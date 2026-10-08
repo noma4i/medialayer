@@ -1,0 +1,192 @@
+@file:Suppress("DEPRECATION")
+
+package com.noma4i.medialayer.ui
+
+import android.content.Context
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
+import androidx.test.core.app.ApplicationProvider
+import com.noma4i.medialayer.Kind
+import com.noma4i.medialayer.MediaSource
+import com.noma4i.medialayer.MediaState
+import java.util.concurrent.CopyOnWriteArrayList
+import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+
+private data class Clip(override val url: String, override val cover: String? = null) : MediaSource {
+  override val kind: Kind get() = Kind.VIDEO
+  override val headers: Map<String, String> get() = emptyMap()
+}
+
+private data class Photo(override val url: String) : MediaSource {
+  override val kind: Kind get() = Kind.IMAGE
+  override val headers: Map<String, String> get() = mapOf("Authorization" to "token")
+  override val size: Pair<Int, Int> get() = 24 to 24
+}
+
+private data class BlurredPhoto(override val url: String) : MediaSource {
+  override val kind: Kind get() = Kind.IMAGE
+  override val headers: Map<String, String> get() = emptyMap()
+  override val blurHash: String get() = "LEHV6nWB2yk8pyo0adR*.7kCMdnj"
+}
+
+private data class Note(override val url: String) : MediaSource {
+  override val kind: Kind get() = Kind.AUDIO
+  override val headers: Map<String, String> get() = emptyMap()
+}
+
+@RunWith(RobolectricTestRunner::class)
+class MediaComposeTest {
+  @get:Rule val rule = createComposeRule()
+
+  private val context = ApplicationProvider.getApplicationContext<Context>()
+  private val events = RecordingEvents()
+  private val layer = RecordingLayer(events)
+  private val requested = CopyOnWriteArrayList<Pair<String, Map<String, String>>>()
+  private val loader by lazy { mediaImageLoader(context, ImageBytes { url, headers -> requested.add(url to headers); pngBytes() }) }
+  private val slots = ExoPlayerSlotFactory(context, startMuted = true)
+
+  @Test
+  fun aDeclaredPlaceTellsTheCoreOnlyWhenSomethingChangesAndWithdrawsOnLeave() {
+    var playing by mutableStateOf(false)
+    var unrelated by mutableIntStateOf(0)
+    var shown by mutableStateOf(true)
+    rule.setContent {
+      MediaLayerProvider(layer, loader, slots.players) {
+        if (shown) MediaVideo(Clip("https://o.test/a.mp4"), playing = playing, muted = true, modifier = Modifier.size((10 + unrelated).dp)) { Text("tick") }
+      }
+    }
+    rule.waitForIdle()
+    val declared = layer.calls.toList()
+
+    unrelated++
+    rule.waitForIdle()
+    assertEquals(declared, layer.calls.toList())
+
+    playing = true
+    rule.waitForIdle()
+    assertEquals(declared + "playing:https://o.test/a.mp4:true", layer.calls.toList())
+
+    shown = false
+    rule.waitForIdle()
+    assertEquals("visible:https://o.test/a.mp4:false", layer.calls.last())
+    assertEquals(
+      listOf("mutedAll:false", "visible:https://o.test/a.mp4:true", "muted:https://o.test/a.mp4:true", "playing:https://o.test/a.mp4:false"),
+      declared
+    )
+    assertEquals(listOf("attach:https://o.test/a.mp4:1", "detach:https://o.test/a.mp4"), events.calls.toList())
+  }
+
+  @Test
+  fun theAppWideMuteReachesTheCore() {
+    rule.setContent { MediaLayerProvider(layer, loader, slots.players) { } }
+    rule.waitForIdle()
+
+    Media.muted = true
+    rule.waitForIdle()
+    Media.muted = false
+
+    rule.waitForIdle()
+    assertEquals(listOf("mutedAll:false", "mutedAll:true", "mutedAll:false"), layer.calls.toList())
+  }
+
+  @Test
+  fun theCoreStateReachesTheContentAndTheCoverShowsUntilReady() {
+    val clip = Clip("https://o.test/a.mp4", cover = "https://o.test/cover.jpg")
+    rule.setContent {
+      MediaLayerProvider(layer, loader, slots.players) {
+        MediaVideo(clip, modifier = Modifier.size(100.dp)) { state -> Text(if (state is MediaState.Failed) "failed ${state.detail}" else "state") }
+      }
+    }
+    rule.waitUntil(5000) { layer.listeners.isNotEmpty() && rule.onAllNodesWithContentDescription("cover").fetchSemanticsNodes().isNotEmpty() }
+    rule.onNodeWithContentDescription("cover").assertIsDisplayed()
+
+    layer.emit(clip.url, MediaState.Ready)
+    rule.waitUntil(5000) { rule.onAllNodesWithContentDescription("cover").fetchSemanticsNodes().isEmpty() }
+
+    layer.emit(clip.url, MediaState.Failed("boom"))
+    rule.waitUntil(5000) { rule.onAllNodesWithTextCount("failed boom") == 1 }
+  }
+
+  @Test
+  fun anImageLoadsThroughTheCoreAtTheDeclaredSizeAndReportsItsStateToTheCore() {
+    rule.setContent {
+      MediaLayerProvider(layer, loader, slots.players) {
+        MediaImage(Photo("https://o.test/p.png"), Modifier.size(50.dp))
+      }
+    }
+
+    rule.waitUntil(5000) {
+      org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+      layer.calls.any { it == "itemState:https://o.test/p.png:Ready" }
+    }
+
+    assertEquals(listOf("https://o.test/p.png" to mapOf("Authorization" to "token")), requested.toList())
+    assertEquals(
+      listOf("itemState:https://o.test/p.png:Loading", "itemState:https://o.test/p.png:Ready"),
+      layer.calls.filter { it.startsWith("itemState") }
+    )
+  }
+
+  @Test
+  fun theBlurHashShowsWhileTheImageLoadsAndGoesAwayWhenItIsReady() {
+    val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+    val gated = mediaImageLoader(context, ImageBytes { _, _ -> gate.await(); pngBytes() })
+    val looper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+    rule.setContent { MediaLayerProvider(layer, gated, slots.players) { MediaImage(BlurredPhoto("https://o.test/b.png"), Modifier.size(50.dp)) } }
+
+    rule.waitUntil(5000) { looper.idle(); rule.onAllNodesWithContentDescription("blurhash").fetchSemanticsNodes().isNotEmpty() }
+    gate.complete(Unit)
+
+    rule.waitUntil(5000) { looper.idle(); rule.onAllNodesWithContentDescription("blurhash").fetchSemanticsNodes().isEmpty() }
+    assertEquals("itemState:https://o.test/b.png:Ready", layer.calls.last { it.startsWith("itemState") })
+  }
+
+  @Test
+  fun anAudioPlaceTogglesPlayingThroughTheCore() {
+    rule.setContent {
+      MediaLayerProvider(layer, loader, slots.players) {
+        MediaAudio(Note("https://o.test/n.m4a")) { audio -> androidx.compose.foundation.layout.Column {
+          Text(if (audio.isPlaying) "pause" else "play", Modifier.size(40.dp).clickableTap(audio::toggle))
+          Text("seek", Modifier.size(40.dp).clickableTap { audio.seek(1500) })
+        } }
+      }
+    }
+    rule.waitForIdle()
+
+    rule.onNodeWithText("play").performClick()
+    rule.waitForIdle()
+    rule.onNodeWithText("pause").performClick()
+    rule.waitForIdle()
+
+    rule.onNodeWithText("seek").performClick()
+    rule.waitForIdle()
+
+    assertEquals(
+      listOf("playing:https://o.test/n.m4a:true", "playing:https://o.test/n.m4a:false"),
+      layer.calls.filter { it.startsWith("playing") }.takeLast(2)
+    )
+    assertEquals("seek:https://o.test/n.m4a:1500", layer.calls.last { it.startsWith("seek") })
+  }
+}
+
+private fun androidx.compose.ui.test.junit4.ComposeContentTestRule.onAllNodesWithTextCount(text: String): Int =
+  onAllNodes(androidx.compose.ui.test.hasText(text)).fetchSemanticsNodes().size
+
+private fun Modifier.clickableTap(action: () -> Unit): Modifier = this.clickable(onClick = action)
