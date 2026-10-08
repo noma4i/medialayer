@@ -20,3 +20,9 @@ uniffi = "0.32.2"
 sha2 = "0.11.0"
 url = "2.5.4"
 thiserror = "2.0.21"
+async-trait = "0.1.92"
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "fs", "io-util", "sync", "time", "macros", "net"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+tokio = { version = "1.53.2", features = ["test-util"] }
