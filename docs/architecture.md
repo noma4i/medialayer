@@ -12,7 +12,7 @@ All behavior is in the Rust core (`core/`). Swift (`swift/`) and Kotlin (`kotlin
 | `proxy` | Local HTTP server on 127.0.0.1 for native players, Range requests, playlist rewriting |
 | `hls` | Playlist parsing, leading segments, variant choice |
 | `prefetch` | Deduplication, queue, priorities, cancel, settled events |
-| `ring` | Policy for a pool of players: which slot holds which page |
+| `pool` | Pool of native players and its assignment policies (`ring`, `lru`, `pinned`) |
 | `session` | Playback arbitration, watchdog, recovery |
 | `image` | Fetch and raw-byte cache for image loaders |
 | `controls` | Limits, statistics, clear, purge, eviction on demand |
@@ -22,6 +22,7 @@ All behavior is in the Rust core (`core/`). Swift (`swift/`) and Kotlin (`kotlin
 | Interface | Purpose |
 | --------- | ------- |
 | `Fetcher` | Network access: URLSession on Swift, OkHttp on Kotlin |
+| `PlayerSlotFactory` | Creates the native player of a slot |
 | `PlayerSlot` | Commands to a native player: load, preroll, play, pause, unload |
 | `PlayerEvents` | Player events to the core: ready, stalled, failed, ended, foreground, memory pressure |
 | `DeviceProfile` | Device class: memory size and low-memory flag |
