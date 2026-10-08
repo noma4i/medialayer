@@ -23,7 +23,8 @@ All behavior is in the Rust core (`core/`). Swift (`swift/`) and Kotlin (`kotlin
 | --------- | ------- |
 | `Fetcher` | Network access: URLSession on Swift, OkHttp on Kotlin |
 | `PlayerSlot` | Commands to a native player: load, preroll, play, pause, unload |
-| `PlayerEvents` | Player events to the core: ready, stalled, failed, ended, foreground |
+| `PlayerEvents` | Player events to the core: ready, stalled, failed, ended, foreground, memory pressure |
+| `DeviceProfile` | Device class: memory size and low-memory flag |
 | `SettingsStore` | Local storage for saved limits: UserDefaults on Swift, SharedPreferences on Kotlin |
 | `Listener` | Core notifications: slot change, settled prefetch, cache statistics |
 

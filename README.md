@@ -12,6 +12,7 @@ One Rust core serves iOS and Android. It contains a local caching HTTP proxy, a 
 - **Everything is configurable.** Budget, minimum size, prefetch windows, depth, timeouts and concurrency are settings with defaults, not constants.
 - **Eviction strategy.** Choose `lru`, `fifo`, `lfu`, `largest_first` or `expire_after`. When the budget is reached, the cache shrinks to a configured share of it. Entries in use are never evicted.
 - **Never blocks.** Public calls are cheap or asynchronous, network and disk run in parallel on library threads, and optional work waits for idle time.
+- **Memory under control.** Player slots are recycled and freed completely, memory pressure shrinks everything, and a low-end profile keeps weak Android devices alive.
 - **One core, two platforms.** All logic is Rust. Swift and Kotlin contain no business logic.
 
 ## Documentation
@@ -19,6 +20,7 @@ One Rust core serves iOS and Android. It contains a local caching HTTP proxy, a 
 - [Architecture](docs/architecture.md)
 - [Limits and eviction](docs/limits-and-eviction.md)
 - [Threading and performance](docs/threading.md)
+- [Memory control](docs/memory.md)
 
 ## Build and check
 
