@@ -51,6 +51,9 @@ pub fn parse_range(value: &str) -> Option<ByteRange> {
     }
     let start = first.parse().ok()?;
     let end = if last.is_empty() { None } else { Some(last.parse().ok()?) };
+    if end.is_some_and(|end| end < start) {
+        return None;
+    }
     Some(ByteRange::From { start, end })
 }
 
@@ -61,7 +64,7 @@ pub fn resolve_range(range: Option<ByteRange>, total: u64) -> RangeOutcome {
         Some(ByteRange::Suffix(length)) if total > 0 => {
             RangeOutcome::Partial { start: total.saturating_sub(length), end: total - 1 }
         }
-        Some(ByteRange::From { start, end }) if start < total && end.is_none_or(|end| end >= start) => {
+        Some(ByteRange::From { start, end }) if start < total => {
             RangeOutcome::Partial { start, end: end.map_or(total - 1, |end| end.min(total - 1)) }
         }
         Some(_) => RangeOutcome::Unsatisfiable,

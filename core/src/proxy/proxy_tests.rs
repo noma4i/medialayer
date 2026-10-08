@@ -181,6 +181,19 @@ async fn inv_proxy_11_range_requests_are_cut_from_the_store() {
 }
 
 #[tokio::test]
+async fn inv_proxy_19_a_range_whose_end_precedes_its_start_is_ignored_and_the_whole_body_is_sent() {
+    let rig = rig().await;
+    let data = pattern(100, 0);
+    rig.fetcher.route("https://o.test/v.mp4", Script::ok(data.clone()));
+    let target = path_of(&rig.proxy.url_for("https://o.test/v.mp4", &HashMap::new()).unwrap());
+
+    let reply = request(rig.proxy.port(), "GET", &target, &[("Range", "bytes=5-2")]).await;
+
+    assert_eq!((reply.status, reply.header("content-range")), (200, None));
+    assert_eq!(reply.body, data);
+}
+
+#[tokio::test]
 async fn inv_proxy_03_range_miss_inside_the_object_is_cached_as_blocks() {
     let rig = rig().await;
     let data = pattern(100, 0);

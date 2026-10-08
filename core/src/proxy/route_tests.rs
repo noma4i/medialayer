@@ -45,6 +45,7 @@ fn inv_proxy_16_parses_single_byte_ranges() {
     assert_eq!(parse_range("bytes=0-1,5-6"), None);
     assert_eq!(parse_range("items=0-1"), None);
     assert_eq!(parse_range("bytes=a-b"), None);
+    assert_eq!(parse_range("bytes=5-2"), None);
 }
 
 #[test]
@@ -56,7 +57,6 @@ fn inv_proxy_16_resolves_ranges_against_the_total() {
     assert_eq!(resolve_range(Some(ByteRange::Suffix(5)), 100), RangeOutcome::Partial { start: 95, end: 99 });
     assert_eq!(resolve_range(Some(ByteRange::Suffix(500)), 100), RangeOutcome::Partial { start: 0, end: 99 });
     assert_eq!(resolve_range(Some(ByteRange::From { start: 100, end: None }), 100), RangeOutcome::Unsatisfiable);
-    assert_eq!(resolve_range(Some(ByteRange::From { start: 20, end: Some(10) }), 100), RangeOutcome::Unsatisfiable);
 }
 
 #[test]
