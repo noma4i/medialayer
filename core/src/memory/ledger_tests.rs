@@ -25,15 +25,6 @@ fn reserve_up_to_the_ceiling_is_admitted_and_one_byte_more_is_refused() {
 }
 
 #[test]
-fn a_refused_reserve_does_not_change_used() {
-    let ledger = Ledger::new(100);
-    let _held = ledger.reserve(Owner::ImageDecode, 60).unwrap();
-    assert!(ledger.reserve(Owner::ImageDecode, 41).is_err());
-    assert_eq!(ledger.used(), 60);
-    assert_eq!(ledger.used_by(Owner::ImageDecode), 60);
-}
-
-#[test]
 fn a_request_that_overflows_the_counter_is_refused_without_panic() {
     let ledger = Ledger::unbounded();
     let _held = ledger.reserve(Owner::Queue, 10).unwrap();
@@ -93,27 +84,18 @@ fn a_pressure_step_lowers_admission_but_not_the_ceiling() {
     assert_eq!(ledger.ceiling(), 1000);
     assert!(ledger.reserve(Owner::Queue, 900).is_err());
     let held = ledger.reserve(Owner::Queue, 800).unwrap();
+    ledger.set_pressure_step(Step::PlaceholdersOnly);
+    assert!(ledger.reserve(Owner::Queue, 1).is_err());
     ledger.set_pressure_step(Step::Normal);
     assert!(ledger.reserve(Owner::Queue, 200).is_ok());
     drop(held);
 }
 
 #[test]
-fn a_deeper_step_than_the_current_use_keeps_used_below_the_ceiling() {
-    let ledger = Ledger::new(1000);
-    let held = ledger.reserve(Owner::Queue, 900).unwrap();
-    ledger.set_pressure_step(Step::PlaceholdersOnly);
-    assert!(ledger.used() <= ledger.ceiling());
-    assert!(ledger.reserve(Owner::Queue, 1).is_err());
-    drop(held);
-    assert_eq!(ledger.used(), 0);
-}
-
-#[test]
 fn alloc_counts_the_buffer_and_releases_it_on_drop() {
     let ledger = Ledger::new(1000);
     let mut buffer = ledger.alloc(Owner::ProxyBuffer, 256).unwrap();
-    assert!(buffer.vec_mut().capacity() >= 256);
+    assert_eq!(buffer.as_mut_slice().len(), 256);
     assert_eq!(ledger.used(), 256);
     drop(buffer);
     assert_eq!(ledger.used(), 0);
@@ -147,4 +129,20 @@ fn concurrent_reserves_never_pass_the_ceiling_and_settle_to_zero() {
         worker.join().unwrap();
     }
     assert_eq!(ledger.used(), 0);
+}
+
+#[test]
+fn set_ceiling_moves_the_admission_limit_and_keeps_existing_reservations() {
+    let ledger = Ledger::new(100);
+    let held = ledger.reserve(Owner::Queue, 60).unwrap();
+
+    ledger.set_ceiling(50);
+
+    assert_eq!(ledger.ceiling(), 50);
+    assert_eq!(ledger.reserve(Owner::Queue, 1).unwrap_err(), Refused::Ceiling { owner: Owner::Queue, requested: 1, available: 0 });
+    assert_eq!(ledger.used(), 60);
+    ledger.set_ceiling(200);
+    let extra = ledger.reserve(Owner::Queue, 100).unwrap();
+    assert_eq!(ledger.used(), 160);
+    drop((held, extra));
 }

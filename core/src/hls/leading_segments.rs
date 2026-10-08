@@ -7,7 +7,7 @@ const UNKNOWN_DURATION_SEGMENT_CAP: usize = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LeadingSegments {
-    pub init_segment: Option<String>,
+    pub init_segments: Vec<String>,
     pub segments: Vec<String>,
 }
 
@@ -33,14 +33,14 @@ pub fn extract_variants(manifest: &str) -> Vec<String> {
 }
 
 pub fn extract_leading_segments(manifest: &str, min_duration_seconds: f64) -> LeadingSegments {
-    let mut init_segment = None;
+    let mut current_init: Option<&str> = None;
     let mut pending_duration = None;
-    let mut candidates: Vec<(&str, Option<f64>)> = Vec::new();
+    let mut candidates: Vec<(&str, Option<f64>, Option<&str>)> = Vec::new();
 
     for line in manifest.split('\n').map(str::trim) {
         if line.starts_with(MAP_TAG) {
             if let Some(uri) = quoted_uri(line) {
-                init_segment = Some(uri.to_string());
+                current_init = Some(uri);
             }
         }
         if line.starts_with(EXTINF_TAG) {
@@ -48,25 +48,29 @@ pub fn extract_leading_segments(manifest: &str, min_duration_seconds: f64) -> Le
             continue;
         }
         if !line.starts_with('#') && !line.is_empty() {
-            candidates.push((line, pending_duration.take()));
+            candidates.push((line, pending_duration.take(), current_init));
         }
     }
 
-    let limit = if candidates.iter().any(|(_, duration)| duration.is_none()) {
+    let limit = if candidates.iter().any(|(_, duration, _)| duration.is_none()) {
         UNKNOWN_DURATION_SEGMENT_CAP
     } else {
         candidates.len()
     };
     let mut segments = Vec::new();
+    let mut init_segments: Vec<String> = Vec::new();
     let mut accumulated = 0.0;
-    for (segment, duration) in candidates.into_iter().take(limit) {
+    for (segment, duration, init) in candidates.into_iter().take(limit) {
         segments.push(segment.to_string());
+        if let Some(init) = init.filter(|init| !init_segments.iter().any(|known| known == init)) {
+            init_segments.push(init.to_string());
+        }
         accumulated += duration.unwrap_or(0.0);
         if accumulated >= min_duration_seconds {
             break;
         }
     }
-    LeadingSegments { init_segment, segments }
+    LeadingSegments { init_segments, segments }
 }
 
 pub fn resolve_url(base: &str, relative: &str) -> String {

@@ -1,5 +1,6 @@
 use super::degradation::{Step, StepPlan};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -37,7 +38,7 @@ struct State {
 
 #[derive(Debug)]
 struct Inner {
-    ceiling: u64,
+    ceiling: AtomicU64,
     state: Mutex<State>,
 }
 
@@ -52,7 +53,7 @@ pub struct Ledger(Arc<Inner>);
 
 impl Ledger {
     pub fn new(ceiling: u64) -> Self {
-        Self(Arc::new(Inner { ceiling, state: Mutex::new(State { used: 0, step: Step::Normal, by_owner: HashMap::new() }) }))
+        Self(Arc::new(Inner { ceiling: AtomicU64::new(ceiling), state: Mutex::new(State { used: 0, step: Step::Normal, by_owner: HashMap::new() }) }))
     }
 
     pub fn unbounded() -> Self {
@@ -64,7 +65,11 @@ impl Ledger {
     }
 
     pub fn ceiling(&self) -> u64 {
-        self.0.ceiling
+        self.0.ceiling.load(Ordering::SeqCst)
+    }
+
+    pub fn set_ceiling(&self, ceiling: u64) {
+        self.0.ceiling.store(ceiling, Ordering::SeqCst);
     }
 
     pub fn used_by(&self, owner: Owner) -> u64 {
@@ -101,16 +106,17 @@ impl Ledger {
     pub fn alloc(&self, owner: Owner, len: u64) -> Result<Buffer, Refused> {
         let reservation = self.reserve(owner, len)?;
         let mut data = Vec::new();
-        let is_allocated = usize::try_from(len).ok().is_some_and(|len| data.try_reserve_exact(len).is_ok());
-        if !is_allocated {
+        let size = usize::try_from(len).ok().filter(|size| data.try_reserve_exact(*size).is_ok());
+        let Some(size) = size else {
             return Err(Refused::Allocation { owner, requested: len });
-        }
-        Ok(Buffer { data, _reservation: reservation })
+        };
+        data.resize(size, 0);
+        Ok(Buffer { data: data.into_boxed_slice(), _reservation: reservation })
     }
 
     fn admission_limit(&self, step: Step) -> u64 {
         let percent = u128::from(StepPlan::for_step(step).admission_percent);
-        (u128::from(self.0.ceiling) * percent / 100) as u64
+        (u128::from(self.ceiling()) * percent / 100) as u64
     }
 
     fn release(&self, owner: Owner, bytes: u64) {
@@ -150,12 +156,16 @@ impl Drop for Reservation {
 
 #[derive(Debug)]
 pub struct Buffer {
-    data: Vec<u8>,
+    data: Box<[u8]>,
     _reservation: Reservation,
 }
 
 impl Buffer {
-    pub fn vec_mut(&mut self) -> &mut Vec<u8> {
+    pub fn as_slice(&self) -> &[u8] {
+        &self.data
+    }
+
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
         &mut self.data
     }
 }

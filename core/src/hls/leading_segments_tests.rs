@@ -34,7 +34,7 @@ fn stops_once_duration_is_covered() {
     let manifest = "#EXTM3U\n#EXTINF:1.0,\na.ts\n#EXTINF:1.0,\nb.ts\n#EXTINF:1.0,\nc.ts\n";
     let selection = leading(manifest, 2.0);
     assert_eq!(selection.segments, vec!["a.ts", "b.ts"]);
-    assert_eq!(selection.init_segment, None);
+    assert!(selection.init_segments.is_empty());
 }
 
 #[test]
@@ -47,7 +47,7 @@ fn takes_one_long_segment() {
 fn reads_init_segment_from_map_uri() {
     let manifest = "#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\",BYTERANGE=\"0@0\"\n#EXTINF:4.0,\na.m4s\n";
     let selection = leading(manifest, 2.0);
-    assert_eq!(selection.init_segment, Some("init.mp4".to_string()));
+    assert_eq!(selection.init_segments, vec!["init.mp4"]);
     assert_eq!(selection.segments, vec!["a.m4s"]);
 }
 
@@ -72,11 +72,11 @@ fn handles_crlf_and_blank_lines() {
 #[test]
 fn reads_map_uri_with_crlf_and_ignores_map_without_quotes() {
     let mapped = "#EXT-X-MAP:URI=\"init.mp4\"\r\n#EXTINF:4.0,\r\na.m4s\r\n";
-    assert_eq!(leading(mapped, 2.0).init_segment, Some("init.mp4".to_string()));
+    assert_eq!(leading(mapped, 2.0).init_segments, vec!["init.mp4"]);
     let unquoted = "#EXT-X-MAP:URI=init.mp4\n#EXTINF:4.0,\na.m4s\n";
-    assert_eq!(leading(unquoted, 2.0).init_segment, None);
+    assert!(leading(unquoted, 2.0).init_segments.is_empty());
     let unclosed = "#EXT-X-MAP:URI=\"init.mp4\n#EXTINF:4.0,\na.m4s\n";
-    assert_eq!(leading(unclosed, 2.0).init_segment, None);
+    assert!(leading(unclosed, 2.0).init_segments.is_empty());
 }
 
 #[test]
@@ -97,24 +97,31 @@ fn extinf_without_a_comma_still_has_a_duration() {
 }
 
 #[test]
-fn resolves_relative_path_against_base() {
-    assert_eq!(resolve_url("https://h/a/b/index.m3u8", "seg.ts"), "https://h/a/b/seg.ts");
-    assert_eq!(resolve_url("https://h/a/b/index.m3u8?t=1", "seg.ts?x=2"), "https://h/a/b/seg.ts?x=2");
+fn resolve_url_joins_relative_parent_absolute_and_root_paths() {
+    let cases = [
+        ("https://h/a/b/index.m3u8", "seg.ts", "https://h/a/b/seg.ts"),
+        ("https://h/a/b/index.m3u8?t=1", "seg.ts?x=2", "https://h/a/b/seg.ts?x=2"),
+        ("https://h/a/b/index.m3u8", "../seg.ts", "https://h/a/seg.ts"),
+        ("https://h/a/b/index.m3u8", "../../../seg.ts", "https://h/seg.ts"),
+        ("https://h/a/index.m3u8", "https://o/x.ts", "https://o/x.ts"),
+        ("https://h/a/index.m3u8", "/x.ts", "https://h/x.ts"),
+        ("not a url", "seg.ts", "seg.ts"),
+    ];
+    for (base, relative, expected) in cases {
+        assert_eq!(resolve_url(base, relative), expected, "{base} + {relative}");
+    }
 }
 
 #[test]
-fn resolves_parent_paths() {
-    assert_eq!(resolve_url("https://h/a/b/index.m3u8", "../seg.ts"), "https://h/a/seg.ts");
-    assert_eq!(resolve_url("https://h/a/b/index.m3u8", "../../../seg.ts"), "https://h/seg.ts");
-}
-
-#[test]
-fn resolves_absolute_and_root_paths() {
-    assert_eq!(resolve_url("https://h/a/index.m3u8", "https://o/x.ts"), "https://o/x.ts");
-    assert_eq!(resolve_url("https://h/a/index.m3u8", "/x.ts"), "https://h/x.ts");
-}
-
-#[test]
-fn returns_the_relative_text_when_the_base_is_invalid() {
-    assert_eq!(resolve_url("not a url", "seg.ts"), "seg.ts");
+fn each_selected_segment_gets_the_map_that_applies_to_it() {
+    let playlist = "#EXTM3U\n#EXT-X-MAP:URI=\"init0.mp4\"\n#EXTINF:2,\ns0.m4s\n#EXT-X-DISCONTINUITY\n#EXT-X-MAP:URI=\"init1.mp4\"\n#EXTINF:2,\ns1.m4s\n";
+    let rows: [(f64, &[&str], &[&str]); 2] = [
+        (1.0, &["init0.mp4"], &["s0.m4s"]),
+        (4.0, &["init0.mp4", "init1.mp4"], &["s0.m4s", "s1.m4s"]),
+    ];
+    for (depth, inits, segments) in rows {
+        let selection = leading(playlist, depth);
+        assert_eq!(selection.init_segments, inits, "init at depth {depth}");
+        assert_eq!(selection.segments, segments, "segments at depth {depth}");
+    }
 }

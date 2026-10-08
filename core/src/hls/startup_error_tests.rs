@@ -1,31 +1,23 @@
 use super::*;
 
 #[test]
-fn http_error_is_fatal_before_first_load() {
-    assert!(is_fatal_startup_http_error(401, false));
-    assert!(is_fatal_startup_http_error(400, false));
-    assert!(is_fatal_startup_http_error(503, false));
+fn http_error_is_fatal_only_before_the_first_load_and_from_status_400() {
+    for (status, has_loaded, fatal) in [
+        (400, false, true),
+        (401, false, true),
+        (503, false, true),
+        (503, true, false),
+        (399, false, false),
+        (200, false, false),
+        (0, false, false),
+    ] {
+        assert_eq!(is_fatal_startup_http_error(status, has_loaded), fatal, "{status} loaded={has_loaded}");
+    }
 }
 
 #[test]
-fn http_error_is_not_fatal_after_first_load() {
-    assert!(!is_fatal_startup_http_error(503, true));
-}
-
-#[test]
-fn non_failing_status_is_not_fatal() {
-    assert!(!is_fatal_startup_http_error(0, false));
-    assert!(!is_fatal_startup_http_error(200, false));
-    assert!(!is_fatal_startup_http_error(399, false));
-}
-
-#[test]
-fn describe_includes_a_non_empty_comment() {
+fn describe_adds_the_comment_only_when_it_is_not_empty() {
     assert_eq!(describe(503, Some("busy")), "HLS load failed: HTTP 503 - busy");
-}
-
-#[test]
-fn describe_skips_a_missing_or_empty_comment() {
     assert_eq!(describe(404, None), "HLS load failed: HTTP 404");
     assert_eq!(describe(404, Some("")), "HLS load failed: HTTP 404");
 }
