@@ -1,5 +1,9 @@
+use crate::memory::{bounded, InputLimits};
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BlurHashError {
+    #[error("blurhash is longer than the input limit")]
+    TooLong,
     #[error("blurhash is shorter than 6 characters")]
     TooShort,
     #[error("blurhash length does not match its component count")]
@@ -35,6 +39,7 @@ fn base83_value(digits: &[u8]) -> u32 {
 
 fn parse_header(hash: &str) -> Result<Header, BlurHashError> {
     let bytes = hash.as_bytes();
+    bounded(bytes.len() as u64, InputLimits::default().blurhash_chars).map_err(|_| BlurHashError::TooLong)?;
     if bytes.len() < MIN_LENGTH {
         return Err(BlurHashError::TooShort);
     }

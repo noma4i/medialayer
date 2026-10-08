@@ -1,3 +1,4 @@
+use super::buffer::Buffers;
 use super::byte_store::ByteStore;
 use super::config::Config;
 use super::flight::{download, Flight, Outcome, Subscription};
@@ -6,10 +7,11 @@ use super::tasks::Tasks;
 use crate::hls::is_manifest_url;
 use super::slots::{Priority, PrioritySlots};
 use crate::fetch::Fetcher;
-use crate::identity::cache_key;
+use crate::identity::namespaced_key;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 use tokio::sync::watch;
 use tokio::time::Instant;
 use std::collections::VecDeque;
@@ -56,6 +58,7 @@ pub(super) struct Inner {
     pub port: AtomicU16,
     pub last_port: AtomicU16,
     pub route_generation: AtomicU64,
+    timeout_ms: AtomicU64,
 }
 
 #[derive(Default)]
@@ -92,6 +95,7 @@ pub(super) fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl Inner {
     pub fn new(config: Config, fetcher: Arc<dyn Fetcher>, store: Arc<dyn ByteStore>, tasks: Tasks) -> Self {
+        let timeout_ms = AtomicU64::new(config.policy.timeout.as_millis() as u64);
         Inner {
             slots: PrioritySlots::new(config.max_concurrent, config.playback_reserved, config.max_waiting),
             fetcher,
@@ -109,7 +113,20 @@ impl Inner {
             port: AtomicU16::new(0),
             last_port: AtomicU16::new(0),
             route_generation: AtomicU64::new(0),
+            timeout_ms,
         }
+    }
+
+    pub fn timeout(&self) -> Duration {
+        Duration::from_millis(self.timeout_ms.load(Ordering::SeqCst))
+    }
+
+    pub fn set_timeout(&self, timeout: Duration) {
+        self.timeout_ms.store(timeout.as_millis() as u64, Ordering::SeqCst);
+    }
+
+    pub fn buffers(&self) -> Buffers {
+        Buffers::new(&self.config, self.timeout())
     }
 
     pub fn register_headers(&self, url: &str, headers: &HashMap<String, String>) {
@@ -139,15 +156,20 @@ impl Inner {
         forwarded
     }
 
-    pub fn existing_flight(&self, url: &str) -> Option<Subscription> {
-        locked(&self.flights).get(&cache_key(url)).map(|flight| {
+    pub fn key(&self, url: &str, headers: &HashMap<String, String>) -> String {
+        namespaced_key(url, headers, &self.config.namespace_headers)
+    }
+
+    pub fn existing_flight(&self, url: &str, headers: &HashMap<String, String>) -> Option<Subscription> {
+        locked(&self.flights).get(&self.key(url, headers)).map(|flight| {
             flight.promote();
             flight.subscribe()
         })
     }
 
     pub fn get_or_start(self: &Arc<Self>, url: &str, headers: HashMap<String, String>, priority: Priority) -> Subscription {
-        self.start_flight(url, cache_key(url), None, headers, priority)
+        let key = self.key(url, &headers);
+        self.start_flight(url, key.clone(), key, None, headers, priority)
     }
 
     pub fn get_or_start_block(
@@ -161,13 +183,15 @@ impl Inner {
         let size = self.config.chunk_size;
         let start = block * size;
         let end = total.map_or(start + size, |total| (start + size).min(total)) - 1;
-        self.start_flight(url, block_key(&cache_key(url), block), Some((start, end)), headers, priority)
+        let base = self.key(url, &headers);
+        self.start_flight(url, block_key(&base, block), base, Some((start, end)), headers, priority)
     }
 
     fn start_flight(
         self: &Arc<Self>,
         url: &str,
         key: String,
+        base_key: String,
         range: Option<(u64, u64)>,
         headers: HashMap<String, String>,
         priority: Priority,
@@ -182,7 +206,7 @@ impl Inner {
                     (existing.clone(), existing.subscribe(), false)
                 }
                 None => {
-                    let flight = Flight::new(url, &key, range, priority);
+                    let flight = Flight::new(url, &key, &base_key, range, priority);
                     flights.insert(key.clone(), flight.clone());
                     let subscription = flight.subscribe();
                     (flight, subscription, true)

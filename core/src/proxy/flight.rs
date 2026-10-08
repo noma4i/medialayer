@@ -1,7 +1,7 @@
 use super::inner::Inner;
-use crate::identity::cache_key;
 use super::slots::Priority;
 use crate::fetch::{header_value, BodyStream, FetchError, Request};
+use super::buffer::Buffers;
 use super::byte_store::Meta;
 use super::slots::QueueFull;
 use bytes::Bytes;
@@ -55,6 +55,7 @@ impl Progress {
 pub(super) struct Flight {
     pub url: String,
     pub key: String,
+    pub base_key: String,
     pub range: Option<(u64, u64)>,
     progress: watch::Sender<Progress>,
     subscribers: AtomicUsize,
@@ -64,11 +65,12 @@ pub(super) struct Flight {
 }
 
 impl Flight {
-    pub fn new(url: &str, key: &str, range: Option<(u64, u64)>, priority: Priority) -> Arc<Flight> {
+    pub fn new(url: &str, key: &str, base_key: &str, range: Option<(u64, u64)>, priority: Priority) -> Arc<Flight> {
         let (progress, _) = watch::channel(Progress { head: None, written: 0, outcome: Outcome::Running });
         Arc::new(Flight {
             url: url.to_string(),
             key: key.to_string(),
+            base_key: base_key.to_string(),
             range,
             progress,
             subscribers: AtomicUsize::new(0),
@@ -150,7 +152,8 @@ impl Drop for Subscription {
     }
 }
 
-pub(super) async fn collect_limited(mut body: BodyStream, limit: usize, idle: Duration) -> Option<Vec<u8>> {
+pub(super) async fn collect_limited(mut body: BodyStream, limit: usize, idle: Duration, buffers: &Buffers) -> Option<Vec<u8>> {
+    let _held = buffers.reserve_exact(limit).await.ok()?;
     let mut collected = Vec::new();
     loop {
         match tokio::time::timeout(idle, body.next()).await {
@@ -190,7 +193,8 @@ pub(super) async fn download(inner: &Inner, flight: &Flight, headers: HashMap<St
             },
         }
     };
-    let timeout = inner.config.policy.timeout;
+    let timeout = inner.timeout();
+    let buffers = inner.buffers();
     let request = Request { url: flight.url.clone(), headers, range: flight.range.map(|(start, end)| (start, Some(end))) };
     let fetched = match cancellable(&flight.cancel, tokio::time::timeout(timeout, inner.fetcher.fetch(request))).await {
         None => return Outcome::Cancelled,
@@ -207,7 +211,7 @@ pub(super) async fn download(inner: &Inner, flight: &Flight, headers: HashMap<St
             return Outcome::Failed("origin ignored the range".to_string());
         }
         let content_type = header_value(&fetched.headers, "content-type").map(str::to_string);
-        let body = collect_limited(fetched.body, REJECTION_BODY_LIMIT, timeout).await.unwrap_or_default();
+        let body = collect_limited(fetched.body, REJECTION_BODY_LIMIT, timeout, &buffers).await.unwrap_or_default();
         return Outcome::Rejected(Arc::new(Rejection { status: fetched.status, content_type, body: Bytes::from(body) }));
     }
     let total = header_value(&fetched.headers, "content-length").and_then(|value| value.trim().parse::<u64>().ok());
@@ -219,7 +223,7 @@ pub(super) async fn download(inner: &Inner, flight: &Flight, headers: HashMap<St
         None => total,
     };
     if let Some(length) = object_length.filter(|_| flight.range.is_some()) {
-        inner.remember_total(&cache_key(&flight.url), length);
+        inner.remember_total(&flight.base_key, length);
     }
     let meta = Meta { content_type: content_type.clone(), total_length: object_length };
     let Some(mut writer) = inner.store.begin_write(&flight.key, meta).await else {
@@ -230,6 +234,17 @@ pub(super) async fn download(inner: &Inner, flight: &Flight, headers: HashMap<St
     let mut body = fetched.body;
     let mut written = 0u64;
     loop {
+        let _buffer = match cancellable(&flight.cancel, buffers.reserve_chunk()).await {
+            None => {
+                writer.abort().await;
+                return Outcome::Cancelled;
+            }
+            Some(Err(_)) => {
+                writer.abort().await;
+                return Outcome::Failed("no memory for the download".to_string());
+            }
+            Some(Ok(buffer)) => buffer,
+        };
         let next = match cancellable(&flight.cancel, tokio::time::timeout(timeout, body.next())).await {
             None => {
                 writer.abort().await;

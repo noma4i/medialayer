@@ -17,6 +17,7 @@ struct Shared<T> {
     wake: Notify,
     boxes: Mutex<Vec<(u64, Arc<Mailbox<T>>)>>,
     next_id: AtomicU64,
+    published: AtomicU64,
 }
 
 fn locked<V>(mutex: &Mutex<V>) -> MutexGuard<'_, V> {
@@ -44,12 +45,13 @@ impl Drop for Subscription {
 
 impl<T: Clone + Send + 'static> Hub<T> {
     pub fn new(handle: Handle) -> Hub<T> {
-        let shared = Arc::new(Shared { latest: Mutex::new(None), wake: Notify::new(), boxes: Mutex::new(Vec::new()), next_id: AtomicU64::new(0) });
+        let shared = Arc::new(Shared { latest: Mutex::new(None), wake: Notify::new(), boxes: Mutex::new(Vec::new()), next_id: AtomicU64::new(0), published: AtomicU64::new(0) });
         let dispatcher = AbortOnDrop::new(handle.spawn(dispatch(shared.clone())));
         Hub { shared, handle, _dispatcher: dispatcher }
     }
 
     pub fn publish(&self, value: T) {
+        self.shared.published.fetch_add(1, Ordering::Relaxed);
         *locked(&self.shared.latest) = Some(value);
         self.shared.wake.notify_one();
     }
@@ -68,6 +70,11 @@ impl<T: Clone + Send + 'static> Hub<T> {
                 }
             }))),
         }
+    }
+
+    #[cfg(test)]
+    pub fn published(&self) -> u64 {
+        self.shared.published.load(Ordering::Relaxed)
     }
 
     pub fn listener_count(&self) -> usize {

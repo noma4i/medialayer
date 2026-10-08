@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+use crate::fetch::DEFAULT_FORWARDED_HEADERS;
 use crate::limits::{EvictionStrategy, Limits};
 
-const DEFAULT_FORWARD_HEADERS: [&str; 8] =
-    ["Authorization", "Cookie", "User-Agent", "Connection", "Accept", "Accept-Encoding", "Accept-Language", "Range"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -82,11 +81,13 @@ pub struct PoolSpec {
     pub reach: u32,
     pub hold_off: u32,
     pub trim_delay: u32,
+    pub low_ram_slots: Option<u32>,
+    pub low_ram_reach: Option<u32>,
 }
 
 impl Default for PoolSpec {
     fn default() -> Self {
-        PoolSpec { slots: Limits::default().slots, reach: 1, hold_off: 1, trim_delay: 30 }
+        PoolSpec { slots: Limits::default().slots, reach: 1, hold_off: 1, trim_delay: 30, low_ram_slots: None, low_ram_reach: None }
     }
 }
 
@@ -107,7 +108,7 @@ pub struct VideoSpec {
 }
 
 fn default_forward_headers() -> Vec<String> {
-    DEFAULT_FORWARD_HEADERS.iter().map(|header| header.to_string()).collect()
+    DEFAULT_FORWARDED_HEADERS.iter().map(|header| header.to_string()).collect()
 }
 
 impl VideoSpec {

@@ -1,9 +1,10 @@
+use super::guard::AbortOnDrop;
+use super::lane::Queue;
 use super::source::PlaybackRoute;
 use crate::pool::{Command, Retention};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use tokio::runtime::Handle;
-use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum RetainLevel {
@@ -41,6 +42,9 @@ pub trait PlayerSlot: Send + Sync {
     fn mute(&self);
     fn unmute(&self);
     fn retain(&self, level: RetainLevel);
+    fn attach(&self, view_token: u64);
+    fn detach(&self);
+    fn seek(&self, position_ms: u64);
     fn sample(&self) -> SlotSample;
 }
 
@@ -59,13 +63,16 @@ pub enum SlotCall {
     Mute,
     Unmute,
     Retain(RetainLevel),
+    Attach { view_token: u64 },
+    Detach,
+    Seek { position_ms: u64 },
 }
 
 impl SlotCall {
     pub fn from_command(command: Command, route: Option<PlaybackRoute>) -> (usize, SlotCall) {
         match command {
             Command::Load { slot, key } => {
-                let route = route.unwrap_or_else(|| PlaybackRoute { url: key.clone(), headers: HashMap::new(), generation: None });
+                let route = route.unwrap_or_else(|| PlaybackRoute { url: key.clone(), headers: HashMap::new(), generation: None, hls: false, looping: true });
                 (slot, SlotCall::Load { key, route })
             }
             Command::Unload { slot } => (slot, SlotCall::Unload),
@@ -88,6 +95,9 @@ impl SlotCall {
             SlotCall::Mute => player.mute(),
             SlotCall::Unmute => player.unmute(),
             SlotCall::Retain(level) => player.retain(level),
+            SlotCall::Attach { view_token } => player.attach(view_token),
+            SlotCall::Detach => player.detach(),
+            SlotCall::Seek { position_ms } => player.seek(position_ms),
         }
     }
 }
@@ -95,8 +105,9 @@ impl SlotCall {
 type Player = Arc<Mutex<Option<Arc<dyn PlayerSlot>>>>;
 
 struct Lane {
-    queue: mpsc::UnboundedSender<SlotCall>,
+    queue: Arc<Queue>,
     player: Player,
+    _task: AbortOnDrop,
 }
 
 pub struct SlotRunner {
@@ -114,12 +125,20 @@ impl SlotRunner {
         let Some(factory) = self.factory.clone() else { return };
         let mut lanes = self.lanes();
         let lane = lanes.entry(slot).or_insert_with(|| {
-            let (queue, inbox) = mpsc::unbounded_channel();
+            let queue = Arc::new(Queue::default());
             let player: Player = Arc::new(Mutex::new(None));
-            self.handle.spawn(run_lane(factory, slot, inbox, player.clone()));
-            Lane { queue, player }
+            let task = self.handle.spawn(run_lane(factory, slot, queue.clone(), player.clone()));
+            Lane { queue, player, _task: AbortOnDrop::new(task) }
         });
-        let _ = lane.queue.send(call);
+        lane.queue.push(call);
+    }
+
+    pub fn is_idle(&self) -> bool {
+        self.lanes().values().all(|lane| lane.queue.is_idle())
+    }
+
+    pub fn queued(&self, slot: usize) -> usize {
+        self.lanes().get(&slot).map_or(0, |lane| lane.queue.len())
     }
 
     pub async fn sample(&self, slot: usize) -> Option<SlotSample> {
@@ -133,13 +152,12 @@ impl SlotRunner {
     }
 }
 
-async fn run_lane(
-    factory: Arc<dyn PlayerSlotFactory>,
-    slot: usize,
-    mut inbox: mpsc::UnboundedReceiver<SlotCall>,
-    player: Player,
-) {
-    while let Some(call) = inbox.recv().await {
+async fn run_lane(factory: Arc<dyn PlayerSlotFactory>, slot: usize, queue: Arc<Queue>, player: Player) {
+    loop {
+        let Some(call) = queue.pop() else {
+            queue.wake.notified().await;
+            continue;
+        };
         let factory = factory.clone();
         let cell = player.clone();
         let _ = tokio::task::spawn_blocking(move || {
@@ -149,5 +167,6 @@ async fn run_lane(
             call.apply(current.as_ref());
         })
         .await;
+        queue.finish();
     }
 }

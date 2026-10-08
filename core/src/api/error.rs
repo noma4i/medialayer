@@ -6,6 +6,8 @@ pub enum MediaError {
     InvalidLimits { detail: String },
     #[error("fetch failed: {detail}")]
     Fetch { detail: String },
+    #[error("blurhash: {detail}")]
+    BlurHash { detail: String },
     #[error("unexpected: {detail}")]
     Unexpected { detail: String },
 }

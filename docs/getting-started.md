@@ -55,6 +55,42 @@ class YupiApp : Application() {
 
 Opening returns at once. Nothing is read from disk until it is needed.
 
+## Open with full control
+
+The calls above fill `OpenConfig` for you. Pass it yourself to change the pool, the device class or the cache key.
+
+### Swift
+
+```swift
+let media = try MediaLayer.open(config: OpenConfig(
+  dir: cacheDirectory.path,
+  fetcher: URLSessionFetcher(),
+  settings: UserDefaultsSettings(),
+  slots: AVQueuePlayerSlotFactory(startMuted: false),
+  device: DeviceMemory(totalMb: 6144, heapClassMb: nil, lowRam: false),
+  defaults: defaultLimits(),
+  pool: defaultPoolSettings(),
+  namespaceHeaders: ["Authorization"],
+  memoryReleaser: nil
+))
+```
+
+### Kotlin
+
+```kotlin
+val media = MediaLayer.open(OpenConfig(
+  dir = cacheDir.path,
+  fetcher = OkHttpFetcher(okHttpClient),
+  settings = SharedPreferencesSettings(this),
+  slots = ExoPlayerSlotFactory(this),
+  device = DeviceMemory(totalMb = 3072u, heapClassMb = 256u, lowRam = false),
+  defaults = defaultLimits(),
+  pool = defaultPoolSettings(),
+  namespaceHeaders = listOf("Authorization"),
+  memoryReleaser = null
+))
+```
+
 ## Where to go next
 
 - [Media files](media-files.md)

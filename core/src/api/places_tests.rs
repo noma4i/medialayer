@@ -21,10 +21,15 @@ async fn a_loading_place_becomes_ready_once_and_never_flickers_back_to_loading()
     places.ready("v1");
     eventually(|| seen.lock().unwrap().len() == 3).await;
     places.declared("v1", false);
+    assert_eq!(places.state("v1"), MediaState::Ready);
     places.ready("v1");
-    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    places.failed("v1", "end");
+    eventually(|| seen.lock().unwrap().len() == 4).await;
 
-    assert_eq!(*seen.lock().unwrap(), vec![MediaState::Idle, MediaState::Loading, MediaState::Ready]);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![MediaState::Idle, MediaState::Loading, MediaState::Ready, MediaState::Failed { detail: "end".to_string() }]
+    );
 }
 
 #[tokio::test]
@@ -69,4 +74,36 @@ async fn an_unloaded_slot_sends_a_declared_place_back_to_loading_and_forgets_an_
     places.unloaded("neighbour");
 
     assert_eq!((places.state("seen"), places.state("neighbour")), (MediaState::Loading, MediaState::Idle));
+}
+
+#[tokio::test]
+async fn a_native_loader_moves_a_place_through_loading_ready_and_failed_in_order() {
+    let places = Places::new(Handle::current());
+    let (seen, _subscription) = watch(&places, "image");
+    eventually(|| seen.lock().unwrap().len() == 1).await;
+    let failure = MediaState::Failed { detail: "decode".to_string() };
+
+    let steps = [
+        (MediaState::Loading, true),
+        (MediaState::Loading, false),
+        (MediaState::Ready, true),
+        (MediaState::Loading, false),
+        (failure.clone(), true),
+        (MediaState::Loading, true),
+        (MediaState::Ready, true),
+    ];
+    for (state, publishes) in steps {
+        let before = places.state("image");
+        places.item_state("image", state.clone());
+        if publishes {
+            eventually(|| seen.lock().unwrap().last() == Some(&state)).await;
+        } else {
+            assert_eq!(places.state("image"), before);
+        }
+    }
+
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![MediaState::Idle, MediaState::Loading, MediaState::Ready, failure, MediaState::Loading, MediaState::Ready]
+    );
 }

@@ -1,11 +1,12 @@
 use super::*;
+use crate::fetch::FetchPolicy;
 use crate::limits::{EvictionStrategy, Limits, LimitsError};
 
 fn sample() -> MediaSpec {
     let mut video = VideoSpec::new("moment_video");
     video.cover_field = Some("coverUrl".to_string());
     video.prefetch = PrefetchSpec { from: 1, to: 4, depth: 3 };
-    video.pool = PoolSpec { slots: 4, reach: 2, hold_off: 5, trim_delay: 60 };
+    video.pool = PoolSpec { slots: 4, reach: 2, hold_off: 5, trim_delay: 60, low_ram_slots: Some(3), low_ram_reach: None };
     video.evict = Some(Evict::Lfu);
     MediaSpec {
         cache: CacheSpec {
@@ -25,6 +26,14 @@ fn sample() -> MediaSpec {
         }],
         audios: vec![AudioSpec { name: "voice_note".to_string(), evict: Some(Evict::Fifo) }],
     }
+}
+
+#[test]
+fn a_video_forwards_by_default_what_the_fetch_policy_forwards() {
+    let policy_names: Vec<String> = crate::fetch::DEFAULT_FORWARDED_HEADERS.iter().map(|name| name.to_string()).collect();
+
+    assert_eq!(VideoSpec::new("a").forward_headers, policy_names);
+    assert_eq!(FetchPolicy::default().forwarded_headers, policy_names);
 }
 
 #[test]

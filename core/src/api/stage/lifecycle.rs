@@ -28,6 +28,11 @@ impl PoolControl for Stage {
         directives
     }
 
+    fn set_slots(&self, slots: usize) {
+        let commands = self.state().ring.set_slots(slots);
+        self.dispatch(commands);
+    }
+
     fn foreground(&self) {
         let (commands, keys) = {
             let mut state = self.state();

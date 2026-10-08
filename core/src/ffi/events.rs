@@ -35,6 +35,14 @@ impl PlayerEvents {
         self.stage.ended(slot as usize);
     }
 
+    pub fn attach(&self, key: String, view_token: u64) {
+        self.stage.attach(&key, view_token);
+    }
+
+    pub fn detach(&self, key: String) {
+        self.stage.detach(&key);
+    }
+
     pub fn foreground(&self) {
         self.signals.foreground();
     }

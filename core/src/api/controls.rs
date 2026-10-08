@@ -1,6 +1,7 @@
 use super::error::MediaError;
 use super::hub::{Deliver, Hub, Subscription};
-use super::ports::{CacheControl, PoolControl, PrefetchControl, SettingsStore};
+use super::assemble::{pool_config, PoolSettings};
+use super::ports::{CacheControl, PoolControl, PrefetchControl, SettingsStore, TransportControl};
 use super::types::{Kind, MediaStats};
 use crate::limits::{resolve, Limits};
 use crate::memory::{effective_ceiling, DeviceMemory, Ledger, ShareTuning};
@@ -17,6 +18,8 @@ pub struct ControlPorts {
     pub settings: Arc<dyn SettingsStore>,
     pub ledger: Ledger,
     pub device: DeviceMemory,
+    pub transport: Arc<dyn TransportControl>,
+    pub pool_settings: PoolSettings,
 }
 
 pub struct Controls {
@@ -94,6 +97,11 @@ impl Controls {
         self.publish_stats().await;
     }
 
+    #[cfg(test)]
+    pub fn published_count(&self) -> u64 {
+        self.stats_hub.published()
+    }
+
     pub fn subscribe_stats(&self, deliver: Deliver<MediaStats>) -> Subscription {
         *locked(&self.published) = None;
         self.stats_hub.subscribe(deliver)
@@ -117,6 +125,8 @@ impl Controls {
     async fn apply(&self, limits: Limits) -> Result<(), MediaError> {
         self.ports.cache.set_limits(limits).await?;
         self.ports.prefetch.set_limits(&limits);
+        self.ports.transport.set_limits(&limits);
+        self.ports.pool.set_slots(pool_config(&limits, self.ports.device, &self.ports.pool_settings).slots);
         self.ports.ledger.set_ceiling(effective_ceiling(limits.memory_budget, self.ports.device, ShareTuning::default()));
         Ok(())
     }

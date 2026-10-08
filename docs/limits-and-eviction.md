@@ -17,14 +17,14 @@ Every size, window, timeout and concurrency value is a setting with a default. A
 | `largest_first` | The biggest entry |
 | `expire_after` | Entries older than the given age, then the oldest |
 
-The strategy is set once for the cache and can be overridden per media kind (`image`, `video`, `audio`). The same options, with defaults, are written in the `.mdl` file: budget 4 GiB, min 64 MiB, shrink_to 90%, strategy `lru`, memory 64 MiB, timeout 30 seconds, 2 concurrent prefetch loads, repeat skip window 60 seconds and 500 entries. Entries being read or written are never evicted. If new data still does not fit, the call fails with `NotEnoughSpace`.
+The strategy is set once for the cache and can be overridden per media kind (`image`, `video`, `audio`). The same options, with defaults, are written in the `.mdl` file: budget 4 GiB, min 64 MiB, shrink_to 90%, strategy `lru`, memory 256 MiB, timeout 30 seconds, 2 concurrent prefetch loads, repeat skip window 60 seconds and 500 entries. Entries being read or written are never evicted. If new data still does not fit, the call fails with `NotEnoughSpace`.
 
 ## Controls
 
 | Call | Result |
 | ---- | ------ |
 | `limits` | Current limits |
-| `setLimits(...)` | Applies and saves new limits; a smaller budget evicts at once |
+| `setLimits(...)` | Applies and saves new limits at once, without a restart: a smaller budget evicts, the timeout and the number of parallel loads change in the proxy, the number of player slots changes in the pool |
 | `resetLimits()` | Back to the defaults from your media file |
 | `stats()` | Bytes and files, in total and per media kind |
 | `clear(...)` | Removes everything or one media kind |
@@ -34,28 +34,28 @@ The strategy is set once for the cache and can be overridden per media kind (`im
 ### Swift
 
 ```swift
-var limits = media.limits
-limits.budget = .gib(2)
+var limits = await media.limits()
+limits.budget = 2 * 1024 * 1024 * 1024
 limits.evict = .lfu
-try await media.setLimits(limits)
+try await media.setLimits(limits: limits)
 
 let stats = await media.stats()
 print(stats.totalBytes, stats.fileCount)
 
-await media.clear(.video)
-await media.purge(url)
+await media.clear(kind: .video)
+await media.purge(url: url)
 ```
 
 ### Kotlin
 
 ```kotlin
-val limits = media.limits.copy(budget = 2.gib, evict = Evict.Lfu)
+val limits = media.limits().copy(budget = 2UL * 1024UL * 1024UL * 1024UL, evict = Evict.Lfu)
 media.setLimits(limits)
 
 val stats = media.stats()
 println("${stats.totalBytes} ${stats.fileCount}")
 
-media.clear(Kind.Video)
+media.clear(Kind.VIDEO)
 media.purge(url)
 ```
 

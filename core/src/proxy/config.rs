@@ -1,5 +1,6 @@
 use crate::fetch::FetchPolicy;
 use crate::limits::Limits;
+use crate::memory::{InputLimits, Ledger};
 use std::time::Duration;
 
 const PLAYBACK_RESERVED: usize = 1;
@@ -7,9 +8,9 @@ const STREAM_CHUNK: usize = 64 * 1024;
 const BLOCK_SIZE: u64 = 1024 * 1024;
 const PLAYLIST_TTL: Duration = Duration::from_secs(2);
 const MAX_WAITING: usize = 64;
-const MAX_PLAYLIST_BYTES: u64 = 2 * 1024 * 1024;
 const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);
 const PING_TIMEOUT: Duration = Duration::from_secs(1);
+const MIN_BUFFER: usize = 4 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -23,6 +24,9 @@ pub struct Config {
     pub max_playlist_bytes: u64,
     pub header_read_timeout: Duration,
     pub ping_timeout: Duration,
+    pub ledger: Ledger,
+    pub min_buffer: usize,
+    pub namespace_headers: Vec<String>,
 }
 
 impl Config {
@@ -35,9 +39,12 @@ impl Config {
             chunk_size: BLOCK_SIZE,
             playlist_ttl: PLAYLIST_TTL,
             max_waiting: MAX_WAITING,
-            max_playlist_bytes: MAX_PLAYLIST_BYTES,
+            max_playlist_bytes: InputLimits::default().playlist_bytes,
             header_read_timeout: HEADER_READ_TIMEOUT,
             ping_timeout: PING_TIMEOUT,
+            ledger: Ledger::unbounded(),
+            min_buffer: MIN_BUFFER,
+            namespace_headers: Vec::new(),
         }
     }
 }

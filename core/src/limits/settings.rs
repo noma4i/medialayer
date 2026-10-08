@@ -51,7 +51,7 @@ impl Default for Limits {
             budget: 4 * GIB,
             min_budget: 64 * MIB,
             shrink_to: 0.9,
-            memory_budget: 64 * MIB,
+            memory_budget: 256 * MIB,
             slots: 3,
             prefetch_from: 2,
             prefetch_to: 5,

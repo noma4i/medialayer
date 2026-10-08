@@ -26,3 +26,21 @@ MediaImage(Avatar(url = url, blurHash = hash))   // BlurHash first, then the ima
 MediaImage(Avatar(url = url, blurHash = null))   // empty until the image loads
 MediaVideo(MomentVideo(url = url, cover = null)) // first frame, then video
 ```
+
+## Asking for the placeholder
+
+`media.placeholder(source:ready:)` returns the placeholder for a source. A source counts as cached when its whole entry or its first block is stored. `media.isCached(source:)` gives the same answer alone.
+
+### Swift
+
+```swift
+let placeholder = await media.placeholder(source: video.item, ready: false)
+let cached = await media.isCached(source: video.item)
+```
+
+### Kotlin
+
+```kotlin
+val placeholder = media.placeholder(video.toItem(), false)
+val cached = media.isCached(video.toItem())
+```

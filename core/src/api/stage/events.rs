@@ -1,12 +1,14 @@
 use super::Stage;
 use crate::api::guard::AbortOnDrop;
 use crate::api::slots::{SlotCall, SlotSample};
-use crate::session::{Action, Event, Sample};
+use crate::session::{Action, Event, Readiness, Sample};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 enum Wake {
     Watchdog,
     Retry,
+    Foreground,
 }
 
 impl Stage {
@@ -49,7 +51,8 @@ impl Stage {
 
     pub(super) fn perform(&self, key: String, action: Action) {
         match action {
-            Action::None | Action::ForegroundRetry(_) => {}
+            Action::None => {}
+            Action::ForegroundRetry(delay_ms) => self.wake_after(key, delay_ms, Wake::Foreground),
             Action::Arm { delay_ms } => self.wake_after(key, delay_ms, Wake::Watchdog),
             Action::Retry(delay_ms) => self.wake_after(key, delay_ms, Wake::Retry),
             Action::Disarm => self.cancel_task(&key),
@@ -69,8 +72,8 @@ impl Stage {
             }
             Action::Fail(reason) => self.inner.places.failed(&key, &reason),
             Action::ForegroundPass => {
-                self.replay_play(&key);
-                self.feed(&key, Event::ForegroundPassDone { is_ok: true });
+                let is_ok = self.foreground_pass(&key);
+                self.feed(&key, Event::ForegroundPassDone { is_ok });
             }
         }
     }
@@ -91,6 +94,7 @@ impl Stage {
             match wake {
                 Wake::Watchdog => stage.sample_watchdog(&target).await,
                 Wake::Retry => stage.retry_due(&target),
+                Wake::Foreground => stage.feed(&target, Event::ForegroundDue),
             }
         });
         self.state().tasks.insert(key, AbortOnDrop::new(task));
@@ -136,6 +140,21 @@ impl Stage {
         if is_playing {
             self.feed(key, Event::Play { position_ms: 0 });
         }
+    }
+
+    fn foreground_pass(&self, key: &str) -> bool {
+        self.inner.foreground_passes.fetch_add(1, Ordering::SeqCst);
+        if self.inner.routes.readiness() != Readiness::Ready {
+            return false;
+        }
+        let stale = self.state().loaded.get(key).is_some_and(|loaded| self.inner.routes.is_stale(&loaded.route));
+        if stale {
+            self.perform(key.to_string(), Action::RefreshRoute);
+            self.reload(key);
+        } else {
+            self.replay_play(key);
+        }
+        true
     }
 
     fn replay_play(&self, key: &str) {

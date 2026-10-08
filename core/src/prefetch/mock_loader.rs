@@ -124,7 +124,7 @@ impl Loader for MockLoader {
         self.run(url, Fetch::FirstBlock, priority).await
     }
 
-    async fn stored(&self, url: &str) -> Option<Vec<u8>> {
+    async fn stored(&self, url: &str, _headers: &HashMap<String, String>) -> Option<Vec<u8>> {
         self.stored_reads.fetch_add(1, Ordering::SeqCst);
         self.script().bodies.get(url).cloned()
     }

@@ -19,7 +19,7 @@ fn media_files_spec() -> MediaSpec {
     let mut video = VideoSpec::new("moment_video");
     video.cover_field = Some("coverUrl".into());
     video.prefetch = PrefetchSpec { from: 2, to: 5, depth: 2 };
-    video.pool = PoolSpec { slots: 3, reach: 1, hold_off: 1, trim_delay: 30 };
+    video.pool = PoolSpec { slots: 3, reach: 1, hold_off: 1, trim_delay: 30, low_ram_slots: Some(2), low_ram_reach: Some(0) };
     video.forward_headers = vec!["Authorization".into(), "Cookie".into(), "User-Agent".into()];
     video.evict = Some(Evict::Lfu);
     MediaSpec {
@@ -60,6 +60,16 @@ fn every_ruby_example_in_the_docs_parses() {
 fn expire_after_and_every_duration_unit_reach_the_spec() {
     let spec = parse_spec("cache do\n  evict expire_after 7.days\n  timeout 2.minutes\nend\nvideo :v do\n  pool hold_off: 1.hour\nend\n").unwrap();
     assert_eq!((spec.cache.evict, spec.cache.timeout, spec.videos[0].pool.hold_off), (Evict::ExpireAfter { seconds: 604800 }, 120, 3600));
+}
+
+#[test]
+fn the_low_memory_pool_options_reach_the_spec_and_a_bad_value_names_its_place() {
+    let spec = parse_spec("video :v do\n  pool low_ram_slots: 4, low_ram_reach: 1\nend\nvideo :w do\nend\n").unwrap();
+    assert_eq!((spec.videos[0].pool.low_ram_slots, spec.videos[0].pool.low_ram_reach), (Some(4), Some(1)));
+    assert_eq!((spec.videos[1].pool.low_ram_slots, spec.videos[1].pool.low_ram_reach), (None, None));
+
+    let errors = parse_spec("video :v do\n  pool low_ram_slots: 1.second\nend\n").unwrap_err();
+    assert_eq!(errors[0].message, "`low_ram_slots:` must be a whole number");
 }
 
 #[test]

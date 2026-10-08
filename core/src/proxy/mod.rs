@@ -1,3 +1,4 @@
+mod buffer;
 mod byte_store;
 mod config;
 mod flight;
@@ -16,15 +17,17 @@ pub(crate) mod test_client;
 
 pub use byte_store::{ByteStore, Meta, StoreWriter};
 pub use config::Config;
+pub use route::block_key;
 pub use slots::Priority;
 
 use crate::fetch::Fetcher;
-use crate::identity::cache_key;
+use crate::limits::Limits;
 use flight::Outcome;
 use inner::Inner;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -98,6 +101,34 @@ impl Proxy {
         Some(route::proxy_url(self.port(), original))
     }
 
+    pub fn set_limits(&self, limits: &Limits) {
+        self.inner.set_timeout(Duration::from_secs(limits.timeout_seconds.into()));
+        self.inner.slots.set_max(limits.max_concurrent as usize);
+    }
+
+    pub fn key_for(&self, url: &str, headers: &HashMap<String, String>) -> String {
+        self.inner.key(url, &self.inner.upstream_headers(url, headers))
+    }
+
+    pub async fn fetch_bytes(&self, url: &str, headers: &HashMap<String, String>, limit: u64) -> Result<Vec<u8>, ProxyError> {
+        self.fetch_into_store(url, headers, Priority::Playback).await?;
+        let key = self.key_for(url, headers);
+        match self.inner.store.len(&key).await {
+            Some(length) if length > limit => {
+                self.inner.store.remove(&key).await;
+                Err(ProxyError::Fetch(format!("response of {length} bytes exceeds the limit of {limit}")))
+            }
+            _ => self.read_stored(url, headers, limit).await.ok_or_else(|| ProxyError::Fetch("the response vanished from the cache".to_string())),
+        }
+    }
+
+    pub async fn read_stored(&self, url: &str, headers: &HashMap<String, String>, limit: u64) -> Option<Vec<u8>> {
+        let key = self.key_for(url, headers);
+        let length = self.inner.store.len(&key).await.filter(|length| *length <= limit)?;
+        let _held = self.inner.buffers().reserve_exact(length as usize).await.ok()?;
+        self.inner.store.get_range(&key, 0, length).await
+    }
+
     pub async fn ping(&self) -> bool {
         let port = self.port();
         if port == 0 {
@@ -139,7 +170,7 @@ impl Proxy {
         priority: Priority,
     ) -> Result<(), ProxyError> {
         let upstream = self.inner.upstream_headers(url, headers);
-        let key = cache_key(url);
+        let key = self.inner.key(url, &upstream);
         self.download_into_store(&key, || self.inner.get_or_start(url, upstream.clone(), priority)).await
     }
 
@@ -151,7 +182,7 @@ impl Proxy {
         priority: Priority,
     ) -> Result<(), ProxyError> {
         let upstream = self.inner.upstream_headers(url, headers);
-        let key = route::block_key(&cache_key(url), block_index);
+        let key = route::block_key(&self.inner.key(url, &upstream), block_index);
         self.download_into_store(&key, || self.inner.get_or_start_block(url, block_index, None, upstream.clone(), priority))
             .await
     }
@@ -197,7 +228,15 @@ impl Proxy {
 }
 
 #[cfg(test)]
+mod buffer_tests;
+#[cfg(test)]
+mod limits_tests;
+#[cfg(test)]
+mod namespace_tests;
+#[cfg(test)]
 mod proxy_tests;
+#[cfg(test)]
+mod resume_tests;
 #[cfg(test)]
 mod route_tests;
 #[cfg(test)]

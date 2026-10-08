@@ -18,7 +18,7 @@ pub trait CacheControl: Send + Sync {
     async fn clear(&self, kind: Option<cache::Kind>);
     async fn purge(&self, url: &str);
     async fn evict_now(&self);
-    async fn contains(&self, url: &str) -> bool;
+    async fn contains(&self, key: &str) -> bool;
 }
 
 pub trait PoolControl: Send + Sync {
@@ -27,11 +27,20 @@ pub trait PoolControl: Send + Sync {
     fn release_under(&self, now_ms: u64, pressure: Pressure) -> Vec<Directive>;
     fn background(&self) -> Vec<Directive>;
     fn foreground(&self);
+    fn set_slots(&self, slots: usize);
+}
+
+pub trait TransportControl: Send + Sync {
+    fn set_limits(&self, limits: &Limits);
 }
 
 pub trait PrefetchControl: Send + Sync {
     fn stop(&self);
     fn set_limits(&self, limits: &Limits);
+}
+
+pub trait MemoryRelease: Send + Sync {
+    fn drop_caches(&self);
 }
 
 pub trait SlotDirectives: Send + Sync {

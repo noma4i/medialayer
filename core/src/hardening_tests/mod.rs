@@ -1,16 +1,16 @@
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::{stream, StreamExt};
-use medialayer::cache::{Cache, CacheStore, Kind, SystemClock, classify_kind};
-use medialayer::fetch::{Fetcher, FetchError, Request, Response};
-use medialayer::limits::Limits;
-use medialayer::prefetch::{Loader, LoadError, Prefetcher, PrefetchLedger, Source, SourceKind};
-use medialayer::proxy::{Config, Proxy, Priority};
+use crate::cache::{classify_kind, Cache, CacheStore, Kind, SystemClock};
+use crate::fetch::{Fetcher, FetchError, Request, Response};
+use crate::limits::Limits;
+use crate::prefetch::{Loader, LoadError, Prefetcher, PrefetchLedger, Source, SourceKind};
+use crate::proxy::test_client::get as client_get;
+use crate::proxy::{Config, Priority, Proxy};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Notify;
 
 fn limits(budget: u64) -> Limits {
@@ -70,12 +70,7 @@ async fn proxy(cache: &Cache, hang: bool, size: usize) -> (Proxy, Arc<Origin>) {
 
 async fn get(proxy: &Proxy, url: &str) -> Vec<u8> {
     let parsed = url::Url::parse(url).unwrap();
-    let mut socket = tokio::net::TcpStream::connect(("127.0.0.1", proxy.port())).await.unwrap();
-    let request = format!("GET {}?{} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n", parsed.path(), parsed.query().unwrap());
-    socket.write_all(request.as_bytes()).await.unwrap();
-    let mut reply = Vec::new();
-    socket.read_to_end(&mut reply).await.unwrap();
-    reply
+    client_get(proxy.port(), &format!("{}?{}", parsed.path(), parsed.query().unwrap())).await.body
 }
 
 #[tokio::test]
@@ -94,10 +89,8 @@ async fn hardening_media_larger_than_cache_still_plays() {
     let (_dir, cache) = cache(100).await;
     let (proxy, _origin) = proxy(&cache, false, 500).await;
     let url = proxy.url_for("https://origin.test/a.mp4", &HashMap::new()).unwrap();
-    let reply = get(&proxy, &url).await;
+    let bytes = get(&proxy, &url).await.len();
     proxy.stop().await;
-    let split = reply.windows(4).position(|w| w == b"\r\n\r\n");
-    let bytes = split.map_or(0, |i| reply.len()-i-4);
     assert_eq!(bytes, 500, "received bytes={bytes}, origin bytes=500");
 }
 
@@ -139,7 +132,7 @@ impl Loader for HangingLoader {
     async fn load_first_block(&self, url: &str, headers: &HashMap<String,String>, priority: Priority) -> Result<(), LoadError> {
         self.load(url, headers, priority).await
     }
-    async fn stored(&self, _: &str) -> Option<Vec<u8>> { None }
+    async fn stored(&self, _: &str, _: &HashMap<String,String>) -> Option<Vec<u8>> { None }
 }
 
 fn sources() -> Vec<Option<Source>> {

@@ -77,6 +77,7 @@ fn decode_rejects_bad_input_without_panic() {
     let bad_character = "LEHV6nWB2yk8pyo0adR*.7kCMdn ";
     let longer = format!("{KNOWN}0");
     let cases = [
+        ("a string over the input limit", decode(&"0".repeat(10_000), 4, 4, 1.0), BlurHashError::TooLong),
         ("one char too long", decode(&longer, 4, 4, 1.0), BlurHashError::LengthMismatch),
         ("one char too short", decode(&KNOWN[..KNOWN.len() - 1], 4, 4, 1.0), BlurHashError::LengthMismatch),
         ("space is outside base83", decode(bad_character, 4, 4, 1.0), BlurHashError::InvalidCharacter),

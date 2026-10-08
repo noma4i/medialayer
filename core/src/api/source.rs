@@ -16,6 +16,8 @@ pub struct PlaybackRoute {
     pub url: String,
     pub headers: HashMap<String, String>,
     pub generation: Option<u64>,
+    pub hls: bool,
+    pub looping: bool,
 }
 
 impl MediaItem {

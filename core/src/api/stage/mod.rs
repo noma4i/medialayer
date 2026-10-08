@@ -13,6 +13,7 @@ use crate::pool::{Command, Ring};
 use crate::prefetch::Prefetcher;
 use crate::session::{self, next_action, Action, Context, Election, Event, RecoveryState, WatchdogConfig};
 use std::collections::HashMap;
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 use tokio::runtime::Handle;
@@ -45,6 +46,7 @@ struct State {
     slot_keys: HashMap<usize, String>,
     tasks: HashMap<String, AbortOnDrop>,
     catalog: HashMap<String, MediaItem>,
+    views: HashMap<String, u64>,
 }
 
 struct Inner {
@@ -57,6 +59,7 @@ struct Inner {
     watchdog: WatchdogConfig,
     handle: Handle,
     tick: Mutex<Option<AbortOnDrop>>,
+    foreground_passes: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -119,6 +122,7 @@ impl Stage {
             slot_keys: HashMap::new(),
             tasks: HashMap::new(),
             catalog: HashMap::new(),
+            views: HashMap::new(),
         };
         let inner = Arc::new(Inner {
             state: Mutex::new(state),
@@ -130,10 +134,26 @@ impl Stage {
             watchdog: parts.watchdog,
             handle: handle.clone(),
             tick: Mutex::new(None),
+            foreground_passes: AtomicU64::new(0),
         });
         let tick = handle.spawn(tick_loop(Arc::downgrade(&inner), parts.tick));
         *inner.tick.lock().unwrap_or_else(PoisonError::into_inner) = Some(AbortOnDrop::new(tick));
         Stage { inner }
+    }
+
+    #[cfg(test)]
+    pub fn commands_idle(&self) -> bool {
+        self.inner.runner.is_idle()
+    }
+
+    #[cfg(test)]
+    pub fn armed_tasks(&self) -> usize {
+        self.state().tasks.len()
+    }
+
+    #[cfg(test)]
+    pub fn foreground_passes(&self) -> u64 {
+        self.inner.foreground_passes.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     pub fn slot_count(&self) -> usize {
@@ -189,7 +209,12 @@ impl Stage {
                 next_action(&mut recovery, Event::Source { key: key.clone(), via_proxy_hls }, self.now());
                 state.slot_keys.insert(*slot, key.clone());
                 state.loaded.insert(key.clone(), Loaded { slot: *slot, recovery, source, route: route.clone() });
+                let view = state.views.get(key).copied();
+                let slot = *slot;
                 calls.push(SlotCall::from_command(command, Some(route)));
+                if let Some(view_token) = view {
+                    calls.push((slot, SlotCall::Attach { view_token }));
+                }
             }
             Command::Unload { slot } => {
                 if let Some(key) = state.slot_keys.remove(slot) {

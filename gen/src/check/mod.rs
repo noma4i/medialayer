@@ -73,7 +73,14 @@ const VIDEO: &[Rule] = &[
     Rule {
         word: "pool",
         args: &[],
-        keys: &[("slots", Want::Int), ("reach", Want::Int), ("hold_off", Want::Duration), ("trim_delay", Want::Duration)],
+        keys: &[
+            ("slots", Want::Int),
+            ("reach", Want::Int),
+            ("hold_off", Want::Duration),
+            ("trim_delay", Want::Duration),
+            ("low_ram_slots", Want::Int),
+            ("low_ram_reach", Want::Int),
+        ],
     },
     Rule { word: "forward_headers", args: &[Want::Headers], keys: &[] },
     EVICT,

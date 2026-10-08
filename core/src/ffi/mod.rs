@@ -1,11 +1,13 @@
 mod events;
 mod fetcher;
+mod image;
 mod layer;
 mod limits;
 
 pub use events::PlayerEvents;
+pub use image::decode_blurhash;
 pub use fetcher::{BodyReader, FetchRequest, FetchResponse, Fetcher, ForeignFetcher};
-pub use layer::{MediaLayer, OpenConfig, StateListener, StatsListener};
+pub use layer::{MediaLayer, MemoryReleaser, OpenConfig, StateListener, StatsListener};
 pub use limits::{default_limits, default_pool_settings, DeviceMemory, Evict, Limits, PoolSettings};
 
 #[cfg(test)]

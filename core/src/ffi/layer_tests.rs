@@ -25,6 +25,8 @@ impl BodyReader for Served {
     async fn next_chunk(&self) -> Result<Option<Vec<u8>>, MediaError> {
         Ok(self.0.lock().unwrap().take())
     }
+
+    fn release(&self) {}
 }
 
 #[derive(Default)]
@@ -66,6 +68,8 @@ fn config(dir: &std::path::Path, fetcher: Arc<dyn Fetcher>, settings: Arc<FakeSe
         device: DeviceMemory { total_mb: 4096, heap_class_mb: None, low_ram: false },
         defaults: default_limits(),
         pool: default_pool_settings(),
+        namespace_headers: Vec::new(),
+        memory_releaser: None,
     }
 }
 
@@ -81,7 +85,7 @@ async fn opening_reads_nothing_until_the_first_call_awaits() {
     assembled.settings = settings.clone();
     let parts = crate::api::assemble(assembled).await.unwrap();
 
-    let layer = MediaLayer::from_parts(None, Handle::current(), parts);
+    let layer = MediaLayer::from_parts(None, Handle::current(), parts, None);
 
     assert_eq!(settings.reads.load(std::sync::atomic::Ordering::SeqCst), 0);
     layer.limits().await;
@@ -122,11 +126,11 @@ fn a_play_url_routes_the_platform_fetcher_through_the_proxy_into_the_disk_cache_
     let port = parsed.port().unwrap();
     let reply = caller.block_on(test_client::get(port, &format!("{}?{}", parsed.path(), parsed.query().unwrap_or_default())));
     let stored = caller.block_on(async {
-        for _ in 0..500 {
+        for _ in 0..1_000_000 {
             if layer.stats().await.file_count > 0 {
                 break;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            tokio::task::yield_now().await;
         }
         layer.stats().await.file_count
     });
@@ -173,7 +177,7 @@ fn a_cache_write_reaches_a_stats_subscriber_without_any_controls_call() {
         assembled.stats_interval = std::time::Duration::from_millis(10);
         let parts = crate::api::assemble(assembled).await.unwrap();
         let cache = parts.cache.clone();
-        (MediaLayer::from_parts(None, Handle::current(), parts), cache)
+        (MediaLayer::from_parts(None, Handle::current(), parts, None), cache)
     });
     let totals = Arc::new(Totals(Mutex::new(Vec::new())));
     let _subscription = layer.subscribe_stats(totals.clone());
@@ -182,4 +186,116 @@ fn a_cache_write_reaches_a_stats_subscriber_without_any_controls_call() {
         cache.put("https://o.test/a.jpg", crate::cache::Kind::Image, &[1; 500]).await.unwrap();
         eventually_async(|| async { totals.0.lock().unwrap().last() == Some(&500) }).await;
     });
+}
+
+#[derive(Default)]
+struct CountingReleaser(std::sync::atomic::AtomicUsize);
+
+impl MemoryReleaser for CountingReleaser {
+    fn drop_memory_caches(&self) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn a_critical_memory_warning_reaches_the_platform_memory_releaser() {
+    let dir = tempfile::tempdir().unwrap();
+    let releaser: Arc<CountingReleaser> = shared();
+    let mut open = config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), None);
+    open.memory_releaser = Some(releaser.clone());
+    let layer = MediaLayer::open(open).unwrap();
+
+    layer.player_events().memory_warning(crate::api::Pressure::Critical);
+
+    for _ in 0..2_000_000 {
+        if releaser.0.load(std::sync::atomic::Ordering::SeqCst) == 1 {
+            break;
+        }
+        std::thread::yield_now();
+    }
+    assert_eq!(releaser.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+fn origin_layer(dir: &std::path::Path) -> (Arc<MediaLayer>, Arc<Origin>) {
+    let origin = Arc::new(Origin::default());
+    (MediaLayer::open(config(dir, origin.clone(), shared::<FakeSettings>(), None)).unwrap(), origin)
+}
+
+#[test]
+fn an_image_loads_through_the_fetcher_into_the_cache_once_and_repeats_come_from_the_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let (layer, origin) = origin_layer(dir.path());
+    let headers = HashMap::from([("Authorization".to_string(), "token".to_string())]);
+    let caller = caller();
+
+    let (first, second, together) = caller.block_on(async {
+        let first = layer.fetch_image("https://o.test/a.jpg".to_string(), headers.clone()).await;
+        let second = layer.fetch_image("https://o.test/a.jpg".to_string(), headers.clone()).await;
+        let together = tokio::join!(
+            layer.fetch_image("https://o.test/b.jpg".to_string(), HashMap::new()),
+            layer.fetch_image("https://o.test/b.jpg".to_string(), HashMap::new())
+        );
+        (first, second, together)
+    });
+
+    assert_eq!((first, second), (Ok(b"origin bytes".to_vec()), Ok(b"origin bytes".to_vec())));
+    assert_eq!(together, (Ok(b"origin bytes".to_vec()), Ok(b"origin bytes".to_vec())));
+    let seen = origin.seen.lock().unwrap();
+    assert_eq!(seen.len(), 2);
+    assert_eq!(seen[0].headers.get("Authorization").map(String::as_str), Some("token"));
+    assert!(seen.iter().all(|request| request.range_start.is_none()));
+}
+
+#[test]
+fn an_image_that_cannot_be_fetched_is_a_fetch_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), None)).unwrap();
+
+    let result = caller().block_on(layer.fetch_image("https://o.test/a.jpg".to_string(), HashMap::new()));
+
+    assert!(matches!(result, Err(MediaError::Fetch { .. })));
+}
+
+#[test]
+fn a_source_is_cached_by_its_first_block_and_the_placeholder_follows_the_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let caller = caller();
+    let (layer, cache) = caller.block_on(async {
+        let parts = crate::api::assemble(assembly(dir.path(), Arc::new(MockFetcher::default()), shared::<MockFactory>())).await.unwrap();
+        let cache = parts.cache.clone();
+        (MediaLayer::from_parts(None, Handle::current(), parts, None), cache)
+    });
+    let cached = MediaItem::bare_video("https://o.test/cached.mp4");
+    let missing = MediaItem::bare_video("https://o.test/missing.mp4");
+
+    caller.block_on(cache.put("https://o.test/cached.mp4#0", crate::cache::Kind::Stream, b"first block")).unwrap();
+
+    assert!(caller.block_on(layer.is_cached(cached.clone())));
+    assert!(!caller.block_on(layer.is_cached(missing.clone())));
+    assert_eq!(caller.block_on(layer.placeholder(cached, false)), crate::api::Placeholder::None);
+    assert_eq!(caller.block_on(layer.placeholder(missing, false)), crate::api::Placeholder::FirstFrame);
+}
+
+#[test]
+fn an_item_state_from_a_native_loader_reaches_the_state_subscribers_and_a_seek_reaches_the_player() {
+    let dir = tempfile::tempdir().unwrap();
+    let factory: Arc<MockFactory> = Arc::default();
+    let slots: Arc<dyn PlayerSlotFactory> = factory.clone();
+    let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), Some(slots))).unwrap();
+    let seen = Arc::new(Seen(Mutex::new(Vec::new())));
+    let _subscription = layer.subscribe_state("https://o.test/a.jpg".to_string(), seen.clone());
+    let caller = caller();
+
+    layer.item_state("https://o.test/a.jpg".to_string(), MediaState::Loading);
+    caller.block_on(eventually(|| seen.0.lock().unwrap().last() == Some(&MediaState::Loading)));
+    layer.item_state("https://o.test/a.jpg".to_string(), MediaState::Ready);
+    caller.block_on(eventually(|| seen.0.lock().unwrap().last() == Some(&MediaState::Ready)));
+
+    let url = "https://o.test/v1.mp4";
+    layer.set_window(0, vec![Some(MediaItem::bare_video(url))]);
+    caller.block_on(eventually(|| factory.slot_holding(url).is_some()));
+    layer.seek(url.to_string(), 1_500);
+    layer.player_events().attach(url.to_string(), 5);
+    let (_, player) = factory.slot_holding(url).unwrap();
+    caller.block_on(eventually(|| player.calls().contains(&SlotCall::Seek { position_ms: 1_500 }) && player.calls().contains(&SlotCall::Attach { view_token: 5 })));
 }

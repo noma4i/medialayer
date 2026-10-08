@@ -1,7 +1,6 @@
 use crate::api::slots::SlotCall;
 use crate::api::test_support::{eventually, eventually_async, rig, rig_with, url_of, video, videos};
 use crate::fetch::mock::Script;
-use std::time::Duration;
 
 fn total_calls(rig: &crate::api::test_support::Rig) -> usize {
     rig.factory.slots.lock().unwrap().values().map(|slot| slot.calls().len()).sum()
@@ -33,12 +32,12 @@ async fn declaring_the_same_window_again_sends_no_commands() {
     stage.set_window(5, videos(20));
     stage.set_playing(&url_of(5), true);
     eventually(|| rig.factory.slot_holding(&url_of(6)).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Preroll))).await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    eventually(|| stage.commands_idle()).await;
     let settled = total_calls(&rig);
 
     stage.set_window(5, videos(20));
     stage.set_playing(&url_of(5), true);
-    tokio::time::sleep(Duration::from_millis(80)).await;
+    eventually(|| stage.commands_idle()).await;
 
     assert_eq!(total_calls(&rig), settled);
 }
@@ -54,8 +53,7 @@ async fn hundreds_of_window_shifts_never_create_more_players_than_slots() {
         stage.set_playing(&url_of(active), true);
     }
 
-    eventually(|| rig.factory.slots.lock().unwrap().len() == stage.slot_count()).await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    eventually(|| rig.factory.slots.lock().unwrap().len() == stage.slot_count() && stage.commands_idle()).await;
     assert_eq!(rig.factory.created.lock().unwrap().len(), stage.slot_count());
 }
 
@@ -90,8 +88,7 @@ async fn muting_all_or_one_key_changes_only_the_volume_and_only_when_the_value_c
     stage.set_muted_all(true);
     stage.set_muted_all(true);
 
-    eventually(|| mutes(4) == 1 && mutes(6) == 1).await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    eventually(|| mutes(4) == 1 && mutes(6) == 1 && stage.commands_idle()).await;
     assert_eq!((mutes(4), mutes(5), mutes(6)), (1, 1, 1));
 }
 
@@ -107,7 +104,7 @@ async fn a_pinned_key_survives_window_moves_and_release_all_frees_every_slot() {
     for active in [4, 9, 14] {
         stage.set_window(active, videos(20));
     }
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    eventually(|| stage.commands_idle()).await;
     let (_, pinned) = rig.holder(intro);
     assert_eq!(pinned.calls().iter().filter(|call| **call == SlotCall::Unload).count(), 0);
 
@@ -159,4 +156,27 @@ async fn the_window_also_drives_prefetch_ahead_of_the_active_page() {
 
     eventually_async(|| async { rig.parts.cache.contains(&format!("{}#0", url_of(2))).await }).await;
     assert_eq!(rig.fetcher.calls_for(&url_of(7)), 0);
+}
+
+#[tokio::test]
+async fn a_view_attaches_to_the_slot_that_holds_its_key_even_when_it_was_declared_before_the_load() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    stage.attach(&url_of(1), 9);
+
+    stage.set_window(0, videos(3));
+
+    eventually(|| rig.factory.slot_holding(&url_of(1)).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Attach { view_token: 9 }))).await;
+    let calls = rig.holder(&url_of(1)).1.calls();
+    let position = |wanted: &dyn Fn(&SlotCall) -> bool| calls.iter().position(wanted).unwrap();
+    assert!(position(&|call| matches!(call, SlotCall::Load { .. })) < position(&|call| matches!(call, SlotCall::Attach { .. })));
+
+    stage.attach(&url_of(1), 11);
+    stage.seek(&url_of(1), 4_200);
+    stage.detach(&url_of(1));
+    let (_, player) = rig.holder(&url_of(1));
+    eventually(|| player.calls().last() == Some(&SlotCall::Detach)).await;
+    let calls = player.calls();
+    assert!(calls.contains(&SlotCall::Attach { view_token: 11 }));
+    assert!(calls.contains(&SlotCall::Seek { position_ms: 4_200 }));
 }

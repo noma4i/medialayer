@@ -1,4 +1,4 @@
-use super::test_support::{eventually, shared, unload, FakeDirectives, FakePool, FakePrefetch};
+use super::test_support::{eventually, shared, unload, FakeDirectives, FakePool, FakePrefetch, FakeRelease};
 use super::*;
 use crate::cache::SystemClock;
 use crate::memory::{Ledger, Step};
@@ -11,6 +11,7 @@ struct Rig {
     pool: Arc<FakePool>,
     prefetch: Arc<FakePrefetch>,
     directives: Arc<FakeDirectives>,
+    release: Arc<FakeRelease>,
     signals: Signals,
 }
 
@@ -18,9 +19,17 @@ fn rig() -> Rig {
     let pool: Arc<FakePool> = shared();
     let prefetch: Arc<FakePrefetch> = shared();
     let directives: Arc<FakeDirectives> = shared();
-    let signals =
-        Signals::new(&Handle::current(), pool.clone(), prefetch.clone(), directives.clone(), Ledger::new(1 << 30), Arc::new(SystemClock));
-    Rig { pool, prefetch, directives, signals }
+    let release: Arc<FakeRelease> = shared();
+    let signals = Signals::new(
+        &Handle::current(),
+        pool.clone(),
+        prefetch.clone(),
+        directives.clone(),
+        release.clone(),
+        Ledger::new(1 << 30),
+        Arc::new(SystemClock),
+    );
+    Rig { pool, prefetch, directives, release, signals }
 }
 
 fn events(rig: &Rig) -> Vec<String> {
@@ -42,16 +51,16 @@ async fn memory_warning_lowers_the_step_and_releases_slots_by_level() {
 }
 
 #[tokio::test]
-async fn pressure_and_background_stop_prefetch_and_forward_the_slot_directives() {
+async fn pressure_and_background_stop_prefetch_drop_the_platform_memory_caches_and_forward_the_slot_directives() {
     for trigger in [|signals: &Signals| signals.memory_warning(Pressure::Critical), |signals: &Signals| signals.background()] {
         let rig = rig();
         *rig.pool.to_return.lock().unwrap() = vec![Directive::StopPrefetch, unload(1), Directive::DropMemoryCache];
 
         trigger(&rig.signals);
 
-        eventually(|| !rig.directives.applied.lock().unwrap().is_empty()).await;
+        eventually(|| !rig.directives.applied.lock().unwrap().is_empty() && rig.release.drops.load(Ordering::SeqCst) == 1).await;
         assert_eq!(rig.prefetch.stops.load(Ordering::SeqCst), 1);
-        assert_eq!(*rig.directives.applied.lock().unwrap(), vec![vec![unload(1), Directive::DropMemoryCache]]);
+        assert_eq!(*rig.directives.applied.lock().unwrap(), vec![vec![unload(1)]]);
     }
 }
 

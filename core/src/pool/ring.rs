@@ -103,6 +103,20 @@ impl Ring {
         self.slots
     }
 
+    pub fn set_slots(&mut self, slots: usize) -> Vec<Command> {
+        let slots = slots.max(2 * self.reach + 1);
+        let mut unloads = Vec::new();
+        for slot in slots..self.slots {
+            self.unbind(slot, ReleaseReason::Explicit, &mut unloads);
+        }
+        self.bindings.resize_with(slots, || None);
+        self.native_muted.resize(slots, self.muted_all);
+        self.uses.resize(slots, 0);
+        self.slots = slots;
+        self.config.slots = slots;
+        unloads
+    }
+
     pub fn slot(&self, page: usize) -> usize {
         page % self.slots
     }

@@ -64,6 +64,13 @@ impl Places {
         });
     }
 
+    pub fn item_state(&self, key: &str, state: MediaState) {
+        self.with(key, |place| match (&place.state, state) {
+            (MediaState::Ready, MediaState::Loading) => {}
+            (_, state) => place.move_to(state),
+        });
+    }
+
     pub fn ready(&self, key: &str) {
         self.with(key, |place| place.move_to(MediaState::Ready));
     }

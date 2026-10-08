@@ -1,6 +1,7 @@
 use super::test_support::proxy_rig;
 use super::*;
 use crate::api::Kind;
+use crate::api::MediaError;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -51,4 +52,56 @@ async fn a_route_is_stale_after_the_proxy_changes_port_and_after_it_becomes_read
     let direct = routes.play_url(&source);
     rig.proxy.restart(0).await.unwrap();
     assert!(routes.is_stale(&direct));
+}
+
+#[tokio::test]
+async fn a_source_is_cached_when_its_whole_entry_or_its_first_block_is_stored() {
+    let rig = proxy_rig().await;
+    let routes = Routes::new(rig.proxy.clone(), Arc::new(rig.cache.clone()));
+    let source = video("https://cdn.test/clip.mp4", "token");
+    let other = video("https://cdn.test/other.mp4", "token");
+    assert!(!routes.is_cached(&source.url, &source.headers).await);
+
+    rig.cache.put("https://cdn.test/clip.mp4#0", crate::cache::Kind::Stream, b"first block").await.unwrap();
+    rig.cache.put("https://cdn.test/other.mp4", crate::cache::Kind::Stream, b"whole").await.unwrap();
+
+    assert!(routes.is_cached(&source.url, &source.headers).await);
+    assert!(routes.is_cached(&other.url, &other.headers).await);
+    assert!(!routes.is_cached("https://cdn.test/third.mp4", &HashMap::new()).await);
+}
+
+#[tokio::test]
+async fn image_bytes_load_through_the_fetcher_into_the_cache_and_refuse_a_response_over_the_limit() {
+    let rig = proxy_rig().await;
+    let routes = Routes::new(rig.proxy.clone(), Arc::new(rig.cache.clone()));
+    rig.fetcher.route("https://cdn.test/a.jpg", crate::fetch::mock::Script::ok(vec![1; 100]));
+
+    let refused = routes.image_bytes("https://cdn.test/a.jpg", &HashMap::new(), 50).await;
+    assert!(matches!(refused, Err(MediaError::Fetch { .. })));
+    assert!(!rig.cache.contains("https://cdn.test/a.jpg").await);
+
+    let loaded = routes.image_bytes("https://cdn.test/a.jpg", &HashMap::new(), 200).await.unwrap();
+    let again = routes.image_bytes("https://cdn.test/a.jpg", &HashMap::new(), 200).await.unwrap();
+
+    assert_eq!((loaded.len(), again.len()), (100, 100));
+    assert_eq!(rig.fetcher.calls(), 2);
+}
+
+#[tokio::test]
+async fn a_route_tells_the_player_whether_to_loop_and_whether_the_stream_is_hls() {
+    let rig = proxy_rig().await;
+    let routes = Routes::new(rig.proxy.clone(), Arc::new(rig.cache.clone()));
+    let cases = [
+        ("feed video", MediaItem::bare("https://cdn.test/a.mp4", Kind::Video), true, false),
+        ("hls video", MediaItem::bare("https://cdn.test/a/index.m3u8", Kind::Video), true, true),
+        ("voice note", MediaItem::bare("https://cdn.test/a.m4a", Kind::Audio), false, false),
+    ];
+
+    for (name, source, looping, hls) in &cases {
+        let proxied = routes.play_url(source);
+        assert_eq!((proxied.looping, proxied.hls), (*looping, *hls), "{name}");
+    }
+    rig.proxy.stop().await;
+    let direct = routes.play_url(&cases[1].1);
+    assert_eq!((direct.looping, direct.hls), (true, true));
 }

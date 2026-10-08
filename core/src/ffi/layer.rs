@@ -2,10 +2,12 @@ use super::events::PlayerEvents;
 use super::fetcher::{Fetcher, ForeignFetcher};
 use super::limits::{DeviceMemory, Limits, PoolSettings};
 use crate::api::{
-    assemble, spawn_pulse, AbortOnDrop, Assembly, ControlPorts, Controls, Kind, MediaError, MediaItem, MediaState, MediaStats, Parts, PlaybackRoute,
+    assemble, placeholder_for, CacheState, MemoryRelease, Placeholder, spawn_pulse, AbortOnDrop, Assembly, ControlPorts, Controls, Kind, MediaError, MediaItem, MediaState, MediaStats, Parts, PlaybackRoute,
     Places, PlayerSlotFactory, Routes, SettingsStore, Signals, Stage, Subscription,
 };
+use crate::memory::InputLimits;
 use crate::session::WatchdogConfig;
+use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -23,6 +25,25 @@ pub struct OpenConfig {
     pub device: DeviceMemory,
     pub defaults: Limits,
     pub pool: PoolSettings,
+    #[uniffi(default = [])]
+    pub namespace_headers: Vec<String>,
+    #[uniffi(default = None)]
+    pub memory_releaser: Option<Arc<dyn MemoryReleaser>>,
+}
+
+#[uniffi::export(with_foreign)]
+pub trait MemoryReleaser: Send + Sync {
+    fn drop_memory_caches(&self);
+}
+
+struct ForeignRelease(Option<Arc<dyn MemoryReleaser>>);
+
+impl MemoryRelease for ForeignRelease {
+    fn drop_caches(&self) {
+        if let Some(releaser) = &self.0 {
+            releaser.drop_memory_caches();
+        }
+    }
 }
 
 #[uniffi::export(with_foreign)]
@@ -48,7 +69,7 @@ pub struct MediaLayer {
 }
 
 impl MediaLayer {
-    pub fn from_parts(runtime: Option<Runtime>, handle: Handle, parts: Parts) -> Arc<MediaLayer> {
+    pub fn from_parts(runtime: Option<Runtime>, handle: Handle, parts: Parts, releaser: Option<Arc<dyn MemoryReleaser>>) -> Arc<MediaLayer> {
         let ports = ControlPorts {
             cache: Arc::new(parts.cache),
             pool: Arc::new(parts.stage.clone()),
@@ -56,6 +77,8 @@ impl MediaLayer {
             settings: parts.settings,
             ledger: parts.ledger.clone(),
             device: parts.device,
+            transport: Arc::new(parts.proxy.clone()),
+            pool_settings: parts.pool,
         };
         let controls = Arc::new(Controls::new(handle.clone(), ports, parts.defaults));
         let signals = Arc::new(Signals::new(
@@ -63,6 +86,7 @@ impl MediaLayer {
             Arc::new(parts.stage.clone()),
             Arc::new(parts.prefetcher),
             Arc::new(parts.stage.clone()),
+            Arc::new(ForeignRelease(releaser)),
             parts.ledger,
             parts.clock,
         ));
@@ -107,14 +131,16 @@ impl MediaLayer {
             .build()
             .map_err(|error| MediaError::Unexpected { detail: error.to_string() })?;
         let handle = runtime.handle().clone();
+        let releaser = config.memory_releaser;
         let assembly = Assembly {
             dir: config.dir.into(),
-            fetcher: Arc::new(ForeignFetcher(config.fetcher)),
+            fetcher: Arc::new(ForeignFetcher::new(config.fetcher, InputLimits::default())),
             settings: config.settings,
             factory: config.slots,
             device: config.device.into(),
             defaults: config.defaults.into(),
             pool: config.pool.into(),
+            namespace_headers: config.namespace_headers,
             watchdog: WatchdogConfig::default(),
             stats_interval: STATS_INTERVAL,
         };
@@ -123,7 +149,7 @@ impl MediaLayer {
             let _ = sender.send(assemble(assembly).await);
         });
         let parts = receiver.recv().map_err(|error| MediaError::Unexpected { detail: error.to_string() })??;
-        Ok(MediaLayer::from_parts(Some(runtime), handle, parts))
+        Ok(MediaLayer::from_parts(Some(runtime), handle, parts, releaser))
     }
 
     pub async fn limits(&self) -> Limits {
@@ -175,6 +201,29 @@ impl MediaLayer {
 
     pub fn refresh_route(&self, source: MediaItem, route: PlaybackRoute) -> PlaybackRoute {
         self.routes.refresh(&source, &route)
+    }
+
+    pub async fn fetch_image(&self, url: String, headers: HashMap<String, String>) -> Result<Vec<u8>, MediaError> {
+        let routes = self.routes.clone();
+        self.on_runtime(async move { routes.image_bytes(&url, &headers, InputLimits::default().response_bytes).await }).await
+    }
+
+    pub async fn is_cached(&self, source: MediaItem) -> bool {
+        let routes = self.routes.clone();
+        self.on_runtime(async move { routes.is_cached(&source.url, &source.headers).await }).await
+    }
+
+    pub async fn placeholder(&self, source: MediaItem, ready: bool) -> Placeholder {
+        let cache = if self.is_cached(source.clone()).await { CacheState::Cached } else { CacheState::Missing };
+        placeholder_for(source, cache, ready)
+    }
+
+    pub fn item_state(&self, key: String, state: MediaState) {
+        self.places.item_state(&key, state);
+    }
+
+    pub fn seek(&self, key: String, position_ms: u64) {
+        self.stage.seek(&key, position_ms);
     }
 
     pub fn set_window(&self, active: u32, sources: Vec<Option<MediaItem>>) {

@@ -44,6 +44,19 @@ impl PrioritySlots {
         }
     }
 
+    pub fn set_max(&self, max: usize) {
+        let mut state = lock(&self.state);
+        state.max = max.max(1);
+        state.reserved = state.reserved.min(state.max - 1);
+        state.hand_out(&self.state);
+    }
+
+    #[cfg(test)]
+    pub fn waiting(&self) -> usize {
+        let state = lock(&self.state);
+        state.playback.len() + state.prefetch.len()
+    }
+
     #[cfg(test)]
     pub fn in_use(&self) -> usize {
         lock(&self.state).in_use

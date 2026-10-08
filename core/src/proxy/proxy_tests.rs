@@ -575,6 +575,20 @@ fn live_playlist(sequence: u32) -> Vec<u8> {
 }
 
 #[tokio::test]
+async fn a_playlist_over_the_input_limit_is_refused_with_502() {
+    let mut config = config(8);
+    config.max_playlist_bytes = 64;
+    let rig = rig_with(config).await;
+    let url = "https://o.test/huge.m3u8";
+    rig.fetcher.route(url, Script::ok(format!("#EXTM3U\n{}", "#EXT-X-COMMENT:padding\n".repeat(20)).into_bytes()));
+    let target = path_of(&rig.proxy.url_for(url, &HashMap::new()).unwrap());
+
+    let reply = get(rig.proxy.port(), &target).await;
+
+    assert_eq!((reply.status, reply.text().as_str()), (502, "playlist too large"));
+}
+
+#[tokio::test]
 async fn live_playlists_are_refetched_after_the_ttl_and_vod_playlists_are_not() {
     let mut config = config(8);
     config.playlist_ttl = Duration::from_millis(150);

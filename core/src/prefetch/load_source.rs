@@ -34,7 +34,7 @@ async fn first_block(loader: &dyn Loader, source: &Source, timeout: Duration) ->
 
 async fn playlist_text(loader: &dyn Loader, source: &Source, url: &str, timeout: Duration) -> Result<String, Outcome> {
     bounded(timeout, loader.load(url, &source.headers, Priority::Prefetch)).await?;
-    let bytes = loader.stored(url).await.ok_or_else(|| Outcome::Failed(format!("playlist {url} is not stored")))?;
+    let bytes = loader.stored(url, &source.headers).await.ok_or_else(|| Outcome::Failed(format!("playlist {url} is not stored")))?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 

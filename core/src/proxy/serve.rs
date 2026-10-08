@@ -7,7 +7,7 @@ use super::route::{
 use super::slots::{Permit, Priority};
 use crate::fetch::{header_value, FetchError, Request};
 use crate::hls::{is_manifest_url, is_multivariant, rewrite_playlist};
-use crate::identity::cache_key;
+use crate::memory::Reservation;
 use bytes::Bytes;
 use futures_util::{stream, Stream, StreamExt};
 use http_body_util::combinators::UnsyncBoxBody;
@@ -61,11 +61,11 @@ pub(super) async fn handle(inner: Arc<Inner>, request: hyper::Request<Incoming>)
 }
 
 async fn playlist(inner: &Arc<Inner>, target: &str, headers: Upstream, head_only: bool) -> Response<ProxyBody> {
-    let key = cache_key(target);
+    let key = inner.key(target, &headers);
     for _ in 0..ATTEMPTS {
         if let Some(length) = inner.store.len(&key).await {
             match stored_playlist(inner, &key, length).await {
-                Ok(Some(bytes)) => return playlist_response(inner, target, &bytes, &headers, head_only),
+                Ok(Some((bytes, _held))) => return playlist_response(inner, target, &bytes, &headers, head_only),
                 Ok(None) => {
                     inner.store.remove(&key).await;
                     inner.forget_playlist(&key);
@@ -85,17 +85,20 @@ async fn playlist(inner: &Arc<Inner>, target: &str, headers: Upstream, head_only
     text(503, "playlist unavailable")
 }
 
-async fn stored_playlist(inner: &Inner, key: &str, length: u64) -> Result<Option<Vec<u8>>, Failure> {
+async fn stored_playlist(inner: &Inner, key: &str, length: u64) -> Result<Option<(Vec<u8>, Reservation)>, Failure> {
     if length > inner.config.max_playlist_bytes {
         return Err(Box::new(text(502, "playlist too large")));
     }
+    let Ok(held) = inner.buffers().reserve_exact(length as usize).await else {
+        return Err(Box::new(text(503, "no memory for the playlist")));
+    };
     let Some(bytes) = inner.store.get_range(key, 0, length).await else {
         return Err(Box::new(text(502, "playlist vanished from the store")));
     };
     let text = String::from_utf8_lossy(&bytes);
     let is_static = text.contains(PLAYLIST_END_TAG) || (is_multivariant(&text) && !text.contains(SEGMENT_TAG));
     drop(text);
-    Ok((is_static || inner.playlist_is_fresh(key)).then_some(bytes))
+    Ok((is_static || inner.playlist_is_fresh(key)).then_some((bytes, held)))
 }
 
 async fn playlist_direct(inner: &Inner, target: &str, headers: Upstream, head_only: bool) -> Response<ProxyBody> {
@@ -107,7 +110,7 @@ async fn playlist_direct(inner: &Inner, target: &str, headers: Upstream, head_on
         return text(response.status, "origin refused the playlist");
     }
     let limit = inner.config.max_playlist_bytes as usize;
-    match collect_limited(response.body, limit, inner.config.policy.timeout).await {
+    match collect_limited(response.body, limit, inner.timeout(), &inner.buffers()).await {
         Some(bytes) => playlist_response(inner, target, &bytes, &headers, head_only),
         None => text(502, "playlist body failed"),
     }
@@ -129,9 +132,9 @@ async fn media(
     range: Option<ByteRange>,
     head_only: bool,
 ) -> Response<ProxyBody> {
-    let key = cache_key(target);
+    let key = inner.key(target, &headers);
     for _ in 0..ATTEMPTS {
-        let mut joined = inner.existing_flight(target);
+        let mut joined = inner.existing_flight(target, &headers);
         if joined.is_none() {
             if let Some(total) = inner.store.len(&key).await {
                 return stored_response(inner, target, &key, total, range, &headers, head_only).await;
@@ -216,7 +219,7 @@ async fn flight_response(
     let cursor = |position: u64, end: Option<u64>| StoreCursor {
         subscription: Some(subscription),
         store: inner.store.clone(),
-        key: cache_key(target),
+        key: inner.key(target, headers),
         position,
         end,
         chunk: inner.config.stream_chunk as u64,
@@ -267,7 +270,7 @@ async fn direct_response(
             forwarded.push((name, value.to_string()));
         }
     }
-    let cursor = DirectCursor { body: response.body, _permit: permit, idle: inner.config.policy.timeout, done: false };
+    let cursor = DirectCursor { body: response.body, _permit: permit, idle: inner.timeout(), buffers: inner.buffers(), done: false };
     respond(response.status, forwarded, streamed(stream::unfold(cursor, next_direct)), head_only)
 }
 
@@ -308,7 +311,7 @@ pub(super) async fn origin_fetch(
         return Err(Box::new(text(503, "busy")));
     };
     let request = Request { url: target.to_string(), headers, range };
-    match tokio::time::timeout(inner.config.policy.timeout, inner.fetcher.fetch(request)).await {
+    match tokio::time::timeout(inner.timeout(), inner.fetcher.fetch(request)).await {
         Err(_) => Err(Box::new(text(502, "origin timed out"))),
         Ok(Err(FetchError::Status(status))) => Err(Box::new(text(status, "origin refused the request"))),
         Ok(Err(error)) => Err(Box::new(text(502, &error.to_string()))),
@@ -476,7 +479,7 @@ async fn block_range_response(
     headers: Upstream,
     range: Option<ByteRange>,
 ) -> Response<ProxyBody> {
-    let key = cache_key(target);
+    let key = inner.key(target, &headers);
     let total = match known_total(inner, target, &key, &headers, range).await {
         Ok(total) => total,
         Err(failure) => return *failure,

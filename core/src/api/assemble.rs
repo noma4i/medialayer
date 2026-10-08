@@ -1,6 +1,6 @@
 use super::error::MediaError;
 use super::places::Places;
-use super::ports::{CacheControl, PrefetchControl, SettingsStore};
+use super::ports::{CacheControl, PrefetchControl, SettingsStore, TransportControl};
 use super::routes::Routes;
 use super::slots::{PlayerSlotFactory, SlotRunner};
 use super::stage::{Stage, StageParts};
@@ -23,6 +23,10 @@ use tokio::runtime::Handle;
 const MIN_TICK_MS: u64 = 50;
 const MAX_TICK_MS: u64 = 5_000;
 const TICKS_PER_TRIM_DELAY: u64 = 4;
+const LOW_RAM_BELOW_MB: u32 = 3_072;
+const LOW_RAM_SLOTS: usize = 2;
+const LOW_RAM_REACH: usize = 0;
+const LOW_RAM_BUFFER_SECONDS: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PoolSettings {
@@ -38,7 +42,12 @@ impl From<&PoolSpec> for PoolSettings {
             reach: spec.reach as usize,
             hold_off_ms: u64::from(spec.hold_off) * 1_000,
             trim_delay_ms: u64::from(spec.trim_delay) * 1_000,
-            profile: ProfileTuning { low_ram_below_mb: 3_072, low_slots: 2, low_reach: 0, low_buffer_seconds: 1 },
+            profile: ProfileTuning {
+                low_ram_below_mb: LOW_RAM_BELOW_MB,
+                low_slots: spec.low_ram_slots.map_or(LOW_RAM_SLOTS, |slots| slots as usize),
+                low_reach: spec.low_ram_reach.map_or(LOW_RAM_REACH, |reach| reach as usize),
+                low_buffer_seconds: LOW_RAM_BUFFER_SECONDS,
+            },
         }
     }
 }
@@ -57,6 +66,7 @@ pub struct Assembly {
     pub device: DeviceMemory,
     pub defaults: Limits,
     pub pool: PoolSettings,
+    pub namespace_headers: Vec<String>,
     pub watchdog: WatchdogConfig,
     pub stats_interval: Duration,
 }
@@ -74,6 +84,7 @@ pub struct Parts {
     pub defaults: Limits,
     pub device: DeviceMemory,
     pub stats_interval: Duration,
+    pub pool: PoolSettings,
 }
 
 pub fn ledger_for(limits: &Limits, device: DeviceMemory) -> Ledger {
@@ -113,8 +124,14 @@ impl CacheControl for Cache {
         Cache::evict_now(self).await;
     }
 
-    async fn contains(&self, url: &str) -> bool {
-        Cache::contains(self, &cache_key(url)).await
+    async fn contains(&self, key: &str) -> bool {
+        Cache::contains(self, key).await
+    }
+}
+
+impl TransportControl for Proxy {
+    fn set_limits(&self, limits: &Limits) {
+        Proxy::set_limits(self, limits);
     }
 }
 
@@ -129,19 +146,19 @@ impl PrefetchControl for Prefetcher {
 }
 
 pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
-    let Assembly { dir, fetcher, settings, factory, device, defaults, pool, watchdog, stats_interval } = config;
+    let Assembly { dir, fetcher, settings, factory, device, defaults, pool, namespace_headers, watchdog, stats_interval } = config;
     defaults.validate()?;
     let handle = Handle::current();
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let ledger = ledger_for(&defaults, device);
     let cache = Cache::open(dir, defaults);
     let store: Arc<dyn ByteStore> = Arc::new(CacheStore::new(cache.clone(), Arc::new(classify_kind)));
-    let proxy = Proxy::start(ProxyConfig::from_limits(&defaults), fetcher, store.clone())
+    let proxy = Proxy::start(ProxyConfig { ledger: ledger.clone(), namespace_headers, ..ProxyConfig::from_limits(&defaults) }, fetcher, store)
         .await
         .map_err(|error| MediaError::Unexpected { detail: error.to_string() })?;
     let dedupe_window = Duration::from_secs(defaults.dedupe_window_seconds.into());
     let prefetch_ledger = PrefetchLedger::new(dedupe_window, defaults.dedupe_max_entries as usize);
-    let prefetcher = Prefetcher::new(Arc::new(ProxyLoader::new(proxy.clone(), store)), &defaults, prefetch_ledger, clock.clone());
+    let prefetcher = Prefetcher::new(Arc::new(ProxyLoader::new(proxy.clone())), &defaults, prefetch_ledger, clock.clone());
     let routes = Arc::new(Routes::new(proxy.clone(), Arc::new(cache.clone())));
     let places = Arc::new(Places::new(handle.clone()));
     let ring_config = pool_config(&defaults, device, &pool);
@@ -159,5 +176,5 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
             tick,
         },
     );
-    Ok(Parts { cache, proxy, prefetcher, stage, places, routes, settings, ledger, clock, defaults, device, stats_interval })
+    Ok(Parts { cache, proxy, prefetcher, stage, places, routes, settings, ledger, clock, defaults, device, stats_interval, pool })
 }

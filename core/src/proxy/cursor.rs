@@ -1,3 +1,4 @@
+use super::buffer::Buffers;
 use super::byte_store::ByteStore;
 use super::flight::{Outcome, Subscription};
 use super::inner::Inner;
@@ -17,6 +18,7 @@ pub(super) struct DirectCursor {
     pub body: BodyStream,
     pub _permit: Permit,
     pub idle: Duration,
+    pub buffers: Buffers,
     pub done: bool,
 }
 
@@ -24,8 +26,12 @@ pub(super) async fn next_direct(mut cursor: DirectCursor) -> Option<(ChunkResult
     if cursor.done {
         return None;
     }
+    let Ok(reservation) = cursor.buffers.reserve_chunk().await else {
+        cursor.done = true;
+        return Some((Err(io::Error::other("no memory for the response")), cursor));
+    };
     match tokio::time::timeout(cursor.idle, cursor.body.next()).await {
-        Ok(Some(Ok(chunk))) => Some((Ok(chunk), cursor)),
+        Ok(Some(Ok(chunk))) => Some((Ok(Buffers::hold(chunk, reservation)), cursor)),
         Ok(None) => None,
         _ => {
             cursor.done = true;
@@ -57,8 +63,8 @@ impl Resume {
             if response.status != if range.is_some() { 206 } else { 200 } {
                 return Some(Err(io::Error::other("origin refused the resume")));
             }
-            let idle = self.inner.config.policy.timeout;
-            self.direct = Some(DirectCursor { body: response.body, _permit: permit, idle, done: false });
+            let idle = self.inner.timeout();
+            self.direct = Some(DirectCursor { body: response.body, _permit: permit, idle, buffers: self.inner.buffers(), done: false });
         }
         let cursor = self.direct.take()?;
         let (item, cursor) = next_direct(cursor).await?;
@@ -103,10 +109,15 @@ pub(super) async fn next_store(mut cursor: StoreCursor) -> Option<(ChunkResult, 
             if let Some(end) = cursor.end {
                 wanted = wanted.min(end - cursor.position);
             }
+            let buffers = cursor.resume.inner.buffers();
+            let Ok(reservation) = buffers.reserve_between(buffers.floor().min(wanted as usize), wanted as usize).await else {
+                return Some(fail_memory(cursor));
+            };
+            let wanted = reservation.bytes().min(wanted);
             match cursor.store.get_range(&cursor.key, cursor.position, wanted).await {
                 Some(data) if !data.is_empty() => {
                     cursor.position += data.len() as u64;
-                    return Some((Ok(Bytes::from(data)), cursor));
+                    return Some((Ok(Buffers::hold(Bytes::from(data), reservation)), cursor));
                 }
                 _ => {
                     cursor.resumed = true;
@@ -129,6 +140,11 @@ pub(super) async fn next_store(mut cursor: StoreCursor) -> Option<(ChunkResult, 
             _ => return Some(fail(cursor)),
         }
     }
+}
+
+fn fail_memory(mut cursor: StoreCursor) -> (ChunkResult, StoreCursor) {
+    cursor.finished = true;
+    (Err(io::Error::other("no memory for the response")), cursor)
 }
 
 fn fail(mut cursor: StoreCursor) -> (ChunkResult, StoreCursor) {

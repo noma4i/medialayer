@@ -2,7 +2,7 @@ use crate::limits::Limits;
 use std::collections::HashMap;
 use std::time::Duration;
 
-const DEFAULT_FORWARDED: [&str; 8] = [
+pub const DEFAULT_FORWARDED_HEADERS: [&str; 8] = [
     "Authorization",
     "Cookie",
     "User-Agent",
@@ -22,7 +22,7 @@ pub struct FetchPolicy {
 impl FetchPolicy {
     pub fn from_limits(limits: &Limits) -> Self {
         FetchPolicy {
-            forwarded_headers: DEFAULT_FORWARDED.iter().map(|name| name.to_string()).collect(),
+            forwarded_headers: DEFAULT_FORWARDED_HEADERS.iter().map(|name| name.to_string()).collect(),
             timeout: Duration::from_secs(limits.timeout_seconds.into()),
         }
     }

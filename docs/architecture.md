@@ -14,57 +14,67 @@ All behavior is in the Rust core (`core/`). Swift (`swift/`) and Kotlin (`kotlin
 | `prefetch` | Deduplication, queue, priorities, cancel, settled events |
 | `pool` | Pool of native players and its assignment policies (`ring`, `lru`, `pinned`) |
 | `session` | Playback arbitration, watchdog, recovery |
-| `image` | Fetch and raw-byte cache for image loaders |
+| `image` | Image bytes for image loaders: fetch through the core, store in the one disk cache, decode BlurHash |
 | `controls` | Limits, statistics, clear, purge, eviction on demand |
 
 ## What the platform provides
 
 | Interface | Purpose |
 | --------- | ------- |
-| `Fetcher` | Network access: URLSession on Swift, OkHttp on Kotlin. You pass it to `open` |
-| `SettingsStore` | Local storage for saved limits (read, write, remove a string by key). You pass it to `open` |
+| `Fetcher` | Network access: `fetch(request)` returns the status, the headers and a `BodyReader`. `range_start` and `range_end` follow HTTP: both ends are included. Ready-made: `URLSessionFetcher` on Swift, `OkHttpFetcher` on Kotlin |
+| `BodyReader` | Reads the body in chunks with `nextChunk()`. The core calls `release()` when the body ends or is dropped |
+| `SettingsStore` | Local storage for saved limits (read, write, remove a string by key). Ready-made: `UserDefaultsSettings`, `SharedPreferencesSettings` |
 | `PlayerSlotFactory` | Creates the native player of a slot |
-| `PlayerSlot` | Commands to a native player: load, preroll, play, pause, unload |
-| `PlayerEvents` | Player events to the core: ready, stalled, failed, ended, foreground, memory pressure |
-| `DeviceProfile` | Device class: memory size and low-memory flag |
-| `Listener` | Core notifications: slot change, settled prefetch, cache statistics |
+| `PlayerSlot` | Commands to a native player: `load`, `preroll`, `play`, `pause`, `mute`, `unmute`, `retain`, `unload`, `attach`, `detach`, `seek`, `sample`. `PlaybackRoute` says whether the source is HLS and whether it loops |
+| `PlayerEvents` | Player events to the core: `ready`, `visualReady`, `stalled`, `failed`, `ended`, `attach`, `detach`, `foreground`, `background`, `memoryWarning`. Get it from `media.playerEvents()` |
+| `DeviceMemory` | Device class in `OpenConfig`: memory size, heap class and the low-memory flag |
+| `MemoryReleaser` | Called when the system reports critical memory pressure, so Nuke and Coil can drop their memory caches |
+| `StatsListener`, `StateListener` | Core notifications: cache statistics and the `MediaState` of one place. `statsStream()` and `stateStream(key:)` wrap them |
 
 ## Implementing the platform interfaces
 
-You pass network access and local storage when you open the library. The player slot and the player events are provided by the generated views, so most apps write only these two.
+`MediaLayerUI` and its Kotlin twin already contain the fetcher, the settings store, the player slots and the memory signals. Write your own only when you need something different. The settings store is the smallest one.
 
 ### Swift
 
 ```swift
-struct URLSessionFetcher: Fetcher {
-  func fetch(_ request: FetchRequest) async throws -> FetchResponse {
-    let (bytes, response) = try await URLSession.shared.bytes(for: request.urlRequest)
-    return FetchResponse(response as! HTTPURLResponse, body: bytes)
-  }
-}
-
-struct UserDefaultsSettings: SettingsStore {
-  func read(_ key: String) -> String? { UserDefaults.standard.string(forKey: key) }
-  func write(_ key: String, _ value: String) { UserDefaults.standard.set(value, forKey: key) }
-  func remove(_ key: String) { UserDefaults.standard.removeObject(forKey: key) }
+final class DefaultsSettings: SettingsStore {
+  func read(key: String) -> String? { UserDefaults.standard.string(forKey: key) }
+  func write(key: String, value: String) { UserDefaults.standard.set(value, forKey: key) }
+  func remove(key: String) { UserDefaults.standard.removeObject(forKey: key) }
 }
 ```
 
 ### Kotlin
 
 ```kotlin
-class OkHttpFetcher(private val client: OkHttpClient) : Fetcher {
-  override suspend fun fetch(request: FetchRequest): FetchResponse =
-    client.newCall(request.toOkHttp()).await().toFetchResponse()
-}
-
-class SharedPreferencesSettings(context: Context) : SettingsStore {
+class PrefsSettings(context: Context) : SettingsStore {
   private val prefs = context.getSharedPreferences("medialayer", Context.MODE_PRIVATE)
   override fun read(key: String) = prefs.getString(key, null)
   override fun write(key: String, value: String) = prefs.edit().putString(key, value).apply()
   override fun remove(key: String) = prefs.edit().remove(key).apply()
 }
 ```
+
+## Image loaders
+
+Nuke and Coil keep decoding and memory caching. Their network access goes through the core.
+
+### Swift
+
+```swift
+let bytes = try await media.fetchImage(url: avatarUrl, headers: [:])
+let pixels = try decodeBlurhash(hash: blurHash, width: 32, height: 32, punch: 1)
+```
+
+### Kotlin
+
+```kotlin
+val bytes = media.fetchImage(avatarUrl, emptyMap())
+val pixels = decodeBlurhash(blurHash, 32u, 32u, 1f)
+```
+
+`fetchImage` loads through the `Fetcher` into the disk cache and reads the cached bytes, with no local HTTP hop. A response above 16 MiB fails. `decodeBlurhash` returns RGBA bytes and throws `MediaError.BlurHash` for a bad string. A loader reports its progress with `media.itemState(key:state:)` so images and audio use the same placeholder chain as video.
 
 ## Repository
 

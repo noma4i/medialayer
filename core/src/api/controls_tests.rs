@@ -1,4 +1,4 @@
-use super::test_support::{eventually, pool_stats, shared, FakeCache, FakePool, FakePrefetch, FakeSettings};
+use super::test_support::{eventually, pool_stats, shared, FakeCache, FakePool, FakePrefetch, FakeSettings, FakeTransport};
 use super::*;
 use crate::cache;
 use crate::limits::Limits;
@@ -16,6 +16,7 @@ struct Rig {
     cache: Arc<FakeCache>,
     pool: Arc<FakePool>,
     prefetch: Arc<FakePrefetch>,
+    transport: Arc<FakeTransport>,
     settings: Arc<FakeSettings>,
     ledger: Ledger,
     controls: Controls,
@@ -33,6 +34,7 @@ fn rig_on(settings: Arc<FakeSettings>) -> Rig {
     let cache: Arc<FakeCache> = shared();
     let pool: Arc<FakePool> = shared();
     let prefetch: Arc<FakePrefetch> = shared();
+    let transport: Arc<FakeTransport> = shared();
     let ledger = Ledger::new(effective_ceiling(Limits::default().memory_budget, DEVICE, ShareTuning::default()));
     let ports = ControlPorts {
         cache: cache.clone(),
@@ -41,9 +43,11 @@ fn rig_on(settings: Arc<FakeSettings>) -> Rig {
         settings: settings.clone(),
         ledger: ledger.clone(),
         device: DEVICE,
+        transport: transport.clone(),
+        pool_settings: PoolSettings::default(),
     };
     let controls = Controls::new(Handle::current(), ports, Limits::default());
-    Rig { cache, pool, prefetch, settings, ledger, controls }
+    Rig { cache, pool, prefetch, transport, settings, ledger, controls }
 }
 
 fn smaller_budget() -> Limits {
@@ -205,7 +209,7 @@ async fn unchanged_stats_reach_a_subscriber_once_and_a_new_subscriber_gets_the_c
         rig.controls.publish_stats().await;
     }
     eventually(|| first.lock().unwrap().len() == 1).await;
-    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    assert_eq!(rig.controls.published_count(), 1);
     assert_eq!(*first.lock().unwrap(), vec![7]);
     let second: Arc<Mutex<Vec<u64>>> = Arc::default();
     let sink = second.clone();
@@ -213,4 +217,15 @@ async fn unchanged_stats_reach_a_subscriber_once_and_a_new_subscriber_gets_the_c
     rig.controls.publish_stats().await;
 
     eventually(|| second.lock().unwrap().len() == 1).await;
+}
+
+#[tokio::test]
+async fn new_limits_reach_the_live_proxy_and_resize_the_live_pool() {
+    let rig = rig_with_saved(None);
+    let limits = Limits { slots: 5, timeout_seconds: 7, max_concurrent: 4, ..Limits::default() };
+
+    rig.controls.set_limits(limits).await.unwrap();
+
+    assert_eq!(*rig.transport.limits.lock().unwrap(), vec![limits]);
+    assert_eq!(*rig.pool.slots.lock().unwrap(), vec![5]);
 }

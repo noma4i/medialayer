@@ -1,7 +1,8 @@
 use super::degradation::{Step, StepPlan};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use tokio::sync::Notify;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Owner {
@@ -40,6 +41,29 @@ struct State {
 struct Inner {
     ceiling: AtomicU64,
     state: Mutex<State>,
+    freed: Notify,
+    waiting: AtomicUsize,
+}
+
+struct Waiting<'a>(&'a AtomicUsize);
+
+impl<'a> Waiting<'a> {
+    fn start(counter: &'a AtomicUsize) -> Self {
+        counter.fetch_add(1, Ordering::SeqCst);
+        Waiting(counter)
+    }
+}
+
+impl Drop for Waiting<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+enum Between {
+    Granted(Reservation),
+    Refused(Refused),
+    Later,
 }
 
 impl Inner {
@@ -53,7 +77,12 @@ pub struct Ledger(Arc<Inner>);
 
 impl Ledger {
     pub fn new(ceiling: u64) -> Self {
-        Self(Arc::new(Inner { ceiling: AtomicU64::new(ceiling), state: Mutex::new(State { used: 0, step: Step::Normal, by_owner: HashMap::new() }) }))
+        Self(Arc::new(Inner {
+            ceiling: AtomicU64::new(ceiling),
+            state: Mutex::new(State { used: 0, step: Step::Normal, by_owner: HashMap::new() }),
+            freed: Notify::new(),
+            waiting: AtomicUsize::new(0),
+        }))
     }
 
     pub fn unbounded() -> Self {
@@ -70,6 +99,11 @@ impl Ledger {
 
     pub fn set_ceiling(&self, ceiling: u64) {
         self.0.ceiling.store(ceiling, Ordering::SeqCst);
+        self.0.freed.notify_waiters();
+    }
+
+    pub fn waiting(&self) -> usize {
+        self.0.waiting.load(Ordering::SeqCst)
     }
 
     pub fn used_by(&self, owner: Owner) -> u64 {
@@ -78,6 +112,7 @@ impl Ledger {
 
     pub fn set_pressure_step(&self, step: Step) {
         self.0.lock().step = step;
+        self.0.freed.notify_waiters();
     }
 
     pub fn reserve(&self, owner: Owner, bytes: u64) -> Result<Reservation, Refused> {
@@ -91,6 +126,38 @@ impl Ledger {
         state.used = used;
         *state.by_owner.entry(owner).or_insert(0) += bytes;
         Ok(Reservation { ledger: self.clone(), owner, bytes })
+    }
+
+    pub async fn reserve_between(&self, owner: Owner, floor: u64, wanted: u64) -> Result<Reservation, Refused> {
+        let floor = floor.min(wanted);
+        loop {
+            let freed = self.0.freed.notified();
+            tokio::pin!(freed);
+            freed.as_mut().enable();
+            match self.reserve_at_least(owner, floor, wanted) {
+                Between::Granted(reservation) => return Ok(reservation),
+                Between::Refused(refused) => return Err(refused),
+                Between::Later => {}
+            }
+            let _waiting = Waiting::start(&self.0.waiting);
+            freed.await;
+        }
+    }
+
+    fn reserve_at_least(&self, owner: Owner, floor: u64, wanted: u64) -> Between {
+        let mut state = self.0.lock();
+        let limit = self.admission_limit(state.step);
+        if floor > limit {
+            return Between::Refused(Refused::Ceiling { owner, requested: floor, available: limit });
+        }
+        let available = limit.saturating_sub(state.used);
+        if available < floor {
+            return Between::Later;
+        }
+        let granted = wanted.min(available);
+        state.used += granted;
+        *state.by_owner.entry(owner).or_insert(0) += granted;
+        Between::Granted(Reservation { ledger: self.clone(), owner, bytes: granted })
     }
 
     pub fn reserve_or_free(&self, owner: Owner, bytes: u64, freeing: &mut impl Freeing) -> Result<Reservation, Refused> {
@@ -128,6 +195,8 @@ impl Ledger {
                 state.by_owner.remove(&owner);
             }
         }
+        drop(state);
+        self.0.freed.notify_waiters();
     }
 }
 

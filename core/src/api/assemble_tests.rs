@@ -5,6 +5,7 @@ use crate::fetch::mock::{MockFetcher, Script};
 use crate::identity::cache_key;
 use crate::limits::Limits;
 use crate::memory::DeviceMemory;
+use crate::pool::{Command, Ring};
 use crate::spec::PoolSpec;
 use std::sync::Arc;
 
@@ -16,7 +17,19 @@ fn ceiling_is_the_smaller_of_the_option_and_the_device_share() {
     let big = DeviceMemory { total_mb: 8192, heap_class_mb: None, low_ram: false };
 
     assert_eq!(ledger_for(&Limits::default(), low).ceiling(), 15 * MIB);
-    assert_eq!(ledger_for(&Limits::default(), big).ceiling(), 64 * MIB);
+    assert_eq!(ledger_for(&Limits::default(), big).ceiling(), 256 * MIB);
+}
+
+#[test]
+fn the_default_memory_holds_the_default_pool() {
+    let device = DeviceMemory { total_mb: 8192, heap_class_mb: None, low_ram: false };
+    let limits = Limits::default();
+    let mut ring = Ring::with_ledger(pool_config(&limits, device, &PoolSettings::default()), ledger_for(&limits, device));
+    let keys: Vec<Option<String>> = (0..3).map(|index| Some(format!("k{index}"))).collect();
+
+    let loads = ring.plan(0, 1, None, &keys).iter().filter(|command| matches!(command, Command::Load { .. })).count();
+
+    assert_eq!(loads, 3);
 }
 
 #[tokio::test]
@@ -62,6 +75,38 @@ async fn assembling_wires_the_fetcher_through_the_proxy_and_prefetch_into_the_di
 }
 
 #[tokio::test]
+async fn the_proxy_downloads_wait_on_the_same_ledger_as_the_pool() {
+    let dir = tempfile::tempdir().unwrap();
+    let fetcher = Arc::new(MockFetcher::new());
+    let url = "https://o.test/clip.mp4";
+    fetcher.route(url, Script::ok(vec![9; 3 * 1024 * 1024]));
+    let parts = assemble(assembly(dir.path(), fetcher.clone(), shared::<MockFactory>())).await.unwrap();
+    let everything = parts.ledger.ceiling() - parts.ledger.used();
+    let held = parts.ledger.reserve(crate::memory::Owner::Queue, everything).unwrap();
+
+    parts.prefetcher.set_window(0, vec![None, None, Some(super::test_support::video(url).for_prefetch())]);
+    super::test_support::eventually(|| parts.ledger.waiting() == 1).await;
+    assert_eq!(parts.cache.stats().await.file_count, 0);
+    drop(held);
+
+    super::test_support::eventually_async(|| async { parts.cache.contains(&format!("{url}#0")).await }).await;
+    assert_eq!(parts.ledger.used(), 0);
+}
+
+#[tokio::test]
+async fn the_namespace_headers_of_the_assembly_reach_the_cache_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = assembly(dir.path(), Arc::new(MockFetcher::default()), shared::<MockFactory>());
+    config.namespace_headers = vec!["Authorization".to_string()];
+    let parts = assemble(config).await.unwrap();
+    let as_user = |token: &str| std::collections::HashMap::from([("Authorization".to_string(), token.to_string())]);
+
+    let first = parts.proxy.key_for("https://o.test/a.mp4", &as_user("a"));
+
+    assert_ne!(first, parts.proxy.key_for("https://o.test/a.mp4", &as_user("b")));
+}
+
+#[tokio::test]
 async fn the_device_profile_and_the_reach_setting_shape_the_pool() {
     let dir = tempfile::tempdir().unwrap();
     let build = |device: DeviceMemory, reach: usize| {
@@ -82,9 +127,11 @@ async fn the_device_profile_and_the_reach_setting_shape_the_pool() {
 
 #[test]
 fn pool_settings_take_reach_and_timings_from_the_spec() {
-    let spec = PoolSpec { slots: 4, reach: 2, hold_off: 5, trim_delay: 60 };
+    let spec = PoolSpec { slots: 4, reach: 2, hold_off: 5, trim_delay: 60, low_ram_slots: Some(3), low_ram_reach: Some(1) };
 
     let settings = PoolSettings::from(&spec);
 
     assert_eq!((settings.reach, settings.hold_off_ms, settings.trim_delay_ms), (2, 5_000, 60_000));
+    assert_eq!((settings.profile.low_slots, settings.profile.low_reach), (3, 1));
+    assert_eq!((PoolSettings::default().profile.low_slots, PoolSettings::default().profile.low_reach), (2, 0));
 }

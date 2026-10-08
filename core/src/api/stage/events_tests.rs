@@ -7,7 +7,6 @@ use crate::identity::cache_key;
 use crate::cache;
 use crate::session::WatchdogConfig;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 const HLS: &str = "https://o.test/hls/master.m3u8";
 
@@ -106,13 +105,14 @@ async fn a_stall_arms_the_watchdog_only_for_the_playing_slot() {
     eventually(|| rig.factory.slot_holding(&url_of(1)).is_some()).await;
     let (idle_slot, idle) = rig.holder(&url_of(1));
     stage.stalled(idle_slot as usize, 0);
-    tokio::time::sleep(Duration::from_millis(120)).await;
+    assert_eq!(stage.armed_tasks(), 0);
     assert_eq!(idle.samples.load(std::sync::atomic::Ordering::SeqCst), 0);
 
     stage.set_playing(&url_of(0), true);
     eventually(|| rig.factory.slot_holding(&url_of(0)).is_some()).await;
     let (active_slot, active) = rig.holder(&url_of(0));
     stage.stalled(active_slot as usize, 0);
+    assert_eq!(stage.armed_tasks(), 1);
 
     eventually(|| active.samples.load(std::sync::atomic::Ordering::SeqCst) >= 1).await;
 }
@@ -141,4 +141,20 @@ async fn watchdog_escalation_purges_the_cached_source_and_loads_it_again() {
     eventually(|| player.loads() >= 3).await;
 
     assert!(!rig.parts.cache.contains(&cache_key(&url_of(0))).await);
+}
+
+#[tokio::test]
+async fn a_foreground_pass_that_finds_the_proxy_down_is_retried_until_it_is_back() {
+    let rig = rig_with(|config| config.watchdog = WatchdogConfig { foreground_delays_ms: vec![5; 400], ..crate::api::test_support::fast_watchdog() }).await;
+    let (_, player) = playing(&rig, video(&url_of(0))).await;
+    let plays = || player.calls().iter().filter(|call| **call == SlotCall::Play).count();
+    let before = plays();
+    rig.parts.proxy.stop().await;
+
+    PoolControl::foreground(&rig.parts.stage);
+    eventually(|| rig.parts.stage.foreground_passes() >= 3).await;
+    assert_eq!(plays(), before);
+    rig.parts.proxy.restart(0).await.unwrap();
+
+    eventually(|| plays() > before).await;
 }

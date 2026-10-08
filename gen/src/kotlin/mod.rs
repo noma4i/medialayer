@@ -13,9 +13,13 @@ pub fn kotlin(spec: &MediaSpec, package: &str) -> String {
 }
 
 fn declaration(source: &Source) -> String {
-    let optional = source.optional.map(|label| format!("    val {label}: String? = null,\n")).unwrap_or_default();
+    let optional = source.optional.map(|label| format!("    override val {label}: String? = null,\n")).unwrap_or_default();
+    let size = source
+        .size
+        .map(|(width, height)| format!("    override val size: Pair<Int, Int>? get() = Pair({width}, {height})\n"))
+        .unwrap_or_default();
     format!(
-        "data class {name}(\n    override val url: String,\n{optional}    override val headers: Map<String, String> = emptyMap(),\n) : MediaSource {{\n    override val kind: Kind get() = Kind.{kind}\n}}\n",
+        "data class {name}(\n    override val url: String,\n{optional}    override val headers: Map<String, String> = emptyMap(),\n) : MediaSource {{\n    override val kind: Kind get() = Kind.{kind}\n{size}}}\n",
         name = type_name(source.name),
         kind = source.kind.to_uppercase(),
     )

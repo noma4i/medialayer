@@ -84,3 +84,31 @@ async fn abandoned_waiters_do_not_fill_the_queue() {
     assert!(timeout(SHORT, slots.acquire(Priority::Prefetch)).await.is_err());
     assert!(timeout(SHORT, slots.acquire(Priority::Prefetch)).await.is_err());
 }
+
+#[tokio::test]
+async fn raising_the_limit_hands_slots_to_the_waiters_and_lowering_it_stops_new_grants() {
+    let slots = PrioritySlots::new(1, 0, 8);
+    let first = slots.acquire(Priority::Playback).await.unwrap();
+    let waiter = tokio::spawn({
+        let slots = slots.clone();
+        async move { slots.acquire(Priority::Playback).await.map(drop) }
+    });
+    for _ in 0..100_000 {
+        if slots.waiting() == 1 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(slots.waiting(), 1);
+
+    slots.set_max(2);
+
+    let granted = tokio::time::timeout(std::time::Duration::from_secs(5), waiter).await;
+    assert!(granted.is_ok_and(|joined| joined.unwrap().is_ok()));
+    slots.set_max(1);
+    let second = slots.acquire(Priority::Playback);
+    tokio::pin!(second);
+    assert!(futures_util::poll!(second.as_mut()).is_pending());
+    drop(first);
+    assert!(second.await.is_ok());
+}

@@ -23,12 +23,14 @@ fn every_limit_survives_the_trip_across_the_bridge_types() {
 }
 
 #[test]
-fn pool_settings_cross_the_bridge_and_keep_the_profile_tuning_defaults() {
-    let settings = PoolSettings { reach: 2, hold_off_ms: 500, trim_delay_ms: 9_000 };
+fn pool_settings_cross_the_bridge_with_their_low_memory_options() {
+    let settings = PoolSettings { reach: 2, hold_off_ms: 500, trim_delay_ms: 9_000, low_ram_slots: 4, low_ram_reach: 1 };
 
     let core = crate::api::PoolSettings::from(settings);
 
     assert_eq!((core.reach, core.hold_off_ms, core.trim_delay_ms), (2, 500, 9_000));
-    assert_eq!(core.profile, crate::api::PoolSettings::default().profile);
-    assert_eq!(default_pool_settings(), PoolSettings { reach: 1, hold_off_ms: 1_000, trim_delay_ms: 30_000 });
+    assert_eq!((core.profile.low_slots, core.profile.low_reach), (4, 1));
+    let defaults = default_pool_settings();
+    assert_eq!(defaults, PoolSettings { reach: 1, hold_off_ms: 1_000, trim_delay_ms: 30_000, low_ram_slots: 2, low_ram_reach: 0 });
+    assert_eq!(crate::api::PoolSettings::from(defaults), crate::api::PoolSettings::default());
 }

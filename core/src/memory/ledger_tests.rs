@@ -146,3 +146,37 @@ fn set_ceiling_moves_the_admission_limit_and_keeps_existing_reservations() {
     assert_eq!(ledger.used(), 160);
     drop((held, extra));
 }
+
+#[tokio::test]
+async fn reserve_between_grants_what_is_free_up_to_the_wish_and_waits_below_the_floor() {
+    let ledger = Ledger::new(100);
+    let holder = ledger.reserve(Owner::Slot(0), 70).unwrap();
+
+    let degraded = ledger.reserve_between(Owner::ProxyBuffer, 10, 50).await.unwrap();
+    assert_eq!(degraded.bytes(), 30);
+    drop(degraded);
+
+    let waiter = tokio::spawn({
+        let ledger = ledger.clone();
+        async move { ledger.reserve_between(Owner::ProxyBuffer, 40, 50).await.map(|granted| granted.bytes()) }
+    });
+    while ledger.waiting() == 0 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(ledger.used_by(Owner::ProxyBuffer), 0);
+
+    drop(holder);
+
+    assert_eq!(waiter.await.unwrap(), Ok(50));
+    assert_eq!(ledger.waiting(), 0);
+}
+
+#[tokio::test]
+async fn reserve_between_refuses_at_once_a_floor_that_can_never_fit() {
+    let ledger = Ledger::new(100);
+
+    let refused = ledger.reserve_between(Owner::ProxyBuffer, 101, 200).await.unwrap_err();
+
+    assert_eq!(refused, Refused::Ceiling { owner: Owner::ProxyBuffer, requested: 101, available: 100 });
+    assert_eq!(ledger.waiting(), 0);
+}

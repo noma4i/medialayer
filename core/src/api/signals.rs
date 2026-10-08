@@ -1,5 +1,5 @@
 use super::guard::AbortOnDrop;
-use super::ports::{PoolControl, PrefetchControl, SlotDirectives};
+use super::ports::{MemoryRelease, PoolControl, PrefetchControl, SlotDirectives};
 use super::types::Pressure;
 use crate::cache::Clock;
 use crate::memory::{Degradation, Ledger};
@@ -68,6 +68,7 @@ struct Reaction {
     pool: Arc<dyn PoolControl>,
     prefetch: Arc<dyn PrefetchControl>,
     directives: Arc<dyn SlotDirectives>,
+    release: Arc<dyn MemoryRelease>,
     ledger: Ledger,
     clock: Arc<dyn Clock>,
     degradation: Mutex<Degradation>,
@@ -84,11 +85,12 @@ impl Signals {
         pool: Arc<dyn PoolControl>,
         prefetch: Arc<dyn PrefetchControl>,
         directives: Arc<dyn SlotDirectives>,
+        release: Arc<dyn MemoryRelease>,
         ledger: Ledger,
         clock: Arc<dyn Clock>,
     ) -> Signals {
         let queue = Arc::new(Queue { pending: Mutex::new(VecDeque::new()), wake: Notify::new() });
-        let reaction = Reaction { pool, prefetch, directives, ledger, clock, degradation: Mutex::new(Degradation::default()) };
+        let reaction = Reaction { pool, prefetch, directives, release, ledger, clock, degradation: Mutex::new(Degradation::default()) };
         let inbox = queue.clone();
         let worker = handle.spawn(async move {
             loop {
@@ -135,6 +137,12 @@ impl Reaction {
             directives.into_iter().partition(|directive| *directive == Directive::StopPrefetch);
         if !stops.is_empty() {
             self.prefetch.stop();
+        }
+        let (drops, rest): (Vec<Directive>, Vec<Directive>) =
+            rest.into_iter().partition(|directive| *directive == Directive::DropMemoryCache);
+        if !drops.is_empty() {
+            let release = self.release.clone();
+            tokio::task::spawn_blocking(move || release.drop_caches());
         }
         if !rest.is_empty() {
             self.directives.apply(rest);

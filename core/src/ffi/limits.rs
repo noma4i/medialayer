@@ -1,6 +1,7 @@
 use crate::limits::{EvictionStrategy, Limits as CoreLimits};
 use crate::api::PoolSettings as CorePoolSettings;
 use crate::memory::DeviceMemory as CoreDeviceMemory;
+use crate::pool::ProfileTuning;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum Evict {
@@ -40,12 +41,22 @@ pub struct PoolSettings {
     pub reach: u32,
     pub hold_off_ms: u64,
     pub trim_delay_ms: u64,
+    #[uniffi(default = 2)]
+    pub low_ram_slots: u32,
+    #[uniffi(default = 0)]
+    pub low_ram_reach: u32,
 }
 
 #[uniffi::export]
 pub fn default_pool_settings() -> PoolSettings {
     let core = CorePoolSettings::default();
-    PoolSettings { reach: core.reach as u32, hold_off_ms: core.hold_off_ms, trim_delay_ms: core.trim_delay_ms }
+    PoolSettings {
+        reach: core.reach as u32,
+        hold_off_ms: core.hold_off_ms,
+        trim_delay_ms: core.trim_delay_ms,
+        low_ram_slots: core.profile.low_slots as u32,
+        low_ram_reach: core.profile.low_reach as u32,
+    }
 }
 
 impl From<PoolSettings> for CorePoolSettings {
@@ -54,7 +65,11 @@ impl From<PoolSettings> for CorePoolSettings {
             reach: settings.reach as usize,
             hold_off_ms: settings.hold_off_ms,
             trim_delay_ms: settings.trim_delay_ms,
-            ..CorePoolSettings::default()
+            profile: ProfileTuning {
+                low_slots: settings.low_ram_slots as usize,
+                low_reach: settings.low_ram_reach as usize,
+                ..CorePoolSettings::default().profile
+            },
         }
     }
 }

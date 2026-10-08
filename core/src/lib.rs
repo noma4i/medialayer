@@ -21,4 +21,6 @@ pub fn version() -> String {
 }
 
 #[cfg(test)]
+mod hardening_tests;
+#[cfg(test)]
 mod lib_tests;

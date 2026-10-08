@@ -1,4 +1,5 @@
 use super::Stage;
+use crate::api::slots::SlotCall;
 use crate::api::source::MediaItem;
 use crate::api::types::Kind;
 use crate::session::Intent;
@@ -39,6 +40,35 @@ impl Stage {
         self.dispatch(commands);
     }
 
+    pub fn attach(&self, key: &str, view_token: u64) {
+        let slot = {
+            let mut state = self.state();
+            state.views.insert(key.to_string(), view_token);
+            state.loaded.get(key).map(|loaded| loaded.slot)
+        };
+        if let Some(slot) = slot {
+            self.inner.runner.send(slot, SlotCall::Attach { view_token });
+        }
+    }
+
+    pub fn detach(&self, key: &str) {
+        let slot = {
+            let mut state = self.state();
+            state.views.remove(key);
+            state.loaded.get(key).map(|loaded| loaded.slot)
+        };
+        if let Some(slot) = slot {
+            self.inner.runner.send(slot, SlotCall::Detach);
+        }
+    }
+
+    pub fn seek(&self, key: &str, position_ms: u64) {
+        let slot = self.state().loaded.get(key).map(|loaded| loaded.slot);
+        if let Some(slot) = slot {
+            self.inner.runner.send(slot, SlotCall::Seek { position_ms });
+        }
+    }
+
     pub fn set_muted_all(&self, muted: bool) {
         let commands = self.state().ring.set_muted_all(muted);
         self.dispatch(commands);
@@ -61,6 +91,7 @@ impl Stage {
 
     pub fn visible(&self, source: MediaItem, visible: bool) {
         let url = source.url.clone();
+        let headers = source.headers.clone();
         if !visible {
             let commands = self.state().ring.untouch(&url);
             self.dispatch(commands);
@@ -77,7 +108,7 @@ impl Stage {
         self.dispatch(commands);
         let inner = self.inner.clone();
         self.inner.handle.spawn(async move {
-            let is_cached = inner.routes.is_cached(&url).await;
+            let is_cached = inner.routes.is_cached(&url, &headers).await;
             inner.places.declared(&url, is_cached);
         });
     }
@@ -90,6 +121,7 @@ impl Stage {
                 state.forget_lease(&key);
             }
             state.catalog.clear();
+            state.views.clear();
             state.ring.release_all()
         };
         self.dispatch(commands);

@@ -1,27 +1,29 @@
 use std::time::Duration;
 
+const ATTEMPTS: usize = 20_000_000;
+
 pub async fn eventually_async<F: std::future::Future<Output = bool>>(mut condition: impl FnMut() -> F) {
-    let waited = tokio::time::timeout(Duration::from_secs(5), async {
-        while !condition().await {
-            tokio::time::sleep(Duration::from_millis(2)).await;
+    for _ in 0..ATTEMPTS {
+        if condition().await {
+            return;
         }
-    })
-    .await;
-    assert!(waited.is_ok(), "condition not reached within 5 seconds");
+        tokio::task::yield_now().await;
+    }
+    panic!("condition never became true");
 }
 
 pub async fn eventually(mut condition: impl FnMut() -> bool) {
-    let waited = tokio::time::timeout(Duration::from_secs(5), async {
-        while !condition() {
-            tokio::time::sleep(Duration::from_millis(2)).await;
+    for _ in 0..ATTEMPTS {
+        if condition() {
+            return;
         }
-    })
-    .await;
-    assert!(waited.is_ok(), "condition not reached within 5 seconds");
+        tokio::task::yield_now().await;
+    }
+    panic!("condition never became true");
 }
 
 use super::assemble::{Assembly, PoolSettings};
-use super::ports::{CacheControl, PoolControl, PrefetchControl, SettingsStore, SlotDirectives};
+use super::ports::{CacheControl, MemoryRelease, PoolControl, PrefetchControl, SettingsStore, SlotDirectives, TransportControl};
 use super::slots::{PlayerSlot, PlayerSlotFactory, RetainLevel, SlotCall, SlotSample};
 use super::source::{MediaItem, PlaybackRoute};
 use super::types::Kind;
@@ -36,7 +38,35 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
+
+#[derive(Default)]
+pub struct LoadGate {
+    closed: Mutex<bool>,
+    opened: Condvar,
+    entered: AtomicUsize,
+}
+
+impl LoadGate {
+    pub fn close(&self) {
+        *self.closed.lock().unwrap() = true;
+    }
+
+    pub fn open(&self) {
+        *self.closed.lock().unwrap() = false;
+        self.opened.notify_all();
+    }
+
+    pub fn entered(&self) -> usize {
+        self.entered.load(Ordering::SeqCst)
+    }
+
+    fn pass(&self) {
+        self.entered.fetch_add(1, Ordering::SeqCst);
+        let closed = self.closed.lock().unwrap();
+        let _ = self.opened.wait_timeout_while(closed, Duration::from_secs(10), |closed| *closed).unwrap();
+    }
+}
 
 #[derive(Default)]
 pub struct FakeCache {
@@ -71,8 +101,8 @@ impl CacheControl for FakeCache {
         self.evictions.fetch_add(1, Ordering::SeqCst);
     }
 
-    async fn contains(&self, url: &str) -> bool {
-        self.cached.lock().unwrap().iter().any(|cached| cached == url)
+    async fn contains(&self, key: &str) -> bool {
+        self.cached.lock().unwrap().iter().any(|cached| cached == key)
     }
 }
 
@@ -110,6 +140,7 @@ pub struct FakePool {
     pub stats: Mutex<Option<Stats>>,
     pub events: Mutex<Vec<String>>,
     pub steps: Mutex<Vec<Step>>,
+    pub slots: Mutex<Vec<usize>>,
     pub to_return: Mutex<Vec<Directive>>,
 }
 
@@ -135,6 +166,10 @@ impl PoolControl for FakePool {
     fn foreground(&self) {
         self.events.lock().unwrap().push("foreground".to_string());
     }
+
+    fn set_slots(&self, slots: usize) {
+        self.slots.lock().unwrap().push(slots);
+    }
 }
 
 #[derive(Default)]
@@ -150,6 +185,28 @@ impl PrefetchControl for FakePrefetch {
 
     fn set_limits(&self, limits: &Limits) {
         self.limits.lock().unwrap().push(*limits);
+    }
+}
+
+#[derive(Default)]
+pub struct FakeTransport {
+    pub limits: Mutex<Vec<Limits>>,
+}
+
+impl TransportControl for FakeTransport {
+    fn set_limits(&self, limits: &Limits) {
+        self.limits.lock().unwrap().push(*limits);
+    }
+}
+
+#[derive(Default)]
+pub struct FakeRelease {
+    pub drops: AtomicUsize,
+}
+
+impl MemoryRelease for FakeRelease {
+    fn drop_caches(&self) {
+        self.drops.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -176,6 +233,7 @@ pub struct ProxyRig {
     pub _dir: tempfile::TempDir,
     pub cache: Cache,
     pub proxy: Proxy,
+    pub fetcher: Arc<MockFetcher>,
 }
 
 pub async fn proxy_rig() -> ProxyRig {
@@ -185,12 +243,12 @@ pub async fn proxy_rig() -> ProxyRig {
     let store: Arc<dyn ByteStore> = Arc::new(CacheStore::new(cache.clone(), Arc::new(classify_kind)));
     let fetcher = Arc::new(MockFetcher::new());
     let proxy = Proxy::start(ProxyConfig::default(), fetcher.clone(), store).await.unwrap();
-    ProxyRig { _dir: dir, cache, proxy }
+    ProxyRig { _dir: dir, cache, proxy, fetcher }
 }
 
 pub struct MockSlot {
     pub calls: Mutex<Vec<SlotCall>>,
-    pub load_delay: Mutex<Duration>,
+    pub gate: Arc<LoadGate>,
     pub sample: Mutex<SlotSample>,
     pub samples: AtomicUsize,
     pub advance_ms: u64,
@@ -208,8 +266,7 @@ impl MockSlot {
 
 impl PlayerSlot for MockSlot {
     fn load(&self, key: String, route: PlaybackRoute) {
-        let delay = *self.load_delay.lock().unwrap();
-        std::thread::sleep(delay);
+        self.gate.pass();
         self.calls.lock().unwrap().push(SlotCall::Load { key, route });
     }
 
@@ -241,6 +298,18 @@ impl PlayerSlot for MockSlot {
         self.calls.lock().unwrap().push(SlotCall::Retain(level));
     }
 
+    fn attach(&self, view_token: u64) {
+        self.calls.lock().unwrap().push(SlotCall::Attach { view_token });
+    }
+
+    fn detach(&self) {
+        self.calls.lock().unwrap().push(SlotCall::Detach);
+    }
+
+    fn seek(&self, position_ms: u64) {
+        self.calls.lock().unwrap().push(SlotCall::Seek { position_ms });
+    }
+
     fn sample(&self) -> SlotSample {
         let taken = self.samples.fetch_add(1, Ordering::SeqCst) as u64 + 1;
         let mut sample = *self.sample.lock().unwrap();
@@ -253,7 +322,7 @@ impl PlayerSlot for MockSlot {
 pub struct MockFactory {
     pub slots: Mutex<HashMap<u32, Arc<MockSlot>>>,
     pub created: Mutex<Vec<u32>>,
-    pub load_delay: Mutex<Duration>,
+    pub gate: Arc<LoadGate>,
     pub advance_ms: Mutex<u64>,
 }
 
@@ -280,7 +349,7 @@ impl PlayerSlotFactory for MockFactory {
         let idle = SlotSample { position_ms: 0, duration_ms: Some(60_000), is_looping: false, view_attached: false, frame_rendered: false };
         let player = Arc::new(MockSlot {
             calls: Mutex::default(),
-            load_delay: Mutex::new(*self.load_delay.lock().unwrap()),
+            gate: self.gate.clone(),
             sample: Mutex::new(idle),
             samples: AtomicUsize::new(0),
             advance_ms: *self.advance_ms.lock().unwrap(),
@@ -310,8 +379,9 @@ pub fn assembly(dir: &Path, fetcher: Arc<MockFetcher>, factory: Arc<MockFactory>
         settings: shared::<FakeSettings>(),
         factory: Some(factory),
         device: DeviceMemory { total_mb: 8192, heap_class_mb: None, low_ram: false },
-        defaults: Limits { memory_budget: 256 * 1024 * 1024, ..Limits::default() },
+        defaults: Limits::default(),
         pool: PoolSettings::default(),
+        namespace_headers: Vec::new(),
         watchdog: fast_watchdog(),
         stats_interval: Duration::from_millis(10),
     }

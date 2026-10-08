@@ -10,7 +10,7 @@ Memory is managed automatically. You do not call anything: there is no pressure 
 | Everything except the chosen slot is released, prefetch stops | The app goes to the background |
 | Slots return one by one | The app returns to the foreground |
 | Fewer slots (at least 2), shorter buffer, lower bitrate, fewer parallel loads | The device is low-memory: Android `isLowRamDevice` or little RAM, iOS little physical memory |
-| Everything stays under one limit | The `memory` option (default 64 MiB) covers players, proxy buffers and image memory |
+| Everything stays under one limit | The `memory` option (default 256 MiB) covers players, proxy buffers and image memory |
 
 ## It cannot run the device out of memory
 
@@ -45,7 +45,7 @@ On Android the context is how the library registers for `onTrimMemory`, `onLowMe
 
 ## Tuning
 
-Defaults are enough for most apps. To change them, set the options in your `.mdl` file.
+Defaults are enough for most apps. To change them, set the options in your `.mdl` file. The player count and reach of a low-memory device are `low_ram_slots` and `low_ram_reach`.
 
 ```ruby
 cache do
@@ -53,9 +53,11 @@ cache do
 end
 
 video :moment_video do
-  pool slots: 3, reach: 1, trim_delay: 30.seconds
+  pool slots: 3, reach: 1, trim_delay: 30.seconds, low_ram_slots: 2, low_ram_reach: 0
 end
 ```
+
+On critical pressure the core also calls your `MemoryReleaser`, so Nuke and Coil can drop their memory caches.
 
 ## Looking at memory
 

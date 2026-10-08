@@ -31,7 +31,7 @@ async fn an_hls_source_lands_in_the_disk_cache_through_the_proxy_up_to_the_leadi
     let proxy = Proxy::start(Config::default(), fetcher.clone(), store.clone()).await.unwrap();
     let limits = Limits::default();
     let prefetcher = Prefetcher::new(
-        Arc::new(ProxyLoader::new(proxy, store)),
+        Arc::new(ProxyLoader::new(proxy)),
         &limits,
         PrefetchLedger::new(Duration::from_secs(60), 100),
         Arc::new(SystemClock),
@@ -61,7 +61,7 @@ async fn the_first_block_of_an_mp4_lands_as_one_ranged_block_not_the_whole_file(
     let url = "https://o.test/clip.mp4";
     fetcher.route(url, Script::ok(vec![7; 3 * 1024 * 1024]));
     let proxy = Proxy::start(Config::default(), fetcher.clone(), store.clone()).await.unwrap();
-    let loader = ProxyLoader::new(proxy, store);
+    let loader = ProxyLoader::new(proxy);
 
     loader.load_first_block(url, &HashMap::new(), crate::proxy::Priority::Prefetch).await.unwrap();
 

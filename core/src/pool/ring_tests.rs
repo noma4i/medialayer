@@ -198,3 +198,27 @@ fn key_of_names_the_key_a_slot_holds_until_it_is_unloaded() {
     ring.release("k5");
     assert_eq!(ring.key_of(2), None);
 }
+
+#[test]
+fn growing_the_ring_adds_free_slots_and_shrinking_it_unloads_the_extra_ones() {
+    let mut ring = ring(5, 1);
+    ring.plan(0, 2, None, &keys(20));
+
+    assert!(ring.set_slots(7).is_empty());
+    assert_eq!(ring.slots(), 7);
+    let commands = ring.set_slots(3);
+
+    assert_eq!(commands, [Command::Unload { slot: 3 }]);
+    assert_eq!(ring.slots(), 3);
+    assert_eq!(ring.stats().released.explicit, 1);
+    assert!(ring.plan(1, 3, None, &keys(20)).iter().all(|command| slot_of(command) < 3));
+}
+
+#[test]
+fn the_ring_never_shrinks_below_the_window_it_must_hold() {
+    let mut ring = ring(5, 1);
+
+    ring.set_slots(1);
+
+    assert_eq!(ring.slots(), 3);
+}
