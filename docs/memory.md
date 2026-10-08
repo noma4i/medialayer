@@ -12,6 +12,12 @@ Memory is managed automatically. You do not call anything: there is no pressure 
 | Fewer slots (at least 2), shorter buffer, lower bitrate, fewer parallel loads | The device is low-memory: Android `isLowRamDevice` or little RAM, iOS little physical memory |
 | Everything stays under one limit | The `memory` option (default 64 MiB) covers players, proxy buffers and image memory |
 
+## It cannot run the device out of memory
+
+Every buffer, player slot, decode and queue reserves room in one counter before it allocates. If there is no room, the library first frees what is least needed. If that is not enough, it refuses the allocation: a place keeps its placeholder, a load waits, a prefetch is cancelled. Nothing is allocated past the limit, and a refused allocation never crashes the app.
+
+The limit is the smaller of your `memory` option and a share of what the device really has (the Android heap class, the iOS physical memory). A low-memory device therefore cannot be pushed past its share by a large setting. Under growing pressure the library steps down in order: lower quality, a shorter buffer, fewer slots, only the playing slot, only placeholders. Images are decoded at the `size` from your media file, never at original size.
+
 Retention levels: `hot` plays or is next, `warm` keeps metadata and a small buffer, `cold` holds nothing.
 
 ## Opening is enough
