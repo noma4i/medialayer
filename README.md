@@ -18,8 +18,55 @@ One Rust core serves iOS and Android. It contains a local caching HTTP proxy, a 
 - **Memory under control.** Player slots are recycled and freed completely, memory pressure shrinks everything, and a low-end profile keeps weak Android devices alive.
 - **One core, two platforms.** All logic is Rust. Swift and Kotlin contain no business logic.
 
+## What using it looks like
+
+You declare a place. The library picks a free player from the pool, prepares the source in it and swaps it in. Images and audio use the same form.
+
+### Swift
+
+```swift
+MediaVideo(MomentVideo(url: moment.videoUrl, cover: moment.coverUrl),
+           playing: isActive,
+           muted: Media.muted)
+
+MediaImage(Avatar(url: user.avatarUrl, blurHash: user.blurHash))
+```
+
+### Kotlin
+
+```kotlin
+MediaVideo(
+  source = MomentVideo(url = moment.videoUrl, cover = moment.coverUrl),
+  playing = isActive,
+  muted = Media.muted
+)
+
+MediaImage(Avatar(url = user.avatarUrl, blurHash = user.blurHash))
+```
+
+Media is described once in a `.mdl` file ([docs/media-files.md](docs/media-files.md)):
+
+```ruby
+cache do
+  budget 4.gib
+  evict :lru
+end
+
+video :moment_video do
+  cover :coverUrl
+  prefetch from: 2, to: 5, depth: 2.seconds
+end
+
+image :avatar do
+  blurhash :blurHash
+  size 288, 288
+end
+```
+
 ## Documentation
 
+- [Getting started](docs/getting-started.md)
+- [Media files](docs/media-files.md)
 - [Architecture](docs/architecture.md)
 - [Limits and eviction](docs/limits-and-eviction.md)
 - [Threading and performance](docs/threading.md)
@@ -28,9 +75,20 @@ One Rust core serves iOS and Android. It contains a local caching HTTP proxy, a 
 - [Player pool](docs/player-pool.md)
 - [Memory control](docs/memory.md)
 
+## Repository layout
+
+| Path | Contents |
+| ---- | -------- |
+| `core/` | The Rust core: cache, proxy, prefetch, pool, session |
+| `swift/` | Swift package with the bindings |
+| `kotlin/` | Android library module with the bindings |
+| `docs/` | Developer documentation |
+| `scripts/` | Build and check scripts |
+
 ## Build and check
 
-```
+```sh
+export PATH=/opt/homebrew/opt/rustup/bin:$PATH
 bash scripts/check_medialayer.sh
 ```
 

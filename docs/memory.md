@@ -11,3 +11,25 @@ MediaLayer owns the memory of your players. It reuses a fixed set of player slot
 | Device profile | Low-memory devices get fewer slots, shorter buffers, lower bitrate and fewer parallel loads |
 | Background | Everything except the chosen slot is released and prefetch stops |
 | Statistics | Slots per level, estimated memory and release counts in `stats()` |
+
+Report pressure from the system callbacks.
+
+### Swift
+
+```swift
+NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification,
+                                       object: nil, queue: nil) { _ in
+  media.memoryPressure(.critical)
+}
+```
+
+### Kotlin
+
+```kotlin
+override fun onTrimMemory(level: Int) {
+  super.onTrimMemory(level)
+  media.memoryPressure(if (level >= TRIM_MEMORY_RUNNING_CRITICAL) Pressure.Critical else Pressure.Moderate)
+}
+```
+
+The device profile is read once at open: `ram` and `isLowRam` on Android, physical memory on iOS.

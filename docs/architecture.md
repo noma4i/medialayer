@@ -29,6 +29,43 @@ All behavior is in the Rust core (`core/`). Swift (`swift/`) and Kotlin (`kotlin
 | `SettingsStore` | Local storage for saved limits: UserDefaults on Swift, SharedPreferences on Kotlin |
 | `Listener` | Core notifications: slot change, settled prefetch, cache statistics |
 
+## Implementing the platform interfaces
+
+You pass network access and local storage when you open the library. The player slot and the player events are provided by the generated views, so most apps write only these two.
+
+### Swift
+
+```swift
+struct URLSessionFetcher: Fetcher {
+  func fetch(_ request: FetchRequest) async throws -> FetchResponse {
+    let (bytes, response) = try await URLSession.shared.bytes(for: request.urlRequest)
+    return FetchResponse(response as! HTTPURLResponse, body: bytes)
+  }
+}
+
+struct UserDefaultsSettings: SettingsStore {
+  func read(_ key: String) -> String? { UserDefaults.standard.string(forKey: key) }
+  func write(_ key: String, _ value: String) { UserDefaults.standard.set(value, forKey: key) }
+  func remove(_ key: String) { UserDefaults.standard.removeObject(forKey: key) }
+}
+```
+
+### Kotlin
+
+```kotlin
+class OkHttpFetcher(private val client: OkHttpClient) : Fetcher {
+  override suspend fun fetch(request: FetchRequest): FetchResponse =
+    client.newCall(request.toOkHttp()).await().toFetchResponse()
+}
+
+class SharedPreferencesSettings(context: Context) : SettingsStore {
+  private val prefs = context.getSharedPreferences("medialayer", Context.MODE_PRIVATE)
+  override fun read(key: String) = prefs.getString(key, null)
+  override fun write(key: String, value: String) = prefs.edit().putString(key, value).apply()
+  override fun remove(key: String) = prefs.edit().remove(key).apply()
+}
+```
+
 ## Repository
 
 | Path | Contents |

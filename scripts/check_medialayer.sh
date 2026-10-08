@@ -17,4 +17,7 @@ echo "== kotlin: libs for 4 Android ABI, bindings, gradle unit tests"
 bash "$root/scripts/build_kotlin.sh"
 "$gradle" -p "$root/kotlin" testDebugUnitTest --console=plain
 
+echo "== docs: paths, links, wording, example pairs"
+bash "$root/scripts/check_docs.sh"
+
 echo "check_medialayer: ok"
