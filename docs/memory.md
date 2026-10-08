@@ -1,35 +1,70 @@
 # Memory control
 
-MediaLayer owns the memory of your players. It reuses a fixed set of player slots, frees buffers and decoders as soon as a slot is released, and shrinks everything when the system is under pressure. It is built for low-end Android devices.
+Memory is managed automatically. You do not call anything: there is no pressure callback to forward and no profile to configure. `open` subscribes to the system signals itself, reads the device class, and the library frees memory before the system has to kill your app. It is built for low-end Android devices.
 
-| Feature | Meaning |
-| ------- | ------- |
-| Memory budget | One configurable limit for players, proxy buffers and image memory |
-| Slot recycling | Players are reused, never created per screen; an unloaded slot holds no frames or buffers |
-| Retention levels | `hot` plays or is next, `warm` keeps metadata and a small buffer, `cold` holds nothing |
-| Memory pressure | Report `moderate` or `critical`; prefetch stops first, far slots are released next, the playing slot last |
-| Device profile | Low-memory devices get fewer slots, shorter buffers, lower bitrate and fewer parallel loads |
-| Background | Everything except the chosen slot is released and prefetch stops |
-| Statistics | Slots per level, estimated memory and release counts in `stats()` |
+| What happens | When |
+| ------------ | ---- |
+| Player slots are reused, never created per screen | Always. An unloaded slot holds no frames, buffers or decoders |
+| Slots drop from hot to warm to cold | After a slot sits idle for `trim_delay` (default 30 seconds) |
+| Prefetch stops, then far slots are released, then the playing slot last | The system reports memory pressure (iOS memory warning, Android `onTrimMemory` and `onLowMemory`) |
+| Everything except the chosen slot is released, prefetch stops | The app goes to the background |
+| Slots return one by one | The app returns to the foreground |
+| Fewer slots (at least 2), shorter buffer, lower bitrate, fewer parallel loads | The device is low-memory: Android `isLowRamDevice` or little RAM, iOS little physical memory |
+| Everything stays under one limit | The `memory` option (default 64 MiB) covers players, proxy buffers and image memory |
 
-Report pressure from the system callbacks.
+Retention levels: `hot` plays or is next, `warm` keeps metadata and a small buffer, `cold` holds nothing.
+
+## Opening is enough
 
 ### Swift
 
 ```swift
-NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification,
-                                       object: nil, queue: nil) { _ in
-  media.memoryPressure(.critical)
-}
+let media = try MediaLayer.open(
+  fetcher: URLSessionFetcher(),
+  settings: UserDefaultsSettings()
+)
 ```
 
 ### Kotlin
 
 ```kotlin
-override fun onTrimMemory(level: Int) {
-  super.onTrimMemory(level)
-  media.memoryPressure(if (level >= TRIM_MEMORY_RUNNING_CRITICAL) Pressure.Critical else Pressure.Moderate)
-}
+val media = MediaLayer.open(
+  context = applicationContext,
+  fetcher = OkHttpFetcher(okHttpClient),
+  settings = SharedPreferencesSettings(applicationContext)
+)
 ```
 
-The device profile is read once at open: `ram` and `isLowRam` on Android, physical memory on iOS.
+On Android the context is how the library registers for `onTrimMemory`, `onLowMemory` and the app lifecycle. On iOS it observes the memory warning and the app lifecycle notifications.
+
+## Tuning
+
+Defaults are enough for most apps. To change them, set the options in your `.mdl` file.
+
+```ruby
+cache do
+  memory 128.mib
+end
+
+video :moment_video do
+  pool slots: 3, reach: 1, trim_delay: 30.seconds
+end
+```
+
+## Looking at memory
+
+`stats()` reports slots per level, estimated memory and the number of releases with their reason (timer, pressure, background, source change).
+
+### Swift
+
+```swift
+let stats = await media.stats()
+print(stats.slots.hot, stats.slots.warm, stats.slots.cold, stats.memoryBytes)
+```
+
+### Kotlin
+
+```kotlin
+val stats = media.stats()
+println("${stats.slots.hot} ${stats.slots.warm} ${stats.slots.cold} ${stats.memoryBytes}")
+```

@@ -45,6 +45,7 @@ class YupiApp : Application() {
   override fun onCreate() {
     super.onCreate()
     media = MediaLayer.open(
+      context = this,
       fetcher = OkHttpFetcher(okHttpClient),
       settings = SharedPreferencesSettings(this)
     )
