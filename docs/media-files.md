@@ -1,24 +1,31 @@
 # Media files
 
-You describe media once in a `.mdl` file. The generator produces typed sources for Swift and Kotlin and the settings for the core. App code never builds URLs, cache keys or prefetch windows.
+You describe media once in a `.mdl` file. The generator produces typed sources for Swift and Kotlin and the settings for the core. App code never builds URLs, cache keys or prefetch windows. This page lists every option, its default and what it does.
 
 ```ruby
 cache do
   budget 4.gib, min: 64.mib
-  evict :lru
   shrink_to 90.percent
+  evict :lru
   memory 256.mib
+  timeout 30.seconds
+  max_concurrent 2
+  dedupe window: 60.seconds, entries: 500
+  namespace headers: [:authorization]
 end
 
 video :moment_video do
   cover :coverUrl
-  prefetch from: 2, to: 5, depth: 2.seconds, timeout: 30.seconds
-  pool slots: 3, reach: 1
+  prefetch from: 2, to: 5, depth: 2.seconds
+  pool slots: 3, reach: 1, hold_off: 1.second, trim_delay: 30.seconds
+  forward_headers [:authorization, :cookie, :user_agent]
+  evict :lfu
 end
 
 image :avatar do
   blurhash :blurHash
   size 288, 288
+  prefetch window: 1...3
 end
 
 audio :voice_note do
@@ -26,18 +33,69 @@ audio :voice_note do
 end
 ```
 
-| Block | Keys |
-| ----- | ---- |
-| `cache` | `budget`, `min`, `shrink_to`, `evict` (`:lru`, `:fifo`, `:lfu`, `:largest_first`, `expire_after 7.days`), `memory`, `namespace headers: [...]` |
-| `video` | `cover` (optional), `prefetch`, `pool`, `forward_headers`, `evict` |
-| `image` | `blurhash` (optional), `size`, `prefetch window: 1...3`, `evict` |
-| `audio` | `evict` |
+Durations are written `30.seconds`, `5.minutes`, `2.days`. Sizes are written `64.mib`, `4.gib`. Percentages are written `90.percent`.
 
-Every value is a default. Users and apps can change limits at run time ([limits and eviction](limits-and-eviction.md)). The URL is the cache key.
+## `cache`: one block for the whole app
 
-The generator makes one type per block, for example `MomentVideo`, `Avatar` and `VoiceNote`, each with the fields you named.
+| Option | Default | Meaning |
+| ------ | ------- | ------- |
+| `budget` | 4 GiB | Disk size at which eviction starts. When the cache reaches it, entries are removed until it shrinks to `shrink_to` |
+| `min` | 64 MiB | Smallest budget the app or the user may set. A lower value is rejected |
+| `shrink_to` | 90% | Share of the budget the cache shrinks to after it reaches the budget. In (0, 100] |
+| `evict` | `:lru` | Which entries go first. See the strategies below |
+| `memory` | 64 MiB | One memory limit for players, proxy buffers and image memory. When it is exceeded, the library frees the least needed slots |
+| `timeout` | 30 seconds | Longest wait for a network response before a load fails |
+| `max_concurrent` | 2 | Prefetch loads that run at once. Loading what is playing never waits for them |
+| `dedupe window:` | 60 seconds | Time during which a repeated prefetch of the same source is skipped |
+| `dedupe entries:` | 500 | Most sources remembered for that skip. The oldest are dropped |
+| `namespace headers:` | none | Request headers that become part of the cache key. By default the key is the URL alone. Set it when the same URL returns different bytes for different users |
 
-## Using the generated types
+The cache key is the URL. The cache lives on disk; image memory caches stay with Nuke and Coil. An entry being read or written is never evicted. If new data still does not fit after eviction, the load fails with `NotEnoughSpace`.
+
+### Eviction strategies
+
+| Strategy | Removes first |
+| -------- | ------------- |
+| `:lru` | The entry used longest ago |
+| `:fifo` | The entry stored first |
+| `:lfu` | The entry used the fewest times |
+| `:largest_first` | The biggest entry |
+| `expire_after 7.days` | Entries older than the given age, then the oldest |
+
+`evict` inside `video`, `image` or `audio` overrides the strategy for that kind only.
+
+## `video`
+
+| Option | Default | Meaning |
+| ------ | ------- | ------- |
+| `cover` | none | Name of the field holding a cover image URL. If given, the cover shows until the video is ready. If not, the first frame is cut from the first chunk and shown instead |
+| `prefetch from:, to:` | 2, 5 | Pages ahead of the active page whose first chunk is loaded in advance. `from: 2, to: 5` loads the pages 2 to 5 ahead |
+| `prefetch depth:` | 2 seconds | How much of the start of each prefetched video is loaded |
+| `pool slots:` | 3 | Number of native players in the pool. A low-memory device gets fewer, at least 2 |
+| `pool reach:` | 1 | Pages kept ready on each side of the active page |
+| `pool hold_off:` | 1 second | Time before a slot released under memory pressure may load again |
+| `pool trim_delay:` | 30 seconds | Time before an idle slot drops from hot to warm to cold |
+| `forward_headers` | Authorization, Cookie, User-Agent, Connection, Accept, Accept-Encoding, Accept-Language, Range | Request headers passed to the origin server |
+| `evict` | the `cache` strategy | Override of the eviction strategy for videos |
+
+## `image`
+
+| Option | Default | Meaning |
+| ------ | ------- | ------- |
+| `blurhash` | none | Name of the field holding a BlurHash string. If given, a blurred preview shows until the image loads. If not, the place stays empty |
+| `size` | none | Pixel size images are decoded at. Smaller means less memory |
+| `prefetch window:` | none | Range of items around the visible ones whose images are loaded in advance |
+| `evict` | the `cache` strategy | Override of the eviction strategy for images |
+
+## `audio`
+
+| Option | Default | Meaning |
+| ------ | ------- | ------- |
+| `evict` | the `cache` strategy | Override of the eviction strategy for audio |
+
+## What the generator makes
+
+One type per block, for example `MomentVideo`, `Avatar` and `VoiceNote`, each with the fields you named. A field you marked optional (`cover`, `blurhash`) is optional in the type.
 
 ### Swift
 
@@ -55,4 +113,4 @@ val avatar = Avatar(url = user.avatarUrl, blurHash = user.blurHash)
 val note = VoiceNote(url = message.audioUrl)
 ```
 
-A field you marked optional in the file (`cover`, `blurhash`) is optional in the type.
+Every value in the file is a default. The app or the user can change limits at run time and the new value is saved on the device.

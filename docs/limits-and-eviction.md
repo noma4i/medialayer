@@ -9,7 +9,15 @@ Every size, window, timeout and concurrency value is a setting with a default. A
 | `shrink_to` | Share of the budget the cache shrinks to, default 90% |
 | `evict` | Strategy: `lru`, `fifo`, `lfu`, `largest_first`, `expire_after` |
 
-The strategy is set once for the cache and can be overridden per media kind (`image`, `video`, `audio`). Entries being read or written are never evicted. If new data still does not fit, the call fails with `NotEnoughSpace`.
+| Strategy | Removes first |
+| -------- | ------------- |
+| `lru` | The entry used longest ago |
+| `fifo` | The entry stored first |
+| `lfu` | The entry used the fewest times |
+| `largest_first` | The biggest entry |
+| `expire_after` | Entries older than the given age, then the oldest |
+
+The strategy is set once for the cache and can be overridden per media kind (`image`, `video`, `audio`). The same options, with defaults, are written in the `.mdl` file: budget 4 GiB, min 64 MiB, shrink_to 90%, strategy `lru`, memory 64 MiB, timeout 30 seconds, 2 concurrent prefetch loads, repeat skip window 60 seconds and 500 entries. Entries being read or written are never evicted. If new data still does not fit, the call fails with `NotEnoughSpace`.
 
 ## Controls
 

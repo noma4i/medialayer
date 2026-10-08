@@ -70,9 +70,25 @@ MediaAudio(VoiceNote(url = message.audioUrl)) { audio ->
 }
 ```
 
+## Parameters
+
+| Parameter | Kinds | Meaning |
+| --------- | ----- | ------- |
+| source | all | A generated type from your `.mdl` file with the URL and optional cover or BlurHash |
+| `playing` | video, audio | True to play, false to stay prepared and paused |
+| `muted` | video, audio | True to silence this place. `Media.muted` silences the whole app |
+| content closure | all | Optional. Receives the `MediaState` to draw your own loading and error views |
+
 ## State
 
-All three kinds share one state type, `MediaState`: `idle`, `loading`, `ready`, `failed`.
+All three kinds share one state type, `MediaState`:
+
+| State | Meaning |
+| ----- | ------- |
+| `idle` | Nothing requested yet |
+| `loading` | Fetching or preparing; placeholders show |
+| `ready` | Shown or ready to play |
+| `failed` | The load failed; carries the reason |
 
 ### Swift
 

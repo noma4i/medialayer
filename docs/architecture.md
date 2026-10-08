@@ -21,12 +21,12 @@ All behavior is in the Rust core (`core/`). Swift (`swift/`) and Kotlin (`kotlin
 
 | Interface | Purpose |
 | --------- | ------- |
-| `Fetcher` | Network access: URLSession on Swift, OkHttp on Kotlin |
+| `Fetcher` | Network access: URLSession on Swift, OkHttp on Kotlin. You pass it to `open` |
+| `SettingsStore` | Local storage for saved limits (read, write, remove a string by key). You pass it to `open` |
 | `PlayerSlotFactory` | Creates the native player of a slot |
 | `PlayerSlot` | Commands to a native player: load, preroll, play, pause, unload |
 | `PlayerEvents` | Player events to the core: ready, stalled, failed, ended, foreground, memory pressure |
 | `DeviceProfile` | Device class: memory size and low-memory flag |
-| `SettingsStore` | Local storage for saved limits: UserDefaults on Swift, SharedPreferences on Kotlin |
 | `Listener` | Core notifications: slot change, settled prefetch, cache statistics |
 
 ## Implementing the platform interfaces
