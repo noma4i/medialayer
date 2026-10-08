@@ -15,6 +15,7 @@ All behavior is in the Rust core (`core/`). Swift (`swift/`) and Kotlin (`kotlin
 | `ring` | Policy for a pool of players: which slot holds which page |
 | `session` | Playback arbitration, watchdog, recovery |
 | `image` | Fetch and raw-byte cache for image loaders |
+| `controls` | Limits, statistics, clear, purge, eviction on demand |
 
 ## What the platform provides
 
@@ -23,6 +24,7 @@ All behavior is in the Rust core (`core/`). Swift (`swift/`) and Kotlin (`kotlin
 | `Fetcher` | Network access: URLSession on Swift, OkHttp on Kotlin |
 | `PlayerSlot` | Commands to a native player: load, preroll, play, pause, unload |
 | `PlayerEvents` | Player events to the core: ready, stalled, failed, ended, foreground |
+| `SettingsStore` | Local storage for saved limits: UserDefaults on Swift, SharedPreferences on Kotlin |
 | `Listener` | Core notifications: slot change, settled prefetch, cache statistics |
 
 ## Repository
