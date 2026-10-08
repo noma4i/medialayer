@@ -8,6 +8,7 @@ One Rust core serves iOS and Android. It contains a local caching HTTP proxy, a 
 
 - **One fetch path.** Images, video (HLS and files) and audio go through the same core. You never see the proxy, its port, cache keys, deduplication or prefetch.
 - **Native players.** AVPlayer and Media3 play from a local address. MediaLayer does not render or decode video.
+- **Declare, don't command.** You say where video, an image or audio goes; the library picks a free invisible player, prepares it and swaps it in.
 - **Player pool.** A pool of native players that the library juggles: it assigns sources, prerolls neighbors, hands playback over and recycles slots.
 - **Image loaders stay.** Nuke on iOS and Coil on Android keep decoding, resizing and memory caching. Their network access and disk cache use the MediaLayer core.
 - **Everything is configurable.** Budget, minimum size, prefetch windows, depth, timeouts and concurrency are settings with defaults, not constants.
@@ -21,6 +22,7 @@ One Rust core serves iOS and Android. It contains a local caching HTTP proxy, a 
 - [Architecture](docs/architecture.md)
 - [Limits and eviction](docs/limits-and-eviction.md)
 - [Threading and performance](docs/threading.md)
+- [Declaring media](docs/declaring-media.md)
 - [Player pool](docs/player-pool.md)
 - [Memory control](docs/memory.md)
 

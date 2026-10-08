@@ -2,6 +2,8 @@
 
 MediaLayer gives you a pool of native players and juggles them for you. You say which pages are visible and which one plays. The pool decides which player holds which source, reuses players when the window moves and never creates more than the pool size.
 
+You normally do not call these. You declare places with `MediaVideo` (see [Declaring media](declaring-media.md)) and the pool runs them from visibility. `pin` and `releaseAll` are public.
+
 | Operation | Result |
 | --------- | ------ |
 | `window(active, keys)` | Recomputes assignments; the pool loads, prerolls, reuses and unloads slots |
