@@ -96,6 +96,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
       let item = AVPlayerItem(asset: AVURLAsset(url: url, options: Self.assetOptions(for: route)))
       self.item = item
       looping = route.looping
+      player.actionAtItemEnd = route.looping ? .none : .pause
       self.key = key
       observe(item)
       player.insert(item, after: nil)

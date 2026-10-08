@@ -38,6 +38,7 @@ struct AVQueuePlayerSlotTests {
     #expect(slot.player.isMuted)
     #expect(log.count("failed 0") == 0)
     #expect(slot.sample().durationMs != nil)
+    #expect(slot.player.currentItem != nil)
   }
 
   @Test
@@ -180,6 +181,7 @@ struct AVQueuePlayerSlotTests {
 
     #expect(log.count("ended") == endedEvents)
     #expect(slot.sample().isLooping == looping)
+    #expect(slot.player.actionAtItemEnd == (looping ? .none : .pause))
   }
 
   @Test
