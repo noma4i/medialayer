@@ -6,6 +6,7 @@ pub mod fetch;
 pub mod hls;
 pub mod identity;
 pub mod limits;
+pub mod memory;
 pub mod pool;
 pub mod prefetch;
 pub mod proxy;

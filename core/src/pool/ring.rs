@@ -1,4 +1,8 @@
-use super::retention::{Pressure, Retention, SlotState, relieve};
+use super::config::PoolConfig;
+use crate::memory::{Ledger, Reservation, Step};
+use super::retention::{Retention, SlotState};
+use super::stats::{Counters, ReleaseReason};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -8,27 +12,91 @@ pub enum Command {
     Preroll { slot: usize },
     Play { slot: usize },
     Pause { slot: usize },
+    Mute { slot: usize },
+    Unmute { slot: usize },
+    Retain { slot: usize, level: Retention },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Owner {
+    Ring,
+    Lru,
+    Pinned,
+}
+
+#[derive(Debug)]
+pub(super) struct Binding {
+    pub key: String,
+    pub owner: Owner,
+    pub page: Option<usize>,
+    pub is_playing: bool,
+    pub is_prerolled: bool,
+    pub level: Retention,
+    pub positional: Retention,
+    pub is_trimmed: bool,
+    pub since: u64,
+    pub last_used: u64,
+    pub reservation: Reservation,
 }
 
 #[derive(Debug, Clone)]
-struct Binding {
-    page: usize,
-    key: Option<String>,
-    is_playing: bool,
-    is_prerolled: bool,
+pub(super) struct Hold {
+    pub window: Vec<String>,
+    pub until: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
+pub(super) struct Saved {
+    pub key: String,
+    pub owner: Owner,
+    pub page: Option<usize>,
+}
+
+#[derive(Debug)]
 pub struct Ring {
-    slots: usize,
-    reach: usize,
-    bindings: Vec<Option<Binding>>,
+    pub(super) slots: usize,
+    pub(super) reach: usize,
+    pub(super) config: PoolConfig,
+    pub(super) bindings: Vec<Option<Binding>>,
+    pub(super) native_muted: Vec<bool>,
+    pub(super) uses: Vec<u32>,
+    pub(super) muted_all: bool,
+    pub(super) muted_keys: HashSet<String>,
+    pub(super) active: usize,
+    pub(super) window: Vec<String>,
+    pub(super) hold: Option<Hold>,
+    pub(super) is_background: bool,
+    pub(super) restore: VecDeque<Saved>,
+    pub(super) counters: Counters,
+    pub(super) ledger: Ledger,
+    pub(super) step: Step,
 }
 
 impl Ring {
-    pub fn new(slots: usize, reach: usize) -> Self {
-        let slots = slots.max(2 * reach + 1);
-        Self { slots, reach, bindings: vec![None; slots] }
+    pub fn new(config: PoolConfig) -> Self {
+        Self::with_ledger(config, Ledger::unbounded())
+    }
+
+    pub fn with_ledger(config: PoolConfig, ledger: Ledger) -> Self {
+        let slots = config.slots.max(2 * config.reach + 1);
+        Self {
+            slots,
+            reach: config.reach,
+            bindings: (0..slots).map(|_| None).collect(),
+            native_muted: vec![config.start_muted; slots],
+            uses: vec![0; slots],
+            muted_all: config.start_muted,
+            muted_keys: HashSet::new(),
+            active: 0,
+            window: Vec::new(),
+            hold: None,
+            is_background: false,
+            restore: VecDeque::new(),
+            counters: Counters::default(),
+            ledger,
+            step: Step::Normal,
+            config,
+        }
     }
 
     pub fn slots(&self) -> usize {
@@ -43,44 +111,67 @@ impl Ring {
         if count == 0 {
             return 0..0;
         }
-        active.saturating_sub(self.reach)..active.saturating_add(self.reach).saturating_add(1).min(count)
+        let reach = self.effective_reach();
+        active.saturating_sub(reach)..active.saturating_add(reach).saturating_add(1).min(count)
     }
 
-    pub fn plan(&mut self, active: usize, playback: Option<usize>, keys: &[Option<String>]) -> Vec<Command> {
+    pub fn plan(&mut self, now: u64, active: usize, playback: Option<usize>, keys: &[Option<String>]) -> Vec<Command> {
+        self.active = active;
+        if self.is_background {
+            return Vec::new();
+        }
         let wanted = self.pages(active, keys.len());
-        let playback = playback.filter(|page| wanted.contains(page));
-        let mut unloads = Vec::new();
-        let mut loads = Vec::new();
+        let pages: HashMap<&str, usize> =
+            wanted.clone().filter_map(|page| keys[page].as_deref().map(|key| (key, page))).collect();
+        let window: Vec<String> = wanted.clone().filter_map(|page| keys[page].clone()).collect();
+        if self.hold.as_ref().is_some_and(|hold| hold.window != window || hold.until.is_some_and(|until| now >= until)) {
+            self.hold = None;
+        }
+        let is_blocked = self.hold.is_some();
+        self.window = window;
 
+        let mut unloads = Vec::new();
+        let mut staged_loads: Vec<(usize, Vec<Command>)> = Vec::new();
         for slot in 0..self.slots {
-            let outside = self.bindings[slot].as_ref().is_some_and(|binding| !wanted.contains(&binding.page));
-            if outside {
-                self.release(slot, &mut unloads);
+            let Some(binding) = self.bindings[slot].as_mut() else {
+                continue;
+            };
+            binding.page = pages.get(binding.key.as_str()).copied();
+            if binding.owner == Owner::Ring && binding.page.is_none() {
+                self.unbind(slot, ReleaseReason::SourceChange, &mut unloads);
             }
         }
-        for page in wanted.clone() {
-            let slot = self.slot(page);
-            let key = keys[page].clone();
-            let is_current = self.bindings[slot].as_ref().is_some_and(|binding| binding.page == page && binding.key == key);
-            if is_current {
+        self.trim_to_limit(&mut unloads);
+        let mut nearest_first: Vec<usize> = wanted.clone().collect();
+        nearest_first.sort_by_key(|page| (page.abs_diff(active), *page < active));
+        for page in nearest_first {
+            let Some(key) = keys[page].as_ref() else {
+                continue;
+            };
+            if is_blocked || self.slot_of(key).is_some() {
                 continue;
             }
-            self.release(slot, &mut unloads);
-            if let Some(key) = &key {
-                loads.push(Command::Load { slot, key: key.clone() });
-            }
-            self.bindings[slot] = Some(Binding { page, key, is_playing: false, is_prerolled: false });
+            let Some(slot) = self.acquire(Some(self.slot(page)), &mut unloads) else {
+                continue;
+            };
+            let mut staged = Vec::new();
+            self.bind(slot, key.clone(), Owner::Ring, Some(page), now, &mut unloads, &mut staged);
+            staged_loads.push((page, staged));
         }
+        staged_loads.sort_by_key(|(page, _)| *page);
+        let loads: Vec<Command> = staged_loads.into_iter().flat_map(|(_, staged)| staged).collect();
 
+        let playback_key = playback.filter(|page| wanted.contains(page)).and_then(|page| keys[page].clone());
         let mut pauses = Vec::new();
         let mut plays = Vec::new();
         let mut prerolls = Vec::new();
         for slot in 0..self.slots {
-            let Some(binding) = self.bindings[slot].as_mut().filter(|binding| binding.key.is_some()) else {
+            let Some(binding) = self.bindings[slot].as_mut() else {
                 continue;
             };
-            let should_play = playback == Some(binding.page);
-            if binding.is_playing && !should_play {
+            let should_play = playback_key.as_deref() == Some(binding.key.as_str());
+            let is_ring = binding.owner == Owner::Ring;
+            if binding.is_playing && !should_play && (is_ring || playback_key.is_some()) {
                 binding.is_playing = false;
                 pauses.push(Command::Pause { slot });
             }
@@ -88,49 +179,123 @@ impl Ring {
                 binding.is_playing = true;
                 plays.push(Command::Play { slot });
             }
-            if !should_play && !binding.is_prerolled {
+            if !should_play && is_ring && !binding.is_prerolled {
                 binding.is_prerolled = true;
                 prerolls.push(Command::Preroll { slot });
             }
         }
-        [unloads, loads, pauses, plays, prerolls].concat()
+        let retains = self.refresh_levels(now);
+        let mutes = self.sync_mute();
+        [unloads, loads, retains, mutes, pauses, plays, prerolls].concat()
     }
 
-    pub fn states(&self, active: usize) -> Vec<SlotState> {
+    pub fn states(&self) -> Vec<SlotState> {
         self.bindings
             .iter()
             .enumerate()
-            .map(|(slot, binding)| match binding.as_ref().filter(|binding| binding.key.is_some()) {
-                None => SlotState { slot, retention: Retention::Cold, is_playing: false, distance: usize::MAX },
-                Some(binding) => {
-                    let is_hot = binding.is_playing || binding.page == active.saturating_add(1);
-                    SlotState {
-                        slot,
-                        retention: if is_hot { Retention::Hot } else { Retention::Warm },
-                        is_playing: binding.is_playing,
-                        distance: binding.page.abs_diff(active),
-                    }
-                }
+            .map(|(slot, binding)| match binding {
+                None => SlotState { slot, retention: Retention::Cold, is_playing: false, is_pinned: false, distance: usize::MAX },
+                Some(binding) => SlotState {
+                    slot,
+                    retention: binding.level,
+                    is_playing: binding.is_playing,
+                    is_pinned: binding.owner == Owner::Pinned,
+                    distance: binding.page.map_or(usize::MAX, |page| page.abs_diff(self.active)),
+                },
             })
             .collect()
     }
 
-    pub fn release_under(&mut self, pressure: Pressure, active: usize) -> Vec<Command> {
-        let commands = relieve(pressure, &self.states(active));
-        for command in &commands {
-            if let Command::Unload { slot } = command {
-                self.bindings[*slot] = None;
-            }
-        }
-        commands
+    pub(super) fn slot_of(&self, key: &str) -> Option<usize> {
+        self.bindings.iter().position(|binding| binding.as_ref().is_some_and(|binding| binding.key == key))
     }
 
-    fn release(&mut self, slot: usize, unloads: &mut Vec<Command>) {
-        let Some(binding) = self.bindings[slot].take() else {
-            return;
-        };
-        if binding.key.is_some() {
-            unloads.push(Command::Unload { slot });
+    pub(super) fn acquire(&mut self, preferred: Option<usize>, unloads: &mut Vec<Command>) -> Option<usize> {
+        if let Some(slot) = preferred.filter(|slot| self.bindings[*slot].is_none()) {
+            return Some(slot);
         }
+        if let Some(slot) = self.bindings.iter().position(Option::is_none) {
+            return Some(slot);
+        }
+        let (_, victim) = self
+            .bindings
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, binding)| {
+                binding.as_ref().filter(|binding| binding.owner == Owner::Lru && !binding.is_playing).map(|binding| (binding.last_used, slot))
+            })
+            .min()?;
+        self.unbind(victim, ReleaseReason::SourceChange, unloads);
+        Some(victim)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn bind(
+        &mut self,
+        slot: usize,
+        key: String,
+        owner: Owner,
+        page: Option<usize>,
+        now: u64,
+        unloads: &mut Vec<Command>,
+        loads: &mut Vec<Command>,
+    ) -> bool {
+        let Some(reservation) = self.admit(slot, page, unloads) else {
+            return false;
+        };
+        if self.uses[slot] > 0 {
+            self.counters.reuses += 1;
+        }
+        self.uses[slot] += 1;
+        loads.push(Command::Load { slot, key: key.clone() });
+        self.bindings[slot] = Some(Binding {
+            key,
+            owner,
+            page,
+            is_playing: false,
+            is_prerolled: false,
+            level: Retention::Warm,
+            positional: Retention::Warm,
+            is_trimmed: false,
+            since: now,
+            last_used: now,
+            reservation,
+        });
+        true
+    }
+
+    pub(super) fn take_binding(&mut self, slot: usize, reason: ReleaseReason) -> Option<Binding> {
+        let binding = self.bindings[slot].take()?;
+        self.counters.released.count(reason);
+        Some(binding)
+    }
+
+    pub(super) fn unbind(&mut self, slot: usize, reason: ReleaseReason, out: &mut Vec<Command>) {
+        if self.take_binding(slot, reason).is_some() {
+            out.push(Command::Unload { slot });
+        }
+    }
+
+    pub(super) fn refresh_levels(&mut self, now: u64) -> Vec<Command> {
+        let next = self.active.saturating_add(1);
+        let mut out = Vec::new();
+        for (slot, binding) in self.bindings.iter_mut().enumerate() {
+            let Some(binding) = binding else {
+                continue;
+            };
+            let desired = if binding.is_playing || binding.page == Some(next) { Retention::Hot } else { Retention::Warm };
+            let is_changed = desired != binding.positional || (binding.is_playing && binding.level != Retention::Hot);
+            if !is_changed {
+                continue;
+            }
+            binding.positional = desired;
+            binding.level = desired;
+            binding.since = now;
+            if desired == Retention::Hot && binding.is_trimmed {
+                binding.is_trimmed = false;
+                out.push(Command::Retain { slot, level: Retention::Hot });
+            }
+        }
+        out
     }
 }

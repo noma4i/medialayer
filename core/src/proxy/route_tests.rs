@@ -1,0 +1,98 @@
+use super::route::*;
+
+#[test]
+fn proxy_url_carries_the_encoded_original_with_the_extension() {
+    assert_eq!(
+        proxy_url(5000, "https://a.com/v/p.m3u8?t=1"),
+        "http://127.0.0.1:5000/request.m3u8?url=https%3A%2F%2Fa.com%2Fv%2Fp.m3u8%3Ft%3D1"
+    );
+    assert_eq!(proxy_url(1, "https://a.com/v/clip.mp4"), "http://127.0.0.1:1/request.mp4?url=https%3A%2F%2Fa.com%2Fv%2Fclip.mp4");
+    assert!(proxy_url(1, "https://a.com/stream").contains("/request.bin?"));
+}
+
+#[test]
+fn target_url_reads_the_query_form() {
+    assert_eq!(
+        target_url("/request.m3u8", Some("url=https%3A%2F%2Fa.com%2Fp.m3u8%3Ft%3D1")),
+        Some("https://a.com/p.m3u8?t=1".to_string())
+    );
+}
+
+#[test]
+fn target_url_reads_the_rewritten_path_form() {
+    assert_eq!(target_url("/https://cdn/a.ts", None), Some("https://cdn/a.ts".to_string()));
+    assert_eq!(target_url("/./https://cdn/a.ts", Some("x=1")), Some("https://cdn/a.ts?x=1".to_string()));
+    assert_eq!(target_url("/http://cdn/a.ts", None), Some("http://cdn/a.ts".to_string()));
+    assert_eq!(
+        target_url("/https://o.test/hls/https://cdn.test/seg0.ts", Some("t=1")),
+        Some("https://cdn.test/seg0.ts?t=1".to_string())
+    );
+}
+
+#[test]
+fn target_url_rejects_unknown_routes() {
+    assert_eq!(target_url("/random", None), None);
+    assert_eq!(target_url("/request.mp4", None), None);
+    assert_eq!(target_url("/request.mp4", Some("other=1")), None);
+    assert_eq!(target_url("/", None), None);
+}
+
+#[test]
+fn parses_single_byte_ranges() {
+    assert_eq!(parse_range("bytes=10-19"), Some(ByteRange::From { start: 10, end: Some(19) }));
+    assert_eq!(parse_range("bytes=10-"), Some(ByteRange::From { start: 10, end: None }));
+    assert_eq!(parse_range("bytes=-5"), Some(ByteRange::Suffix(5)));
+    assert_eq!(parse_range("bytes=0-1,5-6"), None);
+    assert_eq!(parse_range("items=0-1"), None);
+    assert_eq!(parse_range("bytes=a-b"), None);
+}
+
+#[test]
+fn resolves_ranges_against_the_total() {
+    assert_eq!(resolve_range(None, 100), RangeOutcome::Full);
+    assert_eq!(resolve_range(Some(ByteRange::From { start: 10, end: Some(19) }), 100), RangeOutcome::Partial { start: 10, end: 19 });
+    assert_eq!(resolve_range(Some(ByteRange::From { start: 90, end: None }), 100), RangeOutcome::Partial { start: 90, end: 99 });
+    assert_eq!(resolve_range(Some(ByteRange::From { start: 90, end: Some(500) }), 100), RangeOutcome::Partial { start: 90, end: 99 });
+    assert_eq!(resolve_range(Some(ByteRange::Suffix(5)), 100), RangeOutcome::Partial { start: 95, end: 99 });
+    assert_eq!(resolve_range(Some(ByteRange::Suffix(500)), 100), RangeOutcome::Partial { start: 0, end: 99 });
+    assert_eq!(resolve_range(Some(ByteRange::From { start: 100, end: None }), 100), RangeOutcome::Unsatisfiable);
+    assert_eq!(resolve_range(Some(ByteRange::From { start: 20, end: Some(10) }), 100), RangeOutcome::Unsatisfiable);
+}
+
+#[test]
+fn absolutize_resolves_relative_media_lines_only() {
+    let text = "#EXTM3U\n#EXTINF:2.0,\nseg0.ts\n#EXTINF:2.0,\nhttps://cdn/seg1.ts\n\n#EXT-X-ENDLIST\n";
+    assert_eq!(
+        absolutize_playlist(text, "https://o.com/v/p.m3u8"),
+        "#EXTM3U\n#EXTINF:2.0,\nhttps://o.com/v/seg0.ts\n#EXTINF:2.0,\nhttps://cdn/seg1.ts\n\n#EXT-X-ENDLIST\n"
+    );
+}
+
+#[test]
+fn absolutize_keeps_carriage_returns() {
+    assert_eq!(absolutize_playlist("#EXTM3U\r\nseg0.ts\r\n", "https://o.com/p.m3u8"), "#EXTM3U\r\nhttps://o.com/seg0.ts\r\n");
+}
+
+#[test]
+fn authority_names_host_and_port() {
+    assert_eq!(authority("https://a.com/x"), Some("a.com".to_string()));
+    assert_eq!(authority("http://a.com:8080/x"), Some("a.com:8080".to_string()));
+    assert_eq!(authority("not a url"), None);
+}
+
+#[test]
+fn content_type_prefers_the_origin_then_the_extension() {
+    assert_eq!(content_type_for("https://a.com/x.mp4", Some("text/plain")), "text/plain");
+    assert_eq!(content_type_for("https://a.com/x.ts?t=1", None), "video/mp2t");
+    assert_eq!(content_type_for("https://a.com/x.dat", Some("image/png")), "image/png");
+    assert_eq!(content_type_for("https://a.com/x", None), "application/octet-stream");
+}
+
+#[test]
+fn absolutize_resolves_relative_tag_uris_and_keeps_absolute_and_foreign_ones() {
+    let text = "#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\",BYTERANGE=\"1@0\"\n#EXT-X-KEY:METHOD=AES-128,URI=\"https://k/key\"\n#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"skd://x\"\n#EXT-X-MEDIA:URI=\"../a/a.m3u8\"\n";
+    assert_eq!(
+        absolutize_playlist(text, "https://o.com/v/p.m3u8"),
+        "#EXTM3U\n#EXT-X-MAP:URI=\"https://o.com/v/init.mp4\",BYTERANGE=\"1@0\"\n#EXT-X-KEY:METHOD=AES-128,URI=\"https://k/key\"\n#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"skd://x\"\n#EXT-X-MEDIA:URI=\"https://o.com/a/a.m3u8\"\n"
+    );
+}

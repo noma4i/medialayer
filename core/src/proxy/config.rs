@@ -1,0 +1,49 @@
+use crate::fetch::FetchPolicy;
+use crate::limits::Limits;
+use std::time::Duration;
+
+const PLAYBACK_RESERVED: usize = 1;
+const STREAM_CHUNK: usize = 64 * 1024;
+const BLOCK_SIZE: u64 = 1024 * 1024;
+const PLAYLIST_TTL: Duration = Duration::from_secs(2);
+const MAX_WAITING: usize = 64;
+const MAX_PLAYLIST_BYTES: u64 = 2 * 1024 * 1024;
+const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);
+const PING_TIMEOUT: Duration = Duration::from_secs(1);
+
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub policy: FetchPolicy,
+    pub max_concurrent: usize,
+    pub playback_reserved: usize,
+    pub stream_chunk: usize,
+    pub chunk_size: u64,
+    pub playlist_ttl: Duration,
+    pub max_waiting: usize,
+    pub max_playlist_bytes: u64,
+    pub header_read_timeout: Duration,
+    pub ping_timeout: Duration,
+}
+
+impl Config {
+    pub fn from_limits(limits: &Limits) -> Self {
+        Config {
+            policy: FetchPolicy::from_limits(limits),
+            max_concurrent: limits.max_concurrent as usize,
+            playback_reserved: PLAYBACK_RESERVED,
+            stream_chunk: STREAM_CHUNK,
+            chunk_size: BLOCK_SIZE,
+            playlist_ttl: PLAYLIST_TTL,
+            max_waiting: MAX_WAITING,
+            max_playlist_bytes: MAX_PLAYLIST_BYTES,
+            header_read_timeout: HEADER_READ_TIMEOUT,
+            ping_timeout: PING_TIMEOUT,
+        }
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config::from_limits(&Limits::default())
+    }
+}

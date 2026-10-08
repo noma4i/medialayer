@@ -41,11 +41,11 @@ fn keeps_crlf_endings_and_blank_lines() {
 }
 
 #[test]
-fn does_not_touch_map_uri_in_quotes() {
+fn rewrites_map_uri_in_quotes() {
     let manifest = "#EXTM3U\n#EXT-X-MAP:URI=\"http://h/init.mp4\"\nhttp://h/a.m4s\n";
     assert_eq!(
         rewrite_playlist(manifest),
-        "#EXTM3U\n#EXT-X-MAP:URI=\"http://h/init.mp4\"\n./http://h/a.m4s\n"
+        "#EXTM3U\n#EXT-X-MAP:URI=\"./http://h/init.mp4\"\n./http://h/a.m4s\n"
     );
 }
 
@@ -77,4 +77,28 @@ fn restore_inverts_rewrite_for_each_line() {
     let manifest = "#EXTM3U\nhttp://h/a.ts\nb.ts\nhttps://h/c.ts?q=1\n";
     let restored: Vec<String> = rewrite_playlist(manifest).split('\n').map(restore_rewritten).collect();
     assert_eq!(restored.join("\n"), manifest);
+}
+
+#[test]
+fn prefixes_absolute_uris_inside_tags() {
+    let manifest = "#EXTM3U\n#EXT-X-MAP:URI=\"https://cdn/init.mp4\",BYTERANGE=\"720@0\"\n#EXT-X-KEY:METHOD=AES-128,URI=\"http://k/key.bin\",IV=0x01\n#EXTINF:2.0,\na.m4s\n";
+    assert_eq!(
+        rewrite_playlist(manifest),
+        "#EXTM3U\n#EXT-X-MAP:URI=\"./https://cdn/init.mp4\",BYTERANGE=\"720@0\"\n#EXT-X-KEY:METHOD=AES-128,URI=\"./http://k/key.bin\",IV=0x01\n#EXTINF:2.0,\na.m4s\n"
+    );
+}
+
+#[test]
+fn rewrites_media_and_iframe_tags_with_uris() {
+    let manifest = "#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,URI=\"https://cdn/a.m3u8\"\n#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=1,URI=\"https://cdn/i.m3u8\"\n";
+    assert_eq!(
+        rewrite_playlist(manifest),
+        "#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,URI=\"./https://cdn/a.m3u8\"\n#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=1,URI=\"./https://cdn/i.m3u8\"\n"
+    );
+}
+
+#[test]
+fn leaves_relative_and_non_http_tag_uris_alone() {
+    let manifest = "#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"skd://key\"\n";
+    assert_eq!(rewrite_playlist(manifest), manifest);
 }

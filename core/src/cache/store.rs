@@ -1,0 +1,130 @@
+use super::entry::{Kind, Stats};
+use super::error::CacheError;
+use super::evict::{evict_if_needed, names_where, remove_names};
+use super::inner::Inner;
+use super::load::load;
+use super::naming::{bin_path, file_name};
+use super::options::Options;
+use super::reader::Reader;
+use super::save::{mark_dirty, write_index};
+use super::writer::Writer;
+use crate::limits::{Limits, LimitsError};
+use std::path::PathBuf;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::time::Duration;
+
+const WRITE_CHUNK: usize = 1024 * 1024;
+
+#[derive(Clone)]
+pub struct Cache {
+    pub(super) inner: Arc<Inner>,
+}
+
+impl Cache {
+    pub fn open(dir: impl Into<PathBuf>, limits: Limits) -> Cache {
+        Cache::open_with(dir, limits, Options::default())
+    }
+
+    pub fn open_with(dir: impl Into<PathBuf>, limits: Limits, options: Options) -> Cache {
+        let handle = tokio::runtime::Handle::current();
+        let inner = Arc::new(Inner::new(dir.into(), limits, options, handle.clone()));
+        handle.spawn(load(inner.clone()));
+        Cache { inner }
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.inner.is_ready()
+    }
+
+    pub async fn ready(&self) {
+        let _ = self.inner.ready.subscribe().wait_for(|ready| *ready).await;
+    }
+
+    pub async fn flush(&self) {
+        write_index(&self.inner).await;
+    }
+
+    pub async fn get(&self, key: &str) -> Option<Vec<u8>> {
+        self.open_reader(key).await?.read_all().await.ok()
+    }
+
+    pub async fn get_range(&self, key: &str, start: u64, len: u64) -> Option<Vec<u8>> {
+        self.open_reader(key).await?.read_range(start, len).await.ok()
+    }
+
+    pub async fn open_reader(&self, key: &str) -> Option<Reader> {
+        if !self.is_ready() {
+            return None;
+        }
+        let name = file_name(key);
+        let size = self.inner.state().pin(&name, self.inner.now())?;
+        match tokio::fs::File::open(bin_path(&self.inner.dir, &name)).await {
+            Ok(file) => Some(Reader::new(self.inner.clone(), name, file, size)),
+            Err(_) => {
+                {
+                    let mut state = self.inner.state();
+                    state.unpin(&name);
+                    state.take(&name);
+                }
+                mark_dirty(&self.inner);
+                None
+            }
+        }
+    }
+
+    pub async fn put(&self, key: &str, kind: Kind, data: &[u8]) -> Result<(), CacheError> {
+        let mut writer = self.begin_write(key, kind).await?;
+        for chunk in data.chunks(WRITE_CHUNK) {
+            writer.write(chunk).await?;
+        }
+        writer.commit().await
+    }
+
+    pub async fn begin_write(&self, key: &str, kind: Kind) -> Result<Writer, CacheError> {
+        Writer::start(self.inner.clone(), key, kind).await
+    }
+
+    pub async fn contains(&self, key: &str) -> bool {
+        self.is_ready() && self.inner.state().contains(&file_name(key))
+    }
+
+    pub async fn remove(&self, key: &str) -> bool {
+        self.ready().await;
+        remove_names(&self.inner, vec![file_name(key)]).await == 1
+    }
+
+    pub async fn purge_prefix(&self, prefix: &str) -> usize {
+        self.ready().await;
+        let names = names_where(&self.inner, |key, _| key.starts_with(prefix)).await;
+        remove_names(&self.inner, names).await
+    }
+
+    pub async fn clear(&self, kind: Option<Kind>) -> usize {
+        self.ready().await;
+        let names = names_where(&self.inner, |_, entry_kind| kind.is_none_or(|wanted| entry_kind == wanted)).await;
+        remove_names(&self.inner, names).await
+    }
+
+    pub async fn stats(&self) -> Stats {
+        let mut stats = self.inner.state().stats();
+        stats.max_hold = Duration::from_nanos(self.inner.max_hold.load(Ordering::Relaxed));
+        stats.eviction_backlog = self.inner.eviction_backlog.load(Ordering::Relaxed);
+        stats
+    }
+
+    pub async fn set_limits(&self, limits: Limits) -> Result<(), LimitsError> {
+        limits.validate()?;
+        self.inner.state().limits = limits;
+        evict_if_needed(&self.inner).await;
+        Ok(())
+    }
+
+    pub fn reset_max_hold(&self) {
+        self.inner.max_hold.store(0, Ordering::Relaxed);
+    }
+
+    pub async fn evict_now(&self) {
+        evict_if_needed(&self.inner).await;
+    }
+}

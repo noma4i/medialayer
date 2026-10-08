@@ -18,23 +18,37 @@ pub struct SlotState {
     pub slot: usize,
     pub retention: Retention,
     pub is_playing: bool,
+    pub is_pinned: bool,
     pub distance: usize,
 }
 
-pub fn relieve(pressure: Pressure, slots_state: &[SlotState]) -> Vec<Command> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Directive {
+    StopPrefetch,
+    DropMemoryCache,
+    Slot(Command),
+}
+
+pub fn relieve(pressure: Pressure, slots_state: &[SlotState]) -> Vec<Directive> {
     let farthest_first = |retention: Retention| {
-        let mut slots: Vec<&SlotState> =
-            slots_state.iter().filter(|state| state.retention == retention && !state.is_playing).collect();
+        let mut slots: Vec<&SlotState> = slots_state
+            .iter()
+            .filter(|state| state.retention == retention && !state.is_playing && !state.is_pinned)
+            .collect();
         slots.sort_by_key(|state| std::cmp::Reverse(state.distance));
         slots
     };
-    let warm = farthest_first(Retention::Warm);
-    let (hot, playing) = match pressure {
-        Pressure::Moderate => (Vec::new(), Vec::new()),
-        Pressure::Critical => (
-            farthest_first(Retention::Hot),
-            slots_state.iter().filter(|state| state.is_playing && state.retention != Retention::Cold).collect(),
-        ),
+    let unloads = |states: Vec<&SlotState>| -> Vec<Directive> {
+        states.into_iter().map(|state| Directive::Slot(Command::Unload { slot: state.slot })).collect()
     };
-    warm.into_iter().chain(hot).chain(playing).map(|state| Command::Unload { slot: state.slot }).collect()
+    let warm = unloads(farthest_first(Retention::Warm));
+    if pressure == Pressure::Moderate {
+        return [vec![Directive::StopPrefetch], warm].concat();
+    }
+    let hot = unloads(farthest_first(Retention::Hot));
+    let playing = unloads(
+        slots_state.iter().filter(|state| state.is_playing && !state.is_pinned && state.retention != Retention::Cold).collect(),
+    );
+    let pinned = unloads(slots_state.iter().filter(|state| state.is_pinned && state.retention != Retention::Cold).collect());
+    [vec![Directive::StopPrefetch], warm, hot, vec![Directive::DropMemoryCache], playing, pinned].concat()
 }
