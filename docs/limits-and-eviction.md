@@ -23,3 +23,7 @@ The strategy is set once for the cache and can be overridden per media kind (`im
 | `purge(url)` | Removes one source |
 
 Limits are saved in the platform's local storage (UserDefaults on iOS, SharedPreferences on Android) through the `SettingsStore` interface. Defaults come from your media file. A saved value wins over the default.
+
+## Keys
+
+The URL is the cache key. The cache lives on disk; image memory caches stay with Nuke and Coil. Headers join the key only if you ask for it with `namespace headers`.
