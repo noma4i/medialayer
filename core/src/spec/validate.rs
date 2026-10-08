@@ -7,6 +7,8 @@ use crate::spec::MediaSpec;
 pub enum SpecError {
     #[error("`{0}` is declared twice")]
     DuplicateName(String),
+    #[error("`{0}` cannot become a type name: use lowercase letters, digits and single underscores, starting with a letter")]
+    InvalidName(String),
     #[error("`{name}` has a zero width or height")]
     ZeroImageSize { name: String },
     #[error("`{name}` has a prefetch window that starts after it ends")]
@@ -16,6 +18,8 @@ pub enum SpecError {
     #[error("video `{name}`: {error}")]
     Video { name: String, error: LimitsError },
 }
+
+const RESERVED_TYPE_NAMES: [&str; 4] = ["Type", "Protocol", "Self", "Any"];
 
 pub fn type_name(name: &str) -> String {
     name.split('_')
@@ -49,6 +53,9 @@ impl MediaSpec {
             .chain(self.audios.iter().map(|audio| &audio.name));
         let mut seen = HashSet::new();
         for name in names {
+            if !is_valid_name(name) {
+                return Err(SpecError::InvalidName(name.clone()));
+            }
             if !seen.insert(type_name(name)) {
                 return Err(SpecError::DuplicateName(name.clone()));
             }
@@ -67,4 +74,11 @@ impl MediaSpec {
         }
         Ok(())
     }
+}
+
+fn is_valid_name(name: &str) -> bool {
+    let mut characters = name.chars();
+    let starts_with_letter = characters.next().is_some_and(|first| first.is_ascii_lowercase());
+    let allowed = name.chars().all(|character| character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_');
+    starts_with_letter && allowed && !name.ends_with('_') && !name.contains("__") && !RESERVED_TYPE_NAMES.contains(&type_name(name).as_str())
 }

@@ -95,3 +95,22 @@ fn validate_rejects_bad_specs() {
 fn spec_min() -> u64 {
     CacheSpec::default().min
 }
+
+#[test]
+fn names_that_cannot_become_a_type_are_rejected_for_every_kind() {
+    let bad = ["_", "", "__", "1clip", "a-b", "a b", "Avatar", "type", "self", "protocol", "any", "_clip", "clip_"];
+    for name in bad {
+        for kind in 0..3 {
+            let mut spec = sample();
+            spec.videos.clear();
+            spec.images.clear();
+            spec.audios.clear();
+            match kind {
+                0 => spec.videos.push(VideoSpec::new(name)),
+                1 => spec.images.push(ImageSpec { name: name.to_string(), blurhash_field: None, size: None, prefetch_window: None, evict: None }),
+                _ => spec.audios.push(AudioSpec { name: name.to_string(), evict: None }),
+            }
+            assert_eq!(spec.validate(), Err(SpecError::InvalidName(name.to_string())), "name {name:?} kind {kind}");
+        }
+    }
+}

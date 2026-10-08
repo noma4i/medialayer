@@ -147,6 +147,7 @@ pub fn check(files: &[Vec<Call>]) -> Result<medialayer::spec::MediaSpec, Vec<Fou
 fn locate(error: &SpecError, built: &build::Built) -> Found {
     let named = match error {
         SpecError::DuplicateName(name)
+        | SpecError::InvalidName(name)
         | SpecError::ZeroImageSize { name }
         | SpecError::WindowInverted { name }
         | SpecError::Video { name, .. } => built.blocks.get(name),

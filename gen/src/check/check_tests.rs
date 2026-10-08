@@ -31,6 +31,10 @@ fn invalid_sources_are_reported_with_line_column_and_message() {
         ("cache do\n  shrink_to 0.percent\nend\n", expected(1, 1, "cache: shrink_to must be in (0, 1]")),
         ("video :a do\n  prefetch from: 5, to: 2\nend\n", expected(1, 1, "video `a`: prefetch window from 5 is above to 2")),
         ("image :a do\n  size 0, 288\nend\n", expected(1, 1, "`a` has a zero width or height")),
+        (
+            "video :_ do\nend\n",
+            expected(1, 1, "`_` cannot become a type name: use lowercase letters, digits and single underscores, starting with a letter"),
+        ),
     ];
     for (source, want) in cases {
         assert_eq!(failure(source), want, "{source}");
