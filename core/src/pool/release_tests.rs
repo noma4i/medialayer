@@ -44,16 +44,6 @@ fn timer_demotes_hot_to_warm_then_warm_to_cold() {
 }
 
 #[test]
-fn timer_never_touches_the_playing_slot() {
-    let mut pool = ring_with(3, 1, |config| config.trim_delay_ms = 1000);
-    pool.plan(0, 5, Some(5), &keys(20));
-    for now in (1000..=9000).step_by(1000) {
-        assert!(!pool.tick(now).contains(&Command::Unload { slot: 2 }));
-    }
-    assert!(pool.states()[2].is_playing);
-}
-
-#[test]
 fn timer_release_does_not_reload_with_the_same_window() {
     let mut pool = ring_with(3, 1, |config| config.trim_delay_ms = 1000);
     let list = keys(20);

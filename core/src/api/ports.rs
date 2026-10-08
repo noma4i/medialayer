@@ -1,0 +1,39 @@
+use crate::cache;
+use crate::limits::{Limits, LimitsError};
+use crate::memory::Step;
+use crate::pool::{Directive, Pressure, Stats};
+use async_trait::async_trait;
+
+#[uniffi::export(with_foreign)]
+pub trait SettingsStore: Send + Sync {
+    fn read(&self, key: String) -> Option<String>;
+    fn write(&self, key: String, value: String);
+    fn remove(&self, key: String);
+}
+
+#[async_trait]
+pub trait CacheControl: Send + Sync {
+    async fn stats(&self) -> cache::Stats;
+    async fn set_limits(&self, limits: Limits) -> Result<(), LimitsError>;
+    async fn clear(&self, kind: Option<cache::Kind>);
+    async fn purge(&self, url: &str);
+    async fn evict_now(&self);
+    async fn contains(&self, url: &str) -> bool;
+}
+
+pub trait PoolControl: Send + Sync {
+    fn stats(&self) -> Stats;
+    fn set_step(&self, step: Step);
+    fn release_under(&self, now_ms: u64, pressure: Pressure) -> Vec<Directive>;
+    fn background(&self) -> Vec<Directive>;
+    fn foreground(&self);
+}
+
+pub trait PrefetchControl: Send + Sync {
+    fn stop(&self);
+    fn set_limits(&self, limits: &Limits);
+}
+
+pub trait SlotDirectives: Send + Sync {
+    fn apply(&self, directives: Vec<Directive>);
+}

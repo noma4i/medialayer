@@ -1,0 +1,239 @@
+mod events;
+mod inputs;
+mod lifecycle;
+
+use super::places::Places;
+use super::routes::Routes;
+use super::slots::{SlotCall, SlotRunner};
+use super::source::{MediaItem, PlaybackRoute};
+use super::types::Kind;
+use crate::cache::Clock;
+use crate::hls::is_manifest_url;
+use crate::pool::{Command, Ring};
+use crate::prefetch::Prefetcher;
+use crate::session::{self, next_action, Action, Context, Election, Event, RecoveryState, WatchdogConfig};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::time::Duration;
+use tokio::runtime::Handle;
+use super::guard::AbortOnDrop;
+
+pub struct StageParts {
+    pub ring: Ring,
+    pub runner: Arc<SlotRunner>,
+    pub routes: Arc<Routes>,
+    pub places: Arc<Places>,
+    pub prefetcher: Prefetcher,
+    pub clock: Arc<dyn Clock>,
+    pub watchdog: WatchdogConfig,
+    pub tick: Duration,
+}
+
+struct Loaded {
+    slot: usize,
+    recovery: RecoveryState,
+    source: MediaItem,
+    route: PlaybackRoute,
+}
+
+struct State {
+    ring: Ring,
+    election: Election,
+    leases: HashMap<String, u64>,
+    keys_by_lease: HashMap<u64, String>,
+    loaded: HashMap<String, Loaded>,
+    slot_keys: HashMap<usize, String>,
+    tasks: HashMap<String, AbortOnDrop>,
+    catalog: HashMap<String, MediaItem>,
+}
+
+struct Inner {
+    state: Mutex<State>,
+    runner: Arc<SlotRunner>,
+    routes: Arc<Routes>,
+    places: Arc<Places>,
+    prefetcher: Prefetcher,
+    clock: Arc<dyn Clock>,
+    watchdog: WatchdogConfig,
+    handle: Handle,
+    tick: Mutex<Option<AbortOnDrop>>,
+}
+
+#[derive(Clone)]
+pub struct Stage {
+    inner: Arc<Inner>,
+}
+
+impl State {
+    fn lease_for(&mut self, key: &str) -> u64 {
+        if let Some(lease) = self.leases.get(key) {
+            return *lease;
+        }
+        let lease = self.election.register(key, Context::Ring.policy());
+        self.leases.insert(key.to_string(), lease);
+        self.keys_by_lease.insert(lease, key.to_string());
+        lease
+    }
+
+    fn forget_lease(&mut self, key: &str) -> Vec<Command> {
+        let Some(lease) = self.leases.get(key).copied() else {
+            return Vec::new();
+        };
+        let orders = self.election.unregister(key, lease);
+        let commands = self.commands_for(orders);
+        self.leases.remove(key);
+        self.keys_by_lease.remove(&lease);
+        commands
+    }
+
+    fn is_playing(&self, key: &str) -> bool {
+        self.leases.get(key).is_some_and(|lease| self.election.active() == Some(*lease))
+    }
+
+    fn playing_page(&self, keys: &[Option<String>]) -> Option<usize> {
+        let lease = self.election.active()?;
+        let playing = self.keys_by_lease.get(&lease)?;
+        keys.iter().position(|key| key.as_deref() == Some(playing.as_str()))
+    }
+
+    fn commands_for(&mut self, orders: Vec<session::Directive>) -> Vec<Command> {
+        let mut commands = Vec::new();
+        for directive in orders {
+            let Some(key) = self.keys_by_lease.get(&directive.lease).cloned() else {
+                continue;
+            };
+            commands.extend(self.ring.set_playing(&key, directive.order == session::Order::Play));
+        }
+        commands
+    }
+}
+
+impl Stage {
+    pub fn new(handle: Handle, parts: StageParts) -> Stage {
+        let state = State {
+            ring: parts.ring,
+            election: Election::new(),
+            leases: HashMap::new(),
+            keys_by_lease: HashMap::new(),
+            loaded: HashMap::new(),
+            slot_keys: HashMap::new(),
+            tasks: HashMap::new(),
+            catalog: HashMap::new(),
+        };
+        let inner = Arc::new(Inner {
+            state: Mutex::new(state),
+            runner: parts.runner,
+            routes: parts.routes,
+            places: parts.places,
+            prefetcher: parts.prefetcher,
+            clock: parts.clock,
+            watchdog: parts.watchdog,
+            handle: handle.clone(),
+            tick: Mutex::new(None),
+        });
+        let tick = handle.spawn(tick_loop(Arc::downgrade(&inner), parts.tick));
+        *inner.tick.lock().unwrap_or_else(PoisonError::into_inner) = Some(AbortOnDrop::new(tick));
+        Stage { inner }
+    }
+
+    pub fn slot_count(&self) -> usize {
+        self.state().ring.slots()
+    }
+
+    fn state(&self) -> MutexGuard<'_, State> {
+        self.inner.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn now(&self) -> u64 {
+        self.inner.clock.now_ms()
+    }
+
+    fn dispatch(&self, commands: Vec<Command>) {
+        if commands.is_empty() {
+            return;
+        }
+        let mut calls = Vec::new();
+        let mut actions = Vec::new();
+        let mut unloaded = Vec::new();
+        {
+            let mut state = self.state();
+            for command in commands {
+                self.translate(&mut state, command, &mut calls, &mut actions, &mut unloaded);
+            }
+        }
+        for (slot, call) in calls {
+            self.inner.runner.send(slot, call);
+        }
+        for key in unloaded {
+            self.inner.places.unloaded(&key);
+        }
+        for (key, action) in actions {
+            self.perform(key, action);
+        }
+    }
+
+    fn translate(
+        &self,
+        state: &mut State,
+        command: Command,
+        calls: &mut Vec<(usize, SlotCall)>,
+        actions: &mut Vec<(String, Action)>,
+        unloaded: &mut Vec<String>,
+    ) {
+        match &command {
+            Command::Load { slot, key } => {
+                let source = state.catalog.get(key).cloned().unwrap_or_else(|| MediaItem::bare(key, Kind::Video));
+                let route = self.inner.routes.play_url(&source);
+                let via_proxy_hls = route.generation.is_some() && is_manifest_url(&source.url);
+                let mut recovery = RecoveryState::new(self.inner.watchdog.clone());
+                next_action(&mut recovery, Event::Source { key: key.clone(), via_proxy_hls }, self.now());
+                state.slot_keys.insert(*slot, key.clone());
+                state.loaded.insert(key.clone(), Loaded { slot: *slot, recovery, source, route: route.clone() });
+                calls.push(SlotCall::from_command(command, Some(route)));
+            }
+            Command::Unload { slot } => {
+                if let Some(key) = state.slot_keys.remove(slot) {
+                    state.loaded.remove(&key);
+                    state.tasks.remove(&key);
+                    unloaded.push(key);
+                }
+                calls.push(SlotCall::from_command(command, None));
+            }
+            Command::Play { slot } | Command::Pause { slot } => {
+                let event = if matches!(command, Command::Play { .. }) { Event::Play { position_ms: 0 } } else { Event::Pause };
+                if let Some(key) = state.slot_keys.get(slot).cloned() {
+                    self.advance(state, &key, event, actions);
+                }
+                calls.push(SlotCall::from_command(command, None));
+            }
+            _ => calls.push(SlotCall::from_command(command, None)),
+        }
+    }
+
+    fn advance(&self, state: &mut State, key: &str, event: Event, actions: &mut Vec<(String, Action)>) {
+        let now = self.now();
+        let Some(loaded) = state.loaded.get_mut(key) else { return };
+        let action = next_action(&mut loaded.recovery, event, now);
+        if action != Action::None {
+            actions.push((key.to_string(), action));
+        }
+    }
+}
+
+async fn tick_loop(inner: Weak<Inner>, every: Duration) {
+    loop {
+        tokio::time::sleep(every).await;
+        let Some(inner) = inner.upgrade() else { return };
+        let stage = Stage { inner };
+        let commands = {
+            let now = stage.now();
+            stage.state().ring.tick(now)
+        };
+        stage.dispatch(commands);
+    }
+}
+
+#[cfg(test)]
+mod events_tests;
+#[cfg(test)]
+mod inputs_tests;

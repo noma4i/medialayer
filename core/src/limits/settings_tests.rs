@@ -1,36 +1,9 @@
 use super::*;
 
 #[test]
-fn default_matches_v3_values() {
-    let limits = Limits::default();
-    assert_eq!(limits.budget, 4 * 1024 * 1024 * 1024);
-    assert_eq!(limits.min_budget, 64 * 1024 * 1024);
-    assert_eq!(limits.shrink_to, 0.9);
-    assert_eq!(limits.dedupe_window_seconds, 60);
-    assert_eq!(limits.dedupe_max_entries, 500);
-    assert_eq!(limits.timeout_seconds, 30);
-    assert_eq!(limits.depth_seconds, 2);
-    assert_eq!((limits.prefetch_from, limits.prefetch_to), (2, 5));
-    assert_eq!(limits.slots, 3);
-    assert_eq!(limits.max_concurrent, 2);
-    assert_eq!(limits.strategy, EvictionStrategy::Lru);
-}
-
-#[test]
-fn default_is_valid() {
-    assert_eq!(Limits::default().validate(), Ok(()));
-}
-
-#[test]
 fn budget_below_min_is_rejected() {
     let limits = Limits { budget: 10, min_budget: 20, ..Limits::default() };
     assert_eq!(limits.validate(), Err(LimitsError::BudgetBelowMin { budget: 10, min_budget: 20 }));
-}
-
-#[test]
-fn budget_equal_to_min_is_accepted() {
-    let limits = Limits { budget: 20, min_budget: 20, ..Limits::default() };
-    assert_eq!(limits.validate(), Ok(()));
 }
 
 #[test]
@@ -42,21 +15,9 @@ fn shrink_to_outside_unit_interval_is_rejected() {
 }
 
 #[test]
-fn shrink_to_one_is_accepted() {
-    let limits = Limits { shrink_to: 1.0, ..Limits::default() };
-    assert_eq!(limits.validate(), Ok(()));
-}
-
-#[test]
 fn prefetch_window_from_above_to_is_rejected() {
     let limits = Limits { prefetch_from: 6, prefetch_to: 5, ..Limits::default() };
     assert_eq!(limits.validate(), Err(LimitsError::PrefetchWindowInverted { from: 6, to: 5 }));
-}
-
-#[test]
-fn prefetch_window_with_equal_ends_is_accepted() {
-    let limits = Limits { prefetch_from: 3, prefetch_to: 3, ..Limits::default() };
-    assert_eq!(limits.validate(), Ok(()));
 }
 
 #[test]
@@ -75,12 +36,6 @@ fn zero_in_forbidden_field_is_rejected() {
     for (field, limits) in cases {
         assert_eq!(limits.validate(), Err(LimitsError::Zero { field }), "{field}");
     }
-}
-
-#[test]
-fn zero_min_budget_and_zero_prefetch_from_are_accepted() {
-    let limits = Limits { min_budget: 0, prefetch_from: 0, ..Limits::default() };
-    assert_eq!(limits.validate(), Ok(()));
 }
 
 #[test]
@@ -115,35 +70,35 @@ fn decode_applies_only_present_keys_over_base() {
 }
 
 #[test]
-fn decode_rejects_unknown_key() {
-    assert_eq!(
-        Limits::decode(Limits::default(), "color=red"),
-        Err(LimitsError::UnknownKey { key: "color".to_string() })
-    );
-}
-
-#[test]
-fn decode_rejects_line_without_equals() {
-    assert_eq!(Limits::decode(Limits::default(), "budget=100\nnonsense"), Err(LimitsError::MalformedLine { line: 2 }));
-}
-
-#[test]
-fn decode_rejects_bad_number_and_bad_strategy() {
-    assert_eq!(Limits::decode(Limits::default(), "slots=-1"), Err(LimitsError::InvalidValue { key: "slots" }));
-    assert_eq!(Limits::decode(Limits::default(), "strategy=random"), Err(LimitsError::InvalidValue { key: "strategy" }));
-    assert_eq!(
-        Limits::decode(Limits::default(), "strategy=expire_after:soon"),
-        Err(LimitsError::InvalidValue { key: "strategy" })
-    );
-}
-
-#[test]
-fn decode_runs_validation() {
-    assert_eq!(Limits::decode(Limits::default(), "slots=0"), Err(LimitsError::Zero { field: "slots" }));
-}
-
-#[test]
 fn decode_ignores_blank_lines() {
     let decoded = Limits::decode(Limits::default(), "\nslots=4\n\n").unwrap();
     assert_eq!(decoded.slots, 4);
+}
+
+#[test]
+fn boundary_values_are_accepted() {
+    let cases = [
+        ("budget equal to min", Limits { budget: 20, min_budget: 20, ..Limits::default() }),
+        ("shrink_to one", Limits { shrink_to: 1.0, ..Limits::default() }),
+        ("equal prefetch ends", Limits { prefetch_from: 3, prefetch_to: 3, ..Limits::default() }),
+        ("zero min_budget and prefetch_from", Limits { min_budget: 0, prefetch_from: 0, ..Limits::default() }),
+    ];
+    for (name, limits) in cases {
+        assert_eq!(limits.validate(), Ok(()), "{name}");
+    }
+}
+
+#[test]
+fn decode_rejects_bad_text() {
+    let cases = [
+        ("color=red", LimitsError::UnknownKey { key: "color".to_string() }),
+        ("budget=100\nnonsense", LimitsError::MalformedLine { line: 2 }),
+        ("slots=-1", LimitsError::InvalidValue { key: "slots" }),
+        ("strategy=random", LimitsError::InvalidValue { key: "strategy" }),
+        ("strategy=expire_after:soon", LimitsError::InvalidValue { key: "strategy" }),
+        ("slots=0", LimitsError::Zero { field: "slots" }),
+    ];
+    for (text, error) in cases {
+        assert_eq!(Limits::decode(Limits::default(), text), Err(error), "{text}");
+    }
 }

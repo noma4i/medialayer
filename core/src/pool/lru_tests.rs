@@ -57,3 +57,15 @@ fn touch_in_background_loads_nothing() {
     pool.background();
     assert!(pool.touch(1, "a").is_empty());
 }
+
+#[test]
+fn untouch_unloads_a_recently_used_key_but_keeps_window_and_pinned_keys() {
+    let mut pool = ring(4, 1);
+    pool.plan(0, 0, None, &keys(3));
+    pool.pin(1, "intro");
+    pool.touch(2, "chat");
+
+    assert!(pool.untouch("k0").is_empty());
+    assert!(pool.untouch("intro").is_empty());
+    assert_eq!(pool.untouch("chat"), [Command::Unload { slot: 3 }]);
+}

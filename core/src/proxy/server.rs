@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::watch;
+use tokio::sync::{oneshot, watch};
 use tokio::task::JoinSet;
 
 const ACCEPT_RETRY: Duration = Duration::from_millis(10);
@@ -31,8 +31,13 @@ pub(super) async fn spawn_listener(inner: &Arc<Inner>, preferred_port: u16) -> R
     let port = socket.local_addr().map_err(|error| ProxyError::Bind(error.to_string()))?.port();
     let (shutdown, signal) = watch::channel(false);
     inner.alive.store(true, Ordering::SeqCst);
-    let task = tokio::spawn(accept_loop(inner.clone(), socket, signal));
-    Ok((Listener { shutdown, task }, port))
+    let (done, finished) = oneshot::channel();
+    let owner = inner.clone();
+    inner.tasks.spawn(async move {
+        accept_loop(owner, socket, signal).await;
+        drop(done);
+    });
+    Ok((Listener { shutdown, finished }, port))
 }
 
 async fn bind_any() -> Result<TcpListener, ProxyError> {

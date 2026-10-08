@@ -110,13 +110,25 @@ pub fn block_key(key: &str, block: u64) -> String {
     format!("{key}#{block}")
 }
 
-pub fn authority(url: &str) -> Option<String> {
-    let parsed = Url::parse(url).ok()?;
-    let host = parsed.host_str()?;
-    Some(match parsed.port() {
-        Some(port) => format!("{host}:{port}"),
-        None => host.to_string(),
-    })
+pub fn playlist_references(text: &str) -> Vec<String> {
+    let mut references = Vec::new();
+    for line in text.split('\n').map(|line| line.trim_end_matches('\r')) {
+        if !line.starts_with('#') {
+            if is_http(line) {
+                references.push(line.to_string());
+            }
+            continue;
+        }
+        let mut rest = line;
+        while let Some((_, after)) = rest.split_once(TAG_URI_OPEN) {
+            let Some((value, tail)) = after.split_once('"') else { break };
+            if is_http(value) {
+                references.push(value.to_string());
+            }
+            rest = tail;
+        }
+    }
+    references
 }
 
 pub fn content_type_for(url: &str, origin: Option<&str>) -> String {

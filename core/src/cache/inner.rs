@@ -32,7 +32,7 @@ pub struct Inner {
     pub evicting: AtomicBool,
     pub persist_lock: tokio::sync::Mutex<()>,
     state: Mutex<State>,
-    stripes: Vec<tokio::sync::Mutex<()>>,
+    stripes: Vec<Arc<tokio::sync::Mutex<()>>>,
 }
 
 impl Inner {
@@ -54,7 +54,7 @@ impl Inner {
             evicting: AtomicBool::new(false),
             persist_lock: tokio::sync::Mutex::new(()),
             state: Mutex::new(State::new(limits)),
-            stripes: (0..STRIPES).map(|_| tokio::sync::Mutex::new(())).collect(),
+            stripes: (0..STRIPES).map(|_| Arc::new(tokio::sync::Mutex::new(()))).collect(),
         }
     }
 
@@ -63,7 +63,7 @@ impl Inner {
         StateGuard { guard, acquired: Instant::now(), max_hold: &self.max_hold }
     }
 
-    pub fn stripe(&self, key: &str) -> &tokio::sync::Mutex<()> {
+    pub fn stripe(&self, key: &str) -> &Arc<tokio::sync::Mutex<()>> {
         let mut hasher = DefaultHasher::new();
         key.hash(&mut hasher);
         &self.stripes[hasher.finish() as usize % STRIPES]

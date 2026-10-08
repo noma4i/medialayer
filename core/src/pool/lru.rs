@@ -1,4 +1,5 @@
 use super::ring::{Command, Owner, Ring};
+use super::stats::ReleaseReason;
 
 impl Ring {
     pub fn touch(&mut self, now: u64, key: &str) -> Vec<Command> {
@@ -21,5 +22,14 @@ impl Ring {
         }
         let mutes = self.sync_mute();
         [unloads, loads, mutes].concat()
+    }
+
+    pub fn untouch(&mut self, key: &str) -> Vec<Command> {
+        let Some(slot) = self.slot_of(key).filter(|slot| self.bindings[*slot].as_ref().is_some_and(|binding| binding.owner == Owner::Lru)) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        self.unbind(slot, ReleaseReason::Explicit, &mut out);
+        out
     }
 }

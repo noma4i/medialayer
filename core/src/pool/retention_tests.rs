@@ -57,6 +57,8 @@ fn ring_states_mark_playing_and_next_hot_others_warm_unbound_cold() {
     assert_eq!(by_slot(2).retention, Retention::Hot);
     assert_eq!(by_slot(0).retention, Retention::Warm);
     assert_eq!(by_slot(3).retention, Retention::Cold);
+    let stats = ring.stats();
+    assert_eq!((stats.hot, stats.warm, stats.cold), (2, 1, 1));
 }
 
 #[test]

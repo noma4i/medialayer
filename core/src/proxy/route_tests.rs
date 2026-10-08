@@ -74,10 +74,9 @@ fn absolutize_keeps_carriage_returns() {
 }
 
 #[test]
-fn authority_names_host_and_port() {
-    assert_eq!(authority("https://a.com/x"), Some("a.com".to_string()));
-    assert_eq!(authority("http://a.com:8080/x"), Some("a.com:8080".to_string()));
-    assert_eq!(authority("not a url"), None);
+fn playlist_references_list_segment_and_tag_urls() {
+    let text = "#EXTM3U\n#EXT-X-MAP:URI=\"https://a/init.mp4\"\n#EXT-X-KEY:METHOD=NONE\n#EXTINF:2,\nhttps://a/s0.ts\r\n\n#EXT-X-KEY:URI=\"skd://k\"\n";
+    assert_eq!(playlist_references(text), vec!["https://a/init.mp4".to_string(), "https://a/s0.ts".to_string()]);
 }
 
 #[test]

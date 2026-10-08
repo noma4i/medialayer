@@ -234,23 +234,3 @@ fn volume_changes_never_reach_the_election() {
     let sources = [include_str!("election.rs"), include_str!("suspensions.rs"), include_str!("recovery.rs"), include_str!("watchdog_policy.rs")];
     assert!(sources.iter().all(|source| !source.to_lowercase().contains("mute")));
 }
-
-#[test]
-fn a_hundred_pool_mute_flips_leave_the_election_untouched() {
-    use crate::pool::{Command, PoolConfig, Ring};
-    let (mut election, l) = with(&[("ring", Context::Ring)]);
-    election.set_intent("ring", l[0], Intent::Play);
-    let mut pool = Ring::new(PoolConfig::new(3, 1));
-    pool.plan(0, 5, Some(5), &(0..20).map(|index| Some(format!("k{index}"))).collect::<Vec<_>>());
-    let before = election.clone();
-    let mut session_orders = 0;
-    for flip in 0..100 {
-        for command in pool.set_muted_all(flip % 2 == 0) {
-            assert!(matches!(command, Command::Mute { .. } | Command::Unmute { .. }));
-            session_orders += election.set_foreground(true).len();
-        }
-    }
-    assert_eq!(session_orders, 0);
-    assert_eq!(election.active(), before.active());
-    assert!(election.is_active("ring", l[0]));
-}

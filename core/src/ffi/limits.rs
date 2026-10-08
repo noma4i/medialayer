@@ -1,0 +1,135 @@
+use crate::limits::{EvictionStrategy, Limits as CoreLimits};
+use crate::api::PoolSettings as CorePoolSettings;
+use crate::memory::DeviceMemory as CoreDeviceMemory;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum Evict {
+    Lru,
+    Fifo,
+    Lfu,
+    LargestFirst,
+    ExpireAfter { seconds: u32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
+pub struct Limits {
+    pub budget: u64,
+    pub min_budget: u64,
+    pub shrink_to: f64,
+    pub memory_budget: u64,
+    pub slots: u32,
+    pub prefetch_from: u32,
+    pub prefetch_to: u32,
+    pub depth_seconds: u32,
+    pub timeout_seconds: u32,
+    pub max_concurrent: u32,
+    pub dedupe_window_seconds: u32,
+    pub dedupe_max_entries: u32,
+    pub evict: Evict,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct DeviceMemory {
+    pub total_mb: u32,
+    pub heap_class_mb: Option<u32>,
+    pub low_ram: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct PoolSettings {
+    pub reach: u32,
+    pub hold_off_ms: u64,
+    pub trim_delay_ms: u64,
+}
+
+#[uniffi::export]
+pub fn default_pool_settings() -> PoolSettings {
+    let core = CorePoolSettings::default();
+    PoolSettings { reach: core.reach as u32, hold_off_ms: core.hold_off_ms, trim_delay_ms: core.trim_delay_ms }
+}
+
+impl From<PoolSettings> for CorePoolSettings {
+    fn from(settings: PoolSettings) -> Self {
+        CorePoolSettings {
+            reach: settings.reach as usize,
+            hold_off_ms: settings.hold_off_ms,
+            trim_delay_ms: settings.trim_delay_ms,
+            ..CorePoolSettings::default()
+        }
+    }
+}
+
+#[uniffi::export]
+pub fn default_limits() -> Limits {
+    CoreLimits::default().into()
+}
+
+impl From<EvictionStrategy> for Evict {
+    fn from(strategy: EvictionStrategy) -> Self {
+        match strategy {
+            EvictionStrategy::Lru => Evict::Lru,
+            EvictionStrategy::Fifo => Evict::Fifo,
+            EvictionStrategy::Lfu => Evict::Lfu,
+            EvictionStrategy::LargestFirst => Evict::LargestFirst,
+            EvictionStrategy::ExpireAfter(seconds) => Evict::ExpireAfter { seconds },
+        }
+    }
+}
+
+impl From<Evict> for EvictionStrategy {
+    fn from(evict: Evict) -> Self {
+        match evict {
+            Evict::Lru => EvictionStrategy::Lru,
+            Evict::Fifo => EvictionStrategy::Fifo,
+            Evict::Lfu => EvictionStrategy::Lfu,
+            Evict::LargestFirst => EvictionStrategy::LargestFirst,
+            Evict::ExpireAfter { seconds } => EvictionStrategy::ExpireAfter(seconds),
+        }
+    }
+}
+
+impl From<CoreLimits> for Limits {
+    fn from(limits: CoreLimits) -> Self {
+        Limits {
+            budget: limits.budget,
+            min_budget: limits.min_budget,
+            shrink_to: limits.shrink_to,
+            memory_budget: limits.memory_budget,
+            slots: limits.slots,
+            prefetch_from: limits.prefetch_from,
+            prefetch_to: limits.prefetch_to,
+            depth_seconds: limits.depth_seconds,
+            timeout_seconds: limits.timeout_seconds,
+            max_concurrent: limits.max_concurrent,
+            dedupe_window_seconds: limits.dedupe_window_seconds,
+            dedupe_max_entries: limits.dedupe_max_entries,
+            evict: limits.strategy.into(),
+        }
+    }
+}
+
+impl From<Limits> for CoreLimits {
+    fn from(limits: Limits) -> Self {
+        CoreLimits {
+            budget: limits.budget,
+            min_budget: limits.min_budget,
+            shrink_to: limits.shrink_to,
+            memory_budget: limits.memory_budget,
+            slots: limits.slots,
+            prefetch_from: limits.prefetch_from,
+            prefetch_to: limits.prefetch_to,
+            depth_seconds: limits.depth_seconds,
+            timeout_seconds: limits.timeout_seconds,
+            max_concurrent: limits.max_concurrent,
+            dedupe_window_seconds: limits.dedupe_window_seconds,
+            dedupe_max_entries: limits.dedupe_max_entries,
+            strategy: limits.evict.into(),
+        }
+    }
+}
+
+impl From<DeviceMemory> for CoreDeviceMemory {
+    fn from(device: DeviceMemory) -> Self {
+        CoreDeviceMemory { total_mb: device.total_mb, heap_class_mb: device.heap_class_mb, low_ram: device.low_ram }
+    }
+}

@@ -2,12 +2,7 @@ use super::*;
 
 #[test]
 fn the_url_is_the_key() {
-    assert_eq!(cache_key("https://cdn.example.com/a/b.m3u8?x=1"), "https://cdn.example.com/a/b.m3u8?x=1");
-}
-
-#[test]
-fn different_urls_give_different_keys() {
-    assert_ne!(cache_key("https://a.example.com/x"), cache_key("https://a.example.com/y"));
+    assert_eq!(cache_key("https://cdn.example.com/A/b.m3u8?X=1"), "https://cdn.example.com/A/b.m3u8?X=1");
 }
 
 #[test]

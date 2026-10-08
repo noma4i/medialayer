@@ -206,8 +206,12 @@ impl Ring {
             .collect()
     }
 
-    pub(super) fn slot_of(&self, key: &str) -> Option<usize> {
+    pub fn slot_of(&self, key: &str) -> Option<usize> {
         self.bindings.iter().position(|binding| binding.as_ref().is_some_and(|binding| binding.key == key))
+    }
+
+    pub fn key_of(&self, slot: usize) -> Option<&str> {
+        self.bindings.get(slot)?.as_ref().map(|binding| binding.key.as_str())
     }
 
     pub(super) fn acquire(&mut self, preferred: Option<usize>, unloads: &mut Vec<Command>) -> Option<usize> {

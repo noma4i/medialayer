@@ -46,8 +46,8 @@ impl State {
         self.entries.contains_key(name)
     }
 
-    pub fn size_of(&self, name: &str) -> u64 {
-        self.entries.get(name).map_or(0, |slot| slot.entry.size)
+    pub fn entry(&self, name: &str) -> Option<Entry> {
+        self.entries.get(name).map(|slot| slot.entry.clone())
     }
 
     pub fn insert(&mut self, name: String, key: String, entry: Entry) {

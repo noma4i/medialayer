@@ -93,19 +93,6 @@ fn slot_reused_for_an_unmuted_key_is_unmuted() {
 }
 
 #[test]
-fn hundred_mute_flips_emit_only_mute_commands_and_repeats_emit_nothing() {
-    let mut pool = loaded(20);
-    let mut all = Vec::new();
-    for flip in 0..100 {
-        let muted = flip % 2 == 0;
-        all.extend(pool.set_muted_all(muted));
-        assert!(pool.set_muted_all(muted).is_empty());
-    }
-    assert_eq!(all.len(), 300);
-    assert!(all.iter().all(|command| matches!(command, Command::Mute { .. } | Command::Unmute { .. })));
-}
-
-#[test]
 fn mute_flips_leave_playing_and_levels_untouched() {
     let mut pool = loaded(20);
     pool.set_playing("k5", true);

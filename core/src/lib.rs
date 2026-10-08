@@ -1,8 +1,10 @@
 uniffi::setup_scaffolding!();
 
+pub mod api;
 pub mod blurhash;
 pub mod cache;
 pub mod fetch;
+pub mod ffi;
 pub mod hls;
 pub mod identity;
 pub mod limits;
@@ -11,6 +13,7 @@ pub mod pool;
 pub mod prefetch;
 pub mod proxy;
 pub mod session;
+pub mod spec;
 
 #[uniffi::export]
 pub fn version() -> String {

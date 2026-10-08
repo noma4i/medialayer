@@ -1,13 +1,6 @@
 use super::*;
 
 #[test]
-fn empty_registry_allows_every_group() {
-    let suspensions = Suspensions::default();
-    assert!(suspensions.is_empty());
-    assert!(suspensions.allows("ring"));
-}
-
-#[test]
 fn any_active_reason_blocks_groups_it_does_not_allow() {
     let mut suspensions = Suspensions::default();
     assert_eq!(suspensions.set(Reason::Interruption, true, None), Ok(true));

@@ -188,3 +188,13 @@ fn p5_repeated_plan_with_same_window_is_empty() {
         assert!(ring.plan(0, active, Some(active), &list).is_empty());
     }
 }
+
+#[test]
+fn key_of_names_the_key_a_slot_holds_until_it_is_unloaded() {
+    let mut ring = ring(3, 1);
+    ring.plan(0, 5, Some(5), &keys(20));
+
+    assert_eq!((ring.key_of(2), ring.key_of(1)), (Some("k5"), Some("k4")));
+    ring.release("k5");
+    assert_eq!(ring.key_of(2), None);
+}

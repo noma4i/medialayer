@@ -1,11 +1,12 @@
+use super::cursor::{next_direct, next_store, DirectCursor, Resume, StoreCursor};
 use super::flight::{collect_limited, Outcome, Rejection, Subscription};
 use super::inner::Inner;
 use super::route::{
-    absolutize_playlist, block_key, content_type_for, parse_range, resolve_range, target_url, ByteRange, RangeOutcome,
+    absolutize_playlist, block_key, playlist_references, content_type_for, parse_range, resolve_range, target_url, ByteRange, RangeOutcome,
 };
 use super::slots::{Permit, Priority};
-use crate::fetch::{header_value, BodyStream, FetchError, Request};
-use crate::hls::{is_manifest_url, rewrite_playlist};
+use crate::fetch::{header_value, FetchError, Request};
+use crate::hls::{is_manifest_url, is_multivariant, rewrite_playlist};
 use crate::identity::cache_key;
 use bytes::Bytes;
 use futures_util::{stream, Stream, StreamExt};
@@ -17,11 +18,11 @@ use hyper::{Method, Response, StatusCode};
 use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
-use std::time::Duration;
 
 const ATTEMPTS: usize = 3;
 const PLAYLIST_TYPE: &str = "application/vnd.apple.mpegurl";
 const PLAYLIST_END_TAG: &str = "#EXT-X-ENDLIST";
+const SEGMENT_TAG: &str = "#EXTINF";
 
 pub(super) type ProxyBody = UnsyncBoxBody<Bytes, io::Error>;
 
@@ -64,7 +65,7 @@ async fn playlist(inner: &Arc<Inner>, target: &str, headers: Upstream, head_only
     for _ in 0..ATTEMPTS {
         if let Some(length) = inner.store.len(&key).await {
             match stored_playlist(inner, &key, length).await {
-                Ok(Some(bytes)) => return playlist_response(target, &bytes, head_only),
+                Ok(Some(bytes)) => return playlist_response(inner, target, &bytes, &headers, head_only),
                 Ok(None) => {
                     inner.store.remove(&key).await;
                     inner.forget_playlist(&key);
@@ -91,12 +92,14 @@ async fn stored_playlist(inner: &Inner, key: &str, length: u64) -> Result<Option
     let Some(bytes) = inner.store.get_range(key, 0, length).await else {
         return Err(Box::new(text(502, "playlist vanished from the store")));
     };
-    let finished = String::from_utf8_lossy(&bytes).contains(PLAYLIST_END_TAG);
-    Ok((finished || inner.playlist_is_fresh(key)).then_some(bytes))
+    let text = String::from_utf8_lossy(&bytes);
+    let is_static = text.contains(PLAYLIST_END_TAG) || (is_multivariant(&text) && !text.contains(SEGMENT_TAG));
+    drop(text);
+    Ok((is_static || inner.playlist_is_fresh(key)).then_some(bytes))
 }
 
 async fn playlist_direct(inner: &Inner, target: &str, headers: Upstream, head_only: bool) -> Response<ProxyBody> {
-    let (response, _permit) = match origin_fetch(inner, target, headers, None).await {
+    let (response, _permit) = match origin_fetch(inner, target, headers.clone(), None).await {
         Ok(fetched) => fetched,
         Err(failure) => return *failure,
     };
@@ -105,14 +108,16 @@ async fn playlist_direct(inner: &Inner, target: &str, headers: Upstream, head_on
     }
     let limit = inner.config.max_playlist_bytes as usize;
     match collect_limited(response.body, limit, inner.config.policy.timeout).await {
-        Some(bytes) => playlist_response(target, &bytes, head_only),
+        Some(bytes) => playlist_response(inner, target, &bytes, &headers, head_only),
         None => text(502, "playlist body failed"),
     }
 }
 
-fn playlist_response(target: &str, bytes: &[u8], head_only: bool) -> Response<ProxyBody> {
+fn playlist_response(inner: &Inner, target: &str, bytes: &[u8], headers: &Upstream, head_only: bool) -> Response<ProxyBody> {
     let source = String::from_utf8_lossy(bytes);
-    let body = rewrite_playlist(&absolutize_playlist(&source, target));
+    let absolute = absolutize_playlist(&source, target);
+    inner.inherit_headers(&playlist_references(&absolute), headers);
+    let body = rewrite_playlist(&absolute);
     let headers = vec![("content-type", PLAYLIST_TYPE.to_string()), ("content-length", body.len().to_string())];
     respond(200, headers, full(Bytes::from(body)), head_only)
 }
@@ -129,7 +134,7 @@ async fn media(
         let mut joined = inner.existing_flight(target);
         if joined.is_none() {
             if let Some(total) = inner.store.len(&key).await {
-                return stored_response(inner, target, &key, total, range, head_only).await;
+                return stored_response(inner, target, &key, total, range, &headers, head_only).await;
             }
             if head_only {
                 return head_from_origin(inner, target, headers).await;
@@ -152,18 +157,29 @@ fn needs_blocks(range: Option<ByteRange>) -> bool {
 }
 
 async fn stored_response(
-    inner: &Inner,
+    inner: &Arc<Inner>,
     target: &str,
     key: &str,
     total: u64,
     range: Option<ByteRange>,
+    headers: &Upstream,
     head_only: bool,
 ) -> Response<ProxyBody> {
     let meta = inner.store.meta(key).await.unwrap_or_default();
     let content_type = content_type_for(target, meta.content_type.as_deref());
     let body = |start: u64, end: u64| {
-        let cursor = StoredCursor { store: inner.store.clone(), key: key.to_string(), position: start, end, chunk: inner.config.stream_chunk as u64 };
-        streamed(stream::unfold(cursor, next_stored))
+        let cursor = StoreCursor {
+            subscription: None,
+            store: inner.store.clone(),
+            key: key.to_string(),
+            position: start,
+            end: Some(end),
+            chunk: inner.config.stream_chunk as u64,
+            finished: false,
+            resumed: false,
+            resume: Resume::new(inner, target, headers, 0),
+        };
+        streamed(stream::unfold(cursor, next_store))
     };
     match resolve_range(range, total) {
         RangeOutcome::Full => {
@@ -179,7 +195,7 @@ async fn stored_response(
 }
 
 async fn flight_response(
-    inner: &Inner,
+    inner: &Arc<Inner>,
     mut subscription: Subscription,
     target: &str,
     headers: &Upstream,
@@ -197,24 +213,26 @@ async fn flight_response(
         (_, Some(head)) => head,
     };
     let content_type = content_type_for(target, head.content_type.as_deref());
-    let cursor = |position: u64, end: Option<u64>| FlightCursor {
-        subscription,
+    let cursor = |position: u64, end: Option<u64>| StoreCursor {
+        subscription: Some(subscription),
         store: inner.store.clone(),
         key: cache_key(target),
         position,
         end,
         chunk: inner.config.stream_chunk as u64,
         finished: false,
+        resumed: false,
+        resume: Resume::new(inner, target, headers, 0),
     };
     let response = match head.total {
-        None => respond(200, vec![("content-type", content_type), ("accept-ranges", "bytes".to_string())], streamed(stream::unfold(cursor(0, None), next_flight)), head_only),
+        None => respond(200, vec![("content-type", content_type), ("accept-ranges", "bytes".to_string())], streamed(stream::unfold(cursor(0, None), next_store)), head_only),
         Some(total) => match resolve_range(range, total) {
             RangeOutcome::Full => {
-                respond(200, media_headers(&content_type, total, None), streamed(stream::unfold(cursor(0, Some(total)), next_flight)), head_only)
+                respond(200, media_headers(&content_type, total, None), streamed(stream::unfold(cursor(0, Some(total)), next_store)), head_only)
             }
             RangeOutcome::Partial { start, end } => {
                 let headers = media_headers(&content_type, end - start + 1, Some(format!("bytes {start}-{end}/{total}")));
-                respond(206, headers, streamed(stream::unfold(cursor(start, Some(end + 1)), next_flight)), head_only)
+                respond(206, headers, streamed(stream::unfold(cursor(start, Some(end + 1)), next_store)), head_only)
             }
             RangeOutcome::Unsatisfiable => unsatisfiable(total),
         },
@@ -280,7 +298,7 @@ async fn probe_total(inner: &Inner, target: &str, headers: Upstream) -> Result<(
     }
 }
 
-async fn origin_fetch(
+pub(super) async fn origin_fetch(
     inner: &Inner,
     target: &str,
     headers: Upstream,
@@ -350,107 +368,9 @@ fn streamed(source: impl Stream<Item = Result<Bytes, io::Error>> + Send + 'stati
     StreamBody::new(source.map(|chunk| chunk.map(Frame::data))).boxed_unsync()
 }
 
-struct StoredCursor {
-    store: Arc<dyn super::byte_store::ByteStore>,
-    key: String,
-    position: u64,
-    end: u64,
-    chunk: u64,
-}
-
-async fn next_stored(mut cursor: StoredCursor) -> Option<(Result<Bytes, io::Error>, StoredCursor)> {
-    if cursor.position >= cursor.end {
-        return None;
-    }
-    let wanted = cursor.chunk.min(cursor.end - cursor.position);
-    match cursor.store.get_range(&cursor.key, cursor.position, wanted).await {
-        Some(data) if !data.is_empty() => {
-            cursor.position += data.len() as u64;
-            Some((Ok(Bytes::from(data)), cursor))
-        }
-        _ => {
-            cursor.position = cursor.end;
-            Some((Err(io::Error::new(io::ErrorKind::UnexpectedEof, "store entry vanished")), cursor))
-        }
-    }
-}
-
-struct FlightCursor {
-    subscription: Subscription,
-    store: Arc<dyn super::byte_store::ByteStore>,
-    key: String,
-    position: u64,
-    end: Option<u64>,
-    chunk: u64,
-    finished: bool,
-}
-
-async fn next_flight(mut cursor: FlightCursor) -> Option<(Result<Bytes, io::Error>, FlightCursor)> {
-    loop {
-        if cursor.finished || cursor.end.is_some_and(|end| cursor.position >= end) {
-            return None;
-        }
-        let progress = cursor.subscription.snapshot();
-        if cursor.position < progress.written {
-            let mut wanted = cursor.chunk.min(progress.written - cursor.position);
-            if let Some(end) = cursor.end {
-                wanted = wanted.min(end - cursor.position);
-            }
-            match cursor.store.get_range(&cursor.key, cursor.position, wanted).await {
-                Some(data) if !data.is_empty() => {
-                    cursor.position += data.len() as u64;
-                    return Some((Ok(Bytes::from(data)), cursor));
-                }
-                _ => return Some(abort(cursor)),
-            }
-        }
-        match progress.outcome {
-            Outcome::Complete => return None,
-            Outcome::Running => {
-                if !cursor.subscription.changed().await {
-                    return Some(abort(cursor));
-                }
-            }
-            _ => return Some(abort(cursor)),
-        }
-    }
-}
-
-fn abort(mut cursor: FlightCursor) -> (Result<Bytes, io::Error>, FlightCursor) {
-    cursor.finished = true;
-    (Err(io::Error::other("download failed")), cursor)
-}
-
-struct DirectCursor {
-    body: BodyStream,
-    _permit: Permit,
-    idle: Duration,
-    done: bool,
-}
-
-async fn next_direct(mut cursor: DirectCursor) -> Option<(Result<Bytes, io::Error>, DirectCursor)> {
-    if cursor.done {
-        return None;
-    }
-    match tokio::time::timeout(cursor.idle, cursor.body.next()).await {
-        Ok(Some(Ok(chunk))) => Some((Ok(chunk), cursor)),
-        Ok(None) => None,
-        _ => {
-            cursor.done = true;
-            Some((Err(io::Error::other("origin body failed")), cursor))
-        }
-    }
-}
-
-enum Source {
-    Stored(StoredCursor),
-    Flight(FlightCursor),
-}
-
 enum OpenFailure {
     Rejected(Arc<Rejection>),
     Failed(String),
-    Unstorable,
 }
 
 struct BlockCursor {
@@ -462,7 +382,7 @@ struct BlockCursor {
     position: u64,
     end: u64,
     block_end: u64,
-    source: Option<Source>,
+    source: Option<StoreCursor>,
     finished: bool,
 }
 
@@ -476,38 +396,39 @@ impl BlockCursor {
         let offset = self.position - block_start;
         let offset_end = self.block_end - block_start;
         let chunk = self.inner.config.stream_chunk as u64;
+        let mut cursor = StoreCursor {
+            subscription: None,
+            store: self.inner.store.clone(),
+            key: stored_key.clone(),
+            position: offset,
+            end: Some(offset_end),
+            chunk,
+            finished: false,
+            resumed: false,
+            resume: Resume::new(&self.inner, &self.target, &self.headers, block_start),
+        };
         for _ in 0..ATTEMPTS {
             if self.inner.store.len(&stored_key).await.is_some() {
                 let content_type = self.inner.store.meta(&stored_key).await.and_then(|meta| meta.content_type);
-                let cursor = StoredCursor {
-                    store: self.inner.store.clone(),
-                    key: stored_key,
-                    position: offset,
-                    end: offset_end,
-                    chunk,
-                };
-                self.source = Some(Source::Stored(cursor));
+                self.source = Some(cursor);
                 return Ok(content_type);
             }
             let mut subscription =
-                self.inner.get_or_start_block(&self.target, block, self.total, self.headers.clone(), Priority::Playback);
+                self.inner.get_or_start_block(&self.target, block, Some(self.total), self.headers.clone(), Priority::Playback);
+            subscription.linger();
             let progress = subscription.wait_started().await;
             match (progress.outcome, progress.head) {
                 (Outcome::Rejected(rejection), _) => return Err(OpenFailure::Rejected(rejection)),
                 (Outcome::Failed(message), _) => return Err(OpenFailure::Failed(message)),
-                (Outcome::Unstorable, _) => return Err(OpenFailure::Unstorable),
+                (Outcome::Unstorable, _) => {
+                    cursor.resumed = true;
+                    self.source = Some(cursor);
+                    return Ok(None);
+                }
                 (Outcome::Cancelled | Outcome::QueueFull, _) | (_, None) => {}
                 (_, Some(head)) => {
-                    let cursor = FlightCursor {
-                        subscription,
-                        store: self.inner.store.clone(),
-                        key: stored_key,
-                        position: offset,
-                        end: Some(offset_end),
-                        chunk,
-                        finished: false,
-                    };
-                    self.source = Some(Source::Flight(cursor));
+                    cursor.subscription = Some(subscription);
+                    self.source = Some(cursor);
                     return Ok(head.content_type.clone());
                 }
             }
@@ -527,10 +448,7 @@ async fn next_block(mut cursor: BlockCursor) -> Option<(Result<Bytes, io::Error>
             }
             continue;
         };
-        let step = match source {
-            Source::Stored(inner_cursor) => next_stored(inner_cursor).await.map(|(item, rest)| (item, Source::Stored(rest))),
-            Source::Flight(inner_cursor) => next_flight(inner_cursor).await.map(|(item, rest)| (item, Source::Flight(rest))),
-        };
+        let step = next_store(source).await;
         match step {
             None if cursor.position < cursor.block_end => return Some(fail_blocks(cursor)),
             None => {}
@@ -583,9 +501,6 @@ async fn block_range_response(
         Ok(content_type) => content_type,
         Err(OpenFailure::Rejected(rejection)) => return rejected(&rejection, false),
         Err(OpenFailure::Failed(message)) => return text(502, &message),
-        Err(OpenFailure::Unstorable) => {
-            return direct_response(inner, target, headers, range, false).await;
-        }
     };
     let content_type = content_type_for(target, origin_type.as_deref());
     let response_headers = media_headers(&content_type, end - start + 1, Some(format!("bytes {start}-{end}/{total}")));

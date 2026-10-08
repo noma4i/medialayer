@@ -6,11 +6,13 @@ mod route;
 mod serve;
 mod server;
 mod slots;
+mod tasks;
+mod cursor;
 
 #[cfg(test)]
 mod memory_store;
 #[cfg(test)]
-mod test_client;
+pub(crate) mod test_client;
 
 pub use byte_store::{ByteStore, Meta, StoreWriter};
 pub use config::Config;
@@ -54,11 +56,14 @@ pub enum ProxyError {
 #[derive(Clone)]
 pub struct Proxy {
     inner: Arc<Inner>,
+    _owner: Arc<tasks::TasksOwner>,
 }
 
 impl Proxy {
     pub async fn start(config: Config, fetcher: Arc<dyn Fetcher>, store: Arc<dyn ByteStore>) -> Result<Proxy, ProxyError> {
-        let proxy = Proxy { inner: Arc::new(Inner::new(config, fetcher, store)) };
+        let tasks = tasks::Tasks::default();
+        let inner = Arc::new(Inner::new(config, fetcher, store, tasks.clone()));
+        let proxy = Proxy { inner, _owner: Arc::new(tasks::TasksOwner(tasks)) };
         proxy.restart(0).await?;
         Ok(proxy)
     }
@@ -134,12 +139,42 @@ impl Proxy {
         priority: Priority,
     ) -> Result<(), ProxyError> {
         let upstream = self.inner.upstream_headers(url, headers);
+        let key = cache_key(url);
+        self.download_into_store(&key, || self.inner.get_or_start(url, upstream.clone(), priority)).await
+    }
+
+    pub async fn fetch_block_into_store(
+        &self,
+        url: &str,
+        block_index: u64,
+        headers: &HashMap<String, String>,
+        priority: Priority,
+    ) -> Result<(), ProxyError> {
+        let upstream = self.inner.upstream_headers(url, headers);
+        let key = route::block_key(&cache_key(url), block_index);
+        self.download_into_store(&key, || self.inner.get_or_start_block(url, block_index, None, upstream.clone(), priority))
+            .await
+    }
+
+    pub async fn fetch_first_block(
+        &self,
+        url: &str,
+        headers: &HashMap<String, String>,
+        priority: Priority,
+    ) -> Result<(), ProxyError> {
+        self.fetch_block_into_store(url, 0, headers, priority).await
+    }
+
+    async fn download_into_store(
+        &self,
+        key: &str,
+        start: impl Fn() -> flight::Subscription,
+    ) -> Result<(), ProxyError> {
         for _ in 0..FETCH_ATTEMPTS {
-            if self.inner.store.contains(&cache_key(url)).await {
+            if self.inner.store.contains(key).await {
                 return Ok(());
             }
-            let mut subscription = self.inner.get_or_start(url, upstream.clone(), priority);
-            match subscription.wait_finished().await.outcome {
+            match start().wait_finished().await.outcome {
                 Outcome::Complete => return Ok(()),
                 Outcome::Rejected(rejection) => return Err(ProxyError::Status(rejection.status)),
                 Outcome::Failed(message) => return Err(ProxyError::Fetch(message)),
@@ -156,7 +191,7 @@ impl Proxy {
         self.inner.port.store(0, Ordering::SeqCst);
         let Some(stopped) = listener.take() else { return };
         let _ = stopped.shutdown.send(true);
-        let _ = stopped.task.await;
+        let _ = stopped.finished.await;
         self.inner.cancel_all_flights();
     }
 }

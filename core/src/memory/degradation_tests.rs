@@ -45,22 +45,14 @@ fn the_step_never_decreases_as_system_pressure_grows() {
 }
 
 #[test]
-fn moderate_shifts_one_step_and_critical_two_and_removal_lifts_back() {
+fn system_pressure_shifts_the_load_step_up_and_removal_lifts_back() {
     let mut degradation = Degradation::default();
     assert_eq!(degradation.for_pressure(0, CEILING, None), Step::Normal);
     assert_eq!(degradation.for_pressure(0, CEILING, Some(Pressure::Moderate)), Step::LowerQuality);
     assert_eq!(degradation.for_pressure(0, CEILING, Some(Pressure::Critical)), Step::ShorterBuffer);
     assert_eq!(degradation.for_pressure(0, CEILING, None), Step::Normal);
-}
-
-#[test]
-fn system_pressure_stops_at_placeholders_only() {
-    assert_eq!(Degradation::default().for_pressure(995, CEILING, Some(Pressure::Critical)), Step::PlaceholdersOnly);
-}
-
-#[test]
-fn system_pressure_adds_to_the_load_step() {
     assert_eq!(Degradation::default().for_pressure(700, CEILING, Some(Pressure::Moderate)), Step::ShorterBuffer);
+    assert_eq!(Degradation::default().for_pressure(995, CEILING, Some(Pressure::Critical)), Step::PlaceholdersOnly);
 }
 
 #[test]
@@ -70,14 +62,6 @@ fn hysteresis_holds_a_step_inside_the_margin() {
     assert_eq!(degradation.for_pressure(680, CEILING, None), Step::LowerQuality);
     assert_eq!(degradation.for_pressure(651, CEILING, None), Step::LowerQuality);
     assert_eq!(degradation.for_pressure(649, CEILING, None), Step::Normal);
-}
-
-#[test]
-fn a_load_that_flaps_around_a_threshold_does_not_flap_the_step() {
-    let mut degradation = Degradation::default();
-    let steps: Vec<Step> = [699, 701, 699, 701, 699, 701].iter().map(|used| degradation.for_pressure(*used, CEILING, None)).collect();
-    assert_eq!(steps[0], Step::Normal);
-    assert!(steps[1..].iter().all(|step| *step == Step::LowerQuality));
 }
 
 #[test]
@@ -118,11 +102,7 @@ fn plan_values_per_step() {
     assert_eq!(StepPlan::for_step(Step::FewerSlots).slot_limit(2), 2);
     let playing = StepPlan::for_step(Step::PlayingSlotOnly);
     assert_eq!((playing.slot_limit(6), playing.reach_limit(2)), (1, 0));
+    assert_eq!(playing.buffer_seconds(1), 1);
     let none = StepPlan::for_step(Step::PlaceholdersOnly);
     assert_eq!((none.slot_limit(6), none.reach_limit(2), none.buffer_seconds(4)), (0, 0, 0));
-}
-
-#[test]
-fn a_shorter_buffer_keeps_at_least_one_second_until_placeholders() {
-    assert_eq!(StepPlan::for_step(Step::PlayingSlotOnly).buffer_seconds(1), 1);
 }

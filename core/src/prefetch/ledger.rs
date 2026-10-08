@@ -39,6 +39,12 @@ impl PrefetchLedger {
         }
     }
 
+    pub fn set_limits(&mut self, dedupe_window: Duration, max_entries: usize) {
+        self.dedupe_window = dedupe_window;
+        self.max_entries = max_entries;
+        self.trim_dedupe(Duration::ZERO);
+    }
+
     pub fn dedupe_count(&self) -> usize {
         self.dedupe.len()
     }

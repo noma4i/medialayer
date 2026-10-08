@@ -86,7 +86,7 @@ impl Flight {
 
     pub fn subscribe(self: &Arc<Flight>) -> Subscription {
         self.subscribers.fetch_add(1, Ordering::SeqCst);
-        Subscription { flight: self.clone(), receiver: self.progress.subscribe() }
+        Subscription { flight: self.clone(), receiver: self.progress.subscribe(), lingering: false }
     }
 
     pub fn cancel(&self) {
@@ -109,9 +109,14 @@ impl Flight {
 pub(super) struct Subscription {
     flight: Arc<Flight>,
     receiver: watch::Receiver<Progress>,
+    lingering: bool,
 }
 
 impl Subscription {
+    pub fn linger(&mut self) {
+        self.lingering = true;
+    }
+
     pub fn snapshot(&mut self) -> Progress {
         self.receiver.borrow_and_update().clone()
     }
@@ -139,7 +144,7 @@ impl Subscription {
 impl Drop for Subscription {
     fn drop(&mut self) {
         let last = self.flight.subscribers.fetch_sub(1, Ordering::SeqCst) == 1;
-        if last && self.flight.range.is_none() && self.receiver.borrow().is_running() {
+        if last && !self.lingering && self.receiver.borrow().is_running() {
             self.flight.cancel();
         }
     }
@@ -245,7 +250,7 @@ pub(super) async fn download(inner: &Inner, flight: &Flight, headers: HashMap<St
             Some(Ok(chunk)) => {
                 if !writer.append(&chunk).await {
                     writer.abort().await;
-                    return Outcome::Failed("store write failed".to_string());
+                    return Outcome::Unstorable;
                 }
                 written += chunk.len() as u64;
                 flight.publish_written(written);
@@ -260,6 +265,6 @@ pub(super) async fn download(inner: &Inner, flight: &Flight, headers: HashMap<St
     if writer.commit().await {
         Outcome::Complete
     } else {
-        Outcome::Failed("store commit failed".to_string())
+        Outcome::Unstorable
     }
 }

@@ -1,3 +1,4 @@
+use crate::proxy::Meta;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -34,6 +35,7 @@ pub struct Entry {
     pub created: u64,
     pub last_access: u64,
     pub hits: u64,
+    pub meta: Meta,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

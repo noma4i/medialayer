@@ -250,3 +250,73 @@ async fn kinds_sharing_a_strategy_are_ranked_together() {
         }
     }
 }
+
+fn part_bytes(dir: &std::path::Path) -> u64 {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .filter(|file| file.file_name().to_string_lossy().ends_with(".part"))
+        .map(|file| file.metadata().unwrap().len())
+        .sum()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_writers_at_the_budget_edge_cannot_both_append() {
+    for round in 0..50 {
+        let f = fixture(limits(100, 0.8, EvictionStrategy::Lru), &[]).await;
+        let mut first = f.cache.begin_write(&format!("a-{round}"), Kind::Stream).await.unwrap();
+        let mut second = f.cache.begin_write(&format!("b-{round}"), Kind::Stream).await.unwrap();
+        let (one, two) = tokio::join!(
+            tokio::spawn(async move { (first.write(&[0; 70]).await, first) }),
+            tokio::spawn(async move { (second.write(&[0; 70]).await, second) })
+        );
+        let (one, _first) = one.unwrap();
+        let (two, _second) = two.unwrap();
+        assert_eq!(one.is_ok() as u8 + two.is_ok() as u8, 1, "round {round}");
+        assert!([one, two].contains(&Err(CacheError::NotEnoughSpace)));
+        assert_eq!(part_bytes(f.dir.path()), 70);
+    }
+}
+
+#[tokio::test]
+async fn dropped_writer_releases_its_reserved_space() {
+    let f = fixture(limits(100, 0.8, EvictionStrategy::Lru), &[]).await;
+    let mut first = f.cache.begin_write("a", Kind::Stream).await.unwrap();
+    first.write(&[0; 70]).await.unwrap();
+    let mut second = f.cache.begin_write("b", Kind::Stream).await.unwrap();
+    assert_eq!(second.write(&[0; 70]).await, Err(CacheError::NotEnoughSpace));
+    drop(first);
+    second.write(&[0; 70]).await.unwrap();
+}
+
+#[tokio::test]
+async fn aborted_writer_releases_space_and_removes_its_part() {
+    let f = fixture(limits(100, 0.8, EvictionStrategy::Lru), &[]).await;
+    let mut first = f.cache.begin_write("a", Kind::Stream).await.unwrap();
+    first.write(&[0; 70]).await.unwrap();
+    first.abort().await;
+    assert_eq!(files_with_suffix(f.dir.path(), ".part"), 0);
+    f.cache.put("b", Kind::Stream, &payload(100)).await.unwrap();
+}
+
+#[tokio::test]
+async fn commit_counts_the_bytes_once() {
+    let f = fixture(limits(100, 0.8, EvictionStrategy::Lru), &[]).await;
+    let mut first = f.cache.begin_write("a", Kind::Stream).await.unwrap();
+    first.write(&[0; 60]).await.unwrap();
+    first.commit().await.unwrap();
+    assert_eq!(f.cache.stats().await.total_bytes, 60);
+    f.cache.put("b", Kind::Stream, &payload(40)).await.unwrap();
+    assert!(f.cache.contains("a").await);
+    assert!(f.cache.contains("b").await);
+}
+
+#[tokio::test]
+async fn append_evicts_unprotected_entries_to_make_room() {
+    let f = three_of_thirty(EvictionStrategy::Lru).await;
+    let mut writer = f.cache.begin_write("d", Kind::Stream).await.unwrap();
+    writer.write(&[0; 30]).await.unwrap();
+    assert!(!f.cache.contains("a").await);
+    writer.commit().await.unwrap();
+    assert!(f.cache.contains("d").await);
+}

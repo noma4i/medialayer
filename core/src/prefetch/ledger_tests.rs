@@ -102,3 +102,17 @@ fn cancel_counts_only_when_something_was_pending() {
     assert!(ledger.cancel("b", false));
     assert_eq!(ledger.counters.cancelled, 2);
 }
+
+#[test]
+fn set_limits_changes_the_repeat_skip_window_and_the_remembered_count() {
+    let mut ledger = PrefetchLedger::new(Duration::from_secs(60), 100);
+    let depth = Duration::from_secs(2);
+    assert!(ledger.admit("a", depth, Duration::from_secs(0)));
+    assert!(!ledger.admit("a", depth, Duration::from_secs(20)));
+
+    ledger.set_limits(Duration::from_secs(10), 1);
+
+    assert!(ledger.admit("a", depth, Duration::from_secs(20)));
+    assert!(ledger.admit("b", depth, Duration::from_secs(21)));
+    assert_eq!(ledger.dedupe_count(), 1);
+}

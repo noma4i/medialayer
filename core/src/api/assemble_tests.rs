@@ -1,0 +1,90 @@
+use super::test_support::{assembly, shared, FakeSettings, MockFactory};
+use super::*;
+use crate::cache::{self, Cache};
+use crate::fetch::mock::{MockFetcher, Script};
+use crate::identity::cache_key;
+use crate::limits::Limits;
+use crate::memory::DeviceMemory;
+use crate::spec::PoolSpec;
+use std::sync::Arc;
+
+const MIB: u64 = 1024 * 1024;
+
+#[test]
+fn ceiling_is_the_smaller_of_the_option_and_the_device_share() {
+    let low = DeviceMemory { total_mb: 100, heap_class_mb: None, low_ram: true };
+    let big = DeviceMemory { total_mb: 8192, heap_class_mb: None, low_ram: false };
+
+    assert_eq!(ledger_for(&Limits::default(), low).ceiling(), 15 * MIB);
+    assert_eq!(ledger_for(&Limits::default(), big).ceiling(), 64 * MIB);
+}
+
+#[tokio::test]
+async fn purge_removes_the_entry_of_the_url_and_its_ranged_blocks() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = "https://cdn.test/a.mp4";
+    let cache = Cache::open(dir.path(), Limits::default());
+    for key in [cache_key(url), format!("{}#0", cache_key(url)), format!("{}#1", cache_key(url)), "https://cdn.test/b.mp4".to_string()] {
+        cache.put(&key, cache::Kind::Stream, b"bytes").await.unwrap();
+    }
+
+    CacheControl::purge(&cache, url).await;
+
+    assert_eq!(cache.stats().await.file_count, 1);
+    assert!(cache.contains("https://cdn.test/b.mp4").await);
+}
+
+#[tokio::test]
+async fn invalid_defaults_fail_the_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = assembly(dir.path(), Arc::new(MockFetcher::default()), shared::<MockFactory>());
+    config.settings = shared::<FakeSettings>();
+    config.defaults = Limits { budget: 1, ..Limits::default() };
+
+    let result = assemble(config).await;
+
+    assert!(matches!(result, Err(MediaError::InvalidLimits { .. })));
+}
+
+#[tokio::test]
+async fn assembling_wires_the_fetcher_through_the_proxy_and_prefetch_into_the_disk_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let fetcher = Arc::new(MockFetcher::new());
+    let url = "https://o.test/clip.mp4";
+    fetcher.route(url, Script::ok(vec![9; 3 * 1024 * 1024]));
+
+    let parts = assemble(assembly(dir.path(), fetcher.clone(), shared::<MockFactory>())).await.unwrap();
+    parts.prefetcher.set_window(0, vec![None, None, Some(super::test_support::video(url).for_prefetch())]);
+
+    super::test_support::eventually_async(|| async { parts.cache.contains(&format!("{url}#0")).await }).await;
+    assert_eq!(parts.proxy.readiness(), crate::proxy::Readiness::Ready);
+    assert_eq!(fetcher.requests().iter().map(|request| request.range).collect::<Vec<_>>(), vec![Some((0, Some(MIB - 1)))]);
+}
+
+#[tokio::test]
+async fn the_device_profile_and_the_reach_setting_shape_the_pool() {
+    let dir = tempfile::tempdir().unwrap();
+    let build = |device: DeviceMemory, reach: usize| {
+        let mut config = assembly(dir.path(), Arc::new(MockFetcher::default()), shared::<MockFactory>());
+        config.device = device;
+        config.pool = PoolSettings { reach, ..PoolSettings::default() };
+        config
+    };
+    let strong = DeviceMemory { total_mb: 8192, heap_class_mb: None, low_ram: false };
+    let weak = DeviceMemory { total_mb: 1024, heap_class_mb: None, low_ram: true };
+
+    let strong_slots = assemble(build(strong, 1)).await.unwrap().stage.slot_count();
+    let wide_slots = assemble(build(strong, 2)).await.unwrap().stage.slot_count();
+    let weak_slots = assemble(build(weak, 1)).await.unwrap().stage.slot_count();
+
+    assert_eq!((strong_slots, wide_slots, weak_slots), (3, 5, 2));
+}
+
+#[test]
+fn pool_settings_take_reach_and_timings_from_the_spec() {
+    let spec = PoolSpec { slots: 4, reach: 2, hold_off: 5, trim_delay: 60 };
+
+    let settings = PoolSettings::from(&spec);
+
+    assert_eq!((settings.reach, settings.hold_off_ms, settings.trim_delay_ms), (2, 5_000, 60_000));
+}

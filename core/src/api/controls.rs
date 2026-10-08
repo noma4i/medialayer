@@ -1,0 +1,140 @@
+use super::error::MediaError;
+use super::hub::{Deliver, Hub, Subscription};
+use super::ports::{CacheControl, PoolControl, PrefetchControl, SettingsStore};
+use super::types::{Kind, MediaStats};
+use crate::limits::{resolve, Limits};
+use crate::memory::{effective_ceiling, DeviceMemory, Ledger, ShareTuning};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use tokio::runtime::Handle;
+use tokio::sync::Mutex as AsyncMutex;
+
+pub const LIMITS_KEY: &str = "medialayer.limits";
+
+pub struct ControlPorts {
+    pub cache: Arc<dyn CacheControl>,
+    pub pool: Arc<dyn PoolControl>,
+    pub prefetch: Arc<dyn PrefetchControl>,
+    pub settings: Arc<dyn SettingsStore>,
+    pub ledger: Ledger,
+    pub device: DeviceMemory,
+}
+
+pub struct Controls {
+    ports: ControlPorts,
+    defaults: Limits,
+    current: AsyncMutex<Option<Limits>>,
+    diagnostics: Mutex<Vec<String>>,
+    published: Mutex<Option<MediaStats>>,
+    stats_hub: Hub<MediaStats>,
+}
+
+fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+impl Controls {
+    pub fn new(handle: Handle, ports: ControlPorts, defaults: Limits) -> Controls {
+        Controls {
+            ports,
+            defaults,
+            current: AsyncMutex::new(None),
+            diagnostics: Mutex::new(Vec::new()),
+            published: Mutex::new(None),
+            stats_hub: Hub::new(handle),
+        }
+    }
+
+    pub async fn limits(&self) -> Limits {
+        let mut current = self.current.lock().await;
+        self.loaded(&mut current).await
+    }
+
+    pub async fn set_limits(&self, limits: Limits) -> Result<(), MediaError> {
+        limits.validate()?;
+        let mut current = self.current.lock().await;
+        self.loaded(&mut current).await;
+        self.apply(limits).await?;
+        let settings = self.ports.settings.clone();
+        let encoded = limits.encode();
+        let _ = tokio::task::spawn_blocking(move || settings.write(LIMITS_KEY.to_string(), encoded)).await;
+        *current = Some(limits);
+        drop(current);
+        self.publish_stats().await;
+        Ok(())
+    }
+
+    pub async fn reset_limits(&self) -> Result<(), MediaError> {
+        let mut current = self.current.lock().await;
+        self.apply(self.defaults).await?;
+        let settings = self.ports.settings.clone();
+        let _ = tokio::task::spawn_blocking(move || settings.remove(LIMITS_KEY.to_string())).await;
+        *current = Some(self.defaults);
+        drop(current);
+        self.publish_stats().await;
+        Ok(())
+    }
+
+    pub async fn stats(&self) -> MediaStats {
+        let diagnostics = locked(&self.diagnostics).clone();
+        MediaStats::collect(&self.ports.cache.stats().await, &self.ports.pool.stats(), diagnostics)
+    }
+
+    pub async fn clear(&self, kind: Option<Kind>) {
+        self.ports.cache.clear(kind.map(Into::into)).await;
+        self.publish_stats().await;
+    }
+
+    pub async fn purge(&self, url: &str) {
+        self.ports.cache.purge(url).await;
+        self.publish_stats().await;
+    }
+
+    pub async fn evict_now(&self) {
+        self.ports.cache.evict_now().await;
+        self.publish_stats().await;
+    }
+
+    pub fn subscribe_stats(&self, deliver: Deliver<MediaStats>) -> Subscription {
+        *locked(&self.published) = None;
+        self.stats_hub.subscribe(deliver)
+    }
+
+    pub async fn publish_stats(&self) {
+        if self.stats_hub.listener_count() == 0 {
+            return;
+        }
+        let stats = self.stats().await;
+        {
+            let mut published = locked(&self.published);
+            if published.as_ref() == Some(&stats) {
+                return;
+            }
+            *published = Some(stats.clone());
+        }
+        self.stats_hub.publish(stats);
+    }
+
+    async fn apply(&self, limits: Limits) -> Result<(), MediaError> {
+        self.ports.cache.set_limits(limits).await?;
+        self.ports.prefetch.set_limits(&limits);
+        self.ports.ledger.set_ceiling(effective_ceiling(limits.memory_budget, self.ports.device, ShareTuning::default()));
+        Ok(())
+    }
+
+    async fn loaded(&self, current: &mut Option<Limits>) -> Limits {
+        if let Some(limits) = *current {
+            return limits;
+        }
+        let settings = self.ports.settings.clone();
+        let saved = tokio::task::spawn_blocking(move || settings.read(LIMITS_KEY.to_string())).await.ok().flatten();
+        let (limits, rejected) = resolve(self.defaults, saved.as_deref());
+        if let Some(error) = rejected {
+            locked(&self.diagnostics).push(format!("saved limits rejected: {error}"));
+        }
+        if limits != self.defaults {
+            let _ = self.apply(limits).await;
+        }
+        *current = Some(limits);
+        limits
+    }
+}

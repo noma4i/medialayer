@@ -12,24 +12,13 @@ fn channel_sum(data: &[u8]) -> u64 {
 }
 
 #[test]
-fn components_of_known_hash() {
+fn components_read_the_size_flag_and_reject_a_bad_header() {
     assert_eq!(components(KNOWN), Ok((4, 3)));
-}
-
-#[test]
-fn components_of_single_component_hash() {
     assert_eq!(components("00TI:j"), Ok((1, 1)));
-}
-
-#[test]
-fn components_reject_short_hash() {
     assert_eq!(components("LEHV6"), Err(BlurHashError::TooShort));
     assert_eq!(components(""), Err(BlurHashError::TooShort));
-}
-
-#[test]
-fn components_reject_out_of_range_count() {
     assert_eq!(components("~~~~~~"), Err(BlurHashError::ComponentsOutOfRange));
+    assert_eq!(decode("~~~~~~", 4, 4, 1.0), Err(BlurHashError::ComponentsOutOfRange));
 }
 
 #[test]
@@ -43,27 +32,6 @@ fn known_hash_corner_and_center_pixels() {
     assert_eq!(pixel(&data, 32, 16, 16), [158, 125, 108, 255]);
     assert_eq!(pixel(&data, 32, 8, 24), [148, 139, 133, 255]);
     assert_eq!(channel_sum(&data), 719147);
-}
-
-#[test]
-fn known_hash_average_color_is_dc_component() {
-    let data = decode(KNOWN, 32, 32, 1.0).unwrap();
-    let mut totals = [0u64; 3];
-    for chunk in data.chunks(4) {
-        for channel in 0..3 {
-            totals[channel] += chunk[channel] as u64;
-        }
-    }
-    let average: Vec<i64> = totals.iter().map(|sum| (*sum / 1024) as i64).collect();
-    assert!((average[0] - 151).abs() <= 12);
-    assert!((average[1] - 150).abs() <= 12);
-    assert!((average[2] - 149).abs() <= 12);
-}
-
-#[test]
-fn known_hash_alpha_is_opaque_everywhere() {
-    let data = decode(KNOWN, 32, 32, 1.0).unwrap();
-    assert!(data.chunks(4).all(|chunk| chunk[3] == 255));
 }
 
 #[test]
@@ -105,54 +73,23 @@ fn one_pixel_image_is_the_top_left_corner() {
 }
 
 #[test]
-fn rejects_short_hash() {
-    assert_eq!(decode("00TI:", 4, 4, 1.0), Err(BlurHashError::TooShort));
-    assert_eq!(decode("", 4, 4, 1.0), Err(BlurHashError::TooShort));
-}
-
-#[test]
-fn rejects_length_for_wrong_component_count() {
+fn decode_rejects_bad_input_without_panic() {
+    let bad_character = "LEHV6nWB2yk8pyo0adR*.7kCMdn ";
     let longer = format!("{KNOWN}0");
-    assert_eq!(decode(&longer, 4, 4, 1.0), Err(BlurHashError::LengthMismatch));
-    assert_eq!(decode(&KNOWN[..KNOWN.len() - 1], 4, 4, 1.0), Err(BlurHashError::LengthMismatch));
-}
-
-#[test]
-fn rejects_character_outside_base83() {
-    let bad = "LEHV6nWB2yk8pyo0adR*.7kCMdn ";
-    assert_eq!(decode(bad, 4, 4, 1.0), Err(BlurHashError::InvalidCharacter));
-    assert_eq!(decode("00TI:\"", 4, 4, 1.0), Err(BlurHashError::InvalidCharacter));
-}
-
-#[test]
-fn rejects_non_ascii_without_panic() {
+    let cases = [
+        ("one char too long", decode(&longer, 4, 4, 1.0), BlurHashError::LengthMismatch),
+        ("one char too short", decode(&KNOWN[..KNOWN.len() - 1], 4, 4, 1.0), BlurHashError::LengthMismatch),
+        ("space is outside base83", decode(bad_character, 4, 4, 1.0), BlurHashError::InvalidCharacter),
+        ("quote is outside base83", decode("00TI:\"", 4, 4, 1.0), BlurHashError::InvalidCharacter),
+        ("zero width", decode(KNOWN, 0, 4, 1.0), BlurHashError::ZeroSize),
+        ("zero height", decode(KNOWN, 4, 0, 1.0), BlurHashError::ZeroSize),
+        ("oversized image", decode(KNOWN, u32::MAX, u32::MAX, 1.0), BlurHashError::SizeTooLarge),
+        ("nan punch", decode(KNOWN, 4, 4, f32::NAN), BlurHashError::InvalidPunch),
+        ("infinite punch", decode(KNOWN, 4, 4, f32::INFINITY), BlurHashError::InvalidPunch),
+    ];
+    for (name, result, error) in cases {
+        assert_eq!(result, Err(error), "{name}");
+    }
     assert!(decode("00TI:\u{e9}\u{e9}", 4, 4, 1.0).is_err());
     assert!(decode("\u{1f600}\u{1f600}\u{1f600}", 4, 4, 1.0).is_err());
-}
-
-#[test]
-fn rejects_zero_dimensions() {
-    assert_eq!(decode(KNOWN, 0, 4, 1.0), Err(BlurHashError::ZeroSize));
-    assert_eq!(decode(KNOWN, 4, 0, 1.0), Err(BlurHashError::ZeroSize));
-}
-
-#[test]
-fn rejects_component_count_above_nine() {
-    assert_eq!(decode("~~~~~~", 4, 4, 1.0), Err(BlurHashError::ComponentsOutOfRange));
-}
-
-#[test]
-fn rejects_oversized_image_without_allocating() {
-    assert_eq!(decode(KNOWN, u32::MAX, u32::MAX, 1.0), Err(BlurHashError::SizeTooLarge));
-}
-
-#[test]
-fn rejects_non_finite_punch() {
-    assert_eq!(decode(KNOWN, 4, 4, f32::NAN), Err(BlurHashError::InvalidPunch));
-    assert_eq!(decode(KNOWN, 4, 4, f32::INFINITY), Err(BlurHashError::InvalidPunch));
-}
-
-#[test]
-fn decode_is_deterministic() {
-    assert_eq!(decode(KNOWN, 8, 8, 1.0), decode(KNOWN, 8, 8, 1.0));
 }

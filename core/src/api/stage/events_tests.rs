@@ -1,0 +1,144 @@
+use crate::api::ports::{PoolControl, SlotDirectives as _};
+use crate::api::slots::SlotCall;
+use crate::api::source::MediaItem;
+use crate::api::test_support::{eventually, rig, rig_with, url_of, video, videos, Rig};
+use crate::api::types::{Kind, MediaState};
+use crate::identity::cache_key;
+use crate::cache;
+use crate::session::WatchdogConfig;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+const HLS: &str = "https://o.test/hls/master.m3u8";
+
+fn hls() -> MediaItem {
+    MediaItem::bare(HLS, Kind::Video)
+}
+
+async fn playing(rig: &Rig, source: MediaItem) -> (u32, Arc<crate::api::test_support::MockSlot>) {
+    let url = source.url.clone();
+    rig.parts.stage.set_window(0, vec![Some(source)]);
+    rig.parts.stage.set_playing(&url, true);
+    eventually(|| rig.factory.slot_holding(&url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
+    rig.holder(&url)
+}
+
+#[tokio::test]
+async fn the_ready_events_move_a_declared_place_to_ready() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    stage.set_window(0, videos(3));
+    stage.visible(video(&url_of(0)), true);
+    eventually(|| rig.parts.places.state(&url_of(0)) == MediaState::Loading).await;
+    let (slot, _) = rig.holder(&url_of(0));
+
+    stage.visual_ready(slot as usize);
+
+    assert_eq!(rig.parts.places.state(&url_of(0)), MediaState::Ready);
+}
+
+#[tokio::test]
+async fn a_video_already_in_the_cache_is_declared_ready_without_a_loading_step() {
+    let rig = rig().await;
+    rig.parts.cache.put(&cache_key(&url_of(0)), cache::Kind::Stream, b"bytes").await.unwrap();
+    let seen: Arc<Mutex<Vec<MediaState>>> = Arc::default();
+    let sink = seen.clone();
+    let _subscription = rig.parts.places.subscribe(&url_of(0), Arc::new(move |state| sink.lock().unwrap().push(state)));
+
+    rig.parts.stage.visible(video(&url_of(0)), true);
+
+    eventually(|| seen.lock().unwrap().last() == Some(&MediaState::Ready)).await;
+    assert!(!seen.lock().unwrap().contains(&MediaState::Loading));
+}
+
+#[tokio::test]
+async fn a_startup_http_error_on_a_proxied_playlist_refreshes_the_route_and_loads_it_again() {
+    let rig = rig().await;
+    let (slot, player) = playing(&rig, hls()).await;
+    assert_eq!(player.loads(), 1);
+
+    rig.parts.stage.failed(slot as usize, 404, String::new());
+
+    eventually(|| player.loads() == 2).await;
+    assert_eq!(player.calls().iter().filter(|call| **call == SlotCall::Unload).count(), 1);
+}
+
+#[tokio::test]
+async fn repeated_playback_failures_reload_the_player_and_then_fail_the_place_with_the_reason() {
+    let rig = rig().await;
+    rig.parts.places.declared(&url_of(0), false);
+    let (slot, player) = playing(&rig, video(&url_of(0))).await;
+
+    for _ in 0..6 {
+        rig.parts.stage.failed(slot as usize, 0, "decoder died".to_string());
+    }
+
+    assert_eq!(rig.parts.places.state(&url_of(0)), MediaState::Failed { detail: "decoder died".to_string() });
+    eventually(|| player.loads() >= 2).await;
+}
+
+#[tokio::test]
+async fn a_silent_player_is_reloaded_by_the_watchdog() {
+    let rig = rig().await;
+    let (slot, silent) = playing(&rig, video(&url_of(0))).await;
+    rig.parts.stage.ready(slot as usize);
+
+    eventually(|| silent.loads() >= 2).await;
+}
+
+#[tokio::test]
+async fn a_player_whose_clock_moves_is_checked_again_and_left_alone() {
+    let rig = rig_with(|_| {}).await;
+    *rig.factory.advance_ms.lock().unwrap() = 1_000;
+    let (slot, healthy) = playing(&rig, video(&url_of(0))).await;
+    rig.parts.stage.ready(slot as usize);
+
+    eventually(|| healthy.samples.load(std::sync::atomic::Ordering::SeqCst) >= 3).await;
+
+    assert_eq!(healthy.loads(), 1);
+}
+
+#[tokio::test]
+async fn a_stall_arms_the_watchdog_only_for_the_playing_slot() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    stage.set_window(0, videos(3));
+    eventually(|| rig.factory.slot_holding(&url_of(1)).is_some()).await;
+    let (idle_slot, idle) = rig.holder(&url_of(1));
+    stage.stalled(idle_slot as usize, 0);
+    tokio::time::sleep(Duration::from_millis(120)).await;
+    assert_eq!(idle.samples.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    stage.set_playing(&url_of(0), true);
+    eventually(|| rig.factory.slot_holding(&url_of(0)).is_some()).await;
+    let (active_slot, active) = rig.holder(&url_of(0));
+    stage.stalled(active_slot as usize, 0);
+
+    eventually(|| active.samples.load(std::sync::atomic::Ordering::SeqCst) >= 1).await;
+}
+
+#[tokio::test]
+async fn going_to_the_background_pauses_playback_and_returning_resumes_it() {
+    let rig = rig().await;
+    let (_, player) = playing(&rig, video(&url_of(0))).await;
+    let stage = &rig.parts.stage;
+
+    let directives = PoolControl::background(stage);
+    stage.apply(directives);
+    eventually(|| player.calls().last() == Some(&SlotCall::Pause)).await;
+    PoolControl::foreground(stage);
+
+    eventually(|| player.calls().iter().filter(|call| **call == SlotCall::Play).count() >= 2).await;
+}
+
+#[tokio::test]
+async fn watchdog_escalation_purges_the_cached_source_and_loads_it_again() {
+    let rig = rig_with(|config| config.watchdog = WatchdogConfig { max_attempts: 2, ..crate::api::test_support::fast_watchdog() }).await;
+    rig.parts.cache.put(&cache_key(&url_of(0)), cache::Kind::Stream, b"bytes").await.unwrap();
+    let (slot, player) = playing(&rig, video(&url_of(0))).await;
+    rig.parts.stage.ready(slot as usize);
+
+    eventually(|| player.loads() >= 3).await;
+
+    assert!(!rig.parts.cache.contains(&cache_key(&url_of(0))).await);
+}

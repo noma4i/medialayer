@@ -1,3 +1,4 @@
+mod byte_store;
 mod clock;
 mod entry;
 mod error;
@@ -9,12 +10,16 @@ mod options;
 mod persist;
 mod policy;
 mod reader;
+mod reservation;
 mod save;
 mod state;
 mod store;
 mod writer;
 
+pub use byte_store::{classify_kind, CacheStore, Classify};
 pub use clock::{Clock, SystemClock};
+#[cfg(test)]
+pub use clock::ManualClock;
 pub use entry::{Kind, KindStats, Stats};
 pub use error::CacheError;
 pub use options::Options;
@@ -24,6 +29,12 @@ pub use writer::Writer;
 
 #[cfg(test)]
 mod persist_tests;
+#[cfg(test)]
+mod byte_store_tests;
+#[cfg(test)]
+mod proxy_cache_tests;
+#[cfg(test)]
+mod cancel_tests;
 #[cfg(test)]
 mod concurrency_tests;
 #[cfg(test)]

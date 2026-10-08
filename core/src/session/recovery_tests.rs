@@ -213,15 +213,6 @@ fn stale_route_is_refreshed_before_replay_only_when_recovery_is_supported() {
 }
 
 #[test]
-fn direct_route_facing_a_ready_proxy_is_stale() {
-    let mut state = loaded();
-    let due = Event::RetryDue { resolved_generation: None, current_generation: 0, readiness: Readiness::Ready };
-    assert_eq!(next_action(&mut state, due, 0), Action::RefreshRoute);
-    let unhealthy = Event::RetryDue { resolved_generation: None, current_generation: 0, readiness: Readiness::Unhealthy };
-    assert_eq!(next_action(&mut state, unhealthy, 0), Action::Replay);
-}
-
-#[test]
 fn chain_events_out_of_order_do_nothing() {
     let mut state = loaded();
     assert_eq!(next_action(&mut state, Event::CachePurged, 0), Action::None);

@@ -7,28 +7,20 @@ fn tuning() -> ProfileTuning {
 }
 
 #[test]
-fn normal_profile_keeps_the_base_config() {
-    let base = PoolConfig::new(3, 1);
-    assert_eq!(base.clone().for_profile(DeviceProfile { ram_mb: 8192, low_ram: false }, tuning()), base);
-}
-
-#[test]
-fn low_ram_flag_gives_two_slots_no_reach_and_a_shorter_buffer() {
-    let low = PoolConfig::new(3, 1).for_profile(DeviceProfile { ram_mb: 8192, low_ram: true }, tuning());
-    assert_eq!((low.slots, low.reach, low.buffer_seconds), (2, 0, 1));
-}
-
-#[test]
-fn small_ram_counts_as_low_even_without_the_flag() {
-    let low = PoolConfig::new(3, 1).for_profile(DeviceProfile { ram_mb: 2048, low_ram: false }, tuning());
-    assert_eq!(low.slots, 2);
-}
-
-#[test]
-fn tuning_values_are_configurable_and_slots_never_drop_below_two() {
+fn profile_picks_the_base_or_the_low_ram_config() {
     let custom = ProfileTuning { low_ram_below_mb: 100, low_slots: 1, low_reach: 1, low_buffer_seconds: 5 };
-    let low = PoolConfig::new(4, 1).for_profile(DeviceProfile { ram_mb: 8192, low_ram: true }, custom);
-    assert_eq!((low.slots, low.reach, low.buffer_seconds), (2, 1, 2));
+    let base = PoolConfig::new(3, 1);
+    let shape = |config: PoolConfig| (config.slots, config.reach, config.buffer_seconds);
+    let cases = [
+        ("normal keeps the base", PoolConfig::new(3, 1), DeviceProfile { ram_mb: 8192, low_ram: false }, tuning(), shape(base.clone())),
+        ("low ram flag", PoolConfig::new(3, 1), DeviceProfile { ram_mb: 8192, low_ram: true }, tuning(), (2, 0, 1)),
+        ("small ram without the flag", PoolConfig::new(3, 1), DeviceProfile { ram_mb: 2048, low_ram: false }, tuning(), (2, 0, 1)),
+        ("custom tuning, slots never below two", PoolConfig::new(4, 1), DeviceProfile { ram_mb: 8192, low_ram: true }, custom, (2, 1, 2)),
+    ];
+    assert_eq!(base.clone().for_profile(DeviceProfile { ram_mb: 8192, low_ram: false }, tuning()), base);
+    for (name, config, profile, tuning, expected) in cases {
+        assert_eq!(shape(config.for_profile(profile, tuning)), expected, "{name}");
+    }
 }
 
 #[test]

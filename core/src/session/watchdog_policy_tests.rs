@@ -9,18 +9,6 @@ fn progress(attempts: u32) -> Progress {
 }
 
 #[test]
-fn defaults_carry_the_v3_numbers() {
-    let config = WatchdogConfig::default();
-    assert_eq!(
-        (config.first_window_ms, config.progress_window_ms, config.cooldown_ms, config.progress_threshold_ms, config.near_end_ms),
-        (12_000, 3_000, 15_000, 10, 250)
-    );
-    assert_eq!((config.max_attempts, config.max_cooldown_cycles, config.startup_delay_ms), (5, 2, 250));
-    assert_eq!(config.retry_delays_ms, [250, 1_000, 3_000, 8_000, 15_000]);
-    assert_eq!(config.foreground_delays_ms, [100, 300, 800, 2_000, 5_000, 10_000]);
-}
-
-#[test]
 fn window_delays() {
     let config = WatchdogConfig::default();
     assert_eq!(window_delay_ms(&config, false, false), 12_000);

@@ -18,6 +18,7 @@ pub trait ByteStore: Send + Sync {
 
 #[async_trait]
 pub trait StoreWriter: Send {
+    // Dropping a writer without commit discards the entry, like abort.
     async fn append(&mut self, bytes: &[u8]) -> bool;
     async fn commit(self: Box<Self>) -> bool;
     async fn abort(self: Box<Self>);

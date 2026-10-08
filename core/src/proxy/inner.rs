@@ -1,7 +1,8 @@
 use super::byte_store::ByteStore;
 use super::config::Config;
 use super::flight::{download, Flight, Outcome, Subscription};
-use super::route::{authority, block_key};
+use super::route::block_key;
+use super::tasks::Tasks;
 use crate::hls::is_manifest_url;
 use super::slots::{Priority, PrioritySlots};
 use crate::fetch::Fetcher;
@@ -11,10 +12,12 @@ use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicUsize, Ordering}
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use tokio::sync::watch;
 use tokio::time::Instant;
-use tokio::task::JoinHandle;
+use std::collections::VecDeque;
+use tokio::sync::oneshot;
 
 const MAX_STAMPS: usize = 256;
 const MAX_TOTALS: usize = 1024;
+const MAX_REGISTERED: usize = 4096;
 
 pub(super) struct LiveGuard(Arc<AtomicUsize>);
 
@@ -33,7 +36,7 @@ impl Drop for LiveGuard {
 
 pub(super) struct Listener {
     pub shutdown: watch::Sender<bool>,
-    pub task: JoinHandle<()>,
+    pub finished: oneshot::Receiver<()>,
 }
 
 pub(super) struct Inner {
@@ -43,7 +46,8 @@ pub(super) struct Inner {
     pub slots: PrioritySlots,
     pub live: Arc<AtomicUsize>,
     pub flights: Mutex<HashMap<String, Arc<Flight>>>,
-    pub registered_headers: Mutex<HashMap<String, HashMap<String, String>>>,
+    pub registered_headers: Mutex<Registry>,
+    pub tasks: Tasks,
     pub playlist_stamps: Mutex<HashMap<String, Instant>>,
     pub totals: Mutex<HashMap<String, u64>>,
     pub listener: tokio::sync::Mutex<Option<Listener>>,
@@ -54,12 +58,40 @@ pub(super) struct Inner {
     pub route_generation: AtomicU64,
 }
 
+#[derive(Default)]
+pub(super) struct Registry {
+    map: HashMap<String, HashMap<String, String>>,
+    order: VecDeque<String>,
+}
+
+impl Registry {
+    fn get(&self, url: &str) -> Option<&HashMap<String, String>> {
+        self.map.get(url)
+    }
+
+    fn insert(&mut self, url: &str, headers: &HashMap<String, String>, replace: bool) {
+        if let Some(existing) = self.map.get_mut(url) {
+            if replace {
+                *existing = headers.clone();
+            }
+            return;
+        }
+        if self.order.len() >= MAX_REGISTERED {
+            if let Some(oldest) = self.order.pop_front() {
+                self.map.remove(&oldest);
+            }
+        }
+        self.order.push_back(url.to_string());
+        self.map.insert(url.to_string(), headers.clone());
+    }
+}
+
 pub(super) fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 impl Inner {
-    pub fn new(config: Config, fetcher: Arc<dyn Fetcher>, store: Arc<dyn ByteStore>) -> Self {
+    pub fn new(config: Config, fetcher: Arc<dyn Fetcher>, store: Arc<dyn ByteStore>, tasks: Tasks) -> Self {
         Inner {
             slots: PrioritySlots::new(config.max_concurrent, config.playback_reserved, config.max_waiting),
             fetcher,
@@ -67,7 +99,8 @@ impl Inner {
             config,
             live: Arc::new(AtomicUsize::new(0)),
             flights: Mutex::new(HashMap::new()),
-            registered_headers: Mutex::new(HashMap::new()),
+            registered_headers: Mutex::new(Registry::default()),
+            tasks,
             playlist_stamps: Mutex::new(HashMap::new()),
             totals: Mutex::new(HashMap::new()),
             listener: tokio::sync::Mutex::new(None),
@@ -80,15 +113,23 @@ impl Inner {
     }
 
     pub fn register_headers(&self, url: &str, headers: &HashMap<String, String>) {
-        if let (Some(host), false) = (authority(url), headers.is_empty()) {
-            locked(&self.registered_headers).insert(host, headers.clone());
+        if !headers.is_empty() {
+            locked(&self.registered_headers).insert(url, headers, true);
+        }
+    }
+
+    pub fn inherit_headers(&self, urls: &[String], headers: &HashMap<String, String>) {
+        if headers.is_empty() {
+            return;
+        }
+        let mut registry = locked(&self.registered_headers);
+        for url in urls {
+            registry.insert(url, headers, false);
         }
     }
 
     pub fn upstream_headers(&self, url: &str, incoming: &HashMap<String, String>) -> HashMap<String, String> {
-        let mut merged = authority(url)
-            .and_then(|host| locked(&self.registered_headers).get(&host).cloned())
-            .unwrap_or_default();
+        let mut merged = locked(&self.registered_headers).get(url).cloned().unwrap_or_default();
         for (name, value) in incoming {
             merged.retain(|existing, _| !existing.eq_ignore_ascii_case(name));
             merged.insert(name.clone(), value.clone());
@@ -113,13 +154,13 @@ impl Inner {
         self: &Arc<Self>,
         url: &str,
         block: u64,
-        total: u64,
+        total: Option<u64>,
         headers: HashMap<String, String>,
         priority: Priority,
     ) -> Subscription {
         let size = self.config.chunk_size;
         let start = block * size;
-        let end = (start + size).min(total) - 1;
+        let end = total.map_or(start + size, |total| (start + size).min(total)) - 1;
         self.start_flight(url, block_key(&cache_key(url), block), Some((start, end)), headers, priority)
     }
 
@@ -151,7 +192,7 @@ impl Inner {
         if created {
             let guard = LiveGuard::new(&self.live);
             let inner = self.clone();
-            tokio::spawn(async move {
+            self.tasks.spawn(async move {
                 let _guard = guard;
                 inner.run_flight(flight, headers, priority).await;
             });

@@ -56,7 +56,8 @@ fn limits_take_cache_values_and_the_first_video_and_default_to_core_limits() {
 
 #[test]
 fn validate_rejects_bad_specs() {
-    let cases: Vec<(&str, Box<dyn Fn(&mut MediaSpec)>, SpecError)> = vec![
+    type Change = Box<dyn Fn(&mut MediaSpec)>;
+    let cases: Vec<(&str, Change, SpecError)> = vec![
         (
             "duplicate across kinds",
             Box::new(|spec| spec.audios.push(AudioSpec { name: "moment_video".to_string(), evict: None })),

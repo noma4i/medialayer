@@ -1,0 +1,131 @@
+use super::loader::{LoadError, Loader};
+use crate::proxy::Priority;
+use async_trait::async_trait;
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Mutex, MutexGuard, PoisonError};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fetch {
+    Whole,
+    FirstBlock,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Call {
+    pub url: String,
+    pub fetch: Fetch,
+    pub priority: Priority,
+}
+
+#[derive(Default)]
+struct Script {
+    calls: Vec<Call>,
+    bodies: HashMap<String, Vec<u8>>,
+    failing: HashSet<String>,
+}
+
+#[derive(Default)]
+pub struct MockLoader {
+    script: Mutex<Script>,
+    hang_all: AtomicBool,
+    active: AtomicUsize,
+    peak: AtomicUsize,
+    stored_reads: AtomicUsize,
+}
+
+struct Active<'a>(&'a MockLoader);
+
+impl<'a> Active<'a> {
+    fn enter(loader: &'a MockLoader) -> Active<'a> {
+        let now = loader.active.fetch_add(1, Ordering::SeqCst) + 1;
+        loader.peak.fetch_max(now, Ordering::SeqCst);
+        Active(loader)
+    }
+}
+
+impl Drop for Active<'_> {
+    fn drop(&mut self) {
+        self.0.active.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+impl MockLoader {
+    pub fn serve(&self, url: &str, body: &str) {
+        self.script().bodies.insert(url.to_string(), body.as_bytes().to_vec());
+    }
+
+    pub fn hang_all(&self) {
+        self.hang_all.store(true, Ordering::SeqCst);
+    }
+
+    pub fn fail(&self, url: &str, failing: bool) {
+        let mut script = self.script();
+        if failing {
+            script.failing.insert(url.to_string());
+        } else {
+            script.failing.remove(url);
+        }
+    }
+
+    pub fn calls(&self) -> Vec<Call> {
+        self.script().calls.clone()
+    }
+
+    pub fn urls(&self) -> Vec<String> {
+        self.calls().into_iter().map(|call| call.url).collect()
+    }
+
+    pub fn active(&self) -> usize {
+        self.active.load(Ordering::SeqCst)
+    }
+
+    pub fn peak(&self) -> usize {
+        self.peak.load(Ordering::SeqCst)
+    }
+
+    pub fn stored_reads(&self) -> usize {
+        self.stored_reads.load(Ordering::SeqCst)
+    }
+
+    fn script(&self) -> MutexGuard<'_, Script> {
+        self.script.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    async fn run(&self, url: &str, fetch: Fetch, priority: Priority) -> Result<(), LoadError> {
+        let _active = Active::enter(self);
+        let failing = {
+            let mut script = self.script();
+            script.calls.push(Call { url: url.to_string(), fetch, priority });
+            script.failing.contains(url)
+        };
+        if self.hang_all.load(Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
+        if failing {
+            return Err(LoadError(format!("{url} refused")));
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl Loader for MockLoader {
+    async fn load(&self, url: &str, _headers: &HashMap<String, String>, priority: Priority) -> Result<(), LoadError> {
+        self.run(url, Fetch::Whole, priority).await
+    }
+
+    async fn load_first_block(
+        &self,
+        url: &str,
+        _headers: &HashMap<String, String>,
+        priority: Priority,
+    ) -> Result<(), LoadError> {
+        self.run(url, Fetch::FirstBlock, priority).await
+    }
+
+    async fn stored(&self, url: &str) -> Option<Vec<u8>> {
+        self.stored_reads.fetch_add(1, Ordering::SeqCst);
+        self.script().bodies.get(url).cloned()
+    }
+}

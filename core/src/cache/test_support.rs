@@ -73,3 +73,15 @@ pub async fn wait_for_file_count(cache: &Cache, count: u64) {
         tokio::time::sleep(WAIT_STEP).await;
     }
 }
+
+pub async fn poll_then_drop<F: std::future::Future>(future: F, polls: usize) -> bool {
+    let mut future = Box::pin(future);
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+    for _ in 0..polls {
+        if future.as_mut().poll(&mut context).is_ready() {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    false
+}

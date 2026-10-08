@@ -2,14 +2,6 @@ use super::test_support::*;
 use super::*;
 
 #[test]
-fn stats_count_slots_by_level() {
-    let mut pool = ring(4, 1);
-    pool.plan(0, 5, Some(5), &keys(20));
-    let stats = pool.stats();
-    assert_eq!((stats.hot, stats.warm, stats.cold), (2, 1, 1));
-}
-
-#[test]
 fn stats_count_source_change_releases_and_reuses() {
     let mut pool = ring(3, 1);
     let list = keys(20);

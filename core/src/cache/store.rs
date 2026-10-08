@@ -1,14 +1,15 @@
-use super::entry::{Kind, Stats};
+use super::entry::{Entry, Kind, Stats};
 use super::error::CacheError;
 use super::evict::{evict_if_needed, names_where, remove_names};
 use super::inner::Inner;
 use super::load::load;
 use super::naming::{bin_path, file_name};
 use super::options::Options;
-use super::reader::Reader;
+use super::reader::{Pin, Reader};
 use super::save::{mark_dirty, write_index};
 use super::writer::Writer;
 use crate::limits::{Limits, LimitsError};
+use crate::proxy::Meta;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -58,15 +59,12 @@ impl Cache {
             return None;
         }
         let name = file_name(key);
-        let size = self.inner.state().pin(&name, self.inner.now())?;
+        let (pin, size) = Pin::acquire(&self.inner, &name)?;
         match tokio::fs::File::open(bin_path(&self.inner.dir, &name)).await {
-            Ok(file) => Some(Reader::new(self.inner.clone(), name, file, size)),
+            Ok(file) => Some(Reader::new(pin, file, size)),
             Err(_) => {
-                {
-                    let mut state = self.inner.state();
-                    state.unpin(&name);
-                    state.take(&name);
-                }
+                drop(pin);
+                self.inner.state().take(&name);
                 mark_dirty(&self.inner);
                 None
             }
@@ -83,6 +81,21 @@ impl Cache {
 
     pub async fn begin_write(&self, key: &str, kind: Kind) -> Result<Writer, CacheError> {
         Writer::start(self.inner.clone(), key, kind).await
+    }
+
+    pub async fn len(&self, key: &str) -> Option<u64> {
+        self.entry_of(key).map(|entry| entry.size)
+    }
+
+    pub async fn meta(&self, key: &str) -> Option<Meta> {
+        self.entry_of(key).map(|entry| entry.meta)
+    }
+
+    fn entry_of(&self, key: &str) -> Option<Entry> {
+        if !self.is_ready() {
+            return None;
+        }
+        self.inner.state().entry(&file_name(key))
     }
 
     pub async fn contains(&self, key: &str) -> bool {

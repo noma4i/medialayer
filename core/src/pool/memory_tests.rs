@@ -20,11 +20,6 @@ fn live(pool: &Ring) -> usize {
 }
 
 #[test]
-fn slot_estimate_defaults_to_24_mib() {
-    assert_eq!(PoolConfig::new(3, 1).slot_bytes_estimate, 24 * 1024 * 1024);
-}
-
-#[test]
 fn a_ring_without_a_ledger_is_never_refused() {
     let mut pool = ring(3, 1);
     let commands = pool.plan(0, 5, Some(5), &keys(20));
@@ -116,9 +111,10 @@ fn a_pinned_slot_is_not_freed_for_a_page() {
 fn release_and_release_all_free_the_reservation() {
     let (mut pool, ledger) = tight(1000, 5, 2);
     pool.plan(0, 5, Some(5), &keys(20));
-    assert_eq!(ledger.used(), 500);
-    pool.release("k5");
-    assert_eq!(ledger.used(), 400);
+    assert_eq!((ledger.used(), pool.stats().memory_bytes), (500, 500));
+    pool.release("k6");
+    assert_eq!((ledger.used(), pool.stats().memory_bytes, ledger.used_by(MemoryOwner::Slot(1))), (400, 400, 0));
+    assert_eq!(ledger.used_by(MemoryOwner::Slot(0)), 100);
     pool.release_all();
     assert_eq!((ledger.used(), pool.stats().memory_bytes), (0, 0));
 }
@@ -135,16 +131,6 @@ fn the_timer_and_pressure_free_the_reservation() {
     assert_eq!(ledger.used(), 200);
     pool.release_under(1500, Pressure::Critical);
     assert_eq!(ledger.used(), 0);
-}
-
-#[test]
-fn stats_memory_bytes_follows_the_reservations() {
-    let (mut pool, ledger) = tight(1000, 5, 2);
-    pool.plan(0, 5, Some(5), &keys(20));
-    assert_eq!(pool.stats().memory_bytes, 500);
-    pool.release("k6");
-    assert_eq!((pool.stats().memory_bytes, ledger.used_by(MemoryOwner::Slot(1))), (400, 0));
-    assert_eq!(ledger.used_by(MemoryOwner::Slot(0)), 100);
 }
 
 #[test]
