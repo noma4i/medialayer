@@ -1,0 +1,19 @@
+[package]
+name = "medialayer-gen"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "medialayer_gen"
+
+[[bin]]
+name = "medialayer-gen"
+path = "src/main.rs"
+
+[dependencies]
+medialayer = { version = "0.1.0", path = "../core" }
+serde_json = "1.0.151"
+thiserror = "2.0.21"
+
+[dev-dependencies]
+tempfile = "3.27.0"

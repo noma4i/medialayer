@@ -603,12 +603,24 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "serde",
+ "serde_json",
  "sha2",
  "tempfile",
  "thiserror",
  "tokio",
  "uniffi",
  "url",
+]
+
+[[package]]
+name = "medialayer-gen"
+version = "0.1.0"
+dependencies = [
+ "medialayer",
+ "serde_json",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

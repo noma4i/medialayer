@@ -60,7 +60,7 @@ The cache key is the URL. The cache lives on disk; image memory caches stay with
 | `:fifo` | The entry stored first |
 | `:lfu` | The entry used the fewest times |
 | `:largest_first` | The biggest entry |
-| `expire_after 7.days` | Entries older than the given age, then the oldest |
+| `expire_after 7.days` | Entries older than the given age, then the oldest. Written `evict expire_after 7.days` |
 
 `evict` inside `video`, `image` or `audio` overrides the strategy for that kind only.
 
@@ -68,8 +68,8 @@ The cache key is the URL. The cache lives on disk; image memory caches stay with
 
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
-| `cover` | none | Name of the field holding a cover image URL. If given, the cover shows until the video is ready. If not, the first frame is cut from the first chunk and shown instead |
-| `prefetch from:, to:` | 2, 5 | Pages ahead of the active page whose first chunk is loaded in advance. `from: 2, to: 5` loads the pages 2 to 5 ahead |
+| `cover` | none | Name of the field of your own model that holds the cover image URL (the symbol is only a name for your data). The generated type gets an optional `cover` parameter. If given, the cover shows until the video is ready. If not, the first frame is cut from the first chunk and shown instead |
+| `prefetch from:, to:` | 2, 5 | Pages ahead of the active page whose first chunk is loaded in advance. Both ends are included: `from: 2, to: 5` loads the pages 2, 3, 4 and 5 ahead |
 | `prefetch depth:` | 2 seconds | How much of the start of each prefetched video is loaded |
 | `pool slots:` | 3 | Number of native players in the pool. A low-memory device gets fewer, at least 2 |
 | `pool reach:` | 1 | Pages kept ready on each side of the active page |
@@ -82,9 +82,9 @@ The cache key is the URL. The cache lives on disk; image memory caches stay with
 
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
-| `blurhash` | none | Name of the field holding a BlurHash string. If given, a blurred preview shows until the image loads. If not, the place stays empty |
+| `blurhash` | none | Name of the field of your own model that holds the BlurHash string. The generated type gets an optional `blurHash` parameter. If given, a blurred preview shows until the image loads. If not, the place stays empty |
 | `size` | none | Pixel size images are decoded at. Smaller means less memory |
-| `prefetch window:` | none | Range of items around the visible ones whose images are loaded in advance |
+| `prefetch window:` | none | Range of items ahead of the visible ones whose images are loaded in advance. `1...3` means items 1 and 2 ahead (the end is not included, as in Ruby) |
 | `evict` | the `cache` strategy | Override of the eviction strategy for images |
 
 ## `audio`
@@ -95,7 +95,7 @@ The cache key is the URL. The cache lives on disk; image memory caches stay with
 
 ## What the generator makes
 
-One type per block, for example `MomentVideo`, `Avatar` and `VoiceNote`, each with the fields you named. A field you marked optional (`cover`, `blurhash`) is optional in the type.
+One type per block, for example `MomentVideo`, `Avatar` and `VoiceNote`. Every type has `url`. A video with `cover` and an image with `blurhash` also get that optional parameter, named `cover` and `blurHash`. The names of the parameters come from the option names, not from the symbols.
 
 ### Swift
 

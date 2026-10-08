@@ -1,0 +1,25 @@
+use medialayer::spec::{type_name, MediaSpec};
+
+use crate::source::{sources, Source};
+
+pub fn kotlin(spec: &MediaSpec, package: &str) -> String {
+    let mut out = format!("package {package}\n\nimport com.noma4i.medialayer.Kind\nimport com.noma4i.medialayer.MediaSource\n");
+    for source in sources(spec) {
+        out.push('\n');
+        out.push_str(&declaration(&source));
+    }
+    out.push_str(&format!("\nobject MediaSpecJson {{\n    const val VALUE: String = \"\"\"{}\"\"\"\n}}\n", spec.to_json()));
+    out
+}
+
+fn declaration(source: &Source) -> String {
+    let optional = source.optional.map(|label| format!("    val {label}: String? = null,\n")).unwrap_or_default();
+    format!(
+        "data class {name}(\n    override val url: String,\n{optional}    override val headers: Map<String, String> = emptyMap(),\n) : MediaSource {{\n    override val kind: Kind get() = Kind.{kind}\n}}\n",
+        name = type_name(source.name),
+        kind = source.kind.to_uppercase(),
+    )
+}
+
+#[cfg(test)]
+mod kotlin_tests;

@@ -1,0 +1,21 @@
+cache do
+  budget 2.gib, min: 64.mib
+  evict :lru
+  namespace headers: [:authorization]
+end
+
+video :moment_video do
+  cover :coverUrl
+  prefetch from: 1, to: 3
+  pool slots: 3
+end
+
+image :avatar do
+  blurhash :blurHash
+  size 288, 288
+  prefetch window: 1...3
+end
+
+audio :voice_note do
+  evict :fifo
+end
