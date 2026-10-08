@@ -107,3 +107,29 @@ async fn inv_api_03_a_native_loader_moves_a_place_through_loading_ready_and_fail
         vec![MediaState::Idle, MediaState::Loading, MediaState::Ready, failure, MediaState::Loading, MediaState::Ready]
     );
 }
+
+#[tokio::test]
+async fn inv_api_13_a_rendered_or_ended_place_is_never_pulled_back_by_a_late_ready_loading_or_declaration() {
+    for settled in [MediaState::Rendered, MediaState::Ended] {
+        let places = Places::new(Handle::current());
+        places.declared("v1", false);
+        places.ready("v1");
+        places.rendered("v1");
+        if settled == MediaState::Ended {
+            places.ended("v1");
+        }
+
+        places.ready("v1");
+        places.item_state("v1", MediaState::Loading);
+        places.declared("v1", false);
+        places.declared("v1", true);
+
+        assert_eq!(places.state("v1"), settled);
+        assert!(settled.is_ready());
+    }
+    let places = Places::new(Handle::current());
+    places.declared("v2", false);
+    places.ended("v2");
+    places.resumed("v2");
+    assert_eq!(places.state("v2"), MediaState::Loading);
+}

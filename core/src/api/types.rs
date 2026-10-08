@@ -48,7 +48,15 @@ pub enum MediaState {
     Idle,
     Loading,
     Ready,
+    Rendered,
+    Ended,
     Failed { detail: String },
+}
+
+impl MediaState {
+    pub fn is_ready(&self) -> bool {
+        matches!(self, MediaState::Ready | MediaState::Rendered | MediaState::Ended)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]

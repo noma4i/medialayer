@@ -18,6 +18,18 @@ fn sources(count: usize) -> Vec<Option<Source>> {
         .collect()
 }
 
+fn image(url: &str) -> Source {
+    Source { url: url.to_string(), headers: HashMap::new(), kind: SourceKind::Image }
+}
+
+fn pages_of(prefix: &str, count: usize) -> Vec<Vec<Source>> {
+    (0..count).map(|index| vec![image(&format!("https://o.test/{prefix}{index}a.jpg")), image(&format!("https://o.test/{prefix}{index}b.jpg"))]).collect()
+}
+
+fn page_urls(prefix: &str, pages: &[usize]) -> HashSet<String> {
+    pages.iter().flat_map(|page| ["a", "b"].map(|side| format!("https://o.test/{prefix}{page}{side}.jpg"))).collect()
+}
+
 fn video(url: &str) -> Source {
     Source { url: url.to_string(), headers: HashMap::new(), kind: SourceKind::Video }
 }
@@ -300,4 +312,65 @@ async fn inv_prefetch_02_set_limits_changes_the_window_and_the_parallelism_for_t
     assert_eq!(rig.prefetcher.counters().requested, 3);
     tokio::time::sleep(Duration::from_millis(30)).await;
     assert_eq!((rig.loader.active(), rig.loader.peak()), (1, 1));
+}
+
+#[tokio::test]
+async fn inv_prefetch_08_named_windows_start_and_cancel_only_their_own_sources_and_leave_the_video_window_alone() {
+    let rig = rig_with(|limits| limits.max_concurrent = 32);
+    rig.loader.hang_all();
+    rig.prefetcher.set_image_windows(HashMap::from([("grid".to_string(), PageWindow { behind: 0, from: 0, to: 2 }), ("posters".to_string(), PageWindow { behind: 0, from: 0, to: 2 })]));
+    rig.prefetcher.set_window(0, sources(20));
+    rig.prefetcher.set_image_window("grid", 0, pages_of("g", 20));
+    rig.prefetcher.set_image_window("posters", 0, pages_of("p", 20));
+    eventually(|| rig.loader.active() == 4 + 4 + 4).await;
+    assert_eq!(rig.prefetcher.counters().cancelled, 0);
+
+    rig.prefetcher.set_image_window("grid", 10, pages_of("g", 20));
+    eventually(|| rig.loader.urls().len() == 16).await;
+    quiet().await;
+
+    assert_eq!(rig.prefetcher.counters().cancelled, 4);
+    assert_eq!(rig.loader.active(), 12);
+    let started: HashSet<String> = rig.loader.urls().into_iter().collect();
+    assert!(page_urls("g", &[10, 11]).is_subset(&started));
+    assert!(page_urls("p", &[0, 1]).is_subset(&started));
+    assert!((2..=5).all(|index| started.contains(&url(index))));
+}
+
+#[tokio::test]
+async fn inv_prefetch_08_a_source_wanted_by_two_windows_loads_once_and_is_cancelled_only_when_no_window_wants_it() {
+    let rig = rig();
+    rig.loader.hang_all();
+    let shared_page = vec![vec![image("https://o.test/shared.jpg")]];
+    rig.prefetcher.set_image_window("one", 0, shared_page.clone());
+    rig.prefetcher.set_image_window("two", 0, shared_page);
+    eventually(|| rig.loader.active() == 1).await;
+
+    rig.prefetcher.set_image_window("one", 0, Vec::new());
+    quiet().await;
+    assert_eq!((rig.loader.urls().len(), rig.loader.active(), rig.prefetcher.counters().cancelled), (1, 1, 0));
+
+    rig.prefetcher.set_image_window("two", 0, Vec::new());
+    eventually(|| rig.loader.active() == 0).await;
+    assert_eq!((rig.loader.urls().len(), rig.prefetcher.counters().cancelled), (1, 1));
+}
+
+#[tokio::test]
+async fn inv_prefetch_10_a_window_takes_the_range_of_its_name_and_an_unknown_name_takes_the_default() {
+    let rig = rig();
+    rig.prefetcher.set_image_windows(HashMap::from([("avatar".to_string(), PageWindow { behind: 1, from: 1, to: 3 })]));
+    let mut events = rig.prefetcher.settled();
+
+    rig.prefetcher.set_image_window("avatar", 5, pages_of("a", 20));
+    for _ in 0..6 {
+        next(&mut events).await;
+    }
+    assert_eq!(rig.loader.urls().into_iter().collect::<HashSet<_>>(), page_urls("a", &[6, 7, 4]));
+
+    rig.prefetcher.set_image_window("other", 5, pages_of("x", 20));
+    for _ in 0..22 {
+        next(&mut events).await;
+    }
+    assert_eq!(rig.loader.urls().len(), 6 + 22);
+    assert_eq!(rig.loader.urls().into_iter().filter(|url| url.starts_with("https://o.test/x")).collect::<HashSet<_>>(), page_urls("x", &[3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]));
 }

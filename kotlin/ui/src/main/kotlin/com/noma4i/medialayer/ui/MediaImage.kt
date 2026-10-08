@@ -1,8 +1,9 @@
 package com.noma4i.medialayer.ui
 
+import android.content.Context
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -15,13 +16,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Constraints
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
+import coil.memory.MemoryCache
 import coil.request.ImageRequest
+import coil.size.Scale
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.Placeholder
+import com.noma4i.medialayer.PixelSize
 import com.noma4i.medialayer.decodeBlurhash
+import com.noma4i.medialayer.imagePixelSize
 import com.noma4i.medialayer.toItem
 import java.nio.ByteBuffer
 import kotlinx.coroutines.Dispatchers
@@ -35,22 +42,24 @@ fun MediaImage(
   content: @Composable (MediaState) -> Unit = {}
 ) {
   val context = LocalContext.current
-  val media = LocalMediaEnvironment.current.media
+  val density = LocalDensity.current.density
+  val environment = LocalMediaEnvironment.current
+  val media = environment.media
   rememberPlace(source, playing = null, muted = null)
-  var state: MediaState by remember(source.url) { mutableStateOf(MediaState.Idle) }
-  val request = remember(source) {
-    ImageRequest.Builder(context).data(MediaImageData(source.url, source.headers)).apply { source.size?.let { (width, height) -> size(width, height) } }.build()
-  }
-  val blur by produceState<ImageBitmap?>(null, media, source, state == MediaState.Ready) {
-    val placeholder = media.placeholder(source.toItem(), state == MediaState.Ready)
-    value = (placeholder as? Placeholder.BlurHash)?.let { decodeBlur(it.hash) }
-  }
-  Box(modifier) {
+  BoxWithConstraints(modifier) {
+    val pixels = decodePixels(source, constraints, density)
+    val scale = contentScale.toScale()
+    val request = remember(source, pixels, scale) { imageRequest(context, source, pixels, scale) }
+    var state: MediaState by remember(source.url) { mutableStateOf(MediaState.Idle) }
+    val blur by produceState<ImageBitmap?>(null, media, source, state == MediaState.Ready) {
+      val placeholder = media.placeholder(source.toItem(), state == MediaState.Ready)
+      value = (placeholder as? Placeholder.BlurHash)?.let { decodeBlur(it.hash) }
+    }
     blur?.let { Image(it, "blurhash", Modifier.fillMaxSize(), contentScale = contentScale) }
     AsyncImage(
       model = request,
       contentDescription = null,
-      imageLoader = LocalMediaEnvironment.current.imageLoader,
+      imageLoader = environment.imageLoader,
       contentScale = contentScale,
       onState = { painterState ->
         state = painterState.toMediaState()
@@ -60,6 +69,30 @@ fun MediaImage(
     )
     content(state)
   }
+}
+
+private fun decodePixels(source: MediaSource, constraints: Constraints, density: Float): PixelSize? {
+  val declared = source.size?.let { (width, height) -> PixelSize(width.toUInt(), height.toUInt()) }
+  if (declared != null) return declared
+  if (!constraints.hasBoundedWidth || !constraints.hasBoundedHeight) return null
+  return imagePixelSize(constraints.maxWidth / density.toDouble(), constraints.maxHeight / density.toDouble(), density.toDouble(), null)
+}
+
+internal fun imageRequest(context: Context, source: MediaSource, pixels: PixelSize?, scale: Scale): ImageRequest =
+  ImageRequest.Builder(context)
+    .data(MediaImageData(source.url, source.headers))
+    .scale(scale)
+    .apply {
+      pixels?.let {
+        size(it.width.toInt(), it.height.toInt())
+        memoryCacheKey(MemoryCache.Key("${source.url}|${it.width}x${it.height}|$scale"))
+      }
+    }
+    .build()
+
+internal fun ContentScale.toScale(): Scale = when (this) {
+  ContentScale.Fit, ContentScale.Inside, ContentScale.FillWidth, ContentScale.FillHeight -> Scale.FIT
+  else -> Scale.FILL
 }
 
 private suspend fun decodeBlur(hash: String): ImageBitmap? = withContext(Dispatchers.Default) {

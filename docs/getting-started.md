@@ -53,7 +53,7 @@ class YupiApp : Application() {
 }
 ```
 
-Opening returns at once. Nothing is read from disk until it is needed.
+Opening returns at once. Nothing is read from disk until it is needed. To take the defaults from your `.mdl` file, pass `spec` ([media files](media-files.md)).
 
 ## Open with full control
 
@@ -71,7 +71,8 @@ let media = try MediaLayer.open(config: OpenConfig(
   defaults: defaultLimits(),
   pool: defaultPoolSettings(),
   namespaceHeaders: ["Authorization"],
-  memoryReleaser: nil
+  memoryReleaser: nil,
+  silent: false
 ))
 ```
 
@@ -87,7 +88,8 @@ val media = MediaLayer.open(OpenConfig(
   defaults = defaultLimits(),
   pool = defaultPoolSettings(),
   namespaceHeaders = listOf("Authorization"),
-  memoryReleaser = null
+  memoryReleaser = null,
+  silent = false
 ))
 ```
 

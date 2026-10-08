@@ -27,6 +27,7 @@ pub struct StageParts {
     pub prefetcher: Prefetcher,
     pub clock: Arc<dyn Clock>,
     pub watchdog: WatchdogConfig,
+    pub silent: bool,
     pub tick: Duration,
 }
 
@@ -47,6 +48,7 @@ struct State {
     tasks: HashMap<String, AbortOnDrop>,
     catalog: HashMap<String, MediaItem>,
     views: HashMap<String, u64>,
+    rates: HashMap<String, f32>,
 }
 
 struct Inner {
@@ -57,6 +59,7 @@ struct Inner {
     prefetcher: Prefetcher,
     clock: Arc<dyn Clock>,
     watchdog: WatchdogConfig,
+    silent: bool,
     handle: Handle,
     tick: Mutex<Option<AbortOnDrop>>,
     foreground_passes: AtomicU64,
@@ -123,6 +126,7 @@ impl Stage {
             tasks: HashMap::new(),
             catalog: HashMap::new(),
             views: HashMap::new(),
+            rates: HashMap::new(),
         };
         let inner = Arc::new(Inner {
             state: Mutex::new(state),
@@ -132,6 +136,7 @@ impl Stage {
             prefetcher: parts.prefetcher,
             clock: parts.clock,
             watchdog: parts.watchdog,
+            silent: parts.silent,
             handle: handle.clone(),
             tick: Mutex::new(None),
             foreground_passes: AtomicU64::new(0),
@@ -175,10 +180,11 @@ impl Stage {
         let mut calls = Vec::new();
         let mut actions = Vec::new();
         let mut unloaded = Vec::new();
+        let mut resumed = Vec::new();
         {
             let mut state = self.state();
             for command in commands {
-                self.translate(&mut state, command, &mut calls, &mut actions, &mut unloaded);
+                self.translate(&mut state, command, &mut calls, &mut actions, &mut unloaded, &mut resumed);
             }
         }
         for (slot, call) in calls {
@@ -186,6 +192,9 @@ impl Stage {
         }
         for key in unloaded {
             self.inner.places.unloaded(&key);
+        }
+        for key in resumed {
+            self.inner.places.resumed(&key);
         }
         for (key, action) in actions {
             self.perform(key, action);
@@ -199,6 +208,7 @@ impl Stage {
         calls: &mut Vec<(usize, SlotCall)>,
         actions: &mut Vec<(String, Action)>,
         unloaded: &mut Vec<String>,
+        resumed: &mut Vec<String>,
     ) {
         match &command {
             Command::Load { slot, key } => {
@@ -210,8 +220,15 @@ impl Stage {
                 state.slot_keys.insert(*slot, key.clone());
                 state.loaded.insert(key.clone(), Loaded { slot: *slot, recovery, source, route: route.clone() });
                 let view = state.views.get(key).copied();
+                let rate = state.rates.get(key).copied();
                 let slot = *slot;
                 calls.push(SlotCall::from_command(command, Some(route)));
+                if self.inner.silent {
+                    calls.push((slot, SlotCall::Mute));
+                }
+                if let Some(rate) = rate {
+                    calls.push((slot, SlotCall::Rate { rate }));
+                }
                 if let Some(view_token) = view {
                     calls.push((slot, SlotCall::Attach { view_token }));
                 }
@@ -227,10 +244,14 @@ impl Stage {
             Command::Play { slot } | Command::Pause { slot } => {
                 let event = if matches!(command, Command::Play { .. }) { Event::Play { position_ms: 0 } } else { Event::Pause };
                 if let Some(key) = state.slot_keys.get(slot).cloned() {
+                    if matches!(command, Command::Play { .. }) {
+                        resumed.push(key.clone());
+                    }
                     self.advance(state, &key, event, actions);
                 }
                 calls.push(SlotCall::from_command(command, None));
             }
+            Command::Unmute { slot } if self.inner.silent => calls.push((*slot, SlotCall::Mute)),
             _ => calls.push(SlotCall::from_command(command, None)),
         }
     }

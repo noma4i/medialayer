@@ -18,3 +18,5 @@ fun MediaLayer.stateFlow(key: String): Flow<MediaState> = callbackFlow {
   })
   awaitClose { subscription.close() }
 }.conflate()
+
+val MediaState.isReady: Boolean get() = this is MediaState.Ready || this is MediaState.Rendered || this is MediaState.Ended

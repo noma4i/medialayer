@@ -2,6 +2,7 @@ use crate::limits::{EvictionStrategy, Limits as CoreLimits};
 use crate::api::PoolSettings as CorePoolSettings;
 use crate::memory::DeviceMemory as CoreDeviceMemory;
 use crate::pool::ProfileTuning;
+use crate::prefetch::PageWindow;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum Evict {
@@ -47,16 +48,35 @@ pub struct PoolSettings {
     pub low_ram_reach: u32,
 }
 
+impl From<CorePoolSettings> for PoolSettings {
+    fn from(core: CorePoolSettings) -> Self {
+        PoolSettings {
+            reach: core.reach as u32,
+            hold_off_ms: core.hold_off_ms,
+            trim_delay_ms: core.trim_delay_ms,
+            low_ram_slots: core.profile.low_slots as u32,
+            low_ram_reach: core.profile.low_reach as u32,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ImageWindow {
+    pub name: String,
+    pub behind: u32,
+    pub from: u32,
+    pub to: u32,
+}
+
+impl From<&ImageWindow> for (String, PageWindow) {
+    fn from(window: &ImageWindow) -> Self {
+        (window.name.clone(), PageWindow { behind: window.behind as usize, from: window.from as usize, to: window.to as usize })
+    }
+}
+
 #[uniffi::export]
 pub fn default_pool_settings() -> PoolSettings {
-    let core = CorePoolSettings::default();
-    PoolSettings {
-        reach: core.reach as u32,
-        hold_off_ms: core.hold_off_ms,
-        trim_delay_ms: core.trim_delay_ms,
-        low_ram_slots: core.profile.low_slots as u32,
-        low_ram_reach: core.profile.low_reach as u32,
-    }
+    CorePoolSettings::default().into()
 }
 
 impl From<PoolSettings> for CorePoolSettings {

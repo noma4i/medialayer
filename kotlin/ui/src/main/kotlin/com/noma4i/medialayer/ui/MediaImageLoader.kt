@@ -7,6 +7,7 @@ import coil.decode.ImageSource
 import coil.fetch.Fetcher
 import coil.fetch.SourceResult
 import coil.key.Keyer
+import coil.memory.MemoryCache
 import coil.request.CachePolicy
 import coil.request.Options
 import okio.Buffer
@@ -17,8 +18,12 @@ fun interface ImageBytes {
 
 internal data class MediaImageData(val url: String, val headers: Map<String, String>)
 
-fun mediaImageLoader(context: Context, bytes: ImageBytes): ImageLoader =
-  ImageLoader.Builder(context)
+const val DEFAULT_IMAGE_MEMORY_BYTES: Int = 128 * 1024 * 1024
+
+fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: Int = DEFAULT_IMAGE_MEMORY_BYTES): ImageLoader {
+  require(memoryBytes > 0) { "memoryBytes must be positive" }
+  return ImageLoader.Builder(context)
+    .memoryCache(MemoryCache.Builder(context).maxSizeBytes(memoryBytes).build())
     .components {
       add(Keyer<MediaImageData> { data, _ -> data.url })
       add(object : Fetcher.Factory<MediaImageData> {
@@ -29,3 +34,4 @@ fun mediaImageLoader(context: Context, bytes: ImageBytes): ImageLoader =
     .diskCache(null)
     .diskCachePolicy(CachePolicy.DISABLED)
     .build()
+}

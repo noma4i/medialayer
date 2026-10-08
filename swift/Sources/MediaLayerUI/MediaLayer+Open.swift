@@ -1,5 +1,6 @@
 import Foundation
 import MediaLayer
+import Nuke
 import ObjectiveC
 
 nonisolated(unsafe) private var lifetimeKey: UInt8 = 0
@@ -9,23 +10,76 @@ extension MediaLayer {
     fetcher: Fetcher,
     settings: SettingsStore,
     directory: URL? = nil,
-    startMuted: Bool = false
+    startMuted: Bool = false,
+    silent: Bool = false,
+    imageMemoryBytes: Int = MediaImagePipeline.defaultMemoryLimit
   ) throws -> MediaLayer {
-    let factory = AVQueuePlayerSlotFactory(startMuted: startMuted || Self.isDebugBuild)
-    let media = try MediaLayer.open(config: OpenConfig(
-      dir: try (directory ?? Self.defaultDirectory()).path,
-      fetcher: fetcher,
-      settings: settings,
-      slots: factory,
-      device: Self.deviceMemory(),
-      defaults: defaultLimits(),
-      pool: defaultPoolSettings(),
-      namespaceHeaders: [],
-      memoryReleaser: ImageMemoryReleaser()
-    ))
+    let defaults = SpecDefaults(defaults: defaultLimits(), pool: defaultPoolSettings(), namespaceHeaders: [])
+    return try open(
+      defaults: defaults, fetcher: fetcher, settings: settings, directory: directory, startMuted: startMuted, silent: silent, imageMemoryBytes: imageMemoryBytes
+    )
+  }
+
+  public static func open(
+    spec: String,
+    fetcher: Fetcher,
+    settings: SettingsStore,
+    directory: URL? = nil,
+    startMuted: Bool = false,
+    silent: Bool = false,
+    imageMemoryBytes: Int = MediaImagePipeline.defaultMemoryLimit
+  ) throws -> MediaLayer {
+    try open(
+      defaults: specDefaults(json: spec), fetcher: fetcher, settings: settings, directory: directory, startMuted: startMuted, silent: silent,
+      imageMemoryBytes: imageMemoryBytes
+    )
+  }
+
+  private static func open(
+    defaults: SpecDefaults,
+    fetcher: Fetcher,
+    settings: SettingsStore,
+    directory: URL?,
+    startMuted: Bool,
+    silent: Bool,
+    imageMemoryBytes: Int
+  ) throws -> MediaLayer {
+    guard imageMemoryBytes > 0 else { throw MediaError.InvalidSpec(detail: "imageMemoryBytes must be positive") }
+    let imageCache = ImageCache(costLimit: imageMemoryBytes)
+    let (config, factory) = try makeConfig(
+      defaults: defaults, fetcher: fetcher, settings: settings, directory: directory, startMuted: startMuted, silent: silent, imageCache: imageCache
+    )
+    let media = try MediaLayer.open(config: config)
+    ImageMemory.install(imageCache, on: media)
     media.followSystem(events: media.playerEvents(), link: factory.events, center: .default, names: .system)
     Media.current = media
     return media
+  }
+
+  static func makeConfig(
+    defaults: SpecDefaults,
+    fetcher: Fetcher,
+    settings: SettingsStore,
+    directory: URL?,
+    startMuted: Bool,
+    silent: Bool,
+    imageCache: ImageCache = ImageCache(costLimit: MediaImagePipeline.defaultMemoryLimit)
+  ) throws -> (OpenConfig, AVQueuePlayerSlotFactory) {
+    let factory = AVQueuePlayerSlotFactory(startMuted: startMuted || silent || isDebugBuild)
+    let config = OpenConfig(
+      dir: try (directory ?? defaultDirectory()).path,
+      fetcher: fetcher,
+      settings: settings,
+      slots: factory,
+      device: deviceMemory(),
+      defaults: defaults.defaults,
+      pool: defaults.pool,
+      namespaceHeaders: defaults.namespaceHeaders,
+      imageWindows: defaults.imageWindows,
+      memoryReleaser: ImageMemoryReleaser(cache: imageCache),
+      silent: silent
+    )
+    return (config, factory)
   }
 
   func followSystem(events: PlayerEventsProtocol, link: PlayerEventsLink, center: NotificationCenter, names: SystemSignalNames) {

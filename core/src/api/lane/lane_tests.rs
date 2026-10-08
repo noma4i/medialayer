@@ -16,13 +16,14 @@ fn pending_after(calls: Vec<SlotCall>) -> Vec<SlotCall> {
 }
 
 #[test]
-fn inv_api_01_a_new_source_drops_every_command_for_the_old_one_but_keeps_the_sound_state() {
+fn inv_api_01_inv_api_16_a_new_source_drops_every_command_for_the_old_one_but_keeps_the_sound_state() {
     let cases = [
         ("load after load", vec![load("a"), Preroll, Play, load("b")], vec![load("b")]),
         ("load after retain and pause", vec![Retain(RetainLevel::Warm), Pause, load("b")], vec![load("b")]),
         ("load keeps the last mute", vec![Mute, Play, Unmute, Mute, load("b")], vec![Mute, load("b")]),
         ("unload after load", vec![load("a"), Play, Unload], vec![Unload]),
         ("a new source drops the view and the seek of the old one", vec![Attach { view_token: 1 }, Seek { position_ms: 5 }, load("b")], vec![load("b")]),
+        ("a new source drops the rate of the old one", vec![Rate { rate: 2.0 }, load("b")], vec![load("b")]),
         ("a view and a seek stay for the current source", vec![Attach { view_token: 1 }, Detach, Seek { position_ms: 5 }], vec![Attach { view_token: 1 }, Detach, Seek { position_ms: 5 }]),
         ("a reload keeps its unload", vec![Unload, load("b")], vec![Unload, load("b")]),
         ("a second load after a reload keeps the unload", vec![Unload, load("a"), Play, load("b")], vec![Unload, load("b")]),
@@ -35,8 +36,8 @@ fn inv_api_01_a_new_source_drops_every_command_for_the_old_one_but_keeps_the_sou
 }
 
 #[test]
-fn inv_api_01_an_overflowing_queue_folds_to_the_last_state_of_each_kind() {
-    let mut calls = vec![load("a")];
+fn inv_api_01_inv_api_16_an_overflowing_queue_folds_to_the_last_state_of_each_kind() {
+    let mut calls = vec![load("a"), Rate { rate: 1.5 }, Rate { rate: 2.0 }];
     for _ in 0..50 {
         calls.extend([Preroll, Play, Pause, Mute, Unmute, Retain(RetainLevel::Hot), Retain(RetainLevel::Warm)]);
     }
@@ -54,5 +55,6 @@ fn inv_api_01_an_overflowing_queue_folds_to_the_last_state_of_each_kind() {
     assert_eq!(folded.iter().rfind(|call| matches!(call, Play | Pause)), Some(&Play));
     assert_eq!(folded.iter().rfind(|call| matches!(call, Mute | Unmute)), Some(&Unmute));
     assert_eq!(folded.iter().rfind(|call| matches!(call, Retain(_))), Some(&Retain(RetainLevel::Warm)));
+    assert_eq!(folded.iter().rfind(|call| matches!(call, Rate { .. })), Some(&Rate { rate: 2.0 }));
     assert_eq!(folded.iter().filter(|call| matches!(call, Load { .. })).count(), 1);
 }

@@ -21,7 +21,7 @@ impl Stage {
 
     pub fn visual_ready(&self, slot: usize) {
         if let Some(key) = self.key_at(slot) {
-            self.inner.places.ready(&key);
+            self.inner.places.rendered(&key);
         }
     }
 
@@ -39,6 +39,7 @@ impl Stage {
     pub fn ended(&self, slot: usize) {
         if let Some(key) = self.key_at(slot) {
             self.feed(&key, Event::Pause);
+            self.inner.places.ended(&key);
         }
     }
 
@@ -129,6 +130,9 @@ impl Stage {
                 (loaded.slot, SlotCall::Unload),
                 (loaded.slot, SlotCall::Load { key: key.to_string(), route: loaded.route.clone() }),
             ];
+            if let Some(rate) = state.rates.get(key) {
+                calls.push((loaded.slot, SlotCall::Rate { rate: *rate }));
+            }
             if state.is_playing(key) {
                 calls.push((loaded.slot, SlotCall::Play));
             }

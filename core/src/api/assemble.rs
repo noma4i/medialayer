@@ -10,7 +10,7 @@ use crate::identity::cache_key;
 use crate::limits::{Limits, LimitsError};
 use crate::memory::{effective_ceiling, DeviceMemory, Ledger, ShareTuning};
 use crate::pool::{DeviceProfile, PoolConfig, ProfileTuning, Ring};
-use crate::prefetch::{PrefetchLedger, Prefetcher, ProxyLoader};
+use crate::prefetch::{PageWindow, PrefetchLedger, Prefetcher, ProxyLoader};
 use crate::proxy::{ByteStore, Config as ProxyConfig, Proxy};
 use crate::session::WatchdogConfig;
 use crate::spec::PoolSpec;
@@ -67,6 +67,8 @@ pub struct Assembly {
     pub defaults: Limits,
     pub pool: PoolSettings,
     pub namespace_headers: Vec<String>,
+    pub image_windows: Vec<(String, PageWindow)>,
+    pub silent: bool,
     pub watchdog: WatchdogConfig,
     pub stats_interval: Duration,
 }
@@ -146,7 +148,7 @@ impl PrefetchControl for Prefetcher {
 }
 
 pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
-    let Assembly { dir, fetcher, settings, factory, device, defaults, pool, namespace_headers, watchdog, stats_interval } = config;
+    let Assembly { dir, fetcher, settings, factory, device, defaults, pool, namespace_headers, image_windows, silent, watchdog, stats_interval } = config;
     defaults.validate()?;
     let handle = Handle::current();
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
@@ -159,6 +161,7 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
     let dedupe_window = Duration::from_secs(defaults.dedupe_window_seconds.into());
     let prefetch_ledger = PrefetchLedger::new(dedupe_window, defaults.dedupe_max_entries as usize);
     let prefetcher = Prefetcher::new(Arc::new(ProxyLoader::new(proxy.clone())), &defaults, prefetch_ledger, clock.clone());
+    prefetcher.set_image_windows(image_windows.into_iter().collect());
     let routes = Arc::new(Routes::new(proxy.clone(), Arc::new(cache.clone())));
     let places = Arc::new(Places::new(handle.clone()));
     let ring_config = pool_config(&defaults, device, &pool);
@@ -173,6 +176,7 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
             prefetcher: prefetcher.clone(),
             clock: clock.clone(),
             watchdog,
+            silent,
             tick,
         },
     );

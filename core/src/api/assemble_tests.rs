@@ -135,3 +135,20 @@ fn inv_api_09_pool_settings_take_reach_and_timings_from_the_spec() {
     assert_eq!((settings.profile.low_slots, settings.profile.low_reach), (3, 1));
     assert_eq!((PoolSettings::default().profile.low_slots, PoolSettings::default().profile.low_reach), (2, 0));
 }
+
+#[tokio::test]
+async fn inv_prefetch_10_assembling_with_image_windows_gives_each_name_its_range() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = assembly(dir.path(), Arc::new(MockFetcher::new()), shared::<MockFactory>());
+    config.image_windows = vec![("avatar".to_string(), crate::prefetch::PageWindow { behind: 0, from: 1, to: 2 })];
+    let parts = assemble(config).await.unwrap();
+    let pages = |count: usize| -> Vec<Vec<MediaItem>> {
+        (0..count).map(|index| vec![MediaItem::bare(&format!("https://o.test/p{index}.jpg"), Kind::Image)]).collect()
+    };
+
+    parts.stage.set_image_window("avatar", 0, pages(5));
+    assert_eq!(parts.prefetcher.counters().requested, 1);
+    parts.stage.set_image_window("grid", 0, pages(5));
+
+    assert_eq!(parts.prefetcher.counters().requested, 1 + 5);
+}

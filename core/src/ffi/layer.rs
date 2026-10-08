@@ -1,6 +1,6 @@
 use super::events::PlayerEvents;
 use super::fetcher::{Fetcher, ForeignFetcher};
-use super::limits::{DeviceMemory, Limits, PoolSettings};
+use super::limits::{DeviceMemory, ImageWindow, Limits, PoolSettings};
 use crate::api::{
     assemble, placeholder_for, CacheState, MemoryRelease, Placeholder, spawn_pulse, AbortOnDrop, Assembly, ControlPorts, Controls, Kind, MediaError, MediaItem, MediaState, MediaStats, Parts, PlaybackRoute,
     Places, PlayerSlotFactory, Routes, SettingsStore, Signals, Stage, Subscription,
@@ -27,8 +27,12 @@ pub struct OpenConfig {
     pub pool: PoolSettings,
     #[uniffi(default = [])]
     pub namespace_headers: Vec<String>,
+    #[uniffi(default = [])]
+    pub image_windows: Vec<ImageWindow>,
     #[uniffi(default = None)]
     pub memory_releaser: Option<Arc<dyn MemoryReleaser>>,
+    #[uniffi(default = false)]
+    pub silent: bool,
 }
 
 #[uniffi::export(with_foreign)]
@@ -70,6 +74,7 @@ pub struct MediaLayer {
 
 impl MediaLayer {
     pub fn from_parts(runtime: Option<Runtime>, handle: Handle, parts: Parts, releaser: Option<Arc<dyn MemoryReleaser>>) -> Arc<MediaLayer> {
+        let release: Arc<dyn MemoryRelease> = Arc::new(ForeignRelease(releaser));
         let ports = ControlPorts {
             cache: Arc::new(parts.cache),
             pool: Arc::new(parts.stage.clone()),
@@ -79,6 +84,7 @@ impl MediaLayer {
             device: parts.device,
             transport: Arc::new(parts.proxy.clone()),
             pool_settings: parts.pool,
+            release: release.clone(),
         };
         let controls = Arc::new(Controls::new(handle.clone(), ports, parts.defaults));
         let signals = Arc::new(Signals::new(
@@ -86,7 +92,7 @@ impl MediaLayer {
             Arc::new(parts.stage.clone()),
             Arc::new(parts.prefetcher),
             Arc::new(parts.stage.clone()),
-            Arc::new(ForeignRelease(releaser)),
+            release,
             parts.ledger,
             parts.clock,
         ));
@@ -141,6 +147,8 @@ impl MediaLayer {
             defaults: config.defaults.into(),
             pool: config.pool.into(),
             namespace_headers: config.namespace_headers,
+            image_windows: config.image_windows.iter().map(Into::into).collect(),
+            silent: config.silent,
             watchdog: WatchdogConfig::default(),
             stats_interval: STATS_INTERVAL,
         };
@@ -230,8 +238,16 @@ impl MediaLayer {
         self.stage.set_window(active as usize, sources);
     }
 
+    pub fn set_image_window(&self, name: String, active: u32, pages: Vec<Vec<MediaItem>>) {
+        self.stage.set_image_window(&name, active as usize, pages);
+    }
+
     pub fn set_playing(&self, key: String, playing: bool) {
         self.stage.set_playing(&key, playing);
+    }
+
+    pub fn set_rate(&self, key: String, rate: f32) {
+        self.stage.set_rate(&key, rate);
     }
 
     pub fn set_muted_all(&self, muted: bool) {

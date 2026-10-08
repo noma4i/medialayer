@@ -45,6 +45,7 @@ pub trait PlayerSlot: Send + Sync {
     fn attach(&self, view_token: u64);
     fn detach(&self);
     fn seek(&self, position_ms: u64);
+    fn set_rate(&self, rate: f32);
     fn sample(&self) -> SlotSample;
 }
 
@@ -53,7 +54,7 @@ pub trait PlayerSlotFactory: Send + Sync {
     fn create(&self, slot: u32) -> Arc<dyn PlayerSlot>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SlotCall {
     Load { key: String, route: PlaybackRoute },
     Unload,
@@ -66,6 +67,7 @@ pub enum SlotCall {
     Attach { view_token: u64 },
     Detach,
     Seek { position_ms: u64 },
+    Rate { rate: f32 },
 }
 
 impl SlotCall {
@@ -98,6 +100,7 @@ impl SlotCall {
             SlotCall::Attach { view_token } => player.attach(view_token),
             SlotCall::Detach => player.detach(),
             SlotCall::Seek { position_ms } => player.seek(position_ms),
+            SlotCall::Rate { rate } => player.set_rate(rate),
         }
     }
 }

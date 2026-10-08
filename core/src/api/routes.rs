@@ -1,12 +1,14 @@
 use super::error::MediaError;
 use super::ports::CacheControl;
-use super::source::{MediaItem, PlaybackRoute};
+use super::source::{is_local_url, MediaItem, PlaybackRoute};
 use super::types::Kind;
 use crate::hls::is_manifest_url;
 use crate::proxy::{block_key, Proxy, Readiness};
 use crate::session::RouteStaleness;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::io::AsyncReadExt;
+use url::Url;
 
 pub struct Routes {
     proxy: Proxy,
@@ -19,7 +21,7 @@ impl Routes {
     }
 
     pub fn play_url(&self, source: &MediaItem) -> PlaybackRoute {
-        let (hls, looping) = (is_manifest_url(&source.url), source.kind == Kind::Video);
+        let (hls, looping) = (is_manifest_url(&source.url), source.kind == Kind::Video && source.looping);
         match self.proxy.url_for(&source.url, &source.headers) {
             Some(url) => PlaybackRoute { url, headers: HashMap::new(), generation: Some(self.proxy.route_generation()), hls, looping },
             None => PlaybackRoute { url: source.url.clone(), headers: source.headers.clone(), generation: None, hls, looping },
@@ -46,6 +48,9 @@ impl Routes {
     }
 
     pub async fn image_bytes(&self, url: &str, headers: &HashMap<String, String>, limit: u64) -> Result<Vec<u8>, MediaError> {
+        if is_local_url(url) {
+            return read_local_file(url, limit).await;
+        }
         self.proxy.fetch_bytes(url, headers, limit).await.map_err(|error| MediaError::Fetch { detail: error.to_string() })
     }
 
@@ -54,7 +59,22 @@ impl Routes {
     }
 
     pub async fn is_cached(&self, url: &str, headers: &HashMap<String, String>) -> bool {
+        if is_local_url(url) {
+            return true;
+        }
         let key = self.proxy.key_for(url, headers);
         self.cache.contains(&key).await || self.cache.contains(&block_key(&key, 0)).await
     }
+}
+
+async fn read_local_file(url: &str, limit: u64) -> Result<Vec<u8>, MediaError> {
+    let failed = |detail: String| MediaError::Fetch { detail };
+    let path = Url::parse(url).ok().and_then(|parsed| parsed.to_file_path().ok()).ok_or_else(|| failed(format!("{url} is not a file path")))?;
+    let file = tokio::fs::File::open(&path).await.map_err(|error| failed(error.to_string()))?;
+    let mut bytes = Vec::new();
+    file.take(limit.saturating_add(1)).read_to_end(&mut bytes).await.map_err(|error| failed(error.to_string()))?;
+    if bytes.len() as u64 > limit {
+        return Err(failed(format!("file of more than {limit} bytes exceeds the limit")));
+    }
+    Ok(bytes)
 }

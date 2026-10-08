@@ -89,7 +89,7 @@ const VIDEO: &[Rule] = &[
 const IMAGE: &[Rule] = &[
     Rule { word: "blurhash", args: &[Want::Symbol], keys: &[] },
     Rule { word: "size", args: &[Want::Int, Want::Int], keys: &[] },
-    Rule { word: "prefetch", args: &[], keys: &[("window", Want::Range)] },
+    Rule { word: "prefetch", args: &[], keys: &[("window", Want::Range), ("behind", Want::Int)] },
     EVICT,
 ];
 

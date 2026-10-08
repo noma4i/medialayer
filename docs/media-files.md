@@ -25,7 +25,7 @@ end
 image :avatar do
   blurhash :blurHash
   size 288, 288
-  prefetch window: 1...3
+  prefetch window: 1...3, behind: 2
 end
 
 audio :voice_note do
@@ -50,7 +50,7 @@ Durations are written `30.seconds`, `5.minutes`, `2.days`. Sizes are written `64
 | `dedupe entries:` | 500 | Most sources remembered for that skip. The oldest are dropped |
 | `namespace headers:` | none | Request headers that become part of the cache key. By default the key is the URL alone. Set it when the same URL returns different bytes for different users. The key then is the URL plus a hash of the listed header values; a request without those headers keeps the plain URL key. `purge(url)` removes every variant |
 
-UNBUILT: `memory` counts players and proxy buffers. Image decoding in Nuke and Coil is not counted yet.
+UNBUILT: `memory` counts players and proxy buffers. Image decoding in Nuke and Coil is not counted in it. The decoder memory has its own limit, `imageMemoryBytes` of `open`.
 
 The cache key is the URL. The cache lives on disk; image memory caches stay with Nuke and Coil. An entry being read or written is never evicted. If new data still does not fit after eviction, the load fails with `NotEnoughSpace`.
 
@@ -87,9 +87,32 @@ The cache key is the URL. The cache lives on disk; image memory caches stay with
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
 | `blurhash` | none | Name of the field of your own model that holds the BlurHash string. The generated type gets an optional `blurHash` parameter. If given, a blurred preview shows until the image loads. If not, the place stays empty |
-| `size` | none | Pixel size images are decoded at. Smaller means less memory |
-| `prefetch window:` | none | Range of items ahead of the visible ones whose images are loaded in advance. `1...3` means items 1 and 2 ahead (the end is not included, as in Ruby) |
+| `size` | none | Pixel size images are decoded at. It always wins. Without it, the image is decoded at the size of its view in pixels: points times the screen scale, rounded up to a multiple of 8. Smaller means less memory |
+| `prefetch window:` | `0...9` for a window without a block | Range of pages, counted from the active page, whose images are loaded in advance. `1...3` means pages 1 and 2 ahead (the end is not included, as in Ruby). Applies to the image window that has the name of the block |
+| `prefetch behind:` | 0 | Pages behind the active page whose images are loaded in advance |
 | `evict` | the `cache` strategy | Override of the eviction strategy for images |
+
+### Image windows
+
+A grid, a chat or a feed keeps one image window per list. The window has a name. A page is one row, one message or one post, and it can hold several images. `setImageWindow` takes the name, the active page and the sources of every page. The window loads the images of the pages around the active page into the disk cache, nearest pages first. A window is independent of other windows and of the video window. An image that two windows want loads once. An empty list of pages cancels the window.
+
+A window named like an `image` block takes the range of that block (`prefetch window:` and `prefetch behind:`). Any other name takes the default: 2 pages behind, pages 0 to 8 ahead. A `file://` source is never loaded.
+
+#### Swift
+
+```swift
+media.setImageWindow("avatar", active: row, pages: rows.map { $0.map { Avatar(url: $0.avatarUrl) } })
+```
+
+#### Kotlin
+
+```kotlin
+media.setImageWindow("avatar", active = row, pages = rows.map { page -> page.map { Avatar(url = it.avatarUrl) } })
+```
+
+### Image size and memory
+
+`MediaImage` reads the size of its view and the screen scale and asks the decoder for exactly that many pixels, so a grid never decodes full-size photos. `contentMode` (Swift) and `contentScale` (Kotlin) choose between filling and fitting the view. The decoder keeps decoded images in memory by URL and size. An image that is already there shows in the first frame, without a placeholder. The memory limit is `imageMemoryBytes` of `open` (128 MiB by default). `clear()` and `clear(image)` also empty this memory.
 
 ## `audio`
 
@@ -117,4 +140,44 @@ val avatar = Avatar(url = user.avatarUrl, blurHash = user.blurHash)
 val note = VoiceNote(url = message.audioUrl)
 ```
 
-Every value in the file is a default. The generated `MediaSpecJSON` holds all of them; hand the values to `OpenConfig` (`defaults`, `pool`, `namespaceHeaders`). The app or the user can change limits at run time and the new value is saved on the device.
+Every value in the file is a default. The generated `MediaSpecJSON` holds all of them; pass it to `open` as `spec` and the core takes the limits of the `cache` block and the first `video`, the pool settings of the first `video` and the namespace headers. The app or the user can change limits at run time and the new value is saved on the device. A saved value wins over the file at the next launch, and opening never writes to the saved settings. A spec that does not parse or does not validate throws `InvalidSpec`.
+
+### Swift
+
+```swift
+let media = try MediaLayer.open(
+  spec: specJson,
+  fetcher: URLSessionFetcher(),
+  settings: UserDefaultsSettings(),
+  silent: false
+)
+```
+
+### Kotlin
+
+```kotlin
+val media = MediaLayer.open(
+  context = this,
+  spec = specJson,
+  fetcher = OkHttpFetcher(okHttpClient),
+  settings = SharedPreferencesSettings(this),
+  silent = false
+)
+```
+
+## Options of `open`
+
+| Option | Default | Meaning |
+| ------ | ------- | ------- |
+| `fetcher` | none | Network access of the core |
+| `settings` | none | Local storage for saved limits |
+| `spec` | the defaults of the core | JSON from `medialayer-gen spec`. Gives the default limits, the pool settings and the namespace headers |
+| `directory` (Swift) | `Caches/MediaLayer` | Folder of the disk cache. The cache folder of the app on Kotlin |
+| `startMuted` (Swift) | false | Creates every player muted. Debug builds do it always |
+| `callFactory` (Kotlin) | `OkHttpClient()` | HTTP client of the players |
+| `silent` | false | All players stay muted until the app quits. No place and no `Media.muted` can unmute them. Use it while you build the app |
+| `imageMemoryBytes` | 128 MiB | Memory limit of the decoder of images (Nuke `ImageCache`, Coil `MemoryCache`). Must be above 0 |
+
+## Local files
+
+A source with a `file://` URL, such as a clip in the app bundle or a temporary file, plays from its own path. The core does not fetch it, store it in the cache or prefetch it. It counts as cached, so it plays at once, and it shows no placeholder even when a cover is given. The same applies to the `loop`, `onFirstFrame` and `onEnd` options of the place. An image with a `file://` URL is read from its file by `fetchImage`: it is never copied to the disk cache or prefetched.

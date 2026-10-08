@@ -34,6 +34,7 @@ fn media_files_spec() -> MediaSpec {
             blurhash_field: Some("blurHash".into()),
             size: Some((288, 288)),
             prefetch_window: Some((1, 3)),
+            prefetch_behind: Some(2),
             evict: None,
         }],
         audios: vec![AudioSpec { name: "voice_note".into(), evict: Some(Evict::Fifo) }],

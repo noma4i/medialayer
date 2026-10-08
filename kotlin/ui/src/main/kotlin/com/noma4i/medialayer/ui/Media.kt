@@ -42,9 +42,9 @@ fun MediaLayerProvider(media: MediaLayer, imageLoader: ImageLoader? = null, play
 }
 
 @Composable
-internal fun rememberPlace(source: MediaSource, playing: Boolean?, muted: Boolean?): MediaState {
+internal fun rememberPlace(source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean = true): MediaState {
   val media = LocalMediaEnvironment.current.media
-  val item = remember(source) { source.toItem() }
+  val item = remember(source, loop) { source.toItem().copy(looping = loop) }
   DisposableEffect(media, item) {
     media.visible(item, true)
     onDispose { media.visible(item, false) }

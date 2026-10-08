@@ -181,6 +181,7 @@ fn image(name: String, body: &[Call]) -> ImageSpec {
         blurhash_field: argument(body, "blurhash", symbol),
         size: dimensions,
         prefetch_window: keyed(body, "prefetch", "window", range),
+        prefetch_behind: keyed(body, "prefetch", "behind", int),
         evict: argument(body, "evict", evict),
     }
 }

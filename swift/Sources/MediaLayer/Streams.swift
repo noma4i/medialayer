@@ -31,3 +31,12 @@ extension MediaLayer {
     }
   }
 }
+
+extension MediaState {
+  public var isReady: Bool {
+    switch self {
+    case .ready, .rendered, .ended: true
+    case .idle, .loading, .failed: false
+    }
+  }
+}

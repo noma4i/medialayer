@@ -21,6 +21,24 @@ private final class OfflineFetcher: Fetcher, @unchecked Sendable {
   }
 }
 
+private final class RecordingFetcher: Fetcher, @unchecked Sendable {
+  private let lock = NSLock()
+  private var seen: [String] = []
+
+  var urls: [String] { lock.withLock { seen } }
+
+  func fetch(request: FetchRequest) async throws -> FetchResponse {
+    lock.withLock { seen.append(request.url) }
+    throw MediaError.Fetch(detail: "offline")
+  }
+}
+
+private struct Poster: MediaSource {
+  let url: String
+  var kind: Kind { .image }
+  var headers: [String: String] { [:] }
+}
+
 private final class StatsRecorder: StatsListener, @unchecked Sendable {
   private let lock = NSLock()
   private var seen: [UInt64] = []
@@ -42,6 +60,27 @@ struct MediaLayerBridgeTests {
       defaults: defaultLimits(),
       pool: defaultPoolSettings()
     ))
+  }
+
+  @Test
+  func inv_api_17_a_typed_image_window_prefetches_the_remote_images_of_its_pages() async throws {
+    let fetcher = RecordingFetcher()
+    let media = try MediaLayer.open(config: OpenConfig(
+      dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
+      fetcher: fetcher,
+      settings: MemorySettings(),
+      slots: nil,
+      device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
+      defaults: defaultLimits(),
+      pool: defaultPoolSettings(),
+      imageWindows: [ImageWindow(name: "grid", behind: 0, from: 0, to: 2)]
+    ))
+
+    media.setImageWindow("grid", active: 0, pages: (0..<4).map { [Poster(url: "https://o.test/p\($0).jpg")] })
+
+    for _ in 0..<200 where fetcher.urls.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(Set(fetcher.urls) == ["https://o.test/p0.jpg", "https://o.test/p1.jpg"])
   }
 
   @Test

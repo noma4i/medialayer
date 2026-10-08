@@ -27,7 +27,7 @@ The strategy is set once for the cache and can be overridden per media kind (`im
 | `setLimits(...)` | Applies and saves new limits at once, without a restart: a smaller budget evicts, the timeout and the number of parallel loads change in the proxy, the number of player slots changes in the pool |
 | `resetLimits()` | Back to the defaults from your media file |
 | `stats()` | Bytes and files, in total and per media kind |
-| `clear(...)` | Removes everything or one media kind |
+| `clear(...)` | Removes everything or one media kind. Clearing everything or the images also empties the memory of the image decoder |
 | `purge(url)` | Removes one source |
 | `evictNow()` | Runs eviction now |
 

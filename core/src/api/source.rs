@@ -9,6 +9,8 @@ pub struct MediaItem {
     pub headers: HashMap<String, String>,
     pub cover: Option<String>,
     pub blur_hash: Option<String>,
+    #[uniffi(default = true)]
+    pub looping: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -20,9 +22,17 @@ pub struct PlaybackRoute {
     pub looping: bool,
 }
 
+pub fn is_local_url(url: &str) -> bool {
+    url.starts_with("file://")
+}
+
 impl MediaItem {
     pub fn bare(url: &str, kind: Kind) -> MediaItem {
-        MediaItem { kind, url: url.to_string(), headers: HashMap::new(), cover: None, blur_hash: None }
+        MediaItem { kind, url: url.to_string(), headers: HashMap::new(), cover: None, blur_hash: None, looping: true }
+    }
+
+    pub fn is_local(&self) -> bool {
+        is_local_url(&self.url)
     }
 
     #[cfg(test)]

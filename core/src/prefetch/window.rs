@@ -6,6 +6,17 @@ pub struct PrefetchWindow {
     pub to: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PageWindow {
+    pub behind: usize,
+    pub from: usize,
+    pub to: usize,
+}
+
+impl PageWindow {
+    pub const DEFAULT: PageWindow = PageWindow { behind: 2, from: 0, to: 9 };
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrefetchJob {
     pub key: String,
@@ -29,6 +40,26 @@ pub fn wanted_jobs(active: usize, keys: &[Option<String>], window: PrefetchWindo
             keys[index].as_ref().map(|key| PrefetchJob { key: key.clone(), priority: index as i64 - active as i64 })
         })
         .collect()
+}
+
+pub fn wanted_page_jobs(active: usize, pages: &[Vec<String>], window: PageWindow) -> Vec<PrefetchJob> {
+    if active >= pages.len() {
+        return Vec::new();
+    }
+    let ahead_start = active.saturating_add(window.from).min(pages.len());
+    let ahead_end = active.saturating_add(window.to).min(pages.len());
+    let behind_start = active.saturating_sub(window.behind);
+    let order = (ahead_start..ahead_end).chain((behind_start..active).rev());
+    let mut seen = HashSet::new();
+    let mut jobs = Vec::new();
+    for page in order {
+        for key in &pages[page] {
+            if seen.insert(key.as_str()) {
+                jobs.push(PrefetchJob { key: key.clone(), priority: page as i64 - active as i64 });
+            }
+        }
+    }
+    jobs
 }
 
 pub fn diff_window(previous_jobs: &[PrefetchJob], wanted: &[PrefetchJob]) -> WindowDiff {

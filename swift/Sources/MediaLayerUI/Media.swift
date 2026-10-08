@@ -6,6 +6,7 @@ public protocol MediaPlaces: AnyObject, Sendable {
   func visible(source: MediaItem, visible: Bool)
   func setPlaying(key: String, playing: Bool)
   func setMuted(key: String, muted: Bool)
+  func setRate(key: String, rate: Float)
   func setMutedAll(muted: Bool)
   func seek(key: String, positionMs: UInt64)
   func itemState(key: String, state: MediaState)

@@ -77,6 +77,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
   }
 
   override fun unload() = onMain {
+    player?.setPlaybackSpeed(1f)
     hideFromView()
     viewToken = null
     clear()
@@ -104,6 +105,8 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
   override fun mute() = onMain { player?.volume = 0f }
 
   override fun unmute() = onMain { player?.volume = 1f }
+
+  override fun setRate(rate: Float) = onMain { player?.setPlaybackSpeed(rate) }
 
   override fun attach(viewToken: ULong) = onMain {
     this.viewToken = viewToken

@@ -1,4 +1,4 @@
-use super::test_support::{eventually, pool_stats, shared, FakeCache, FakePool, FakePrefetch, FakeSettings, FakeTransport};
+use super::test_support::{eventually, pool_stats, shared, FakeCache, FakePool, FakePrefetch, FakeRelease, FakeSettings, FakeTransport};
 use super::*;
 use crate::cache;
 use crate::limits::Limits;
@@ -18,6 +18,7 @@ struct Rig {
     prefetch: Arc<FakePrefetch>,
     transport: Arc<FakeTransport>,
     settings: Arc<FakeSettings>,
+    release: Arc<FakeRelease>,
     ledger: Ledger,
     controls: Controls,
 }
@@ -35,6 +36,7 @@ fn rig_on(settings: Arc<FakeSettings>) -> Rig {
     let pool: Arc<FakePool> = shared();
     let prefetch: Arc<FakePrefetch> = shared();
     let transport: Arc<FakeTransport> = shared();
+    let release: Arc<FakeRelease> = shared();
     let ledger = Ledger::new(effective_ceiling(Limits::default().memory_budget, DEVICE, ShareTuning::default()));
     let ports = ControlPorts {
         cache: cache.clone(),
@@ -45,9 +47,10 @@ fn rig_on(settings: Arc<FakeSettings>) -> Rig {
         device: DEVICE,
         transport: transport.clone(),
         pool_settings: PoolSettings::default(),
+        release: release.clone(),
     };
     let controls = Controls::new(Handle::current(), ports, Limits::default());
-    Rig { cache, pool, prefetch, transport, settings, ledger, controls }
+    Rig { cache, pool, prefetch, transport, settings, release, ledger, controls }
 }
 
 fn smaller_budget() -> Limits {
@@ -144,6 +147,21 @@ async fn inv_api_07_clear_purge_and_evict_now_go_to_the_cache() {
     assert_eq!(*rig.cache.cleared.lock().unwrap(), vec![Some(cache::Kind::Stream), None]);
     assert_eq!(*rig.cache.purged.lock().unwrap(), vec!["https://cdn.test/a.mp4".to_string()]);
     assert_eq!(rig.cache.evictions.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn inv_image_03_clearing_everything_or_the_images_drops_the_decoder_memory_and_another_kind_does_not() {
+    let rig = rig_with_saved(None);
+    let drops = || rig.release.drops.load(Ordering::SeqCst);
+
+    rig.controls.clear(Some(Kind::Video)).await;
+    rig.controls.clear(Some(Kind::Audio)).await;
+    assert_eq!(drops(), 0);
+
+    rig.controls.clear(Some(Kind::Image)).await;
+    assert_eq!(drops(), 1);
+    rig.controls.clear(None).await;
+    assert_eq!(drops(), 2);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

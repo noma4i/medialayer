@@ -69,7 +69,9 @@ fn config(dir: &std::path::Path, fetcher: Arc<dyn Fetcher>, settings: Arc<FakeSe
         defaults: default_limits(),
         pool: default_pool_settings(),
         namespace_headers: Vec::new(),
+        image_windows: Vec::new(),
         memory_releaser: None,
+        silent: false,
     }
 }
 
@@ -298,4 +300,83 @@ fn inv_ffi_03_an_item_state_from_a_native_loader_reaches_the_state_subscribers_a
     layer.player_events().attach(url.to_string(), 5);
     let (_, player) = factory.slot_holding(url).unwrap();
     caller.block_on(eventually(|| player.calls().contains(&SlotCall::Seek { position_ms: 1_500 }) && player.calls().contains(&SlotCall::Attach { view_token: 5 })));
+}
+
+#[test]
+fn inv_ffi_05_open_takes_the_spec_defaults_without_writing_them_and_a_saved_limit_wins_over_them() {
+    let spec = crate::spec::MediaSpec {
+        cache: crate::spec::CacheSpec { budget: 3_000_000_000, ..Default::default() },
+        videos: vec![crate::spec::VideoSpec { pool: crate::spec::PoolSpec { slots: 5, ..Default::default() }, ..crate::spec::VideoSpec::new("clip") }],
+        ..Default::default()
+    };
+    let parsed = crate::ffi::spec_defaults(spec.to_json()).unwrap();
+    let settings: Arc<FakeSettings> = shared();
+    let caller = caller();
+    let from_spec = |dir: &std::path::Path| {
+        let mut open = config(dir, Arc::new(Offline), settings.clone(), None);
+        open.defaults = parsed.defaults;
+        open.pool = parsed.pool;
+        MediaLayer::open(open).unwrap()
+    };
+    let first_dir = tempfile::tempdir().unwrap();
+
+    let layer = from_spec(first_dir.path());
+    let limits = caller.block_on(layer.limits());
+
+    assert_eq!((limits.budget, limits.slots), (3_000_000_000, 5));
+    assert!(settings.writes.lock().unwrap().is_empty());
+    let saved = Limits { budget: 600_000_000, ..parsed.defaults };
+    caller.block_on(layer.set_limits(saved)).unwrap();
+    drop(layer);
+    let second_dir = tempfile::tempdir().unwrap();
+    assert_eq!(caller.block_on(from_spec(second_dir.path()).limits()), saved);
+}
+
+#[test]
+fn inv_ffi_05_namespace_headers_given_to_open_give_each_header_value_its_own_cache_entry() {
+    let caller = caller();
+    let fetch_twice = |namespace: Vec<String>| {
+        let dir = tempfile::tempdir().unwrap();
+        let origin = Arc::new(Origin::default());
+        let mut open = config(dir.path(), origin.clone(), shared::<FakeSettings>(), None);
+        open.namespace_headers = namespace;
+        let layer = MediaLayer::open(open).unwrap();
+        for token in ["one", "two"] {
+            let headers = HashMap::from([("Authorization".to_string(), token.to_string())]);
+            caller.block_on(layer.fetch_image("https://o.test/a.jpg".to_string(), headers)).unwrap();
+        }
+        let seen = origin.seen.lock().unwrap().len();
+        seen
+    };
+
+    assert_eq!((fetch_twice(Vec::new()), fetch_twice(vec!["Authorization".to_string()])), (1, 2));
+}
+
+#[test]
+fn inv_api_15_the_placeholder_of_a_local_file_is_empty_even_when_it_names_a_cover() {
+    let dir = tempfile::tempdir().unwrap();
+    let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), None)).unwrap();
+    let local = MediaItem { cover: Some("https://o.test/cover.jpg".to_string()), ..MediaItem::bare_video("file:///bundle/intro.mp4") };
+    let remote = MediaItem { cover: Some("https://o.test/cover.jpg".to_string()), ..MediaItem::bare_video("https://o.test/a.mp4") };
+
+    assert_eq!(caller().block_on(layer.placeholder(local, false)), crate::api::Placeholder::None);
+    assert_eq!(caller().block_on(layer.placeholder(remote, false)), crate::api::Placeholder::Cover { url: "https://o.test/cover.jpg".to_string() });
+}
+
+fn poster_pages(count: usize) -> Vec<Vec<MediaItem>> {
+    (0..count).map(|index| vec![MediaItem::bare(&format!("https://o.test/p{index}.jpg"), crate::api::Kind::Image)]).collect()
+}
+
+#[test]
+fn inv_ffi_06_an_image_prefetched_by_a_window_is_a_cache_hit_for_fetch_image() {
+    let dir = tempfile::tempdir().unwrap();
+    let (layer, origin) = origin_layer(dir.path());
+    let caller = caller();
+
+    layer.set_image_window("grid".to_string(), 0, poster_pages(1));
+    caller.block_on(eventually(|| !origin.seen.lock().unwrap().is_empty()));
+    let fetched = caller.block_on(layer.fetch_image("https://o.test/p0.jpg".to_string(), HashMap::new()));
+
+    assert_eq!(fetched, Ok(b"origin bytes".to_vec()));
+    assert_eq!(origin.seen.lock().unwrap().len(), 1);
 }

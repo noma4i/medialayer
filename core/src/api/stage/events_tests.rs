@@ -31,9 +31,11 @@ async fn inv_api_03_the_ready_events_move_a_declared_place_to_ready() {
     eventually(|| rig.factory.slot_holding(&url_of(0)).is_some()).await;
     let (slot, _) = rig.holder(&url_of(0));
 
+    stage.ready(slot as usize);
+    assert_eq!(rig.parts.places.state(&url_of(0)), MediaState::Ready);
     stage.visual_ready(slot as usize);
 
-    assert_eq!(rig.parts.places.state(&url_of(0)), MediaState::Ready);
+    assert_eq!(rig.parts.places.state(&url_of(0)), MediaState::Rendered);
 }
 
 #[tokio::test]
@@ -157,4 +159,26 @@ async fn inv_api_06_a_foreground_pass_that_finds_the_proxy_down_is_retried_until
     rig.parts.proxy.restart(0).await.unwrap();
 
     eventually(|| plays() > before).await;
+}
+
+#[tokio::test]
+async fn inv_api_13_a_slot_that_renders_ends_and_plays_again_moves_the_place_through_rendered_and_ended() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    let (slot, _) = playing(&rig, video(&url_of(0))).await;
+    stage.visible(video(&url_of(0)), true);
+    let state = || rig.parts.places.state(&url_of(0));
+
+    stage.ready(slot as usize);
+    assert_eq!(state(), MediaState::Ready);
+    stage.visual_ready(slot as usize);
+    assert_eq!(state(), MediaState::Rendered);
+    stage.ended(slot as usize);
+    assert_eq!(state(), MediaState::Ended);
+    stage.visual_ready(slot as usize);
+    assert_eq!(state(), MediaState::Ended);
+    stage.set_playing(&url_of(0), false);
+    stage.set_playing(&url_of(0), true);
+
+    eventually(|| state() == MediaState::Rendered).await;
 }

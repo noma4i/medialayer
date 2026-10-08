@@ -1,7 +1,7 @@
 use super::error::MediaError;
 use super::hub::{Deliver, Hub, Subscription};
 use super::assemble::{pool_config, PoolSettings};
-use super::ports::{CacheControl, PoolControl, PrefetchControl, SettingsStore, TransportControl};
+use super::ports::{CacheControl, MemoryRelease, PoolControl, PrefetchControl, SettingsStore, TransportControl};
 use super::types::{Kind, MediaStats};
 use crate::limits::{resolve, Limits};
 use crate::memory::{effective_ceiling, DeviceMemory, Ledger, ShareTuning};
@@ -20,6 +20,7 @@ pub struct ControlPorts {
     pub device: DeviceMemory,
     pub transport: Arc<dyn TransportControl>,
     pub pool_settings: PoolSettings,
+    pub release: Arc<dyn MemoryRelease>,
 }
 
 pub struct Controls {
@@ -84,6 +85,10 @@ impl Controls {
 
     pub async fn clear(&self, kind: Option<Kind>) {
         self.ports.cache.clear(kind.map(Into::into)).await;
+        if matches!(kind, None | Some(Kind::Image)) {
+            let release = self.ports.release.clone();
+            let _ = tokio::task::spawn_blocking(move || release.drop_caches()).await;
+        }
         self.publish_stats().await;
     }
 

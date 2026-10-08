@@ -34,3 +34,12 @@ fn inv_limits_06_pool_settings_cross_the_bridge_with_their_low_memory_options() 
     assert_eq!(defaults, PoolSettings { reach: 1, hold_off_ms: 1_000, trim_delay_ms: 30_000, low_ram_slots: 2, low_ram_reach: 0 });
     assert_eq!(crate::api::PoolSettings::from(defaults), crate::api::PoolSettings::default());
 }
+
+#[test]
+fn inv_limits_06_an_image_window_crosses_the_bridge_with_its_name_and_its_three_bounds() {
+    let window = ImageWindow { name: "avatar".to_string(), behind: 2, from: 1, to: 3 };
+
+    let (name, core) = <(String, crate::prefetch::PageWindow)>::from(&window);
+
+    assert_eq!((name.as_str(), core), ("avatar", crate::prefetch::PageWindow { behind: 2, from: 1, to: 3 }));
+}

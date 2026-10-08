@@ -10,3 +10,6 @@ interface MediaSource {
 }
 
 fun MediaSource.toItem(): MediaItem = MediaItem(kind, url, headers, cover, blurHash)
+
+fun MediaLayer.setImageWindow(name: String, active: Int, pages: List<List<MediaSource>>) =
+    setImageWindow(name, active.coerceAtLeast(0).toUInt(), pages.map { page -> page.map { it.toItem() } })

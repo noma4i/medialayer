@@ -101,6 +101,18 @@ class ExoPlayerSlotTest {
   }
 
   @Test
+  fun theRateIsThePlaybackSpeedAndGoesBackToNormalWithUnload() {
+    val slot = factory().create(0u)
+    slot.load("k", route); idle()
+
+    slot.setRate(1.5f); idle()
+    assertEquals(1.5f, slot.player!!.playbackParameters.speed, 0f)
+    slot.unload(); idle()
+
+    assertEquals(1f, slot.player!!.playbackParameters.speed, 0f)
+  }
+
+  @Test
   fun attachGivesTheViewHandleThePlayerDetachTakesItAndSeekMovesThePosition() {
     val factory = factory()
     val slot = factory.create(0u)

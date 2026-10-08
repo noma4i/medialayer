@@ -91,7 +91,6 @@ class ExoPlayerSlotFactory(
     created.clear()
   }
 
-  private companion object {
-    fun isDebuggable(context: Context): Boolean = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
-  }
 }
+
+internal fun isDebuggable(context: Context): Boolean = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0

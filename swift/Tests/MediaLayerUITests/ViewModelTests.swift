@@ -10,6 +10,9 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   private let lock = NSLock()
   private var calls: [String] = []
   var imageResult: Result<Data, Error> = .success(Data())
+  private var fetches: [String] = []
+
+  var fetchedURLs: [String] { lock.withLock { fetches } }
 
   var recorded: [String] { lock.withLock { calls } }
 
@@ -19,9 +22,13 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   func setPlaying(key: String, playing: Bool) { record("playing \(playing)") }
   func setMuted(key: String, muted: Bool) { record("muted \(muted)") }
   func setMutedAll(muted: Bool) { record("mutedAll \(muted)") }
+  func setRate(key: String, rate: Float) { record("rate \(rate)") }
   func seek(key: String, positionMs: UInt64) { record("seek \(positionMs)") }
   func itemState(key: String, state: MediaState) { record("state \(state)") }
-  func fetchImage(url: String, headers: [String: String]) async throws -> Data { try imageResult.get() }
+  func fetchImage(url: String, headers: [String: String]) async throws -> Data {
+    lock.withLock { fetches.append(url) }
+    return try imageResult.get()
+  }
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder { .none }
   func stateStream(key: String) -> AsyncStream<MediaState> { AsyncStream { $0.finish() } }
   func attachView(key: String, token: UInt64) { record("attach \(key)") }
@@ -42,6 +49,40 @@ struct ViewModelTests {
 
     #expect(places.recorded == ["playing true", "playing false"])
     #expect(!audio.isPlaying)
+  }
+
+  @MainActor
+  @Test
+  func theAudioRateIsKeptAndSentToTheCore() {
+    let places = RecordingPlaces()
+    let audio = AudioPlayback(key: "note", playing: false, rate: 1.5, places: places, slots: LoadedSlots())
+    #expect(audio.rate == 1.5)
+
+    audio.setRate(2)
+
+    #expect((audio.rate, places.recorded) == (2, ["rate 2.0"]))
+  }
+
+  @Test
+  func aVideoDeclaresItselfLoopingUnlessTheCallerAsksForOneShot() {
+    let clip = TestClip()
+
+    #expect(MediaVideo(clip).item.looping)
+    #expect(!MediaVideo(clip, loop: false, onFirstFrame: {}, onEnd: {}).item.looping)
+  }
+
+  @Test
+  func firstFrameFiresOncePerLoadAndEndFiresEveryTimeTheClipEnds() {
+    var edges = VideoEdges()
+    let steps: [(MediaState, firstFrame: Bool, ended: Bool)] = [
+      (.loading, false, false), (.ready, false, false), (.rendered, true, false), (.rendered, false, false),
+      (.ended, false, true), (.rendered, false, false), (.ended, false, true), (.loading, false, false), (.rendered, true, false)
+    ]
+
+    for (state, firstFrame, ended) in steps {
+      let reached = edges.advance(to: state)
+      #expect((reached.firstFrame, reached.ended) == (firstFrame, ended), "\(state)")
+    }
   }
 
   @Test
@@ -66,7 +107,9 @@ struct ViewModelTests {
     let places = RecordingPlaces()
     places.imageResult = result
 
-    _ = await MediaImagePipeline.load(TestImageSource(), places: places, pipeline: MediaImagePipeline.make(places: places))
+    let request = MediaImagePipeline.request(for: TestImageSource())!
+
+    _ = await MediaImagePipeline.load(TestImageSource(), request: request, places: places, pipeline: MediaImagePipeline.make(places: places))
 
     #expect(places.recorded.map { $0.hasPrefix("state failed") ? "state failed" : $0 } == expected)
   }
@@ -100,5 +143,11 @@ struct ViewModelTests {
 private struct TestImageSource: MediaSource {
   var url: String { "https://o.test/a.png" }
   var kind: Kind { .image }
+  var headers: [String: String] { [:] }
+}
+
+private struct TestClip: MediaSource {
+  var url: String { "file:///bundle/intro.mp4" }
+  var kind: Kind { .video }
   var headers: [String: String] { [:] }
 }

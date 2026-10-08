@@ -88,13 +88,14 @@ async fn inv_ffi_03_image_bytes_load_through_the_fetcher_into_the_cache_and_refu
 }
 
 #[tokio::test]
-async fn inv_api_08_a_route_tells_the_player_whether_to_loop_and_whether_the_stream_is_hls() {
+async fn inv_api_08_inv_api_12_a_route_tells_the_player_whether_to_loop_and_whether_the_stream_is_hls() {
     let rig = proxy_rig().await;
     let routes = Routes::new(rig.proxy.clone(), Arc::new(rig.cache.clone()));
     let cases = [
         ("feed video", MediaItem::bare("https://cdn.test/a.mp4", Kind::Video), true, false),
         ("hls video", MediaItem::bare("https://cdn.test/a/index.m3u8", Kind::Video), true, true),
         ("voice note", MediaItem::bare("https://cdn.test/a.m4a", Kind::Audio), false, false),
+        ("one-shot intro", MediaItem { looping: false, ..MediaItem::bare("https://cdn.test/intro.mp4", Kind::Video) }, false, false),
     ];
 
     for (name, source, looping, hls) in &cases {
@@ -104,4 +105,41 @@ async fn inv_api_08_a_route_tells_the_player_whether_to_loop_and_whether_the_str
     rig.proxy.stop().await;
     let direct = routes.play_url(&cases[1].1);
     assert_eq!((direct.looping, direct.hls), (true, true));
+}
+
+#[tokio::test]
+async fn inv_api_15_a_local_file_is_cached_by_definition_and_is_played_from_its_own_path() {
+    let rig = proxy_rig().await;
+    let routes = Routes::new(rig.proxy.clone(), Arc::new(rig.cache.clone()));
+    let clip = MediaItem::bare("file:///bundle/intro.mp4", Kind::Video);
+
+    let route = routes.play_url(&clip);
+
+    assert!(clip.is_local() && !MediaItem::bare("https://cdn.test/a.mp4", Kind::Video).is_local());
+    assert!(routes.is_cached(&clip.url, &clip.headers).await);
+    assert_eq!((route.url.as_str(), route.generation, route.headers.len()), ("file:///bundle/intro.mp4", None, 0));
+    assert_eq!(rig.fetcher.calls(), 0);
+}
+
+#[tokio::test]
+async fn inv_image_02_a_file_image_is_read_from_its_path_and_neither_asks_the_fetcher_nor_enters_the_cache() {
+    let rig = proxy_rig().await;
+    let routes = Routes::new(rig.proxy.clone(), Arc::new(rig.cache.clone()));
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("a photo.jpg");
+    std::fs::write(&path, vec![7u8; 100]).unwrap();
+    let url = url::Url::from_file_path(&path).unwrap().to_string();
+    let missing = url::Url::from_file_path(folder.path().join("gone.jpg")).unwrap().to_string();
+
+    let read = routes.image_bytes(&url, &HashMap::new(), 200).await;
+    let over = routes.image_bytes(&url, &HashMap::new(), 99).await;
+    let absent = routes.image_bytes(&missing, &HashMap::new(), 200).await;
+    let exact = routes.image_bytes(&url, &HashMap::new(), 100).await;
+
+    assert_eq!(read, Ok(vec![7u8; 100]));
+    assert_eq!(exact, Ok(vec![7u8; 100]));
+    assert!(matches!(over, Err(MediaError::Fetch { .. })));
+    assert!(matches!(absent, Err(MediaError::Fetch { .. })));
+    assert_eq!(rig.fetcher.calls(), 0);
+    assert_eq!(rig.cache.stats().await.file_count, 0);
 }

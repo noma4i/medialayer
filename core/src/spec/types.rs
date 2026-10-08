@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::fetch::DEFAULT_FORWARDED_HEADERS;
 use crate::limits::{EvictionStrategy, Limits};
+use crate::prefetch::PageWindow;
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -135,7 +136,19 @@ pub struct ImageSpec {
     #[serde(default)]
     pub prefetch_window: Option<(u32, u32)>,
     #[serde(default)]
+    pub prefetch_behind: Option<u32>,
+    #[serde(default)]
     pub evict: Option<Evict>,
+}
+
+impl ImageSpec {
+    pub fn window(&self) -> Option<(u32, u32, u32)> {
+        if self.prefetch_window.is_none() && self.prefetch_behind.is_none() {
+            return None;
+        }
+        let (from, to) = self.prefetch_window.unwrap_or((PageWindow::DEFAULT.from as u32, PageWindow::DEFAULT.to as u32));
+        Some((self.prefetch_behind.unwrap_or(0), from, to))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -166,6 +179,10 @@ impl MediaSpec {
 
     pub fn limits(&self) -> Limits {
         self.limits_for(self.videos.first())
+    }
+
+    pub fn pool(&self) -> PoolSpec {
+        self.videos.first().map(|video| video.pool.clone()).unwrap_or_default()
     }
 
     pub(super) fn limits_for(&self, video: Option<&VideoSpec>) -> Limits {

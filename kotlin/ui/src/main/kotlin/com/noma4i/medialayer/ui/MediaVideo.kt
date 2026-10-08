@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -16,8 +18,20 @@ import coil.compose.AsyncImage
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.Placeholder
+import com.noma4i.medialayer.isReady
 import com.noma4i.medialayer.toItem
 import kotlinx.coroutines.flow.flowOf
+
+internal class VideoEdges {
+  private var hasRendered = false
+
+  fun advance(state: MediaState): Pair<Boolean, Boolean> = when (state) {
+    is MediaState.Idle, is MediaState.Loading -> { hasRendered = false; false to false }
+    is MediaState.Rendered -> (!hasRendered).also { hasRendered = true } to false
+    is MediaState.Ended -> false to true
+    else -> false to false
+  }
+}
 
 @Composable
 fun MediaVideo(
@@ -26,10 +40,21 @@ fun MediaVideo(
   muted: Boolean = false,
   modifier: Modifier = Modifier,
   contentScale: ContentScale = ContentScale.Crop,
+  loop: Boolean = true,
+  onFirstFrame: () -> Unit = {},
+  onEnd: () -> Unit = {},
   content: @Composable (MediaState) -> Unit = {}
 ) {
   val environment = LocalMediaEnvironment.current
-  val state = rememberPlace(source, playing, muted)
+  val state = rememberPlace(source, playing, muted, loop)
+  val edges = remember(source.url) { VideoEdges() }
+  val firstFrame by rememberUpdatedState(onFirstFrame)
+  val end by rememberUpdatedState(onEnd)
+  LaunchedEffect(edges, state) {
+    val (isFirstFrame, isEnd) = edges.advance(state)
+    if (isFirstFrame) firstFrame()
+    if (isEnd) end()
+  }
   val view = remember(environment) { environment.players?.newView() }
   val player by remember(view) { view?.player ?: flowOf(null) }.collectAsState(null)
   DisposableEffect(environment, view, source.url) {
@@ -42,7 +67,7 @@ fun MediaVideo(
   }
   Box(modifier) {
     player?.let { ContentFrame(it, Modifier.fillMaxSize(), SURFACE_TYPE_TEXTURE_VIEW, contentScale, true, {}) }
-    VideoPlaceholder(source, state == MediaState.Ready, contentScale)
+    VideoPlaceholder(source, state.isReady, contentScale)
     content(state)
   }
 }

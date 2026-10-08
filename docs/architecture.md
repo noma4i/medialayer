@@ -25,7 +25,7 @@ All behavior is in the Rust core (`core/`). Swift (`swift/`) and Kotlin (`kotlin
 | `BodyReader` | Reads the body in chunks with `nextChunk()`. The core calls `release()` when the body ends or is dropped |
 | `SettingsStore` | Local storage for saved limits (read, write, remove a string by key). Ready-made: `UserDefaultsSettings`, `SharedPreferencesSettings` |
 | `PlayerSlotFactory` | Creates the native player of a slot |
-| `PlayerSlot` | Commands to a native player: `load`, `preroll`, `play`, `pause`, `mute`, `unmute`, `retain`, `unload`, `attach`, `detach`, `seek`, `sample`. `PlaybackRoute` says whether the source is HLS and whether it loops |
+| `PlayerSlot` | Commands to a native player: `load`, `preroll`, `play`, `pause`, `mute`, `unmute`, `retain`, `unload`, `attach`, `detach`, `seek`, `setRate`, `sample`. `PlaybackRoute` says whether the source is HLS and whether it loops |
 | `PlayerEvents` | Player events to the core: `ready`, `visualReady`, `stalled`, `failed`, `ended`, `attach`, `detach`, `foreground`, `background`, `memoryWarning`. Get it from `media.playerEvents()` |
 | `DeviceMemory` | Device class in `OpenConfig`: memory size, heap class and the low-memory flag |
 | `MemoryReleaser` | Called when the system reports critical memory pressure, so Nuke and Coil can drop their memory caches |
@@ -74,7 +74,7 @@ val bytes = media.fetchImage(avatarUrl, emptyMap())
 val pixels = decodeBlurhash(blurHash, 32u, 32u, 1f)
 ```
 
-`fetchImage` loads through the `Fetcher` into the disk cache and reads the cached bytes, with no local HTTP hop. A response above 16 MiB fails. `decodeBlurhash` returns RGBA bytes and throws `MediaError.BlurHash` for a bad string. A loader reports its progress with `media.itemState(key:state:)` so images and audio use the same placeholder chain as video.
+`fetchImage` loads through the `Fetcher` into the disk cache and reads the cached bytes, with no local HTTP hop. A `file://` URL is read straight from its file and never enters the disk cache. A response above 16 MiB fails. `decodeBlurhash` returns RGBA bytes and throws `MediaError.BlurHash` for a bad string. A loader reports its progress with `media.itemState(key:state:)` so images and audio use the same placeholder chain as video.
 
 ## Repository
 

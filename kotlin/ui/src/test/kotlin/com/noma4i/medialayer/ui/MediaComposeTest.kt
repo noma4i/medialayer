@@ -4,7 +4,10 @@ package com.noma4i.medialayer.ui
 
 import android.content.Context
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
+import androidx.compose.ui.layout.ContentScale
+import coil.memory.MemoryCache
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -28,6 +31,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 private data class Clip(override val url: String, override val cover: String? = null) : MediaSource {
   override val kind: Kind get() = Kind.VIDEO
@@ -38,6 +42,11 @@ private data class Photo(override val url: String) : MediaSource {
   override val kind: Kind get() = Kind.IMAGE
   override val headers: Map<String, String> get() = mapOf("Authorization" to "token")
   override val size: Pair<Int, Int> get() = 24 to 24
+}
+
+private data class Plain(override val url: String) : MediaSource {
+  override val kind: Kind get() = Kind.IMAGE
+  override val headers: Map<String, String> get() = emptyMap()
 }
 
 private data class BlurredPhoto(override val url: String) : MediaSource {
@@ -125,6 +134,40 @@ class MediaComposeTest {
   }
 
   @Test
+  fun aOneShotVideoDeclaresItselfWithoutLoopAndReportsTheFirstFrameAndEveryEnd() {
+    var firstFrames = 0
+    var ends = 0
+    val clip = Clip("https://o.test/intro.mp4")
+    rule.setContent {
+      MediaLayerProvider(layer, loader, slots.players) {
+        MediaVideo(clip, loop = false, onFirstFrame = { firstFrames++ }, onEnd = { ends++ }, modifier = Modifier.size(100.dp))
+      }
+    }
+    rule.waitUntil(5000) { layer.listeners.isNotEmpty() }
+    val states = listOf(MediaState.Loading, MediaState.Ready, MediaState.Rendered, MediaState.Ended, MediaState.Rendered, MediaState.Ended)
+
+    states.forEach { state ->
+      layer.emit(clip.url, state)
+      rule.waitForIdle()
+    }
+
+    assertEquals(listOf(false), layer.items.filter { it.url == clip.url }.map { it.looping }.distinct())
+    assertEquals(1 to 2, firstFrames to ends)
+  }
+
+  @Test
+  fun anAudioRateGoesToTheCoreAndAChangeOfTheParameterGoesAgain() {
+    var rate by androidx.compose.runtime.mutableFloatStateOf(1.5f)
+    rule.setContent { MediaLayerProvider(layer, loader, slots.players) { MediaAudio(Note("https://o.test/n.m4a"), rate = rate) { } } }
+    rule.waitForIdle()
+
+    rate = 2f
+    rule.waitForIdle()
+
+    assertEquals(listOf("rate:https://o.test/n.m4a:1.5", "rate:https://o.test/n.m4a:2.0"), layer.calls.filter { it.startsWith("rate") })
+  }
+
+  @Test
   fun anImageLoadsThroughTheCoreAtTheDeclaredSizeAndReportsItsStateToTheCore() {
     rule.setContent {
       MediaLayerProvider(layer, loader, slots.players) {
@@ -142,6 +185,74 @@ class MediaComposeTest {
       listOf("itemState:https://o.test/p.png:Loading", "itemState:https://o.test/p.png:Ready"),
       layer.calls.filter { it.startsWith("itemState") }
     )
+  }
+
+  private fun decodedWidthAndHeight(imageLoader: coil.ImageLoader, key: String): Pair<Int, Int> =
+    imageLoader.memoryCache!!.get(MemoryCache.Key(key))!!.bitmap.let { it.width to it.height }
+
+  private fun shown(imageLoader: coil.ImageLoader, count: Int) {
+    val looper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+    rule.waitUntil(5000) { looper.idle(); imageLoader.memoryCache!!.keys.size == count }
+  }
+
+  @Test
+  @Config(qualifiers = "xxhdpi")
+  fun inv_image_01_a_view_decodes_at_its_size_in_pixels_rounded_up_to_8_and_a_declared_size_wins() {
+    val sized = mediaImageLoader(context, ImageBytes { url, headers -> requested.add(url to headers); pngBytes(400, 400) })
+    rule.setContent {
+      MediaLayerProvider(layer, sized, slots.players) {
+        Column {
+          MediaImage(Plain("https://o.test/view.png"), Modifier.size(50.dp))
+          MediaImage(Photo("https://o.test/declared.png"), Modifier.size(50.dp))
+        }
+      }
+    }
+
+    shown(sized, 2)
+
+    assertEquals(152 to 152, decodedWidthAndHeight(sized, "https://o.test/view.png|152x152|FILL"))
+    assertEquals(24 to 24, decodedWidthAndHeight(sized, "https://o.test/declared.png|24x24|FILL"))
+    assertEquals(setOf("https://o.test/view.png", "https://o.test/declared.png"), requested.map { it.first }.toSet())
+  }
+
+  @Test
+  @Config(qualifiers = "xxhdpi")
+  fun inv_image_04_the_content_scale_picks_the_decoder_scale_and_keeps_the_decode_size() {
+    val wide = mediaImageLoader(context, ImageBytes { _, _ -> pngBytes(400, 200) })
+    rule.setContent {
+      MediaLayerProvider(layer, wide, slots.players) {
+        Column {
+          MediaImage(Plain("https://o.test/crop.png"), Modifier.size(50.dp), contentScale = ContentScale.Crop)
+          MediaImage(Plain("https://o.test/fit.png"), Modifier.size(50.dp), contentScale = ContentScale.Fit)
+        }
+      }
+    }
+
+    shown(wide, 2)
+
+    assertEquals(304 to 152, decodedWidthAndHeight(wide, "https://o.test/crop.png|152x152|FILL"))
+    assertEquals(152 to 76, decodedWidthAndHeight(wide, "https://o.test/fit.png|152x152|FIT"))
+  }
+
+  @Test
+  fun inv_image_05_an_image_in_the_decoder_memory_shows_in_the_first_composition_without_the_core() {
+    val seen = CopyOnWriteArrayList<MediaState>()
+    var visible by mutableStateOf(true)
+    rule.setContent {
+      MediaLayerProvider(layer, loader, slots.players) {
+        if (visible) MediaImage(Plain("https://o.test/again.png"), Modifier.size(50.dp)) { seen.add(it) }
+      }
+    }
+    rule.waitUntil(5000) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); seen.lastOrNull() == MediaState.Ready }
+    val before = seen.size
+
+    visible = false
+    rule.waitForIdle()
+    visible = true
+    rule.waitForIdle()
+
+    assertEquals(MediaState.Ready, seen[before])
+    assertEquals(1, requested.size)
   }
 
   @Test

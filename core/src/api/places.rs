@@ -57,7 +57,8 @@ impl Places {
         self.with(key, |place| {
             place.is_declared = true;
             match (&place.state, is_cached) {
-                (MediaState::Ready, _) | (MediaState::Loading, false) => {}
+                (state, _) if state.is_ready() => {}
+                (MediaState::Loading, false) => {}
                 (_, true) => place.move_to(MediaState::Ready),
                 (_, false) => place.move_to(MediaState::Loading),
             }
@@ -66,13 +67,41 @@ impl Places {
 
     pub fn item_state(&self, key: &str, state: MediaState) {
         self.with(key, |place| match (&place.state, state) {
-            (MediaState::Ready, MediaState::Loading) => {}
+            (current, MediaState::Loading) if current.is_ready() => {}
             (_, state) => place.move_to(state),
         });
     }
 
     pub fn ready(&self, key: &str) {
-        self.with(key, |place| place.move_to(MediaState::Ready));
+        self.with(key, |place| {
+            if !place.state.is_ready() {
+                place.move_to(MediaState::Ready);
+            }
+        });
+    }
+
+    pub fn rendered(&self, key: &str) {
+        self.with(key, |place| {
+            if place.state != MediaState::Ended {
+                place.move_to(MediaState::Rendered);
+            }
+        });
+    }
+
+    pub fn ended(&self, key: &str) {
+        self.with(key, |place| {
+            if place.state.is_ready() {
+                place.move_to(MediaState::Ended);
+            }
+        });
+    }
+
+    pub fn resumed(&self, key: &str) {
+        self.with(key, |place| {
+            if place.state == MediaState::Ended {
+                place.move_to(MediaState::Rendered);
+            }
+        });
     }
 
     pub fn failed(&self, key: &str, detail: &str) {

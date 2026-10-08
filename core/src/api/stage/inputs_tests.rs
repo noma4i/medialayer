@@ -1,6 +1,9 @@
 use crate::api::slots::SlotCall;
+use crate::api::source::MediaItem;
 use crate::api::test_support::{eventually, eventually_async, rig, rig_with, url_of, video, videos};
+use crate::api::types::Kind;
 use crate::fetch::mock::Script;
+use crate::identity::cache_key;
 
 fn total_calls(rig: &crate::api::test_support::Rig) -> usize {
     rig.factory.slots.lock().unwrap().values().map(|slot| slot.calls().len()).sum()
@@ -179,4 +182,119 @@ async fn inv_api_04_a_view_attaches_to_the_slot_that_holds_its_key_even_when_it_
     let calls = player.calls();
     assert!(calls.contains(&SlotCall::Attach { view_token: 11 }));
     assert!(calls.contains(&SlotCall::Seek { position_ms: 4_200 }));
+}
+
+fn sound_calls(rig: &crate::api::test_support::Rig) -> Vec<SlotCall> {
+    rig.factory.slots.lock().unwrap().values().flat_map(|slot| slot.calls()).filter(|call| matches!(call, SlotCall::Mute | SlotCall::Unmute)).collect()
+}
+
+#[tokio::test]
+async fn inv_api_14_a_silent_layer_never_unmutes_a_slot_whatever_the_places_ask() {
+    let rig = rig_with(|config| config.silent = true).await;
+    let stage = &rig.parts.stage;
+    stage.set_window(5, videos(20));
+    eventually(|| [4, 5, 6].iter().all(|page| rig.factory.slot_holding(&url_of(*page)).is_some())).await;
+
+    stage.set_muted_all(true);
+    stage.set_muted(&url_of(5), true);
+    stage.set_muted(&url_of(5), false);
+    stage.set_muted_all(false);
+    stage.set_window(9, videos(20));
+
+    eventually(|| [8, 9, 10].iter().all(|page| rig.factory.slot_holding(&url_of(*page)).is_some()) && stage.commands_idle()).await;
+    assert!(!sound_calls(&rig).contains(&SlotCall::Unmute));
+    for slot in rig.factory.slots.lock().unwrap().values() {
+        let calls = slot.calls();
+        for index in calls.iter().enumerate().filter(|(_, call)| matches!(call, SlotCall::Load { .. })).map(|(index, _)| index) {
+            assert_eq!(calls.get(index + 1), Some(&SlotCall::Mute), "{calls:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn inv_api_14_a_layer_that_is_not_silent_still_unmutes_on_request() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    stage.set_window(5, videos(20));
+    eventually(|| rig.factory.slot_holding(&url_of(5)).is_some()).await;
+
+    stage.set_muted(&url_of(5), true);
+    stage.set_muted(&url_of(5), false);
+
+    eventually(|| rig.holder(&url_of(5)).1.calls().contains(&SlotCall::Unmute)).await;
+}
+
+#[tokio::test]
+async fn inv_api_16_a_rate_is_sent_after_the_load_of_its_key_and_reaches_the_slot_that_holds_it_within_bounds() {
+    let rig = rig_with(|config| config.defaults.slots = 4).await;
+    let stage = &rig.parts.stage;
+    let rates = |page: usize| rig.holder(&url_of(page)).1.calls().into_iter().filter_map(|call| if let SlotCall::Rate { rate } = call { Some(rate) } else { None }).collect::<Vec<f32>>();
+
+    stage.set_rate(&url_of(5), 1.5);
+    stage.set_window(5, videos(20));
+    eventually(|| rig.factory.slot_holding(&url_of(5)).is_some_and(|(_, slot)| slot.calls().iter().any(|call| matches!(call, SlotCall::Rate { .. })))).await;
+    let calls = rig.holder(&url_of(5)).1.calls();
+    let position = |wanted: &dyn Fn(&SlotCall) -> bool| calls.iter().position(wanted).unwrap();
+    assert!(position(&|call| matches!(call, SlotCall::Load { .. })) < position(&|call| matches!(call, SlotCall::Rate { .. })));
+
+    stage.set_rate(&url_of(5), 2.0);
+    stage.set_rate(&url_of(5), f32::NAN);
+    stage.set_rate(&url_of(5), 40.0);
+    stage.set_rate(&url_of(5), 0.0);
+    eventually(|| rates(5).len() == 4).await;
+    assert_eq!(rates(5), vec![1.5, 2.0, 4.0, 0.25]);
+
+    stage.set_rate(&url_of(5), 1.0);
+    eventually(|| rates(5).len() == 5).await;
+    assert_eq!(rates(5).last(), Some(&1.0));
+}
+
+#[tokio::test]
+async fn inv_api_15_a_local_file_in_the_window_is_never_prefetched_and_plays_from_its_own_path() {
+    let rig = rig().await;
+    let local = |index: usize| MediaItem::bare_video(&format!("file:///bundle/clip{index}.mp4"));
+    let window: Vec<Option<MediaItem>> = (0..4).map(|index| Some(local(index))).collect();
+
+    rig.parts.stage.set_window(0, window);
+    rig.parts.stage.visible(local(0), true);
+
+    eventually(|| rig.factory.slot_holding("file:///bundle/clip0.mp4").is_some()).await;
+    eventually(|| rig.parts.stage.commands_idle()).await;
+    let (_, slot) = rig.holder("file:///bundle/clip0.mp4");
+    let route = slot.calls().into_iter().find_map(|call| if let SlotCall::Load { route, .. } = call { Some(route) } else { None }).unwrap();
+    assert_eq!((route.url.as_str(), route.generation), ("file:///bundle/clip0.mp4", None));
+    assert_eq!(rig.parts.prefetcher.live_tasks(), 0);
+    assert_eq!(rig.fetcher.calls(), 0);
+    assert_eq!(rig.parts.cache.stats().await.file_count, 0);
+}
+
+#[tokio::test]
+async fn inv_api_17_an_image_window_prefetches_remote_images_into_the_cache_and_never_touches_the_pool_or_local_files() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    stage.set_window(5, videos(20));
+    stage.set_playing(&url_of(5), true);
+    eventually(|| rig.factory.slot_holding(&url_of(6)).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Preroll))).await;
+    eventually(|| stage.commands_idle()).await;
+    let settled = total_calls(&rig);
+    let remote = |index: usize| format!("https://o.test/poster{index}.jpg");
+    let page = |index: usize| {
+        vec![MediaItem::bare(&remote(index), Kind::Image), MediaItem::bare(&format!("file:///bundle/poster{index}.jpg"), Kind::Image)]
+    };
+    for index in 0..4 {
+        rig.fetcher.route(&remote(index), Script::ok(vec![index as u8; 32]));
+    }
+
+    stage.set_image_window("grid", 0, (0..4).map(page).collect());
+
+    for index in 0..4 {
+        eventually_async(|| async { rig.parts.cache.contains(&cache_key(&remote(index))).await }).await;
+    }
+    for index in 0..4 {
+        assert_eq!(rig.fetcher.calls_for(&remote(index)), 1);
+        assert_eq!(rig.fetcher.calls_for(&format!("file:///bundle/poster{index}.jpg")), 0);
+    }
+    assert_eq!(rig.parts.stage.slot_count(), rig.factory.created.lock().unwrap().len());
+    eventually(|| stage.commands_idle()).await;
+    assert_eq!(total_calls(&rig), settled);
 }

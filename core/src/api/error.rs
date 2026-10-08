@@ -4,6 +4,8 @@ use crate::limits::LimitsError;
 pub enum MediaError {
     #[error("invalid limits: {detail}")]
     InvalidLimits { detail: String },
+    #[error("invalid spec: {detail}")]
+    InvalidSpec { detail: String },
     #[error("fetch failed: {detail}")]
     Fetch { detail: String },
     #[error("blurhash: {detail}")]

@@ -5,6 +5,9 @@ use crate::api::types::Kind;
 use crate::session::Intent;
 use std::collections::HashSet;
 
+const MIN_RATE: f32 = 0.25;
+const MAX_RATE: f32 = 4.0;
+
 impl Stage {
     pub fn set_window(&self, active: usize, sources: Vec<Option<MediaItem>>) {
         let keys: Vec<Option<String>> =
@@ -23,7 +26,13 @@ impl Stage {
             commands
         };
         self.dispatch(commands);
-        self.inner.prefetcher.set_window(active, sources.iter().map(|source| source.as_ref().map(MediaItem::for_prefetch)).collect());
+        let remote = sources.iter().map(|source| source.as_ref().filter(|source| !source.is_local()).map(MediaItem::for_prefetch));
+        self.inner.prefetcher.set_window(active, remote.collect());
+    }
+
+    pub fn set_image_window(&self, name: &str, active: usize, pages: Vec<Vec<MediaItem>>) {
+        let remote = pages.iter().map(|page| page.iter().filter(|source| !source.is_local()).map(MediaItem::for_prefetch).collect());
+        self.inner.prefetcher.set_image_window(name, active, remote.collect());
     }
 
     pub fn set_playing(&self, key: &str, playing: bool) {
@@ -66,6 +75,25 @@ impl Stage {
         let slot = self.state().loaded.get(key).map(|loaded| loaded.slot);
         if let Some(slot) = slot {
             self.inner.runner.send(slot, SlotCall::Seek { position_ms });
+        }
+    }
+
+    pub fn set_rate(&self, key: &str, rate: f32) {
+        if !rate.is_finite() {
+            return;
+        }
+        let rate = rate.clamp(MIN_RATE, MAX_RATE);
+        let slot = {
+            let mut state = self.state();
+            if rate == 1.0 {
+                state.rates.remove(key);
+            } else {
+                state.rates.insert(key.to_string(), rate);
+            }
+            state.loaded.get(key).map(|loaded| loaded.slot)
+        };
+        if let Some(slot) = slot {
+            self.inner.runner.send(slot, SlotCall::Rate { rate });
         }
     }
 
@@ -122,6 +150,7 @@ impl Stage {
             }
             state.catalog.clear();
             state.views.clear();
+            state.rates.clear();
             state.ring.release_all()
         };
         self.dispatch(commands);

@@ -22,6 +22,7 @@ fn sample() -> MediaSpec {
             blurhash_field: Some("blurHash".to_string()),
             size: Some((288, 288)),
             prefetch_window: Some((1, 3)),
+            prefetch_behind: Some(2),
             evict: None,
         }],
         audios: vec![AudioSpec { name: "voice_note".to_string(), evict: Some(Evict::Fifo) }],
@@ -117,7 +118,7 @@ fn inv_spec_01_names_that_cannot_become_a_type_are_rejected_for_every_kind() {
             spec.audios.clear();
             match kind {
                 0 => spec.videos.push(VideoSpec::new(name)),
-                1 => spec.images.push(ImageSpec { name: name.to_string(), blurhash_field: None, size: None, prefetch_window: None, evict: None }),
+                1 => spec.images.push(ImageSpec { name: name.to_string(), blurhash_field: None, size: None, prefetch_window: None, prefetch_behind: None, evict: None }),
                 _ => spec.audios.push(AudioSpec { name: name.to_string(), evict: None }),
             }
             assert_eq!(spec.validate(), Err(SpecError::InvalidName(name.to_string())), "name {name:?} kind {kind}");

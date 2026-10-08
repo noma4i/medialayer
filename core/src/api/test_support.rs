@@ -310,6 +310,10 @@ impl PlayerSlot for MockSlot {
         self.calls.lock().unwrap().push(SlotCall::Seek { position_ms });
     }
 
+    fn set_rate(&self, rate: f32) {
+        self.calls.lock().unwrap().push(SlotCall::Rate { rate });
+    }
+
     fn sample(&self) -> SlotSample {
         let taken = self.samples.fetch_add(1, Ordering::SeqCst) as u64 + 1;
         let mut sample = *self.sample.lock().unwrap();
@@ -382,6 +386,8 @@ pub fn assembly(dir: &Path, fetcher: Arc<MockFetcher>, factory: Arc<MockFactory>
         defaults: Limits::default(),
         pool: PoolSettings::default(),
         namespace_headers: Vec::new(),
+        image_windows: Vec::new(),
+        silent: false,
         watchdog: fast_watchdog(),
         stats_interval: Duration::from_millis(10),
     }

@@ -161,6 +161,13 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     }
   }
 
+  public func setRate(rate: Float) {
+    onMain { [self] in
+      player.defaultRate = rate
+      if player.rate != 0 { player.rate = rate }
+    }
+  }
+
   public func attach(viewToken: UInt64) {
     onMain { [self] in
       guard let host = hosts.layer(for: viewToken) else { return }
@@ -269,6 +276,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     player.pause()
     player.removeAllItems()
     item = nil
+    player.defaultRate = 1
     prerollRequested = false
     itemReady = false
     visualReadySent = false

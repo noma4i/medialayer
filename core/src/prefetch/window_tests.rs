@@ -88,3 +88,38 @@ fn inv_prefetch_05_window_is_a_parameter() {
     assert_eq!(names(&wanted), ["m6"]);
     assert_eq!(priorities(&wanted), [1]);
 }
+
+fn pages(count: usize) -> Vec<Vec<String>> {
+    (0..count).map(|index| vec![format!("m{index}a"), format!("m{index}b")]).collect()
+}
+
+#[test]
+fn inv_prefetch_09_a_page_window_wants_every_source_of_the_pages_ahead_then_the_pages_behind_nearest_first() {
+    let wanted = wanted_page_jobs(5, &pages(20), PageWindow { behind: 2, from: 0, to: 3 });
+
+    assert_eq!(names(&wanted), ["m5a", "m5b", "m6a", "m6b", "m7a", "m7b", "m4a", "m4b", "m3a", "m3b"]);
+    assert_eq!(priorities(&wanted), [0, 0, 1, 1, 2, 2, -1, -1, -2, -2]);
+}
+
+#[test]
+fn inv_prefetch_09_a_page_window_ends_before_to_starts_at_from_and_stops_at_the_edges_of_the_list() {
+    let cases = [
+        ("from skips the nearest pages", 5, PageWindow { behind: 0, from: 2, to: 4 }, vec!["m7a", "m7b", "m8a", "m8b"]),
+        ("the end of the list clamps", 18, PageWindow { behind: 0, from: 0, to: 9 }, vec!["m18a", "m18b", "m19a", "m19b"]),
+        ("the start of the list clamps", 1, PageWindow { behind: 4, from: 5, to: 5 }, vec!["m0a", "m0b"]),
+        ("an active page past the list wants nothing", 20, PageWindow::DEFAULT, vec![]),
+    ];
+    for (name, active, window, expected) in cases {
+        assert_eq!(names(&wanted_page_jobs(active, &pages(20), window)), expected, "{name}");
+    }
+}
+
+#[test]
+fn inv_prefetch_09_a_source_shared_by_two_pages_is_wanted_once_at_its_nearest_page() {
+    let shared = vec![vec!["x".to_string()], vec!["y".to_string(), "x".to_string()], vec!["x".to_string()]];
+
+    let wanted = wanted_page_jobs(0, &shared, PageWindow { behind: 0, from: 0, to: 3 });
+
+    assert_eq!(names(&wanted), ["x", "y"]);
+    assert_eq!(priorities(&wanted), [0, 1]);
+}

@@ -4,7 +4,7 @@ use super::load_source::load_source;
 use super::loader::Loader;
 use super::settled::{Outcome, Settled};
 use super::source::Source;
-use super::window::{diff_window, wanted_jobs, PrefetchJob, PrefetchWindow};
+use super::window::{diff_window, wanted_jobs, wanted_page_jobs, PageWindow, PrefetchJob, PrefetchWindow};
 use crate::cache::Clock;
 use crate::limits::Limits;
 use std::collections::{HashMap, HashSet};
@@ -22,9 +22,15 @@ struct Job {
     active: Arc<AtomicBool>,
 }
 
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum WindowKey {
+    Stage,
+    Image(String),
+}
+
 struct State {
     ledger: PrefetchLedger,
-    window_jobs: Vec<PrefetchJob>,
+    windows: HashMap<WindowKey, Vec<PrefetchJob>>,
     running: HashMap<String, Job>,
     next_id: u64,
 }
@@ -34,6 +40,10 @@ impl State {
         let Some(job) = self.running.remove(key) else { return };
         self.ledger.cancel(key, job.active.load(Ordering::SeqCst));
         job.cancel.notify_one();
+    }
+
+    fn is_wanted(&self, key: &str) -> bool {
+        self.windows.values().any(|jobs| jobs.iter().any(|job| job.key == key))
     }
 }
 
@@ -57,6 +67,7 @@ impl Tuning {
 struct Shared {
     loader: Arc<dyn Loader>,
     tuning: Mutex<Tuning>,
+    image_windows: Mutex<HashMap<String, PageWindow>>,
     gate: Arc<Gate>,
     clock: Arc<dyn Clock>,
     state: Mutex<State>,
@@ -109,9 +120,10 @@ impl Prefetcher {
         let shared = Shared {
             loader,
             tuning: Mutex::new(Tuning::from_limits(limits)),
+            image_windows: Mutex::new(HashMap::new()),
             gate: Gate::new(limits.max_concurrent as usize),
             clock,
-            state: Mutex::new(State { ledger, window_jobs: Vec::new(), running: HashMap::new(), next_id: 0 }),
+            state: Mutex::new(State { ledger, windows: HashMap::new(), running: HashMap::new(), next_id: 0 }),
             live: AtomicUsize::new(0),
             events: broadcast::channel(EVENT_CAPACITY).0,
             handle: Handle::current(),
@@ -129,28 +141,50 @@ impl Prefetcher {
 
     pub fn set_window(&self, active: usize, sources: Vec<Option<Source>>) {
         let urls: Vec<Option<String>> = sources.iter().map(|source| source.as_ref().map(|source| source.url.clone())).collect();
+        let wanted = wanted_jobs(active, &urls, self.shared.tuning().window);
+        self.apply_window(WindowKey::Stage, wanted, sources.into_iter().flatten().collect());
+    }
+
+    pub fn set_image_windows(&self, windows: HashMap<String, PageWindow>) {
+        *self.shared.image_windows.lock().unwrap_or_else(PoisonError::into_inner) = windows;
+    }
+
+    pub fn set_image_window(&self, name: &str, active: usize, pages: Vec<Vec<Source>>) {
+        let window = self.shared.image_windows.lock().unwrap_or_else(PoisonError::into_inner).get(name).copied().unwrap_or(PageWindow::DEFAULT);
+        let urls: Vec<Vec<String>> = pages.iter().map(|page| page.iter().map(|source| source.url.clone()).collect()).collect();
+        let wanted = wanted_page_jobs(active, &urls, window);
+        self.apply_window(WindowKey::Image(name.to_string()), wanted, pages.into_iter().flatten().collect());
+    }
+
+    fn apply_window(&self, key: WindowKey, wanted: Vec<PrefetchJob>, sources: Vec<Source>) {
         let tuning = self.shared.tuning();
-        let wanted = wanted_jobs(active, &urls, tuning.window);
         let wanted_urls: HashSet<&str> = wanted.iter().map(|job| job.key.as_str()).collect();
         let by_url: HashMap<&str, &Source> =
-            sources.iter().flatten().filter(|source| wanted_urls.contains(source.url.as_str())).map(|source| (source.url.as_str(), source)).collect();
+            sources.iter().filter(|source| wanted_urls.contains(source.url.as_str())).map(|source| (source.url.as_str(), source)).collect();
         let now = Duration::from_millis(self.shared.clock.now_ms());
         let mut state = self.shared.state();
-        let diff = diff_window(&state.window_jobs, &wanted);
+        let previous = state.windows.remove(&key).unwrap_or_default();
+        let diff = diff_window(&previous, &wanted);
+        if !wanted.is_empty() {
+            state.windows.insert(key, wanted.clone());
+        }
         for job in &diff.to_cancel {
-            state.cancel_job(&job.key);
+            if !state.is_wanted(&job.key) {
+                state.cancel_job(&job.key);
+            }
         }
         for job in &diff.to_start {
             if let Some(source) = by_url.get(job.key.as_str()) {
                 self.start(&mut state, (*source).clone(), now, &tuning);
             }
         }
-        state.window_jobs = wanted;
     }
 
     pub fn cancel(&self, url: &str) {
         let mut state = self.shared.state();
-        state.window_jobs.retain(|job| job.key != url);
+        for jobs in state.windows.values_mut() {
+            jobs.retain(|job| job.key != url);
+        }
         state.cancel_job(url);
     }
 
@@ -164,7 +198,7 @@ impl Prefetcher {
         for url in running {
             state.cancel_job(&url);
         }
-        state.window_jobs.clear();
+        state.windows.clear();
     }
 
     pub fn settled(&self) -> broadcast::Receiver<Settled> {

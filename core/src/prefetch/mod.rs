@@ -12,7 +12,7 @@ pub use loader::{LoadError, Loader, ProxyLoader};
 pub use runner::Prefetcher;
 pub use settled::{Outcome, Settled};
 pub use source::{Source, SourceKind};
-pub use window::{diff_window, wanted_jobs, PrefetchJob, PrefetchWindow, WindowDiff};
+pub use window::{diff_window, wanted_jobs, wanted_page_jobs, PageWindow, PrefetchJob, PrefetchWindow, WindowDiff};
 
 #[cfg(test)]
 mod mock_loader;

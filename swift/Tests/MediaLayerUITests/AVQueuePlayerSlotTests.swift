@@ -56,6 +56,21 @@ struct AVQueuePlayerSlotTests {
   }
 
   @Test
+  func theRateIsTheDefaultRateOfThePlayerAndGoesBackToNormalWithTheItem() async throws {
+    let log = PlayerEventLog()
+    let slot = makeSlot(log)
+    slot.load(key: "clip", route: route(Self.silentClip))
+
+    slot.setRate(rate: 1.5)
+    await drainMain()
+    #expect(slot.player.defaultRate == 1.5)
+    slot.unload()
+    await drainMain()
+
+    #expect(slot.player.defaultRate == 1)
+  }
+
+  @Test
   func unloadFreesTheItemAndTheLoadedKey() async throws {
     let log = PlayerEventLog()
     let slots = LoadedSlots()

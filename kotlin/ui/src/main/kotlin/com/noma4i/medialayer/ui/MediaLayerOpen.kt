@@ -18,8 +18,10 @@ import com.noma4i.medialayer.OpenConfig
 import com.noma4i.medialayer.PlayerEventsInterface
 import com.noma4i.medialayer.Pressure
 import com.noma4i.medialayer.SettingsStore
+import com.noma4i.medialayer.SpecDefaults
 import com.noma4i.medialayer.defaultLimits
 import com.noma4i.medialayer.defaultPoolSettings
+import com.noma4i.medialayer.specDefaults
 import java.io.File
 import java.util.Collections
 import java.util.WeakHashMap
@@ -37,9 +39,24 @@ fun MediaLayer.Companion.open(
   context: Context,
   fetcher: Fetcher,
   settings: SettingsStore,
-  callFactory: Call.Factory = OkHttpClient()
+  callFactory: Call.Factory = OkHttpClient(),
+  silent: Boolean = false,
+  imageMemoryBytes: Int = DEFAULT_IMAGE_MEMORY_BYTES
 ): MediaLayer =
-  openMediaLayer(context, fetcher, settings, callFactory, ProcessLifecycleOwner.get().lifecycle) { MediaLayer.open(it) }
+  openMediaLayer(context, fetcher, settings, callFactory, platformDefaults(), silent, ProcessLifecycleOwner.get().lifecycle, imageMemoryBytes) { MediaLayer.open(it) }
+
+fun MediaLayer.Companion.open(
+  context: Context,
+  spec: String,
+  fetcher: Fetcher,
+  settings: SettingsStore,
+  callFactory: Call.Factory = OkHttpClient(),
+  silent: Boolean = false,
+  imageMemoryBytes: Int = DEFAULT_IMAGE_MEMORY_BYTES
+): MediaLayer =
+  openMediaLayer(context, fetcher, settings, callFactory, specDefaults(spec), silent, ProcessLifecycleOwner.get().lifecycle, imageMemoryBytes) { MediaLayer.open(it) }
+
+private fun platformDefaults(): SpecDefaults = SpecDefaults(defaultLimits(), defaultPoolSettings(), emptyList())
 
 fun MediaLayer.release() {
   bindings.remove(this)?.let {
@@ -54,14 +71,17 @@ internal fun openMediaLayer(
   fetcher: Fetcher,
   settings: SettingsStore,
   callFactory: Call.Factory = OkHttpClient(),
+  defaults: SpecDefaults = platformDefaults(),
+  silent: Boolean = false,
   lifecycle: Lifecycle,
+  imageMemoryBytes: Int = DEFAULT_IMAGE_MEMORY_BYTES,
   open: (OpenConfig) -> MediaLayer
 ): MediaLayer {
   val app = context.applicationContext
-  val factory = ExoPlayerSlotFactory(app, callFactory)
+  val factory = ExoPlayerSlotFactory(app, callFactory, startMuted = silent || isDebuggable(app))
   val dir = File(app.cacheDir, "medialayer").apply { mkdirs() }
   lateinit var layer: MediaLayer
-  val imageLoader = mediaImageLoader(app, ImageBytes { url, headers -> layer.fetchImage(url, headers) })
+  val imageLoader = mediaImageLoader(app, ImageBytes { url, headers -> layer.fetchImage(url, headers) }, imageMemoryBytes)
   val releaser = object : MemoryReleaser {
     override fun dropMemoryCaches() {
       imageLoader.memoryCache?.clear()
@@ -74,10 +94,12 @@ internal fun openMediaLayer(
       settings = settings,
       slots = factory,
       device = deviceMemory(app),
-      defaults = defaultLimits(),
-      pool = defaultPoolSettings(),
-      namespaceHeaders = emptyList(),
-      memoryReleaser = releaser
+      defaults = defaults.defaults,
+      pool = defaults.pool,
+      namespaceHeaders = defaults.namespaceHeaders,
+      imageWindows = defaults.imageWindows,
+      memoryReleaser = releaser,
+      silent = silent
     )
   )
   val events = layer.playerEvents()

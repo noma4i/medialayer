@@ -10,3 +10,24 @@ fn inv_placeholder_01_a_blurhash_decodes_to_rgba_bytes_and_a_bad_one_is_an_error
     assert!(matches!(decode_blurhash("short".to_string(), 32, 32, 1.0), Err(MediaError::BlurHash { .. })));
     assert!(matches!(decode_blurhash(KNOWN.to_string(), 0, 32, 1.0), Err(MediaError::BlurHash { .. })));
 }
+
+#[test]
+fn inv_image_01_the_decode_size_is_the_view_in_pixels_rounded_up_to_8_and_a_declared_size_wins() {
+    let size = |width, height| PixelSize { width, height };
+    let cases = [
+        ((50.0, 50.0, 3.0, None), Some(size(152, 152))),
+        ((96.0, 96.0, 3.0, None), Some(size(288, 288))),
+        ((100.4, 20.0, 2.0, None), Some(size(208, 40))),
+        ((50.0, 50.0, 3.0, Some(size(16, 16))), Some(size(16, 16))),
+        ((0.0, 0.0, 3.0, Some(size(16, 16))), Some(size(16, 16))),
+        ((0.0, 50.0, 3.0, None), None),
+        ((50.0, -1.0, 3.0, None), None),
+        ((50.0, 50.0, 0.0, None), None),
+        ((f64::NAN, 50.0, 3.0, None), None),
+        ((50.0, f64::INFINITY, 3.0, None), None),
+        ((1.0e9, 50.0, 3.0, None), Some(size(16_384, 152))),
+    ];
+    for ((width, height, scale, declared), expected) in cases {
+        assert_eq!(image_pixel_size(width, height, scale, declared), expected, "{width}x{height} at {scale} declared {declared:?}");
+    }
+}
