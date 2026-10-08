@@ -80,7 +80,7 @@ end
 | Path | Contents |
 | ---- | -------- |
 | `core/` | The Rust core: cache, proxy, prefetch, pool, session |
-| `swift/` | Swift package with the bindings |
+| `MediaLayer/` | Swift package with the bindings |
 | `kotlin/` | Android library module with the bindings |
 | `docs/` | Developer documentation |
 | `scripts/` | Build and check scripts |

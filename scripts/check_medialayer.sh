@@ -17,7 +17,7 @@ bash "$root/scripts/check_zoo.sh"
 
 echo "== ios: xcframework, swift test"
 bash "$root/scripts/build_ios.sh"
-swift test --package-path "$root/swift"
+swift test --package-path "$root/MediaLayer"
 
 echo "== kotlin: libs for 4 Android ABI, bindings, gradle unit tests"
 bash "$root/scripts/build_kotlin.sh"

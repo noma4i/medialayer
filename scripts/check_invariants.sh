@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Traceability report: invariant (specs/invariants.md) -> tests named inv_<area>_<nn>_* in core/src, gen/src, swift/Tests and kotlin test sources.
+# Traceability report: invariant (specs/invariants.md) -> tests named inv_<area>_<nn>_* in core/src, gen/src, MediaLayer/Tests and kotlin test sources.
 # Report mode always exits 0. --strict exits 1 when a REQUIRED invariant has no test, a test names an unknown invariant or ids repeat.
 # --list prints every invariant with the names of its tests.
 set -euo pipefail
@@ -39,7 +39,7 @@ dups="$(awk '{print $1}' "$work/registry.txt" | sort | uniq -d)"
 
 {
   grep -rhoE --include='*.rs' 'fn inv_[a-z0-9_]+' "$root/core/src" "$root/gen/src" 2>/dev/null || true
-  grep -rhoE --include='*.swift' 'func inv_[a-z0-9_]+' "$root/swift/Tests" 2>/dev/null || true
+  grep -rhoE --include='*.swift' 'func inv_[a-z0-9_]+' "$root/MediaLayer/Tests" 2>/dev/null || true
   grep -rhoE --include='*.kt' 'fun inv_[a-z0-9_]+' "$root/kotlin/src/test" "$root/kotlin/ui/src/test" 2>/dev/null || true
 } | sed -E 's/^(fn|func|fun) //' | sort -u > "$work/tests.txt"
 

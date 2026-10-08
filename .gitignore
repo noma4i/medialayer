@@ -3,9 +3,9 @@
 *.xcodeproj
 /target/
 .DS_Store
-swift/MediaLayerFFI.xcframework/
-swift/Sources/MediaLayer/medialayer.swift
-swift/.build/
+MediaLayer/MediaLayerFFI.xcframework/
+MediaLayer/Sources/MediaLayer/medialayer.swift
+MediaLayer/.build/
 kotlin/src/main/jniLibs/
 kotlin/src/main/kotlin/com/noma4i/medialayer/medialayer.kt
 kotlin/.gradle/
@@ -14,4 +14,4 @@ kotlin/local.properties
 !docs/
 !docs/*.md
 **/build/
-swift/Package.resolved
+MediaLayer/Package.resolved
