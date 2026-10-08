@@ -4,7 +4,7 @@ While media loads, a place shows placeholders chosen by MediaLayer. You only dec
 
 | Kind | Chain |
 | ---- | ----- |
-| Image | BlurHash decoded from a short string (one decoder in the core for both platforms), then the image |
+| Image | BlurHash, used only if the source has one, decoded from a short string (one decoder in the core for both platforms), then the image |
 | Video with a cover | The cover while the video is not ready, then the video |
 | Video without a cover | The first frame, cut from the first chunk and shown without starting playback, then the video |
 | Video already cached or ready | Playback starts at once, no placeholder |

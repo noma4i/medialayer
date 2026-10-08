@@ -22,6 +22,11 @@ url = "2.5.4"
 thiserror = "2.0.21"
 async-trait = "0.1.92"
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "fs", "io-util", "sync", "time", "macros", "net"] }
+hyper = { version = "1.12.0", features = ["server", "http1"] }
+hyper-util = { version = "0.1.21", features = ["tokio"] }
+http-body-util = "0.1.5"
+bytes = "1.12.1"
+futures-util = "0.3.34"
 
 [dev-dependencies]
 tempfile = "3.27.0"
