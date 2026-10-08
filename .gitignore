@@ -1,0 +1,15 @@
+.build/
+.swiftpm/
+*.xcodeproj
+/target/
+.DS_Store
+swift/MediaLayerFFI.xcframework/
+swift/Sources/MediaLayer/medialayer.swift
+swift/.build/
+kotlin/src/main/jniLibs/
+kotlin/src/main/kotlin/com/noma4i/medialayer/medialayer.kt
+kotlin/.gradle/
+kotlin/build/
+kotlin/local.properties
+!docs/
+!docs/*.md
