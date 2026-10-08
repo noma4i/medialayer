@@ -7,7 +7,7 @@ fn tuning() -> ProfileTuning {
 }
 
 #[test]
-fn profile_picks_the_base_or_the_low_ram_config() {
+fn inv_pool_14_profile_picks_the_base_or_the_low_ram_config() {
     let custom = ProfileTuning { low_ram_below_mb: 100, low_slots: 1, low_reach: 1, low_buffer_seconds: 5 };
     let base = PoolConfig::new(3, 1);
     let shape = |config: PoolConfig| (config.slots, config.reach, config.buffer_seconds);
@@ -24,7 +24,7 @@ fn profile_picks_the_base_or_the_low_ram_config() {
 }
 
 #[test]
-fn low_and_normal_profiles_give_different_slot_plans() {
+fn inv_pool_14_low_and_normal_profiles_give_different_slot_plans() {
     let normal = PoolConfig::new(3, 1);
     let low = normal.clone().for_profile(DeviceProfile { ram_mb: 1024, low_ram: true }, tuning());
     let loads = |config: PoolConfig| {
@@ -34,14 +34,14 @@ fn low_and_normal_profiles_give_different_slot_plans() {
 }
 
 #[test]
-fn config_follows_limits_slots_and_depth() {
+fn inv_pool_14_config_follows_limits_slots_and_depth() {
     let limits = Limits { slots: 4, depth_seconds: 7, ..Limits::default() };
     let config = PoolConfig::from_limits(&limits, 1);
     assert_eq!((config.slots, config.buffer_seconds), (4, 7));
 }
 
 #[test]
-fn start_muted_slots_load_without_mute_commands_and_unmute_on_request() {
+fn inv_pool_12_start_muted_slots_load_without_mute_commands_and_unmute_on_request() {
     let mut pool = ring_with(3, 1, |config| config.start_muted = true);
     let commands = pool.plan(0, 5, Some(5), &keys(20));
     assert!(commands.iter().all(|command| !matches!(command, Command::Mute { .. } | Command::Unmute { .. })));

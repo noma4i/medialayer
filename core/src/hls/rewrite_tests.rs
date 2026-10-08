@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn absolute_lines_get_a_dot_slash_prefix_and_everything_else_is_kept() {
+fn inv_hls_03_absolute_lines_get_a_dot_slash_prefix_and_everything_else_is_kept() {
     let cases = [
         ("absolute line", "#EXTM3U\n#EXTINF:2.0,\nhttps://cdn.example.com/a.ts\n", "#EXTM3U\n#EXTINF:2.0,\n./https://cdn.example.com/a.ts\n"),
         ("relative lines and tags", "#EXTM3U\n#EXTINF:2.0,\na.ts\n#EXTINF:2.0,\nhttp://h/b.ts\n", "#EXTM3U\n#EXTINF:2.0,\na.ts\n#EXTINF:2.0,\n./http://h/b.ts\n"),
@@ -17,7 +17,7 @@ fn absolute_lines_get_a_dot_slash_prefix_and_everything_else_is_kept() {
 }
 
 #[test]
-fn absolute_http_uris_inside_tags_get_the_prefix_and_other_tag_uris_are_kept() {
+fn inv_hls_03_absolute_http_uris_inside_tags_get_the_prefix_and_other_tag_uris_are_kept() {
     let cases = [
         (
             "map, key",
@@ -46,7 +46,7 @@ fn absolute_http_uris_inside_tags_get_the_prefix_and_other_tag_uris_are_kept() {
 }
 
 #[test]
-fn restore_strips_the_prefix_from_absolute_paths_only() {
+fn inv_hls_03_restore_strips_the_prefix_from_absolute_paths_only() {
     let cases = [
         ("./https://h/a.ts?x=1", "https://h/a.ts?x=1"),
         ("./http://h/a.ts", "http://h/a.ts"),
@@ -61,7 +61,7 @@ fn restore_strips_the_prefix_from_absolute_paths_only() {
 }
 
 #[test]
-fn restore_inverts_rewrite_for_each_line() {
+fn inv_hls_03_restore_inverts_rewrite_for_each_line() {
     let manifest = "#EXTM3U\nhttp://h/a.ts\nb.ts\nhttps://h/c.ts?q=1\n";
     let restored: Vec<String> = rewrite_playlist(manifest).split('\n').map(restore_rewritten).collect();
     assert_eq!(restored.join("\n"), manifest);

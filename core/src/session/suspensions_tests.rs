@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn any_active_reason_blocks_groups_it_does_not_allow() {
+fn inv_session_03_any_active_reason_blocks_groups_it_does_not_allow() {
     let mut suspensions = Suspensions::default();
     assert_eq!(suspensions.set(Reason::Interruption, true, None), Ok(true));
     assert!(!suspensions.allows("ring"));
@@ -10,7 +10,7 @@ fn any_active_reason_blocks_groups_it_does_not_allow() {
 }
 
 #[test]
-fn allow_groups_keep_listed_groups_eligible() {
+fn inv_session_03_allow_groups_keep_listed_groups_eligible() {
     let mut suspensions = Suspensions::default();
     suspensions.set(Reason::AudioFocusTransient, true, Some(&["hero", "system"])).unwrap();
     assert!(suspensions.allows("hero"));
@@ -19,7 +19,7 @@ fn allow_groups_keep_listed_groups_eligible() {
 }
 
 #[test]
-fn setting_the_same_value_again_changes_nothing() {
+fn inv_session_03_setting_the_same_value_again_changes_nothing() {
     let mut suspensions = Suspensions::default();
     assert_eq!(suspensions.set(Reason::Manual, true, Some(&["b", "a", "a"])), Ok(true));
     assert_eq!(suspensions.set(Reason::Manual, true, Some(&["a", "b"])), Ok(false));
@@ -29,7 +29,7 @@ fn setting_the_same_value_again_changes_nothing() {
 }
 
 #[test]
-fn thaw_removes_only_its_reason() {
+fn inv_session_03_thaw_removes_only_its_reason() {
     let mut suspensions = Suspensions::default();
     suspensions.set(Reason::Background, true, None).unwrap();
     suspensions.set(Reason::Interruption, true, None).unwrap();
@@ -42,14 +42,14 @@ fn thaw_removes_only_its_reason() {
 }
 
 #[test]
-fn blank_allow_group_is_rejected_and_changes_nothing() {
+fn inv_session_03_blank_allow_group_is_rejected_and_changes_nothing() {
     let mut suspensions = Suspensions::default();
     assert_eq!(suspensions.set(Reason::Manual, true, Some(&["ring", "  "])), Err(SuspensionError::BlankGroup));
     assert!(suspensions.is_empty());
 }
 
 #[test]
-fn allow_groups_are_trimmed_and_snapshot_is_sorted_by_reason() {
+fn inv_session_03_allow_groups_are_trimmed_and_snapshot_is_sorted_by_reason() {
     let mut suspensions = Suspensions::default();
     suspensions.set(Reason::Manual, true, Some(&[" b ", "a"])).unwrap();
     suspensions.set(Reason::AudioFocusTransient, true, None).unwrap();

@@ -12,7 +12,7 @@ fn loaded(count: usize) -> Ring {
 }
 
 #[test]
-fn set_playing_plays_once_and_pauses_the_previous_player_first() {
+fn inv_pool_02_set_playing_plays_once_and_pauses_the_previous_player_first() {
     let mut pool = loaded(20);
     assert_eq!(pool.set_playing("k5", true), [Command::Play { slot: 2 }]);
     assert!(pool.set_playing("k5", true).is_empty());
@@ -21,7 +21,7 @@ fn set_playing_plays_once_and_pauses_the_previous_player_first() {
 }
 
 #[test]
-fn set_playing_false_pauses_only_a_playing_key() {
+fn inv_pool_02_set_playing_false_pauses_only_a_playing_key() {
     let mut pool = loaded(20);
     assert!(pool.set_playing("k5", false).is_empty());
     pool.set_playing("k5", true);
@@ -30,7 +30,7 @@ fn set_playing_false_pauses_only_a_playing_key() {
 }
 
 #[test]
-fn set_playing_on_an_unbound_key_does_nothing() {
+fn inv_pool_02_set_playing_on_an_unbound_key_does_nothing() {
     let mut pool = loaded(20);
     pool.set_playing("k5", true);
     assert!(pool.set_playing("ghost", true).is_empty());
@@ -38,7 +38,7 @@ fn set_playing_on_an_unbound_key_does_nothing() {
 }
 
 #[test]
-fn handoff_plays_the_target_before_pausing_the_source() {
+fn inv_pool_02_handoff_plays_the_target_before_pausing_the_source() {
     let mut pool = loaded(20);
     pool.set_playing("k5", true);
     assert_eq!(pool.handoff("k5", "k6"), [Command::Play { slot: 0 }, Command::Pause { slot: 2 }]);
@@ -47,7 +47,7 @@ fn handoff_plays_the_target_before_pausing_the_source() {
 }
 
 #[test]
-fn handoff_from_a_paused_or_unknown_source_changes_nothing() {
+fn inv_pool_02_handoff_from_a_paused_or_unknown_source_changes_nothing() {
     let mut pool = loaded(20);
     assert!(pool.handoff("k5", "k6").is_empty());
     pool.set_playing("k5", true);
@@ -57,7 +57,7 @@ fn handoff_from_a_paused_or_unknown_source_changes_nothing() {
 }
 
 #[test]
-fn global_mute_changes_only_slots_whose_value_changes() {
+fn inv_pool_12_global_mute_changes_only_slots_whose_value_changes() {
     let mut pool = loaded(20);
     assert_eq!(pool.set_muted_all(true), [Command::Mute { slot: 0 }, Command::Mute { slot: 1 }, Command::Mute { slot: 2 }]);
     assert!(pool.set_muted_all(true).is_empty());
@@ -65,7 +65,7 @@ fn global_mute_changes_only_slots_whose_value_changes() {
 }
 
 #[test]
-fn slot_mute_survives_global_unmute() {
+fn inv_pool_12_slot_mute_survives_global_unmute() {
     let mut pool = loaded(20);
     assert_eq!(pool.set_muted("k5", true), [Command::Mute { slot: 2 }]);
     assert!(pool.set_muted("k5", true).is_empty());
@@ -75,14 +75,14 @@ fn slot_mute_survives_global_unmute() {
 }
 
 #[test]
-fn mute_set_before_load_applies_right_after_the_load() {
+fn inv_pool_12_mute_set_before_load_applies_right_after_the_load() {
     let mut pool = ring(3, 0);
     assert!(pool.set_muted("a", true).is_empty());
     assert_eq!(pool.touch(1, "a"), [Command::Load { slot: 0, key: "a".into() }, Command::Mute { slot: 0 }]);
 }
 
 #[test]
-fn slot_reused_for_an_unmuted_key_is_unmuted() {
+fn inv_pool_12_slot_reused_for_an_unmuted_key_is_unmuted() {
     let mut pool = ring(2, 0);
     pool.set_muted("a", true);
     pool.touch(1, "a");
@@ -93,7 +93,7 @@ fn slot_reused_for_an_unmuted_key_is_unmuted() {
 }
 
 #[test]
-fn mute_flips_leave_playing_and_levels_untouched() {
+fn inv_pool_12_mute_flips_leave_playing_and_levels_untouched() {
     let mut pool = loaded(20);
     pool.set_playing("k5", true);
     let before = pool.states();

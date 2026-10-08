@@ -7,7 +7,7 @@ fn total_calls(rig: &crate::api::test_support::Rig) -> usize {
 }
 
 #[tokio::test]
-async fn the_window_loads_the_neighbours_through_the_proxy_and_the_active_page_plays() {
+async fn inv_api_04_the_window_loads_the_neighbours_through_the_proxy_and_the_active_page_plays() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
 
@@ -26,7 +26,7 @@ async fn the_window_loads_the_neighbours_through_the_proxy_and_the_active_page_p
 }
 
 #[tokio::test]
-async fn declaring_the_same_window_again_sends_no_commands() {
+async fn inv_api_04_declaring_the_same_window_again_sends_no_commands() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
     stage.set_window(5, videos(20));
@@ -43,7 +43,7 @@ async fn declaring_the_same_window_again_sends_no_commands() {
 }
 
 #[tokio::test]
-async fn hundreds_of_window_shifts_never_create_more_players_than_slots() {
+async fn inv_pool_01_hundreds_of_window_shifts_never_create_more_players_than_slots() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
 
@@ -58,7 +58,7 @@ async fn hundreds_of_window_shifts_never_create_more_players_than_slots() {
 }
 
 #[tokio::test]
-async fn the_latest_playing_intent_wins_and_only_one_slot_plays() {
+async fn inv_pool_02_the_latest_playing_intent_wins_and_only_one_slot_plays() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
     stage.set_window(5, videos(20));
@@ -74,7 +74,7 @@ async fn the_latest_playing_intent_wins_and_only_one_slot_plays() {
 }
 
 #[tokio::test]
-async fn muting_all_or_one_key_changes_only_the_volume_and_only_when_the_value_changes() {
+async fn inv_pool_12_muting_all_or_one_key_changes_only_the_volume_and_only_when_the_value_changes() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
     stage.set_window(5, videos(20));
@@ -93,7 +93,7 @@ async fn muting_all_or_one_key_changes_only_the_volume_and_only_when_the_value_c
 }
 
 #[tokio::test]
-async fn a_pinned_key_survives_window_moves_and_release_all_frees_every_slot() {
+async fn inv_api_04_a_pinned_key_survives_window_moves_and_release_all_frees_every_slot() {
     let rig = rig_with(|config| config.defaults.slots = 4).await;
     let stage = &rig.parts.stage;
     let intro = "https://o.test/intro.mp4";
@@ -115,7 +115,7 @@ async fn a_pinned_key_survives_window_moves_and_release_all_frees_every_slot() {
 }
 
 #[tokio::test]
-async fn an_unpinned_key_goes_back_to_the_normal_rules() {
+async fn inv_api_04_an_unpinned_key_goes_back_to_the_normal_rules() {
     let rig = rig_with(|config| config.defaults.slots = 4).await;
     let stage = &rig.parts.stage;
     let intro = "https://o.test/intro.mp4";
@@ -131,7 +131,7 @@ async fn an_unpinned_key_goes_back_to_the_normal_rules() {
 }
 
 #[tokio::test]
-async fn a_visible_place_outside_the_window_takes_a_slot_and_gives_it_back_when_it_leaves() {
+async fn inv_api_04_a_visible_place_outside_the_window_takes_a_slot_and_gives_it_back_when_it_leaves() {
     let rig = rig_with(|config| config.defaults.slots = 4).await;
     let stage = &rig.parts.stage;
     let chat = "https://o.test/chat.mp4";
@@ -146,7 +146,7 @@ async fn a_visible_place_outside_the_window_takes_a_slot_and_gives_it_back_when_
 }
 
 #[tokio::test]
-async fn the_window_also_drives_prefetch_ahead_of_the_active_page() {
+async fn inv_api_04_the_window_also_drives_prefetch_ahead_of_the_active_page() {
     let rig = rig().await;
     for page in 0..8 {
         rig.fetcher.route(&url_of(page), Script::ok(vec![1; 2 * 1024 * 1024]));
@@ -159,7 +159,7 @@ async fn the_window_also_drives_prefetch_ahead_of_the_active_page() {
 }
 
 #[tokio::test]
-async fn a_view_attaches_to_the_slot_that_holds_its_key_even_when_it_was_declared_before_the_load() {
+async fn inv_api_04_a_view_attaches_to_the_slot_that_holds_its_key_even_when_it_was_declared_before_the_load() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
     stage.attach(&url_of(1), 9);

@@ -45,7 +45,7 @@ fn request() -> fetch::Request {
 }
 
 #[tokio::test]
-async fn request_and_range_cross_to_the_platform_and_the_body_streams_back() {
+async fn inv_ffi_01_request_and_range_cross_to_the_platform_and_the_body_streams_back() {
     let platform = Arc::new(Platform {
         seen: Mutex::new(Vec::new()),
         chunks: vec![Ok(Some(b"ab".to_vec())), Ok(Some(b"cd".to_vec())), Ok(None)],
@@ -62,7 +62,7 @@ async fn request_and_range_cross_to_the_platform_and_the_body_streams_back() {
 }
 
 #[tokio::test]
-async fn a_chunk_over_the_response_limit_ends_the_body_with_an_error_and_is_not_passed_on() {
+async fn inv_ffi_01_a_chunk_over_the_response_limit_ends_the_body_with_an_error_and_is_not_passed_on() {
     let platform = Arc::new(Platform { seen: Mutex::new(Vec::new()), chunks: vec![Ok(Some(b"ab".to_vec())), Ok(Some(b"cdef".to_vec())), Ok(None)], closes: Arc::default() });
     let limits = InputLimits { response_bytes: 3, ..InputLimits::default() };
     let response = ForeignFetcher::new(platform, limits).fetch(request()).await.unwrap();
@@ -75,7 +75,7 @@ async fn a_chunk_over_the_response_limit_ends_the_body_with_an_error_and_is_not_
 }
 
 #[tokio::test]
-async fn a_platform_error_in_the_middle_of_the_body_ends_the_stream_with_a_fetch_error() {
+async fn inv_ffi_01_a_platform_error_in_the_middle_of_the_body_ends_the_stream_with_a_fetch_error() {
     let failure = MediaError::Fetch { detail: "connection reset".to_string() };
     let platform = Arc::new(Platform { seen: Mutex::new(Vec::new()), chunks: vec![Ok(Some(b"ab".to_vec())), Err(failure)], closes: Arc::default() });
     let response = ForeignFetcher::new(platform, InputLimits::default()).fetch(request()).await.unwrap();
@@ -87,7 +87,7 @@ async fn a_platform_error_in_the_middle_of_the_body_ends_the_stream_with_a_fetch
 }
 
 #[tokio::test]
-async fn the_platform_reader_is_closed_when_the_body_is_dropped_midway_and_when_it_ends() {
+async fn inv_ffi_01_the_platform_reader_is_closed_when_the_body_is_dropped_midway_and_when_it_ends() {
     for read_to_end in [false, true] {
         let platform = Arc::new(Platform {
             seen: Mutex::new(Vec::new()),

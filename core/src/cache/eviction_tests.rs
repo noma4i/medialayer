@@ -21,7 +21,7 @@ async fn present(f: &Fixture) -> Vec<&'static str> {
 }
 
 #[tokio::test]
-async fn lru_evicts_the_least_recently_read() {
+async fn inv_cache_08_lru_evicts_the_least_recently_read() {
     let f = three_of_thirty(EvictionStrategy::Lru).await;
     f.touch("a").await;
     f.put("d", Kind::Image, 30).await;
@@ -29,7 +29,7 @@ async fn lru_evicts_the_least_recently_read() {
 }
 
 #[tokio::test]
-async fn fifo_evicts_the_oldest_created_even_if_read() {
+async fn inv_cache_08_fifo_evicts_the_oldest_created_even_if_read() {
     let f = three_of_thirty(EvictionStrategy::Fifo).await;
     f.touch("a").await;
     f.put("d", Kind::Image, 30).await;
@@ -37,7 +37,7 @@ async fn fifo_evicts_the_oldest_created_even_if_read() {
 }
 
 #[tokio::test]
-async fn lfu_evicts_the_least_read() {
+async fn inv_cache_08_lfu_evicts_the_least_read() {
     let f = three_of_thirty(EvictionStrategy::Lfu).await;
     f.touch("a").await;
     f.touch("a").await;
@@ -47,7 +47,7 @@ async fn lfu_evicts_the_least_read() {
 }
 
 #[tokio::test]
-async fn largest_first_evicts_the_biggest() {
+async fn inv_cache_08_largest_first_evicts_the_biggest() {
     let f = fixture(limits(100, 0.8, EvictionStrategy::LargestFirst), &[]).await;
     f.put("a", Kind::Image, 20).await;
     f.put("b", Kind::Image, 50).await;
@@ -57,7 +57,7 @@ async fn largest_first_evicts_the_biggest() {
 }
 
 #[tokio::test]
-async fn expire_after_evicts_the_expired_entry() {
+async fn inv_cache_08_expire_after_evicts_the_expired_entry() {
     let f = fixture(limits(100, 0.8, EvictionStrategy::ExpireAfter(10)), &[]).await;
     f.put("a", Kind::Image, 30).await;
     f.clock.advance_ms(6_000);
@@ -69,7 +69,7 @@ async fn expire_after_evicts_the_expired_entry() {
 }
 
 #[tokio::test]
-async fn kind_override_replaces_the_default_strategy() {
+async fn inv_cache_08_kind_override_replaces_the_default_strategy() {
     let f = fixture(limits(100, 0.8, EvictionStrategy::Lru), &[(Kind::Image, EvictionStrategy::Fifo)]).await;
     for key in ["a", "b", "c"] {
         f.put(key, Kind::Image, 30).await;
@@ -80,7 +80,7 @@ async fn kind_override_replaces_the_default_strategy() {
 }
 
 #[tokio::test]
-async fn eviction_is_counted_in_stats() {
+async fn inv_cache_08_eviction_is_counted_in_stats() {
     let f = three_of_thirty(EvictionStrategy::Lru).await;
     f.put("d", Kind::Image, 30).await;
     let stats = f.cache.stats().await;
@@ -90,7 +90,7 @@ async fn eviction_is_counted_in_stats() {
 }
 
 #[tokio::test]
-async fn open_reader_protects_the_entry() {
+async fn inv_cache_04_open_reader_protects_the_entry() {
     let f = fixture(limits(100, 0.8, EvictionStrategy::Lru), &[]).await;
     f.put("a", Kind::Image, 60).await;
     let reader = f.cache.open_reader("a").await.unwrap();
@@ -103,7 +103,7 @@ async fn open_reader_protects_the_entry() {
 }
 
 #[tokio::test]
-async fn open_writer_protects_the_entry() {
+async fn inv_cache_04_open_writer_protects_the_entry() {
     let f = fixture(limits(100, 0.8, EvictionStrategy::Lru), &[]).await;
     f.put("a", Kind::Image, 60).await;
     let writer = f.cache.begin_write("a", Kind::Image).await.unwrap();
@@ -114,7 +114,7 @@ async fn open_writer_protects_the_entry() {
 }
 
 #[tokio::test]
-async fn entry_larger_than_budget_is_refused_and_leaves_no_files() {
+async fn inv_cache_01_entry_larger_than_budget_is_refused_and_leaves_no_files() {
     let f = fixture(limits(100, 0.8, EvictionStrategy::Lru), &[]).await;
     let result = f.cache.put("a", Kind::Image, &payload(150)).await;
     assert_eq!(result, Err(CacheError::NotEnoughSpace));
@@ -123,7 +123,7 @@ async fn entry_larger_than_budget_is_refused_and_leaves_no_files() {
 }
 
 #[tokio::test]
-async fn failed_put_does_not_leak_reserved_space() {
+async fn inv_cache_02_failed_put_does_not_leak_reserved_space() {
     let f = fixture(limits(100, 0.8, EvictionStrategy::Lru), &[]).await;
     f.put("a", Kind::Image, 60).await;
     let reader = f.cache.open_reader("a").await.unwrap();
@@ -134,7 +134,7 @@ async fn failed_put_does_not_leak_reserved_space() {
 }
 
 #[tokio::test]
-async fn set_limits_below_used_evicts_immediately() {
+async fn inv_cache_10_set_limits_below_used_evicts_immediately() {
     let f = three_of_thirty(EvictionStrategy::Lru).await;
     f.cache.set_limits(limits(50, 0.8, EvictionStrategy::Lru)).await.unwrap();
     let stats = f.cache.stats().await;
@@ -145,7 +145,7 @@ async fn set_limits_below_used_evicts_immediately() {
 }
 
 #[tokio::test]
-async fn set_limits_rejects_invalid_limits() {
+async fn inv_cache_10_set_limits_rejects_invalid_limits() {
     let f = three_of_thirty(EvictionStrategy::Lru).await;
     let invalid = crate::limits::Limits { budget: 10, min_budget: 20, ..crate::limits::Limits::default() };
     assert!(f.cache.set_limits(invalid).await.is_err());
@@ -153,7 +153,7 @@ async fn set_limits_rejects_invalid_limits() {
 }
 
 #[tokio::test]
-async fn reaching_the_budget_evicts_in_background_down_to_shrink_target() {
+async fn inv_cache_08_reaching_the_budget_evicts_in_background_down_to_shrink_target() {
     let f = three_of_thirty(EvictionStrategy::Lru).await;
     f.put("d", Kind::Image, 10).await;
     wait_for_file_count(&f.cache, 3).await;
@@ -162,7 +162,7 @@ async fn reaching_the_budget_evicts_in_background_down_to_shrink_target() {
 }
 
 #[tokio::test]
-async fn evict_now_runs_when_used_is_at_budget() {
+async fn inv_cache_08_evict_now_runs_when_used_is_at_budget() {
     let f = three_of_thirty(EvictionStrategy::Lru).await;
     f.cache.put("d", Kind::Image, &payload(10)).await.unwrap();
     f.cache.evict_now().await;
@@ -170,7 +170,7 @@ async fn evict_now_runs_when_used_is_at_budget() {
 }
 
 #[tokio::test]
-async fn eviction_waits_for_the_key_lock_before_deleting_the_file() {
+async fn inv_cache_09_eviction_waits_for_the_key_lock_before_deleting_the_file() {
     let f = three_of_thirty(EvictionStrategy::Lru).await;
     let name = crate::identity::key_file_name("a");
     let guard = f.cache.inner.stripe(&name).lock().await;
@@ -186,7 +186,7 @@ async fn eviction_waits_for_the_key_lock_before_deleting_the_file() {
 }
 
 #[tokio::test]
-async fn entry_rewritten_during_eviction_keeps_its_file() {
+async fn inv_cache_09_entry_rewritten_during_eviction_keeps_its_file() {
     let f = three_of_thirty(EvictionStrategy::Lru).await;
     let name = crate::identity::key_file_name("a");
     let guard = f.cache.inner.stripe(&name).lock().await;
@@ -209,7 +209,7 @@ fn mixed_priority_options(clock: std::sync::Arc<super::clock::ManualClock>) -> O
 }
 
 #[tokio::test]
-async fn mixed_strategies_evict_by_kind_priority_then_kind_strategy() {
+async fn inv_cache_08_mixed_strategies_evict_by_kind_priority_then_kind_strategy() {
     for round in 0..20 {
         let dir = tempfile::tempdir().unwrap();
         let clock = std::sync::Arc::new(super::clock::ManualClock::new(1_000));
@@ -232,7 +232,7 @@ async fn mixed_strategies_evict_by_kind_priority_then_kind_strategy() {
 }
 
 #[tokio::test]
-async fn kinds_sharing_a_strategy_are_ranked_together() {
+async fn inv_cache_08_kinds_sharing_a_strategy_are_ranked_together() {
     for _ in 0..20 {
         let dir = tempfile::tempdir().unwrap();
         let clock = std::sync::Arc::new(super::clock::ManualClock::new(1_000));
@@ -261,7 +261,7 @@ fn part_bytes(dir: &std::path::Path) -> u64 {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn two_writers_at_the_budget_edge_cannot_both_append() {
+async fn inv_cache_01_two_writers_at_the_budget_edge_cannot_both_append() {
     for round in 0..50 {
         let f = fixture(limits(100, 0.8, EvictionStrategy::Lru), &[]).await;
         let mut first = f.cache.begin_write(&format!("a-{round}"), Kind::Stream).await.unwrap();
@@ -279,7 +279,7 @@ async fn two_writers_at_the_budget_edge_cannot_both_append() {
 }
 
 #[tokio::test]
-async fn dropped_writer_releases_its_reserved_space() {
+async fn inv_cache_02_dropped_writer_releases_its_reserved_space() {
     let f = fixture(limits(100, 0.8, EvictionStrategy::Lru), &[]).await;
     let mut first = f.cache.begin_write("a", Kind::Stream).await.unwrap();
     first.write(&[0; 70]).await.unwrap();
@@ -290,7 +290,7 @@ async fn dropped_writer_releases_its_reserved_space() {
 }
 
 #[tokio::test]
-async fn aborted_writer_releases_space_and_removes_its_part() {
+async fn inv_cache_02_aborted_writer_releases_space_and_removes_its_part() {
     let f = fixture(limits(100, 0.8, EvictionStrategy::Lru), &[]).await;
     let mut first = f.cache.begin_write("a", Kind::Stream).await.unwrap();
     first.write(&[0; 70]).await.unwrap();
@@ -300,7 +300,7 @@ async fn aborted_writer_releases_space_and_removes_its_part() {
 }
 
 #[tokio::test]
-async fn commit_counts_the_bytes_once() {
+async fn inv_cache_02_commit_counts_the_bytes_once() {
     let f = fixture(limits(100, 0.8, EvictionStrategy::Lru), &[]).await;
     let mut first = f.cache.begin_write("a", Kind::Stream).await.unwrap();
     first.write(&[0; 60]).await.unwrap();
@@ -312,7 +312,7 @@ async fn commit_counts_the_bytes_once() {
 }
 
 #[tokio::test]
-async fn append_evicts_unprotected_entries_to_make_room() {
+async fn inv_cache_01_append_evicts_unprotected_entries_to_make_room() {
     let f = three_of_thirty(EvictionStrategy::Lru).await;
     let mut writer = f.cache.begin_write("d", Kind::Stream).await.unwrap();
     writer.write(&[0; 30]).await.unwrap();

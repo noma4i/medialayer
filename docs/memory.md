@@ -20,6 +20,8 @@ The limit is the smaller of your `memory` option and a share of what the device 
 
 Retention levels: `hot` plays or is next, `warm` keeps metadata and a small buffer, `cold` holds nothing.
 
+UNBUILT: the steps lower the slot count, the reach and the admission share today. The bitrate cap and the shorter buffer of the steps do not reach the players yet. Image decoding in Nuke and Coil does not reserve room in the counter yet. A low-memory device gets fewer slots and a shorter reach, not a lower bitrate or fewer parallel loads.
+
 ## Opening is enough
 
 ### Swift

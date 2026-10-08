@@ -32,13 +32,13 @@ impl Released {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub(super) struct Counters {
+pub(super) struct PoolCounters {
     pub reuses: u64,
     pub released: Released,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Stats {
+pub struct PoolStats {
     pub hot: usize,
     pub warm: usize,
     pub cold: usize,
@@ -48,10 +48,10 @@ pub struct Stats {
 }
 
 impl Ring {
-    pub fn stats(&self) -> Stats {
+    pub fn stats(&self) -> PoolStats {
         let states = self.states();
         let count = |retention: Retention| states.iter().filter(|state| state.retention == retention).count();
-        Stats {
+        PoolStats {
             hot: count(Retention::Hot),
             warm: count(Retention::Warm),
             cold: count(Retention::Cold),

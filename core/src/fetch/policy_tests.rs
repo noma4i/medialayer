@@ -8,14 +8,14 @@ fn headers(pairs: &[(&str, &str)]) -> HashMap<String, String> {
 }
 
 #[test]
-fn default_timeout_comes_from_limits() {
+fn inv_proxy_18_default_timeout_comes_from_limits() {
     assert_eq!(FetchPolicy::default().timeout, Duration::from_secs(30));
     let limits = Limits { timeout_seconds: 7, ..Limits::default() };
     assert_eq!(FetchPolicy::from_limits(&limits).timeout, Duration::from_secs(7));
 }
 
 #[test]
-fn default_whitelist_forwards_the_eight_v3_headers_and_drops_the_rest() {
+fn inv_proxy_18_default_whitelist_forwards_the_eight_v3_headers_and_drops_the_rest() {
     let input = headers(&[
         ("Authorization", "Bearer t"),
         ("cookie", "a=b"),
@@ -36,14 +36,14 @@ fn default_whitelist_forwards_the_eight_v3_headers_and_drops_the_rest() {
 }
 
 #[test]
-fn whitelist_is_configurable() {
+fn inv_proxy_18_whitelist_is_configurable() {
     let policy = FetchPolicy::default().with_forwarded_headers(&["X-Custom"]);
     let forwarded = policy.forward(&headers(&[("x-custom", "1"), ("Authorization", "t")]));
     assert_eq!(forwarded, headers(&[("x-custom", "1")]));
 }
 
 #[test]
-fn header_lookup_ignores_case() {
+fn inv_proxy_18_header_lookup_ignores_case() {
     let input = headers(&[("Content-Length", "5")]);
     assert_eq!(header_value(&input, "content-length"), Some("5"));
     assert_eq!(header_value(&input, "etag"), None);

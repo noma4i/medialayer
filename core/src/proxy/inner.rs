@@ -1,7 +1,7 @@
 use super::buffer::Buffers;
 use super::byte_store::ByteStore;
 use super::config::Config;
-use super::flight::{download, Flight, Outcome, Subscription};
+use super::flight::{download, Flight, FlightOutcome, FlightSubscription};
 use super::route::block_key;
 use super::tasks::Tasks;
 use crate::hls::is_manifest_url;
@@ -41,7 +41,7 @@ pub(super) struct Listener {
     pub finished: oneshot::Receiver<()>,
 }
 
-pub(super) struct Inner {
+pub(super) struct ProxyShared {
     pub fetcher: Arc<dyn Fetcher>,
     pub store: Arc<dyn ByteStore>,
     pub config: Config,
@@ -93,10 +93,10 @@ pub(super) fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-impl Inner {
+impl ProxyShared {
     pub fn new(config: Config, fetcher: Arc<dyn Fetcher>, store: Arc<dyn ByteStore>, tasks: Tasks) -> Self {
         let timeout_ms = AtomicU64::new(config.policy.timeout.as_millis() as u64);
-        Inner {
+        ProxyShared {
             slots: PrioritySlots::new(config.max_concurrent, config.playback_reserved, config.max_waiting),
             fetcher,
             store,
@@ -160,14 +160,14 @@ impl Inner {
         namespaced_key(url, headers, &self.config.namespace_headers)
     }
 
-    pub fn existing_flight(&self, url: &str, headers: &HashMap<String, String>) -> Option<Subscription> {
+    pub fn existing_flight(&self, url: &str, headers: &HashMap<String, String>) -> Option<FlightSubscription> {
         locked(&self.flights).get(&self.key(url, headers)).map(|flight| {
             flight.promote();
             flight.subscribe()
         })
     }
 
-    pub fn get_or_start(self: &Arc<Self>, url: &str, headers: HashMap<String, String>, priority: Priority) -> Subscription {
+    pub fn get_or_start(self: &Arc<Self>, url: &str, headers: HashMap<String, String>, priority: Priority) -> FlightSubscription {
         let key = self.key(url, &headers);
         self.start_flight(url, key.clone(), key, None, headers, priority)
     }
@@ -179,7 +179,7 @@ impl Inner {
         total: Option<u64>,
         headers: HashMap<String, String>,
         priority: Priority,
-    ) -> Subscription {
+    ) -> FlightSubscription {
         let size = self.config.chunk_size;
         let start = block * size;
         let end = total.map_or(start + size, |total| (start + size).min(total)) - 1;
@@ -195,7 +195,7 @@ impl Inner {
         range: Option<(u64, u64)>,
         headers: HashMap<String, String>,
         priority: Priority,
-    ) -> Subscription {
+    ) -> FlightSubscription {
         let (flight, subscription, created) = {
             let mut flights = locked(&self.flights);
             match flights.get(&key) {
@@ -232,7 +232,7 @@ impl Inner {
                 flights.remove(&flight.key);
             }
         }
-        if matches!(outcome, Outcome::Complete) && is_manifest_url(&flight.url) {
+        if matches!(outcome, FlightOutcome::Complete) && is_manifest_url(&flight.url) {
             self.stamp_playlist(&flight.key);
         }
         flight.finish(outcome);
@@ -269,7 +269,18 @@ impl Inner {
 
     pub fn cancel_all_flights(&self) {
         for flight in locked(&self.flights).values() {
-            flight.cancel();
+            flight.force_cancel();
         }
+    }
+
+    pub fn retire_if_abandoned(&self, flight: &Arc<Flight>) -> bool {
+        let mut flights = locked(&self.flights);
+        if !flight.is_abandoned() {
+            return false;
+        }
+        if flights.get(&flight.key).is_some_and(|current| Arc::ptr_eq(current, flight)) {
+            flights.remove(&flight.key);
+        }
+        true
     }
 }

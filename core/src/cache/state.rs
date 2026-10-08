@@ -1,4 +1,4 @@
-use super::entry::{Entry, Kind, KindStats, Stats};
+use super::entry::{Entry, Kind, KindStats, CacheStats};
 use crate::limits::Limits;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound;
@@ -113,8 +113,8 @@ impl State {
             .collect()
     }
 
-    pub fn stats(&self) -> Stats {
-        Stats {
+    pub fn stats(&self) -> CacheStats {
+        CacheStats {
             total_bytes: self.used,
             file_count: self.entries.len() as u64,
             per_kind: Kind::ALL.into_iter().map(|kind| (kind, self.per_kind[kind.index()])).collect(),

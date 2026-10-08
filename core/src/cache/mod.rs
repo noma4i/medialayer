@@ -20,13 +20,15 @@ pub use byte_store::{classify_kind, CacheStore, Classify};
 pub use clock::{Clock, SystemClock};
 #[cfg(test)]
 pub use clock::ManualClock;
-pub use entry::{Kind, KindStats, Stats};
+pub use entry::{Kind, KindStats, CacheStats};
 pub use error::CacheError;
 pub use options::Options;
 pub use reader::Reader;
 pub use store::Cache;
 pub use writer::Writer;
 
+#[cfg(test)]
+mod oracle_tests;
 #[cfg(test)]
 mod persist_tests;
 #[cfg(test)]
@@ -41,6 +43,8 @@ mod concurrency_tests;
 mod eviction_tests;
 #[cfg(test)]
 mod recovery_tests;
+#[cfg(test)]
+mod stand_tests;
 #[cfg(test)]
 mod store_tests;
 #[cfg(test)]

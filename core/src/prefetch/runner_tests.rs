@@ -74,7 +74,7 @@ fn names(urls: &[String]) -> HashSet<String> {
 }
 
 #[tokio::test]
-async fn shifting_the_window_starts_the_new_page_and_cancels_the_departed_one() {
+async fn inv_prefetch_03_shifting_the_window_starts_the_new_page_and_cancels_the_departed_one() {
     let rig = rig();
     rig.loader.hang_all();
     rig.prefetcher.set_window(0, sources(20));
@@ -91,7 +91,7 @@ async fn shifting_the_window_starts_the_new_page_and_cancels_the_departed_one() 
 }
 
 #[tokio::test]
-async fn a_source_loaded_inside_the_dedupe_window_is_not_loaded_again_until_the_window_passes() {
+async fn inv_prefetch_01_a_source_loaded_inside_the_dedupe_window_is_not_loaded_again_until_the_window_passes() {
     let rig = rig();
     let mut events = rig.prefetcher.settled();
     rig.prefetcher.set_window(0, sources(20));
@@ -116,7 +116,7 @@ async fn a_source_loaded_inside_the_dedupe_window_is_not_loaded_again_until_the_
 }
 
 #[tokio::test]
-async fn a_failed_source_is_loaded_again_when_it_re_enters_the_window() {
+async fn inv_prefetch_01_a_failed_source_is_loaded_again_when_it_re_enters_the_window() {
     let rig = rig();
     let mut events = rig.prefetcher.settled();
     rig.loader.fail(&url(2), true);
@@ -138,7 +138,7 @@ async fn a_failed_source_is_loaded_again_when_it_re_enters_the_window() {
 }
 
 #[tokio::test]
-async fn each_started_source_settles_exactly_once() {
+async fn inv_prefetch_03_each_started_source_settles_exactly_once() {
     let rig = rig();
     let mut events = rig.prefetcher.settled();
     for _ in 0..3 {
@@ -156,7 +156,7 @@ async fn each_started_source_settles_exactly_once() {
 }
 
 #[tokio::test]
-async fn hls_sources_load_the_first_variant_and_the_leading_segments_to_the_configured_depth() {
+async fn inv_prefetch_06_hls_sources_load_the_first_variant_and_the_leading_segments_to_the_configured_depth() {
     let master = "https://o.test/hls/master.m3u8";
     let multivariant = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=900\nv0/index.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=300\nv1/index.m3u8\n";
     let mapped = "#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:2.0,\ns0.m4s\n#EXTINF:2.0,\ns1.m4s\n#EXTINF:2.0,\ns2.m4s\n";
@@ -192,7 +192,7 @@ async fn hls_sources_load_the_first_variant_and_the_leading_segments_to_the_conf
 }
 
 #[tokio::test]
-async fn images_load_whole_while_audio_and_plain_video_load_only_their_first_block_and_no_playlist_is_read() {
+async fn inv_prefetch_06_images_load_whole_while_audio_and_plain_video_load_only_their_first_block_and_no_playlist_is_read() {
     let rig = rig();
     let feed = vec![
         None,
@@ -215,7 +215,7 @@ async fn images_load_whole_while_audio_and_plain_video_load_only_their_first_blo
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_hung_load_settles_as_timed_out_after_the_configured_timeout() {
+async fn inv_prefetch_03_a_hung_load_settles_as_timed_out_after_the_configured_timeout() {
     let rig = rig();
     let mut events = rig.prefetcher.settled();
     rig.loader.hang_all();
@@ -232,7 +232,7 @@ async fn a_hung_load_settles_as_timed_out_after_the_configured_timeout() {
 }
 
 #[tokio::test]
-async fn stop_all_cancels_every_load_and_forgets_the_window_so_the_same_feed_starts_again() {
+async fn inv_prefetch_04_stop_all_cancels_every_load_and_forgets_the_window_so_the_same_feed_starts_again() {
     let rig = rig();
     let mut events = rig.prefetcher.settled();
     rig.loader.hang_all();
@@ -250,7 +250,7 @@ async fn stop_all_cancels_every_load_and_forgets_the_window_so_the_same_feed_sta
 }
 
 #[tokio::test]
-async fn no_more_than_max_concurrent_loads_run_and_cancel_hands_the_slot_to_the_next_source() {
+async fn inv_prefetch_02_no_more_than_max_concurrent_loads_run_and_cancel_hands_the_slot_to_the_next_source() {
     let rig = rig_with(|limits| limits.max_concurrent = 2);
     rig.loader.hang_all();
     rig.prefetcher.set_window(0, sources(20));
@@ -266,7 +266,7 @@ async fn no_more_than_max_concurrent_loads_run_and_cancel_hands_the_slot_to_the_
 }
 
 #[tokio::test]
-async fn a_thousand_window_shifts_leave_no_live_tasks_behind() {
+async fn inv_prefetch_03_a_thousand_window_shifts_leave_no_live_tasks_behind() {
     let rig = rig();
     rig.loader.hang_all();
     let feed = sources(1200);
@@ -285,7 +285,7 @@ async fn a_thousand_window_shifts_leave_no_live_tasks_behind() {
 }
 
 #[tokio::test]
-async fn set_limits_changes_the_window_and_the_parallelism_for_the_next_jobs() {
+async fn inv_prefetch_02_set_limits_changes_the_window_and_the_parallelism_for_the_next_jobs() {
     let rig = rig_with(|limits| {
         limits.max_concurrent = 8;
         limits.prefetch_from = 1;

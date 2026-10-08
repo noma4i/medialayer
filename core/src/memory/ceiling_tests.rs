@@ -7,7 +7,7 @@ fn device(total_mb: u32, heap_class_mb: Option<u32>, low_ram: bool) -> DeviceMem
 }
 
 #[test]
-fn the_ceiling_is_the_setting_capped_by_a_share_of_memory_or_heap() {
+fn inv_memory_06_the_ceiling_is_the_setting_capped_by_a_share_of_memory_or_heap() {
     let cases = [
         ("a strong device keeps a small setting", 64 * MIB, device(8192, None, false), 64 * MIB),
         ("a normal device caps to a quarter of memory", 4096 * MIB, device(4096, None, false), 1024 * MIB),
@@ -23,7 +23,7 @@ fn the_ceiling_is_the_setting_capped_by_a_share_of_memory_or_heap() {
 }
 
 #[test]
-fn the_shares_are_tunable() {
+fn inv_memory_06_the_shares_are_tunable() {
     let share = ShareTuning { low_ram_percent: 10, normal_percent: 50, heap_percent: 25 };
     assert_eq!(effective_ceiling(u64::MAX, device(1000, None, true), share), 1000 * MIB / 10);
     assert_eq!(effective_ceiling(u64::MAX, device(1000, None, false), share), 1000 * MIB / 2);

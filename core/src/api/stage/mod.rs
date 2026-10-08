@@ -99,7 +99,7 @@ impl State {
         keys.iter().position(|key| key.as_deref() == Some(playing.as_str()))
     }
 
-    fn commands_for(&mut self, orders: Vec<session::Directive>) -> Vec<Command> {
+    fn commands_for(&mut self, orders: Vec<session::LeaseOrder>) -> Vec<Command> {
         let mut commands = Vec::new();
         for directive in orders {
             let Some(key) = self.keys_by_lease.get(&directive.lease).cloned() else {

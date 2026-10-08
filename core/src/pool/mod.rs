@@ -10,8 +10,8 @@ mod stats;
 
 pub use config::{DeviceProfile, PoolConfig, ProfileTuning};
 pub use retention::{relieve, Directive, Pressure, Retention, SlotState};
-pub use ring::{Command, Owner, Ring};
-pub use stats::{ReleaseReason, Released, Stats};
+pub use ring::{Command, Holder, Ring};
+pub use stats::{ReleaseReason, Released, PoolStats};
 
 #[cfg(test)]
 mod test_support;
@@ -35,3 +35,5 @@ mod ring_tests;
 mod shared_tests;
 #[cfg(test)]
 mod stats_tests;
+#[cfg(test)]
+mod walk_tests;

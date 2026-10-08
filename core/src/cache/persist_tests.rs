@@ -9,7 +9,7 @@ fn sample(meta: Meta) -> Entry {
 }
 
 #[test]
-fn line_round_trips_with_and_without_meta() {
+fn inv_cache_14_line_round_trips_with_and_without_meta() {
     let metas = [
         Meta::default(),
         Meta { content_type: Some("video/mp4; codecs=\"avc1\"".to_string()), total_length: None },
@@ -23,7 +23,7 @@ fn line_round_trips_with_and_without_meta() {
 }
 
 #[test]
-fn malformed_lines_are_rejected() {
+fn inv_cache_14_malformed_lines_are_rejected() {
     for line in [
         "zz\t1\timage\t1\t1\t1\t\t",
         "6b\t1\tvideo\t1\t1\t1\t\t",
@@ -37,7 +37,7 @@ fn malformed_lines_are_rejected() {
 }
 
 #[test]
-fn hex_names_round_trip() {
+fn inv_cache_14_hex_names_round_trip() {
     assert_eq!(hex_decode(&hex_encode("a/b c")), Some("a/b c".to_string()));
     assert_eq!(hex_decode("abc"), None);
 }

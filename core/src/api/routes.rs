@@ -4,7 +4,7 @@ use super::source::{MediaItem, PlaybackRoute};
 use super::types::Kind;
 use crate::hls::is_manifest_url;
 use crate::proxy::{block_key, Proxy, Readiness};
-use crate::session::{Readiness as SessionReadiness, RouteStaleness};
+use crate::session::RouteStaleness;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -41,12 +41,8 @@ impl Routes {
         self.proxy.route_generation()
     }
 
-    pub fn readiness(&self) -> SessionReadiness {
-        match self.proxy.readiness() {
-            Readiness::Stopped => SessionReadiness::Stopped,
-            Readiness::Ready => SessionReadiness::Ready,
-            Readiness::Unhealthy => SessionReadiness::Unhealthy,
-        }
+    pub fn readiness(&self) -> Readiness {
+        self.proxy.readiness()
     }
 
     pub async fn image_bytes(&self, url: &str, headers: &HashMap<String, String>, limit: u64) -> Result<Vec<u8>, MediaError> {

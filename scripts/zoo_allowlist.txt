@@ -1,0 +1,19 @@
+# check_zoo.sh exceptions. Every line needs a reason after the hash sign.
+type Limits # bridge mirror: the Swift and Kotlin type name is part of the public API, ffi/limits.rs converts to limits::Limits
+type Evict # bridge mirror of spec::Evict, the public bridge name stays
+type DeviceMemory # bridge mirror of memory::DeviceMemory, the public bridge name stays
+type PoolSettings # bridge mirror of api::PoolSettings, the public bridge name stays
+type Fetcher # bridge trait the platform implements, ffi/fetcher.rs adapts it to fetch::Fetcher
+type Kind # bridge enum with the source kinds, cache::Kind has the storage kinds
+type Pressure # bridge enum for platform memory levels, pool::Pressure is the internal ladder
+name PlayerSlotFactory # public bridge trait name used by MediaLayerUI and the Kotlin module, rename needs the native owners
+spawn api/signals.rs 1 # platform drop_caches call on the blocking pool, must not hold the signal loop, ends with the call
+spawn api/stage/events.rs 1 # one purge of one source, ends with the purge
+spawn api/stage/inputs.rs 1 # one cache check of one declared source, ends with the check
+spawn cache/evict.rs 1 # eviction pass, guarded by the evicting flag, ends when the cache is under the target
+spawn cache/save.rs 1 # index persist loop, guarded by the persisting flag, ends when nothing is dirty
+spawn cache/store.rs 1 # index load on open, ends with the load
+spawn cache/writer.rs 2 # part cleanup after a dropped writer, part creation that deletes its file when abandoned
+spawn ffi/fetcher.rs 1 # closes the platform reader on the blocking pool after the body is dropped
+spawn ffi/layer.rs 2 # limits warm-up on open, assemble on the new runtime whose result is awaited through a channel
+spawn prefetch/runner.rs 1 # load jobs owned by prefetch::Owner through the cancel notify of every job

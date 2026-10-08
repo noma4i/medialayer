@@ -1,7 +1,7 @@
 use crate::cache;
 use crate::limits::{Limits, LimitsError};
 use crate::memory::Step;
-use crate::pool::{Directive, Pressure, Stats};
+use crate::pool::{Directive, Pressure, PoolStats};
 use async_trait::async_trait;
 
 #[uniffi::export(with_foreign)]
@@ -13,7 +13,7 @@ pub trait SettingsStore: Send + Sync {
 
 #[async_trait]
 pub trait CacheControl: Send + Sync {
-    async fn stats(&self) -> cache::Stats;
+    async fn stats(&self) -> cache::CacheStats;
     async fn set_limits(&self, limits: Limits) -> Result<(), LimitsError>;
     async fn clear(&self, kind: Option<cache::Kind>);
     async fn purge(&self, url: &str);
@@ -22,7 +22,7 @@ pub trait CacheControl: Send + Sync {
 }
 
 pub trait PoolControl: Send + Sync {
-    fn stats(&self) -> Stats;
+    fn stats(&self) -> PoolStats;
     fn set_step(&self, step: Step);
     fn release_under(&self, now_ms: u64, pressure: Pressure) -> Vec<Directive>;
     fn background(&self) -> Vec<Directive>;

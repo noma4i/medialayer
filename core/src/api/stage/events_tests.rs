@@ -23,12 +23,12 @@ async fn playing(rig: &Rig, source: MediaItem) -> (u32, Arc<crate::api::test_sup
 }
 
 #[tokio::test]
-async fn the_ready_events_move_a_declared_place_to_ready() {
+async fn inv_api_03_the_ready_events_move_a_declared_place_to_ready() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
     stage.set_window(0, videos(3));
     stage.visible(video(&url_of(0)), true);
-    eventually(|| rig.parts.places.state(&url_of(0)) == MediaState::Loading).await;
+    eventually(|| rig.factory.slot_holding(&url_of(0)).is_some()).await;
     let (slot, _) = rig.holder(&url_of(0));
 
     stage.visual_ready(slot as usize);
@@ -37,7 +37,7 @@ async fn the_ready_events_move_a_declared_place_to_ready() {
 }
 
 #[tokio::test]
-async fn a_video_already_in_the_cache_is_declared_ready_without_a_loading_step() {
+async fn inv_placeholder_03_a_video_already_in_the_cache_is_declared_ready_without_a_loading_step() {
     let rig = rig().await;
     rig.parts.cache.put(&cache_key(&url_of(0)), cache::Kind::Stream, b"bytes").await.unwrap();
     let seen: Arc<Mutex<Vec<MediaState>>> = Arc::default();
@@ -51,7 +51,7 @@ async fn a_video_already_in_the_cache_is_declared_ready_without_a_loading_step()
 }
 
 #[tokio::test]
-async fn a_startup_http_error_on_a_proxied_playlist_refreshes_the_route_and_loads_it_again() {
+async fn inv_api_06_a_startup_http_error_on_a_proxied_playlist_refreshes_the_route_and_loads_it_again() {
     let rig = rig().await;
     let (slot, player) = playing(&rig, hls()).await;
     assert_eq!(player.loads(), 1);
@@ -63,7 +63,7 @@ async fn a_startup_http_error_on_a_proxied_playlist_refreshes_the_route_and_load
 }
 
 #[tokio::test]
-async fn repeated_playback_failures_reload_the_player_and_then_fail_the_place_with_the_reason() {
+async fn inv_api_06_repeated_playback_failures_reload_the_player_and_then_fail_the_place_with_the_reason() {
     let rig = rig().await;
     rig.parts.places.declared(&url_of(0), false);
     let (slot, player) = playing(&rig, video(&url_of(0))).await;
@@ -77,7 +77,7 @@ async fn repeated_playback_failures_reload_the_player_and_then_fail_the_place_wi
 }
 
 #[tokio::test]
-async fn a_silent_player_is_reloaded_by_the_watchdog() {
+async fn inv_api_06_a_silent_player_is_reloaded_by_the_watchdog() {
     let rig = rig().await;
     let (slot, silent) = playing(&rig, video(&url_of(0))).await;
     rig.parts.stage.ready(slot as usize);
@@ -86,7 +86,7 @@ async fn a_silent_player_is_reloaded_by_the_watchdog() {
 }
 
 #[tokio::test]
-async fn a_player_whose_clock_moves_is_checked_again_and_left_alone() {
+async fn inv_api_06_a_player_whose_clock_moves_is_checked_again_and_left_alone() {
     let rig = rig_with(|_| {}).await;
     *rig.factory.advance_ms.lock().unwrap() = 1_000;
     let (slot, healthy) = playing(&rig, video(&url_of(0))).await;
@@ -98,7 +98,7 @@ async fn a_player_whose_clock_moves_is_checked_again_and_left_alone() {
 }
 
 #[tokio::test]
-async fn a_stall_arms_the_watchdog_only_for_the_playing_slot() {
+async fn inv_api_06_a_stall_arms_the_watchdog_only_for_the_playing_slot() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
     stage.set_window(0, videos(3));
@@ -118,7 +118,7 @@ async fn a_stall_arms_the_watchdog_only_for_the_playing_slot() {
 }
 
 #[tokio::test]
-async fn going_to_the_background_pauses_playback_and_returning_resumes_it() {
+async fn inv_api_06_going_to_the_background_pauses_playback_and_returning_resumes_it() {
     let rig = rig().await;
     let (_, player) = playing(&rig, video(&url_of(0))).await;
     let stage = &rig.parts.stage;
@@ -132,7 +132,7 @@ async fn going_to_the_background_pauses_playback_and_returning_resumes_it() {
 }
 
 #[tokio::test]
-async fn watchdog_escalation_purges_the_cached_source_and_loads_it_again() {
+async fn inv_api_06_watchdog_escalation_purges_the_cached_source_and_loads_it_again() {
     let rig = rig_with(|config| config.watchdog = WatchdogConfig { max_attempts: 2, ..crate::api::test_support::fast_watchdog() }).await;
     rig.parts.cache.put(&cache_key(&url_of(0)), cache::Kind::Stream, b"bytes").await.unwrap();
     let (slot, player) = playing(&rig, video(&url_of(0))).await;
@@ -144,7 +144,7 @@ async fn watchdog_escalation_purges_the_cached_source_and_loads_it_again() {
 }
 
 #[tokio::test]
-async fn a_foreground_pass_that_finds_the_proxy_down_is_retried_until_it_is_back() {
+async fn inv_api_06_a_foreground_pass_that_finds_the_proxy_down_is_retried_until_it_is_back() {
     let rig = rig_with(|config| config.watchdog = WatchdogConfig { foreground_delays_ms: vec![5; 400], ..crate::api::test_support::fast_watchdog() }).await;
     let (_, player) = playing(&rig, video(&url_of(0))).await;
     let plays = || player.calls().iter().filter(|call| **call == SlotCall::Play).count();

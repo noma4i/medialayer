@@ -10,7 +10,7 @@ fn reserved(cache: &Cache) -> u64 {
 }
 
 #[tokio::test]
-async fn open_reader_cancelled_at_any_await_point_releases_its_pin() {
+async fn inv_cache_03_open_reader_cancelled_at_any_await_point_releases_its_pin() {
     for polls in 1..=MAX_POLLS {
         let f = fixture(limits(100, 0.9, EvictionStrategy::Lru), &[]).await;
         f.put("a", Kind::Image, 40).await;
@@ -20,7 +20,7 @@ async fn open_reader_cancelled_at_any_await_point_releases_its_pin() {
 }
 
 #[tokio::test]
-async fn begin_write_cancelled_at_any_await_point_unregisters_the_writer() {
+async fn inv_cache_02_begin_write_cancelled_at_any_await_point_unregisters_the_writer() {
     for polls in 1..=MAX_POLLS {
         let f = fixture(limits(100, 0.9, EvictionStrategy::Lru), &[]).await;
         if poll_then_drop(f.cache.begin_write("a", Kind::Stream), polls).await {
@@ -33,7 +33,7 @@ async fn begin_write_cancelled_at_any_await_point_unregisters_the_writer() {
 }
 
 #[tokio::test]
-async fn write_cancelled_at_any_await_point_leaves_no_reserve_after_the_writer_drops() {
+async fn inv_cache_02_write_cancelled_at_any_await_point_leaves_no_reserve_after_the_writer_drops() {
     for polls in 1..=MAX_POLLS {
         let f = fixture(limits(100, 0.9, EvictionStrategy::Lru), &[]).await;
         let mut writer = f.cache.begin_write("a", Kind::Stream).await.unwrap();
@@ -44,7 +44,7 @@ async fn write_cancelled_at_any_await_point_leaves_no_reserve_after_the_writer_d
 }
 
 #[tokio::test]
-async fn commit_cancelled_at_any_await_point_leaves_a_consistent_cache() {
+async fn inv_cache_02_commit_cancelled_at_any_await_point_leaves_a_consistent_cache() {
     for polls in 1..=MAX_POLLS {
         let f = fixture(limits(100, 0.9, EvictionStrategy::Lru), &[]).await;
         let mut writer = f.cache.begin_write("a", Kind::Stream).await.unwrap();
@@ -59,7 +59,7 @@ async fn commit_cancelled_at_any_await_point_leaves_a_consistent_cache() {
 }
 
 #[tokio::test]
-async fn commit_cancelled_while_waiting_for_the_key_lock_releases_the_reserve() {
+async fn inv_cache_02_commit_cancelled_while_waiting_for_the_key_lock_releases_the_reserve() {
     let f = fixture(limits(100, 0.9, EvictionStrategy::Lru), &[]).await;
     let mut writer = f.cache.begin_write("a", Kind::Stream).await.unwrap();
     writer.write(&[0; 80]).await.unwrap();
@@ -72,4 +72,16 @@ async fn commit_cancelled_while_waiting_for_the_key_lock_releases_the_reserve() 
     drop(stripe);
     assert_eq!(reserved(&f.cache), 0);
     assert_eq!(f.cache.stats().await.open_writers, 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn inv_cache_02_a_begin_write_cancelled_at_any_microsecond_leaves_no_part_file() {
+    let f = fixture(limits(1 << 30, 0.9, EvictionStrategy::Lru), &[]).await;
+    for round in 0..4000u64 {
+        let key = format!("k{round}");
+        let _ = tokio::time::timeout(std::time::Duration::from_micros(round % 120), f.cache.begin_write(&key, Kind::Stream)).await;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert_eq!(f.cache.stats().await.open_writers, 0);
+    assert_eq!(files_with_suffix(f.dir.path(), ".part"), 0, "cancelled begin_write calls left part files");
 }

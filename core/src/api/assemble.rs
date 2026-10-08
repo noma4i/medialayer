@@ -102,7 +102,7 @@ pub fn pool_config(limits: &Limits, device: DeviceMemory, settings: &PoolSetting
 
 #[async_trait]
 impl CacheControl for Cache {
-    async fn stats(&self) -> crate::cache::Stats {
+    async fn stats(&self) -> crate::cache::CacheStats {
         Cache::stats(self).await
     }
 

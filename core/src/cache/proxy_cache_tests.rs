@@ -110,7 +110,7 @@ async fn settle(cache: &Cache) {
 }
 
 #[tokio::test]
-async fn hls_and_media_replay_offline_from_a_reopened_disk_cache_with_their_content_type() {
+async fn inv_cache_07_hls_and_media_replay_offline_from_a_reopened_disk_cache_with_their_content_type() {
     let first = rig(ROOMY).await;
     hls_origin(&first.fetcher);
     first.fetcher.route(BLOB, Script::ok(pattern(100, 5)).header("Content-Type", "video/x-custom"));
@@ -131,7 +131,7 @@ async fn hls_and_media_replay_offline_from_a_reopened_disk_cache_with_their_cont
 }
 
 #[tokio::test]
-async fn range_requests_are_cut_from_cached_blocks_and_their_total_after_a_reopen() {
+async fn inv_cache_07_range_requests_are_cut_from_cached_blocks_and_their_total_after_a_reopen() {
     let first = rig(ROOMY).await;
     let data = pattern(100, 0);
     first.fetcher.route(VIDEO, Script::ok(data.clone()));
@@ -150,7 +150,7 @@ async fn range_requests_are_cut_from_cached_blocks_and_their_total_after_a_reope
 }
 
 #[tokio::test]
-async fn a_small_budget_evicts_old_entries_without_breaking_what_is_served() {
+async fn inv_cache_06_a_small_budget_evicts_old_entries_without_breaking_what_is_served() {
     let rig = rig(SMALL_BUDGET).await;
     hls_origin(&rig.fetcher);
     let urls = [MASTER, MEDIA, SEGMENT_ABSOLUTE, SEGMENT_RELATIVE];

@@ -11,7 +11,7 @@ fn watch(places: &Places, key: &str) -> (Arc<Mutex<Vec<MediaState>>>, Subscripti
 }
 
 #[tokio::test]
-async fn a_loading_place_becomes_ready_once_and_never_flickers_back_to_loading() {
+async fn inv_api_03_a_loading_place_becomes_ready_once_and_never_flickers_back_to_loading() {
     let places = Places::new(Handle::current());
     let (seen, _subscription) = watch(&places, "v1");
     eventually(|| seen.lock().unwrap().len() == 1).await;
@@ -33,7 +33,7 @@ async fn a_loading_place_becomes_ready_once_and_never_flickers_back_to_loading()
 }
 
 #[tokio::test]
-async fn a_cached_video_or_a_ready_slot_skips_loading() {
+async fn inv_placeholder_03_a_cached_video_or_a_ready_slot_skips_loading() {
     for ready_first in [false, true] {
         let places = Places::new(Handle::current());
         let (seen, _subscription) = watch(&places, "v1");
@@ -52,7 +52,7 @@ async fn a_cached_video_or_a_ready_slot_skips_loading() {
 }
 
 #[tokio::test]
-async fn a_failed_place_reports_the_reason_and_loads_again_when_declared_again() {
+async fn inv_api_03_a_failed_place_reports_the_reason_and_loads_again_when_declared_again() {
     let places = Places::new(Handle::current());
 
     places.declared("v1", false);
@@ -64,7 +64,7 @@ async fn a_failed_place_reports_the_reason_and_loads_again_when_declared_again()
 }
 
 #[tokio::test]
-async fn an_unloaded_slot_sends_a_declared_place_back_to_loading_and_forgets_an_undeclared_one() {
+async fn inv_api_03_an_unloaded_slot_sends_a_declared_place_back_to_loading_and_forgets_an_undeclared_one() {
     let places = Places::new(Handle::current());
     places.declared("seen", false);
     places.ready("seen");
@@ -77,7 +77,7 @@ async fn an_unloaded_slot_sends_a_declared_place_back_to_loading_and_forgets_an_
 }
 
 #[tokio::test]
-async fn a_native_loader_moves_a_place_through_loading_ready_and_failed_in_order() {
+async fn inv_api_03_a_native_loader_moves_a_place_through_loading_ready_and_failed_in_order() {
     let places = Places::new(Handle::current());
     let (seen, _subscription) = watch(&places, "image");
     eventually(|| seen.lock().unwrap().len() == 1).await;

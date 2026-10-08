@@ -7,13 +7,13 @@ fn page_of(key: &str) -> usize {
 }
 
 #[test]
-fn slot_wraps_page_by_slot_count() {
+fn inv_pool_10_slot_wraps_page_by_slot_count() {
     let ring = ring(3, 1);
     assert_eq!((0..7).map(|page| ring.slot(page)).collect::<Vec<_>>(), [0, 1, 2, 0, 1, 2, 0]);
 }
 
 #[test]
-fn pages_window_follows_reach_and_list_bounds() {
+fn inv_pool_10_pages_window_follows_reach_and_list_bounds() {
     let pool = ring(3, 1);
     assert_eq!(pool.pages(5, 20), 4..7);
     assert_eq!(pool.pages(0, 20), 0..2);
@@ -23,13 +23,13 @@ fn pages_window_follows_reach_and_list_bounds() {
 }
 
 #[test]
-fn slots_are_clamped_to_hold_the_window() {
+fn inv_pool_10_slots_are_clamped_to_hold_the_window() {
     assert_eq!(ring(2, 1).slots(), 3);
     assert_eq!(ring(2, 0).slots(), 2);
 }
 
 #[test]
-fn first_plan_loads_window_plays_active_and_prerolls_neighbours() {
+fn inv_pool_10_first_plan_loads_window_plays_active_and_prerolls_neighbours() {
     let mut ring = ring(3, 1);
     let commands = ring.plan(0, 5, Some(5), &keys(20));
     assert_eq!(
@@ -46,7 +46,7 @@ fn first_plan_loads_window_plays_active_and_prerolls_neighbours() {
 }
 
 #[test]
-fn scroll_reuses_the_freed_slot() {
+fn inv_pool_10_scroll_reuses_the_freed_slot() {
     let mut ring = ring(3, 1);
     ring.plan(0, 5, Some(5), &keys(20));
     let commands = ring.plan(0, 6, Some(6), &keys(20));
@@ -64,14 +64,14 @@ fn scroll_reuses_the_freed_slot() {
 }
 
 #[test]
-fn playback_outside_window_plays_nothing() {
+fn inv_pool_10_playback_outside_window_plays_nothing() {
     let mut ring = ring(3, 1);
     let commands = ring.plan(0, 5, Some(9), &keys(20));
     assert!(commands.iter().all(|command| !matches!(command, Command::Play { .. })));
 }
 
 #[test]
-fn pages_without_source_get_no_load() {
+fn inv_pool_10_pages_without_source_get_no_load() {
     let mut ring = ring(3, 1);
     let mut list = keys(20);
     list[5] = None;
@@ -81,7 +81,7 @@ fn pages_without_source_get_no_load() {
 }
 
 #[test]
-fn changed_key_for_same_page_reloads_the_slot() {
+fn inv_pool_10_changed_key_for_same_page_reloads_the_slot() {
     let mut ring = ring(3, 1);
     ring.plan(0, 5, Some(5), &keys(20));
     let mut list = keys(20);
@@ -91,7 +91,7 @@ fn changed_key_for_same_page_reloads_the_slot() {
 }
 
 #[test]
-fn p1_slots_stay_within_pool_over_1000_window_changes() {
+fn inv_pool_01_slots_stay_within_pool_over_1000_window_changes() {
     let mut ring = ring(3, 1);
     let list = keys(50);
     for active in walk(50, 1000) {
@@ -106,7 +106,7 @@ fn p1_slots_stay_within_pool_over_1000_window_changes() {
 }
 
 #[test]
-fn p2_at_most_one_slot_plays_after_every_command() {
+fn inv_pool_02_at_most_one_slot_plays_after_every_command() {
     let mut ring = ring(5, 2);
     let list = keys(50);
     let mut playing: HashSet<usize> = HashSet::new();
@@ -127,7 +127,7 @@ fn p2_at_most_one_slot_plays_after_every_command() {
 }
 
 #[test]
-fn p3_unloaded_slot_gets_no_commands_until_load() {
+fn inv_pool_03_unloaded_slot_gets_no_commands_until_load() {
     let mut ring = ring(3, 1);
     let list = keys(50);
     let mut unloaded: HashSet<usize> = HashSet::new();
@@ -150,7 +150,7 @@ fn p3_unloaded_slot_gets_no_commands_until_load() {
 }
 
 #[test]
-fn p4_preroll_hits_only_non_playing_window_pages_once_per_source() {
+fn inv_pool_04_preroll_hits_only_non_playing_window_pages_once_per_source() {
     let mut ring = ring(3, 1);
     let list = keys(50);
     let mut loaded: HashMap<usize, (String, usize)> = HashMap::new();
@@ -180,7 +180,7 @@ fn p4_preroll_hits_only_non_playing_window_pages_once_per_source() {
 }
 
 #[test]
-fn p5_repeated_plan_with_same_window_is_empty() {
+fn inv_pool_05_repeated_plan_with_same_window_is_empty() {
     let mut ring = ring(3, 1);
     let list = keys(50);
     for active in walk(50, 200) {
@@ -190,7 +190,7 @@ fn p5_repeated_plan_with_same_window_is_empty() {
 }
 
 #[test]
-fn key_of_names_the_key_a_slot_holds_until_it_is_unloaded() {
+fn inv_pool_01_key_of_names_the_key_a_slot_holds_until_it_is_unloaded() {
     let mut ring = ring(3, 1);
     ring.plan(0, 5, Some(5), &keys(20));
 
@@ -200,7 +200,7 @@ fn key_of_names_the_key_a_slot_holds_until_it_is_unloaded() {
 }
 
 #[test]
-fn growing_the_ring_adds_free_slots_and_shrinking_it_unloads_the_extra_ones() {
+fn inv_pool_10_growing_the_ring_adds_free_slots_and_shrinking_it_unloads_the_extra_ones() {
     let mut ring = ring(5, 1);
     ring.plan(0, 2, None, &keys(20));
 
@@ -215,7 +215,7 @@ fn growing_the_ring_adds_free_slots_and_shrinking_it_unloads_the_extra_ones() {
 }
 
 #[test]
-fn the_ring_never_shrinks_below_the_window_it_must_hold() {
+fn inv_pool_10_the_ring_never_shrinks_below_the_window_it_must_hold() {
     let mut ring = ring(5, 1);
 
     ring.set_slots(1);

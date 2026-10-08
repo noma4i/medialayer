@@ -9,7 +9,7 @@ fn route(url: &str) -> PlaybackRoute {
 }
 
 #[tokio::test]
-async fn commands_reach_the_player_in_order_while_the_caller_never_waits_for_it() {
+async fn inv_api_01_commands_reach_the_player_in_order_while_the_caller_never_waits_for_it() {
     let factory: Arc<MockFactory> = Arc::default();
     factory.gate.close();
     let runner = SlotRunner::new(Handle::current(), Some(factory.clone()));
@@ -29,7 +29,7 @@ async fn commands_reach_the_player_in_order_while_the_caller_never_waits_for_it(
 }
 
 #[tokio::test]
-async fn a_slow_platform_never_makes_the_queue_grow_and_the_last_source_wins() {
+async fn inv_api_01_a_slow_platform_never_makes_the_queue_grow_and_the_last_source_wins() {
     let factory: Arc<MockFactory> = Arc::default();
     factory.gate.close();
     let runner = SlotRunner::new(Handle::current(), Some(factory.clone()));
@@ -63,7 +63,7 @@ async fn a_slow_platform_never_makes_the_queue_grow_and_the_last_source_wins() {
 }
 
 #[tokio::test]
-async fn each_slot_gets_one_player_for_its_whole_life_and_a_slow_slot_does_not_hold_another() {
+async fn inv_api_01_each_slot_gets_one_player_for_its_whole_life_and_a_slow_slot_does_not_hold_another() {
     let factory: Arc<MockFactory> = Arc::default();
     let runner = SlotRunner::new(Handle::current(), Some(factory.clone()));
 
@@ -81,7 +81,7 @@ async fn each_slot_gets_one_player_for_its_whole_life_and_a_slow_slot_does_not_h
 }
 
 #[tokio::test]
-async fn without_a_factory_commands_are_dropped_and_no_sample_exists() {
+async fn inv_api_01_without_a_factory_commands_are_dropped_and_no_sample_exists() {
     let runner = SlotRunner::new(Handle::current(), None);
 
     runner.send(0, SlotCall::Play);

@@ -1,16 +1,16 @@
 use super::error::CacheError;
-use super::inner::Inner;
+use super::inner::CacheShared;
 use std::io::SeekFrom;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 pub struct Pin {
-    inner: Arc<Inner>,
+    inner: Arc<CacheShared>,
     name: String,
 }
 
 impl Pin {
-    pub fn acquire(inner: &Arc<Inner>, name: &str) -> Option<(Pin, u64)> {
+    pub fn acquire(inner: &Arc<CacheShared>, name: &str) -> Option<(Pin, u64)> {
         let size = inner.state().pin(name, inner.now())?;
         Some((Pin { inner: inner.clone(), name: name.to_string() }, size))
     }

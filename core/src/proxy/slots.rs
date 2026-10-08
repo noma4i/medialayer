@@ -1,4 +1,9 @@
+use crate::fetch::{BodyStream, FetchError};
+use bytes::Bytes;
+use futures_util::Stream;
 use std::collections::VecDeque;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use tokio::sync::oneshot;
 
@@ -27,6 +32,25 @@ pub struct PrioritySlots {
 
 pub struct Permit {
     state: Option<Arc<Mutex<State>>>,
+}
+
+struct HeldBody {
+    body: BodyStream,
+    _permit: Permit,
+}
+
+impl Stream for HeldBody {
+    type Item = Result<Bytes, FetchError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.body.as_mut().poll_next(context)
+    }
+}
+
+impl Permit {
+    pub fn hold(self, body: BodyStream) -> BodyStream {
+        Box::pin(HeldBody { body, _permit: self })
+    }
 }
 
 impl PrioritySlots {

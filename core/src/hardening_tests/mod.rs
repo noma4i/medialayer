@@ -25,7 +25,7 @@ async fn cache(budget: u64) -> (tempfile::TempDir, Cache) {
 }
 
 #[tokio::test]
-async fn hardening_pending_writes_share_disk_budget() {
+async fn inv_cache_01_pending_writes_share_disk_budget() {
     let (dir, cache) = cache(100).await;
     let mut a = cache.begin_write("a", Kind::Stream).await.unwrap();
     let mut b = cache.begin_write("b", Kind::Stream).await.unwrap();
@@ -74,7 +74,7 @@ async fn get(proxy: &Proxy, url: &str) -> Vec<u8> {
 }
 
 #[tokio::test]
-async fn hardening_registered_headers_stay_with_their_source() {
+async fn inv_proxy_01_registered_headers_stay_with_their_source() {
     let (_dir, cache) = cache(10000).await;
     let (proxy, origin) = proxy(&cache, false, 10).await;
     let a = proxy.url_for("https://origin.test/a.mp4", &HashMap::from([("Authorization".into(), "token-A".into())])).unwrap();
@@ -85,7 +85,7 @@ async fn hardening_registered_headers_stay_with_their_source() {
 }
 
 #[tokio::test]
-async fn hardening_media_larger_than_cache_still_plays() {
+async fn inv_proxy_02_media_larger_than_cache_still_plays() {
     let (_dir, cache) = cache(100).await;
     let (proxy, _origin) = proxy(&cache, false, 500).await;
     let url = proxy.url_for("https://origin.test/a.mp4", &HashMap::new()).unwrap();
@@ -95,7 +95,7 @@ async fn hardening_media_larger_than_cache_still_plays() {
 }
 
 #[tokio::test]
-async fn hardening_cancel_first_block_stops_download() {
+async fn inv_proxy_06_cancel_first_block_stops_download() {
     let (_dir, cache) = cache(10000).await;
     let (proxy, origin) = proxy(&cache, true, 10).await;
     let running = proxy.clone();
@@ -147,7 +147,7 @@ fn prefetch() -> (Prefetcher, Arc<HangingLoader>, Limits) {
 }
 
 #[tokio::test]
-async fn hardening_set_limits_preserves_total_concurrency() {
+async fn inv_prefetch_02_set_limits_preserves_total_concurrency() {
     let (prefetch, loader, mut limits) = prefetch();
     prefetch.set_window(0, sources());
     loader.started.notified().await;
@@ -161,7 +161,7 @@ async fn hardening_set_limits_preserves_total_concurrency() {
 }
 
 #[tokio::test]
-async fn hardening_drop_prefetch_stops_owned_tasks() {
+async fn inv_prefetch_04_drop_prefetch_stops_owned_tasks() {
     let (prefetch, loader, _limits) = prefetch();
     prefetch.set_window(0, sources());
     loader.started.notified().await;
@@ -171,7 +171,7 @@ async fn hardening_drop_prefetch_stops_owned_tasks() {
 }
 
 #[tokio::test]
-async fn hardening_drop_proxy_closes_owned_listener() {
+async fn inv_proxy_07_drop_proxy_closes_owned_listener() {
     let (_dir, cache) = cache(10000).await;
     let (proxy, _origin) = proxy(&cache, false, 10).await;
     let port = proxy.port();

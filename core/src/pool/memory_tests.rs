@@ -20,7 +20,7 @@ fn live(pool: &Ring) -> usize {
 }
 
 #[test]
-fn a_ring_without_a_ledger_is_never_refused() {
+fn inv_pool_06_a_ring_without_a_ledger_is_never_refused() {
     let mut pool = ring(3, 1);
     let commands = pool.plan(0, 5, Some(5), &keys(20));
     assert_eq!(loaded_keys(&commands).len(), 3);
@@ -28,7 +28,7 @@ fn a_ring_without_a_ledger_is_never_refused() {
 }
 
 #[test]
-fn r1_the_pool_holds_no_more_slots_than_the_ledger_admits() {
+fn inv_pool_06_the_pool_holds_no_more_slots_than_the_ledger_admits() {
     let (mut pool, ledger) = tight(250, 5, 2);
     let commands = pool.plan(0, 4, Some(4), &keys(10));
     assert_eq!(loaded_keys(&commands).len(), 2);
@@ -37,7 +37,7 @@ fn r1_the_pool_holds_no_more_slots_than_the_ledger_admits() {
 }
 
 #[test]
-fn the_nearest_pages_win_the_budget_forward_first() {
+fn inv_pool_06_the_nearest_pages_win_the_budget_forward_first() {
     let (mut pool, _ledger) = tight(250, 5, 2);
     let mut loaded = loaded_keys(&pool.plan(0, 4, Some(4), &keys(10)));
     loaded.sort();
@@ -45,7 +45,7 @@ fn the_nearest_pages_win_the_budget_forward_first() {
 }
 
 #[test]
-fn a_refused_page_stays_a_placeholder_and_loads_once_room_appears() {
+fn inv_pool_06_a_refused_page_stays_a_placeholder_and_loads_once_room_appears() {
     let (mut pool, ledger) = tight(250, 5, 2);
     let list = keys(10);
     let outside = ledger.reserve(MemoryOwner::ImageDecode, 150).unwrap();
@@ -59,7 +59,7 @@ fn a_refused_page_stays_a_placeholder_and_loads_once_room_appears() {
 }
 
 #[test]
-fn memory_frees_the_least_recently_used_slots_for_a_page_in_the_window() {
+fn inv_pool_06_memory_frees_the_least_recently_used_slots_for_a_page_in_the_window() {
     let (mut pool, ledger) = tight(200, 5, 2);
     pool.touch(1, "x");
     pool.touch(2, "y");
@@ -73,7 +73,7 @@ fn memory_frees_the_least_recently_used_slots_for_a_page_in_the_window() {
 }
 
 #[test]
-fn memory_frees_farther_ring_slots_for_a_nearer_page() {
+fn inv_pool_06_memory_frees_farther_ring_slots_for_a_nearer_page() {
     let (mut pool, ledger) = tight(200, 5, 2);
     let list = keys(20);
     pool.plan(0, 10, Some(10), &list);
@@ -88,7 +88,7 @@ fn memory_frees_farther_ring_slots_for_a_nearer_page() {
 }
 
 #[test]
-fn the_playing_slot_is_never_freed_for_memory() {
+fn inv_pool_06_the_playing_slot_is_never_freed_for_memory() {
     let (mut pool, ledger) = tight(100, 3, 0);
     pool.plan(0, 0, Some(0), &keys(5));
     assert!(pool.touch(1, "z").is_empty());
@@ -98,7 +98,7 @@ fn the_playing_slot_is_never_freed_for_memory() {
 }
 
 #[test]
-fn a_pinned_slot_is_not_freed_for_a_page() {
+fn inv_pool_06_a_pinned_slot_is_not_freed_for_a_page() {
     let (mut pool, ledger) = tight(100, 3, 0);
     pool.pin(0, "p");
     let commands = pool.plan(1, 0, Some(0), &keys(5));
@@ -108,7 +108,7 @@ fn a_pinned_slot_is_not_freed_for_a_page() {
 }
 
 #[test]
-fn release_and_release_all_free_the_reservation() {
+fn inv_pool_06_release_and_release_all_free_the_reservation() {
     let (mut pool, ledger) = tight(1000, 5, 2);
     pool.plan(0, 5, Some(5), &keys(20));
     assert_eq!((ledger.used(), pool.stats().memory_bytes), (500, 500));
@@ -120,7 +120,7 @@ fn release_and_release_all_free_the_reservation() {
 }
 
 #[test]
-fn the_timer_and_pressure_free_the_reservation() {
+fn inv_pool_06_the_timer_and_pressure_free_the_reservation() {
     let ledger = Ledger::new(1000);
     let mut config = PoolConfig::new(3, 1);
     config.slot_bytes_estimate = ESTIMATE;
@@ -134,7 +134,7 @@ fn the_timer_and_pressure_free_the_reservation() {
 }
 
 #[test]
-fn background_restore_waits_for_memory_and_keeps_the_saved_slots() {
+fn inv_pool_06_background_restore_waits_for_memory_and_keeps_the_saved_slots() {
     let (mut pool, ledger) = tight(300, 3, 1);
     let list = keys(20);
     pool.plan(0, 5, Some(5), &list);
@@ -150,7 +150,7 @@ fn background_restore_waits_for_memory_and_keeps_the_saved_slots() {
 }
 
 #[test]
-fn release_counts_as_explicit_not_source_change() {
+fn inv_pool_06_release_counts_as_explicit_not_source_change() {
     let mut pool = ring(3, 1);
     pool.plan(0, 5, Some(5), &keys(20));
     pool.release("k5");
@@ -160,7 +160,7 @@ fn release_counts_as_explicit_not_source_change() {
 }
 
 #[test]
-fn fewer_slots_shrinks_slots_and_reach() {
+fn inv_pool_06_fewer_slots_shrinks_slots_and_reach() {
     let (mut pool, ledger) = tight(10_000, 6, 2);
     let list = keys(20);
     pool.plan(0, 5, Some(5), &list);
@@ -173,7 +173,7 @@ fn fewer_slots_shrinks_slots_and_reach() {
 }
 
 #[test]
-fn playing_slot_only_keeps_just_the_playing_slot() {
+fn inv_pool_06_playing_slot_only_keeps_just_the_playing_slot() {
     let (mut pool, ledger) = tight(10_000, 6, 2);
     let list = keys(20);
     pool.plan(0, 5, Some(5), &list);
@@ -186,7 +186,7 @@ fn playing_slot_only_keeps_just_the_playing_slot() {
 }
 
 #[test]
-fn placeholders_only_unloads_everything_and_loads_nothing_until_the_step_lifts() {
+fn inv_pool_06_placeholders_only_unloads_everything_and_loads_nothing_until_the_step_lifts() {
     let (mut pool, ledger) = tight(10_000, 6, 2);
     let list = keys(20);
     pool.plan(0, 5, Some(5), &list);
@@ -200,7 +200,7 @@ fn placeholders_only_unloads_everything_and_loads_nothing_until_the_step_lifts()
 }
 
 #[test]
-fn a_step_also_lowers_the_ledger_admission() {
+fn inv_pool_06_a_step_also_lowers_the_ledger_admission() {
     let (mut pool, ledger) = tight(1000, 5, 2);
     pool.set_step(Step::FewerSlots);
     assert!(ledger.reserve(MemoryOwner::Queue, 900).is_err());

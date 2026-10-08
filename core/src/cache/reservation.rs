@@ -1,18 +1,18 @@
 use super::error::CacheError;
 use super::evict::evict_to;
-use super::inner::Inner;
+use super::inner::CacheShared;
 use super::state::State;
 use crate::limits::eviction_target;
 use std::sync::Arc;
 
-pub struct Reservation {
-    inner: Arc<Inner>,
+pub struct SpaceReservation {
+    inner: Arc<CacheShared>,
     held: u64,
 }
 
-impl Reservation {
-    pub fn new(inner: Arc<Inner>) -> Reservation {
-        Reservation { inner, held: 0 }
+impl SpaceReservation {
+    pub fn new(inner: Arc<CacheShared>) -> SpaceReservation {
+        SpaceReservation { inner, held: 0 }
     }
 
     pub fn held(&self) -> u64 {
@@ -45,7 +45,7 @@ impl Reservation {
     }
 }
 
-impl Drop for Reservation {
+impl Drop for SpaceReservation {
     fn drop(&mut self) {
         if self.held > 0 {
             self.inner.state().reserved -= self.held;

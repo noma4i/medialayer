@@ -1,7 +1,7 @@
 use super::config::PoolConfig;
 use crate::memory::{Ledger, Reservation, Step};
 use super::retention::{Retention, SlotState};
-use super::stats::{Counters, ReleaseReason};
+use super::stats::{PoolCounters, ReleaseReason};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
 
@@ -18,7 +18,7 @@ pub enum Command {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Owner {
+pub enum Holder {
     Ring,
     Lru,
     Pinned,
@@ -27,7 +27,7 @@ pub enum Owner {
 #[derive(Debug)]
 pub(super) struct Binding {
     pub key: String,
-    pub owner: Owner,
+    pub owner: Holder,
     pub page: Option<usize>,
     pub is_playing: bool,
     pub is_prerolled: bool,
@@ -48,7 +48,7 @@ pub(super) struct Hold {
 #[derive(Debug, Clone)]
 pub(super) struct Saved {
     pub key: String,
-    pub owner: Owner,
+    pub owner: Holder,
     pub page: Option<usize>,
 }
 
@@ -67,7 +67,7 @@ pub struct Ring {
     pub(super) hold: Option<Hold>,
     pub(super) is_background: bool,
     pub(super) restore: VecDeque<Saved>,
-    pub(super) counters: Counters,
+    pub(super) counters: PoolCounters,
     pub(super) ledger: Ledger,
     pub(super) step: Step,
 }
@@ -92,7 +92,7 @@ impl Ring {
             hold: None,
             is_background: false,
             restore: VecDeque::new(),
-            counters: Counters::default(),
+            counters: PoolCounters::default(),
             ledger,
             step: Step::Normal,
             config,
@@ -151,7 +151,7 @@ impl Ring {
                 continue;
             };
             binding.page = pages.get(binding.key.as_str()).copied();
-            if binding.owner == Owner::Ring && binding.page.is_none() {
+            if binding.owner == Holder::Ring && binding.page.is_none() {
                 self.unbind(slot, ReleaseReason::SourceChange, &mut unloads);
             }
         }
@@ -169,7 +169,7 @@ impl Ring {
                 continue;
             };
             let mut staged = Vec::new();
-            self.bind(slot, key.clone(), Owner::Ring, Some(page), now, &mut unloads, &mut staged);
+            self.bind(slot, key.clone(), Holder::Ring, Some(page), now, &mut unloads, &mut staged);
             staged_loads.push((page, staged));
         }
         staged_loads.sort_by_key(|(page, _)| *page);
@@ -184,7 +184,7 @@ impl Ring {
                 continue;
             };
             let should_play = playback_key.as_deref() == Some(binding.key.as_str());
-            let is_ring = binding.owner == Owner::Ring;
+            let is_ring = binding.owner == Holder::Ring;
             if binding.is_playing && !should_play && (is_ring || playback_key.is_some()) {
                 binding.is_playing = false;
                 pauses.push(Command::Pause { slot });
@@ -213,7 +213,7 @@ impl Ring {
                     slot,
                     retention: binding.level,
                     is_playing: binding.is_playing,
-                    is_pinned: binding.owner == Owner::Pinned,
+                    is_pinned: binding.owner == Holder::Pinned,
                     distance: binding.page.map_or(usize::MAX, |page| page.abs_diff(self.active)),
                 },
             })
@@ -240,7 +240,7 @@ impl Ring {
             .iter()
             .enumerate()
             .filter_map(|(slot, binding)| {
-                binding.as_ref().filter(|binding| binding.owner == Owner::Lru && !binding.is_playing).map(|binding| (binding.last_used, slot))
+                binding.as_ref().filter(|binding| binding.owner == Holder::Lru && !binding.is_playing).map(|binding| (binding.last_used, slot))
             })
             .min()?;
         self.unbind(victim, ReleaseReason::SourceChange, unloads);
@@ -252,7 +252,7 @@ impl Ring {
         &mut self,
         slot: usize,
         key: String,
-        owner: Owner,
+        owner: Holder,
         page: Option<usize>,
         now: u64,
         unloads: &mut Vec<Command>,

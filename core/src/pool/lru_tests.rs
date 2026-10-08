@@ -2,7 +2,7 @@ use super::test_support::*;
 use super::*;
 
 #[test]
-fn touch_loads_unknown_keys_into_free_slots_and_ignores_known_ones() {
+fn inv_pool_15_touch_loads_unknown_keys_into_free_slots_and_ignores_known_ones() {
     let mut pool = ring(3, 0);
     assert_eq!(pool.touch(1, "a"), [Command::Load { slot: 0, key: "a".into() }]);
     assert_eq!(pool.touch(2, "b"), [Command::Load { slot: 1, key: "b".into() }]);
@@ -10,7 +10,7 @@ fn touch_loads_unknown_keys_into_free_slots_and_ignores_known_ones() {
 }
 
 #[test]
-fn full_pool_evicts_the_least_recently_used_key() {
+fn inv_pool_15_full_pool_evicts_the_least_recently_used_key() {
     let mut pool = ring(3, 0);
     pool.touch(1, "a");
     pool.touch(2, "b");
@@ -20,7 +20,7 @@ fn full_pool_evicts_the_least_recently_used_key() {
 }
 
 #[test]
-fn playing_key_is_not_evicted() {
+fn inv_pool_15_playing_key_is_not_evicted() {
     let mut pool = ring(2, 0);
     pool.touch(1, "a");
     pool.touch(2, "b");
@@ -29,7 +29,7 @@ fn playing_key_is_not_evicted() {
 }
 
 #[test]
-fn lru_never_evicts_ring_slots() {
+fn inv_pool_15_lru_never_evicts_ring_slots() {
     let mut pool = ring(4, 0);
     pool.plan(0, 5, Some(5), &keys(20));
     for (now, key) in ["a", "b", "c", "d", "e"].into_iter().enumerate() {
@@ -41,7 +41,7 @@ fn lru_never_evicts_ring_slots() {
 }
 
 #[test]
-fn ring_window_reclaims_slots_held_by_lru_keys() {
+fn inv_pool_15_ring_window_reclaims_slots_held_by_lru_keys() {
     let mut pool = ring(3, 1);
     pool.touch(1, "a");
     pool.touch(2, "b");
@@ -52,14 +52,14 @@ fn ring_window_reclaims_slots_held_by_lru_keys() {
 }
 
 #[test]
-fn touch_in_background_loads_nothing() {
+fn inv_pool_15_touch_in_background_loads_nothing() {
     let mut pool = ring(3, 0);
     pool.background();
     assert!(pool.touch(1, "a").is_empty());
 }
 
 #[test]
-fn untouch_unloads_a_recently_used_key_but_keeps_window_and_pinned_keys() {
+fn inv_pool_15_untouch_unloads_a_recently_used_key_but_keeps_window_and_pinned_keys() {
     let mut pool = ring(4, 1);
     pool.plan(0, 0, None, &keys(3));
     pool.pin(1, "intro");

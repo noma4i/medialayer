@@ -13,7 +13,7 @@ fn video(url: &str, token: &str) -> MediaItem {
 }
 
 #[tokio::test]
-async fn play_url_goes_through_the_proxy_when_it_is_ready_and_direct_when_it_is_not() {
+async fn inv_api_08_play_url_goes_through_the_proxy_when_it_is_ready_and_direct_when_it_is_not() {
     let rig = proxy_rig().await;
     let routes = Routes::new(rig.proxy.clone(), Arc::new(rig.cache.clone()));
     let source = video("https://cdn.test/a/index.m3u8", "token");
@@ -31,7 +31,7 @@ async fn play_url_goes_through_the_proxy_when_it_is_ready_and_direct_when_it_is_
 }
 
 #[tokio::test]
-async fn a_route_is_stale_after_the_proxy_changes_port_and_after_it_becomes_ready_again() {
+async fn inv_api_08_a_route_is_stale_after_the_proxy_changes_port_and_after_it_becomes_ready_again() {
     let rig = proxy_rig().await;
     let routes = Routes::new(rig.proxy.clone(), Arc::new(rig.cache.clone()));
     let source = video("https://cdn.test/a/index.m3u8", "token");
@@ -55,7 +55,7 @@ async fn a_route_is_stale_after_the_proxy_changes_port_and_after_it_becomes_read
 }
 
 #[tokio::test]
-async fn a_source_is_cached_when_its_whole_entry_or_its_first_block_is_stored() {
+async fn inv_api_08_a_source_is_cached_when_its_whole_entry_or_its_first_block_is_stored() {
     let rig = proxy_rig().await;
     let routes = Routes::new(rig.proxy.clone(), Arc::new(rig.cache.clone()));
     let source = video("https://cdn.test/clip.mp4", "token");
@@ -71,7 +71,7 @@ async fn a_source_is_cached_when_its_whole_entry_or_its_first_block_is_stored() 
 }
 
 #[tokio::test]
-async fn image_bytes_load_through_the_fetcher_into_the_cache_and_refuse_a_response_over_the_limit() {
+async fn inv_ffi_03_image_bytes_load_through_the_fetcher_into_the_cache_and_refuse_a_response_over_the_limit() {
     let rig = proxy_rig().await;
     let routes = Routes::new(rig.proxy.clone(), Arc::new(rig.cache.clone()));
     rig.fetcher.route("https://cdn.test/a.jpg", crate::fetch::mock::Script::ok(vec![1; 100]));
@@ -88,7 +88,7 @@ async fn image_bytes_load_through_the_fetcher_into_the_cache_and_refuse_a_respon
 }
 
 #[tokio::test]
-async fn a_route_tells_the_player_whether_to_loop_and_whether_the_stream_is_hls() {
+async fn inv_api_08_a_route_tells_the_player_whether_to_loop_and_whether_the_stream_is_hls() {
     let rig = proxy_rig().await;
     let routes = Routes::new(rig.proxy.clone(), Arc::new(rig.cache.clone()));
     let cases = [

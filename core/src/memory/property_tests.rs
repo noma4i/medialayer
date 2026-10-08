@@ -1,18 +1,6 @@
 use super::*;
 use crate::pool::Pressure;
-
-struct Lcg(u64);
-
-impl Lcg {
-    fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        self.0 >> 33
-    }
-
-    fn below(&mut self, bound: u64) -> u64 {
-        self.next() % bound
-    }
-}
+use crate::seeded::Dice;
 
 fn owner(roll: u64) -> Owner {
     match roll % 4 {
@@ -26,11 +14,11 @@ fn owner(roll: u64) -> Owner {
 const STEPS: [Step; 6] = [Step::Normal, Step::LowerQuality, Step::ShorterBuffer, Step::FewerSlots, Step::PlayingSlotOnly, Step::PlaceholdersOnly];
 
 #[test]
-fn r11_used_never_passes_the_ceiling_over_100000_random_operations() {
+fn inv_memory_01_used_never_passes_the_ceiling_over_100000_random_operations() {
     let ceiling = 10_000u64;
     let ledger = Ledger::new(ceiling);
     let mut degradation = Degradation::default();
-    let mut rng = Lcg(42);
+    let mut rng = Dice::new("inv_memory_01_r11_used_never_passes_the_ceiling_over_100000_random_operations");
     let mut held: Vec<Reservation> = Vec::new();
     let mut refusals = 0u64;
     let mut frees = 0u64;
@@ -39,7 +27,7 @@ fn r11_used_never_passes_the_ceiling_over_100000_random_operations() {
         match rng.below(5) {
             0 | 1 => {
                 let bytes = rng.below(ceiling / 3) + 1;
-                match ledger.reserve(owner(rng.next()), bytes) {
+                match ledger.reserve(owner(rng.next_u64()), bytes) {
                     Ok(reservation) => held.push(reservation),
                     Err(_) => {
                         refusals += 1;
@@ -72,7 +60,7 @@ fn r11_used_never_passes_the_ceiling_over_100000_random_operations() {
                     frees += 1;
                     freed
                 };
-                if let Ok(reservation) = ledger.reserve_or_free(owner(rng.next()), bytes, &mut freeing) {
+                if let Ok(reservation) = ledger.reserve_or_free(owner(rng.next_u64()), bytes, &mut freeing) {
                     held.push(reservation);
                 }
             }
@@ -86,9 +74,9 @@ fn r11_used_never_passes_the_ceiling_over_100000_random_operations() {
 }
 
 #[test]
-fn a_random_step_sequence_keeps_admission_below_the_step_share() {
+fn inv_memory_01_a_random_step_sequence_keeps_admission_below_the_step_share() {
     let ledger = Ledger::new(1000);
-    let mut rng = Lcg(7);
+    let mut rng = Dice::new("inv_memory_01_a_random_step_sequence_keeps_admission_below_the_step_share");
     let mut held = Vec::new();
     for _ in 0..2_000 {
         let step = STEPS[rng.below(6) as usize];
@@ -107,4 +95,84 @@ fn a_random_step_sequence_keeps_admission_below_the_step_share() {
             held.remove(0);
         }
     }
+}
+
+async fn contend(ledger: &Ledger, tasks: u64, dice: crate::seeded::Dice, moving: bool) -> (u64, u64) {
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+    let (granted, refused) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+    let stop = Arc::new(AtomicBool::new(false));
+    let watcher = {
+        let (ledger, stop) = (ledger.clone(), stop.clone());
+        tokio::spawn(async move {
+            while !stop.load(Ordering::SeqCst) {
+                if !moving {
+                    assert!(ledger.used() <= ledger.ceiling(), "used passes the ceiling");
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+    };
+    let controller = {
+        let (ledger, stop, mut dice) = (ledger.clone(), stop.clone(), dice.fork(999));
+        tokio::spawn(async move {
+            while moving && !stop.load(Ordering::SeqCst) {
+                ledger.set_ceiling(if dice.percent(50) { 300 } else { 4_000 });
+                ledger.set_pressure_step(STEPS[dice.index(6)]);
+                tokio::time::sleep(Duration::from_micros(dice.between(50, 400))).await;
+            }
+        })
+    };
+    let workers: Vec<_> = (0..tasks)
+        .map(|index| {
+            let (ledger, granted, refused) = (ledger.clone(), granted.clone(), refused.clone());
+            let mut lane = dice.fork(index);
+            tokio::spawn(async move {
+                for _ in 0..40 {
+                    let floor = lane.between(1, 500);
+                    let wanted = floor + lane.below(600);
+                    let wait = Duration::from_millis(lane.between(1, 20));
+                    match tokio::time::timeout(wait, ledger.reserve_between(owner(lane.next_u64()), floor, wanted)).await {
+                        Ok(Ok(held)) => {
+                            assert!(held.bytes() >= floor && held.bytes() <= wanted, "granted {} for {floor}..{wanted}", held.bytes());
+                            granted.fetch_add(1, Ordering::SeqCst);
+                            for _ in 0..lane.below(3) {
+                                tokio::task::yield_now().await;
+                            }
+                        }
+                        Ok(Err(_)) => {
+                            refused.fetch_add(1, Ordering::SeqCst);
+                        }
+                        Err(_) => {}
+                    }
+                }
+            })
+        })
+        .collect();
+    for worker in workers {
+        tokio::time::timeout(Duration::from_secs(20), worker).await.expect("a reservation task hung").unwrap();
+    }
+    stop.store(true, Ordering::SeqCst);
+    watcher.await.unwrap();
+    controller.await.unwrap();
+    (granted.load(Ordering::SeqCst), refused.load(Ordering::SeqCst))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn inv_memory_01_inv_memory_04_waiting_reservations_never_pass_the_ceiling_and_all_settle_to_zero() {
+    let dice = crate::seeded::Dice::new("inv_memory_01_inv_memory_04_waiting_reservations_never_pass_the_ceiling_and_all_settle_to_zero");
+    let ledger = Ledger::new(1_500);
+    let (granted, _) = contend(&ledger, 16, dice, false).await;
+    assert!(granted > 100, "the stand barely granted anything: {granted}");
+    assert_eq!((ledger.used(), ledger.waiting()), (0, 0), "reservations or waiters leaked");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn inv_memory_04_a_ceiling_and_a_step_that_keep_moving_never_strand_a_waiter_or_leak_bytes() {
+    let dice = crate::seeded::Dice::new("inv_memory_04_a_ceiling_and_a_step_that_keep_moving_never_strand_a_waiter_or_leak_bytes");
+    let ledger = Ledger::new(4_000);
+    let (granted, refused) = contend(&ledger, 16, dice, true).await;
+    assert!(granted > 50 && refused > 0, "the stand never hit both outcomes: {granted} granted, {refused} refused");
+    assert_eq!((ledger.used(), ledger.waiting()), (0, 0), "reservations or waiters leaked");
 }

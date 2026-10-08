@@ -2,7 +2,7 @@ use super::*;
 use std::thread;
 
 #[test]
-fn reserve_counts_and_drop_releases() {
+fn inv_memory_01_reserve_counts_and_drop_releases() {
     let ledger = Ledger::new(1000);
     let first = ledger.reserve(Owner::Slot(0), 300).unwrap();
     let second = ledger.reserve(Owner::ProxyBuffer, 200).unwrap();
@@ -15,7 +15,7 @@ fn reserve_counts_and_drop_releases() {
 }
 
 #[test]
-fn reserve_up_to_the_ceiling_is_admitted_and_one_byte_more_is_refused() {
+fn inv_memory_01_reserve_up_to_the_ceiling_is_admitted_and_one_byte_more_is_refused() {
     let ledger = Ledger::new(1000);
     let held = ledger.reserve(Owner::Queue, 1000).unwrap();
     let refused = ledger.reserve(Owner::Queue, 1).unwrap_err();
@@ -25,7 +25,7 @@ fn reserve_up_to_the_ceiling_is_admitted_and_one_byte_more_is_refused() {
 }
 
 #[test]
-fn a_request_that_overflows_the_counter_is_refused_without_panic() {
+fn inv_memory_02_a_request_that_overflows_the_counter_is_refused_without_panic() {
     let ledger = Ledger::unbounded();
     let _held = ledger.reserve(Owner::Queue, 10).unwrap();
     assert!(ledger.reserve(Owner::Queue, u64::MAX).is_err());
@@ -33,7 +33,7 @@ fn a_request_that_overflows_the_counter_is_refused_without_panic() {
 }
 
 #[test]
-fn used_by_sums_one_owner() {
+fn inv_memory_01_used_by_sums_one_owner() {
     let ledger = Ledger::new(1000);
     let _a = ledger.reserve(Owner::Slot(0), 100).unwrap();
     let _b = ledger.reserve(Owner::Slot(1), 50).unwrap();
@@ -42,7 +42,7 @@ fn used_by_sums_one_owner() {
 }
 
 #[test]
-fn reserve_or_free_skips_freeing_when_it_fits() {
+fn inv_memory_08_reserve_or_free_skips_freeing_when_it_fits() {
     let ledger = Ledger::new(100);
     let mut calls = 0;
     let mut freeing = |_needed: u64| {
@@ -54,7 +54,7 @@ fn reserve_or_free_skips_freeing_when_it_fits() {
 }
 
 #[test]
-fn reserve_or_free_asks_for_the_missing_bytes_then_admits() {
+fn inv_memory_08_reserve_or_free_asks_for_the_missing_bytes_then_admits() {
     let ledger = Ledger::new(100);
     let mut victim = Some(ledger.reserve(Owner::Slot(0), 80).unwrap());
     let mut asked = Vec::new();
@@ -68,7 +68,7 @@ fn reserve_or_free_asks_for_the_missing_bytes_then_admits() {
 }
 
 #[test]
-fn reserve_or_free_refuses_when_freeing_is_not_enough() {
+fn inv_memory_08_reserve_or_free_refuses_when_freeing_is_not_enough() {
     let ledger = Ledger::new(100);
     let _pinned = ledger.reserve(Owner::Slot(0), 90).unwrap();
     let mut freeing = |_needed: u64| 0;
@@ -78,7 +78,7 @@ fn reserve_or_free_refuses_when_freeing_is_not_enough() {
 }
 
 #[test]
-fn a_pressure_step_lowers_admission_but_not_the_ceiling() {
+fn inv_memory_01_a_pressure_step_lowers_admission_but_not_the_ceiling() {
     let ledger = Ledger::new(1000);
     ledger.set_pressure_step(Step::FewerSlots);
     assert_eq!(ledger.ceiling(), 1000);
@@ -92,7 +92,7 @@ fn a_pressure_step_lowers_admission_but_not_the_ceiling() {
 }
 
 #[test]
-fn alloc_counts_the_buffer_and_releases_it_on_drop() {
+fn inv_memory_03_alloc_counts_the_buffer_and_releases_it_on_drop() {
     let ledger = Ledger::new(1000);
     let mut buffer = ledger.alloc(Owner::ProxyBuffer, 256).unwrap();
     assert_eq!(buffer.as_mut_slice().len(), 256);
@@ -102,7 +102,7 @@ fn alloc_counts_the_buffer_and_releases_it_on_drop() {
 }
 
 #[test]
-fn alloc_that_the_allocator_cannot_serve_is_refused_without_panic() {
+fn inv_memory_02_alloc_that_the_allocator_cannot_serve_is_refused_without_panic() {
     let ledger = Ledger::unbounded();
     let refused = ledger.alloc(Owner::ProxyBuffer, u64::MAX / 2).err().unwrap();
     assert!(matches!(refused, Refused::Allocation { owner: Owner::ProxyBuffer, .. }));
@@ -110,7 +110,7 @@ fn alloc_that_the_allocator_cannot_serve_is_refused_without_panic() {
 }
 
 #[test]
-fn concurrent_reserves_never_pass_the_ceiling_and_settle_to_zero() {
+fn inv_memory_01_concurrent_reserves_never_pass_the_ceiling_and_settle_to_zero() {
     let ledger = Ledger::new(10_000);
     let workers: Vec<_> = (0..8)
         .map(|index| {
@@ -132,7 +132,7 @@ fn concurrent_reserves_never_pass_the_ceiling_and_settle_to_zero() {
 }
 
 #[test]
-fn set_ceiling_moves_the_admission_limit_and_keeps_existing_reservations() {
+fn inv_memory_01_set_ceiling_moves_the_admission_limit_and_keeps_existing_reservations() {
     let ledger = Ledger::new(100);
     let held = ledger.reserve(Owner::Queue, 60).unwrap();
 
@@ -148,7 +148,7 @@ fn set_ceiling_moves_the_admission_limit_and_keeps_existing_reservations() {
 }
 
 #[tokio::test]
-async fn reserve_between_grants_what_is_free_up_to_the_wish_and_waits_below_the_floor() {
+async fn inv_memory_04_reserve_between_grants_what_is_free_up_to_the_wish_and_waits_below_the_floor() {
     let ledger = Ledger::new(100);
     let holder = ledger.reserve(Owner::Slot(0), 70).unwrap();
 
@@ -172,7 +172,7 @@ async fn reserve_between_grants_what_is_free_up_to_the_wish_and_waits_below_the_
 }
 
 #[tokio::test]
-async fn reserve_between_refuses_at_once_a_floor_that_can_never_fit() {
+async fn inv_memory_04_reserve_between_refuses_at_once_a_floor_that_can_never_fit() {
     let ledger = Ledger::new(100);
 
     let refused = ledger.reserve_between(Owner::ProxyBuffer, 101, 200).await.unwrap_err();

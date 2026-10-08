@@ -2,7 +2,7 @@ use super::*;
 use crate::limits::{EvictionStrategy, Limits as CoreLimits};
 
 #[test]
-fn every_limit_survives_the_trip_across_the_bridge_types() {
+fn inv_limits_06_every_limit_survives_the_trip_across_the_bridge_types() {
     let core = CoreLimits {
         budget: 2_000_000_000,
         min_budget: 70_000_000,
@@ -23,7 +23,7 @@ fn every_limit_survives_the_trip_across_the_bridge_types() {
 }
 
 #[test]
-fn pool_settings_cross_the_bridge_with_their_low_memory_options() {
+fn inv_limits_06_pool_settings_cross_the_bridge_with_their_low_memory_options() {
     let settings = PoolSettings { reach: 2, hold_off_ms: 500, trim_delay_ms: 9_000, low_ram_slots: 4, low_ram_reach: 1 };
 
     let core = crate::api::PoolSettings::from(settings);

@@ -78,7 +78,7 @@ fn caller() -> tokio::runtime::Runtime {
 }
 
 #[tokio::test]
-async fn opening_reads_nothing_until_the_first_call_awaits() {
+async fn inv_ffi_02_opening_reads_nothing_until_the_first_call_awaits() {
     let settings: Arc<FakeSettings> = shared();
     let dir = tempfile::tempdir().unwrap();
     let mut assembled = assembly(dir.path(), Arc::new(MockFetcher::default()), shared::<MockFactory>());
@@ -93,7 +93,7 @@ async fn opening_reads_nothing_until_the_first_call_awaits() {
 }
 
 #[test]
-fn open_wires_the_real_parts_so_limits_reach_the_store_and_stats_answer() {
+fn inv_ffi_02_open_wires_the_real_parts_so_limits_reach_the_store_and_stats_answer() {
     let dir = tempfile::tempdir().unwrap();
     let settings: Arc<FakeSettings> = shared();
     let caller = caller();
@@ -111,7 +111,7 @@ fn open_wires_the_real_parts_so_limits_reach_the_store_and_stats_answer() {
 }
 
 #[test]
-fn a_play_url_routes_the_platform_fetcher_through_the_proxy_into_the_disk_cache_and_purge_removes_it() {
+fn inv_ffi_02_a_play_url_routes_the_platform_fetcher_through_the_proxy_into_the_disk_cache_and_purge_removes_it() {
     let dir = tempfile::tempdir().unwrap();
     let origin = Arc::new(Origin::default());
     let layer = MediaLayer::open(config(dir.path(), origin.clone(), shared::<FakeSettings>(), None)).unwrap();
@@ -144,7 +144,7 @@ fn a_play_url_routes_the_platform_fetcher_through_the_proxy_into_the_disk_cache_
 }
 
 #[test]
-fn declarations_reach_the_platform_slots_and_the_player_events_move_the_state() {
+fn inv_ffi_02_declarations_reach_the_platform_slots_and_the_player_events_move_the_state() {
     let dir = tempfile::tempdir().unwrap();
     let factory: Arc<MockFactory> = Arc::default();
     let slots: Arc<dyn PlayerSlotFactory> = factory.clone();
@@ -169,7 +169,7 @@ fn declarations_reach_the_platform_slots_and_the_player_events_move_the_state() 
 }
 
 #[test]
-fn a_cache_write_reaches_a_stats_subscriber_without_any_controls_call() {
+fn inv_ffi_02_a_cache_write_reaches_a_stats_subscriber_without_any_controls_call() {
     let dir = tempfile::tempdir().unwrap();
     let caller = caller();
     let (layer, cache) = caller.block_on(async {
@@ -198,7 +198,7 @@ impl MemoryReleaser for CountingReleaser {
 }
 
 #[test]
-fn a_critical_memory_warning_reaches_the_platform_memory_releaser() {
+fn inv_ffi_02_a_critical_memory_warning_reaches_the_platform_memory_releaser() {
     let dir = tempfile::tempdir().unwrap();
     let releaser: Arc<CountingReleaser> = shared();
     let mut open = config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), None);
@@ -222,7 +222,7 @@ fn origin_layer(dir: &std::path::Path) -> (Arc<MediaLayer>, Arc<Origin>) {
 }
 
 #[test]
-fn an_image_loads_through_the_fetcher_into_the_cache_once_and_repeats_come_from_the_cache() {
+fn inv_ffi_03_an_image_loads_through_the_fetcher_into_the_cache_once_and_repeats_come_from_the_cache() {
     let dir = tempfile::tempdir().unwrap();
     let (layer, origin) = origin_layer(dir.path());
     let headers = HashMap::from([("Authorization".to_string(), "token".to_string())]);
@@ -247,7 +247,7 @@ fn an_image_loads_through_the_fetcher_into_the_cache_once_and_repeats_come_from_
 }
 
 #[test]
-fn an_image_that_cannot_be_fetched_is_a_fetch_error() {
+fn inv_ffi_03_an_image_that_cannot_be_fetched_is_a_fetch_error() {
     let dir = tempfile::tempdir().unwrap();
     let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), None)).unwrap();
 
@@ -257,7 +257,7 @@ fn an_image_that_cannot_be_fetched_is_a_fetch_error() {
 }
 
 #[test]
-fn a_source_is_cached_by_its_first_block_and_the_placeholder_follows_the_cache() {
+fn inv_placeholder_02_a_source_is_cached_by_its_first_block_and_the_placeholder_follows_the_cache() {
     let dir = tempfile::tempdir().unwrap();
     let caller = caller();
     let (layer, cache) = caller.block_on(async {
@@ -277,7 +277,7 @@ fn a_source_is_cached_by_its_first_block_and_the_placeholder_follows_the_cache()
 }
 
 #[test]
-fn an_item_state_from_a_native_loader_reaches_the_state_subscribers_and_a_seek_reaches_the_player() {
+fn inv_ffi_03_an_item_state_from_a_native_loader_reaches_the_state_subscribers_and_a_seek_reaches_the_player() {
     let dir = tempfile::tempdir().unwrap();
     let factory: Arc<MockFactory> = Arc::default();
     let slots: Arc<dyn PlayerSlotFactory> = factory.clone();

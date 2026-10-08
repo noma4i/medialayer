@@ -1,6 +1,6 @@
 use super::entry::Entry;
 use super::evict::trigger_eviction;
-use super::inner::{delete_files, Inner};
+use super::inner::{delete_files, CacheShared};
 use super::naming::{bin_path, file_name, name_of_bin_file, INDEX_FILE, PART_SUFFIX};
 use super::persist::decode_line;
 use super::save::mark_dirty;
@@ -15,7 +15,7 @@ struct Listing {
     parts: Vec<PathBuf>,
 }
 
-pub async fn load(inner: Arc<Inner>) {
+pub async fn load(inner: Arc<CacheShared>) {
     let _ = tokio::fs::create_dir_all(&inner.dir).await;
     let text = tokio::fs::read_to_string(inner.dir.join(INDEX_FILE)).await.unwrap_or_default();
     let dir = inner.dir.clone();
@@ -31,7 +31,7 @@ pub async fn load(inner: Arc<Inner>) {
     mark_dirty(&inner);
 }
 
-fn merge(inner: &Inner, batch: &[(String, Entry)], bins: &HashMap<String, u64>) {
+fn merge(inner: &CacheShared, batch: &[(String, Entry)], bins: &HashMap<String, u64>) {
     let hashed: Vec<(String, &(String, Entry))> = batch.iter().map(|record| (file_name(&record.0), record)).collect();
     let mut state = inner.state();
     for (name, (key, entry)) in hashed {
@@ -56,7 +56,7 @@ fn list_dir(dir: &Path) -> Listing {
     listing
 }
 
-async fn remove_leftovers(inner: &Arc<Inner>, listing: Listing) {
+async fn remove_leftovers(inner: &Arc<CacheShared>, listing: Listing) {
     let dead_parts: Vec<PathBuf> = {
         let state = inner.state();
         listing.parts.into_iter().filter(|path| !state.live_parts.contains(path)).collect()
@@ -68,7 +68,7 @@ async fn remove_leftovers(inner: &Arc<Inner>, listing: Listing) {
     }
 }
 
-async fn remove_orphan(inner: &Arc<Inner>, name: &str) {
+async fn remove_orphan(inner: &Arc<CacheShared>, name: &str) {
     let _stripe = inner.stripe(name).lock().await;
     if inner.state().contains(name) {
         return;

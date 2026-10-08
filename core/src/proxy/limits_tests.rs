@@ -12,7 +12,7 @@ async fn rig(max_concurrent: usize) -> (Proxy, Arc<MockFetcher>) {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_new_timeout_applies_to_the_next_origin_wait_without_a_restart() {
+async fn inv_proxy_10_a_new_timeout_applies_to_the_next_origin_wait_without_a_restart() {
     let (proxy, fetcher) = rig(2).await;
     fetcher.route("https://o.test/hang.mp4", Script::ok(b"x".to_vec()).hanging());
 
@@ -34,7 +34,7 @@ async fn a_new_timeout_applies_to_the_next_origin_wait_without_a_restart() {
 }
 
 #[tokio::test]
-async fn a_new_concurrency_limit_lets_waiting_downloads_start_in_place() {
+async fn inv_proxy_10_a_new_concurrency_limit_lets_waiting_downloads_start_in_place() {
     let (proxy, fetcher) = rig(1).await;
     for name in ["a", "b"] {
         fetcher.route(&format!("https://o.test/{name}.mp4"), Script::ok(b"x".to_vec()).hanging());

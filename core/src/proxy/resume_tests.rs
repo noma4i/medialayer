@@ -54,7 +54,7 @@ async fn body_after_the_rest(mut client: Client) -> Vec<u8> {
 }
 
 #[tokio::test]
-async fn an_entry_removed_in_the_middle_of_a_response_is_continued_from_the_origin_with_the_right_bytes() {
+async fn inv_proxy_04_an_entry_removed_in_the_middle_of_a_response_is_continued_from_the_origin_with_the_right_bytes() {
     let rig = rig().await;
     let stream = client_paused_after_the_first_bytes(&rig).await;
     assert!(rig.cache.remove(URL).await);
@@ -67,7 +67,7 @@ async fn an_entry_removed_in_the_middle_of_a_response_is_continued_from_the_orig
 }
 
 #[tokio::test]
-async fn an_entry_evicted_by_another_download_in_the_middle_of_a_response_is_continued_with_the_right_bytes() {
+async fn inv_proxy_04_an_entry_evicted_by_another_download_in_the_middle_of_a_response_is_continued_with_the_right_bytes() {
     let rig = rig().await;
     let stream = client_paused_after_the_first_bytes(&rig).await;
     rig.cache.set_limits(Limits { budget: 1024, min_budget: 1, ..Limits::default() }).await.unwrap();

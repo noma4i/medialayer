@@ -22,6 +22,10 @@ pub async fn get(port: u16, target: &str) -> Reply {
 }
 
 pub async fn request(port: u16, method: &str, target: &str, headers: &[(&str, &str)]) -> Reply {
+    try_request(port, method, target, headers).await.expect("response head")
+}
+
+pub async fn try_request(port: u16, method: &str, target: &str, headers: &[(&str, &str)]) -> Option<Reply> {
     let mut stream = open(port, method, target, headers).await;
     let mut raw = Vec::new();
     stream.read_to_end(&mut raw).await.unwrap_or_default();
@@ -51,11 +55,11 @@ pub async fn read_at_least(stream: &mut TcpStream, bytes: usize) -> usize {
     total
 }
 
-fn parse(raw: &[u8]) -> Reply {
-    let split = raw.windows(4).position(|window| window == b"\r\n\r\n").expect("response head");
+fn parse(raw: &[u8]) -> Option<Reply> {
+    let split = raw.windows(4).position(|window| window == b"\r\n\r\n")?;
     let head = String::from_utf8_lossy(&raw[..split]).into_owned();
     let mut lines = head.split("\r\n");
-    let status = lines.next().and_then(|line| line.split(' ').nth(1)).and_then(|code| code.parse().ok()).expect("status");
+    let status = lines.next().and_then(|line| line.split(' ').nth(1)).and_then(|code| code.parse().ok())?;
     let headers: Vec<(String, String)> = lines
         .filter_map(|line| line.split_once(':'))
         .map(|(name, value)| (name.trim().to_string(), value.trim().to_string()))
@@ -64,7 +68,7 @@ fn parse(raw: &[u8]) -> Reply {
     let chunked = headers
         .iter()
         .any(|(name, value)| name.eq_ignore_ascii_case("transfer-encoding") && value.eq_ignore_ascii_case("chunked"));
-    Reply { status, headers, body: if chunked { dechunk(body) } else { body.to_vec() } }
+    Some(Reply { status, headers, body: if chunked { dechunk(body) } else { body.to_vec() } })
 }
 
 fn dechunk(mut body: &[u8]) -> Vec<u8> {

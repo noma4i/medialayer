@@ -14,7 +14,7 @@ const SEGMENT_0: &str = "https://o.test/hls/v0/s0.m4s";
 const SEGMENT_1: &str = "https://o.test/hls/v0/s1.m4s";
 
 #[tokio::test]
-async fn an_hls_source_lands_in_the_disk_cache_through_the_proxy_up_to_the_leading_depth() {
+async fn inv_prefetch_06_an_hls_source_lands_in_the_disk_cache_through_the_proxy_up_to_the_leading_depth() {
     let dir = tempfile::tempdir().unwrap();
     let cache = Cache::open(dir.path(), Limits::default());
     cache.ready().await;
@@ -52,7 +52,7 @@ async fn an_hls_source_lands_in_the_disk_cache_through_the_proxy_up_to_the_leadi
 }
 
 #[tokio::test]
-async fn the_first_block_of_an_mp4_lands_as_one_ranged_block_not_the_whole_file() {
+async fn inv_prefetch_06_the_first_block_of_an_mp4_lands_as_one_ranged_block_not_the_whole_file() {
     let dir = tempfile::tempdir().unwrap();
     let cache = Cache::open(dir.path(), Limits::default());
     cache.ready().await;

@@ -75,7 +75,7 @@ impl Ring {
             let Some(binding) = self.bindings[slot].as_mut() else {
                 continue;
             };
-            let is_exempt = binding.is_playing || binding.owner == super::ring::Owner::Pinned;
+            let is_exempt = binding.is_playing || binding.owner == super::ring::Holder::Pinned;
             if is_exempt || now.saturating_sub(binding.since) < self.config.trim_delay_ms {
                 continue;
             }

@@ -8,7 +8,7 @@ fn map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
 }
 
 #[test]
-fn namespace_matches_the_independent_sha256_vectors() {
+fn inv_proxy_15_namespace_matches_the_independent_sha256_vectors() {
     let cases = [
         ("bare", URL.to_string(), map(&[]), "982329f070ea6cf08370524b340e445e6df6a3941c5ea34114812ada87da11e3"),
         ("two headers", URL.to_string(), map(&[("Authorization", "a"), ("X-Token", "b")]), "0bfbd247ee451169591cd8c74cdf32edf8666b73fd6d557446c5605523062faa"),
@@ -24,28 +24,28 @@ fn namespace_matches_the_independent_sha256_vectors() {
 }
 
 #[test]
-fn namespace_ignores_case_and_order() {
+fn inv_proxy_15_namespace_ignores_case_and_order() {
     let first = cache_namespace(URL, &map(&[("Authorization", "a"), ("X-Token", "b")]));
     let second = cache_namespace(URL, &map(&[("x-token", "b"), ("authorization", "a")]));
     assert_eq!(first, second);
 }
 
 #[test]
-fn namespace_drops_empty_name_and_empty_value() {
+fn inv_proxy_15_namespace_drops_empty_name_and_empty_value() {
     let bare = cache_namespace(URL, &map(&[]));
     assert_eq!(cache_namespace(URL, &map(&[("X-Empty", "")])), bare);
     assert_eq!(cache_namespace(URL, &map(&[("", "value")])), bare);
 }
 
 #[test]
-fn namespace_ignores_transport_headers() {
+fn inv_proxy_15_namespace_ignores_transport_headers() {
     let source = map(&[("Authorization", "a")]);
     let routed = transport_headers(URL, &source);
     assert_eq!(cache_namespace(URL, &routed), cache_namespace(URL, &source));
 }
 
 #[test]
-fn transport_headers_carry_namespace_and_sorted_names() {
+fn inv_proxy_15_transport_headers_carry_namespace_and_sorted_names() {
     let source = map(&[("X-Token", "b"), ("Authorization", "a")]);
     let routed = transport_headers(URL, &source);
     assert_eq!(routed["Authorization"], "a");
@@ -54,7 +54,7 @@ fn transport_headers_carry_namespace_and_sorted_names() {
 }
 
 #[test]
-fn transport_headers_without_source_have_namespace_only() {
+fn inv_proxy_15_transport_headers_without_source_have_namespace_only() {
     let bare = transport_headers(URL, &map(&[]));
     assert!(!bare.contains_key(FORWARDED_NAMES_HEADER));
     assert!(bare.contains_key(NAMESPACE_HEADER));

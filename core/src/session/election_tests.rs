@@ -1,20 +1,20 @@
 use super::*;
 use std::collections::HashSet;
 
-fn policy(group: &str, priority: u32, resume: Resume) -> Policy {
+fn policy(group: &str, priority: u32, resume: ResumeMode) -> Policy {
     Policy { group: group.into(), priority, resume }
 }
 
-fn play(lease: u64) -> Directive {
-    Directive { lease, order: Order::Play }
+fn play(lease: u64) -> LeaseOrder {
+    LeaseOrder { lease, order: Order::Play }
 }
 
-fn pause(lease: u64) -> Directive {
-    Directive { lease, order: Order::Pause }
+fn pause(lease: u64) -> LeaseOrder {
+    LeaseOrder { lease, order: Order::Pause }
 }
 
-fn idle(lease: u64) -> Directive {
-    Directive { lease, order: Order::Idle }
+fn idle(lease: u64) -> LeaseOrder {
+    LeaseOrder { lease, order: Order::Idle }
 }
 
 fn with(contexts: &[(&str, Context)]) -> (Election, Vec<u64>) {
@@ -24,14 +24,14 @@ fn with(contexts: &[(&str, Context)]) -> (Election, Vec<u64>) {
 }
 
 #[test]
-fn context_table_matches_priorities_groups_and_resume_modes() {
+fn inv_session_01_context_table_matches_priorities_groups_and_resume_modes() {
     let table = [
-        (Context::Ring, "ring", 300, Resume::Automatic),
-        (Context::Ambient, "ambient", 325, Resume::Automatic),
-        (Context::Hero, "hero", 400, Resume::Manual),
-        (Context::Overlay, "overlay", 450, Resume::Automatic),
-        (Context::System, "system", 475, Resume::Automatic),
-        (Context::Exclusive, "exclusive", 500, Resume::Automatic),
+        (Context::Ring, "ring", 300, ResumeMode::Automatic),
+        (Context::Ambient, "ambient", 325, ResumeMode::Automatic),
+        (Context::Hero, "hero", 400, ResumeMode::Manual),
+        (Context::Overlay, "overlay", 450, ResumeMode::Automatic),
+        (Context::System, "system", 475, ResumeMode::Automatic),
+        (Context::Exclusive, "exclusive", 500, ResumeMode::Automatic),
     ];
     for (context, group, priority, resume) in table {
         assert_eq!(context.policy(), policy(group, priority, resume));
@@ -39,7 +39,7 @@ fn context_table_matches_priorities_groups_and_resume_modes() {
 }
 
 #[test]
-fn eligible_only_in_foreground_with_play_intent() {
+fn inv_session_03_eligible_only_in_foreground_with_play_intent() {
     let (mut election, leases) = with(&[("a", Context::Ring)]);
     assert!(!election.is_eligible(leases[0]));
     election.set_intent("a", leases[0], Intent::Play);
@@ -49,7 +49,7 @@ fn eligible_only_in_foreground_with_play_intent() {
 }
 
 #[test]
-fn single_play_intent_gets_a_play_directive_once() {
+fn inv_session_02_single_play_intent_gets_a_play_directive_once() {
     let (mut election, leases) = with(&[("a", Context::Ring)]);
     assert_eq!(election.set_intent("a", leases[0], Intent::Play), [play(leases[0])]);
     assert!(election.set_intent("a", leases[0], Intent::Play).is_empty());
@@ -58,7 +58,7 @@ fn single_play_intent_gets_a_play_directive_once() {
 }
 
 #[test]
-fn higher_priority_wins_and_pauses_the_previous_winner() {
+fn inv_session_01_higher_priority_wins_and_pauses_the_previous_winner() {
     let (mut election, l) = with(&[("ring", Context::Ring), ("sys", Context::System)]);
     election.set_intent("ring", l[0], Intent::Play);
     assert_eq!(election.set_intent("sys", l[1], Intent::Play), [pause(l[0]), play(l[1])]);
@@ -66,7 +66,7 @@ fn higher_priority_wins_and_pauses_the_previous_winner() {
 }
 
 #[test]
-fn lower_priority_never_displaces_a_higher_one() {
+fn inv_session_01_lower_priority_never_displaces_a_higher_one() {
     let (mut election, l) = with(&[("sys", Context::System), ("ring", Context::Ring)]);
     election.set_intent("sys", l[0], Intent::Play);
     assert!(election.set_intent("ring", l[1], Intent::Play).is_empty());
@@ -74,16 +74,16 @@ fn lower_priority_never_displaces_a_higher_one() {
 }
 
 #[test]
-fn equal_priority_goes_to_the_latest_intent_then_key_then_lease() {
+fn inv_session_01_equal_priority_goes_to_the_latest_intent_then_key_then_lease() {
     let mut election = Election::new();
-    let a = election.register("a", policy("g", 100, Resume::Automatic));
-    let b = election.register("b", policy("g", 100, Resume::Automatic));
+    let a = election.register("a", policy("g", 100, ResumeMode::Automatic));
+    let b = election.register("b", policy("g", 100, ResumeMode::Automatic));
     election.set_intent("a", a, Intent::Play);
     assert_eq!(election.set_intent("b", b, Intent::Play), [pause(a), play(b)]);
 }
 
 #[test]
-fn manual_loser_becomes_idle_and_stays_idle_after_the_winner_leaves() {
+fn inv_session_04_manual_loser_becomes_idle_and_stays_idle_after_the_winner_leaves() {
     let (mut election, l) = with(&[("chat", Context::Hero), ("edit", Context::Exclusive)]);
     election.set_intent("chat", l[0], Intent::Play);
     assert_eq!(election.set_intent("edit", l[1], Intent::Play), [pause(l[0]), idle(l[0]), play(l[1])]);
@@ -93,7 +93,7 @@ fn manual_loser_becomes_idle_and_stays_idle_after_the_winner_leaves() {
 }
 
 #[test]
-fn automatic_loser_keeps_intent_and_resumes_after_the_winner_leaves() {
+fn inv_session_04_automatic_loser_keeps_intent_and_resumes_after_the_winner_leaves() {
     let (mut election, l) = with(&[("ring", Context::Ring), ("ambient", Context::Ambient)]);
     election.set_intent("ring", l[0], Intent::Play);
     election.set_intent("ambient", l[1], Intent::Play);
@@ -102,7 +102,7 @@ fn automatic_loser_keeps_intent_and_resumes_after_the_winner_leaves() {
 }
 
 #[test]
-fn unregister_with_the_wrong_key_or_lease_is_ignored() {
+fn inv_session_05_unregister_with_the_wrong_key_or_lease_is_ignored() {
     let (mut election, l) = with(&[("a", Context::Ring)]);
     election.set_intent("a", l[0], Intent::Play);
     assert!(election.unregister("b", l[0]).is_empty());
@@ -111,7 +111,7 @@ fn unregister_with_the_wrong_key_or_lease_is_ignored() {
 }
 
 #[test]
-fn set_intent_with_the_wrong_key_or_lease_is_ignored() {
+fn inv_session_05_set_intent_with_the_wrong_key_or_lease_is_ignored() {
     let (mut election, l) = with(&[("a", Context::Ring)]);
     assert!(election.set_intent("b", l[0], Intent::Play).is_empty());
     assert!(election.set_intent("a", 99, Intent::Play).is_empty());
@@ -119,7 +119,7 @@ fn set_intent_with_the_wrong_key_or_lease_is_ignored() {
 }
 
 #[test]
-fn suspension_blocks_ineligible_groups_and_thaw_resumes() {
+fn inv_session_03_suspension_blocks_ineligible_groups_and_thaw_resumes() {
     let (mut election, l) = with(&[("ring", Context::Ring)]);
     election.set_intent("ring", l[0], Intent::Play);
     assert_eq!(election.set_suspension(Reason::Interruption, true, None), Ok(vec![pause(l[0])]));
@@ -129,7 +129,7 @@ fn suspension_blocks_ineligible_groups_and_thaw_resumes() {
 }
 
 #[test]
-fn suspension_allow_groups_keep_listed_groups_playing() {
+fn inv_session_03_suspension_allow_groups_keep_listed_groups_playing() {
     let (mut election, l) = with(&[("ring", Context::Ring), ("sys", Context::System)]);
     election.set_intent("ring", l[0], Intent::Play);
     election.set_intent("sys", l[1], Intent::Play);
@@ -138,7 +138,7 @@ fn suspension_allow_groups_keep_listed_groups_playing() {
 }
 
 #[test]
-fn suspension_of_a_manual_session_drops_its_intent() {
+fn inv_session_04_suspension_of_a_manual_session_drops_its_intent() {
     let (mut election, l) = with(&[("chat", Context::Hero)]);
     election.set_intent("chat", l[0], Intent::Play);
     assert_eq!(election.set_suspension(Reason::Interruption, true, None), Ok(vec![pause(l[0]), idle(l[0])]));
@@ -146,7 +146,7 @@ fn suspension_of_a_manual_session_drops_its_intent() {
 }
 
 #[test]
-fn background_pauses_without_dropping_manual_intent_and_foreground_resumes() {
+fn inv_session_03_background_pauses_without_dropping_manual_intent_and_foreground_resumes() {
     let (mut election, l) = with(&[("chat", Context::Hero)]);
     election.set_intent("chat", l[0], Intent::Play);
     assert_eq!(election.set_foreground(false), [pause(l[0])]);
@@ -156,7 +156,7 @@ fn background_pauses_without_dropping_manual_intent_and_foreground_resumes() {
 }
 
 #[test]
-fn stop_all_idles_every_session_with_play_intent() {
+fn inv_session_04_stop_all_idles_every_session_with_play_intent() {
     let (mut election, l) = with(&[("ring", Context::Ring), ("ambient", Context::Ambient), ("sys", Context::System)]);
     election.set_intent("ring", l[0], Intent::Play);
     election.set_intent("ambient", l[1], Intent::Play);
@@ -166,7 +166,7 @@ fn stop_all_idles_every_session_with_play_intent() {
 }
 
 #[test]
-fn stop_manual_keeps_automatic_sessions() {
+fn inv_session_04_stop_manual_keeps_automatic_sessions() {
     let (mut election, l) = with(&[("ring", Context::Ring), ("chat", Context::Hero)]);
     election.set_intent("ring", l[0], Intent::Play);
     election.set_intent("chat", l[1], Intent::Play);
@@ -176,14 +176,14 @@ fn stop_manual_keeps_automatic_sessions() {
 }
 
 #[test]
-fn at_most_one_session_plays_across_a_random_walk() {
+fn inv_session_01_at_most_one_session_plays_across_a_random_walk() {
     let contexts = [Context::Ring, Context::Ambient, Context::Hero, Context::Overlay, Context::System, Context::Exclusive];
     let mut election = Election::new();
     let leases: Vec<u64> = contexts.iter().enumerate().map(|(i, context)| election.register(&format!("s{i}"), context.policy())).collect();
     let mut playing: HashSet<u64> = HashSet::new();
-    let mut state = 7u64;
+    let mut dice = crate::seeded::Dice::new("inv_session_01_at_most_one_session_plays_across_a_random_walk");
     for _ in 0..4000 {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let state = dice.next_u64();
         let index = (state >> 33) as usize % 6;
         let key = format!("s{index}");
         let directives = match (state >> 40) % 9 {
@@ -209,7 +209,7 @@ fn at_most_one_session_plays_across_a_random_walk() {
 }
 
 #[test]
-fn applying_the_same_inputs_again_is_idempotent() {
+fn inv_session_02_applying_the_same_inputs_again_is_idempotent() {
     let (mut election, l) = with(&[("ring", Context::Ring), ("sys", Context::System)]);
     election.set_intent("ring", l[0], Intent::Play);
     election.set_intent("sys", l[1], Intent::Play);
@@ -222,7 +222,7 @@ fn applying_the_same_inputs_again_is_idempotent() {
 }
 
 #[test]
-fn unregistering_the_active_session_pauses_it_even_if_stale() {
+fn inv_session_05_unregistering_the_active_session_pauses_it_even_if_stale() {
     let (mut election, l) = with(&[("a", Context::Ring)]);
     election.set_intent("a", l[0], Intent::Play);
     assert_eq!(election.unregister("a", l[0]), [pause(l[0])]);
@@ -230,7 +230,7 @@ fn unregistering_the_active_session_pauses_it_even_if_stale() {
 }
 
 #[test]
-fn volume_changes_never_reach_the_election() {
+fn inv_session_02_volume_changes_never_reach_the_election() {
     let sources = [include_str!("election.rs"), include_str!("suspensions.rs"), include_str!("recovery.rs"), include_str!("watchdog_policy.rs")];
     assert!(sources.iter().all(|source| !source.to_lowercase().contains("mute")));
 }

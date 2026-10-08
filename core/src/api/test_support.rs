@@ -31,7 +31,7 @@ use crate::cache::{self, classify_kind, Cache, CacheStore};
 use crate::fetch::mock::MockFetcher;
 use crate::limits::{Limits, LimitsError};
 use crate::memory::{DeviceMemory, Step};
-use crate::pool::{Command, Directive, Pressure, Released, Stats};
+use crate::pool::{Command, Directive, Pressure, Released, PoolStats};
 use crate::proxy::{ByteStore, Config as ProxyConfig, Proxy};
 use crate::session::WatchdogConfig;
 use async_trait::async_trait;
@@ -70,7 +70,7 @@ impl LoadGate {
 
 #[derive(Default)]
 pub struct FakeCache {
-    pub stats: Mutex<cache::Stats>,
+    pub stats: Mutex<cache::CacheStats>,
     pub applied: Mutex<Vec<Limits>>,
     pub cleared: Mutex<Vec<Option<cache::Kind>>>,
     pub purged: Mutex<Vec<String>>,
@@ -80,7 +80,7 @@ pub struct FakeCache {
 
 #[async_trait]
 impl CacheControl for FakeCache {
-    async fn stats(&self) -> cache::Stats {
+    async fn stats(&self) -> cache::CacheStats {
         self.stats.lock().unwrap().clone()
     }
 
@@ -131,13 +131,13 @@ impl SettingsStore for FakeSettings {
     }
 }
 
-pub fn pool_stats() -> Stats {
-    Stats { hot: 1, warm: 2, cold: 3, reuses: 0, released: Released::default(), memory_bytes: 0 }
+pub fn pool_stats() -> PoolStats {
+    PoolStats { hot: 1, warm: 2, cold: 3, reuses: 0, released: Released::default(), memory_bytes: 0 }
 }
 
 #[derive(Default)]
 pub struct FakePool {
-    pub stats: Mutex<Option<Stats>>,
+    pub stats: Mutex<Option<PoolStats>>,
     pub events: Mutex<Vec<String>>,
     pub steps: Mutex<Vec<Step>>,
     pub slots: Mutex<Vec<usize>>,
@@ -145,7 +145,7 @@ pub struct FakePool {
 }
 
 impl PoolControl for FakePool {
-    fn stats(&self) -> Stats {
+    fn stats(&self) -> PoolStats {
         self.stats.lock().unwrap().unwrap_or_else(pool_stats)
     }
 

@@ -1,10 +1,10 @@
-use super::ring::{Command, Owner, Ring};
+use super::ring::{Command, Holder, Ring};
 
 impl Ring {
     pub fn pin(&mut self, now: u64, key: &str) -> Vec<Command> {
         if let Some(slot) = self.slot_of(key) {
             if let Some(binding) = self.bindings[slot].as_mut() {
-                binding.owner = Owner::Pinned;
+                binding.owner = Holder::Pinned;
             }
             return Vec::new();
         }
@@ -16,7 +16,7 @@ impl Ring {
         let Some(slot) = self.acquire(None, &mut unloads) else {
             return Vec::new();
         };
-        if !self.bind(slot, key.to_string(), Owner::Pinned, None, now, &mut unloads, &mut loads) {
+        if !self.bind(slot, key.to_string(), Holder::Pinned, None, now, &mut unloads, &mut loads) {
             return unloads;
         }
         let mutes = self.sync_mute();
@@ -27,8 +27,8 @@ impl Ring {
         let Some(binding) = self.slot_of(key).and_then(|slot| self.bindings[slot].as_mut()) else {
             return;
         };
-        if binding.owner == Owner::Pinned {
-            binding.owner = if binding.page.is_some() { Owner::Ring } else { Owner::Lru };
+        if binding.owner == Holder::Pinned {
+            binding.owner = if binding.page.is_some() { Holder::Ring } else { Holder::Lru };
         }
     }
 }

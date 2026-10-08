@@ -1,10 +1,10 @@
 use super::cursor::{next_direct, next_store, DirectCursor, Resume, StoreCursor};
-use super::flight::{collect_limited, Outcome, Rejection, Subscription};
-use super::inner::Inner;
+use super::flight::{collect_limited, FlightOutcome, Rejection, FlightSubscription};
+use super::inner::ProxyShared;
 use super::route::{
     absolutize_playlist, block_key, playlist_references, content_type_for, parse_range, resolve_range, target_url, ByteRange, RangeOutcome,
 };
-use super::slots::{Permit, Priority};
+use super::slots::Priority;
 use crate::fetch::{header_value, FetchError, Request};
 use crate::hls::{is_manifest_url, is_multivariant, rewrite_playlist};
 use crate::memory::Reservation;
@@ -35,7 +35,7 @@ enum Step {
     Retry,
 }
 
-pub(super) async fn handle(inner: Arc<Inner>, request: hyper::Request<Incoming>) -> Response<ProxyBody> {
+pub(super) async fn handle(inner: Arc<ProxyShared>, request: hyper::Request<Incoming>) -> Response<ProxyBody> {
     let head_only = request.method() == Method::HEAD;
     if request.method() != Method::GET && !head_only {
         return text(405, "method not allowed");
@@ -60,12 +60,17 @@ pub(super) async fn handle(inner: Arc<Inner>, request: hyper::Request<Incoming>)
     }
 }
 
-async fn playlist(inner: &Arc<Inner>, target: &str, headers: Upstream, head_only: bool) -> Response<ProxyBody> {
+async fn playlist(inner: &Arc<ProxyShared>, target: &str, headers: Upstream, head_only: bool) -> Response<ProxyBody> {
     let key = inner.key(target, &headers);
     for _ in 0..ATTEMPTS {
         if let Some(length) = inner.store.len(&key).await {
             match stored_playlist(inner, &key, length).await {
-                Ok(Some((bytes, _held))) => return playlist_response(inner, target, &bytes, &headers, head_only),
+                Ok(Some((bytes, held))) => {
+                    let response = playlist_response(inner, target, &bytes, &headers, head_only);
+                    drop(bytes);
+                    drop(held);
+                    return response;
+                }
                 Ok(None) => {
                     inner.store.remove(&key).await;
                     inner.forget_playlist(&key);
@@ -76,16 +81,16 @@ async fn playlist(inner: &Arc<Inner>, target: &str, headers: Upstream, head_only
         }
         let mut subscription = inner.get_or_start(target, headers.clone(), Priority::Playback);
         match subscription.wait_finished().await.outcome {
-            Outcome::Rejected(rejection) => return rejected(&rejection, head_only),
-            Outcome::Failed(message) => return text(502, &message),
-            Outcome::Unstorable => return playlist_direct(inner, target, headers, head_only).await,
+            FlightOutcome::Rejected(rejection) => return rejected(&rejection, head_only),
+            FlightOutcome::Failed(message) => return text(502, &message),
+            FlightOutcome::Unstorable => return playlist_direct(inner, target, headers, head_only).await,
             _ => {}
         }
     }
     text(503, "playlist unavailable")
 }
 
-async fn stored_playlist(inner: &Inner, key: &str, length: u64) -> Result<Option<(Vec<u8>, Reservation)>, Failure> {
+async fn stored_playlist(inner: &ProxyShared, key: &str, length: u64) -> Result<Option<(Vec<u8>, Reservation)>, Failure> {
     if length > inner.config.max_playlist_bytes {
         return Err(Box::new(text(502, "playlist too large")));
     }
@@ -101,8 +106,8 @@ async fn stored_playlist(inner: &Inner, key: &str, length: u64) -> Result<Option
     Ok((is_static || inner.playlist_is_fresh(key)).then_some((bytes, held)))
 }
 
-async fn playlist_direct(inner: &Inner, target: &str, headers: Upstream, head_only: bool) -> Response<ProxyBody> {
-    let (response, _permit) = match origin_fetch(inner, target, headers.clone(), None).await {
+async fn playlist_direct(inner: &ProxyShared, target: &str, headers: Upstream, head_only: bool) -> Response<ProxyBody> {
+    let response = match origin_fetch(inner, target, headers.clone(), None).await {
         Ok(fetched) => fetched,
         Err(failure) => return *failure,
     };
@@ -116,7 +121,7 @@ async fn playlist_direct(inner: &Inner, target: &str, headers: Upstream, head_on
     }
 }
 
-fn playlist_response(inner: &Inner, target: &str, bytes: &[u8], headers: &Upstream, head_only: bool) -> Response<ProxyBody> {
+fn playlist_response(inner: &ProxyShared, target: &str, bytes: &[u8], headers: &Upstream, head_only: bool) -> Response<ProxyBody> {
     let source = String::from_utf8_lossy(bytes);
     let absolute = absolutize_playlist(&source, target);
     inner.inherit_headers(&playlist_references(&absolute), headers);
@@ -126,7 +131,7 @@ fn playlist_response(inner: &Inner, target: &str, bytes: &[u8], headers: &Upstre
 }
 
 async fn media(
-    inner: &Arc<Inner>,
+    inner: &Arc<ProxyShared>,
     target: &str,
     headers: Upstream,
     range: Option<ByteRange>,
@@ -160,7 +165,7 @@ fn needs_blocks(range: Option<ByteRange>) -> bool {
 }
 
 async fn stored_response(
-    inner: &Arc<Inner>,
+    inner: &Arc<ProxyShared>,
     target: &str,
     key: &str,
     total: u64,
@@ -198,8 +203,8 @@ async fn stored_response(
 }
 
 async fn flight_response(
-    inner: &Arc<Inner>,
-    mut subscription: Subscription,
+    inner: &Arc<ProxyShared>,
+    mut subscription: FlightSubscription,
     target: &str,
     headers: &Upstream,
     range: Option<ByteRange>,
@@ -207,12 +212,12 @@ async fn flight_response(
 ) -> Step {
     let progress = subscription.wait_started().await;
     let head = match (progress.outcome, progress.head) {
-        (Outcome::Rejected(rejection), _) => return Step::Done(rejected(&rejection, head_only)),
-        (Outcome::Failed(message), _) => return Step::Done(text(502, &message)),
-        (Outcome::Unstorable, _) => {
+        (FlightOutcome::Rejected(rejection), _) => return Step::Done(rejected(&rejection, head_only)),
+        (FlightOutcome::Failed(message), _) => return Step::Done(text(502, &message)),
+        (FlightOutcome::Unstorable, _) => {
             return Step::Done(direct_response(inner, target, headers.clone(), range, head_only).await)
         }
-        (Outcome::Cancelled | Outcome::QueueFull, _) | (_, None) => return Step::Retry,
+        (FlightOutcome::Cancelled | FlightOutcome::QueueFull, _) | (_, None) => return Step::Retry,
         (_, Some(head)) => head,
     };
     let content_type = content_type_for(target, head.content_type.as_deref());
@@ -244,7 +249,7 @@ async fn flight_response(
 }
 
 async fn direct_response(
-    inner: &Inner,
+    inner: &ProxyShared,
     target: &str,
     headers: Upstream,
     range: Option<ByteRange>,
@@ -259,7 +264,7 @@ async fn direct_response(
             Err(failure) => return *failure,
         },
     };
-    let (response, permit) = match origin_fetch(inner, target, headers, upstream_range).await {
+    let response = match origin_fetch(inner, target, headers, upstream_range).await {
         Ok(fetched) => fetched,
         Err(failure) => return *failure,
     };
@@ -270,11 +275,11 @@ async fn direct_response(
             forwarded.push((name, value.to_string()));
         }
     }
-    let cursor = DirectCursor { body: response.body, _permit: permit, idle: inner.timeout(), buffers: inner.buffers(), done: false };
+    let cursor = DirectCursor { body: response.body, idle: inner.timeout(), buffers: inner.buffers(), done: false };
     respond(response.status, forwarded, streamed(stream::unfold(cursor, next_direct)), head_only)
 }
 
-async fn head_from_origin(inner: &Inner, target: &str, headers: Upstream) -> Response<ProxyBody> {
+async fn head_from_origin(inner: &ProxyShared, target: &str, headers: Upstream) -> Response<ProxyBody> {
     match probe_total(inner, target, headers).await {
         Ok((total, origin_type)) => {
             let content_type = content_type_for(target, origin_type.as_deref());
@@ -284,8 +289,8 @@ async fn head_from_origin(inner: &Inner, target: &str, headers: Upstream) -> Res
     }
 }
 
-async fn probe_total(inner: &Inner, target: &str, headers: Upstream) -> Result<(u64, Option<String>), Failure> {
-    let (response, _permit) = origin_fetch(inner, target, headers, Some((0, Some(0)))).await?;
+async fn probe_total(inner: &ProxyShared, target: &str, headers: Upstream) -> Result<(u64, Option<String>), Failure> {
+    let response = origin_fetch(inner, target, headers, Some((0, Some(0)))).await?;
     let total = header_value(&response.headers, "content-range")
         .and_then(|value| value.rsplit_once('/'))
         .and_then(|(_, total)| total.trim().parse::<u64>().ok())
@@ -302,11 +307,11 @@ async fn probe_total(inner: &Inner, target: &str, headers: Upstream) -> Result<(
 }
 
 pub(super) async fn origin_fetch(
-    inner: &Inner,
+    inner: &ProxyShared,
     target: &str,
     headers: Upstream,
     range: Option<(u64, Option<u64>)>,
-) -> Result<(crate::fetch::Response, Permit), Failure> {
+) -> Result<crate::fetch::Response, Failure> {
     let Ok(permit) = inner.slots.acquire(Priority::Playback).await else {
         return Err(Box::new(text(503, "busy")));
     };
@@ -315,7 +320,7 @@ pub(super) async fn origin_fetch(
         Err(_) => Err(Box::new(text(502, "origin timed out"))),
         Ok(Err(FetchError::Status(status))) => Err(Box::new(text(status, "origin refused the request"))),
         Ok(Err(error)) => Err(Box::new(text(502, &error.to_string()))),
-        Ok(Ok(response)) => Ok((response, permit)),
+        Ok(Ok(response)) => Ok(crate::fetch::Response { body: permit.hold(response.body), ..response }),
     }
 }
 
@@ -377,7 +382,7 @@ enum OpenFailure {
 }
 
 struct BlockCursor {
-    inner: Arc<Inner>,
+    inner: Arc<ProxyShared>,
     target: String,
     key: String,
     headers: Upstream,
@@ -421,14 +426,14 @@ impl BlockCursor {
             subscription.linger();
             let progress = subscription.wait_started().await;
             match (progress.outcome, progress.head) {
-                (Outcome::Rejected(rejection), _) => return Err(OpenFailure::Rejected(rejection)),
-                (Outcome::Failed(message), _) => return Err(OpenFailure::Failed(message)),
-                (Outcome::Unstorable, _) => {
+                (FlightOutcome::Rejected(rejection), _) => return Err(OpenFailure::Rejected(rejection)),
+                (FlightOutcome::Failed(message), _) => return Err(OpenFailure::Failed(message)),
+                (FlightOutcome::Unstorable, _) => {
                     cursor.resumed = true;
                     self.source = Some(cursor);
                     return Ok(None);
                 }
-                (Outcome::Cancelled | Outcome::QueueFull, _) | (_, None) => {}
+                (FlightOutcome::Cancelled | FlightOutcome::QueueFull, _) | (_, None) => {}
                 (_, Some(head)) => {
                     cursor.subscription = Some(subscription);
                     self.source = Some(cursor);
@@ -474,7 +479,7 @@ fn fail_blocks(mut cursor: BlockCursor) -> (Result<Bytes, io::Error>, BlockCurso
 }
 
 async fn block_range_response(
-    inner: &Arc<Inner>,
+    inner: &Arc<ProxyShared>,
     target: &str,
     headers: Upstream,
     range: Option<ByteRange>,
@@ -511,7 +516,7 @@ async fn block_range_response(
 }
 
 async fn known_total(
-    inner: &Inner,
+    inner: &ProxyShared,
     target: &str,
     key: &str,
     headers: &Upstream,

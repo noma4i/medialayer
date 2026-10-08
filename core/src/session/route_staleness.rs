@@ -1,9 +1,4 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Readiness {
-    Stopped,
-    Ready,
-    Unhealthy,
-}
+use crate::proxy::Readiness;
 
 pub struct RouteStaleness;
 

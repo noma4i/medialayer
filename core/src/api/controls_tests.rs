@@ -55,7 +55,7 @@ fn smaller_budget() -> Limits {
 }
 
 #[tokio::test]
-async fn saved_limits_win_over_defaults_and_reach_the_cache() {
+async fn inv_limits_03_saved_limits_win_over_defaults_and_reach_the_cache() {
     let rig = rig_with_saved(Some("budget=536870912"));
 
     assert_eq!(rig.controls.limits().await.budget, 512 * MIB);
@@ -63,7 +63,7 @@ async fn saved_limits_win_over_defaults_and_reach_the_cache() {
 }
 
 #[tokio::test]
-async fn invalid_saved_limits_fall_back_to_defaults() {
+async fn inv_limits_03_invalid_saved_limits_fall_back_to_defaults() {
     let rig = rig_with_saved(Some("budget=1024"));
 
     assert_eq!(rig.controls.limits().await, Limits::default());
@@ -71,7 +71,7 @@ async fn invalid_saved_limits_fall_back_to_defaults() {
 }
 
 #[tokio::test]
-async fn set_limits_applies_to_the_cache_and_survives_a_reopen() {
+async fn inv_limits_04_set_limits_applies_to_the_cache_and_survives_a_reopen() {
     let rig = rig_with_saved(None);
 
     rig.controls.set_limits(smaller_budget()).await.unwrap();
@@ -83,7 +83,7 @@ async fn set_limits_applies_to_the_cache_and_survives_a_reopen() {
 }
 
 #[tokio::test]
-async fn invalid_limits_are_refused_without_side_effects() {
+async fn inv_limits_01_invalid_limits_are_refused_without_side_effects() {
     let rig = rig_with_saved(None);
     let invalid = Limits { budget: 1, ..Limits::default() };
 
@@ -96,7 +96,7 @@ async fn invalid_limits_are_refused_without_side_effects() {
 }
 
 #[tokio::test]
-async fn reset_limits_drops_the_saved_value_and_restores_defaults() {
+async fn inv_limits_04_reset_limits_drops_the_saved_value_and_restores_defaults() {
     let rig = rig_with_saved(Some("budget=536870912"));
     rig.controls.limits().await;
 
@@ -108,7 +108,7 @@ async fn reset_limits_drops_the_saved_value_and_restores_defaults() {
 }
 
 #[tokio::test]
-async fn stats_join_the_cache_and_the_pool() {
+async fn inv_api_07_stats_join_the_cache_and_the_pool() {
     let rig = rig_with_saved(None);
     {
         let mut stats = rig.cache.stats.lock().unwrap();
@@ -120,7 +120,7 @@ async fn stats_join_the_cache_and_the_pool() {
         stats.per_kind.insert(cache::Kind::Image, cache::KindStats { bytes: 50, files: 1 });
     }
     *rig.pool.stats.lock().unwrap() =
-        Some(crate::pool::Stats { memory_bytes: 77, released: Released { pressure: 5, ..Released::default() }, ..pool_stats() });
+        Some(crate::pool::PoolStats { memory_bytes: 77, released: Released { pressure: 5, ..Released::default() }, ..pool_stats() });
 
     let stats = rig.controls.stats().await;
 
@@ -133,7 +133,7 @@ async fn stats_join_the_cache_and_the_pool() {
 }
 
 #[tokio::test]
-async fn clear_purge_and_evict_now_go_to_the_cache() {
+async fn inv_api_07_clear_purge_and_evict_now_go_to_the_cache() {
     let rig = rig_with_saved(None);
 
     rig.controls.clear(Some(Kind::Video)).await;
@@ -147,7 +147,7 @@ async fn clear_purge_and_evict_now_go_to_the_cache() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn changing_limits_notifies_stats_subscribers() {
+async fn inv_api_07_changing_limits_notifies_stats_subscribers() {
     let rig = rig_with_saved(None);
     rig.cache.stats.lock().unwrap().total_bytes = 42;
     let seen: Arc<Mutex<Vec<u64>>> = Arc::default();
@@ -160,7 +160,7 @@ async fn changing_limits_notifies_stats_subscribers() {
 }
 
 #[tokio::test]
-async fn new_limits_move_the_memory_ceiling_and_reach_the_prefetcher_and_a_reset_brings_them_back() {
+async fn inv_limits_04_new_limits_move_the_memory_ceiling_and_reach_the_prefetcher_and_a_reset_brings_them_back() {
     let rig = rig_with_saved(None);
     let before = rig.ledger.ceiling();
     let smaller = Limits { memory_budget: 32 * MIB, prefetch_to: 7, ..Limits::default() };
@@ -175,7 +175,7 @@ async fn new_limits_move_the_memory_ceiling_and_reach_the_prefetcher_and_a_reset
 }
 
 #[tokio::test]
-async fn saved_limits_reach_the_ceiling_and_the_prefetcher_when_they_are_first_read() {
+async fn inv_limits_03_saved_limits_reach_the_ceiling_and_the_prefetcher_when_they_are_first_read() {
     let rig = rig_with_saved(Some("memory_budget=33554432"));
 
     rig.controls.limits().await;
@@ -185,7 +185,7 @@ async fn saved_limits_reach_the_ceiling_and_the_prefetcher_when_they_are_first_r
 }
 
 #[tokio::test]
-async fn an_invalid_saved_value_is_dropped_and_named_in_the_diagnostics() {
+async fn inv_limits_03_an_invalid_saved_value_is_dropped_and_named_in_the_diagnostics() {
     let rig = rig_with_saved(Some("budget=1024"));
     assert!(rig.controls.stats().await.diagnostics.is_empty());
 
@@ -198,7 +198,7 @@ async fn an_invalid_saved_value_is_dropped_and_named_in_the_diagnostics() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn unchanged_stats_reach_a_subscriber_once_and_a_new_subscriber_gets_the_current_state() {
+async fn inv_api_07_unchanged_stats_reach_a_subscriber_once_and_a_new_subscriber_gets_the_current_state() {
     let rig = rig_with_saved(None);
     rig.cache.stats.lock().unwrap().total_bytes = 7;
     let first: Arc<Mutex<Vec<u64>>> = Arc::default();
@@ -220,7 +220,7 @@ async fn unchanged_stats_reach_a_subscriber_once_and_a_new_subscriber_gets_the_c
 }
 
 #[tokio::test]
-async fn new_limits_reach_the_live_proxy_and_resize_the_live_pool() {
+async fn inv_limits_04_new_limits_reach_the_live_proxy_and_resize_the_live_pool() {
     let rig = rig_with_saved(None);
     let limits = Limits { slots: 5, timeout_seconds: 7, max_concurrent: 4, ..Limits::default() };
 

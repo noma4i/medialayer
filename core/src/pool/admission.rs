@@ -1,4 +1,4 @@
-use super::ring::{Command, Owner, Ring};
+use super::ring::{Command, Holder, Ring};
 use super::stats::ReleaseReason;
 use crate::memory::{Owner as MemoryOwner, Reservation, Step, StepPlan};
 use std::cmp::Reverse;
@@ -55,18 +55,18 @@ impl Ring {
             .bindings
             .iter()
             .enumerate()
-            .filter_map(|(slot, binding)| binding.as_ref().filter(|binding| !binding.is_playing && binding.owner != Owner::Pinned).map(|binding| (slot, binding)));
+            .filter_map(|(slot, binding)| binding.as_ref().filter(|binding| !binding.is_playing && binding.owner != Holder::Pinned).map(|binding| (slot, binding)));
         let farther = |binding: &super::ring::Binding, than: usize| binding.page.is_none_or(|page| page.abs_diff(self.active) > than);
         let (_, victim) = match distance {
             None => candidates
-                .filter(|(_, binding)| binding.owner == Owner::Lru)
+                .filter(|(_, binding)| binding.owner == Holder::Lru)
                 .map(|(slot, binding)| ((false, Reverse(0), binding.last_used), slot))
                 .min()?,
             Some(than) => candidates
-                .filter(|(_, binding)| binding.owner == Owner::Lru || farther(binding, than))
+                .filter(|(_, binding)| binding.owner == Holder::Lru || farther(binding, than))
                 .map(|(slot, binding)| {
                     let far = binding.page.map_or(usize::MAX, |page| page.abs_diff(self.active));
-                    (((binding.owner != Owner::Lru), Reverse(far), binding.last_used), slot)
+                    (((binding.owner != Holder::Lru), Reverse(far), binding.last_used), slot)
                 })
                 .min()?,
         };
@@ -78,7 +78,7 @@ impl Ring {
             .bindings
             .iter()
             .enumerate()
-            .filter_map(|(slot, binding)| binding.as_ref().filter(|binding| !binding.is_playing && binding.owner != Owner::Pinned).map(|binding| (slot, binding)))
+            .filter_map(|(slot, binding)| binding.as_ref().filter(|binding| !binding.is_playing && binding.owner != Holder::Pinned).map(|binding| (slot, binding)))
             .map(|(slot, binding)| ((Reverse(binding.page.map_or(usize::MAX, |page| page.abs_diff(self.active))), binding.last_used), slot))
             .min()
             .map(|(_, slot)| slot);

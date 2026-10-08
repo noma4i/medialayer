@@ -22,8 +22,8 @@ pub use slots::Priority;
 
 use crate::fetch::Fetcher;
 use crate::limits::Limits;
-use flight::Outcome;
-use inner::Inner;
+use flight::FlightOutcome;
+use inner::ProxyShared;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -58,14 +58,14 @@ pub enum ProxyError {
 
 #[derive(Clone)]
 pub struct Proxy {
-    inner: Arc<Inner>,
+    inner: Arc<ProxyShared>,
     _owner: Arc<tasks::TasksOwner>,
 }
 
 impl Proxy {
     pub async fn start(config: Config, fetcher: Arc<dyn Fetcher>, store: Arc<dyn ByteStore>) -> Result<Proxy, ProxyError> {
         let tasks = tasks::Tasks::default();
-        let inner = Arc::new(Inner::new(config, fetcher, store, tasks.clone()));
+        let inner = Arc::new(ProxyShared::new(config, fetcher, store, tasks.clone()));
         let proxy = Proxy { inner, _owner: Arc::new(tasks::TasksOwner(tasks)) };
         proxy.restart(0).await?;
         Ok(proxy)
@@ -199,19 +199,19 @@ impl Proxy {
     async fn download_into_store(
         &self,
         key: &str,
-        start: impl Fn() -> flight::Subscription,
+        start: impl Fn() -> flight::FlightSubscription,
     ) -> Result<(), ProxyError> {
         for _ in 0..FETCH_ATTEMPTS {
             if self.inner.store.contains(key).await {
                 return Ok(());
             }
             match start().wait_finished().await.outcome {
-                Outcome::Complete => return Ok(()),
-                Outcome::Rejected(rejection) => return Err(ProxyError::Status(rejection.status)),
-                Outcome::Failed(message) => return Err(ProxyError::Fetch(message)),
-                Outcome::Unstorable => return Err(ProxyError::StoreRefused),
-                Outcome::QueueFull => return Err(ProxyError::QueueFull),
-                Outcome::Cancelled | Outcome::Running => {}
+                FlightOutcome::Complete => return Ok(()),
+                FlightOutcome::Rejected(rejection) => return Err(ProxyError::Status(rejection.status)),
+                FlightOutcome::Failed(message) => return Err(ProxyError::Fetch(message)),
+                FlightOutcome::Unstorable => return Err(ProxyError::StoreRefused),
+                FlightOutcome::QueueFull => return Err(ProxyError::QueueFull),
+                FlightOutcome::Cancelled | FlightOutcome::Running => {}
             }
         }
         Err(ProxyError::Fetch("download cancelled".to_string()))
@@ -241,3 +241,5 @@ mod resume_tests;
 mod route_tests;
 #[cfg(test)]
 mod slots_tests;
+#[cfg(test)]
+mod stand_tests;

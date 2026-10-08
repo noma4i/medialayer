@@ -9,6 +9,12 @@ gradle="${GRADLE:-$(ls -d "$HOME"/.gradle/wrapper/dists/gradle-9.*-bin/*/gradle-
 echo "== rust: cargo test"
 cargo test --manifest-path "$root/core/Cargo.toml"
 
+echo "== invariants: every REQUIRED invariant has a test"
+bash "$root/scripts/check_invariants.sh" --strict
+
+echo "== zoo: duplicate names, banned words, copies, unowned tasks"
+bash "$root/scripts/check_zoo.sh"
+
 echo "== ios: xcframework, swift test"
 bash "$root/scripts/build_ios.sh"
 swift test --package-path "$root/swift"

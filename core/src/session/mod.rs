@@ -4,9 +4,9 @@ mod route_staleness;
 mod suspensions;
 mod watchdog_policy;
 
-pub use election::{Context, Directive, Election, Intent, Order, Policy, Resume};
+pub use election::{Context, LeaseOrder, Election, Intent, Order, Policy, ResumeMode};
 pub use recovery::{next_action, Action, Event, RecoveryState, FOREGROUND_STEPS};
-pub use route_staleness::{Readiness, RouteStaleness};
+pub use route_staleness::RouteStaleness;
 pub use suspensions::{Reason, SuspensionError, Suspensions};
 pub use watchdog_policy::{
     evaluate, has_clock_advanced, window_delay_ms, Decision, Progress, Sample, Verdict, WatchdogConfig,

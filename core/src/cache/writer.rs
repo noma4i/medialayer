@@ -1,24 +1,26 @@
 use super::entry::{Entry, Kind};
 use super::error::CacheError;
 use super::evict::trigger_eviction;
-use super::inner::{delete_files, Inner};
+use super::inner::{delete_files, CacheShared};
 use crate::proxy::Meta;
 use super::naming::{bin_path, file_name, part_path};
-use super::reservation::Reservation;
+use super::reservation::SpaceReservation;
 use super::save::mark_dirty;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
+use tokio::runtime::Handle;
+use tokio::sync::oneshot;
 
 struct Registration {
-    inner: Arc<Inner>,
+    inner: Arc<CacheShared>,
     name: String,
     part: PathBuf,
 }
 
 impl Registration {
-    fn new(inner: &Arc<Inner>, name: &str, part: &Path) -> Registration {
+    fn new(inner: &Arc<CacheShared>, name: &str, part: &Path) -> Registration {
         let mut state = inner.state();
         state.start_writing(name);
         state.live_parts.insert(part.to_path_buf());
@@ -35,7 +37,7 @@ impl Drop for Registration {
 }
 
 pub struct Writer {
-    inner: Arc<Inner>,
+    inner: Arc<CacheShared>,
     key: String,
     name: String,
     kind: Kind,
@@ -43,19 +45,19 @@ pub struct Writer {
     part: PathBuf,
     _registration: Registration,
     file: Option<tokio::fs::File>,
-    reservation: Reservation,
+    reservation: SpaceReservation,
     renamed: bool,
 }
 
 impl Writer {
-    pub(super) async fn start(inner: Arc<Inner>, key: &str, kind: Kind) -> Result<Writer, CacheError> {
+    pub(super) async fn start(inner: Arc<CacheShared>, key: &str, kind: Kind) -> Result<Writer, CacheError> {
         tokio::fs::create_dir_all(&inner.dir).await?;
         let name = file_name(key);
         let part = part_path(&inner.dir, &name, inner.part_sequence.fetch_add(1, Ordering::SeqCst));
         let registration = Registration::new(&inner, &name, &part);
-        let reservation = Reservation::new(inner.clone());
+        let reservation = SpaceReservation::new(inner.clone());
         let mut writer = Writer { inner, key: key.to_string(), name, kind, meta: Meta::default(), part, _registration: registration, file: None, reservation, renamed: false };
-        writer.file = Some(tokio::fs::File::create(&writer.part).await?);
+        writer.file = Some(create_part(&writer.inner.handle, &writer.part).await?);
         Ok(writer)
     }
 
@@ -107,6 +109,20 @@ impl Writer {
         trigger_eviction(&inner);
         Ok(())
     }
+}
+
+async fn create_part(handle: &Handle, part: &Path) -> Result<tokio::fs::File, CacheError> {
+    let (sender, receiver) = oneshot::channel();
+    let part = part.to_path_buf();
+    handle.spawn(async move {
+        let created = tokio::fs::File::create(&part).await;
+        if let Err(Ok(abandoned)) = sender.send(created) {
+            drop(abandoned);
+            delete_files(vec![part]).await;
+        }
+    });
+    let created = receiver.await.map_err(|_| CacheError::Io("part creation was dropped".to_string()))?;
+    Ok(created?)
 }
 
 impl Drop for Writer {

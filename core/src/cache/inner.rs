@@ -15,7 +15,7 @@ use tokio::sync::watch;
 
 const STRIPES: usize = 16;
 
-pub struct Inner {
+pub struct CacheShared {
     pub dir: PathBuf,
     pub clock: Arc<dyn Clock>,
     pub overrides: HashMap<Kind, EvictionStrategy>,
@@ -35,9 +35,9 @@ pub struct Inner {
     stripes: Vec<Arc<tokio::sync::Mutex<()>>>,
 }
 
-impl Inner {
-    pub fn new(dir: PathBuf, limits: Limits, options: super::options::Options, handle: Handle) -> Inner {
-        Inner {
+impl CacheShared {
+    pub fn new(dir: PathBuf, limits: Limits, options: super::options::Options, handle: Handle) -> CacheShared {
+        CacheShared {
             dir,
             clock: options.clock,
             overrides: options.overrides,
@@ -106,7 +106,7 @@ impl Drop for StateGuard<'_> {
 
 const SCAN_CHUNK: usize = 1000;
 
-pub async fn scan(inner: &Inner) -> Vec<Item> {
+pub async fn scan(inner: &CacheShared) -> Vec<Item> {
     let mut items = Vec::new();
     let mut after: Option<String> = None;
     loop {

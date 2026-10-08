@@ -5,6 +5,7 @@ mod settings;
 pub use eviction::eviction_target;
 pub use resolve::resolve;
 pub use settings::{EvictionStrategy, Limits, LimitsError};
+pub(crate) use settings::MIB;
 
 #[cfg(test)]
 mod eviction_tests;

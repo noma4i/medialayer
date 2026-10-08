@@ -12,7 +12,7 @@ fn channel_sum(data: &[u8]) -> u64 {
 }
 
 #[test]
-fn components_read_the_size_flag_and_reject_a_bad_header() {
+fn inv_placeholder_01_components_read_the_size_flag_and_reject_a_bad_header() {
     assert_eq!(components(KNOWN), Ok((4, 3)));
     assert_eq!(components("00TI:j"), Ok((1, 1)));
     assert_eq!(components("LEHV6"), Err(BlurHashError::TooShort));
@@ -22,7 +22,7 @@ fn components_read_the_size_flag_and_reject_a_bad_header() {
 }
 
 #[test]
-fn known_hash_corner_and_center_pixels() {
+fn inv_placeholder_01_known_hash_corner_and_center_pixels() {
     let data = decode(KNOWN, 32, 32, 1.0).unwrap();
     assert_eq!(data.len(), 32 * 32 * 4);
     assert_eq!(pixel(&data, 32, 0, 0), [135, 164, 177, 255]);
@@ -35,7 +35,7 @@ fn known_hash_corner_and_center_pixels() {
 }
 
 #[test]
-fn punch_changes_saturation() {
+fn inv_placeholder_01_punch_changes_saturation() {
     let data = decode(KNOWN, 32, 32, 2.0).unwrap();
     assert_eq!(pixel(&data, 32, 0, 0), [116, 176, 201, 255]);
     assert_eq!(pixel(&data, 32, 16, 16), [165, 92, 0, 255]);
@@ -44,20 +44,20 @@ fn punch_changes_saturation() {
 }
 
 #[test]
-fn single_component_hash_is_one_flat_color() {
+fn inv_placeholder_01_single_component_hash_is_one_flat_color() {
     let data = decode("00TI:j", 5, 7, 1.0).unwrap();
     assert_eq!(data.len(), 5 * 7 * 4);
     assert!(data.chunks(4).all(|chunk| chunk == [255, 0, 0, 255]));
 }
 
 #[test]
-fn single_component_hash_ignores_punch() {
+fn inv_placeholder_01_single_component_hash_ignores_punch() {
     let data = decode("005?}k", 3, 3, 4.0).unwrap();
     assert!(data.chunks(4).all(|chunk| chunk == [51, 102, 153, 255]));
 }
 
 #[test]
-fn other_sizes_keep_known_corner_and_length() {
+fn inv_placeholder_01_other_sizes_keep_known_corner_and_length() {
     let data = decode(KNOWN, 17, 9, 1.0).unwrap();
     assert_eq!(data.len(), 17 * 9 * 4);
     assert_eq!(pixel(&data, 17, 0, 0), [135, 164, 177, 255]);
@@ -66,14 +66,14 @@ fn other_sizes_keep_known_corner_and_length() {
 }
 
 #[test]
-fn one_pixel_image_is_the_top_left_corner() {
+fn inv_placeholder_01_one_pixel_image_is_the_top_left_corner() {
     let data = decode(KNOWN, 1, 1, 1.0).unwrap();
     assert_eq!(data.len(), 4);
     assert_eq!(&data[..], &[135, 164, 177, 255]);
 }
 
 #[test]
-fn decode_rejects_bad_input_without_panic() {
+fn inv_placeholder_01_decode_rejects_bad_input_without_panic() {
     let bad_character = "LEHV6nWB2yk8pyo0adR*.7kCMdn ";
     let longer = format!("{KNOWN}0");
     let cases = [

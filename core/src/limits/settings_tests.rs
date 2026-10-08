@@ -1,13 +1,13 @@
 use super::*;
 
 #[test]
-fn budget_below_min_is_rejected() {
+fn inv_limits_01_budget_below_min_is_rejected() {
     let limits = Limits { budget: 10, min_budget: 20, ..Limits::default() };
     assert_eq!(limits.validate(), Err(LimitsError::BudgetBelowMin { budget: 10, min_budget: 20 }));
 }
 
 #[test]
-fn shrink_to_outside_unit_interval_is_rejected() {
+fn inv_limits_01_shrink_to_outside_unit_interval_is_rejected() {
     for value in [0.0, -0.5, 1.01, f64::NAN, f64::INFINITY] {
         let limits = Limits { shrink_to: value, ..Limits::default() };
         assert_eq!(limits.validate(), Err(LimitsError::ShrinkToOutOfRange));
@@ -15,13 +15,13 @@ fn shrink_to_outside_unit_interval_is_rejected() {
 }
 
 #[test]
-fn prefetch_window_from_above_to_is_rejected() {
+fn inv_limits_01_prefetch_window_from_above_to_is_rejected() {
     let limits = Limits { prefetch_from: 6, prefetch_to: 5, ..Limits::default() };
     assert_eq!(limits.validate(), Err(LimitsError::PrefetchWindowInverted { from: 6, to: 5 }));
 }
 
 #[test]
-fn zero_in_forbidden_field_is_rejected() {
+fn inv_limits_01_zero_in_forbidden_field_is_rejected() {
     let cases = [
         ("budget", Limits { budget: 0, min_budget: 0, ..Limits::default() }),
         ("memory_budget", Limits { memory_budget: 0, ..Limits::default() }),
@@ -39,7 +39,7 @@ fn zero_in_forbidden_field_is_rejected() {
 }
 
 #[test]
-fn encode_decode_round_trip_for_every_strategy() {
+fn inv_limits_02_encode_decode_round_trip_for_every_strategy() {
     let strategies = [
         EvictionStrategy::Lru,
         EvictionStrategy::Fifo,
@@ -54,7 +54,7 @@ fn encode_decode_round_trip_for_every_strategy() {
 }
 
 #[test]
-fn encode_is_key_value_lines() {
+fn inv_limits_02_encode_is_key_value_lines() {
     let text = Limits::default().encode();
     assert!(text.lines().any(|line| line == "budget=4294967296"));
     assert!(text.lines().any(|line| line == "shrink_to=0.9"));
@@ -62,7 +62,7 @@ fn encode_is_key_value_lines() {
 }
 
 #[test]
-fn decode_applies_only_present_keys_over_base() {
+fn inv_limits_02_decode_applies_only_present_keys_over_base() {
     let base = Limits { slots: 7, ..Limits::default() };
     let decoded = Limits::decode(base, "timeout_seconds=10\n").unwrap();
     assert_eq!(decoded.timeout_seconds, 10);
@@ -70,13 +70,13 @@ fn decode_applies_only_present_keys_over_base() {
 }
 
 #[test]
-fn decode_ignores_blank_lines() {
+fn inv_limits_02_decode_ignores_blank_lines() {
     let decoded = Limits::decode(Limits::default(), "\nslots=4\n\n").unwrap();
     assert_eq!(decoded.slots, 4);
 }
 
 #[test]
-fn boundary_values_are_accepted() {
+fn inv_limits_01_boundary_values_are_accepted() {
     let cases = [
         ("budget equal to min", Limits { budget: 20, min_budget: 20, ..Limits::default() }),
         ("shrink_to one", Limits { shrink_to: 1.0, ..Limits::default() }),
@@ -89,7 +89,7 @@ fn boundary_values_are_accepted() {
 }
 
 #[test]
-fn decode_rejects_bad_text() {
+fn inv_limits_02_decode_rejects_bad_text() {
     let cases = [
         ("color=red", LimitsError::UnknownKey { key: "color".to_string() }),
         ("budget=100\nnonsense", LimitsError::MalformedLine { line: 2 }),

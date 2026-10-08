@@ -1,7 +1,7 @@
-use super::entry::{Entry, Kind, Stats};
+use super::entry::{Entry, Kind, CacheStats};
 use super::error::CacheError;
 use super::evict::{evict_if_needed, names_where, remove_names};
-use super::inner::Inner;
+use super::inner::CacheShared;
 use super::load::load;
 use super::naming::{bin_path, file_name};
 use super::options::Options;
@@ -19,7 +19,7 @@ const WRITE_CHUNK: usize = 1024 * 1024;
 
 #[derive(Clone)]
 pub struct Cache {
-    pub(super) inner: Arc<Inner>,
+    pub(super) inner: Arc<CacheShared>,
 }
 
 impl Cache {
@@ -29,7 +29,7 @@ impl Cache {
 
     pub fn open_with(dir: impl Into<PathBuf>, limits: Limits, options: Options) -> Cache {
         let handle = tokio::runtime::Handle::current();
-        let inner = Arc::new(Inner::new(dir.into(), limits, options, handle.clone()));
+        let inner = Arc::new(CacheShared::new(dir.into(), limits, options, handle.clone()));
         handle.spawn(load(inner.clone()));
         Cache { inner }
     }
@@ -119,7 +119,7 @@ impl Cache {
         remove_names(&self.inner, names).await
     }
 
-    pub async fn stats(&self) -> Stats {
+    pub async fn stats(&self) -> CacheStats {
         let mut stats = self.inner.state().stats();
         stats.max_hold = Duration::from_nanos(self.inner.max_hold.load(Ordering::Relaxed));
         stats.eviction_backlog = self.inner.eviction_backlog.load(Ordering::Relaxed);

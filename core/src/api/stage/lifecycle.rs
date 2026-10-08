@@ -1,11 +1,11 @@
 use super::Stage;
 use crate::api::ports::{PoolControl, SlotDirectives};
 use crate::memory::Step;
-use crate::pool::{Directive, Pressure, Stats};
+use crate::pool::{Directive, Pressure, PoolStats};
 use crate::session::Event;
 
 impl PoolControl for Stage {
-    fn stats(&self) -> Stats {
+    fn stats(&self) -> PoolStats {
         self.state().ring.stats()
     }
 

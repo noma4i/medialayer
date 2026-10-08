@@ -10,20 +10,20 @@ async fn roomy() -> Fixture {
 }
 
 #[tokio::test]
-async fn put_then_get_returns_the_bytes() {
+async fn inv_cache_05_put_then_get_returns_the_bytes() {
     let f = roomy().await;
     f.cache.put("k", Kind::Image, b"hello world").await.unwrap();
     assert_eq!(f.cache.get("k").await, Some(b"hello world".to_vec()));
 }
 
 #[tokio::test]
-async fn get_of_missing_key_is_a_miss() {
+async fn inv_cache_05_get_of_missing_key_is_a_miss() {
     let f = roomy().await;
     assert_eq!(f.cache.get("nope").await, None);
 }
 
 #[tokio::test]
-async fn get_range_returns_the_slice() {
+async fn inv_cache_05_get_range_returns_the_slice() {
     let f = roomy().await;
     f.cache.put("k", Kind::Stream, b"0123456789").await.unwrap();
     assert_eq!(f.cache.get_range("k", 3, 4).await, Some(b"3456".to_vec()));
@@ -32,7 +32,7 @@ async fn get_range_returns_the_slice() {
 }
 
 #[tokio::test]
-async fn file_name_is_the_identity_hash_of_the_key() {
+async fn inv_cache_05_file_name_is_the_identity_hash_of_the_key() {
     let f = roomy().await;
     f.cache.put("ab", Kind::Image, b"x").await.unwrap();
     let name = crate::identity::key_file_name("ab");
@@ -41,7 +41,7 @@ async fn file_name_is_the_identity_hash_of_the_key() {
 }
 
 #[tokio::test]
-async fn put_replaces_the_previous_value_and_size() {
+async fn inv_cache_05_put_replaces_the_previous_value_and_size() {
     let f = roomy().await;
     f.put("k", Kind::Image, 100).await;
     f.put("k", Kind::Image, 40).await;
@@ -50,7 +50,7 @@ async fn put_replaces_the_previous_value_and_size() {
 }
 
 #[tokio::test]
-async fn contains_and_remove() {
+async fn inv_cache_05_contains_and_remove() {
     let f = roomy().await;
     f.put("k", Kind::Image, 10).await;
     assert!(f.cache.contains("k").await);
@@ -61,7 +61,7 @@ async fn contains_and_remove() {
 }
 
 #[tokio::test]
-async fn purge_prefix_removes_only_matching_keys() {
+async fn inv_cache_05_purge_prefix_removes_only_matching_keys() {
     let f = roomy().await;
     for key in ["video/1/a", "video/1/b", "video/2/a", "image/1"] {
         f.put(key, Kind::Stream, 10).await;
@@ -75,7 +75,7 @@ async fn purge_prefix_removes_only_matching_keys() {
 }
 
 #[tokio::test]
-async fn clear_by_kind_keeps_other_kinds() {
+async fn inv_cache_13_clear_by_kind_keeps_other_kinds() {
     let f = roomy().await;
     f.put("i", Kind::Image, 10).await;
     f.put("s", Kind::Stream, 20).await;
@@ -88,7 +88,7 @@ async fn clear_by_kind_keeps_other_kinds() {
 }
 
 #[tokio::test]
-async fn clear_all_empties_the_cache() {
+async fn inv_cache_05_clear_all_empties_the_cache() {
     let f = roomy().await;
     f.put("i", Kind::Image, 10).await;
     f.put("s", Kind::Stream, 20).await;
@@ -99,7 +99,7 @@ async fn clear_all_empties_the_cache() {
 }
 
 #[tokio::test]
-async fn stats_split_bytes_by_kind() {
+async fn inv_cache_13_stats_split_bytes_by_kind() {
     let f = roomy().await;
     f.put("i", Kind::Image, 10).await;
     f.put("s", Kind::Stream, 20).await;
@@ -112,7 +112,7 @@ async fn stats_split_bytes_by_kind() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn parallel_puts_of_one_key_leave_one_complete_value() {
+async fn inv_cache_12_parallel_puts_of_one_key_leave_one_complete_value() {
     let f = roomy().await;
     let first = vec![1u8; 1000];
     let second = vec![2u8; 2000];
@@ -128,7 +128,7 @@ async fn parallel_puts_of_one_key_leave_one_complete_value() {
 }
 
 #[tokio::test]
-async fn streamed_write_is_invisible_until_commit_and_read_in_chunks() {
+async fn inv_cache_12_streamed_write_is_invisible_until_commit_and_read_in_chunks() {
     let dir = tempfile::tempdir().unwrap();
     let options = Options { chunk_size: CHUNK, ..Options::default() };
     let cache = Cache::open_with(dir.path(), limits(u64::MAX / 2, 0.9, EvictionStrategy::Lru), options);
@@ -159,7 +159,7 @@ async fn streamed_write_is_invisible_until_commit_and_read_in_chunks() {
 }
 
 #[tokio::test]
-async fn dropped_writer_removes_its_part_and_keeps_the_old_value() {
+async fn inv_cache_12_dropped_writer_removes_its_part_and_keeps_the_old_value() {
     let f = roomy().await;
     f.cache.put("k", Kind::Image, b"old").await.unwrap();
     let mut writer = f.cache.begin_write("k", Kind::Image).await.unwrap();
@@ -170,7 +170,7 @@ async fn dropped_writer_removes_its_part_and_keeps_the_old_value() {
 }
 
 #[tokio::test]
-async fn url_key_of_5000_chars_round_trips_through_a_reopen() {
+async fn inv_cache_14_url_key_of_5000_chars_round_trips_through_a_reopen() {
     let f = roomy().await;
     let key = format!("https://cdn.example.com/{}", "segment/".repeat(625));
     assert!(key.len() >= 5000);
@@ -186,7 +186,7 @@ async fn url_key_of_5000_chars_round_trips_through_a_reopen() {
 }
 
 #[tokio::test]
-async fn reads_count_hits_for_lfu() {
+async fn inv_cache_05_reads_count_hits_for_lfu() {
     let f = roomy().await;
     f.put("k", Kind::Image, 10).await;
     f.touch("k").await;

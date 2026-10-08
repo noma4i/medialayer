@@ -8,7 +8,7 @@ fn step_at(used: u64) -> Step {
 }
 
 #[test]
-fn load_maps_to_the_ladder() {
+fn inv_memory_05_load_maps_to_the_ladder() {
     assert_eq!(step_at(0), Step::Normal);
     assert_eq!(step_at(699), Step::Normal);
     assert_eq!(step_at(700), Step::LowerQuality);
@@ -20,12 +20,12 @@ fn load_maps_to_the_ladder() {
 }
 
 #[test]
-fn a_zero_ceiling_is_placeholders_only() {
+fn inv_memory_05_a_zero_ceiling_is_placeholders_only() {
     assert_eq!(Degradation::default().for_pressure(0, 0, None), Step::PlaceholdersOnly);
 }
 
 #[test]
-fn the_step_never_decreases_as_load_grows() {
+fn inv_memory_05_the_step_never_decreases_as_load_grows() {
     let mut previous = Step::Normal;
     for used in 0..=CEILING {
         let step = step_at(used);
@@ -35,7 +35,7 @@ fn the_step_never_decreases_as_load_grows() {
 }
 
 #[test]
-fn the_step_never_decreases_as_system_pressure_grows() {
+fn inv_memory_05_the_step_never_decreases_as_system_pressure_grows() {
     for used in (0..=CEILING).step_by(10) {
         let none = Degradation::default().for_pressure(used, CEILING, None);
         let moderate = Degradation::default().for_pressure(used, CEILING, Some(Pressure::Moderate));
@@ -45,7 +45,7 @@ fn the_step_never_decreases_as_system_pressure_grows() {
 }
 
 #[test]
-fn system_pressure_shifts_the_load_step_up_and_removal_lifts_back() {
+fn inv_memory_05_system_pressure_shifts_the_load_step_up_and_removal_lifts_back() {
     let mut degradation = Degradation::default();
     assert_eq!(degradation.for_pressure(0, CEILING, None), Step::Normal);
     assert_eq!(degradation.for_pressure(0, CEILING, Some(Pressure::Moderate)), Step::LowerQuality);
@@ -56,7 +56,7 @@ fn system_pressure_shifts_the_load_step_up_and_removal_lifts_back() {
 }
 
 #[test]
-fn hysteresis_holds_a_step_inside_the_margin() {
+fn inv_memory_05_hysteresis_holds_a_step_inside_the_margin() {
     let mut degradation = Degradation::default();
     assert_eq!(degradation.for_pressure(720, CEILING, None), Step::LowerQuality);
     assert_eq!(degradation.for_pressure(680, CEILING, None), Step::LowerQuality);
@@ -65,7 +65,7 @@ fn hysteresis_holds_a_step_inside_the_margin() {
 }
 
 #[test]
-fn recovery_walks_down_to_the_highest_step_the_load_still_justifies() {
+fn inv_memory_05_recovery_walks_down_to_the_highest_step_the_load_still_justifies() {
     let mut degradation = Degradation::default();
     assert_eq!(degradation.for_pressure(995, CEILING, None), Step::PlaceholdersOnly);
     assert_eq!(degradation.for_pressure(820, CEILING, None), Step::ShorterBuffer);
@@ -73,7 +73,7 @@ fn recovery_walks_down_to_the_highest_step_the_load_still_justifies() {
 }
 
 #[test]
-fn the_margin_is_tunable() {
+fn inv_memory_05_the_margin_is_tunable() {
     let tuning = DegradationTuning { margin_percent: 0, ..DegradationTuning::default() };
     let mut degradation = Degradation::new(tuning);
     assert_eq!(degradation.for_pressure(720, CEILING, None), Step::LowerQuality);
@@ -81,7 +81,7 @@ fn the_margin_is_tunable() {
 }
 
 #[test]
-fn plans_shrink_monotonically_down_the_ladder() {
+fn inv_memory_05_plans_shrink_monotonically_down_the_ladder() {
     let steps = [Step::Normal, Step::LowerQuality, Step::ShorterBuffer, Step::FewerSlots, Step::PlayingSlotOnly, Step::PlaceholdersOnly];
     for pair in steps.windows(2) {
         let (before, after) = (StepPlan::for_step(pair[0]), StepPlan::for_step(pair[1]));
@@ -94,7 +94,7 @@ fn plans_shrink_monotonically_down_the_ladder() {
 }
 
 #[test]
-fn plan_values_per_step() {
+fn inv_memory_05_plan_values_per_step() {
     let normal = StepPlan::for_step(Step::Normal);
     assert_eq!((normal.bitrate_cap_kbps, normal.buffer_seconds(4), normal.slot_limit(6), normal.reach_limit(2)), (None, 4, 6, 2));
     let fewer = StepPlan::for_step(Step::FewerSlots);

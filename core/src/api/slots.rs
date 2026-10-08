@@ -111,23 +111,23 @@ struct Lane {
 }
 
 pub struct SlotRunner {
-    factory: Option<Arc<dyn PlayerSlotFactory>>,
+    players: Option<Arc<dyn PlayerSlotFactory>>,
     handle: Handle,
     lanes: Mutex<HashMap<usize, Lane>>,
 }
 
 impl SlotRunner {
-    pub fn new(handle: Handle, factory: Option<Arc<dyn PlayerSlotFactory>>) -> SlotRunner {
-        SlotRunner { factory, handle, lanes: Mutex::new(HashMap::new()) }
+    pub fn new(handle: Handle, players: Option<Arc<dyn PlayerSlotFactory>>) -> SlotRunner {
+        SlotRunner { players, handle, lanes: Mutex::new(HashMap::new()) }
     }
 
     pub fn send(&self, slot: usize, call: SlotCall) {
-        let Some(factory) = self.factory.clone() else { return };
+        let Some(players) = self.players.clone() else { return };
         let mut lanes = self.lanes();
         let lane = lanes.entry(slot).or_insert_with(|| {
             let queue = Arc::new(Queue::default());
             let player: Player = Arc::new(Mutex::new(None));
-            let task = self.handle.spawn(run_lane(factory, slot, queue.clone(), player.clone()));
+            let task = self.handle.spawn(run_lane(players, slot, queue.clone(), player.clone()));
             Lane { queue, player, _task: AbortOnDrop::new(task) }
         });
         lane.queue.push(call);
@@ -152,17 +152,17 @@ impl SlotRunner {
     }
 }
 
-async fn run_lane(factory: Arc<dyn PlayerSlotFactory>, slot: usize, queue: Arc<Queue>, player: Player) {
+async fn run_lane(players: Arc<dyn PlayerSlotFactory>, slot: usize, queue: Arc<Queue>, player: Player) {
     loop {
         let Some(call) = queue.pop() else {
             queue.wake.notified().await;
             continue;
         };
-        let factory = factory.clone();
+        let players = players.clone();
         let cell = player.clone();
         let _ = tokio::task::spawn_blocking(move || {
             let mut held = cell.lock().unwrap_or_else(PoisonError::into_inner);
-            let current = held.get_or_insert_with(|| factory.create(slot as u32)).clone();
+            let current = held.get_or_insert_with(|| players.create(slot as u32)).clone();
             drop(held);
             call.apply(current.as_ref());
         })

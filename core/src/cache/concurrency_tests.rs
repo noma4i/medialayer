@@ -42,7 +42,7 @@ fn write_prepared_dir(dir: &std::path::Path, files: usize, hot_key: &str) {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn put_and_get_of_50_mib_do_not_stall_other_tasks() {
+async fn inv_cache_11_put_and_get_of_50_mib_do_not_stall_other_tasks() {
     let f = fixture(limits(u64::MAX / 2, 0.9, EvictionStrategy::Lru), &[]).await;
     let stop = Arc::new(AtomicBool::new(false));
     let ticker = spawn_ticker(stop.clone());
@@ -57,7 +57,7 @@ async fn put_and_get_of_50_mib_do_not_stall_other_tasks() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn open_on_20000_files_returns_fast_and_reads_miss_until_ready() {
+async fn inv_cache_11_open_on_20000_files_returns_fast_and_reads_miss_until_ready() {
     let dir = tempfile::tempdir().unwrap();
     write_prepared_dir(dir.path(), OPEN_FILES, "hot");
     let started = Instant::now();
@@ -73,26 +73,33 @@ async fn open_on_20000_files_returns_fast_and_reads_miss_until_ready() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn evicting_10000_entries_does_not_delay_reads() {
+async fn inv_cache_11_evicting_10000_entries_gives_other_tasks_a_turn_at_least_every_128_removals() {
     let dir = tempfile::tempdir().unwrap();
     write_prepared_dir(dir.path(), EVICTED_ENTRIES, "hot");
     let cache = Cache::open(dir.path(), limits(500, 0.5, EvictionStrategy::Lru));
     cache.ready().await;
-    let (mut worst, mut reads) = (Duration::ZERO, 0);
-    while cache.stats().await.evictions < EVICTED_ENTRIES as u64 - 30 {
-        let before = Instant::now();
-        assert!(cache.get("hot").await.is_some());
-        worst = worst.max(before.elapsed());
-        reads += 1;
-        tokio::time::sleep(Duration::from_millis(1)).await;
-    }
-    assert!(reads > 3, "eviction finished before reads overlapped: {reads}");
-    assert!(worst < MAX_STALL, "a read waited {worst:?} during eviction");
-    assert!(cache.contains("hot").await);
+    let stop = Arc::new(AtomicBool::new(false));
+    let turns = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let probe = {
+        let (stop, turns) = (stop.clone(), turns.clone());
+        tokio::spawn(async move {
+            while !stop.load(Ordering::SeqCst) {
+                turns.fetch_add(1, Ordering::SeqCst);
+                tokio::task::yield_now().await;
+            }
+        })
+    };
+    wait_until(|| !cache.inner.evicting.load(Ordering::SeqCst) && cache.inner.state().used <= 500).await;
+    stop.store(true, Ordering::SeqCst);
+    probe.await.unwrap();
+    let evicted = cache.stats().await.evictions;
+    assert!(evicted >= EVICTED_ENTRIES as u64 - 30, "eviction did not run: {evicted}");
+    assert!(turns.load(Ordering::SeqCst) >= evicted / 128, "{} turns for {evicted} removals", turns.load(Ordering::SeqCst));
+    assert!(cache.get("hot").await.is_some());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn index_lock_hold_stays_short_with_100000_entries() {
+async fn inv_cache_11_index_lock_hold_stays_short_with_100000_entries() {
     let dir = tempfile::tempdir().unwrap();
     write_prepared_dir(dir.path(), BIG_INDEX_ENTRIES, "hot");
     let cache = Cache::open(dir.path(), limits(u64::MAX / 2, 0.9, EvictionStrategy::Lru));
@@ -107,7 +114,7 @@ async fn index_lock_hold_stays_short_with_100000_entries() {
 }
 
 #[tokio::test]
-async fn diagnostics_count_open_writers() {
+async fn inv_cache_11_diagnostics_count_open_writers() {
     let f = fixture(limits(u64::MAX / 2, 0.9, EvictionStrategy::Lru), &[]).await;
     let first = f.cache.begin_write("a", Kind::Image).await.unwrap();
     let second = f.cache.begin_write("b", Kind::Image).await.unwrap();

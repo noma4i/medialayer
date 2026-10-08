@@ -12,7 +12,7 @@ fn source(kind: Kind, cover: Option<&str>, blur_hash: Option<&str>) -> MediaItem
 }
 
 #[test]
-fn a_blur_hash_over_the_input_limit_is_not_handed_to_the_platform() {
+fn inv_placeholder_02_a_blur_hash_over_the_input_limit_is_not_handed_to_the_platform() {
     let oversized = "L".repeat(10_000);
 
     let placeholder = placeholder_for(source(Kind::Image, None, Some(&oversized)), CacheState::Missing, false);
@@ -21,7 +21,7 @@ fn a_blur_hash_over_the_input_limit_is_not_handed_to_the_platform() {
 }
 
 #[test]
-fn the_placeholder_follows_the_kind_the_optional_fields_and_the_cache() {
+fn inv_placeholder_02_the_placeholder_follows_the_kind_the_optional_fields_and_the_cache() {
     let hash = || Placeholder::BlurHash { hash: "LEHV6n".to_string() };
     let cover = || Placeholder::Cover { url: "https://cdn.test/c.jpg".to_string() };
     let cases = [

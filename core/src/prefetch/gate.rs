@@ -8,9 +8,9 @@ pub(super) struct Gate {
     wake: Notify,
 }
 
-pub(super) struct Permit(Arc<Gate>);
+pub(super) struct LoadPermit(Arc<Gate>);
 
-impl Drop for Permit {
+impl Drop for LoadPermit {
     fn drop(&mut self) {
         self.0.running.fetch_sub(1, Ordering::SeqCst);
         self.0.wake.notify_waiters();
@@ -27,13 +27,13 @@ impl Gate {
         self.wake.notify_waiters();
     }
 
-    pub async fn acquire(self: &Arc<Gate>) -> Permit {
+    pub async fn acquire(self: &Arc<Gate>) -> LoadPermit {
         loop {
             let notified = self.wake.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
             if self.try_take() {
-                return Permit(self.clone());
+                return LoadPermit(self.clone());
             }
             notified.await;
         }

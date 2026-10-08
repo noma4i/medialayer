@@ -6,7 +6,7 @@ fn loads(commands: &[Command]) -> usize {
 }
 
 #[test]
-fn hold_off_blocks_reload_of_the_same_window_until_it_passes() {
+fn inv_pool_09_hold_off_blocks_reload_of_the_same_window_until_it_passes() {
     let mut pool = ring_with(3, 1, |config| config.hold_off_ms = 1000);
     let list = keys(20);
     pool.plan(0, 5, Some(5), &list);
@@ -17,7 +17,7 @@ fn hold_off_blocks_reload_of_the_same_window_until_it_passes() {
 }
 
 #[test]
-fn hold_off_ends_when_the_window_changes() {
+fn inv_pool_09_hold_off_ends_when_the_window_changes() {
     let mut pool = ring_with(3, 1, |config| config.hold_off_ms = 1000);
     let list = keys(20);
     pool.plan(0, 5, Some(5), &list);
@@ -26,14 +26,14 @@ fn hold_off_ends_when_the_window_changes() {
 }
 
 #[test]
-fn pressure_without_unloads_sets_no_hold() {
+fn inv_pool_08_pressure_without_unloads_sets_no_hold() {
     let mut pool = ring_with(3, 1, |config| config.hold_off_ms = 1000);
     pool.release_under(100, Pressure::Critical);
     assert_eq!(loads(&pool.plan(200, 5, Some(5), &keys(20))), 3);
 }
 
 #[test]
-fn timer_demotes_hot_to_warm_then_warm_to_cold() {
+fn inv_pool_08_timer_demotes_hot_to_warm_then_warm_to_cold() {
     let mut pool = ring_with(3, 1, |config| config.trim_delay_ms = 1000);
     pool.plan(0, 5, Some(5), &keys(20));
     assert!(pool.tick(999).is_empty());
@@ -44,7 +44,7 @@ fn timer_demotes_hot_to_warm_then_warm_to_cold() {
 }
 
 #[test]
-fn timer_release_does_not_reload_with_the_same_window() {
+fn inv_pool_05_timer_release_does_not_reload_with_the_same_window() {
     let mut pool = ring_with(3, 1, |config| config.trim_delay_ms = 1000);
     let list = keys(20);
     pool.plan(0, 5, Some(5), &list);
@@ -55,7 +55,7 @@ fn timer_release_does_not_reload_with_the_same_window() {
 }
 
 #[test]
-fn timer_trimmed_slot_is_retained_hot_when_it_starts_playing() {
+fn inv_pool_08_timer_trimmed_slot_is_retained_hot_when_it_starts_playing() {
     let mut pool = ring_with(3, 1, |config| config.trim_delay_ms = 1000);
     let list = keys(20);
     pool.plan(0, 5, Some(5), &list);
@@ -66,7 +66,7 @@ fn timer_trimmed_slot_is_retained_hot_when_it_starts_playing() {
 }
 
 #[test]
-fn repeated_plan_after_a_timer_trim_is_empty() {
+fn inv_pool_05_repeated_plan_after_a_timer_trim_is_empty() {
     let mut pool = ring_with(3, 1, |config| config.trim_delay_ms = 1000);
     let list = keys(20);
     pool.plan(0, 5, Some(5), &list);
@@ -75,7 +75,7 @@ fn repeated_plan_after_a_timer_trim_is_empty() {
 }
 
 #[test]
-fn background_releases_all_but_the_playing_slot_after_stopping_prefetch() {
+fn inv_pool_09_background_releases_all_but_the_playing_slot_after_stopping_prefetch() {
     let mut pool = ring(3, 1);
     pool.plan(0, 5, Some(5), &keys(20));
     assert_eq!(
@@ -88,7 +88,7 @@ fn background_releases_all_but_the_playing_slot_after_stopping_prefetch() {
 }
 
 #[test]
-fn foreground_restores_one_slot_per_tick_nearest_first() {
+fn inv_pool_09_foreground_restores_one_slot_per_tick_nearest_first() {
     let mut pool = ring(3, 1);
     pool.plan(0, 5, Some(5), &keys(20));
     pool.background();
@@ -99,7 +99,7 @@ fn foreground_restores_one_slot_per_tick_nearest_first() {
 }
 
 #[test]
-fn foreground_without_background_restores_nothing() {
+fn inv_pool_09_foreground_without_background_restores_nothing() {
     let mut pool = ring(3, 1);
     pool.plan(0, 5, Some(5), &keys(20));
     pool.foreground();
@@ -107,7 +107,7 @@ fn foreground_without_background_restores_nothing() {
 }
 
 #[test]
-fn release_unloads_one_key_and_release_all_unloads_everything() {
+fn inv_pool_09_release_unloads_one_key_and_release_all_unloads_everything() {
     let mut pool = ring(3, 1);
     pool.plan(0, 5, Some(5), &keys(20));
     assert_eq!(pool.release("k5"), [Command::Unload { slot: 2 }]);

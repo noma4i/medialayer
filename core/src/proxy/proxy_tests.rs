@@ -101,7 +101,7 @@ async fn play_master(rig: &Rig) -> Vec<Reply> {
 }
 
 #[tokio::test]
-async fn master_to_media_to_segments_streams_and_rewrites() {
+async fn inv_proxy_12_master_to_media_to_segments_streams_and_rewrites() {
     let rig = rig().await;
     hls_origin(&rig);
     let replies = play_master(&rig).await;
@@ -117,7 +117,7 @@ async fn master_to_media_to_segments_streams_and_rewrites() {
 }
 
 #[tokio::test]
-async fn first_pass_tees_into_the_store_and_keeps_playlists_raw() {
+async fn inv_proxy_03_first_pass_tees_into_the_store_and_keeps_playlists_raw() {
     let rig = rig().await;
     hls_origin(&rig);
     play_master(&rig).await;
@@ -130,7 +130,7 @@ async fn first_pass_tees_into_the_store_and_keeps_playlists_raw() {
 }
 
 #[tokio::test]
-async fn offline_replay_serves_everything_from_the_store_then_clear_empties_it() {
+async fn inv_proxy_12_offline_replay_serves_everything_from_the_store_then_clear_empties_it() {
     let rig = rig().await;
     hls_origin(&rig);
     let online = play_master(&rig).await;
@@ -151,7 +151,7 @@ async fn offline_replay_serves_everything_from_the_store_then_clear_empties_it()
 }
 
 #[tokio::test]
-async fn range_requests_are_cut_from_the_store() {
+async fn inv_proxy_11_range_requests_are_cut_from_the_store() {
     let rig = rig().await;
     let data = pattern(100, 0);
     rig.fetcher.route("https://o.test/v.mp4", Script::ok(data.clone()));
@@ -181,7 +181,7 @@ async fn range_requests_are_cut_from_the_store() {
 }
 
 #[tokio::test]
-async fn range_miss_inside_the_object_is_cached_as_blocks() {
+async fn inv_proxy_03_range_miss_inside_the_object_is_cached_as_blocks() {
     let rig = rig().await;
     let data = pattern(100, 0);
     rig.fetcher.route("https://o.test/v.mp4", Script::ok(data.clone()));
@@ -198,7 +198,7 @@ async fn range_miss_inside_the_object_is_cached_as_blocks() {
 }
 
 #[tokio::test]
-async fn range_miss_from_zero_fills_the_store_and_slices_the_answer() {
+async fn inv_proxy_03_range_miss_from_zero_fills_the_store_and_slices_the_answer() {
     let rig = rig().await;
     let data = pattern(100, 0);
     rig.fetcher.route("https://o.test/v.mp4", Script::ok(data.clone()));
@@ -211,7 +211,7 @@ async fn range_miss_from_zero_fills_the_store_and_slices_the_answer() {
 }
 
 #[tokio::test]
-async fn ten_parallel_clients_share_one_origin_call() {
+async fn inv_proxy_05_ten_parallel_clients_share_one_origin_call() {
     let rig = rig().await;
     rig.fetcher.route(
         "https://o.test/shared.mp4",
@@ -230,7 +230,7 @@ async fn ten_parallel_clients_share_one_origin_call() {
 }
 
 #[tokio::test]
-async fn origin_errors_pass_through_and_are_not_cached() {
+async fn inv_proxy_08_origin_errors_pass_through_and_are_not_cached() {
     let rig = rig().await;
     rig.fetcher.route("https://o.test/gone.mp4", Script::ok(b"nope".to_vec()).status(404));
     rig.fetcher.route("https://o.test/broken.mp4", Script::ok(b"boom".to_vec()).status(503));
@@ -247,7 +247,7 @@ async fn origin_errors_pass_through_and_are_not_cached() {
 }
 
 #[tokio::test]
-async fn fetch_errors_become_502_with_text() {
+async fn inv_proxy_08_fetch_errors_become_502_with_text() {
     let rig = rig().await;
     rig.fetcher.set_offline(true);
     let reply = get(rig.proxy.port(), &path_of(&rig.proxy.url_for("https://o.test/a.mp4", &HashMap::new()).unwrap())).await;
@@ -256,7 +256,7 @@ async fn fetch_errors_become_502_with_text() {
 }
 
 #[tokio::test]
-async fn a_cut_origin_body_aborts_the_write_and_leaves_nothing_stored() {
+async fn inv_proxy_03_a_cut_origin_body_aborts_the_write_and_leaves_nothing_stored() {
     let rig = rig().await;
     rig.fetcher.route("https://o.test/cut.mp4", Script::ok(pattern(10_000, 0)).chunked(1000).cut_after(3000));
     let reply = get(rig.proxy.port(), &path_of(&rig.proxy.url_for("https://o.test/cut.mp4", &HashMap::new()).unwrap())).await;
@@ -267,7 +267,7 @@ async fn a_cut_origin_body_aborts_the_write_and_leaves_nothing_stored() {
 }
 
 #[tokio::test]
-async fn head_answers_from_the_store_and_probes_the_origin_on_a_miss() {
+async fn inv_proxy_08_head_answers_from_the_store_and_probes_the_origin_on_a_miss() {
     let rig = rig().await;
     rig.fetcher.route("https://o.test/v.mp4", Script::ok(pattern(100, 0)));
     let target = path_of(&rig.proxy.url_for("https://o.test/v.mp4", &HashMap::new()).unwrap());
@@ -287,14 +287,14 @@ async fn head_answers_from_the_store_and_probes_the_origin_on_a_miss() {
 }
 
 #[tokio::test]
-async fn unknown_routes_and_methods_are_rejected() {
+async fn inv_proxy_08_unknown_routes_and_methods_are_rejected() {
     let rig = rig().await;
     assert_eq!(get(rig.proxy.port(), "/nothing").await.status, 404);
     assert_eq!(request(rig.proxy.port(), "POST", "/request.mp4?url=https%3A%2F%2Fo.test%2Fa.mp4", &[]).await.status, 405);
 }
 
 #[tokio::test]
-async fn only_whitelisted_headers_reach_the_origin_and_registered_headers_are_used() {
+async fn inv_proxy_01_only_whitelisted_headers_reach_the_origin_and_registered_headers_are_used() {
     let rig = rig().await;
     rig.fetcher.route("https://o.test/a.mp4", Script::ok(pattern(10, 0)));
     let registered = HashMap::from([("Authorization".to_string(), "Bearer registered".to_string())]);
@@ -318,7 +318,7 @@ async fn only_whitelisted_headers_reach_the_origin_and_registered_headers_are_us
 }
 
 #[tokio::test]
-async fn a_hung_origin_does_not_delay_other_answers() {
+async fn inv_proxy_14_a_hung_origin_does_not_delay_other_answers() {
     let rig = rig().await;
     rig.fetcher.route("https://o.test/hung.mp4", Script::ok(pattern(10, 0)).hanging());
     rig.fetcher.route("https://o.test/fine.mp4", Script::ok(pattern(10, 5)));
@@ -333,7 +333,7 @@ async fn a_hung_origin_does_not_delay_other_answers() {
 }
 
 #[tokio::test]
-async fn a_slow_client_does_not_delay_other_clients() {
+async fn inv_proxy_14_a_slow_client_does_not_delay_other_clients() {
     let rig = rig().await;
     rig.fetcher.route("https://o.test/big.mp4", Script::filled(8 * 1024 * 1024).chunked(64 * 1024));
     let target = path_of(&rig.proxy.url_for("https://o.test/big.mp4", &HashMap::new()).unwrap());
@@ -344,7 +344,7 @@ async fn a_slow_client_does_not_delay_other_clients() {
 }
 
 #[tokio::test]
-async fn a_fifty_mebibyte_segment_streams_without_buffering_it_whole() {
+async fn inv_proxy_13_a_fifty_mebibyte_segment_streams_without_buffering_it_whole() {
     let rig = rig().await;
     let size = 50 * 1024 * 1024;
     rig.fetcher.route("https://o.test/huge.mp4", Script::filled(size as u64).chunked(64 * 1024));
@@ -356,7 +356,7 @@ async fn a_fifty_mebibyte_segment_streams_without_buffering_it_whole() {
 }
 
 #[tokio::test]
-async fn a_dropped_client_cancels_the_download_and_closes_everything() {
+async fn inv_proxy_06_a_dropped_client_cancels_the_download_and_closes_everything() {
     let rig = rig().await;
     rig.fetcher.route(
         "https://o.test/slow.mp4",
@@ -375,7 +375,7 @@ async fn a_dropped_client_cancels_the_download_and_closes_everything() {
 }
 
 #[tokio::test]
-async fn one_client_leaving_does_not_cancel_a_shared_download() {
+async fn inv_proxy_06_one_client_leaving_does_not_cancel_a_shared_download() {
     let rig = rig().await;
     rig.fetcher.route(
         "https://o.test/shared.mp4",
@@ -394,7 +394,7 @@ async fn one_client_leaving_does_not_cancel_a_shared_download() {
 }
 
 #[tokio::test]
-async fn playback_starts_while_prefetch_holds_every_prefetch_slot() {
+async fn inv_proxy_09_playback_starts_while_prefetch_holds_every_prefetch_slot() {
     let rig = rig_with(config(2)).await;
     rig.fetcher.route("https://o.test/low1.mp4", Script::ok(pattern(10, 0)).hanging());
     rig.fetcher.route("https://o.test/low2.mp4", Script::ok(pattern(10, 0)).hanging());
@@ -412,7 +412,7 @@ async fn playback_starts_while_prefetch_holds_every_prefetch_slot() {
 }
 
 #[tokio::test]
-async fn prefetch_fills_the_store_and_later_playback_works_offline() {
+async fn inv_proxy_03_prefetch_fills_the_store_and_later_playback_works_offline() {
     let rig = rig().await;
     rig.fetcher.route("https://o.test/p.mp4", Script::ok(pattern(5000, 6)).chunked(1000));
     rig.proxy.fetch_into_store("https://o.test/p.mp4", &HashMap::new(), Priority::Prefetch).await.unwrap();
@@ -426,7 +426,7 @@ async fn prefetch_fills_the_store_and_later_playback_works_offline() {
 }
 
 #[tokio::test]
-async fn prefetch_reports_origin_status_and_fetch_failures() {
+async fn inv_proxy_08_prefetch_reports_origin_status_and_fetch_failures() {
     let rig = rig().await;
     rig.fetcher.route("https://o.test/gone.mp4", Script::ok(b"x".to_vec()).status(404));
     assert_eq!(rig.proxy.fetch_into_store("https://o.test/gone.mp4", &HashMap::new(), Priority::Prefetch).await, Err(ProxyError::Status(404)));
@@ -440,7 +440,7 @@ async fn prefetch_reports_origin_status_and_fetch_failures() {
 }
 
 #[tokio::test]
-async fn restart_on_another_port_raises_the_route_generation() {
+async fn inv_proxy_17_restart_on_another_port_raises_the_route_generation() {
     let rig = rig().await;
     assert_eq!(rig.proxy.route_generation(), 0);
     let first = rig.proxy.port();
@@ -462,7 +462,7 @@ async fn restart_on_another_port_raises_the_route_generation() {
 }
 
 #[tokio::test]
-async fn ping_and_readiness_follow_the_lifecycle() {
+async fn inv_proxy_17_ping_and_readiness_follow_the_lifecycle() {
     let rig = rig().await;
     assert_eq!(rig.proxy.readiness(), Readiness::Ready);
     assert!(rig.proxy.ping().await);
@@ -482,7 +482,7 @@ async fn ping_and_readiness_follow_the_lifecycle() {
 }
 
 #[tokio::test]
-async fn stop_closes_open_connections_and_cancels_their_downloads() {
+async fn inv_proxy_07_stop_closes_open_connections_and_cancels_their_downloads() {
     let rig = rig().await;
     rig.fetcher.route("https://o.test/slow.mp4", Script::filled(10 * 1024 * 1024).chunked(16 * 1024).chunk_delay(Duration::from_millis(5)));
     let target = path_of(&rig.proxy.url_for("https://o.test/slow.mp4", &HashMap::new()).unwrap());
@@ -541,7 +541,7 @@ async fn walk_fmp4(rig: &Rig) -> Vec<Reply> {
 }
 
 #[tokio::test]
-async fn fmp4_playlist_routes_map_and_key_uris_through_the_proxy() {
+async fn inv_proxy_12_fmp4_playlist_routes_map_and_key_uris_through_the_proxy() {
     let rig = rig().await;
     fmp4_origin(&rig);
     let replies = walk_fmp4(&rig).await;
@@ -557,7 +557,7 @@ async fn fmp4_playlist_routes_map_and_key_uris_through_the_proxy() {
 }
 
 #[tokio::test]
-async fn fmp4_playlist_replays_offline_including_init_and_key() {
+async fn inv_proxy_12_fmp4_playlist_replays_offline_including_init_and_key() {
     let rig = rig().await;
     fmp4_origin(&rig);
     let online = walk_fmp4(&rig).await;
@@ -575,7 +575,7 @@ fn live_playlist(sequence: u32) -> Vec<u8> {
 }
 
 #[tokio::test]
-async fn a_playlist_over_the_input_limit_is_refused_with_502() {
+async fn inv_proxy_13_a_playlist_over_the_input_limit_is_refused_with_502() {
     let mut config = config(8);
     config.max_playlist_bytes = 64;
     let rig = rig_with(config).await;
@@ -589,7 +589,7 @@ async fn a_playlist_over_the_input_limit_is_refused_with_502() {
 }
 
 #[tokio::test]
-async fn live_playlists_are_refetched_after_the_ttl_and_vod_playlists_are_not() {
+async fn inv_proxy_12_live_playlists_are_refetched_after_the_ttl_and_vod_playlists_are_not() {
     let mut config = config(8);
     config.playlist_ttl = Duration::from_millis(150);
     let rig = rig_with(config).await;
@@ -615,7 +615,7 @@ async fn live_playlists_are_refetched_after_the_ttl_and_vod_playlists_are_not() 
 }
 
 #[tokio::test]
-async fn a_saved_content_type_is_served_from_the_store_instead_of_a_guess() {
+async fn inv_proxy_12_a_saved_content_type_is_served_from_the_store_instead_of_a_guess() {
     let rig = rig().await;
     let url = "https://o.test/clip.mp4";
     rig.fetcher.route(url, Script::ok(pattern(100, 0)).header("Content-Type", "video/x-special"));
@@ -635,7 +635,7 @@ async fn a_saved_content_type_is_served_from_the_store_instead_of_a_guess() {
 }
 
 #[tokio::test]
-async fn overlapping_ranges_fetch_only_the_missing_blocks() {
+async fn inv_proxy_05_overlapping_ranges_fetch_only_the_missing_blocks() {
     let rig = rig_with(block_config(1000)).await;
     let data = pattern(4500, 1);
     rig.fetcher.route("https://o.test/r.mp4", Script::ok(data.clone()).chunked(300));
@@ -662,7 +662,7 @@ async fn overlapping_ranges_fetch_only_the_missing_blocks() {
 }
 
 #[tokio::test]
-async fn suffix_and_tail_ranges_use_a_short_last_block() {
+async fn inv_proxy_11_suffix_and_tail_ranges_use_a_short_last_block() {
     let rig = rig_with(block_config(1000)).await;
     let data = pattern(4500, 3);
     rig.fetcher.route("https://o.test/r.mp4", Script::ok(data.clone()));
@@ -677,7 +677,7 @@ async fn suffix_and_tail_ranges_use_a_short_last_block() {
 }
 
 #[tokio::test]
-async fn parallel_ranges_over_one_block_fetch_it_once() {
+async fn inv_proxy_05_parallel_ranges_over_one_block_fetch_it_once() {
     let rig = rig_with(block_config(1000)).await;
     let data = pattern(3000, 4);
     rig.fetcher.route("https://o.test/r.mp4", Script::ok(data.clone()).chunked(100).chunk_delay(Duration::from_millis(5)));
@@ -693,7 +693,7 @@ async fn parallel_ranges_over_one_block_fetch_it_once() {
 }
 
 #[tokio::test]
-async fn prefetch_over_the_wait_queue_limit_is_refused_at_once() {
+async fn inv_proxy_09_prefetch_over_the_wait_queue_limit_is_refused_at_once() {
     let mut config = config(2);
     config.max_waiting = 1;
     let rig = rig_with(config).await;
@@ -713,7 +713,7 @@ async fn prefetch_over_the_wait_queue_limit_is_refused_at_once() {
 }
 
 #[tokio::test]
-async fn a_player_request_promotes_a_waiting_prefetch() {
+async fn inv_proxy_09_a_player_request_promotes_a_waiting_prefetch() {
     let rig = rig_with(config(2)).await;
     rig.fetcher.route("https://o.test/hold.mp4", Script::ok(pattern(10, 0)).hanging());
     rig.fetcher.route("https://o.test/next.mp4", Script::ok(pattern(10, 6)));
@@ -732,7 +732,7 @@ async fn a_player_request_promotes_a_waiting_prefetch() {
 }
 
 #[tokio::test]
-async fn a_hung_origin_frees_its_slot_after_the_timeout() {
+async fn inv_proxy_10_a_hung_origin_frees_its_slot_after_the_timeout() {
     let mut config = config(2);
     config.policy = config.policy.with_timeout(Duration::from_millis(300));
     let rig = rig_with(config).await;
@@ -748,7 +748,7 @@ async fn a_hung_origin_frees_its_slot_after_the_timeout() {
 }
 
 #[tokio::test]
-async fn a_prefetched_block_loads_alone_and_serves_later_ranges_without_the_origin() {
+async fn inv_proxy_03_a_prefetched_block_loads_alone_and_serves_later_ranges_without_the_origin() {
     let rig = rig_with(block_config(1000)).await;
     let data = pattern(4500, 7);
     let url = "https://o.test/blocks.mp4";
@@ -773,7 +773,7 @@ async fn a_prefetched_block_loads_alone_and_serves_later_ranges_without_the_orig
 }
 
 #[tokio::test]
-async fn a_master_playlist_without_endlist_survives_a_restart_and_plays_offline() {
+async fn inv_proxy_12_a_master_playlist_without_endlist_survives_a_restart_and_plays_offline() {
     let store = MemoryStore::new();
     let master = "https://o.test/live/master.m3u8";
     let first_fetcher = Arc::new(MockFetcher::new());
@@ -794,7 +794,7 @@ async fn a_master_playlist_without_endlist_survives_a_restart_and_plays_offline(
 }
 
 #[tokio::test]
-async fn a_store_failure_at_any_step_never_cuts_playback_for_any_joined_client() {
+async fn inv_proxy_02_a_store_failure_at_any_step_never_cuts_playback_for_any_joined_client() {
     for failure in [Failure::Begin, Failure::Append(1), Failure::Append(4), Failure::Commit] {
         let rig = rig().await;
         rig.store.fail_at(Some(failure));
@@ -818,7 +818,7 @@ async fn a_store_failure_at_any_step_never_cuts_playback_for_any_joined_client()
 }
 
 #[tokio::test]
-async fn a_store_failure_inside_a_block_never_cuts_a_range() {
+async fn inv_proxy_02_a_store_failure_inside_a_block_never_cuts_a_range() {
     for failure in [Failure::Begin, Failure::Append(2), Failure::Commit] {
         let rig = rig_with(block_config(1000)).await;
         rig.store.fail_at(Some(failure));
@@ -832,7 +832,7 @@ async fn a_store_failure_inside_a_block_never_cuts_a_range() {
 }
 
 #[tokio::test]
-async fn registered_headers_reach_the_streams_own_urls_and_no_other_url_of_the_host() {
+async fn inv_proxy_01_registered_headers_reach_the_streams_own_urls_and_no_other_url_of_the_host() {
     let rig = rig().await;
     hls_origin(&rig);
     rig.fetcher.route("https://o.test/hls/other.mp4", Script::ok(pattern(10, 0)));
@@ -857,7 +857,7 @@ async fn registered_headers_reach_the_streams_own_urls_and_no_other_url_of_the_h
 }
 
 #[tokio::test]
-async fn abandoning_a_block_prefetch_cancels_its_download() {
+async fn inv_proxy_06_abandoning_a_block_prefetch_cancels_its_download() {
     let rig = rig_with(block_config(1000)).await;
     rig.fetcher.route("https://o.test/r.mp4", Script::ok(pattern(4500, 1)).chunked(50).chunk_delay(Duration::from_millis(10)));
     let owner = tokio::spawn({
@@ -871,7 +871,7 @@ async fn abandoning_a_block_prefetch_cancels_its_download() {
 }
 
 #[tokio::test]
-async fn a_range_dropped_mid_block_lets_the_block_finish_for_the_next_range() {
+async fn inv_proxy_06_a_range_dropped_mid_block_lets_the_block_finish_for_the_next_range() {
     let rig = rig_with(block_config(1000)).await;
     let data = pattern(4500, 2);
     rig.fetcher.route("https://o.test/r.mp4", Script::ok(data.clone()).chunked(100).chunk_delay(Duration::from_millis(10)));
@@ -885,7 +885,7 @@ async fn a_range_dropped_mid_block_lets_the_block_finish_for_the_next_range() {
 }
 
 #[tokio::test]
-async fn dropping_the_last_proxy_closes_the_listener_connections_and_downloads() {
+async fn inv_proxy_07_dropping_the_last_proxy_closes_the_listener_connections_and_downloads() {
     let rig = rig().await;
     rig.fetcher.route(
         "https://o.test/slow.mp4",

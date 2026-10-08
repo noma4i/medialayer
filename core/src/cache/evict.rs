@@ -1,5 +1,5 @@
 use super::entry::Kind;
-use super::inner::{scan, Inner};
+use super::inner::{scan, CacheShared};
 use super::naming::bin_path;
 use super::policy::victim_order;
 use super::save::mark_dirty;
@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 const YIELD_EVERY: usize = 128;
 
-pub async fn evict_if_needed(inner: &Arc<Inner>) -> usize {
+pub async fn evict_if_needed(inner: &Arc<CacheShared>) -> usize {
     let target = {
         let state = inner.state();
         eviction_target(&state.limits, state.used)
@@ -20,7 +20,7 @@ pub async fn evict_if_needed(inner: &Arc<Inner>) -> usize {
     }
 }
 
-pub fn trigger_eviction(inner: &Arc<Inner>) {
+pub fn trigger_eviction(inner: &Arc<CacheShared>) {
     let needed = {
         let state = inner.state();
         eviction_target(&state.limits, state.used).is_some()
@@ -46,12 +46,12 @@ impl Drop for BacklogReset<'_> {
     }
 }
 
-fn over(inner: &Inner, target: u64) -> bool {
+fn over(inner: &CacheShared, target: u64) -> bool {
     let state = inner.state();
     state.used + state.reserved > target
 }
 
-pub async fn evict_to(inner: &Arc<Inner>, target: u64) -> usize {
+pub async fn evict_to(inner: &Arc<CacheShared>, target: u64) -> usize {
     if !over(inner, target) {
         return 0;
     }
@@ -83,7 +83,7 @@ pub async fn evict_to(inner: &Arc<Inner>, target: u64) -> usize {
     evicted
 }
 
-async fn evict_one(inner: &Arc<Inner>, name: &str) -> bool {
+async fn evict_one(inner: &Arc<CacheShared>, name: &str) -> bool {
     let _stripe = inner.stripe(name).lock().await;
     {
         let mut state = inner.state();
@@ -96,7 +96,7 @@ async fn evict_one(inner: &Arc<Inner>, name: &str) -> bool {
     true
 }
 
-pub async fn remove_names(inner: &Arc<Inner>, names: Vec<String>) -> usize {
+pub async fn remove_names(inner: &Arc<CacheShared>, names: Vec<String>) -> usize {
     let mut removed = 0;
     for (position, name) in names.iter().enumerate() {
         let _stripe = inner.stripe(name).lock().await;
@@ -115,6 +115,6 @@ pub async fn remove_names(inner: &Arc<Inner>, names: Vec<String>) -> usize {
     removed
 }
 
-pub async fn names_where(inner: &Inner, wanted: impl Fn(&str, Kind) -> bool) -> Vec<String> {
+pub async fn names_where(inner: &CacheShared, wanted: impl Fn(&str, Kind) -> bool) -> Vec<String> {
     scan(inner).await.into_iter().filter(|item| wanted(&item.key, item.entry.kind)).map(|item| item.name).collect()
 }

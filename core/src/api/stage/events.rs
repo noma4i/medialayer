@@ -1,7 +1,8 @@
 use super::Stage;
 use crate::api::guard::AbortOnDrop;
 use crate::api::slots::{SlotCall, SlotSample};
-use crate::session::{Action, Event, Readiness, Sample};
+use crate::proxy::Readiness;
+use crate::session::{Action, Event, Sample};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 

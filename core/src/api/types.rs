@@ -88,7 +88,7 @@ pub struct MediaStats {
 }
 
 impl MediaStats {
-    pub fn collect(cache: &cache::Stats, pool: &pool::Stats, diagnostics: Vec<String>) -> MediaStats {
+    pub fn collect(cache: &cache::CacheStats, pool: &pool::PoolStats, diagnostics: Vec<String>) -> MediaStats {
         let released = pool.released;
         MediaStats {
             total_bytes: cache.total_bytes,

@@ -37,7 +37,7 @@ fn events(rig: &Rig) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn memory_warning_lowers_the_step_and_releases_slots_by_level() {
+async fn inv_api_05_memory_warning_lowers_the_step_and_releases_slots_by_level() {
     for (level, step, event) in [
         (Pressure::Moderate, Step::LowerQuality, "release_under Moderate"),
         (Pressure::Critical, Step::ShorterBuffer, "release_under Critical"),
@@ -51,7 +51,7 @@ async fn memory_warning_lowers_the_step_and_releases_slots_by_level() {
 }
 
 #[tokio::test]
-async fn pressure_and_background_stop_prefetch_drop_the_platform_memory_caches_and_forward_the_slot_directives() {
+async fn inv_api_05_pressure_and_background_stop_prefetch_drop_the_platform_memory_caches_and_forward_the_slot_directives() {
     for trigger in [|signals: &Signals| signals.memory_warning(Pressure::Critical), |signals: &Signals| signals.background()] {
         let rig = rig();
         *rig.pool.to_return.lock().unwrap() = vec![Directive::StopPrefetch, unload(1), Directive::DropMemoryCache];
@@ -65,7 +65,7 @@ async fn pressure_and_background_stop_prefetch_drop_the_platform_memory_caches_a
 }
 
 #[tokio::test]
-async fn foreground_after_pressure_returns_the_step_to_normal() {
+async fn inv_api_05_foreground_after_pressure_returns_the_step_to_normal() {
     let rig = rig();
 
     rig.signals.memory_warning(Pressure::Critical);
@@ -76,7 +76,7 @@ async fn foreground_after_pressure_returns_the_step_to_normal() {
 }
 
 #[tokio::test]
-async fn signals_apply_in_the_order_they_arrive() {
+async fn inv_api_05_signals_apply_in_the_order_they_arrive() {
     let rig = rig();
 
     rig.signals.background();
@@ -88,7 +88,7 @@ async fn signals_apply_in_the_order_they_arrive() {
 }
 
 #[tokio::test]
-async fn an_overflowing_queue_keeps_the_worst_pressure_and_the_last_lifecycle_signal() {
+async fn inv_api_05_an_overflowing_queue_keeps_the_worst_pressure_and_the_last_lifecycle_signal() {
     let rig = rig();
 
     rig.signals.memory_warning(Pressure::Critical);

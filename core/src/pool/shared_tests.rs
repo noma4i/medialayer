@@ -42,19 +42,12 @@ impl Model {
     }
 
     fn apply_directives(&mut self, directives: &[Directive]) {
-        let commands: Vec<Command> = directives
-            .iter()
-            .filter_map(|directive| match directive {
-                Directive::Slot(command) => Some(command.clone()),
-                _ => None,
-            })
-            .collect();
-        self.apply(&commands);
+        self.apply(&slot_commands(directives));
     }
 }
 
 #[test]
-fn p8_feed_chat_and_intro_share_one_pool_within_its_slots() {
+fn inv_pool_11_feed_chat_and_intro_share_one_pool_within_its_slots() {
     let mut pool = ring(5, 1);
     let mut model = Model { loaded: HashMap::new(), playing: HashSet::new(), created: HashSet::new(), slots: 5 };
     let feed = keys(50);
@@ -71,7 +64,7 @@ fn p8_feed_chat_and_intro_share_one_pool_within_its_slots() {
 }
 
 #[test]
-fn p8_kinds_never_play_together() {
+fn inv_pool_11_kinds_never_play_together() {
     let mut pool = ring(5, 1);
     let mut model = Model { loaded: HashMap::new(), playing: HashSet::new(), created: HashSet::new(), slots: 5 };
     model.apply(&pool.pin(0, "intro"));
@@ -85,7 +78,7 @@ fn p8_kinds_never_play_together() {
 }
 
 #[test]
-fn p6_pool_policy_is_chosen_by_the_binding_owner_not_the_caller() {
+fn inv_pool_11_pool_policy_is_chosen_by_the_binding_owner_not_the_caller() {
     let mut pool = ring(4, 0);
     pool.plan(0, 3, Some(3), &keys(10));
     pool.touch(1, "chat");
@@ -96,16 +89,16 @@ fn p6_pool_policy_is_chosen_by_the_binding_owner_not_the_caller() {
 }
 
 #[test]
-fn properties_hold_across_a_mixed_operation_walk() {
+fn inv_pool_11_properties_hold_across_a_mixed_operation_walk() {
     let mut pool = ring_with(4, 1, |config| {
         config.trim_delay_ms = 200;
         config.hold_off_ms = 50;
     });
     let mut model = Model { loaded: HashMap::new(), playing: HashSet::new(), created: HashSet::new(), slots: 4 };
     let feed = keys(30);
-    let mut state = 99u64;
+    let mut dice = crate::seeded::Dice::new("inv_pool_11_properties_hold_across_a_mixed_operation_walk");
     for step in 0..3000u64 {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let state = dice.next_u64();
         let now = step * 10;
         let pick = (state >> 33) % 14;
         let page = (state >> 40) as usize % 30;
@@ -130,7 +123,7 @@ fn properties_hold_across_a_mixed_operation_walk() {
 }
 
 #[test]
-fn replaying_the_same_calls_gives_the_same_commands() {
+fn inv_pool_05_replaying_the_same_calls_gives_the_same_commands() {
     let run = || {
         let mut pool = ring(4, 1);
         let mut all = Vec::new();

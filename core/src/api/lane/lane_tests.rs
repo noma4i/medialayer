@@ -16,7 +16,7 @@ fn pending_after(calls: Vec<SlotCall>) -> Vec<SlotCall> {
 }
 
 #[test]
-fn a_new_source_drops_every_command_for_the_old_one_but_keeps_the_sound_state() {
+fn inv_api_01_a_new_source_drops_every_command_for_the_old_one_but_keeps_the_sound_state() {
     let cases = [
         ("load after load", vec![load("a"), Preroll, Play, load("b")], vec![load("b")]),
         ("load after retain and pause", vec![Retain(RetainLevel::Warm), Pause, load("b")], vec![load("b")]),
@@ -35,7 +35,7 @@ fn a_new_source_drops_every_command_for_the_old_one_but_keeps_the_sound_state() 
 }
 
 #[test]
-fn an_overflowing_queue_folds_to_the_last_state_of_each_kind() {
+fn inv_api_01_an_overflowing_queue_folds_to_the_last_state_of_each_kind() {
     let mut calls = vec![load("a")];
     for _ in 0..50 {
         calls.extend([Preroll, Play, Pause, Mute, Unmute, Retain(RetainLevel::Hot), Retain(RetainLevel::Warm)]);

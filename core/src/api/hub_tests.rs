@@ -34,7 +34,7 @@ fn subscribe_blocked(hub: &Hub<u32>) -> Blocked {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn slow_listener_does_not_delay_the_others() {
+async fn inv_api_02_slow_listener_does_not_delay_the_others() {
     let hub = Hub::new(Handle::current());
     let slow = subscribe_blocked(&hub);
     let (fast_log, fast) = recorder();
@@ -51,7 +51,7 @@ async fn slow_listener_does_not_delay_the_others() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn burst_behind_a_busy_listener_collapses_to_the_latest_value() {
+async fn inv_api_02_burst_behind_a_busy_listener_collapses_to_the_latest_value() {
     let hub = Hub::new(Handle::current());
     let slow = subscribe_blocked(&hub);
 
@@ -66,7 +66,7 @@ async fn burst_behind_a_busy_listener_collapses_to_the_latest_value() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn dropping_the_subscription_stops_deliveries() {
+async fn inv_api_02_dropping_the_subscription_stops_deliveries() {
     let hub = Hub::new(Handle::current());
     let (dropped_log, dropped) = recorder();
     let (marker_log, marker) = recorder();

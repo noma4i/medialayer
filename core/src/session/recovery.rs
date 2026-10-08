@@ -1,4 +1,5 @@
-use super::route_staleness::{Readiness, RouteStaleness};
+use super::route_staleness::RouteStaleness;
+use crate::proxy::Readiness;
 use super::watchdog_policy::{evaluate, window_delay_ms, Decision, Progress, Sample, WatchdogConfig};
 use crate::hls;
 

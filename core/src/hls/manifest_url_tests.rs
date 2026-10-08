@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn only_the_path_extension_marks_a_manifest_url() {
+fn inv_hls_04_only_the_path_extension_marks_a_manifest_url() {
     for url in [
         "https://cdn.example.com/a/index.m3u8",
         "https://cdn.example.com/a/INDEX.M3U8",

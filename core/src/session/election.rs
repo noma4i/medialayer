@@ -1,7 +1,7 @@
 use super::suspensions::{Reason, SuspensionError, Suspensions};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Resume {
+pub enum ResumeMode {
     Automatic,
     Manual,
 }
@@ -16,7 +16,7 @@ pub enum Intent {
 pub struct Policy {
     pub group: String,
     pub priority: u32,
-    pub resume: Resume,
+    pub resume: ResumeMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,12 +32,12 @@ pub enum Context {
 impl Context {
     pub fn policy(self) -> Policy {
         let (group, priority, resume) = match self {
-            Context::Ring => ("ring", 300, Resume::Automatic),
-            Context::Ambient => ("ambient", 325, Resume::Automatic),
-            Context::Hero => ("hero", 400, Resume::Manual),
-            Context::Overlay => ("overlay", 450, Resume::Automatic),
-            Context::System => ("system", 475, Resume::Automatic),
-            Context::Exclusive => ("exclusive", 500, Resume::Automatic),
+            Context::Ring => ("ring", 300, ResumeMode::Automatic),
+            Context::Ambient => ("ambient", 325, ResumeMode::Automatic),
+            Context::Hero => ("hero", 400, ResumeMode::Manual),
+            Context::Overlay => ("overlay", 450, ResumeMode::Automatic),
+            Context::System => ("system", 475, ResumeMode::Automatic),
+            Context::Exclusive => ("exclusive", 500, ResumeMode::Automatic),
         };
         Policy { group: group.to_string(), priority, resume }
     }
@@ -51,7 +51,7 @@ pub enum Order {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Directive {
+pub struct LeaseOrder {
     pub lease: u64,
     pub order: Order,
 }
@@ -94,7 +94,7 @@ impl Election {
         lease
     }
 
-    pub fn unregister(&mut self, key: &str, lease: u64) -> Vec<Directive> {
+    pub fn unregister(&mut self, key: &str, lease: u64) -> Vec<LeaseOrder> {
         let mut out = Vec::new();
         let Some(index) = self.sessions.iter().position(|session| session.lease == lease && session.key == key) else {
             return out;
@@ -102,13 +102,13 @@ impl Election {
         self.sessions.remove(index);
         if self.active == Some(lease) {
             self.active = None;
-            out.push(Directive { lease, order: Order::Pause });
+            out.push(LeaseOrder { lease, order: Order::Pause });
         }
         self.resolve(true, &mut out);
         out
     }
 
-    pub fn set_intent(&mut self, key: &str, lease: u64, intent: Intent) -> Vec<Directive> {
+    pub fn set_intent(&mut self, key: &str, lease: u64, intent: Intent) -> Vec<LeaseOrder> {
         let mut out = Vec::new();
         let sequence = self.next_sequence;
         let Some(session) = self.sessions.iter_mut().find(|session| session.lease == lease && session.key == key) else {
@@ -126,7 +126,7 @@ impl Election {
         out
     }
 
-    pub fn set_foreground(&mut self, is_foreground: bool) -> Vec<Directive> {
+    pub fn set_foreground(&mut self, is_foreground: bool) -> Vec<LeaseOrder> {
         let mut out = Vec::new();
         if self.is_foreground == is_foreground {
             return out;
@@ -136,7 +136,7 @@ impl Election {
         out
     }
 
-    pub fn set_suspension(&mut self, reason: Reason, is_active: bool, allow_groups: Option<&[&str]>) -> Result<Vec<Directive>, SuspensionError> {
+    pub fn set_suspension(&mut self, reason: Reason, is_active: bool, allow_groups: Option<&[&str]>) -> Result<Vec<LeaseOrder>, SuspensionError> {
         let mut out = Vec::new();
         if self.suspensions.set(reason, is_active, allow_groups)? {
             self.resolve(true, &mut out);
@@ -144,12 +144,12 @@ impl Election {
         Ok(out)
     }
 
-    pub fn stop_all(&mut self) -> Vec<Directive> {
+    pub fn stop_all(&mut self) -> Vec<LeaseOrder> {
         self.stop(|_| true)
     }
 
-    pub fn stop_manual(&mut self) -> Vec<Directive> {
-        let mut out = self.stop(|session| session.policy.resume == Resume::Manual);
+    pub fn stop_manual(&mut self) -> Vec<LeaseOrder> {
+        let mut out = self.stop(|session| session.policy.resume == ResumeMode::Manual);
         if !out.is_empty() {
             self.resolve(false, &mut out);
         }
@@ -176,7 +176,7 @@ impl Election {
         self.is_foreground && session.intent == Intent::Play && self.suspensions.allows(&session.policy.group)
     }
 
-    fn stop(&mut self, matches: impl Fn(&Session) -> bool) -> Vec<Directive> {
+    fn stop(&mut self, matches: impl Fn(&Session) -> bool) -> Vec<LeaseOrder> {
         let mut out = Vec::new();
         let mut affected: Vec<u64> =
             self.sessions.iter().filter(|session| session.intent == Intent::Play && matches(session)).map(|session| session.lease).collect();
@@ -191,10 +191,10 @@ impl Election {
         }
         if let Some(lease) = stopped_active {
             self.active = None;
-            out.push(Directive { lease, order: Order::Pause });
-            out.push(Directive { lease, order: Order::Idle });
+            out.push(LeaseOrder { lease, order: Order::Pause });
+            out.push(LeaseOrder { lease, order: Order::Idle });
         }
-        out.extend(affected.into_iter().filter(|lease| Some(*lease) != stopped_active).map(|lease| Directive { lease, order: Order::Idle }));
+        out.extend(affected.into_iter().filter(|lease| Some(*lease) != stopped_active).map(|lease| LeaseOrder { lease, order: Order::Idle }));
         out
     }
 
@@ -213,17 +213,17 @@ impl Election {
             .map(|session| session.lease)
     }
 
-    fn resolve(&mut self, manual_loss_becomes_idle: bool, out: &mut Vec<Directive>) {
+    fn resolve(&mut self, manual_loss_becomes_idle: bool, out: &mut Vec<LeaseOrder>) {
         if self.winner() == self.active {
             return;
         }
         if let Some(lease) = self.active.take() {
             if let Some(session) = self.sessions.iter_mut().find(|session| session.lease == lease) {
                 session.is_playing = false;
-                out.push(Directive { lease, order: Order::Pause });
-                if session.policy.resume == Resume::Manual && manual_loss_becomes_idle {
+                out.push(LeaseOrder { lease, order: Order::Pause });
+                if session.policy.resume == ResumeMode::Manual && manual_loss_becomes_idle {
                     session.intent = Intent::Idle;
-                    out.push(Directive { lease, order: Order::Idle });
+                    out.push(LeaseOrder { lease, order: Order::Idle });
                 }
             }
         }
@@ -234,6 +234,6 @@ impl Election {
             session.is_playing = true;
         }
         self.active = Some(next);
-        out.push(Directive { lease: next, order: Order::Play });
+        out.push(LeaseOrder { lease: next, order: Order::Play });
     }
 }

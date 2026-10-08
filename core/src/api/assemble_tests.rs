@@ -12,7 +12,7 @@ use std::sync::Arc;
 const MIB: u64 = 1024 * 1024;
 
 #[test]
-fn ceiling_is_the_smaller_of_the_option_and_the_device_share() {
+fn inv_api_09_ceiling_is_the_smaller_of_the_option_and_the_device_share() {
     let low = DeviceMemory { total_mb: 100, heap_class_mb: None, low_ram: true };
     let big = DeviceMemory { total_mb: 8192, heap_class_mb: None, low_ram: false };
 
@@ -21,7 +21,7 @@ fn ceiling_is_the_smaller_of_the_option_and_the_device_share() {
 }
 
 #[test]
-fn the_default_memory_holds_the_default_pool() {
+fn inv_api_09_the_default_memory_holds_the_default_pool() {
     let device = DeviceMemory { total_mb: 8192, heap_class_mb: None, low_ram: false };
     let limits = Limits::default();
     let mut ring = Ring::with_ledger(pool_config(&limits, device, &PoolSettings::default()), ledger_for(&limits, device));
@@ -33,7 +33,7 @@ fn the_default_memory_holds_the_default_pool() {
 }
 
 #[tokio::test]
-async fn purge_removes_the_entry_of_the_url_and_its_ranged_blocks() {
+async fn inv_api_09_purge_removes_the_entry_of_the_url_and_its_ranged_blocks() {
     let dir = tempfile::tempdir().unwrap();
     let url = "https://cdn.test/a.mp4";
     let cache = Cache::open(dir.path(), Limits::default());
@@ -48,7 +48,7 @@ async fn purge_removes_the_entry_of_the_url_and_its_ranged_blocks() {
 }
 
 #[tokio::test]
-async fn invalid_defaults_fail_the_open() {
+async fn inv_limits_01_invalid_defaults_fail_the_open() {
     let dir = tempfile::tempdir().unwrap();
     let mut config = assembly(dir.path(), Arc::new(MockFetcher::default()), shared::<MockFactory>());
     config.settings = shared::<FakeSettings>();
@@ -60,7 +60,7 @@ async fn invalid_defaults_fail_the_open() {
 }
 
 #[tokio::test]
-async fn assembling_wires_the_fetcher_through_the_proxy_and_prefetch_into_the_disk_cache() {
+async fn inv_api_09_assembling_wires_the_fetcher_through_the_proxy_and_prefetch_into_the_disk_cache() {
     let dir = tempfile::tempdir().unwrap();
     let fetcher = Arc::new(MockFetcher::new());
     let url = "https://o.test/clip.mp4";
@@ -75,7 +75,7 @@ async fn assembling_wires_the_fetcher_through_the_proxy_and_prefetch_into_the_di
 }
 
 #[tokio::test]
-async fn the_proxy_downloads_wait_on_the_same_ledger_as_the_pool() {
+async fn inv_api_09_the_proxy_downloads_wait_on_the_same_ledger_as_the_pool() {
     let dir = tempfile::tempdir().unwrap();
     let fetcher = Arc::new(MockFetcher::new());
     let url = "https://o.test/clip.mp4";
@@ -94,7 +94,7 @@ async fn the_proxy_downloads_wait_on_the_same_ledger_as_the_pool() {
 }
 
 #[tokio::test]
-async fn the_namespace_headers_of_the_assembly_reach_the_cache_key() {
+async fn inv_api_09_the_namespace_headers_of_the_assembly_reach_the_cache_key() {
     let dir = tempfile::tempdir().unwrap();
     let mut config = assembly(dir.path(), Arc::new(MockFetcher::default()), shared::<MockFactory>());
     config.namespace_headers = vec!["Authorization".to_string()];
@@ -107,7 +107,7 @@ async fn the_namespace_headers_of_the_assembly_reach_the_cache_key() {
 }
 
 #[tokio::test]
-async fn the_device_profile_and_the_reach_setting_shape_the_pool() {
+async fn inv_api_09_the_device_profile_and_the_reach_setting_shape_the_pool() {
     let dir = tempfile::tempdir().unwrap();
     let build = |device: DeviceMemory, reach: usize| {
         let mut config = assembly(dir.path(), Arc::new(MockFetcher::default()), shared::<MockFactory>());
@@ -126,7 +126,7 @@ async fn the_device_profile_and_the_reach_setting_shape_the_pool() {
 }
 
 #[test]
-fn pool_settings_take_reach_and_timings_from_the_spec() {
+fn inv_api_09_pool_settings_take_reach_and_timings_from_the_spec() {
     let spec = PoolSpec { slots: 4, reach: 2, hold_off: 5, trim_delay: 60, low_ram_slots: Some(3), low_ram_reach: Some(1) };
 
     let settings = PoolSettings::from(&spec);

@@ -1,4 +1,4 @@
-use super::inner::{Inner, Listener, LiveGuard};
+use super::inner::{ProxyShared, Listener, LiveGuard};
 use super::serve::handle;
 use super::ProxyError;
 use hyper::server::conn::http1;
@@ -22,7 +22,7 @@ impl Drop for AliveGuard {
     }
 }
 
-pub(super) async fn spawn_listener(inner: &Arc<Inner>, preferred_port: u16) -> Result<(Listener, u16), ProxyError> {
+pub(super) async fn spawn_listener(inner: &Arc<ProxyShared>, preferred_port: u16) -> Result<(Listener, u16), ProxyError> {
     let socket = match TcpListener::bind(("127.0.0.1", preferred_port)).await {
         Ok(socket) => socket,
         Err(_) if preferred_port != 0 => bind_any().await?,
@@ -44,7 +44,7 @@ async fn bind_any() -> Result<TcpListener, ProxyError> {
     TcpListener::bind(("127.0.0.1", 0)).await.map_err(|error| ProxyError::Bind(error.to_string()))
 }
 
-async fn accept_loop(inner: Arc<Inner>, socket: TcpListener, mut shutdown: watch::Receiver<bool>) {
+async fn accept_loop(inner: Arc<ProxyShared>, socket: TcpListener, mut shutdown: watch::Receiver<bool>) {
     let _alive = AliveGuard(inner.alive.clone());
     let mut connections = JoinSet::new();
     loop {
@@ -64,16 +64,16 @@ async fn accept_loop(inner: Arc<Inner>, socket: TcpListener, mut shutdown: watch
     connections.shutdown().await;
 }
 
-async fn serve_connection(inner: Arc<Inner>, stream: TcpStream, _live: LiveGuard) {
+async fn serve_connection(inner: Arc<ProxyShared>, stream: TcpStream, _live: LiveGuard) {
     let _ = stream.set_nodelay(true);
     let header_timeout = inner.config.header_read_timeout;
-    let service = service_fn(move |request| {
+    let on_request = service_fn(move |request| {
         let inner = inner.clone();
         async move { Ok::<_, Infallible>(handle(inner, request).await) }
     });
     let connection = http1::Builder::new()
         .timer(TokioTimer::new())
         .header_read_timeout(header_timeout)
-        .serve_connection(TokioIo::new(stream), service);
+        .serve_connection(TokioIo::new(stream), on_request);
     let _ = connection.await;
 }

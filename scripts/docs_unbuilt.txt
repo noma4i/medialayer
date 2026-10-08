@@ -1,0 +1,8 @@
+# Docs that carry an UNBUILT marker. check_docs.sh keeps this list and the docs equal.
+# <path> <invariant in specs/invariants.md>
+docs/memory.md INV-MEMORY-09
+docs/memory.md INV-MEMORY-10
+docs/memory.md INV-MEMORY-11
+docs/threading.md INV-API-10
+docs/media-files.md INV-MEMORY-10
+README.md INV-API-10

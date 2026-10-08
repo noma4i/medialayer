@@ -45,7 +45,7 @@ pub struct KindStats {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Stats {
+pub struct CacheStats {
     pub total_bytes: u64,
     pub file_count: u64,
     pub per_kind: BTreeMap<Kind, KindStats>,

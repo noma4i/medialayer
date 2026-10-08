@@ -5,7 +5,7 @@ use tokio::time::timeout;
 const SHORT: Duration = Duration::from_millis(50);
 
 #[tokio::test]
-async fn grants_up_to_max_and_queues_the_rest() {
+async fn inv_proxy_10_grants_up_to_max_and_queues_the_rest() {
     let slots = PrioritySlots::new(2, 0, 8);
     let first = slots.acquire(Priority::Playback).await.unwrap();
     let _second = slots.acquire(Priority::Playback).await.unwrap();
@@ -16,7 +16,7 @@ async fn grants_up_to_max_and_queues_the_rest() {
 }
 
 #[tokio::test]
-async fn playback_overtakes_queued_prefetch() {
+async fn inv_proxy_09_playback_overtakes_queued_prefetch() {
     let slots = PrioritySlots::new(1, 0, 8);
     let held = slots.acquire(Priority::Playback).await.unwrap();
     let low = tokio::spawn({
@@ -37,7 +37,7 @@ async fn playback_overtakes_queued_prefetch() {
 }
 
 #[tokio::test]
-async fn prefetch_cannot_take_the_reserved_slots() {
+async fn inv_proxy_09_prefetch_cannot_take_the_reserved_slots() {
     let slots = PrioritySlots::new(2, 1, 8);
     let _low = slots.acquire(Priority::Prefetch).await.unwrap();
     assert!(timeout(SHORT, slots.acquire(Priority::Prefetch)).await.is_err());
@@ -45,7 +45,7 @@ async fn prefetch_cannot_take_the_reserved_slots() {
 }
 
 #[tokio::test]
-async fn a_dropped_waiter_does_not_leak_its_slot() {
+async fn inv_proxy_10_a_dropped_waiter_does_not_leak_its_slot() {
     let slots = PrioritySlots::new(1, 0, 8);
     let held = slots.acquire(Priority::Playback).await.unwrap();
     assert!(timeout(SHORT, slots.acquire(Priority::Playback)).await.is_err());
@@ -55,7 +55,7 @@ async fn a_dropped_waiter_does_not_leak_its_slot() {
 }
 
 #[tokio::test]
-async fn prefetch_is_refused_at_once_when_the_wait_queue_is_full() {
+async fn inv_proxy_09_prefetch_is_refused_at_once_when_the_wait_queue_is_full() {
     let slots = PrioritySlots::new(1, 0, 1);
     let _held = slots.acquire(Priority::Prefetch).await.unwrap();
     let waiting = tokio::spawn({
@@ -69,7 +69,7 @@ async fn prefetch_is_refused_at_once_when_the_wait_queue_is_full() {
 }
 
 #[tokio::test]
-async fn playback_waits_even_when_the_wait_queue_is_full() {
+async fn inv_proxy_09_playback_waits_even_when_the_wait_queue_is_full() {
     let slots = PrioritySlots::new(1, 0, 0);
     let held = slots.acquire(Priority::Playback).await.unwrap();
     assert!(timeout(SHORT, slots.acquire(Priority::Playback)).await.is_err());
@@ -78,7 +78,7 @@ async fn playback_waits_even_when_the_wait_queue_is_full() {
 }
 
 #[tokio::test]
-async fn abandoned_waiters_do_not_fill_the_queue() {
+async fn inv_proxy_09_abandoned_waiters_do_not_fill_the_queue() {
     let slots = PrioritySlots::new(1, 0, 1);
     let _held = slots.acquire(Priority::Prefetch).await.unwrap();
     assert!(timeout(SHORT, slots.acquire(Priority::Prefetch)).await.is_err());
@@ -86,7 +86,7 @@ async fn abandoned_waiters_do_not_fill_the_queue() {
 }
 
 #[tokio::test]
-async fn raising_the_limit_hands_slots_to_the_waiters_and_lowering_it_stops_new_grants() {
+async fn inv_proxy_10_raising_the_limit_hands_slots_to_the_waiters_and_lowering_it_stops_new_grants() {
     let slots = PrioritySlots::new(1, 0, 8);
     let first = slots.acquire(Priority::Playback).await.unwrap();
     let waiter = tokio::spawn({
@@ -111,4 +111,62 @@ async fn raising_the_limit_hands_slots_to_the_waiters_and_lowering_it_stops_new_
     assert!(futures_util::poll!(second.as_mut()).is_pending());
     drop(first);
     assert!(second.await.is_ok());
+}
+
+#[tokio::test]
+async fn inv_proxy_10_random_tasks_never_hold_more_than_max_or_more_prefetch_than_the_split_and_leave_nothing_behind() {
+    use crate::seeded::Dice;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    let dice = Dice::new("inv_proxy_10_random_tasks_never_hold_more_than_max_or_more_prefetch_than_the_split_and_leave_nothing_behind");
+    for round in 0..40u64 {
+        let mut rolls = dice.fork(round);
+        let max = rolls.between(1, 5) as usize;
+        let reserved = rolls.below(3) as usize;
+        let slots = PrioritySlots::new(max, reserved, rolls.between(1, 6) as usize);
+        let prefetch_limit = max - reserved.min(max - 1);
+        let (held, held_prefetch) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let (peak, peak_prefetch, refused) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let mut tasks = Vec::new();
+        for index in 0..30u64 {
+            let (slots, held, held_prefetch) = (slots.clone(), held.clone(), held_prefetch.clone());
+            let (peak, peak_prefetch, refused) = (peak.clone(), peak_prefetch.clone(), refused.clone());
+            let mut lane = rolls.fork(index);
+            tasks.push(tokio::spawn(async move {
+                let priority = if lane.percent(40) { Priority::Playback } else { Priority::Prefetch };
+                let patience = Duration::from_micros(lane.between(20, 3_000));
+                let acquired = if lane.percent(30) { timeout(patience, slots.acquire(priority)).await.ok() } else { Some(slots.acquire(priority).await) };
+                let Some(permit) = acquired else { return };
+                let Ok(permit) = permit else {
+                    refused.fetch_add(1, Ordering::SeqCst);
+                    return;
+                };
+                let now = held.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now, Ordering::SeqCst);
+                if priority == Priority::Prefetch {
+                    let now = held_prefetch.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak_prefetch.fetch_max(now, Ordering::SeqCst);
+                }
+                for _ in 0..lane.below(4) {
+                    tokio::task::yield_now().await;
+                }
+                if priority == Priority::Prefetch {
+                    held_prefetch.fetch_sub(1, Ordering::SeqCst);
+                }
+                held.fetch_sub(1, Ordering::SeqCst);
+                drop(permit);
+            }));
+        }
+        for task in tasks {
+            timeout(Duration::from_secs(5), task).await.expect("a task never got its slot").unwrap();
+        }
+        assert!(peak.load(Ordering::SeqCst) <= max, "round {round}: {} permits held with max {max}", peak.load(Ordering::SeqCst));
+        assert!(
+            peak_prefetch.load(Ordering::SeqCst) <= prefetch_limit,
+            "round {round}: {} prefetch permits held with a limit of {prefetch_limit}",
+            peak_prefetch.load(Ordering::SeqCst)
+        );
+        drop(slots.acquire(Priority::Playback).await.unwrap());
+        assert_eq!((slots.in_use(), slots.waiting()), (0, 0), "round {round}: slots or waiters leaked");
+    }
 }

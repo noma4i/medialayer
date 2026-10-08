@@ -29,7 +29,7 @@ fn sample() -> MediaSpec {
 }
 
 #[test]
-fn a_video_forwards_by_default_what_the_fetch_policy_forwards() {
+fn inv_spec_04_a_video_forwards_by_default_what_the_fetch_policy_forwards() {
     let policy_names: Vec<String> = crate::fetch::DEFAULT_FORWARDED_HEADERS.iter().map(|name| name.to_string()).collect();
 
     assert_eq!(VideoSpec::new("a").forward_headers, policy_names);
@@ -37,7 +37,7 @@ fn a_video_forwards_by_default_what_the_fetch_policy_forwards() {
 }
 
 #[test]
-fn json_is_stable_and_round_trips() {
+fn inv_spec_02_json_is_stable_and_round_trips() {
     let spec = sample();
     let json = spec.to_json();
     assert_eq!(MediaSpec::from_json(&json).unwrap(), spec);
@@ -46,14 +46,14 @@ fn json_is_stable_and_round_trips() {
 }
 
 #[test]
-fn json_with_an_unknown_option_is_rejected() {
+fn inv_spec_02_json_with_an_unknown_option_is_rejected() {
     for text in [r#"{"cache":{"bogus":1}}"#, r#"{"videos":[{"name":"a","bogus":1}]}"#, r#"{"images":[{"name":"a","prefetch_window":[1,2,3]}]}"#] {
         assert!(MediaSpec::from_json(text).is_err(), "{text}");
     }
 }
 
 #[test]
-fn limits_take_cache_values_and_the_first_video_and_default_to_core_limits() {
+fn inv_spec_04_limits_take_cache_values_and_the_first_video_and_default_to_core_limits() {
     assert_eq!(MediaSpec::default().limits(), Limits::default());
     let limits = sample().limits();
     assert_eq!(limits.budget, 2 * 1024 * 1024 * 1024);
@@ -64,7 +64,7 @@ fn limits_take_cache_values_and_the_first_video_and_default_to_core_limits() {
 }
 
 #[test]
-fn validate_rejects_bad_specs() {
+fn inv_spec_03_validate_rejects_bad_specs() {
     type Change = Box<dyn Fn(&mut MediaSpec)>;
     let cases: Vec<(&str, Change, SpecError)> = vec![
         (
@@ -107,7 +107,7 @@ fn spec_min() -> u64 {
 }
 
 #[test]
-fn names_that_cannot_become_a_type_are_rejected_for_every_kind() {
+fn inv_spec_01_names_that_cannot_become_a_type_are_rejected_for_every_kind() {
     let bad = ["_", "", "__", "1clip", "a-b", "a b", "Avatar", "type", "self", "protocol", "any", "_clip", "clip_"];
     for name in bad {
         for kind in 0..3 {

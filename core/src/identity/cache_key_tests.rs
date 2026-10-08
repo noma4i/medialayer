@@ -1,12 +1,12 @@
 use super::*;
 
 #[test]
-fn the_url_is_the_key() {
+fn inv_proxy_15_the_url_is_the_key() {
     assert_eq!(cache_key("https://cdn.example.com/A/b.m3u8?X=1"), "https://cdn.example.com/A/b.m3u8?X=1");
 }
 
 #[test]
-fn file_name_of_a_key_is_stable_hex() {
+fn inv_proxy_15_file_name_of_a_key_is_stable_hex() {
     let name = key_file_name("https://a.example.com/x");
     assert_eq!(name.len(), 64);
     assert!(name.chars().all(|c| c.is_ascii_hexdigit()));
@@ -18,7 +18,7 @@ fn headers(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, String> 
 }
 
 #[test]
-fn the_key_follows_only_the_listed_headers_that_carry_a_value() {
+fn inv_proxy_15_the_key_follows_only_the_listed_headers_that_carry_a_value() {
     let url = "https://cdn.example.com/a.mp4";
     let listed = vec!["authorization".to_string()];
     let a = namespaced_key(url, &headers(&[("Authorization", "a")]), &listed);

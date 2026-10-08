@@ -7,7 +7,7 @@ fn roomy() -> crate::limits::Limits {
 }
 
 #[tokio::test]
-async fn index_survives_a_reopen() {
+async fn inv_cache_07_index_survives_a_reopen() {
     let f = fixture(roomy(), &[]).await;
     f.put("k", Kind::Audio, 25).await;
     f.cache.flush().await;
@@ -19,7 +19,7 @@ async fn index_survives_a_reopen() {
 }
 
 #[tokio::test]
-async fn part_files_are_removed_on_open() {
+async fn inv_cache_07_part_files_are_removed_on_open() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join(format!("{}.7.part", crate::identity::key_file_name("ab"))), b"partial").unwrap();
     let cache = Cache::open(dir.path(), roomy());
@@ -28,7 +28,7 @@ async fn part_files_are_removed_on_open() {
 }
 
 #[tokio::test]
-async fn orphan_files_without_an_index_entry_are_removed() {
+async fn inv_cache_07_orphan_files_without_an_index_entry_are_removed() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join(format!("{}.bin", crate::identity::key_file_name("ab"))), b"orphan").unwrap();
     let cache = Cache::open(dir.path(), roomy());
@@ -38,7 +38,7 @@ async fn orphan_files_without_an_index_entry_are_removed() {
 }
 
 #[tokio::test]
-async fn index_entries_without_a_file_are_dropped() {
+async fn inv_cache_07_index_entries_without_a_file_are_dropped() {
     let f = fixture(roomy(), &[]).await;
     f.put("k", Kind::Image, 10).await;
     f.cache.flush().await;
@@ -50,7 +50,7 @@ async fn index_entries_without_a_file_are_dropped() {
 }
 
 #[tokio::test]
-async fn live_writer_part_survives_recovery() {
+async fn inv_cache_07_live_writer_part_survives_recovery() {
     let dir = tempfile::tempdir().unwrap();
     let cache = Cache::open(dir.path(), roomy());
     let mut writer = cache.begin_write("k", Kind::Stream).await.unwrap();
@@ -63,7 +63,7 @@ async fn live_writer_part_survives_recovery() {
 }
 
 #[tokio::test]
-async fn entries_over_budget_after_load_are_evicted() {
+async fn inv_cache_07_entries_over_budget_after_load_are_evicted() {
     let f = fixture(roomy(), &[]).await;
     for key in ["a", "b", "c"] {
         f.put(key, Kind::Image, 30).await;

@@ -136,7 +136,7 @@ async fn until(mut condition: impl FnMut() -> bool) {
 }
 
 #[tokio::test]
-async fn downloads_reserve_their_buffers_and_never_pull_more_than_the_ledger_allows() {
+async fn inv_proxy_13_downloads_reserve_their_buffers_and_never_pull_more_than_the_ledger_allows() {
     let rig = rig(STREAM_CHUNK).await;
     let urls: Vec<String> = (0..3).map(|index| format!("https://o.test/v{index}.mp4")).collect();
     for url in &urls {
@@ -155,7 +155,7 @@ async fn downloads_reserve_their_buffers_and_never_pull_more_than_the_ledger_all
 }
 
 #[tokio::test]
-async fn serving_from_the_store_shrinks_its_chunks_to_what_the_ledger_has_free() {
+async fn inv_proxy_13_serving_from_the_store_shrinks_its_chunks_to_what_the_ledger_has_free() {
     let rig = rig(STREAM_CHUNK / 4).await;
     let url = "https://o.test/cached.mp4";
     rig.store.seed(url, &pattern(100_000));
@@ -169,7 +169,7 @@ async fn serving_from_the_store_shrinks_its_chunks_to_what_the_ledger_has_free()
 }
 
 #[tokio::test]
-async fn serving_waits_while_the_ledger_is_full_and_continues_when_memory_is_freed() {
+async fn inv_proxy_13_serving_waits_while_the_ledger_is_full_and_continues_when_memory_is_freed() {
     let rig = rig(STREAM_CHUNK).await;
     let url = "https://o.test/cached.mp4";
     rig.store.seed(url, &pattern(100_000));
@@ -189,7 +189,7 @@ async fn serving_waits_while_the_ledger_is_full_and_continues_when_memory_is_fre
 const PLAYLIST: &str = "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2.0,\nseg0.ts\n#EXT-X-ENDLIST\n";
 
 #[tokio::test]
-async fn a_stored_playlist_is_read_under_a_reservation_of_its_size() {
+async fn inv_proxy_13_a_stored_playlist_is_read_under_a_reservation_of_its_size() {
     let rig = rig(STREAM_CHUNK).await;
     let url = "https://o.test/list.m3u8";
     rig.store.seed(url, PLAYLIST.as_bytes());
@@ -201,7 +201,7 @@ async fn a_stored_playlist_is_read_under_a_reservation_of_its_size() {
 }
 
 #[tokio::test]
-async fn a_stored_object_is_read_for_prefetch_under_a_reservation_of_its_size() {
+async fn inv_proxy_13_a_stored_object_is_read_for_prefetch_under_a_reservation_of_its_size() {
     let rig = rig(STREAM_CHUNK).await;
     let url = "https://o.test/list.m3u8";
     rig.store.seed(url, PLAYLIST.as_bytes());
@@ -213,7 +213,7 @@ async fn a_stored_object_is_read_for_prefetch_under_a_reservation_of_its_size() 
 }
 
 #[tokio::test]
-async fn an_object_over_the_read_limit_is_not_read_into_memory() {
+async fn inv_proxy_13_an_object_over_the_read_limit_is_not_read_into_memory() {
     let rig = rig(STREAM_CHUNK).await;
     let url = "https://o.test/list.m3u8";
     rig.store.seed(url, PLAYLIST.as_bytes());

@@ -16,7 +16,7 @@ fn meta(content_type: Option<&str>) -> Meta {
 }
 
 #[test]
-fn kind_follows_the_content_type_then_the_extension_then_defaults_to_stream() {
+fn inv_cache_13_kind_follows_the_content_type_then_the_extension_then_defaults_to_stream() {
     let cases = [
         ("https://o.test/a.bin", Some("image/jpeg"), Kind::Image),
         ("https://o.test/a.bin", Some("audio/mpeg"), Kind::Audio),
@@ -32,7 +32,7 @@ fn kind_follows_the_content_type_then_the_extension_then_defaults_to_stream() {
 }
 
 #[tokio::test]
-async fn an_open_write_is_readable_before_the_commit_and_complete_after_it() {
+async fn inv_cache_12_an_open_write_is_readable_before_the_commit_and_complete_after_it() {
     let (store, f) = store().await;
     let described = Meta { content_type: Some("video/mp4".to_string()), total_length: Some(6) };
     let mut writer = store.begin_write(KEY, described.clone()).await.unwrap();
@@ -52,7 +52,7 @@ async fn an_open_write_is_readable_before_the_commit_and_complete_after_it() {
 }
 
 #[tokio::test]
-async fn an_aborted_write_leaves_nothing_readable_and_no_part_file() {
+async fn inv_cache_12_an_aborted_write_leaves_nothing_readable_and_no_part_file() {
     let (store, f) = store().await;
     let mut writer = store.begin_write(KEY, Meta::default()).await.unwrap();
     assert!(writer.append(b"zz").await);

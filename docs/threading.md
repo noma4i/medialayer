@@ -13,6 +13,8 @@ MediaLayer never blocks your threads. Every public call either returns at once o
 | Listeners | Called from library threads with the latest state only; hop to the main thread yourself |
 | Cancel | Stops work at once and releases connections and files |
 
+UNBUILT: deferred work. Eviction starts right after a write that reaches the budget, the library has no idle signal yet, and the far prefetch window is not delayed.
+
 ### Swift
 
 ```swift

@@ -1,9 +1,8 @@
 use super::buffer::Buffers;
 use super::byte_store::ByteStore;
-use super::flight::{Outcome, Subscription};
-use super::inner::Inner;
+use super::flight::{FlightOutcome, FlightSubscription};
+use super::inner::ProxyShared;
 use super::serve::origin_fetch;
-use super::slots::Permit;
 use crate::fetch::BodyStream;
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -16,7 +15,6 @@ pub(super) type ChunkResult = Result<Bytes, io::Error>;
 
 pub(super) struct DirectCursor {
     pub body: BodyStream,
-    pub _permit: Permit,
     pub idle: Duration,
     pub buffers: Buffers,
     pub done: bool,
@@ -41,7 +39,7 @@ pub(super) async fn next_direct(mut cursor: DirectCursor) -> Option<(ChunkResult
 }
 
 pub(super) struct Resume {
-    pub inner: Arc<Inner>,
+    pub inner: Arc<ProxyShared>,
     pub target: String,
     pub headers: HashMap<String, String>,
     pub origin_offset: u64,
@@ -49,7 +47,7 @@ pub(super) struct Resume {
 }
 
 impl Resume {
-    pub fn new(inner: &Arc<Inner>, target: &str, headers: &HashMap<String, String>, origin_offset: u64) -> Self {
+    pub fn new(inner: &Arc<ProxyShared>, target: &str, headers: &HashMap<String, String>, origin_offset: u64) -> Self {
         Resume { inner: inner.clone(), target: target.to_string(), headers: headers.clone(), origin_offset, direct: None }
     }
 
@@ -57,14 +55,14 @@ impl Resume {
         if self.direct.is_none() {
             let start = self.origin_offset + *position;
             let range = (start > 0 || end.is_some()).then(|| (start, end.map(|end| self.origin_offset + end - 1)));
-            let Ok((response, permit)) = origin_fetch(&self.inner, &self.target, self.headers.clone(), range).await else {
+            let Ok(response) = origin_fetch(&self.inner, &self.target, self.headers.clone(), range).await else {
                 return Some(Err(io::Error::other("origin unavailable for the resume")));
             };
             if response.status != if range.is_some() { 206 } else { 200 } {
                 return Some(Err(io::Error::other("origin refused the resume")));
             }
             let idle = self.inner.timeout();
-            self.direct = Some(DirectCursor { body: response.body, _permit: permit, idle, buffers: self.inner.buffers(), done: false });
+            self.direct = Some(DirectCursor { body: response.body, idle, buffers: self.inner.buffers(), done: false });
         }
         let cursor = self.direct.take()?;
         let (item, cursor) = next_direct(cursor).await?;
@@ -77,7 +75,7 @@ impl Resume {
 }
 
 pub(super) struct StoreCursor {
-    pub subscription: Option<Subscription>,
+    pub subscription: Option<FlightSubscription>,
     pub store: Arc<dyn ByteStore>,
     pub key: String,
     pub position: u64,
@@ -102,7 +100,7 @@ pub(super) async fn next_store(mut cursor: StoreCursor) -> Option<(ChunkResult, 
                 let progress = subscription.snapshot();
                 (progress.written, progress.outcome)
             }
-            None => (cursor.end.unwrap_or(0), Outcome::Complete),
+            None => (cursor.end.unwrap_or(0), FlightOutcome::Complete),
         };
         if cursor.position < written {
             let mut wanted = cursor.chunk.min(written - cursor.position);
@@ -126,9 +124,9 @@ pub(super) async fn next_store(mut cursor: StoreCursor) -> Option<(ChunkResult, 
             }
         }
         match outcome {
-            Outcome::Complete => return None,
-            Outcome::Unstorable => cursor.resumed = true,
-            Outcome::Running => {
+            FlightOutcome::Complete => return None,
+            FlightOutcome::Unstorable => cursor.resumed = true,
+            FlightOutcome::Running => {
                 let alive = match cursor.subscription.as_mut() {
                     Some(subscription) => subscription.changed().await,
                     None => false,

@@ -1,4 +1,4 @@
-const MIB: u64 = 1024 * 1024;
+use crate::limits::MIB;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeviceMemory {

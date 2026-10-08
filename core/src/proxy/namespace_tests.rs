@@ -26,7 +26,7 @@ async fn play_as(proxy: &Proxy, token: &str) -> u16 {
 }
 
 #[tokio::test]
-async fn one_url_with_different_authorization_is_cached_per_user_when_the_option_lists_it() {
+async fn inv_proxy_15_one_url_with_different_authorization_is_cached_per_user_when_the_option_lists_it() {
     let (proxy, fetcher, store) = rig(&["Authorization"]).await;
 
     assert_eq!(play_as(&proxy, "user-a").await, 200);
@@ -38,7 +38,7 @@ async fn one_url_with_different_authorization_is_cached_per_user_when_the_option
 }
 
 #[tokio::test]
-async fn by_default_the_url_alone_is_the_key() {
+async fn inv_proxy_15_by_default_the_url_alone_is_the_key() {
     let (proxy, fetcher, store) = rig(&[]).await;
 
     play_as(&proxy, "user-a").await;
@@ -50,7 +50,7 @@ async fn by_default_the_url_alone_is_the_key() {
 }
 
 #[tokio::test]
-async fn prefetch_and_the_ready_check_use_the_same_namespaced_key() {
+async fn inv_proxy_15_prefetch_and_the_ready_check_use_the_same_namespaced_key() {
     let (proxy, _fetcher, store) = rig(&["Authorization"]).await;
 
     proxy.fetch_into_store(URL, &authorization("user-a"), Priority::Prefetch).await.unwrap();

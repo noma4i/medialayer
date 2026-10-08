@@ -14,6 +14,16 @@ pub fn ring_with(slots: usize, reach: usize, adjust: impl FnOnce(&mut PoolConfig
     Ring::new(config)
 }
 
+pub fn slot_commands(directives: &[Directive]) -> Vec<Command> {
+    directives
+        .iter()
+        .filter_map(|directive| match directive {
+            Directive::Slot(command) => Some(command.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 pub fn slot_of(command: &Command) -> usize {
     match command {
         Command::Load { slot, .. }
@@ -28,11 +38,11 @@ pub fn slot_of(command: &Command) -> usize {
 }
 
 pub fn walk(count: usize, steps: usize) -> Vec<usize> {
-    let mut state = 12345u64;
+    let mut dice = crate::seeded::Dice::new("pool test_support walk");
     let mut active = 0usize;
     (0..steps)
         .map(|_| {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let state = dice.next_u64();
             let jump = (state >> 33) % 5;
             active = match jump {
                 0 => active.saturating_sub(1),

@@ -1,4 +1,4 @@
-const MIB: u64 = 1024 * 1024;
+pub(crate) const MIB: u64 = 1024 * 1024;
 const GIB: u64 = 1024 * MIB;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

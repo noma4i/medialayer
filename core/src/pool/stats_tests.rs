@@ -2,7 +2,7 @@ use super::test_support::*;
 use super::*;
 
 #[test]
-fn stats_count_source_change_releases_and_reuses() {
+fn inv_pool_13_stats_count_source_change_releases_and_reuses() {
     let mut pool = ring(3, 1);
     let list = keys(20);
     pool.plan(0, 5, Some(5), &list);
@@ -13,7 +13,7 @@ fn stats_count_source_change_releases_and_reuses() {
 }
 
 #[test]
-fn stats_count_pressure_timer_and_background_reasons_separately() {
+fn inv_pool_13_stats_count_pressure_timer_and_background_reasons_separately() {
     let mut pool = ring_with(3, 1, |config| config.trim_delay_ms = 1000);
     pool.plan(0, 5, Some(5), &keys(20));
     pool.tick(1000);
@@ -28,7 +28,7 @@ fn stats_count_pressure_timer_and_background_reasons_separately() {
 }
 
 #[test]
-fn stats_are_stable_when_nothing_happens() {
+fn inv_pool_13_stats_are_stable_when_nothing_happens() {
     let mut pool = ring(3, 1);
     pool.plan(0, 5, Some(5), &keys(20));
     let before = pool.stats();
