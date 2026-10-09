@@ -11,6 +11,26 @@ use tokio::sync::oneshot;
 pub enum Priority {
     Playback,
     Prefetch,
+    Image,
+    ImagePrefetch,
+}
+
+impl Priority {
+    pub fn is_prefetch(self) -> bool {
+        matches!(self, Priority::Prefetch | Priority::ImagePrefetch)
+    }
+
+    pub fn promoted(self) -> Priority {
+        match self {
+            Priority::Prefetch => Priority::Playback,
+            Priority::ImagePrefetch => Priority::Image,
+            other => other,
+        }
+    }
+
+    pub fn is_image(self) -> bool {
+        matches!(self, Priority::Image | Priority::ImagePrefetch)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,14 +113,15 @@ impl PrioritySlots {
                 state.in_use += 1;
                 return Ok(Permit { state: Some(self.state.clone()) });
             }
-            if priority == Priority::Prefetch && state.prefetch.len() >= state.max_waiting {
+            if priority.is_prefetch() && state.prefetch.len() >= state.max_waiting {
                 return Err(QueueFull);
             }
             let (sender, receiver) = oneshot::channel();
             crate::trace!("slots", "wait {priority:?} in_use={} playback={} prefetch={}", state.in_use, state.playback.len(), state.prefetch.len());
-            match priority {
-                Priority::Playback => state.playback.push_back(sender),
-                Priority::Prefetch => state.prefetch.push_back(sender),
+            if priority.is_prefetch() {
+                state.prefetch.push_back(sender);
+            } else {
+                state.playback.push_back(sender);
             }
             receiver
         };
@@ -122,11 +143,10 @@ impl State {
     }
 
     fn can_take_now(&self, priority: Priority) -> bool {
-        match priority {
-            Priority::Playback => self.in_use < self.max && self.playback.is_empty(),
-            Priority::Prefetch => {
-                self.in_use < self.prefetch_limit() && self.playback.is_empty() && self.prefetch.is_empty()
-            }
+        if priority.is_prefetch() {
+            self.in_use < self.prefetch_limit() && self.playback.is_empty() && self.prefetch.is_empty()
+        } else {
+            self.in_use < self.max && self.playback.is_empty()
         }
     }
 

@@ -25,7 +25,7 @@ async fn bounded(timeout: Duration, load: impl Future<Output = Result<(), LoadEr
 }
 
 async fn whole_file(loader: &dyn Loader, source: &Source, timeout: Duration) -> Result<(), Outcome> {
-    bounded(timeout, loader.load(&source.url, &source.headers, Priority::Prefetch)).await
+    bounded(timeout, loader.load(&source.url, &source.headers, Priority::ImagePrefetch)).await
 }
 
 async fn first_block(loader: &dyn Loader, source: &Source, timeout: Duration) -> Result<(), Outcome> {

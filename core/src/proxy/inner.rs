@@ -46,6 +46,7 @@ pub(super) struct ProxyShared {
     pub store: Arc<dyn ByteStore>,
     pub config: Config,
     pub slots: PrioritySlots,
+    pub image_slots: PrioritySlots,
     pub live: Arc<AtomicUsize>,
     pub flights: Mutex<HashMap<String, Arc<Flight>>>,
     pub registered_headers: Mutex<Registry>,
@@ -99,6 +100,7 @@ impl ProxyShared {
         let timeout_ms = AtomicU64::new(config.policy.timeout.as_millis() as u64);
         ProxyShared {
             slots: PrioritySlots::new(config.max_concurrent, config.playback_reserved, config.max_waiting),
+            image_slots: PrioritySlots::new(config.max_concurrent, config.playback_reserved, config.max_waiting),
             fetcher,
             store,
             config,
@@ -117,6 +119,10 @@ impl ProxyShared {
             route_generation: AtomicU64::new(0),
             timeout_ms,
         }
+    }
+
+    pub fn gate(&self, priority: Priority) -> &PrioritySlots {
+        if priority.is_image() { &self.image_slots } else { &self.slots }
     }
 
     pub fn timeout(&self) -> Duration {
@@ -202,7 +208,7 @@ impl ProxyShared {
             let mut flights = locked(&self.flights);
             match flights.get(&key) {
                 Some(existing) => {
-                    if priority == Priority::Playback {
+                    if !priority.is_prefetch() {
                         existing.promote();
                     }
                     (existing.clone(), existing.subscribe(), false)

@@ -104,6 +104,7 @@ impl Proxy {
     pub fn set_limits(&self, limits: &Limits) {
         self.inner.set_timeout(Duration::from_secs(limits.timeout_seconds.into()));
         self.inner.slots.set_max(limits.max_concurrent as usize);
+        self.inner.image_slots.set_max(limits.max_concurrent as usize);
     }
 
     pub fn key_for(&self, url: &str, headers: &HashMap<String, String>) -> String {
@@ -111,7 +112,7 @@ impl Proxy {
     }
 
     pub async fn fetch_bytes(&self, url: &str, headers: &HashMap<String, String>, limit: u64) -> Result<Vec<u8>, ProxyError> {
-        self.fetch_into_store(url, headers, Priority::Playback).await?;
+        self.fetch_into_store(url, headers, Priority::Image).await?;
         let key = self.key_for(url, headers);
         match self.inner.store.len(&key).await {
             Some(length) if length > limit => {
@@ -229,6 +230,8 @@ impl Proxy {
 
 #[cfg(test)]
 mod buffer_tests;
+#[cfg(test)]
+mod lanes_tests;
 #[cfg(test)]
 mod limits_tests;
 #[cfg(test)]

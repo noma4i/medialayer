@@ -77,7 +77,7 @@ impl Flight {
             subscribers: AtomicUsize::new(0),
             cancel: Notify::new(),
             forced: AtomicBool::new(false),
-            promoted: AtomicBool::new(priority == Priority::Playback),
+            promoted: AtomicBool::new(!priority.is_prefetch()),
             promote: Notify::new(),
         })
     }
@@ -207,8 +207,8 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
         tokio::select! {
             biased;
             _ = wait_retired(inner, flight) => return FlightOutcome::Cancelled,
-            _ = flight.promote.notified(), if priority == Priority::Prefetch => priority = Priority::Playback,
-            permit = inner.slots.acquire(priority) => match permit {
+            _ = flight.promote.notified(), if priority.is_prefetch() => priority = priority.promoted(),
+            permit = inner.gate(priority).acquire(priority) => match permit {
                 Ok(permit) => break permit,
                 Err(QueueFull) => return FlightOutcome::QueueFull,
             },
