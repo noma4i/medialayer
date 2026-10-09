@@ -127,6 +127,20 @@ struct ViewModelTests {
   }
 
   @Test
+  func theLastViewThatLeavesStopsThePlayBeforeItWithdrawsTheKey() {
+    let places = RecordingPlaces()
+    let claims = KeyClaims(places: places)
+    let owner = UUID()
+    let item = TestClip().item
+    claims.visible(owner: owner, source: item, visible: true)
+    claims.setPlaying(owner: owner, key: item.url, playing: true)
+
+    claims.release(owner: owner, key: item.url)
+
+    #expect(places.recorded == ["visible true", "playing true", "playing false", "visible false"])
+  }
+
+  @Test
   func aCancelledImageLoadDoesNotReportTheItemAsFailed() async {
     let places = RecordingPlaces()
     places.imageResult = .success(pngData(side: 8))

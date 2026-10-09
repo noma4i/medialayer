@@ -59,9 +59,13 @@ fun MediaVideo(
   val player by remember(view) { view?.player ?: flowOf(null) }.collectAsState(null)
   DisposableEffect(environment, view, source.url) {
     val events = environment.media.playerEvents()
-    if (view != null) events.attach(source.url, view.token)
+    val owners = environment.players?.owners
+    if (view != null) {
+      owners?.claim(source.url, view.token)
+      events.attach(source.url, view.token)
+    }
     onDispose {
-      if (view != null) events.detach(source.url)
+      if (view != null && (owners?.release(source.url, view.token) != false)) events.detach(source.url)
       view?.let { environment.players?.release(it) }
     }
   }

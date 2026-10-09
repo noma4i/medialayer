@@ -75,8 +75,8 @@ public struct MediaVideo<Content: View>: View {
   private func declare(visible: Bool) {
     guard let places = context?.places else { return }
     let claims = KeyClaims.of(places)
-    claims.visible(owner: owner, source: item, visible: visible)
     guard visible else { return claims.release(owner: owner, key: source.url) }
+    claims.visible(owner: owner, source: item, visible: true)
     claims.setPlaying(owner: owner, key: source.url, playing: playing)
     claims.setMuted(owner: owner, key: source.url, muted: muted)
   }

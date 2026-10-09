@@ -121,7 +121,6 @@ public struct MediaAudio<Content: View>: View {
         }
         .onDisappear {
           let claims = KeyClaims.of(context.places)
-          claims.visible(owner: owner, source: source.item, visible: false)
           claims.release(owner: owner, key: source.url)
         }
         .onChange(of: muted) { _, value in KeyClaims.of(context.places).setMuted(owner: owner, key: source.url, muted: value) }

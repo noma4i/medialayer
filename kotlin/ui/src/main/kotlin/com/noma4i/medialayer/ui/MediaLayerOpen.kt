@@ -22,6 +22,8 @@ import com.noma4i.medialayer.SpecDefaults
 import com.noma4i.medialayer.defaultLimits
 import com.noma4i.medialayer.defaultPoolSettings
 import com.noma4i.medialayer.specDefaults
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Collections
 import java.util.WeakHashMap
@@ -55,6 +57,18 @@ fun MediaLayer.Companion.open(
   imageMemoryBytes: Int = DEFAULT_IMAGE_MEMORY_BYTES
 ): MediaLayer =
   openMediaLayer(context, fetcher, settings, callFactory, specDefaults(spec), silent, ProcessLifecycleOwner.get().lifecycle, imageMemoryBytes) { MediaLayer.open(it) }
+
+internal suspend fun <Result> offCaller(work: () -> Result): Result = withContext(Dispatchers.Default) { work() }
+
+suspend fun MediaLayer.Companion.openInBackground(
+  context: Context,
+  spec: String,
+  fetcher: Fetcher,
+  settings: SettingsStore,
+  callFactory: Call.Factory = OkHttpClient(),
+  silent: Boolean = false,
+  imageMemoryBytes: Int = DEFAULT_IMAGE_MEMORY_BYTES
+): MediaLayer = offCaller { MediaLayer.open(context, spec, fetcher, settings, callFactory, silent, imageMemoryBytes) }
 
 private fun platformDefaults(): SpecDefaults = SpecDefaults(defaultLimits(), defaultPoolSettings(), emptyList())
 

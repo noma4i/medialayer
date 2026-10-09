@@ -42,6 +42,7 @@ class SlotPlayers internal constructor() {
 
   fun player(key: String): Flow<ExoPlayer?> = published.map { it[key] }.distinctUntilChanged()
 
+  internal val owners = ViewOwners()
   private val views = ConcurrentHashMap<ULong, ViewHandle>()
   private val nextToken = AtomicLong(1)
 

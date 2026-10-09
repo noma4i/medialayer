@@ -45,19 +45,20 @@ fun MediaLayerProvider(media: MediaLayer, imageLoader: ImageLoader? = null, play
 internal fun rememberPlace(source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean = true): MediaState {
   val media = LocalMediaEnvironment.current.media
   val item = remember(source, loop) { source.toItem().copy(looping = loop) }
+  val owner = remember { Any() }
   DisposableEffect(media, item) {
-    media.visible(item, true)
-    onDispose { media.visible(item, false) }
+    media.claims.visible(owner, item, true)
+    onDispose { media.claims.release(owner, item.url) }
   }
   if (muted != null) {
     DisposableEffect(media, item.url, muted) {
-      media.setMuted(item.url, muted)
+      media.claims.setMuted(owner, item.url, muted)
       onDispose { }
     }
   }
   if (playing != null) {
     DisposableEffect(media, item.url, playing) {
-      media.setPlaying(item.url, playing)
+      media.claims.setPlaying(owner, item.url, playing)
       onDispose { }
     }
   }

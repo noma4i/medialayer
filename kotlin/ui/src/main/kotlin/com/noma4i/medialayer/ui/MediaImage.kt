@@ -31,6 +31,7 @@ import com.noma4i.medialayer.decodeBlurhash
 import com.noma4i.medialayer.imagePixelSize
 import com.noma4i.medialayer.toItem
 import java.nio.ByteBuffer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -62,8 +63,11 @@ fun MediaImage(
       imageLoader = environment.imageLoader,
       contentScale = contentScale,
       onState = { painterState ->
-        state = painterState.toMediaState()
-        media.itemState(source.url, state)
+        val reached = painterState.toMediaState()
+        if (reached != null) {
+          state = reached
+          media.itemState(source.url, reached)
+        }
       },
       modifier = Modifier.fillMaxSize()
     )
@@ -104,9 +108,12 @@ private suspend fun decodeBlur(hash: String): ImageBitmap? = withContext(Dispatc
 
 private const val BLUR_SIZE = 32
 
-private fun AsyncImagePainter.State.toMediaState(): MediaState = when (this) {
+internal fun imageFailure(error: Throwable): MediaState? =
+  if (error is CancellationException) null else MediaState.Failed(error.message ?: error.javaClass.simpleName)
+
+private fun AsyncImagePainter.State.toMediaState(): MediaState? = when (this) {
   is AsyncImagePainter.State.Empty -> MediaState.Idle
   is AsyncImagePainter.State.Loading -> MediaState.Loading
   is AsyncImagePainter.State.Success -> MediaState.Ready
-  is AsyncImagePainter.State.Error -> MediaState.Failed(result.throwable.message ?: result.throwable.javaClass.simpleName)
+  is AsyncImagePainter.State.Error -> imageFailure(result.throwable)
 }

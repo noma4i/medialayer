@@ -94,11 +94,8 @@ class MediaComposeTest {
 
     shown = false
     rule.waitForIdle()
-    assertEquals("visible:https://o.test/a.mp4:false", layer.calls.last())
-    assertEquals(
-      listOf("mutedAll:false", "visible:https://o.test/a.mp4:true", "muted:https://o.test/a.mp4:true", "playing:https://o.test/a.mp4:false"),
-      declared
-    )
+    assertEquals(listOf("playing:https://o.test/a.mp4:false", "visible:https://o.test/a.mp4:false"), layer.calls.toList().takeLast(2))
+    assertEquals(listOf("mutedAll:false", "visible:https://o.test/a.mp4:true", "muted:https://o.test/a.mp4:true"), declared)
     assertEquals(listOf("attach:https://o.test/a.mp4:1", "detach:https://o.test/a.mp4"), events.calls.toList())
   }
 

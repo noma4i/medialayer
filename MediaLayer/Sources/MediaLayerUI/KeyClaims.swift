@@ -92,8 +92,9 @@ final class KeyClaims: @unchecked Sendable {
   }
 
   private func forward(_ change: Change, key: String) {
-    if let visible = change.visible, let source = change.source { places.visible(source: source, visible: visible) }
+    if change.visible == true, let source = change.source { places.visible(source: source, visible: true) }
     if let playing = change.playing { places.setPlaying(key: key, playing: playing) }
     if let muted = change.muted { places.setMuted(key: key, muted: muted) }
+    if change.visible == false, let source = change.source { places.visible(source: source, visible: false) }
   }
 }
