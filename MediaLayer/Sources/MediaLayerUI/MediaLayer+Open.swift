@@ -79,7 +79,7 @@ extension MediaLayer {
     silent: Bool,
     imageCache: ImageCache = ImageCache(costLimit: MediaImagePipeline.defaultMemoryLimit)
   ) throws -> (OpenConfig, AVQueuePlayerSlotFactory) {
-    let factory = AVQueuePlayerSlotFactory(startMuted: startMuted || silent || isDebugBuild)
+    let factory = AVQueuePlayerSlotFactory(startMuted: startMuted || silent)
     let config = OpenConfig(
       dir: try (directory ?? defaultDirectory()).path,
       fetcher: fetcher,
@@ -104,14 +104,6 @@ extension MediaLayer {
 
   static func deviceMemory() -> DeviceMemory {
     DeviceMemory(totalMb: UInt32(clamping: ProcessInfo.processInfo.physicalMemory / 1_048_576), heapClassMb: nil, lowRam: false)
-  }
-
-  private static var isDebugBuild: Bool {
-    #if DEBUG
-    true
-    #else
-    false
-    #endif
   }
 
   private static func defaultDirectory() throws -> URL {
