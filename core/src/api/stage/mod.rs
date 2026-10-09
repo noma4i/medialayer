@@ -1,7 +1,9 @@
 mod events;
 mod inputs;
 mod lifecycle;
+mod positions;
 
+use self::positions::ResumePositions;
 use super::places::Places;
 use super::routes::Routes;
 use super::slots::{SlotCall, SlotRunner};
@@ -49,6 +51,7 @@ struct State {
     catalog: HashMap<String, MediaItem>,
     views: HashMap<String, u64>,
     rates: HashMap<String, f32>,
+    positions: ResumePositions,
 }
 
 struct Inner {
@@ -140,6 +143,7 @@ impl Stage {
             catalog: HashMap::new(),
             views: HashMap::new(),
             rates: HashMap::new(),
+            positions: ResumePositions::default(),
         };
         let inner = Arc::new(Inner {
             state: Mutex::new(state),
@@ -234,6 +238,7 @@ impl Stage {
                 state.loaded.insert(key.clone(), Loaded { slot: *slot, recovery, source, route: route.clone() });
                 let view = state.views.get(key).copied();
                 let rate = state.rates.get(key).copied();
+                let resume = state.positions.take(key);
                 let slot = *slot;
                 calls.push(SlotCall::from_command(command, Some(route)));
                 if self.inner.silent {
@@ -242,12 +247,19 @@ impl Stage {
                 if let Some(rate) = rate {
                     calls.push((slot, SlotCall::Rate { rate }));
                 }
+                if let Some(position_ms) = resume {
+                    calls.push((slot, SlotCall::Seek { position_ms }));
+                }
                 if let Some(view_token) = view {
                     calls.push((slot, SlotCall::Attach { view_token }));
                 }
             }
             Command::Unload { slot } => {
                 if let Some(key) = state.slot_keys.remove(slot) {
+                    let position = self.inner.runner.sample_now(*slot).map(|sample| sample.position_ms).filter(|position| *position > 0);
+                    if let Some(position) = position.filter(|_| !state.is_playing(&key)) {
+                        state.positions.remember(&key, position);
+                    }
                     state.loaded.remove(&key);
                     state.tasks.remove(&key);
                     unloaded.push(key);
@@ -299,3 +311,6 @@ async fn tick_loop(inner: Weak<Inner>, every: Duration) {
 mod events_tests;
 #[cfg(test)]
 mod inputs_tests;
+
+#[cfg(test)]
+mod positions_tests;

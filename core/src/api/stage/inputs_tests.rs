@@ -312,3 +312,25 @@ async fn inv_api_17_an_image_window_prefetches_remote_images_into_the_cache_and_
     eventually(|| stage.commands_idle()).await;
     assert_eq!(total_calls(&rig), settled);
 }
+
+#[tokio::test]
+async fn inv_api_18_a_place_that_leaves_while_not_playing_resumes_at_its_position_when_it_returns() {
+    let rig = rig_with(|config| config.defaults.slots = 4).await;
+    let stage = &rig.parts.stage;
+    let chat = "https://o.test/chat.mp4";
+    stage.set_window(0, videos(20));
+    stage.visible(video(chat), true);
+    eventually(|| rig.factory.slot_holding(chat).is_some()).await;
+    rig.holder(chat).1.sample.lock().unwrap().position_ms = 14_000;
+    stage.visible(video(chat), false);
+    eventually(|| rig.factory.slot_holding(chat).is_none()).await;
+
+    stage.visible(video(chat), true);
+
+    let resumed = |calls: &[SlotCall]| calls.iter().any(|call| matches!(call, SlotCall::Seek { position_ms } if *position_ms >= 14_000));
+    eventually(|| rig.factory.slot_holding(chat).is_some_and(|(_, slot)| resumed(&slot.calls()))).await;
+    let calls = rig.holder(chat).1.calls();
+    let load = calls.iter().rposition(|call| matches!(call, SlotCall::Load { .. })).unwrap();
+    let seek = calls.iter().rposition(|call| matches!(call, SlotCall::Seek { position_ms } if *position_ms >= 14_000));
+    assert!(seek.is_some_and(|seek| seek > load));
+}

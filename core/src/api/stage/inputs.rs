@@ -151,6 +151,7 @@ impl Stage {
             state.catalog.clear();
             state.views.clear();
             state.rates.clear();
+            state.positions.clear();
             state.ring.release_all()
         };
         self.dispatch(commands);

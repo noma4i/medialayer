@@ -37,3 +37,7 @@ Policies decide assignment: `ring` keeps a window around the active page, `lru` 
 | `trim_delay` | Time before an idle slot drops from hot to warm to cold, default 30 seconds |
 
 Slot and reach changes made with `setLimits` apply at once: extra players are unloaded and the window is rebuilt at the next update. These are written in the `pool` line of the `video` block of your `.mdl` file.
+
+## Position of a place that left
+
+A place that leaves the screen while it is not playing keeps its position. When the same source comes back, the new player starts at that position. A playing place restarts from the beginning, and the library keeps the last 32 positions.

@@ -144,6 +144,12 @@ impl SlotRunner {
         self.lanes().get(&slot).map_or(0, |lane| lane.queue.len())
     }
 
+    pub fn sample_now(&self, slot: usize) -> Option<SlotSample> {
+        let player = self.lanes().get(&slot)?.player.clone();
+        let player = player.lock().unwrap_or_else(PoisonError::into_inner).clone()?;
+        Some(player.sample())
+    }
+
     pub async fn sample(&self, slot: usize) -> Option<SlotSample> {
         let player = self.lanes().get(&slot)?.player.clone();
         let player = player.lock().unwrap_or_else(PoisonError::into_inner).clone()?;
