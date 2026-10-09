@@ -1,3 +1,4 @@
+use super::byte_store::Meta;
 use super::cursor::{next_direct, next_store, DirectCursor, Resume, StoreCursor};
 use super::flight::{collect_limited, FlightOutcome, Rejection, FlightSubscription};
 use super::inner::ProxyShared;
@@ -5,9 +6,9 @@ use super::route::{
     absolutize_playlist, block_key, playlist_references, content_type_for, parse_range, resolve_range, target_url, ByteRange, RangeOutcome,
 };
 use super::slots::Priority;
-use crate::fetch::{header_value, FetchError, Request};
+use crate::fetch::{header_value, BodyStream, FetchError, Request};
 use crate::hls::{is_manifest_url, is_multivariant, rewrite_playlist};
-use crate::memory::Reservation;
+use crate::memory::{InputLimits, Reservation};
 use bytes::Bytes;
 use futures_util::{stream, Stream, StreamExt};
 use http_body_util::combinators::UnsyncBoxBody;
@@ -263,7 +264,7 @@ async fn direct_response(
         None => None,
         Some(ByteRange::From { start, end }) => Some((start, end)),
         Some(ByteRange::Suffix(length)) => match probe_total(inner, target, headers.clone()).await {
-            Ok((total, _)) if total > 0 => Some((total.saturating_sub(length), Some(total - 1))),
+            Ok(Probe { total, .. }) if total > 0 => Some((total.saturating_sub(length), Some(total - 1))),
             Ok(_) => return unsatisfiable(0),
             Err(failure) => return *failure,
         },
@@ -285,15 +286,21 @@ async fn direct_response(
 
 async fn head_from_origin(inner: &ProxyShared, target: &str, headers: Upstream) -> Response<ProxyBody> {
     match probe_total(inner, target, headers).await {
-        Ok((total, origin_type)) => {
-            let content_type = content_type_for(target, origin_type.as_deref());
-            respond(200, media_headers(&content_type, total, None), empty(), false)
+        Ok(probe) => {
+            let content_type = content_type_for(target, probe.origin_type.as_deref());
+            respond(200, media_headers(&content_type, probe.total, None), empty(), false)
         }
         Err(failure) => *failure,
     }
 }
 
-async fn probe_total(inner: &ProxyShared, target: &str, headers: Upstream) -> Result<(u64, Option<String>), Failure> {
+struct Probe {
+    total: u64,
+    origin_type: Option<String>,
+    whole: Option<BodyStream>,
+}
+
+async fn probe_total(inner: &ProxyShared, target: &str, headers: Upstream) -> Result<Probe, Failure> {
     let response = origin_fetch(inner, target, headers, Some((0, Some(0)))).await?;
     let total = header_value(&response.headers, "content-range")
         .and_then(|value| value.rsplit_once('/'))
@@ -304,10 +311,41 @@ async fn probe_total(inner: &ProxyShared, target: &str, headers: Upstream) -> Re
         });
     let origin_type = header_value(&response.headers, "content-type").map(str::to_string);
     match (response.status, total) {
-        (200 | 206, Some(total)) => Ok((total, origin_type)),
+        (200 | 206, Some(total)) => Ok(Probe { total, origin_type, whole: (response.status == 200).then_some(response.body) }),
         (200 | 206, None) => Err(Box::new(text(502, "origin did not report a size"))),
         (status, _) => Err(Box::new(text(status, "origin refused the request"))),
     }
+}
+
+async fn store_whole(inner: &ProxyShared, key: &str, probe: &mut Probe) -> Result<(), Failure> {
+    let refused = || Box::new(text(502, "origin ignored the range"));
+    let Some(mut body) = probe.whole.take() else { return Ok(()) };
+    if probe.total > InputLimits::default().response_bytes {
+        return Err(refused());
+    }
+    let meta = Meta { content_type: probe.origin_type.clone(), total_length: Some(probe.total) };
+    let Some(mut writer) = inner.store.begin_write(key, meta).await else { return Err(refused()) };
+    let buffers = inner.buffers();
+    let mut written = 0u64;
+    loop {
+        let Ok(_buffer) = buffers.reserve_chunk().await else {
+            writer.abort().await;
+            return Err(Box::new(text(503, "no memory for the download")));
+        };
+        match tokio::time::timeout(inner.timeout(), body.next()).await {
+            Ok(None) => break,
+            Ok(Some(Ok(chunk))) if writer.append(&chunk).await => written += chunk.len() as u64,
+            _ => {
+                writer.abort().await;
+                return Err(Box::new(text(502, "origin body failed")));
+            }
+        }
+    }
+    if written != probe.total {
+        writer.abort().await;
+        return Err(Box::new(text(502, "origin body truncated")));
+    }
+    if writer.commit().await { Ok(()) } else { Err(refused()) }
 }
 
 pub(super) async fn origin_fetch(
@@ -493,6 +531,9 @@ async fn block_range_response(
         Ok(total) => total,
         Err(failure) => return *failure,
     };
+    if let Some(length) = inner.store.len(&key).await {
+        return stored_response(inner, target, &key, length, range, &headers, false).await;
+    }
     let (start, end) = match resolve_range(range, total) {
         RangeOutcome::Partial { start, end } => (start, end),
         _ => return unsatisfiable(total),
@@ -536,7 +577,25 @@ async fn known_total(
             return Ok(total);
         }
     }
-    let (total, _) = probe_total(inner, target, headers.clone()).await?;
-    inner.remember_total(key, total);
-    Ok(total)
+    let lock = inner.probe_lock(key);
+    let total = probe_once(inner, target, key, headers, &lock).await;
+    inner.release_probe_lock(key, lock);
+    total
+}
+
+async fn probe_once(
+    inner: &ProxyShared,
+    target: &str,
+    key: &str,
+    headers: &Upstream,
+    lock: &tokio::sync::Mutex<()>,
+) -> Result<u64, Failure> {
+    let _turn = lock.lock().await;
+    if let Some(total) = inner.known_total(key) {
+        return Ok(total);
+    }
+    let mut probe = probe_total(inner, target, headers.clone()).await?;
+    store_whole(inner, key, &mut probe).await?;
+    inner.remember_total(key, probe.total);
+    Ok(probe.total)
 }

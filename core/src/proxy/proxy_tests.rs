@@ -935,3 +935,72 @@ async fn inv_proxy_07_dropping_the_last_proxy_closes_the_listener_connections_an
     assert!(eventually(|| store.open_writers() == 0 && store.count() == 0).await);
     assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err());
 }
+
+const IGNORING: &str = "https://o.test/voice.m4a";
+
+async fn ignoring_rig(data: &[u8]) -> (Rig, String) {
+    let rig = rig_with(block_config(1000)).await;
+    rig.fetcher.route(IGNORING, Script::ok(data.to_vec()).chunked(300).chunk_delay(Duration::from_millis(5)).ignoring_range());
+    let target = path_of(&rig.proxy.url_for(IGNORING, &HashMap::new()).unwrap());
+    (rig, target)
+}
+
+#[tokio::test]
+async fn inv_proxy_11_an_origin_that_answers_200_to_a_range_still_serves_every_range_shape_from_one_download() {
+    let data = pattern(4500, 6);
+    let cases: [(&str, u64, u64); 4] =
+        [("bytes=0-1", 0, 1), ("bytes=2-", 2, 4499), ("bytes=-300", 4200, 4499), ("bytes=1100-1199", 1100, 1199)];
+    for (range, start, end) in cases {
+        let (rig, target) = ignoring_rig(&data).await;
+        let port = rig.proxy.port();
+        let reply = request(port, "GET", &target, &[("Range", range)]).await;
+        let expected = format!("bytes {start}-{end}/4500");
+        assert_eq!((reply.status, reply.header("content-range")), (206, Some(expected.as_str())), "{range}");
+        assert_eq!(reply.header("content-length"), Some((end - start + 1).to_string().as_str()), "{range}");
+        assert_eq!(reply.header("accept-ranges"), Some("bytes"), "{range}");
+        assert_eq!(reply.body, data[start as usize..=end as usize], "{range}");
+        let second = request(port, "GET", &target, &[("Range", "bytes=1000-1099")]).await;
+        assert_eq!((second.status, second.body), (206, data[1000..1100].to_vec()), "{range}");
+        assert_eq!(rig.store.bytes(IGNORING), Some(data.clone()), "{range}");
+        let calls = rig.fetcher.calls();
+
+        let third = request(port, "GET", &target, &[("Range", "bytes=1000-1099")]).await;
+        assert_eq!((third.status, third.body), (206, data[1000..1100].to_vec()), "{range}");
+        assert_eq!(rig.fetcher.calls(), calls, "{range}");
+        assert_eq!(rig.store.count(), 1, "{range}");
+    }
+}
+
+#[tokio::test]
+async fn inv_proxy_05_parallel_ranges_of_an_origin_that_ignores_ranges_fetch_the_object_once() {
+    let data = pattern(4500, 7);
+    let (rig, target) = ignoring_rig(&data).await;
+    let port = rig.proxy.port();
+    let clients: Vec<_> = ["bytes=1100-1900", "bytes=3000-3400", "bytes=2-"]
+        .into_iter()
+        .map(|range| tokio::spawn({ let target = target.clone(); async move { (range, request(port, "GET", &target, &[("Range", range)]).await) } }))
+        .collect();
+    for client in clients {
+        let (range, reply) = within(10, client).await.unwrap();
+        assert_eq!(reply.status, 206, "{range}");
+        let (start, end) = match range {
+            "bytes=1100-1900" => (1100, 1900),
+            "bytes=3000-3400" => (3000, 3400),
+            _ => (2, 4499),
+        };
+        assert_eq!(reply.body, data[start..=end], "{range}");
+    }
+    assert_eq!(rig.fetcher.calls(), 1);
+    assert_eq!(rig.store.open_writers(), 0);
+}
+
+#[tokio::test]
+async fn inv_proxy_13_an_object_above_the_response_limit_is_refused_when_the_origin_ignores_the_range() {
+    let rig = rig_with(block_config(1000)).await;
+    let size = crate::memory::InputLimits::default().response_bytes + 1;
+    rig.fetcher.route(IGNORING, Script::filled(size).ignoring_range());
+    let target = path_of(&rig.proxy.url_for(IGNORING, &HashMap::new()).unwrap());
+    let reply = request(rig.proxy.port(), "GET", &target, &[("Range", "bytes=2-")]).await;
+    assert_eq!(reply.status, 502);
+    assert_eq!((rig.store.count(), rig.store.open_writers()), (0, 0));
+}

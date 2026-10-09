@@ -39,6 +39,7 @@ pub struct Script {
     pub chunk_delay: Duration,
     pub cut_after: Option<u64>,
     pub hang: bool,
+    pub ignore_range: bool,
 }
 
 impl Script {
@@ -60,6 +61,7 @@ impl Script {
             chunk_delay: Duration::ZERO,
             cut_after: None,
             hang: false,
+            ignore_range: false,
         }
     }
 
@@ -95,6 +97,11 @@ impl Script {
 
     pub fn hanging(mut self) -> Self {
         self.hang = true;
+        self
+    }
+
+    pub fn ignoring_range(mut self) -> Self {
+        self.ignore_range = true;
         self
     }
 }
@@ -230,6 +237,7 @@ impl Fetcher for MockFetcher {
         let total = script.payload.len();
         let mut headers = script.headers.clone();
         let (status, start, end) = match request.range {
+            Some(_) if script.ignore_range => (script.status, 0, total),
             Some((start, _)) if start >= total => {
                 headers.insert("Content-Range".to_string(), format!("bytes */{total}"));
                 (416, 0, 0)

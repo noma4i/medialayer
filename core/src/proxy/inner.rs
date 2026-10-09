@@ -52,6 +52,7 @@ pub(super) struct ProxyShared {
     pub tasks: Tasks,
     pub playlist_stamps: Mutex<HashMap<String, Instant>>,
     pub totals: Mutex<HashMap<String, u64>>,
+    probe_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub listener: tokio::sync::Mutex<Option<Listener>>,
     pub running: AtomicBool,
     pub alive: Arc<AtomicBool>,
@@ -107,6 +108,7 @@ impl ProxyShared {
             tasks,
             playlist_stamps: Mutex::new(HashMap::new()),
             totals: Mutex::new(HashMap::new()),
+            probe_locks: Mutex::new(HashMap::new()),
             listener: tokio::sync::Mutex::new(None),
             running: AtomicBool::new(false),
             alive: Arc::new(AtomicBool::new(false)),
@@ -261,6 +263,17 @@ impl ProxyShared {
             totals.clear();
         }
         totals.insert(key.to_string(), total);
+    }
+
+    pub fn probe_lock(&self, key: &str) -> Arc<tokio::sync::Mutex<()>> {
+        locked(&self.probe_locks).entry(key.to_string()).or_default().clone()
+    }
+
+    pub fn release_probe_lock(&self, key: &str, lock: Arc<tokio::sync::Mutex<()>>) {
+        let mut locks = locked(&self.probe_locks);
+        if Arc::strong_count(&lock) == 2 {
+            locks.remove(key);
+        }
     }
 
     pub fn known_total(&self, key: &str) -> Option<u64> {
