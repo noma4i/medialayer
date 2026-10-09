@@ -9,6 +9,7 @@ public final class AudioPlayback {
   public private(set) var progress = 0.0
   public private(set) var rate: Float
   public private(set) var state: MediaState = .idle
+  public private(set) var pollEpoch = 0
   @ObservationIgnored private let key: String
   @ObservationIgnored private let places: MediaPlaces
   @ObservationIgnored private let slots: LoadedSlots
@@ -32,6 +33,7 @@ public final class AudioPlayback {
 
   public func seek(to fraction: Double) {
     guard let duration = slots.slot(for: key)?.sample().durationMs else { return }
+    pollEpoch += 1
     places.seek(key: key, positionMs: UInt64(Double(duration) * min(max(fraction, 0), 1)))
   }
 
@@ -51,8 +53,17 @@ public final class AudioPlayback {
   }
 }
 
+enum AudioSampling {
+  static let interval: Duration = .milliseconds(250)
+  static let pausedSamples = 4
+
+  static func remaining(isPlaying: Bool, pausedLeft: Int) -> Int? {
+    if isPlaying { return pausedLeft }
+    return pausedLeft > 0 ? pausedLeft - 1 : nil
+  }
+}
+
 public struct MediaAudio<Content: View>: View {
-  private static var sampleInterval: Duration { .milliseconds(250) }
 
   @Environment(\.mediaContext) private var context
   private let source: any MediaSource
@@ -91,6 +102,12 @@ public struct MediaAudio<Content: View>: View {
     @State private var audio: AudioPlayback
     @State private var owner = UUID()
 
+    private struct Sampling: Equatable {
+      let url: String
+      let isPlaying: Bool
+      let epoch: Int
+    }
+
     init(source: any MediaSource, playing: Bool, muted: Bool, rate: Float, context: MediaContext, content: @escaping (AudioPlayback) -> Content) {
       self.source = source
       self.playing = playing
@@ -106,10 +123,14 @@ public struct MediaAudio<Content: View>: View {
         .task(id: source.url) {
           for await value in context.places.stateStream(key: source.url) { audio.follow(value) }
         }
-        .task(id: source.url) {
+        .task(id: Sampling(url: source.url, isPlaying: audio.isPlaying, epoch: audio.pollEpoch)) {
+          var pausedLeft = AudioSampling.pausedSamples
           while !Task.isCancelled {
             audio.refresh(from: context.slots.slot(for: source.url)?.sample())
-            try? await Task.sleep(for: MediaAudio.sampleInterval)
+            guard let left = AudioSampling.remaining(isPlaying: audio.isPlaying, pausedLeft: pausedLeft) else { return }
+
+            pausedLeft = left
+            try? await Task.sleep(for: AudioSampling.interval)
           }
         }
         .onAppear {

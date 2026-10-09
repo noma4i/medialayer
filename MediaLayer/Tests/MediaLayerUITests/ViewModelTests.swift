@@ -51,6 +51,19 @@ struct ViewModelTests {
     #expect(!audio.isPlaying)
   }
 
+  @Test
+  func aPausedAudioSamplesFourTimesThenStopsAndAPlayingOneNeverStops() {
+    var pausedLeft = AudioSampling.pausedSamples
+    var samples = 0
+    while let left = AudioSampling.remaining(isPlaying: false, pausedLeft: pausedLeft) {
+      pausedLeft = left
+      samples += 1
+    }
+
+    #expect(samples == AudioSampling.pausedSamples)
+    #expect(AudioSampling.remaining(isPlaying: true, pausedLeft: 0) == 0)
+  }
+
   @MainActor
   @Test
   func theAudioRateIsKeptAndSentToTheCore() {
