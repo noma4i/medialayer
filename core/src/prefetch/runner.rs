@@ -31,6 +31,7 @@ enum WindowKey {
 struct State {
     ledger: PrefetchLedger,
     windows: HashMap<WindowKey, Vec<PrefetchJob>>,
+    last: HashMap<WindowKey, (Vec<PrefetchJob>, Vec<Source>)>,
     running: HashMap<String, Job>,
     next_id: u64,
 }
@@ -123,7 +124,7 @@ impl Prefetcher {
             image_windows: Mutex::new(HashMap::new()),
             gate: Gate::new(limits.max_concurrent as usize),
             clock,
-            state: Mutex::new(State { ledger, windows: HashMap::new(), running: HashMap::new(), next_id: 0 }),
+            state: Mutex::new(State { ledger, windows: HashMap::new(), last: HashMap::new(), running: HashMap::new(), next_id: 0 }),
             live: AtomicUsize::new(0),
             events: broadcast::channel(EVENT_CAPACITY).0,
             handle: Handle::current(),
@@ -165,7 +166,10 @@ impl Prefetcher {
         let mut state = self.shared.state();
         let previous = state.windows.remove(&key).unwrap_or_default();
         let diff = diff_window(&previous, &wanted);
-        if !wanted.is_empty() {
+        if wanted.is_empty() {
+            state.last.remove(&key);
+        } else {
+            state.last.insert(key.clone(), (wanted.clone(), by_url.values().map(|source| (*source).clone()).collect()));
             state.windows.insert(key, wanted.clone());
         }
         for job in &diff.to_cancel {
@@ -190,6 +194,19 @@ impl Prefetcher {
 
     pub fn stop_all(&self) {
         Prefetcher::cancel_everything(&self.shared);
+    }
+
+    pub fn resume(&self) {
+        let windows: Vec<(WindowKey, Vec<PrefetchJob>, Vec<Source>)> =
+            self.shared.state().last.iter().map(|(key, (jobs, sources))| (key.clone(), jobs.clone(), sources.clone())).collect();
+        for (key, jobs, sources) in windows {
+            self.apply_window(key, jobs, sources);
+        }
+    }
+
+    pub fn forget_windows(&self) {
+        Prefetcher::cancel_everything(&self.shared);
+        self.shared.state().last.clear();
     }
 
     fn cancel_everything(shared: &Shared) {
@@ -261,6 +278,9 @@ fn settle(shared: &Shared, url: &str, id: u64, outcome: &Outcome) {
         Outcome::Failed(_) | Outcome::TimedOut => {
             state.ledger.counters.failed += 1;
             state.ledger.forget(url);
+            for jobs in state.windows.values_mut() {
+                jobs.retain(|job| job.key != url);
+            }
         }
         Outcome::Cancelled => {}
     }

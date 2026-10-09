@@ -150,6 +150,25 @@ async fn inv_prefetch_01_a_failed_source_is_loaded_again_when_it_re_enters_the_w
 }
 
 #[tokio::test]
+async fn inv_prefetch_01_a_failed_source_is_loaded_again_when_the_same_window_is_declared_again() {
+    let rig = rig();
+    let mut events = rig.prefetcher.settled();
+    rig.loader.fail(&url(2), true);
+    rig.prefetcher.set_window(0, sources(20));
+    let mut outcomes = HashMap::new();
+    for _ in 0..4 {
+        let settled = next(&mut events).await;
+        outcomes.insert(settled.url, settled.outcome);
+    }
+    assert_eq!(outcomes[&url(2)], Outcome::Failed(format!("{} refused", url(2))));
+
+    rig.loader.fail(&url(2), false);
+    rig.prefetcher.set_window(0, sources(20));
+
+    assert_eq!(next(&mut events).await, Settled { url: url(2), outcome: Outcome::Loaded });
+}
+
+#[tokio::test]
 async fn inv_prefetch_03_each_started_source_settles_exactly_once() {
     let rig = rig();
     let mut events = rig.prefetcher.settled();
@@ -258,6 +277,23 @@ async fn inv_prefetch_04_stop_all_cancels_every_load_and_forgets_the_window_so_t
     assert_eq!((rig.loader.active(), rig.prefetcher.live_tasks(), rig.prefetcher.counters().cancelled), (0, 0, 4));
 
     rig.prefetcher.set_window(0, sources(20));
+    eventually(|| rig.loader.urls().len() == 8).await;
+}
+
+#[tokio::test]
+async fn inv_prefetch_04_resume_starts_the_last_window_again_without_declaring_it() {
+    let rig = rig();
+    let mut events = rig.prefetcher.settled();
+    rig.loader.hang_all();
+    rig.prefetcher.set_window(0, sources(20));
+    eventually(|| rig.loader.active() == 4).await;
+    rig.prefetcher.stop_all();
+    for _ in 0..4 {
+        next(&mut events).await;
+    }
+
+    rig.prefetcher.resume();
+
     eventually(|| rig.loader.urls().len() == 8).await;
 }
 

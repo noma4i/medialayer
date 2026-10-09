@@ -89,6 +89,7 @@ public struct MediaAudio<Content: View>: View {
     let context: MediaContext
     let content: (AudioPlayback) -> Content
     @State private var audio: AudioPlayback
+    @State private var owner = UUID()
 
     init(source: any MediaSource, playing: Bool, muted: Bool, rate: Float, context: MediaContext, content: @escaping (AudioPlayback) -> Content) {
       self.source = source
@@ -112,13 +113,18 @@ public struct MediaAudio<Content: View>: View {
           }
         }
         .onAppear {
-          context.places.visible(source: source.item, visible: true)
-          context.places.setPlaying(key: source.url, playing: audio.isPlaying)
-          context.places.setMuted(key: source.url, muted: muted)
+          let claims = KeyClaims.of(context.places)
+          claims.visible(owner: owner, source: source.item, visible: true)
+          claims.setPlaying(owner: owner, key: source.url, playing: audio.isPlaying)
+          claims.setMuted(owner: owner, key: source.url, muted: muted)
           context.places.setRate(key: source.url, rate: audio.rate)
         }
-        .onDisappear { context.places.visible(source: source.item, visible: false) }
-        .onChange(of: muted) { _, value in context.places.setMuted(key: source.url, muted: value) }
+        .onDisappear {
+          let claims = KeyClaims.of(context.places)
+          claims.visible(owner: owner, source: source.item, visible: false)
+          claims.release(owner: owner, key: source.url)
+        }
+        .onChange(of: muted) { _, value in KeyClaims.of(context.places).setMuted(owner: owner, key: source.url, muted: value) }
         .onChange(of: rate) { _, value in audio.setRate(value) }
     }
   }

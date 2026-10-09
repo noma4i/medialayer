@@ -41,6 +41,7 @@ impl PoolControl for Stage {
             (state.commands_for(orders), state.loaded.keys().cloned().collect::<Vec<String>>())
         };
         self.dispatch(commands);
+        self.inner.prefetcher.resume();
         for key in keys {
             self.feed(&key, Event::Foreground);
         }

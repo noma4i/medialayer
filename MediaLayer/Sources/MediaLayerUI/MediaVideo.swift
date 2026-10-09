@@ -23,6 +23,7 @@ struct VideoEdges {
 public struct MediaVideo<Content: View>: View {
   @Environment(\.mediaContext) private var context
   @State private var state: MediaState = .idle
+  @State private var owner = UUID()
   private let source: any MediaSource
   private let playing: Bool
   private let muted: Bool
@@ -61,8 +62,8 @@ public struct MediaVideo<Content: View>: View {
     .task(id: source.url) { await follow() }
     .onAppear { declare(visible: true) }
     .onDisappear { declare(visible: false) }
-    .onChange(of: playing) { _, value in context?.places.setPlaying(key: source.url, playing: value) }
-    .onChange(of: muted) { _, value in context?.places.setMuted(key: source.url, muted: value) }
+    .onChange(of: playing) { _, value in context.map { KeyClaims.of($0.places).setPlaying(owner: owner, key: source.url, playing: value) } }
+    .onChange(of: muted) { _, value in context.map { KeyClaims.of($0.places).setMuted(owner: owner, key: source.url, muted: value) } }
   }
 
   var item: MediaItem {
@@ -73,10 +74,11 @@ public struct MediaVideo<Content: View>: View {
 
   private func declare(visible: Bool) {
     guard let places = context?.places else { return }
-    places.visible(source: item, visible: visible)
-    guard visible else { return }
-    places.setPlaying(key: source.url, playing: playing)
-    places.setMuted(key: source.url, muted: muted)
+    let claims = KeyClaims.of(places)
+    claims.visible(owner: owner, source: item, visible: visible)
+    guard visible else { return claims.release(owner: owner, key: source.url) }
+    claims.setPlaying(owner: owner, key: source.url, playing: playing)
+    claims.setMuted(owner: owner, key: source.url, muted: muted)
   }
 
   private func follow() async {

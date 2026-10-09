@@ -154,7 +154,7 @@ impl Stage {
             state.ring.release_all()
         };
         self.dispatch(commands);
-        self.inner.prefetcher.stop_all();
+        self.inner.prefetcher.forget_windows();
         self.inner.places.retire_all();
     }
 }

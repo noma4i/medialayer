@@ -127,6 +127,78 @@ struct ViewModelTests {
   }
 
   @Test
+  func aCancelledImageLoadDoesNotReportTheItemAsFailed() async {
+    let places = RecordingPlaces()
+    places.imageResult = .success(pngData(side: 8))
+    let source = TestImageSource()
+    let request = MediaImagePipeline.request(for: source)!
+    let pipeline = MediaImagePipeline.make(places: places)
+
+    let image = await Task {
+      withUnsafeCurrentTask { $0?.cancel() }
+      return await MediaImagePipeline.load(source, request: request, places: places, pipeline: pipeline)
+    }.value
+
+    #expect(image == nil)
+    #expect(!places.recorded.contains { $0.hasPrefix("state failed") })
+  }
+
+  @Test
+  func twoViewsOfOneKeyKeepItVisibleUntilTheLastOneLeaves() {
+    let places = RecordingPlaces()
+    let claims = KeyClaims(places: places)
+    let first = UUID(), second = UUID()
+    let item = TestClip().item
+
+    claims.visible(owner: first, source: item, visible: true)
+    claims.visible(owner: second, source: item, visible: true)
+    claims.visible(owner: first, source: item, visible: false)
+    #expect(places.recorded == ["visible true"])
+
+    claims.visible(owner: second, source: item, visible: false)
+    #expect(places.recorded == ["visible true", "visible false"])
+  }
+
+  @Test
+  func aViewThatDoesNotPlayNeverStopsAnotherViewOfTheSameKey() {
+    let places = RecordingPlaces()
+    let claims = KeyClaims(places: places)
+    let playing = UUID(), idle = UUID()
+
+    claims.setPlaying(owner: playing, key: "k", playing: true)
+    claims.setPlaying(owner: idle, key: "k", playing: false)
+    #expect(places.recorded == ["playing true"])
+
+    claims.setPlaying(owner: playing, key: "k", playing: false)
+    #expect(places.recorded == ["playing true", "playing false"])
+  }
+
+  @Test
+  func aKeyIsMutedOnlyWhileEveryViewOfItAsksForMute() {
+    let places = RecordingPlaces()
+    let claims = KeyClaims(places: places)
+    let first = UUID(), second = UUID()
+
+    claims.setMuted(owner: first, key: "k", muted: true)
+    claims.setMuted(owner: second, key: "k", muted: false)
+    claims.setMuted(owner: second, key: "k", muted: true)
+
+    #expect(places.recorded == ["muted true", "muted false", "muted true"])
+  }
+
+  @Test
+  func aViewThatLeavesDropsItsPlayAndMuteClaims() {
+    let places = RecordingPlaces()
+    let claims = KeyClaims(places: places)
+    let owner = UUID()
+    claims.setPlaying(owner: owner, key: "k", playing: true)
+
+    claims.release(owner: owner, key: "k")
+
+    #expect(places.recorded == ["playing true", "playing false"])
+  }
+
+  @Test
   func releaserDropsTheNukeMemoryCache() {
     let request = ImageRequest(url: URL(string: "https://o.test/cached.png"))
     ImageCache.shared[ImageCacheKey(request: request)] = ImageContainer(image: PlatformImage())

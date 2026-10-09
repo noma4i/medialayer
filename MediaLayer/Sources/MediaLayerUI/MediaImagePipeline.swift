@@ -81,7 +81,7 @@ extension MediaImagePipeline {
       places.itemState(key: source.url, state: .ready)
       return image
     } catch {
-      places.itemState(key: source.url, state: .failed(detail: error.localizedDescription))
+      if !Task.isCancelled { places.itemState(key: source.url, state: .failed(detail: error.localizedDescription)) }
       return nil
     }
   }
