@@ -99,6 +99,18 @@ struct ViewModelTests {
     #expect(HostLayers.shared.layer(for: token) == nil)
   }
 
+  @Test
+  func releasingAnOlderViewOfTheSameKeyDoesNotDetachTheNewerView() {
+    let places = RecordingPlaces()
+    var older: SurfaceAttachment? = SurfaceAttachment(places: places, key: "replaced", layer: CALayer())
+    let newer = SurfaceAttachment(places: places, key: "replaced", layer: CALayer())
+
+    older = nil
+
+    #expect(places.recorded == ["attach replaced", "attach replaced"])
+    withExtendedLifetime((older, newer)) {}
+  }
+
   @Test(arguments: [
     (Result<Data, Error>.success(pngData(side: 8)), ["state loading", "state ready"]),
     (Result<Data, Error>.failure(URLError(.notConnectedToInternet)), ["state loading", "state failed"])

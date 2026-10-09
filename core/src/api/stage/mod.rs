@@ -92,6 +92,19 @@ impl State {
         commands
     }
 
+    fn restore_wanted(&mut self, now: u64) -> Vec<Command> {
+        let wanted: Vec<String> =
+            self.leases.keys().filter(|key| self.catalog.contains_key(*key) && !self.loaded.contains_key(*key)).cloned().collect();
+        let mut commands = Vec::new();
+        for key in wanted {
+            commands.extend(self.ring.touch(now, &key));
+            if self.is_playing(&key) {
+                commands.extend(self.ring.set_playing(&key, true));
+            }
+        }
+        commands
+    }
+
     fn is_playing(&self, key: &str) -> bool {
         self.leases.get(key).is_some_and(|lease| self.election.active() == Some(*lease))
     }
@@ -273,7 +286,10 @@ async fn tick_loop(inner: Weak<Inner>, every: Duration) {
         let stage = Stage { inner };
         let commands = {
             let now = stage.now();
-            stage.state().ring.tick(now)
+            let mut state = stage.state();
+            let mut commands = state.ring.tick(now);
+            commands.extend(state.restore_wanted(now));
+            commands
         };
         stage.dispatch(commands);
     }

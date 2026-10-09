@@ -13,13 +13,13 @@ done
 
 cargo build --manifest-path "$root/core/Cargo.toml" --features cli
 rm -rf "$build" "$bridge/MediaLayerFFI.xcframework"
-mkdir -p "$build/headers" "$bridge/Sources/MediaLayer"
+mkdir -p "$build/headers/medialayerFFI" "$bridge/Sources/MediaLayer"
 
 (cd -- "$root/core" && "$root/target/debug/uniffi-bindgen" generate \
   --library "$root/target/debug/libmedialayer.dylib" --language swift --out-dir "$build/swift")
 
-cp "$build/swift/medialayerFFI.h" "$build/headers/"
-cp "$build/swift/medialayerFFI.modulemap" "$build/headers/module.modulemap"
+cp "$build/swift/medialayerFFI.h" "$build/headers/medialayerFFI/"
+cp "$build/swift/medialayerFFI.modulemap" "$build/headers/medialayerFFI/module.modulemap"
 cp "$build/swift/medialayer.swift" "$bridge/Sources/MediaLayer/medialayer.swift"
 
 mkdir -p "$build/ios-sim"

@@ -40,6 +40,7 @@ public final class HostLayers: @unchecked Sendable {
 
   private let lock = NSLock()
   private var layers: [UInt64: WeakLayer] = [:]
+  private var owners: [String: UInt64] = [:]
   private var next: UInt64 = 1
 
   public init() {}
@@ -55,6 +56,18 @@ public final class HostLayers: @unchecked Sendable {
 
   public func unregister(_ token: UInt64) {
     lock.withLock { layers[token] = nil }
+  }
+
+  func claim(key: String, token: UInt64) {
+    lock.withLock { owners[key] = token }
+  }
+
+  func release(key: String, token: UInt64) -> Bool {
+    lock.withLock {
+      guard owners[key] == token else { return false }
+      owners[key] = nil
+      return true
+    }
   }
 
   func layer(for token: UInt64) -> CALayer? {

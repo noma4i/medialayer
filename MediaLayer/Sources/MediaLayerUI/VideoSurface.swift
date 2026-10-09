@@ -17,11 +17,12 @@ final class SurfaceAttachment {
     self.places = places
     self.key = key
     token = HostLayers.shared.register(layer)
+    HostLayers.shared.claim(key: key, token: token)
     places.attachView(key: key, token: token)
   }
 
   deinit {
-    places.detachView(key: key)
+    if HostLayers.shared.release(key: key, token: token) { places.detachView(key: key) }
     HostLayers.shared.unregister(token)
   }
 }

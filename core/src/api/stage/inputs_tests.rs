@@ -46,6 +46,20 @@ async fn inv_api_04_declaring_the_same_window_again_sends_no_commands() {
 }
 
 #[tokio::test]
+async fn inv_api_04_a_page_that_still_wants_to_play_gets_a_player_again_after_its_slot_was_taken() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    stage.set_window(5, videos(20));
+    stage.set_playing(&url_of(5), true);
+    eventually(|| rig.factory.slot_holding(&url_of(5)).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
+
+    stage.set_window(0, Vec::new());
+    eventually(|| rig.factory.slot_holding(&url_of(5)).is_none() && stage.commands_idle()).await;
+
+    eventually(|| rig.factory.slot_holding(&url_of(5)).is_some_and(|(_, slot)| slot.calls().last() == Some(&SlotCall::Play))).await;
+}
+
+#[tokio::test]
 async fn inv_pool_01_hundreds_of_window_shifts_never_create_more_players_than_slots() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
