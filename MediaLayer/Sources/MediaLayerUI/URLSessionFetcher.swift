@@ -4,6 +4,7 @@ import MediaLayer
 public final class URLSessionFetcher: Fetcher, @unchecked Sendable {
   public static let defaultBufferLimit = 1 << 20
   public static let defaultTimeout: TimeInterval = 30
+  private static let traceDelay: UInt64? = ProcessInfo.processInfo.environment["ML_FETCH_DELAY_MS"].flatMap(UInt64.init).map { $0 * 1_000_000 }
 
   private let router = StreamRouter()
   private let session: URLSession
@@ -33,6 +34,7 @@ public final class URLSessionFetcher: Fetcher, @unchecked Sendable {
     if let start = request.rangeStart {
       urlRequest.setValue("bytes=\(start)-\(request.rangeEnd.map(String.init) ?? "")", forHTTPHeaderField: "Range")
     }
+    if let delay = Self.traceDelay { try await Task.sleep(nanoseconds: delay) }
     let task = session.dataTask(with: urlRequest)
     let body = StreamingBody(
       limit: bufferLimit,

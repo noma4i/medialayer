@@ -92,6 +92,7 @@ final class KeyClaims: @unchecked Sendable {
   }
 
   private func forward(_ change: Change, key: String) {
+    MediaTrace.emit("claims", "key=\(MediaTrace.tail(key)) visible=\(change.visible.map(String.init) ?? "-") playing=\(change.playing.map(String.init) ?? "-") muted=\(change.muted.map(String.init) ?? "-")")
     if change.visible == true, let source = change.source { places.visible(source: source, visible: true) }
     if let playing = change.playing { places.setPlaying(key: key, playing: playing) }
     if let muted = change.muted { places.setMuted(key: key, muted: muted) }

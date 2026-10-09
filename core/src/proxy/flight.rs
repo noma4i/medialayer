@@ -202,6 +202,7 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
         return FlightOutcome::Complete;
     }
     let mut priority = priority;
+    let queued = std::time::Instant::now();
     let permit = loop {
         tokio::select! {
             biased;
@@ -213,6 +214,7 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
             },
         }
     };
+    crate::trace!("flight", "permit {} waited={}ms {priority:?}", crate::trace::tail(&flight.url), queued.elapsed().as_millis());
     let timeout = inner.timeout();
     let buffers = inner.buffers();
     let request = Request { url: flight.url.clone(), headers, range: flight.range.map(|(start, end)| (start, Some(end))) };

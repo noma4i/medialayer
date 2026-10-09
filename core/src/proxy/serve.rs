@@ -54,10 +54,70 @@ pub(super) async fn handle(inner: Arc<ProxyShared>, request: hyper::Request<Inco
         .collect();
     let range = header_value(&incoming, "range").and_then(parse_range);
     let headers = inner.upstream_headers(&target, &incoming);
-    if is_manifest_url(&target) {
+    let exchange = Exchange::open(&inner, &target, header_value(&incoming, "range"), head_only);
+    let response = if is_manifest_url(&target) {
         playlist(&inner, &target, headers, head_only).await
     } else {
         media(&inner, &target, headers, range, head_only).await
+    };
+    Exchange::answer(exchange, response)
+}
+
+struct Exchange {
+    label: String,
+    started: std::time::Instant,
+    bytes: u64,
+    expected: Option<u64>,
+}
+
+impl Exchange {
+    fn open(inner: &ProxyShared, target: &str, range: Option<&str>, head_only: bool) -> Option<Exchange> {
+        if !crate::trace::enabled() {
+            return None;
+        }
+        let label = format!("{} range={} head={head_only}", crate::trace::tail(target), range.unwrap_or("-"));
+        crate::trace!("proxy", "request {label} live={} slots={}", inner.live.load(std::sync::atomic::Ordering::SeqCst), inner.slots.in_use());
+        Some(Exchange { label, started: std::time::Instant::now(), bytes: 0, expected: None })
+    }
+
+    fn count(&mut self, bytes: u64) {
+        self.bytes += bytes;
+    }
+
+    fn answer(exchange: Option<Exchange>, response: Response<ProxyBody>) -> Response<ProxyBody> {
+        let Some(mut exchange) = exchange else { return response };
+        let length = |name: &str| response.headers().get(name).and_then(|value| value.to_str().ok()).map(str::to_string);
+        exchange.expected = length("content-length").and_then(|value| value.parse().ok());
+        crate::trace!(
+            "proxy",
+            "response {} status={} length={:?} range={:?} after={}ms",
+            exchange.label,
+            response.status().as_u16(),
+            exchange.expected,
+            length("content-range"),
+            exchange.started.elapsed().as_millis()
+        );
+        let (parts, body) = response.into_parts();
+        let body = body
+            .map_frame(move |frame| {
+                exchange.count(frame.data_ref().map_or(0, |data| data.len() as u64));
+                frame
+            })
+            .boxed_unsync();
+        Response::from_parts(parts, body)
+    }
+}
+
+impl Drop for Exchange {
+    fn drop(&mut self) {
+        crate::trace!(
+            "proxy",
+            "closed {} bytes={} of {:?} after={}ms",
+            self.label,
+            self.bytes,
+            self.expected,
+            self.started.elapsed().as_millis()
+        );
     }
 }
 
@@ -358,6 +418,7 @@ pub(super) async fn origin_fetch(
         return Err(Box::new(text(503, "busy")));
     };
     let request = Request { url: target.to_string(), headers, range };
+    crate::trace!("origin", "fetch {} range={range:?}", crate::trace::tail(target));
     match tokio::time::timeout(inner.timeout(), inner.fetcher.fetch(request)).await {
         Err(_) => Err(Box::new(text(502, "origin timed out"))),
         Ok(Err(FetchError::Status(status))) => Err(Box::new(text(status, "origin refused the request"))),

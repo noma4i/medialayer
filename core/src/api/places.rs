@@ -135,7 +135,12 @@ impl Places {
 
     fn with(&self, key: &str, change: impl FnOnce(&mut Place)) {
         let mut entries = self.entries();
-        change(entries.entry(key.to_string()).or_insert_with(Place::idle));
+        let place = entries.entry(key.to_string()).or_insert_with(Place::idle);
+        let before = place.state.clone();
+        change(place);
+        if place.state != before {
+            crate::trace!("place", "{} {before:?} -> {:?}", crate::trace::tail(key), place.state);
+        }
         if entries.get(key).is_some_and(Place::is_unused) {
             entries.remove(key);
         }

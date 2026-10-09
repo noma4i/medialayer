@@ -14,23 +14,27 @@ enum Wake {
 
 impl Stage {
     pub fn ready(&self, slot: usize) {
+        crate::trace!("event", "ready slot={slot} key={:?}", self.key_at(slot).as_deref().map(crate::trace::tail));
         let Some(key) = self.key_at(slot) else { return };
         self.feed(&key, Event::Loaded);
         self.inner.places.ready(&key);
     }
 
     pub fn visual_ready(&self, slot: usize) {
+        crate::trace!("event", "visual_ready slot={slot} key={:?}", self.key_at(slot).as_deref().map(crate::trace::tail));
         if let Some(key) = self.key_at(slot) {
             self.inner.places.rendered(&key);
         }
     }
 
     pub fn stalled(&self, slot: usize, position_ms: u64) {
+        crate::trace!("event", "stalled slot={slot} position={position_ms} key={:?}", self.key_at(slot).as_deref().map(crate::trace::tail));
         let Some(key) = self.key_at(slot).filter(|key| self.state().is_playing(key)) else { return };
         self.feed(&key, Event::Play { position_ms });
     }
 
     pub fn failed(&self, slot: usize, status: i32, detail: String) {
+        crate::trace!("event", "failed slot={slot} status={status} detail={detail} key={:?}", self.key_at(slot).as_deref().map(crate::trace::tail));
         let Some(key) = self.key_at(slot) else { return };
         let event = if status > 0 { Event::HttpError { status } } else { Event::PlaybackFailed { reason: detail } };
         self.feed(&key, event);
@@ -52,6 +56,7 @@ impl Stage {
     }
 
     pub(super) fn perform(&self, key: String, action: Action) {
+        crate::trace!("event", "action {} {action:?}", crate::trace::tail(&key));
         match action {
             Action::None => {}
             Action::ForegroundRetry(delay_ms) => self.wake_after(key, delay_ms, Wake::Foreground),

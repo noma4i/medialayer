@@ -12,6 +12,7 @@ const MAX_RATE: f32 = 4.0;
 impl Stage {
     pub fn set_window(&self, active: usize, sources: Vec<Option<MediaItem>>) {
         let count = sources.len();
+        crate::trace!("stage", "window active={active} count={count}");
         let reach = self.state().ring.pages(active, count);
         let wanted = self.inner.prefetcher.window_range(active, count);
         let sources = Sliced::of(sources, reach.start.min(wanted.start)..reach.end.max(wanted.end));
@@ -43,6 +44,7 @@ impl Stage {
     }
 
     pub fn set_playing(&self, key: &str, playing: bool) {
+        crate::trace!("stage", "set_playing {} {playing}", crate::trace::tail(key));
         let commands = {
             let mut state = self.state();
             if !playing {
@@ -127,6 +129,7 @@ impl Stage {
     pub fn visible(&self, source: MediaItem, visible: bool) {
         let url = source.url.clone();
         let headers = source.headers.clone();
+        crate::trace!("stage", "visible {} {visible}", crate::trace::tail(&url));
         if !visible {
             let commands = self.state().ring.untouch(&url);
             self.dispatch(commands);

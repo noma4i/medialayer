@@ -87,6 +87,13 @@ impl SlotCall {
         }
     }
 
+    pub fn label(&self) -> String {
+        match self {
+            SlotCall::Load { key, route } => format!("Load {} via {}", crate::trace::tail(key), crate::trace::tail(&route.url)),
+            other => format!("{other:?}"),
+        }
+    }
+
     fn apply(self, player: &dyn PlayerSlot) {
         match self {
             SlotCall::Load { key, route } => player.load(key, route),
@@ -126,6 +133,7 @@ impl SlotRunner {
 
     pub fn send(&self, slot: usize, call: SlotCall) {
         let Some(players) = self.players.clone() else { return };
+        crate::trace!("slot", "send {slot} {}", call.label());
         let mut lanes = self.lanes();
         let lane = lanes.entry(slot).or_insert_with(|| {
             let queue = Arc::new(Queue::default());

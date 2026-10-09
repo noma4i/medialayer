@@ -81,7 +81,6 @@ impl PrioritySlots {
         state.playback.len() + state.prefetch.len()
     }
 
-    #[cfg(test)]
     pub fn in_use(&self) -> usize {
         lock(&self.state).in_use
     }
@@ -98,6 +97,7 @@ impl PrioritySlots {
                 return Err(QueueFull);
             }
             let (sender, receiver) = oneshot::channel();
+            crate::trace!("slots", "wait {priority:?} in_use={} playback={} prefetch={}", state.in_use, state.playback.len(), state.prefetch.len());
             match priority {
                 Priority::Playback => state.playback.push_back(sender),
                 Priority::Prefetch => state.prefetch.push_back(sender),

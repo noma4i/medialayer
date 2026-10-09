@@ -53,6 +53,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private var key: String?
   private var item: AVPlayerItem?
   private var observations: [NSKeyValueObservation] = []
+  private var traceObservations: [NSKeyValueObservation] = []
   private var notificationTokens: [NSObjectProtocol] = []
   private var timeToken: Any?
   private var prerollRequested = false
@@ -71,6 +72,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     player.isMuted = startMuted
     player.automaticallyWaitsToMinimizeStalling = true
     layer.videoGravity = .resizeAspectFill
+    traceStart()
   }
 
   deinit {
@@ -92,6 +94,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
         events.with { $0.failed(slot: id, status: 0, detail: "invalid url \(route.url)") }
         return
       }
+      MediaTrace.emit("player", "slot=\(id) load key=\(MediaTrace.tail(key)) url=\(MediaTrace.tail(route.url))")
       tearDownItem()
       let item = AVPlayerItem(asset: AVURLAsset(url: url, options: Self.assetOptions(for: route)))
       self.item = item
@@ -107,6 +110,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   public func unload() {
     onMain { [self] in
       let released = key
+      MediaTrace.emit("player", "slot=\(id) unload key=\(released.map(MediaTrace.tail) ?? "-")")
       tearDownItem()
       key = nil
       if let released { slots.release(key: released, slot: self) }
@@ -123,6 +127,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   public func play() {
     onMain { [self] in
       wantsPlay = true
+      MediaTrace.emit("player", "slot=\(id) play key=\(key.map(MediaTrace.tail) ?? "-")")
       player.play()
     }
   }
@@ -130,6 +135,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   public func pause() {
     onMain { [self] in
       wantsPlay = false
+      MediaTrace.emit("player", "slot=\(id) pause key=\(key.map(MediaTrace.tail) ?? "-")")
       player.pause()
     }
   }
@@ -216,9 +222,18 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
       center.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
         self?.itemEnded()
       },
+      center.addObserver(forName: .AVPlayerItemNewErrorLogEntry, object: item, queue: .main) { [weak self] _ in
+        guard let self, MediaTrace.isOn, let event = item.errorLog()?.events.last else { return }
+        MediaTrace.emit("player", "slot=\(id) errorlog status=\(event.errorStatusCode) domain=\(event.errorDomain) uri=\(event.uri.map(MediaTrace.tail) ?? "-") comment=\(event.errorComment ?? "-")")
+      },
+      center.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main) { [weak self] note in
+        guard let self else { return }
+        MediaTrace.emit("player", "slot=\(id) failed-to-end key=\(key.map(MediaTrace.tail) ?? "-") \(String(describing: note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey]))")
+      },
       center.addObserver(forName: .AVPlayerItemPlaybackStalled, object: item, queue: .main) { [weak self] _ in
         guard let self else { return }
         let position = positionMs()
+        MediaTrace.emit("player", "slot=\(id) stalled key=\(key.map(MediaTrace.tail) ?? "-") position=\(position)")
         events.with { $0.stalled(slot: self.id, positionMs: position) }
       }
     ]
@@ -242,11 +257,13 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     guard item === self.item else { return }
     switch item.status {
     case .readyToPlay:
+      MediaTrace.emit("player", "slot=\(id) item ready key=\(key.map(MediaTrace.tail) ?? "-")")
       itemReady = true
       refreshSample()
       events.with { $0.ready(slot: id) }
       prerollIfReady()
     case .failed:
+      MediaTrace.emit("player", "slot=\(id) item failed key=\(key.map(MediaTrace.tail) ?? "-") \(item.error.map { String(describing: $0) } ?? "-")")
       events.with { $0.failed(slot: id, status: Self.httpStatus(of: item), detail: item.error?.localizedDescription ?? "failed") }
     default:
       break
@@ -283,6 +300,39 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     visualReadySent = false
     looping = false
     refreshSample()
+  }
+
+  private func traceStart() {
+    guard MediaTrace.isOn else { return }
+    traceObservations = [
+      player.observe(\.rate, options: [.new]) { [weak self] player, _ in
+        guard let self else { return }
+        MediaTrace.emit("player", "slot=\(id) rate=\(player.rate) key=\(key.map(MediaTrace.tail) ?? "-")")
+      },
+      player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+        guard let self else { return }
+        let reason = player.reasonForWaitingToPlay?.rawValue ?? "-"
+        MediaTrace.emit("player", "slot=\(id) control=\(player.timeControlStatus.rawValue) reason=\(reason) key=\(key.map(MediaTrace.tail) ?? "-")")
+      }
+    ]
+    DispatchQueue.main.async { [weak self] in
+      Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
+        guard let self else { return timer.invalidate() }
+        traceSnapshot()
+      }
+    }
+  }
+
+  private func traceSnapshot() {
+    guard key != nil || player.rate != 0 else { return }
+    let buffered = item?.loadedTimeRanges.first?.timeRangeValue.end.seconds ?? 0
+    let seconds = player.currentTime().seconds
+    MediaTrace.emit(
+      "snapshot",
+      "slot=\(id) key=\(key.map(MediaTrace.tail) ?? "-") rate=\(player.rate) control=\(player.timeControlStatus.rawValue) "
+        + "status=\(item?.status.rawValue ?? -1) time=\(String(format: "%.2f", seconds.isFinite ? seconds : 0)) buffered=\(String(format: "%.2f", buffered)) "
+        + "display=\(layer.isReadyForDisplay) attached=\(layer.superlayer != nil) wants=\(wantsPlay)"
+    )
   }
 
   private func positionMs() -> UInt64 {

@@ -15,6 +15,7 @@ pub mod prefetch;
 pub mod proxy;
 pub mod session;
 pub mod spec;
+pub mod trace;
 
 #[uniffi::export]
 pub fn version() -> String {

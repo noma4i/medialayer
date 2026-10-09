@@ -220,6 +220,7 @@ impl Stage {
         {
             let mut state = self.state();
             for command in commands {
+                crate::trace!("stage", "command {command:?}");
                 self.translate(&mut state, command, &mut calls, &mut actions, &mut unloaded, &mut resumed);
             }
         }
