@@ -384,3 +384,39 @@ async fn inv_api_20_declaring_a_window_costs_the_same_for_a_short_and_a_long_lis
 
     assert!(long <= short * 2, "set_window allocated {long} times for 2000 sources and {short} for 20");
 }
+
+#[tokio::test]
+async fn inv_api_21_the_mute_and_rate_of_a_place_that_left_are_forgotten() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    for page in 0..50usize {
+        let source = video(&url_of(page));
+        stage.visible(source.clone(), true);
+        stage.set_muted(&url_of(page), true);
+        stage.set_rate(&url_of(page), 1.5);
+        stage.visible(source, false);
+    }
+    eventually(|| stage.commands_idle()).await;
+
+    assert_eq!(stage.kept_preferences(), 0);
+}
+
+#[tokio::test]
+async fn inv_api_21_a_declared_place_keeps_its_mute_when_its_player_is_unloaded_and_loaded_again() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    let source = video(&url_of(5));
+    stage.visible(source, true);
+    stage.set_muted(&url_of(5), true);
+    stage.set_window(5, videos(20));
+    eventually(|| rig.factory.slot_holding(&url_of(5)).is_some()).await;
+
+    stage.set_window(15, videos(20));
+    eventually(|| rig.factory.slot_holding(&url_of(5)).is_none() && stage.commands_idle()).await;
+    stage.set_window(5, videos(20));
+    eventually(|| rig.factory.slot_holding(&url_of(5)).is_some() && stage.commands_idle()).await;
+
+    let (_, slot) = rig.holder(&url_of(5));
+    let last = slot.calls().into_iter().rev().find(|call| matches!(call, SlotCall::Mute | SlotCall::Unmute));
+    assert_eq!(last, Some(SlotCall::Mute));
+}

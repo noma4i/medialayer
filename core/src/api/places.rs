@@ -53,6 +53,10 @@ impl Places {
         subscription
     }
 
+    pub fn is_declared(&self, key: &str) -> bool {
+        self.entries().get(key).is_some_and(|place| place.is_declared)
+    }
+
     pub fn declared(&self, key: &str, is_cached: bool) {
         self.with(key, |place| {
             place.is_declared = true;

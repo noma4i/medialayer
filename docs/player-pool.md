@@ -42,6 +42,10 @@ Slot and reach changes made with `setLimits` apply at once: extra players are un
 
 The cost of `setWindow` and `setImageWindow` depends on the size of the window, not on the length of your list. The pool copies only the pages it needs, so a feed of 2000 pages costs the same as a feed of 20.
 
+## Preferences of a place
+
+The mute and the rate of a source live while a place declares the source or a player holds it. When the place leaves and the player unloads, the pool forgets them, so a long session does not grow. A place that comes back sends its mute and rate again.
+
 ## Window is protected
 
 The pages of the window around the active page always keep their players. A place outside the window that becomes visible takes a free player only. It never takes one from the window. A visible place inside the window joins the window.

@@ -57,6 +57,14 @@ impl Ring {
         self.sync_mute()
     }
 
+    pub fn forget_mute(&mut self, key: &str) {
+        self.muted_keys.remove(key);
+    }
+
+    pub fn muted_key_count(&self) -> usize {
+        self.muted_keys.len()
+    }
+
     pub(super) fn sync_mute(&mut self) -> Vec<Command> {
         let mut out = Vec::new();
         for slot in 0..self.slots {

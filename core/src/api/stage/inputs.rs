@@ -131,6 +131,7 @@ impl Stage {
             let commands = self.state().ring.untouch(&url);
             self.dispatch(commands);
             self.inner.places.retired(&url);
+            self.forget_preferences(&url);
             return;
         }
         let now = self.now();

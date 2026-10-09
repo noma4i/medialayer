@@ -180,8 +180,25 @@ impl Stage {
         self.inner.foreground_passes.load(std::sync::atomic::Ordering::SeqCst)
     }
 
+    #[cfg(test)]
+    pub fn kept_preferences(&self) -> usize {
+        let state = self.state();
+        state.rates.len() + state.ring.muted_key_count()
+    }
+
     pub fn slot_count(&self) -> usize {
         self.state().ring.slots()
+    }
+
+    fn forget_preferences(&self, key: &str) {
+        if self.inner.places.is_declared(key) {
+            return;
+        }
+        let mut state = self.state();
+        if !state.loaded.contains_key(key) {
+            state.rates.remove(key);
+            state.ring.forget_mute(key);
+        }
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -211,6 +228,7 @@ impl Stage {
         }
         for key in unloaded {
             self.inner.places.unloaded(&key);
+            self.forget_preferences(&key);
         }
         for key in resumed {
             self.inner.places.resumed(&key);
