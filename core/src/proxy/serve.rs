@@ -147,7 +147,7 @@ async fn media(
             if head_only {
                 return head_from_origin(inner, target, headers).await;
             }
-            if needs_blocks(range) {
+            if needs_blocks(range) || first_block_is_stored(inner, &key, range).await {
                 return block_range_response(inner, target, headers, range).await;
             }
         }
@@ -158,6 +158,10 @@ async fn media(
         }
     }
     text(503, "media unavailable")
+}
+
+async fn first_block_is_stored(inner: &ProxyShared, key: &str, range: Option<ByteRange>) -> bool {
+    matches!(range, Some(ByteRange::From { start: 0, end: Some(_) })) && inner.store.len(&block_key(key, 0)).await.is_some()
 }
 
 fn needs_blocks(range: Option<ByteRange>) -> bool {

@@ -786,6 +786,24 @@ async fn inv_proxy_03_a_prefetched_block_loads_alone_and_serves_later_ranges_wit
 }
 
 #[tokio::test]
+async fn inv_proxy_03_a_small_range_from_zero_is_served_from_the_prefetched_first_block() {
+    let rig = rig_with(block_config(1000)).await;
+    let data = pattern(4500, 7);
+    let url = "https://o.test/first.mp4";
+    rig.fetcher.route(url, Script::ok(data.clone()).chunked(300));
+    let none = HashMap::new();
+    rig.proxy.fetch_first_block(url, &none, Priority::Prefetch).await.unwrap();
+    let calls = rig.fetcher.calls();
+
+    let target = path_of(&rig.proxy.url_for(url, &none).unwrap());
+    let reply = request(rig.proxy.port(), "GET", &target, &[("Range", "bytes=0-99")]).await;
+
+    assert_eq!((reply.status, reply.header("content-range")), (206, Some("bytes 0-99/4500")));
+    assert_eq!(reply.body, data[..100]);
+    assert_eq!(rig.fetcher.calls(), calls);
+}
+
+#[tokio::test]
 async fn inv_proxy_12_a_master_playlist_without_endlist_survives_a_restart_and_plays_offline() {
     let store = MemoryStore::new();
     let master = "https://o.test/live/master.m3u8";
