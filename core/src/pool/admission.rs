@@ -59,7 +59,7 @@ impl Ring {
         let farther = |binding: &super::ring::Binding, than: usize| binding.page.is_none_or(|page| page.abs_diff(self.active) > than);
         let (_, victim) = match distance {
             None => candidates
-                .filter(|(_, binding)| binding.owner == Holder::Lru)
+                .filter(|(_, binding)| binding.owner == Holder::Lru && !self.window.contains(&binding.key))
                 .map(|(slot, binding)| ((false, Reverse(0), binding.last_used), slot))
                 .min()?,
             Some(than) => candidates

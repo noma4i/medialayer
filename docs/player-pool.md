@@ -38,6 +38,10 @@ Policies decide assignment: `ring` keeps a window around the active page, `lru` 
 
 Slot and reach changes made with `setLimits` apply at once: extra players are unloaded and the window is rebuilt at the next update. These are written in the `pool` line of the `video` block of your `.mdl` file.
 
+## Window is protected
+
+The pages of the window around the active page always keep their players. A place outside the window that becomes visible takes a free player only. It never takes one from the window. A visible place inside the window joins the window.
+
 ## Position of a place that left
 
 A place that leaves the screen while it is not playing keeps its position. When the same source comes back, the new player starts at that position. A playing place restarts from the beginning, and the library keeps the last 32 positions.

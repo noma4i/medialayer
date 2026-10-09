@@ -334,3 +334,37 @@ async fn inv_api_18_a_place_that_leaves_while_not_playing_resumes_at_its_positio
     let seek = calls.iter().rposition(|call| matches!(call, SlotCall::Seek { position_ms } if *position_ms >= 14_000));
     assert!(seek.is_some_and(|seek| seek > load));
 }
+
+#[tokio::test]
+async fn inv_api_19_scrolling_a_feed_keeps_the_active_page_playing_and_its_neighbours_loaded() {
+    let rig = rig_with(|config| config.pool.reach = 1).await;
+    let stage = &rig.parts.stage;
+    let all = videos(20);
+    let mut shown: Vec<usize> = Vec::new();
+
+    for active in 0..12usize {
+        let rendered: Vec<usize> = (active.saturating_sub(2)..(active + 3).min(20)).collect();
+        for page in shown.iter().filter(|page| !rendered.contains(page)) {
+            stage.visible(all[*page].clone().unwrap(), false);
+            stage.set_playing(&url_of(*page), false);
+        }
+        for page in rendered.iter().filter(|page| !shown.contains(page)) {
+            stage.visible(all[*page].clone().unwrap(), true);
+        }
+        shown = rendered;
+        if active > 0 {
+            stage.set_playing(&url_of(active - 1), false);
+        }
+        stage.set_window(active, all.clone());
+        stage.set_playing(&url_of(active), true);
+
+        eventually(|| stage.commands_idle()).await;
+        let held = |page: usize| rig.factory.slot_holding(&url_of(page));
+        assert!(held(active).is_some_and(|(_, slot)| slot.calls().last() == Some(&SlotCall::Play)), "active {active} is not playing");
+        for page in [active.wrapping_sub(1), active + 1] {
+            if page < 20 {
+                assert!(held(page).is_some(), "page {page} next to active {active} holds no player");
+            }
+        }
+    }
+}

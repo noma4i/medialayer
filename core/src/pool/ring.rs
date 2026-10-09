@@ -151,6 +151,9 @@ impl Ring {
                 continue;
             };
             binding.page = pages.get(binding.key.as_str()).copied();
+            if binding.owner == Holder::Lru && binding.page.is_some() {
+                binding.owner = Holder::Ring;
+            }
             if binding.owner == Holder::Ring && binding.page.is_none() {
                 self.unbind(slot, ReleaseReason::SourceChange, &mut unloads);
             }
@@ -240,7 +243,7 @@ impl Ring {
             .iter()
             .enumerate()
             .filter_map(|(slot, binding)| {
-                binding.as_ref().filter(|binding| binding.owner == Holder::Lru && !binding.is_playing).map(|binding| (binding.last_used, slot))
+                binding.as_ref().filter(|binding| binding.owner == Holder::Lru && !binding.is_playing && !self.window.contains(&binding.key)).map(|binding| (binding.last_used, slot))
             })
             .min()?;
         self.unbind(victim, ReleaseReason::SourceChange, unloads);
