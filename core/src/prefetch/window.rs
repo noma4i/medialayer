@@ -1,4 +1,6 @@
+use crate::pages::{Keyed, PageKeys, Sliced};
 use std::collections::HashSet;
+use std::ops::Range;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrefetchWindow {
@@ -13,8 +15,18 @@ pub struct PageWindow {
     pub to: usize,
 }
 
+impl PrefetchWindow {
+    pub fn range(&self, active: usize, count: usize) -> Range<usize> {
+        active.saturating_add(self.from).min(count)..active.saturating_add(self.to).saturating_add(1).min(count)
+    }
+}
+
 impl PageWindow {
     pub const DEFAULT: PageWindow = PageWindow { behind: 2, from: 0, to: 9 };
+
+    pub fn range(&self, active: usize, count: usize) -> Range<usize> {
+        active.saturating_sub(self.behind).min(count)..active.saturating_add(self.to).min(count)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,33 +41,30 @@ pub struct WindowDiff {
     pub to_cancel: Vec<PrefetchJob>,
 }
 
-pub fn wanted_jobs(active: usize, keys: &[Option<String>], window: PrefetchWindow) -> Vec<PrefetchJob> {
-    if active >= keys.len() {
+pub fn wanted_jobs(active: usize, keys: &(impl PageKeys + ?Sized), window: PrefetchWindow) -> Vec<PrefetchJob> {
+    if active >= keys.count() {
         return Vec::new();
     }
-    let lower = active.saturating_add(window.from).min(keys.len());
-    let upper = active.saturating_add(window.to).saturating_add(1).min(keys.len());
-    (lower..upper)
-        .filter_map(|index| {
-            keys[index].as_ref().map(|key| PrefetchJob { key: key.clone(), priority: index as i64 - active as i64 })
-        })
+    window
+        .range(active, keys.count())
+        .filter_map(|index| keys.key(index).map(|key| PrefetchJob { key: key.to_string(), priority: index as i64 - active as i64 }))
         .collect()
 }
 
-pub fn wanted_page_jobs(active: usize, pages: &[Vec<String>], window: PageWindow) -> Vec<PrefetchJob> {
-    if active >= pages.len() {
+pub fn wanted_page_jobs<S: Keyed>(active: usize, pages: &Sliced<Vec<S>>, window: PageWindow) -> Vec<PrefetchJob> {
+    if active >= pages.count() {
         return Vec::new();
     }
-    let ahead_start = active.saturating_add(window.from).min(pages.len());
-    let ahead_end = active.saturating_add(window.to).min(pages.len());
+    let ahead_start = active.saturating_add(window.from).min(pages.count());
+    let ahead_end = active.saturating_add(window.to).min(pages.count());
     let behind_start = active.saturating_sub(window.behind);
     let order = (ahead_start..ahead_end).chain((behind_start..active).rev());
     let mut seen = HashSet::new();
     let mut jobs = Vec::new();
     for page in order {
-        for key in &pages[page] {
-            if seen.insert(key.as_str()) {
-                jobs.push(PrefetchJob { key: key.clone(), priority: page as i64 - active as i64 });
+        for key in pages.get(page).into_iter().flatten().map(Keyed::key) {
+            if seen.insert(key) {
+                jobs.push(PrefetchJob { key: key.to_string(), priority: page as i64 - active as i64 });
             }
         }
     }

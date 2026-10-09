@@ -9,6 +9,7 @@ pub mod hls;
 pub mod identity;
 pub mod limits;
 pub mod memory;
+pub mod pages;
 pub mod pool;
 pub mod prefetch;
 pub mod proxy;
@@ -20,6 +21,11 @@ pub fn version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+#[cfg(test)]
+mod alloc_probe;
+#[cfg(test)]
+#[global_allocator]
+static ALLOCATOR: alloc_probe::Counting = alloc_probe::Counting;
 #[cfg(test)]
 mod hardening_tests;
 #[cfg(test)]

@@ -1,7 +1,8 @@
-use super::Stage;
+use super::{Stage, State};
 use crate::api::slots::SlotCall;
 use crate::api::source::MediaItem;
 use crate::api::types::Kind;
+use crate::pages::Sliced;
 use crate::session::Intent;
 use std::collections::HashSet;
 
@@ -10,29 +11,35 @@ const MAX_RATE: f32 = 4.0;
 
 impl Stage {
     pub fn set_window(&self, active: usize, sources: Vec<Option<MediaItem>>) {
-        let keys: Vec<Option<String>> =
-            sources.iter().map(|source| source.as_ref().filter(|source| source.kind != Kind::Image).map(|source| source.url.clone())).collect();
+        let count = sources.len();
+        let reach = self.state().ring.pages(active, count);
+        let wanted = self.inner.prefetcher.window_range(active, count);
+        let sources = Sliced::of(sources, reach.start.min(wanted.start)..reach.end.max(wanted.end));
+        let keys = sources.map(|source| (source.kind != Kind::Image).then(|| source.url.clone()));
         let now = self.now();
         let commands = {
             let mut state = self.state();
-            for source in sources.iter().flatten() {
+            for source in sources.present() {
                 state.catalog.insert(source.url.clone(), source.clone());
             }
-            let playing = state.playing_page(&keys);
+            let playing = state.playing_page(&keys, reach.start..reach.end);
             let commands = state.ring.plan(now, active, playing, &keys);
-            let urls: HashSet<&str> = sources.iter().flatten().map(|source| source.url.as_str()).collect();
-            let loaded: HashSet<String> = state.loaded.keys().cloned().collect();
-            state.catalog.retain(|key, _| urls.contains(key.as_str()) || loaded.contains(key));
+            let kept: HashSet<&str> = sources.present().map(|source| source.url.as_str()).collect();
+            let State { catalog, loaded, leases, views, .. } = &mut *state;
+            catalog.retain(|key, _| kept.contains(key.as_str()) || loaded.contains_key(key) || leases.contains_key(key) || views.contains_key(key));
             commands
         };
         self.dispatch(commands);
-        let remote = sources.iter().map(|source| source.as_ref().filter(|source| !source.is_local()).map(MediaItem::for_prefetch));
-        self.inner.prefetcher.set_window(active, remote.collect());
+        let remote = sources.map(|source| (!source.is_local()).then(|| source.for_prefetch()));
+        self.inner.prefetcher.set_window(active, remote);
     }
 
     pub fn set_image_window(&self, name: &str, active: usize, pages: Vec<Vec<MediaItem>>) {
-        let remote = pages.iter().map(|page| page.iter().filter(|source| !source.is_local()).map(MediaItem::for_prefetch).collect());
-        self.inner.prefetcher.set_image_window(name, active, remote.collect());
+        let count = pages.len();
+        let range = self.inner.prefetcher.image_window_range(name, active, count);
+        let pages = Sliced::of(pages.into_iter().map(Some).collect(), range);
+        let remote = pages.map(|page| Some(page.iter().filter(|source| !source.is_local()).map(MediaItem::for_prefetch).collect()));
+        self.inner.prefetcher.set_image_window(name, active, remote);
     }
 
     pub fn set_playing(&self, key: &str, playing: bool) {

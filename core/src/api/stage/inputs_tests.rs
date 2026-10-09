@@ -368,3 +368,19 @@ async fn inv_api_19_scrolling_a_feed_keeps_the_active_page_playing_and_its_neigh
         }
     }
 }
+
+#[tokio::test]
+async fn inv_api_20_declaring_a_window_costs_the_same_for_a_short_and_a_long_list() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    let measure = |count: usize| {
+        let sources = videos(count);
+        crate::alloc_probe::allocations_of(|| stage.set_window(count / 2, sources))
+    };
+    measure(20);
+    measure(2000);
+    let short = measure(20);
+    let long = measure(2000);
+
+    assert!(long <= short * 2, "set_window allocated {long} times for 2000 sources and {short} for 20");
+}

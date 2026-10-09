@@ -38,6 +38,10 @@ Policies decide assignment: `ring` keeps a window around the active page, `lru` 
 
 Slot and reach changes made with `setLimits` apply at once: extra players are unloaded and the window is rebuilt at the next update. These are written in the `pool` line of the `video` block of your `.mdl` file.
 
+## Cost of a window
+
+The cost of `setWindow` and `setImageWindow` depends on the size of the window, not on the length of your list. The pool copies only the pages it needs, so a feed of 2000 pages costs the same as a feed of 20.
+
 ## Window is protected
 
 The pages of the window around the active page always keep their players. A place outside the window that becomes visible takes a free player only. It never takes one from the window. A visible place inside the window joins the window.

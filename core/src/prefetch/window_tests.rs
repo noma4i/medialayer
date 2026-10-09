@@ -1,4 +1,5 @@
 use super::*;
+use crate::pages::Sliced;
 
 const V3_WINDOW: PrefetchWindow = PrefetchWindow { from: 2, to: 5 };
 
@@ -95,7 +96,7 @@ fn pages(count: usize) -> Vec<Vec<String>> {
 
 #[test]
 fn inv_prefetch_09_a_page_window_wants_every_source_of_the_pages_ahead_then_the_pages_behind_nearest_first() {
-    let wanted = wanted_page_jobs(5, &pages(20), PageWindow { behind: 2, from: 0, to: 3 });
+    let wanted = wanted_page_jobs(5, &Sliced::from(pages(20)), PageWindow { behind: 2, from: 0, to: 3 });
 
     assert_eq!(names(&wanted), ["m5a", "m5b", "m6a", "m6b", "m7a", "m7b", "m4a", "m4b", "m3a", "m3b"]);
     assert_eq!(priorities(&wanted), [0, 0, 1, 1, 2, 2, -1, -1, -2, -2]);
@@ -110,7 +111,7 @@ fn inv_prefetch_09_a_page_window_ends_before_to_starts_at_from_and_stops_at_the_
         ("an active page past the list wants nothing", 20, PageWindow::DEFAULT, vec![]),
     ];
     for (name, active, window, expected) in cases {
-        assert_eq!(names(&wanted_page_jobs(active, &pages(20), window)), expected, "{name}");
+        assert_eq!(names(&wanted_page_jobs(active, &Sliced::from(pages(20)), window)), expected, "{name}");
     }
 }
 
@@ -118,7 +119,7 @@ fn inv_prefetch_09_a_page_window_ends_before_to_starts_at_from_and_stops_at_the_
 fn inv_prefetch_09_a_source_shared_by_two_pages_is_wanted_once_at_its_nearest_page() {
     let shared = vec![vec!["x".to_string()], vec!["y".to_string(), "x".to_string()], vec!["x".to_string()]];
 
-    let wanted = wanted_page_jobs(0, &shared, PageWindow { behind: 0, from: 0, to: 3 });
+    let wanted = wanted_page_jobs(0, &Sliced::from(shared), PageWindow { behind: 0, from: 0, to: 3 });
 
     assert_eq!(names(&wanted), ["x", "y"]);
     assert_eq!(priorities(&wanted), [0, 1]);

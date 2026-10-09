@@ -2,6 +2,7 @@ use super::config::PoolConfig;
 use crate::memory::{Ledger, Reservation, Step};
 use super::retention::{Retention, SlotState};
 use super::stats::{PoolCounters, ReleaseReason};
+use crate::pages::PageKeys;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
 
@@ -129,15 +130,15 @@ impl Ring {
         active.saturating_sub(reach)..active.saturating_add(reach).saturating_add(1).min(count)
     }
 
-    pub fn plan(&mut self, now: u64, active: usize, playback: Option<usize>, keys: &[Option<String>]) -> Vec<Command> {
+    pub fn plan(&mut self, now: u64, active: usize, playback: Option<usize>, keys: &(impl PageKeys + ?Sized)) -> Vec<Command> {
         self.active = active;
         if self.is_background {
             return Vec::new();
         }
-        let wanted = self.pages(active, keys.len());
+        let wanted = self.pages(active, keys.count());
         let pages: HashMap<&str, usize> =
-            wanted.clone().filter_map(|page| keys[page].as_deref().map(|key| (key, page))).collect();
-        let window: Vec<String> = wanted.clone().filter_map(|page| keys[page].clone()).collect();
+            wanted.clone().filter_map(|page| keys.key(page).map(|key| (key, page))).collect();
+        let window: Vec<String> = wanted.clone().filter_map(|page| keys.key(page).map(str::to_string)).collect();
         if self.hold.as_ref().is_some_and(|hold| hold.window != window || hold.until.is_some_and(|until| now >= until)) {
             self.hold = None;
         }
@@ -162,7 +163,7 @@ impl Ring {
         let mut nearest_first: Vec<usize> = wanted.clone().collect();
         nearest_first.sort_by_key(|page| (page.abs_diff(active), *page < active));
         for page in nearest_first {
-            let Some(key) = keys[page].as_ref() else {
+            let Some(key) = keys.key(page) else {
                 continue;
             };
             if is_blocked || self.slot_of(key).is_some() {
@@ -172,13 +173,13 @@ impl Ring {
                 continue;
             };
             let mut staged = Vec::new();
-            self.bind(slot, key.clone(), Holder::Ring, Some(page), now, &mut unloads, &mut staged);
+            self.bind(slot, key.to_string(), Holder::Ring, Some(page), now, &mut unloads, &mut staged);
             staged_loads.push((page, staged));
         }
         staged_loads.sort_by_key(|(page, _)| *page);
         let loads: Vec<Command> = staged_loads.into_iter().flat_map(|(_, staged)| staged).collect();
 
-        let playback_key = playback.filter(|page| wanted.contains(page)).and_then(|page| keys[page].clone());
+        let playback_key = playback.filter(|page| wanted.contains(page)).and_then(|page| keys.key(page).map(str::to_string));
         let mut pauses = Vec::new();
         let mut plays = Vec::new();
         let mut prerolls = Vec::new();
@@ -231,6 +232,10 @@ impl Ring {
         self.bindings.get(slot)?.as_ref().map(|binding| binding.key.as_str())
     }
 
+    pub(super) fn is_spare(&self, binding: &Binding) -> bool {
+        binding.owner == Holder::Lru && !binding.is_playing && !self.window.contains(&binding.key)
+    }
+
     pub(super) fn acquire(&mut self, preferred: Option<usize>, unloads: &mut Vec<Command>) -> Option<usize> {
         if let Some(slot) = preferred.filter(|slot| self.bindings[*slot].is_none()) {
             return Some(slot);
@@ -242,9 +247,7 @@ impl Ring {
             .bindings
             .iter()
             .enumerate()
-            .filter_map(|(slot, binding)| {
-                binding.as_ref().filter(|binding| binding.owner == Holder::Lru && !binding.is_playing && !self.window.contains(&binding.key)).map(|binding| (binding.last_used, slot))
-            })
+            .filter_map(|(slot, binding)| binding.as_ref().filter(|binding| self.is_spare(binding)).map(|binding| (binding.last_used, slot)))
             .min()?;
         self.unbind(victim, ReleaseReason::SourceChange, unloads);
         Some(victim)

@@ -7,7 +7,9 @@ use super::source::Source;
 use super::window::{diff_window, wanted_jobs, wanted_page_jobs, PageWindow, PrefetchJob, PrefetchWindow};
 use crate::cache::Clock;
 use crate::limits::Limits;
+use crate::pages::Sliced;
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -140,21 +142,32 @@ impl Prefetcher {
         self.shared.state().ledger.set_limits(window, limits.dedupe_max_entries as usize);
     }
 
-    pub fn set_window(&self, active: usize, sources: Vec<Option<Source>>) {
-        let urls: Vec<Option<String>> = sources.iter().map(|source| source.as_ref().map(|source| source.url.clone())).collect();
-        let wanted = wanted_jobs(active, &urls, self.shared.tuning().window);
-        self.apply_window(WindowKey::Stage, wanted, sources.into_iter().flatten().collect());
+    pub fn window_range(&self, active: usize, count: usize) -> Range<usize> {
+        self.shared.tuning().window.range(active, count)
+    }
+
+    pub fn image_window_range(&self, name: &str, active: usize, count: usize) -> Range<usize> {
+        self.image_window(name).range(active, count)
+    }
+
+    pub fn set_window(&self, active: usize, sources: impl Into<Sliced<Source>>) {
+        let sources = sources.into();
+        let wanted = wanted_jobs(active, &sources, self.shared.tuning().window);
+        self.apply_window(WindowKey::Stage, wanted, sources.into_present().collect());
     }
 
     pub fn set_image_windows(&self, windows: HashMap<String, PageWindow>) {
         *self.shared.image_windows.lock().unwrap_or_else(PoisonError::into_inner) = windows;
     }
 
-    pub fn set_image_window(&self, name: &str, active: usize, pages: Vec<Vec<Source>>) {
-        let window = self.shared.image_windows.lock().unwrap_or_else(PoisonError::into_inner).get(name).copied().unwrap_or(PageWindow::DEFAULT);
-        let urls: Vec<Vec<String>> = pages.iter().map(|page| page.iter().map(|source| source.url.clone()).collect()).collect();
-        let wanted = wanted_page_jobs(active, &urls, window);
-        self.apply_window(WindowKey::Image(name.to_string()), wanted, pages.into_iter().flatten().collect());
+    pub fn set_image_window(&self, name: &str, active: usize, pages: impl Into<Sliced<Vec<Source>>>) {
+        let pages = pages.into();
+        let wanted = wanted_page_jobs(active, &pages, self.image_window(name));
+        self.apply_window(WindowKey::Image(name.to_string()), wanted, pages.into_present().flatten().collect());
+    }
+
+    fn image_window(&self, name: &str) -> PageWindow {
+        self.shared.image_windows.lock().unwrap_or_else(PoisonError::into_inner).get(name).copied().unwrap_or(PageWindow::DEFAULT)
     }
 
     fn apply_window(&self, key: WindowKey, wanted: Vec<PrefetchJob>, sources: Vec<Source>) {

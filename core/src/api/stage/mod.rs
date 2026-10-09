@@ -11,10 +11,12 @@ use super::source::{MediaItem, PlaybackRoute};
 use super::types::Kind;
 use crate::cache::Clock;
 use crate::hls::is_manifest_url;
+use crate::pages::PageKeys;
 use crate::pool::{Command, Ring};
 use crate::prefetch::Prefetcher;
 use crate::session::{self, next_action, Action, Context, Election, Event, RecoveryState, WatchdogConfig};
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
@@ -112,10 +114,10 @@ impl State {
         self.leases.get(key).is_some_and(|lease| self.election.active() == Some(*lease))
     }
 
-    fn playing_page(&self, keys: &[Option<String>]) -> Option<usize> {
+    fn playing_page(&self, keys: &impl PageKeys, pages: Range<usize>) -> Option<usize> {
         let lease = self.election.active()?;
         let playing = self.keys_by_lease.get(&lease)?;
-        keys.iter().position(|key| key.as_deref() == Some(playing.as_str()))
+        pages.into_iter().find(|page| keys.key(*page) == Some(playing.as_str()))
     }
 
     fn commands_for(&mut self, orders: Vec<session::LeaseOrder>) -> Vec<Command> {

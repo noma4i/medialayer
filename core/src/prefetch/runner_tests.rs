@@ -382,11 +382,11 @@ async fn inv_prefetch_08_a_source_wanted_by_two_windows_loads_once_and_is_cancel
     rig.prefetcher.set_image_window("two", 0, shared_page);
     eventually(|| rig.loader.active() == 1).await;
 
-    rig.prefetcher.set_image_window("one", 0, Vec::new());
+    rig.prefetcher.set_image_window("one", 0, Vec::<Vec<Source>>::new());
     quiet().await;
     assert_eq!((rig.loader.urls().len(), rig.loader.active(), rig.prefetcher.counters().cancelled), (1, 1, 0));
 
-    rig.prefetcher.set_image_window("two", 0, Vec::new());
+    rig.prefetcher.set_image_window("two", 0, Vec::<Vec<Source>>::new());
     eventually(|| rig.loader.active() == 0).await;
     assert_eq!((rig.loader.urls().len(), rig.prefetcher.counters().cancelled), (1, 1));
 }
