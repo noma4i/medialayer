@@ -961,7 +961,7 @@ async fn inv_proxy_11_an_origin_that_answers_200_to_a_range_still_serves_every_r
         assert_eq!(reply.body, data[start as usize..=end as usize], "{range}");
         let second = request(port, "GET", &target, &[("Range", "bytes=1000-1099")]).await;
         assert_eq!((second.status, second.body), (206, data[1000..1100].to_vec()), "{range}");
-        assert_eq!(rig.store.bytes(IGNORING), Some(data.clone()), "{range}");
+        assert!(eventually(|| rig.store.bytes(IGNORING) == Some(data.clone())).await, "{range}");
         let calls = rig.fetcher.calls();
 
         let third = request(port, "GET", &target, &[("Range", "bytes=1000-1099")]).await;
@@ -990,17 +990,36 @@ async fn inv_proxy_05_parallel_ranges_of_an_origin_that_ignores_ranges_fetch_the
         };
         assert_eq!(reply.body, data[start..=end], "{range}");
     }
-    assert_eq!(rig.fetcher.calls(), 1);
-    assert_eq!(rig.store.open_writers(), 0);
+    assert!(eventually(|| rig.store.open_writers() == 0).await);
+    assert_eq!(rig.fetcher.bytes_served(), data.len() as u64);
 }
 
 #[tokio::test]
-async fn inv_proxy_13_an_object_above_the_response_limit_is_refused_when_the_origin_ignores_the_range() {
+async fn inv_proxy_21_an_object_above_the_response_limit_streams_when_the_origin_ignores_the_range() {
     let rig = rig_with(block_config(1000)).await;
     let size = crate::memory::InputLimits::default().response_bytes + 1;
     rig.fetcher.route(IGNORING, Script::filled(size).ignoring_range());
     let target = path_of(&rig.proxy.url_for(IGNORING, &HashMap::new()).unwrap());
     let reply = request(rig.proxy.port(), "GET", &target, &[("Range", "bytes=2-")]).await;
-    assert_eq!(reply.status, 502);
-    assert_eq!((rig.store.count(), rig.store.open_writers()), (0, 0));
+    assert_eq!((reply.status, reply.body.len() as u64), (206, size - 2));
+    assert_eq!(rig.store.open_writers(), 0);
+}
+
+#[tokio::test]
+async fn inv_proxy_21_a_range_of_an_origin_that_ignores_ranges_starts_answering_before_the_download_ends() {
+    let data = pattern(6000, 3);
+    let rig = rig_with(block_config(1000)).await;
+    rig.fetcher.route(IGNORING, Script::ok(data.clone()).chunked(300).chunk_delay(Duration::from_millis(20)).ignoring_range());
+    let target = path_of(&rig.proxy.url_for(IGNORING, &HashMap::new()).unwrap());
+    let port = rig.proxy.port();
+    let first = request(port, "GET", &target, &[("Range", "bytes=0-1")]).await;
+    assert_eq!((first.status, first.body), (206, data[..2].to_vec()));
+
+    let mut stream = open(port, "GET", &target, &[("Range", "bytes=2-")]).await;
+    read_at_least(&mut stream, 1).await;
+    let served = rig.fetcher.bytes_served();
+    assert!(served < data.len() as u64 / 2, "the answer waited for {served} of {} origin bytes", data.len());
+    let mut rest = Vec::new();
+    tokio::io::AsyncReadExt::read_to_end(&mut stream, &mut rest).await.unwrap();
+    assert!(rest.ends_with(&data[2..]));
 }

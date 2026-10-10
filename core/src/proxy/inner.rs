@@ -8,7 +8,7 @@ use crate::hls::is_manifest_url;
 use super::slots::{Priority, PrioritySlots};
 use crate::fetch::Fetcher;
 use crate::identity::namespaced_key;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -53,6 +53,7 @@ pub(super) struct ProxyShared {
     pub tasks: Tasks,
     pub playlist_stamps: Mutex<HashMap<String, Instant>>,
     pub totals: Mutex<HashMap<String, u64>>,
+    whole_only: Mutex<HashSet<String>>,
     probe_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub listener: tokio::sync::Mutex<Option<Listener>>,
     pub running: AtomicBool,
@@ -110,6 +111,7 @@ impl ProxyShared {
             tasks,
             playlist_stamps: Mutex::new(HashMap::new()),
             totals: Mutex::new(HashMap::new()),
+            whole_only: Mutex::new(HashSet::new()),
             probe_locks: Mutex::new(HashMap::new()),
             listener: tokio::sync::Mutex::new(None),
             running: AtomicBool::new(false),
@@ -272,6 +274,18 @@ impl ProxyShared {
             totals.clear();
         }
         totals.insert(key.to_string(), total);
+    }
+
+    pub fn mark_ignores_range(&self, key: &str) {
+        let mut keys = locked(&self.whole_only);
+        if keys.len() >= MAX_TOTALS {
+            keys.clear();
+        }
+        keys.insert(key.to_string());
+    }
+
+    pub fn ignores_range(&self, key: &str) -> bool {
+        locked(&self.whole_only).contains(key)
     }
 
     pub fn probe_lock(&self, key: &str) -> Arc<tokio::sync::Mutex<()>> {
