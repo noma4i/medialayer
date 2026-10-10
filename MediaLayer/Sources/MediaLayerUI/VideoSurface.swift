@@ -1,10 +1,14 @@
+import AVFoundation
 import QuartzCore
 import SwiftUI
 
-func layoutHosted(_ layer: CALayer?, bounds: CGRect) {
+func layoutHosted(_ layer: CALayer?, bounds: CGRect, gravity: AVLayerVideoGravity = .resizeAspectFill) {
   CATransaction.begin()
   CATransaction.setDisableActions(true)
-  layer?.sublayers?.forEach { $0.frame = bounds }
+  layer?.sublayers?.forEach {
+    $0.frame = bounds
+    ($0 as? AVPlayerLayer)?.videoGravity = gravity
+  }
   CATransaction.commit()
 }
 
@@ -37,10 +41,11 @@ import UIKit
 
 final class SurfaceView: UIView {
   var attachment: SurfaceAttachment?
+  var gravity = AVLayerVideoGravity.resizeAspectFill
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    layoutHosted(layer, bounds: bounds)
+    layoutHosted(layer, bounds: bounds, gravity: gravity)
   }
 }
 
@@ -49,6 +54,7 @@ struct VideoSurface: UIViewRepresentable {
   let key: String
   let owner: UUID
   let isPlaying: Bool
+  var gravity = AVLayerVideoGravity.resizeAspectFill
 
   func makeUIView(context: Context) -> SurfaceView {
     let view = SurfaceView()
@@ -58,6 +64,10 @@ struct VideoSurface: UIViewRepresentable {
   }
 
   func updateUIView(_ view: SurfaceView, context: Context) {
+    if view.gravity != gravity {
+      view.gravity = gravity
+      view.setNeedsLayout()
+    }
     if view.attachment == nil {
       view.attachment = SurfaceAttachment(places: places, key: key, layer: view.layer, owner: owner, isPlaying: isPlaying)
     }
@@ -72,10 +82,11 @@ import AppKit
 
 final class SurfaceView: NSView {
   var attachment: SurfaceAttachment?
+  var gravity = AVLayerVideoGravity.resizeAspectFill
 
   override func layout() {
     super.layout()
-    layoutHosted(layer, bounds: bounds)
+    layoutHosted(layer, bounds: bounds, gravity: gravity)
   }
 }
 
@@ -84,6 +95,7 @@ struct VideoSurface: NSViewRepresentable {
   let key: String
   let owner: UUID
   let isPlaying: Bool
+  var gravity = AVLayerVideoGravity.resizeAspectFill
 
   func makeNSView(context: Context) -> SurfaceView {
     let view = SurfaceView()
@@ -92,6 +104,10 @@ struct VideoSurface: NSViewRepresentable {
   }
 
   func updateNSView(_ view: SurfaceView, context: Context) {
+    if view.gravity != gravity {
+      view.gravity = gravity
+      view.needsLayout = true
+    }
     if view.attachment == nil, let layer = view.layer {
       view.attachment = SurfaceAttachment(places: places, key: key, layer: layer, owner: owner, isPlaying: isPlaying)
     }

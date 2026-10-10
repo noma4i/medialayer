@@ -1,3 +1,4 @@
+import AVFoundation
 import MediaLayer
 import SwiftUI
 
@@ -28,6 +29,7 @@ public struct MediaVideo<Content: View>: View {
   private let playing: Bool
   private let muted: Bool
   private let loop: Bool
+  private let gravity: AVLayerVideoGravity
   private let onFirstFrame: () -> Void
   private let onEnd: () -> Void
   private let content: (MediaState) -> Content
@@ -37,6 +39,7 @@ public struct MediaVideo<Content: View>: View {
     playing: Bool = true,
     muted: Bool = false,
     loop: Bool = true,
+    gravity: AVLayerVideoGravity = .resizeAspectFill,
     onFirstFrame: @escaping () -> Void = {},
     onEnd: @escaping () -> Void = {},
     @ViewBuilder content: @escaping (MediaState) -> Content
@@ -45,6 +48,7 @@ public struct MediaVideo<Content: View>: View {
     self.playing = playing
     self.muted = muted
     self.loop = loop
+    self.gravity = gravity
     self.onFirstFrame = onFirstFrame
     self.onEnd = onEnd
     self.content = content
@@ -54,7 +58,7 @@ public struct MediaVideo<Content: View>: View {
     ZStack {
       if let context {
         PlaceholderView(item: item, ready: state.isReady, context: context)
-        VideoSurface(places: context.places, key: source.url, owner: owner, isPlaying: playing)
+        VideoSurface(places: context.places, key: source.url, owner: owner, isPlaying: playing, gravity: gravity)
       }
       content(state)
     }
@@ -99,9 +103,10 @@ extension MediaVideo where Content == EmptyView {
     playing: Bool = true,
     muted: Bool = false,
     loop: Bool = true,
+    gravity: AVLayerVideoGravity = .resizeAspectFill,
     onFirstFrame: @escaping () -> Void = {},
     onEnd: @escaping () -> Void = {}
   ) {
-    self.init(source, playing: playing, muted: muted, loop: loop, onFirstFrame: onFirstFrame, onEnd: onEnd) { _ in EmptyView() }
+    self.init(source, playing: playing, muted: muted, loop: loop, gravity: gravity, onFirstFrame: onFirstFrame, onEnd: onEnd) { _ in EmptyView() }
   }
 }
