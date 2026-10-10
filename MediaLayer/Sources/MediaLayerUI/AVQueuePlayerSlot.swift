@@ -51,6 +51,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private var cachedSample = SlotSample(positionMs: 0, durationMs: nil, isLooping: false, viewAttached: false, frameRendered: false)
 
   private var key: String?
+  private var hostKey: String?
   private var item: AVPlayerItem?
   private var observations: [NSKeyValueObservation] = []
   private var traceObservations: [NSKeyValueObservation] = []
@@ -96,6 +97,10 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
       }
       MediaTrace.emit("player", "slot=\(id) load key=\(MediaTrace.tail(key)) url=\(MediaTrace.tail(route.url))")
       tearDownItem()
+      if hostKey != key {
+        layer.removeFromSuperlayer()
+        hostKey = nil
+      }
       let item = AVPlayerItem(asset: AVURLAsset(url: url, options: Self.assetOptions(for: route)))
       self.item = item
       looping = route.looping
@@ -185,6 +190,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   func attach(to host: CALayer) {
     onMain { [self] in
       host.addSublayer(layer)
+      hostKey = key
       layer.frame = host.bounds
       refreshSample()
     }
@@ -193,6 +199,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   public func detach() {
     onMain { [self] in
       layer.removeFromSuperlayer()
+      hostKey = nil
       refreshSample()
     }
   }
@@ -293,7 +300,6 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     item?.asset.cancelLoading()
     player.pause()
     player.removeAllItems()
-    layer.removeFromSuperlayer()
     item = nil
     player.defaultRate = 1
     prerollRequested = false

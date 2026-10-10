@@ -44,6 +44,22 @@ struct AVQueuePlayerSlotTests {
   }
 
   @Test
+  func reloadingTheSameKeyKeepsTheHost() async {
+    let log = PlayerEventLog()
+    let slot = makeSlot(log)
+    let host = CALayer()
+    slot.load(key: "a", route: route(Self.silentClip))
+    slot.attach(to: host)
+    await drainMain()
+
+    slot.unload()
+    slot.load(key: "a", route: route(Self.silentClip))
+    await drainMain()
+
+    #expect(slot.layer.superlayer === host)
+  }
+
+  @Test
   func localClipPlaysMutedFromReadyToEnded() async throws {
     let log = PlayerEventLog()
     let slot = makeSlot(log)
