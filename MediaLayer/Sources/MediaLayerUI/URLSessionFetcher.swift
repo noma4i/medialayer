@@ -5,6 +5,9 @@ public final class URLSessionFetcher: Fetcher, @unchecked Sendable {
   public static let defaultBufferLimit = 1 << 20
   public static let defaultTimeout: TimeInterval = 30
   private static let traceDelay: UInt64? = ProcessInfo.processInfo.environment["ML_FETCH_DELAY_MS"].flatMap(UInt64.init).map { $0 * 1_000_000 }
+  private static let traceIgnoresRange: Set<String> = Set(
+    (ProcessInfo.processInfo.environment["ML_IGNORE_RANGE_EXTENSIONS"] ?? "").split(separator: ",").map(String.init)
+  )
 
   private let router = StreamRouter()
   private let session: URLSession
@@ -31,7 +34,7 @@ public final class URLSessionFetcher: Fetcher, @unchecked Sendable {
     }
     var urlRequest = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
     for (name, value) in request.headers { urlRequest.setValue(value, forHTTPHeaderField: name) }
-    if let start = request.rangeStart {
+    if let start = request.rangeStart, !Self.traceIgnoresRange.contains(url.pathExtension) {
       urlRequest.setValue("bytes=\(start)-\(request.rangeEnd.map(String.init) ?? "")", forHTTPHeaderField: "Range")
     }
     if let delay = Self.traceDelay { try await Task.sleep(nanoseconds: delay) }
