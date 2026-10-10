@@ -34,7 +34,6 @@ pub struct Sample {
     pub position_ms: u64,
     pub duration_ms: Option<u64>,
     pub is_looping: bool,
-    pub loop_wrapped: bool,
     pub view_attached: bool,
     pub frame_rendered: bool,
 }
@@ -74,12 +73,12 @@ pub fn window_delay_ms(config: &WatchdogConfig, has_progress: bool, is_cooling: 
     }
 }
 
-pub fn has_clock_advanced(config: &WatchdogConfig, start_ms: u64, current_ms: u64, loop_wrapped: bool) -> bool {
-    loop_wrapped || current_ms > start_ms.saturating_add(config.progress_threshold_ms)
+pub fn has_clock_advanced(config: &WatchdogConfig, start_ms: u64, current_ms: u64, is_looping: bool) -> bool {
+    (is_looping && current_ms < start_ms) || current_ms > start_ms.saturating_add(config.progress_threshold_ms)
 }
 
 pub fn evaluate(config: &WatchdogConfig, start_ms: u64, sample: &Sample, progress: &Progress) -> Verdict {
-    let advanced = has_clock_advanced(config, start_ms, sample.position_ms, sample.loop_wrapped);
+    let advanced = has_clock_advanced(config, start_ms, sample.position_ms, sample.is_looping);
     let is_near_end = !sample.is_looping
         && sample.duration_ms.is_some_and(|duration| sample.position_ms >= duration.saturating_sub(config.near_end_ms));
     let is_visible = !sample.view_attached || sample.frame_rendered;

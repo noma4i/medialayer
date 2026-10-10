@@ -2,7 +2,7 @@ use super::*;
 use crate::proxy::Readiness;
 
 fn stalled() -> Sample {
-    Sample { position_ms: 0, duration_ms: Some(60_000), is_looping: false, loop_wrapped: false, view_attached: false, frame_rendered: false }
+    Sample { position_ms: 0, duration_ms: Some(60_000), is_looping: false, view_attached: false, frame_rendered: false }
 }
 
 fn moving(position_ms: u64) -> Sample {
@@ -260,4 +260,23 @@ fn inv_session_09_foreground_resets_watchdog_startup_and_retry_budgets() {
         assert_eq!(play_and_fire(&mut state, &mut now, stalled()), Action::Recover);
     }
     assert_eq!(play_and_fire(&mut state, &mut now, stalled()), Action::PurgeCache("v1".into()));
+}
+
+fn wrapped(position_ms: u64) -> Sample {
+    Sample { is_looping: true, frame_rendered: true, view_attached: true, ..moving(position_ms) }
+}
+
+#[test]
+fn inv_session_11_a_looping_clip_that_wrapped_is_progress_and_a_clip_that_went_back_without_a_loop_is_a_stall() {
+    let mut looping = loaded();
+    let mut now = 0;
+    assert_eq!(play_and_fire(&mut looping, &mut now, wrapped(5_000)), Action::Arm { delay_ms: 3_000 });
+    now += 3_000;
+    assert_eq!(next_action(&mut looping, Event::WatchdogFired(wrapped(1_000)), now), Action::Arm { delay_ms: 3_000 });
+
+    let mut once = loaded();
+    let mut now = 0;
+    assert_eq!(play_and_fire(&mut once, &mut now, Sample { is_looping: false, ..wrapped(5_000) }), Action::Arm { delay_ms: 3_000 });
+    now += 3_000;
+    assert_eq!(next_action(&mut once, Event::WatchdogFired(Sample { is_looping: false, ..wrapped(1_000) }), now), Action::Recover);
 }

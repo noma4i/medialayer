@@ -17,6 +17,10 @@ All behavior is in the Rust core (`core/`). Swift (`MediaLayer/`) and Kotlin (`k
 | `image` | Image bytes for image loaders: fetch through the core, store in the one disk cache, decode BlurHash |
 | `controls` | Limits, statistics, clear, purge, eviction on demand |
 
+## Stall watchdog
+
+While a place plays, the core samples its player and reloads it when the position stops moving. A looping video that wraps to the start counts as moving, so a loop never reloads the player. A video that does not loop and goes back is a stall.
+
 ## What the platform provides
 
 | Interface | Purpose |

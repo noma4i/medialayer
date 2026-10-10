@@ -1,7 +1,7 @@
 use super::*;
 
 fn sample(position_ms: u64) -> Sample {
-    Sample { position_ms, duration_ms: Some(60_000), is_looping: false, loop_wrapped: false, view_attached: false, frame_rendered: false }
+    Sample { position_ms, duration_ms: Some(60_000), is_looping: false, view_attached: false, frame_rendered: false }
 }
 
 fn progress(attempts: u32) -> Progress {

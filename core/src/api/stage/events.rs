@@ -113,7 +113,7 @@ impl Stage {
         else {
             return;
         };
-        let sample = Sample { position_ms, duration_ms, is_looping, loop_wrapped: false, view_attached, frame_rendered };
+        let sample = Sample { position_ms, duration_ms, is_looping, view_attached, frame_rendered };
         self.feed(key, Event::WatchdogFired(sample));
     }
 
