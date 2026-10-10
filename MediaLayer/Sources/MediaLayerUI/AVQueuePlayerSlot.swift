@@ -293,6 +293,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     item?.asset.cancelLoading()
     player.pause()
     player.removeAllItems()
+    layer.removeFromSuperlayer()
     item = nil
     player.defaultRate = 1
     prerollRequested = false

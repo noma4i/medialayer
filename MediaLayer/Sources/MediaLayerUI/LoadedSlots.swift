@@ -31,6 +31,12 @@ private struct WeakSlot {
   init(_ value: AVQueuePlayerSlot) { self.value = value }
 }
 
+enum HostRelease: Equatable {
+  case none
+  case detach
+  case handover(UInt64)
+}
+
 public final class HostLayers: @unchecked Sendable {
   public static let shared = HostLayers()
 
@@ -40,7 +46,7 @@ public final class HostLayers: @unchecked Sendable {
 
   private let lock = NSLock()
   private var layers: [UInt64: WeakLayer] = [:]
-  private var owners: [String: UInt64] = [:]
+  private var claims: [String: [UInt64]] = [:]
   private var next: UInt64 = 1
 
   public init() {}
@@ -59,14 +65,23 @@ public final class HostLayers: @unchecked Sendable {
   }
 
   func claim(key: String, token: UInt64) {
-    lock.withLock { owners[key] = token }
+    lock.withLock {
+      var stack = claims[key] ?? []
+      stack.removeAll { $0 == token }
+      stack.append(token)
+      claims[key] = stack
+    }
   }
 
-  func release(key: String, token: UInt64) -> Bool {
+  func release(key: String, token: UInt64) -> HostRelease {
     lock.withLock {
-      guard owners[key] == token else { return false }
-      owners[key] = nil
-      return true
+      var stack = claims[key] ?? []
+      let wasOwner = stack.last == token
+      stack.removeAll { $0 == token }
+      stack.removeAll { layers[$0]?.value == nil }
+      claims[key] = stack.isEmpty ? nil : stack
+      guard wasOwner else { return .none }
+      return stack.last.map(HostRelease.handover) ?? .detach
     }
   }
 

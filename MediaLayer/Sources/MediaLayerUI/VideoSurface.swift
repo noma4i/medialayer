@@ -12,18 +12,24 @@ final class SurfaceAttachment {
   let places: MediaPlaces
   let key: String
   let token: UInt64
+  private let hosts: HostLayers
 
-  init(places: MediaPlaces, key: String, layer: CALayer) {
+  init(places: MediaPlaces, key: String, layer: CALayer, hosts: HostLayers = .shared) {
     self.places = places
     self.key = key
-    token = HostLayers.shared.register(layer)
-    HostLayers.shared.claim(key: key, token: token)
+    self.hosts = hosts
+    token = hosts.register(layer)
+    hosts.claim(key: key, token: token)
     places.attachView(key: key, token: token)
   }
 
   deinit {
-    if HostLayers.shared.release(key: key, token: token) { places.detachView(key: key) }
-    HostLayers.shared.unregister(token)
+    hosts.unregister(token)
+    switch hosts.release(key: key, token: token) {
+    case .none: break
+    case .detach: places.detachView(key: key)
+    case .handover(let previous): places.attachView(key: key, token: previous)
+    }
   }
 }
 

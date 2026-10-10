@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import MediaLayer
+import QuartzCore
 import Testing
 @testable import MediaLayerUI
 
@@ -26,6 +27,23 @@ struct AVQueuePlayerSlotTests {
   }
 
   @Test
+  func aSlotLoadedForANewKeyLeavesTheHostOfTheOldKey() async {
+    let log = PlayerEventLog()
+    let slot = makeSlot(log)
+    let host = CALayer()
+    slot.load(key: "a", route: route(Self.silentClip))
+    await log.wait(for: "ready")
+    slot.attach(to: host)
+    await drainMain()
+    #expect(slot.layer.superlayer === host)
+
+    slot.load(key: "b", route: route(Self.silentClip))
+    await drainMain()
+
+    #expect(slot.layer.superlayer == nil)
+  }
+
+  @Test
   func localClipPlaysMutedFromReadyToEnded() async throws {
     let log = PlayerEventLog()
     let slot = makeSlot(log)
@@ -46,9 +64,9 @@ struct AVQueuePlayerSlotTests {
     let log = PlayerEventLog()
     let slot = makeSlot(log)
     let host = CALayer()
-    slot.attach(to: host)
 
     slot.load(key: "clip", route: route(Self.silentClip))
+    slot.attach(to: host)
     slot.preroll()
     await log.wait(for: "visualReady")
 
