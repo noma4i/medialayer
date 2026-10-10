@@ -71,15 +71,19 @@ public enum MediaImagePipeline {
 
 extension MediaImagePipeline {
   static func cachedImage(for request: ImageRequest, in pipeline: ImagePipeline) -> PlatformImage? {
-    pipeline.cache[request]?.image
+    cachedContainer(for: request, in: pipeline)?.image
   }
 
-  static func load(_ source: some MediaSource, request: ImageRequest, places: MediaPlaces, pipeline: ImagePipeline) async -> PlatformImage? {
+  static func cachedContainer(for request: ImageRequest, in pipeline: ImagePipeline) -> ImageContainer? {
+    pipeline.cache[request]
+  }
+
+  static func load(_ source: some MediaSource, request: ImageRequest, places: MediaPlaces, pipeline: ImagePipeline) async -> ImageContainer? {
     places.itemState(key: source.url, state: .loading)
     do {
-      let image = try await pipeline.image(for: request)
+      let container = try await pipeline.imageTask(with: request).response.container
       places.itemState(key: source.url, state: .ready)
-      return image
+      return container
     } catch {
       if !Task.isCancelled { places.itemState(key: source.url, state: .failed(detail: error.localizedDescription)) }
       return nil

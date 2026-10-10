@@ -11,6 +11,7 @@ struct ImageKey: Equatable {
 private struct LoadedImage {
   let key: ImageKey
   let image: PlatformImage
+  var frames: AnimatedFrames?
 }
 
 public struct MediaImage<Content: View>: View {
@@ -18,6 +19,7 @@ public struct MediaImage<Content: View>: View {
   @Environment(\.displayScale) private var displayScale
   @State private var loaded: LoadedImage?
   @State private var state: MediaState = .idle
+  @State private var isVisible = false
   private let source: any MediaSource
   private let contentMode: ContentMode
   private let content: (MediaState) -> Content
@@ -36,7 +38,9 @@ public struct MediaImage<Content: View>: View {
         if let context, shown == nil {
           PlaceholderView(item: source.item, ready: false, context: context)
         }
-        if let shown {
+        if let frames = loaded.flatMap({ $0.key == key ? $0.frames : nil }) {
+          AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isVisible)
+        } else if let shown {
           Image(platform: shown).resizable().aspectRatio(contentMode: contentMode)
         }
         content(state)
@@ -46,8 +50,14 @@ public struct MediaImage<Content: View>: View {
       .task(id: key) { await load(key: key, points: geometry.size) }
     }
     .task(id: source.url) { await follow() }
-    .onAppear { context?.places.visible(source: source.item, visible: true) }
-    .onDisappear { context?.places.visible(source: source.item, visible: false) }
+    .onAppear {
+      isVisible = true
+      context?.places.visible(source: source.item, visible: true)
+    }
+    .onDisappear {
+      isVisible = false
+      context?.places.visible(source: source.item, visible: false)
+    }
   }
 
   private func imageKey(points: CGSize) -> ImageKey {
@@ -66,13 +76,20 @@ public struct MediaImage<Content: View>: View {
 
   private func load(key: ImageKey, points: CGSize) async {
     guard let context, key.pixels != nil, let request = request(points: points) else { return }
-    if let hit = MediaImagePipeline.cachedImage(for: request, in: context.pipeline) {
-      loaded = LoadedImage(key: key, image: hit)
+    let container: ImageContainer?
+    if let hit = MediaImagePipeline.cachedContainer(for: request, in: context.pipeline) {
       context.places.itemState(key: source.url, state: .ready)
-      return
+      container = hit
+    } else {
+      container = await MediaImagePipeline.load(source, request: request, places: context.places, pipeline: context.pipeline)
     }
-    let image = await MediaImagePipeline.load(source, request: request, places: context.places, pipeline: context.pipeline)
-    loaded = image.map { LoadedImage(key: key, image: $0) }
+    loaded = container.map { LoadedImage(key: key, image: $0.image) }
+    guard let container, container.type == .gif, let data = container.data, let pixels = key.pixels else { return }
+
+    let frames = await AnimatedFrames.load(data, maxPixel: Int(max(pixels.width, pixels.height)))
+    guard !Task.isCancelled, loaded?.key == key else { return }
+
+    loaded?.frames = frames
   }
 
   private func follow() async {
