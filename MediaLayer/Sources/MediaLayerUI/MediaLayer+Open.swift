@@ -35,20 +35,6 @@ extension MediaLayer {
     )
   }
 
-  public static func openInBackground(
-    spec: String,
-    fetcher: Fetcher,
-    settings: SettingsStore,
-    directory: URL? = nil,
-    startMuted: Bool = false,
-    silent: Bool = false,
-    imageMemoryBytes: Int = MediaImagePipeline.defaultMemoryLimit
-  ) async throws -> MediaLayer {
-    try await offCaller {
-      try open(spec: spec, fetcher: fetcher, settings: settings, directory: directory, startMuted: startMuted, silent: silent, imageMemoryBytes: imageMemoryBytes)
-    }
-  }
-
   private static func open(
     defaults: SpecDefaults,
     fetcher: Fetcher,
@@ -112,8 +98,4 @@ extension MediaLayer {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     return directory
   }
-}
-
-func offCaller<Result: Sendable>(_ work: @escaping @Sendable () throws -> Result) async throws -> Result {
-  try await Task.detached(priority: .userInitiated, operation: work).value
 }

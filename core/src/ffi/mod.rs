@@ -1,3 +1,5 @@
+mod assembled;
+mod deferred;
 mod events;
 mod fetcher;
 mod image;

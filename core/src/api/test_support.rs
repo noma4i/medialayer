@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 const ATTEMPTS: usize = 20_000_000;
@@ -223,6 +224,16 @@ impl SlotDirectives for FakeDirectives {
 
 pub fn unload(slot: usize) -> Directive {
     Directive::Slot(Command::Unload { slot })
+}
+
+static SLOW_ASSEMBLIES: Mutex<Vec<(PathBuf, Duration)>> = Mutex::new(Vec::new());
+
+pub fn slow_assembly(dir: &Path, delay: Duration) {
+    SLOW_ASSEMBLIES.lock().unwrap().push((dir.to_path_buf(), delay));
+}
+
+pub fn assembly_delay(dir: &Path) -> Option<Duration> {
+    SLOW_ASSEMBLIES.lock().unwrap().iter().find(|(slow, _)| slow == dir).map(|(_, delay)| *delay)
 }
 
 pub fn shared<T: Default>() -> Arc<T> {

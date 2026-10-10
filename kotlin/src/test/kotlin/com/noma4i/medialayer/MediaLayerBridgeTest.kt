@@ -259,7 +259,7 @@ class MediaLayerBridgeTest {
   }
 
   @Test
-  fun playUrlGoesThroughTheLocalProxyAndTheVideoPlaceholderIsTheFirstFrame() {
+  fun playUrlGoesThroughTheLocalProxyAndTheVideoPlaceholderIsTheFirstFrame() = runBlocking {
     val media = open(MemorySettings())
     val source = MediaItem(Kind.VIDEO, "https://o.test/a.mp4", emptyMap(), null, null)
 

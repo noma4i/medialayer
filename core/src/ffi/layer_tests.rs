@@ -1,5 +1,5 @@
 use super::*;
-use crate::api::test_support::{assembly, eventually, eventually_async, shared, FakeSettings, MockFactory, MockSlot};
+use crate::api::test_support::{assembly, eventually, eventually_async, shared, slow_assembly, FakeSettings, MockFactory, MockSlot};
 use crate::api::{MediaError, MediaItem, MediaState, MediaStats, PlayerSlotFactory, SlotCall, LIMITS_KEY};
 use crate::fetch::mock::MockFetcher;
 use crate::proxy::test_client;
@@ -123,7 +123,7 @@ fn inv_ffi_02_a_play_url_routes_the_platform_fetcher_through_the_proxy_into_the_
     };
     let caller = caller();
 
-    let route = layer.play_url(source.clone());
+    let route = caller.block_on(layer.play_url(source.clone())).unwrap();
     let parsed = Url::parse(&route.url).unwrap();
     let port = parsed.port().unwrap();
     let reply = caller.block_on(test_client::get(port, &format!("{}?{}", parsed.path(), parsed.query().unwrap_or_default())));
@@ -142,7 +142,7 @@ fn inv_ffi_02_a_play_url_routes_the_platform_fetcher_through_the_proxy_into_the_
     assert_eq!(origin.seen.lock().unwrap()[0].headers.get("Authorization").map(String::as_str), Some("token"));
     assert_eq!(stored, 1);
     assert_eq!(caller.block_on(layer.stats()).file_count, 0);
-    assert_eq!(layer.refresh_route(source, route.clone()), route);
+    assert_eq!(caller.block_on(layer.refresh_route(source, route.clone())).unwrap(), route);
 }
 
 #[test]
@@ -379,4 +379,46 @@ fn inv_ffi_06_an_image_prefetched_by_a_window_is_a_cache_hit_for_fetch_image() {
 
     assert_eq!(fetched, Ok(b"origin bytes".to_vec()));
     assert_eq!(origin.seen.lock().unwrap().len(), 1);
+}
+
+const SLOW: std::time::Duration = std::time::Duration::from_secs(2);
+const CALLER_BUDGET: std::time::Duration = std::time::Duration::from_millis(100);
+
+#[test]
+fn inv_ffi_07_open_returns_to_the_caller_while_the_assembly_is_still_running() {
+    let dir = tempfile::tempdir().unwrap();
+    slow_assembly(dir.path(), SLOW);
+    let started = std::time::Instant::now();
+
+    let _layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), None)).unwrap();
+
+    assert!(started.elapsed() < CALLER_BUDGET, "open held the caller for {:?}", started.elapsed());
+}
+
+#[test]
+fn inv_ffi_07_calls_made_before_the_assembly_ends_run_after_it_in_call_order_and_are_not_lost() {
+    let dir = tempfile::tempdir().unwrap();
+    slow_assembly(dir.path(), SLOW);
+    let factory: Arc<MockFactory> = Arc::default();
+    let slots: Arc<dyn PlayerSlotFactory> = factory.clone();
+    let started = std::time::Instant::now();
+    let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), Some(slots))).unwrap();
+    let url = "https://o.test/v1.mp4";
+    let seen = Arc::new(Seen(Mutex::new(Vec::new())));
+    let _subscription = layer.subscribe_state(url.to_string(), seen.clone());
+    let caller = caller();
+
+    layer.set_window(0, vec![Some(MediaItem::bare_video(url))]);
+    layer.set_playing(url.to_string(), true);
+    layer.player_events().attach(url.to_string(), 5);
+    let declared_in = started.elapsed();
+    let limits = caller.block_on(layer.limits());
+
+    assert!(declared_in < SLOW / 2, "the declarations waited {declared_in:?} for the assembly");
+    assert!(started.elapsed() >= SLOW, "the async call returned before the assembly ended");
+    assert_eq!(limits, default_limits());
+    caller.block_on(eventually(|| factory.slot_holding(url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play) && slot.calls().contains(&SlotCall::Attach { view_token: 5 }))));
+    let (index, _) = factory.slot_holding(url).unwrap();
+    layer.player_events().ready(index);
+    caller.block_on(eventually(|| seen.0.lock().unwrap().last() == Some(&MediaState::Ready)));
 }

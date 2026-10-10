@@ -136,11 +136,11 @@ struct MediaLayerBridgeTests {
   }
 
   @Test
-  func playUrlGoesThroughTheLocalProxyAndTheVideoPlaceholderIsTheFirstFrame() throws {
+  func playUrlGoesThroughTheLocalProxyAndTheVideoPlaceholderIsTheFirstFrame() async throws {
     let media = try open(settings: MemorySettings())
     let source = MediaItem(kind: .video, url: "https://o.test/a.mp4", headers: [:], cover: nil, blurHash: nil)
 
-    let route = media.playUrl(source: source)
+    let route = try await media.playUrl(source: source)
 
     #expect(route.url.hasPrefix("http://127.0.0.1:"))
     #expect(placeholderFor(source: source, cache: .missing, ready: false) == .firstFrame)

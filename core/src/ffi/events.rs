@@ -1,57 +1,58 @@
-use crate::api::{Pressure, Signals, Stage};
+use super::assembled::Assembled;
+use super::deferred::Deferred;
+use crate::api::Pressure;
 use std::sync::Arc;
 
 #[derive(uniffi::Object)]
 pub struct PlayerEvents {
-    stage: Stage,
-    signals: Arc<Signals>,
+    assembled: Arc<Deferred<Assembled>>,
 }
 
 impl PlayerEvents {
-    pub fn new(stage: Stage, signals: Arc<Signals>) -> Arc<PlayerEvents> {
-        Arc::new(PlayerEvents { stage, signals })
+    pub fn new(assembled: Arc<Deferred<Assembled>>) -> Arc<PlayerEvents> {
+        Arc::new(PlayerEvents { assembled })
     }
 }
 
 #[uniffi::export]
 impl PlayerEvents {
     pub fn ready(&self, slot: u32) {
-        self.stage.ready(slot as usize);
+        self.assembled.run(move |assembled| assembled.stage.ready(slot as usize));
     }
 
     pub fn visual_ready(&self, slot: u32) {
-        self.stage.visual_ready(slot as usize);
+        self.assembled.run(move |assembled| assembled.stage.visual_ready(slot as usize));
     }
 
     pub fn stalled(&self, slot: u32, position_ms: u64) {
-        self.stage.stalled(slot as usize, position_ms);
+        self.assembled.run(move |assembled| assembled.stage.stalled(slot as usize, position_ms));
     }
 
     pub fn failed(&self, slot: u32, status: i32, detail: String) {
-        self.stage.failed(slot as usize, status, detail);
+        self.assembled.run(move |assembled| assembled.stage.failed(slot as usize, status, detail));
     }
 
     pub fn ended(&self, slot: u32) {
-        self.stage.ended(slot as usize);
+        self.assembled.run(move |assembled| assembled.stage.ended(slot as usize));
     }
 
     pub fn attach(&self, key: String, view_token: u64) {
-        self.stage.attach(&key, view_token);
+        self.assembled.run(move |assembled| assembled.stage.attach(&key, view_token));
     }
 
     pub fn detach(&self, key: String) {
-        self.stage.detach(&key);
+        self.assembled.run(move |assembled| assembled.stage.detach(&key));
     }
 
     pub fn foreground(&self) {
-        self.signals.foreground();
+        self.assembled.run(|assembled| assembled.signals.foreground());
     }
 
     pub fn background(&self) {
-        self.signals.background();
+        self.assembled.run(|assembled| assembled.signals.background());
     }
 
     pub fn memory_warning(&self, level: Pressure) {
-        self.signals.memory_warning(level);
+        self.assembled.run(move |assembled| assembled.signals.memory_warning(level));
     }
 }

@@ -149,6 +149,10 @@ impl PrefetchControl for Prefetcher {
 
 pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
     let Assembly { dir, fetcher, settings, factory, device, defaults, pool, namespace_headers, image_windows, silent, watchdog, stats_interval } = config;
+    #[cfg(test)]
+    if let Some(delay) = super::test_support::assembly_delay(&dir) {
+        tokio::time::sleep(delay).await;
+    }
     defaults.validate()?;
     let handle = Handle::current();
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);

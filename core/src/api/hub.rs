@@ -35,6 +35,12 @@ pub struct Subscription {
     cancel: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
+impl Subscription {
+    pub fn cancelling(cancel: impl FnOnce() + Send + 'static) -> Subscription {
+        Subscription { cancel: Mutex::new(Some(Box::new(cancel))) }
+    }
+}
+
 impl Drop for Subscription {
     fn drop(&mut self) {
         if let Some(cancel) = locked(&self.cancel).take() {
