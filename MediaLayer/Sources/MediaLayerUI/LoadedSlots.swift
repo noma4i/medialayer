@@ -31,6 +31,11 @@ private struct WeakSlot {
   init(_ value: AVQueuePlayerSlot) { self.value = value }
 }
 
+struct HostClaim {
+  let token: UInt64
+  let owner: UUID
+}
+
 enum HostRelease: Equatable {
   case none
   case detach
@@ -46,7 +51,7 @@ public final class HostLayers: @unchecked Sendable {
 
   private let lock = NSLock()
   private var layers: [UInt64: WeakLayer] = [:]
-  private var claims: [String: [UInt64]] = [:]
+  private var claims: [String: [HostClaim]] = [:]
   private var next: UInt64 = 1
 
   public init() {}
@@ -64,24 +69,37 @@ public final class HostLayers: @unchecked Sendable {
     lock.withLock { layers[token] = nil }
   }
 
-  func claim(key: String, token: UInt64) {
+  func claim(key: String, token: UInt64, owner: UUID, isPlaying: Bool) -> Bool {
     lock.withLock {
       var stack = claims[key] ?? []
-      stack.removeAll { $0 == token }
-      stack.append(token)
+      stack.removeAll { $0.token == token || layers[$0.token]?.value == nil }
+      let isFirst = stack.isEmpty
+      stack.insert(HostClaim(token: token, owner: owner), at: isPlaying ? stack.count : 0)
       claims[key] = stack
+      return isFirst || isPlaying
+    }
+  }
+
+  func prefer(key: String, owner: UUID) -> UInt64? {
+    lock.withLock {
+      var stack = claims[key] ?? []
+      guard let index = stack.firstIndex(where: { $0.owner == owner }), index != stack.count - 1 else { return nil }
+      let claim = stack.remove(at: index)
+      stack.append(claim)
+      claims[key] = stack
+      return claim.token
     }
   }
 
   func release(key: String, token: UInt64) -> HostRelease {
     lock.withLock {
       var stack = claims[key] ?? []
-      let wasOwner = stack.last == token
-      stack.removeAll { $0 == token }
-      stack.removeAll { layers[$0]?.value == nil }
+      let wasOwner = stack.last?.token == token
+      stack.removeAll { $0.token == token }
+      stack.removeAll { layers[$0.token]?.value == nil }
       claims[key] = stack.isEmpty ? nil : stack
       guard wasOwner else { return .none }
-      return stack.last.map(HostRelease.handover) ?? .detach
+      return stack.last.map { HostRelease.handover($0.token) } ?? .detach
     }
   }
 

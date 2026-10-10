@@ -18,13 +18,15 @@ final class KeyClaims: @unchecked Sendable {
   }
 
   private let places: MediaPlaces
+  private let hosts: HostLayers
   private let lock = NSLock()
   private var claims: [String: [UUID: Claim]] = [:]
   private var applied: [String: Applied] = [:]
   private var sources: [String: MediaItem] = [:]
 
-  init(places: MediaPlaces) {
+  init(places: MediaPlaces, hosts: HostLayers = .shared) {
     self.places = places
+    self.hosts = hosts
   }
 
   static func of(_ places: MediaPlaces) -> KeyClaims {
@@ -42,6 +44,7 @@ final class KeyClaims: @unchecked Sendable {
 
   func setPlaying(owner: UUID, key: String, playing: Bool) {
     forward(update(owner: owner, key: key) { $0.playing = playing }, key: key)
+    if playing, let token = hosts.prefer(key: key, owner: owner) { places.attachView(key: key, token: token) }
   }
 
   func setMuted(owner: UUID, key: String, muted: Bool) {

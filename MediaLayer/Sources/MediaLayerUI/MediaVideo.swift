@@ -54,7 +54,7 @@ public struct MediaVideo<Content: View>: View {
     ZStack {
       if let context {
         PlaceholderView(item: item, ready: state.isReady, context: context)
-        VideoSurface(places: context.places, key: source.url)
+        VideoSurface(places: context.places, key: source.url, owner: owner, isPlaying: playing)
       }
       content(state)
     }

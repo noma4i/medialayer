@@ -14,13 +14,12 @@ final class SurfaceAttachment {
   let token: UInt64
   private let hosts: HostLayers
 
-  init(places: MediaPlaces, key: String, layer: CALayer, hosts: HostLayers = .shared) {
+  init(places: MediaPlaces, key: String, layer: CALayer, owner: UUID = UUID(), isPlaying: Bool = false, hosts: HostLayers = .shared) {
     self.places = places
     self.key = key
     self.hosts = hosts
     token = hosts.register(layer)
-    hosts.claim(key: key, token: token)
-    places.attachView(key: key, token: token)
+    if hosts.claim(key: key, token: token, owner: owner, isPlaying: isPlaying) { places.attachView(key: key, token: token) }
   }
 
   deinit {
@@ -48,6 +47,8 @@ final class SurfaceView: UIView {
 struct VideoSurface: UIViewRepresentable {
   let places: MediaPlaces
   let key: String
+  let owner: UUID
+  let isPlaying: Bool
 
   func makeUIView(context: Context) -> SurfaceView {
     let view = SurfaceView()
@@ -58,7 +59,7 @@ struct VideoSurface: UIViewRepresentable {
 
   func updateUIView(_ view: SurfaceView, context: Context) {
     if view.attachment == nil {
-      view.attachment = SurfaceAttachment(places: places, key: key, layer: view.layer)
+      view.attachment = SurfaceAttachment(places: places, key: key, layer: view.layer, owner: owner, isPlaying: isPlaying)
     }
   }
 
@@ -81,6 +82,8 @@ final class SurfaceView: NSView {
 struct VideoSurface: NSViewRepresentable {
   let places: MediaPlaces
   let key: String
+  let owner: UUID
+  let isPlaying: Bool
 
   func makeNSView(context: Context) -> SurfaceView {
     let view = SurfaceView()
@@ -90,7 +93,7 @@ struct VideoSurface: NSViewRepresentable {
 
   func updateNSView(_ view: SurfaceView, context: Context) {
     if view.attachment == nil, let layer = view.layer {
-      view.attachment = SurfaceAttachment(places: places, key: key, layer: layer)
+      view.attachment = SurfaceAttachment(places: places, key: key, layer: layer, owner: owner, isPlaying: isPlaying)
     }
   }
 
