@@ -14,7 +14,7 @@ private struct GifSource: MediaSource {
   var size: MediaSize?
 }
 
-private func transparentGif(frames: Int, side: Int) -> Data {
+private func transparentGif(frames: Int, side: Int, delay: Double = 0.1) -> Data {
   let data = NSMutableData()
   let destination = CGImageDestinationCreateWithData(data, UTType.gif.identifier as CFString, frames, nil)!
   CGImageDestinationSetProperties(destination, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
@@ -25,7 +25,7 @@ private func transparentGif(frames: Int, side: Int) -> Data {
     )!
     context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
     context.fill(CGRect(x: side / 4 + index, y: side / 4, width: side / 2, height: side / 2))
-    CGImageDestinationAddImage(destination, context.makeImage()!, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.1]] as CFDictionary)
+    CGImageDestinationAddImage(destination, context.makeImage()!, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: delay]] as CFDictionary)
   }
   CGImageDestinationFinalize(destination)
   return data as Data
@@ -70,5 +70,14 @@ struct AnimatedFramesTests {
 
     #expect(container.type == .gif)
     #expect(AnimatedFrames.decode(data, maxPixel: 8)?.images.count == 3)
+  }
+
+  @Test
+  func inv_image_06_a_playback_rate_stretches_the_loop_of_a_gif_stamped_faster_than_its_video() throws {
+    let frames = try #require(AnimatedFrames.decode(transparentGif(frames: 40, side: 16, delay: 0.05), maxPixel: 16))
+
+    #expect(abs(frames.loopDuration(rate: 1) - 2) < 0.001)
+    #expect(abs(frames.loopDuration(rate: 0.5) - 4) < 0.001)
+    #expect(abs(frames.loopDuration(rate: 0) - 2) < 0.001)
   }
 }

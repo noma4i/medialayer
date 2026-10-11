@@ -12,6 +12,8 @@ struct AnimatedFrames {
   let images: [CGImage]
   let duration: TimeInterval
 
+  func loopDuration(rate: Double) -> TimeInterval { rate > 0 ? duration / rate : duration }
+
   static func load(_ data: Data, maxPixel: Int) async -> AnimatedFrames? {
     decode(data, maxPixel: maxPixel)
   }
@@ -55,6 +57,7 @@ struct AnimatedFramesView: UIViewRepresentable {
   let frames: AnimatedFrames
   let contentMode: ContentMode
   let isPlaying: Bool
+  let playbackRate: Double
 
   func makeCoordinator() -> Playback { Playback() }
 
@@ -72,8 +75,8 @@ struct AnimatedFramesView: UIViewRepresentable {
       context.coordinator.token = frames.token
       view.stopAnimating()
       view.animationImages = frames.images.map { UIImage(cgImage: $0) }
-      view.animationDuration = frames.duration
     }
+    view.animationDuration = frames.loopDuration(rate: playbackRate)
     if isPlaying {
       if !view.isAnimating { view.startAnimating() }
     } else {
@@ -90,6 +93,7 @@ struct AnimatedFramesView: View {
   let frames: AnimatedFrames
   let contentMode: ContentMode
   let isPlaying: Bool
+  let playbackRate: Double
 
   var body: some View {
     Image(decorative: frames.images[0], scale: 1).resizable().aspectRatio(contentMode: contentMode)

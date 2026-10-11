@@ -22,11 +22,13 @@ public struct MediaImage<Content: View>: View {
   @State private var isVisible = false
   private let source: any MediaSource
   private let contentMode: ContentMode
+  private let playbackRate: Double
   private let content: (MediaState) -> Content
 
-  public init(_ source: some MediaSource, contentMode: ContentMode = .fill, @ViewBuilder content: @escaping (MediaState) -> Content) {
+  public init(_ source: some MediaSource, contentMode: ContentMode = .fill, playbackRate: Double = 1, @ViewBuilder content: @escaping (MediaState) -> Content) {
     self.source = source
     self.contentMode = contentMode
+    self.playbackRate = playbackRate
     self.content = content
   }
 
@@ -39,7 +41,7 @@ public struct MediaImage<Content: View>: View {
           PlaceholderView(item: source.item, ready: false, context: context)
         }
         if let frames = loaded.flatMap({ $0.key == key ? $0.frames : nil }) {
-          AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isVisible)
+          AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isVisible, playbackRate: playbackRate)
         } else if let shown {
           Image(platform: shown).resizable().aspectRatio(contentMode: contentMode)
         }
@@ -99,7 +101,7 @@ public struct MediaImage<Content: View>: View {
 }
 
 extension MediaImage where Content == EmptyView {
-  public init(_ source: some MediaSource, contentMode: ContentMode = .fill) {
-    self.init(source, contentMode: contentMode) { _ in EmptyView() }
+  public init(_ source: some MediaSource, contentMode: ContentMode = .fill, playbackRate: Double = 1) {
+    self.init(source, contentMode: contentMode, playbackRate: playbackRate) { _ in EmptyView() }
   }
 }
