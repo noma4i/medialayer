@@ -37,6 +37,7 @@ dependencies {
   implementation("androidx.lifecycle:lifecycle-process:2.10.0")
   implementation("com.squareup.okhttp3:okhttp:5.5.0")
   implementation("io.coil-kt:coil-compose:2.7.0")
+  implementation("io.coil-kt:coil-gif:2.7.0")
   implementation("net.java.dev.jna:jna:5.17.0@aar")
 
   testImplementation("net.java.dev.jna:jna:5.17.0")

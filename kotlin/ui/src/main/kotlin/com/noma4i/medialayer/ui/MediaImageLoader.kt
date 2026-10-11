@@ -1,9 +1,12 @@
 package com.noma4i.medialayer.ui
 
 import android.content.Context
+import android.os.Build
 import coil.ImageLoader
 import coil.decode.DataSource
 import coil.decode.ImageSource
+import coil.decode.GifDecoder
+import coil.decode.ImageDecoderDecoder
 import coil.fetch.Fetcher
 import coil.fetch.SourceResult
 import coil.key.Keyer
@@ -25,6 +28,7 @@ fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: Int = DEF
   return ImageLoader.Builder(context)
     .memoryCache(MemoryCache.Builder(context).maxSizeBytes(memoryBytes).build())
     .components {
+      if (Build.VERSION.SDK_INT >= 28) add(ImageDecoderDecoder.Factory()) else add(GifDecoder.Factory())
       add(Keyer<MediaImageData> { data, _ -> data.url })
       add(object : Fetcher.Factory<MediaImageData> {
         override fun create(data: MediaImageData, options: Options, imageLoader: ImageLoader): Fetcher =
