@@ -153,8 +153,16 @@ impl Proxy {
         if self.ping().await {
             return true;
         }
-        let preferred = self.inner.last_port.load(Ordering::SeqCst);
-        self.rebind(&mut listener, preferred).await.is_ok()
+        let previous = self.inner.last_port.load(Ordering::SeqCst);
+        match self.rebind(&mut listener, previous).await {
+            Ok(port) if port == previous => crate::trace!("proxy", "repaired the listener on the same port {port}"),
+            Ok(port) => crate::trace!("proxy", "repaired the listener on a new port {previous} -> {port}"),
+            Err(error) => {
+                crate::trace!("proxy", "repair failed: {error}");
+                return false;
+            }
+        }
+        true
     }
 
     pub async fn stop(&self) {

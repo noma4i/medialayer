@@ -514,6 +514,23 @@ async fn inv_proxy_23_a_listener_closed_under_the_accept_loop_is_rebound_by_repa
 }
 
 #[tokio::test]
+async fn inv_proxy_23_an_accept_task_that_ended_is_rebound_by_repair() {
+    let rig = rig().await;
+    let port = rig.proxy.port();
+    let _ = rig.proxy.inner.listener.lock().await.as_ref().unwrap().shutdown.send(true);
+    while rig.proxy.readiness() == Readiness::Ready {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(rig.proxy.readiness(), Readiness::Unhealthy);
+    assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err());
+
+    assert!(rig.proxy.repair().await);
+
+    assert_eq!(rig.proxy.readiness(), Readiness::Ready);
+    assert!(rig.proxy.ping().await);
+}
+
+#[tokio::test]
 async fn inv_proxy_23_repair_leaves_a_healthy_or_stopped_proxy_alone() {
     let rig = rig().await;
     let (port, generation) = (rig.proxy.port(), rig.proxy.route_generation());
