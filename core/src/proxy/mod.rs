@@ -145,6 +145,18 @@ impl Proxy {
         tokio::time::timeout(self.inner.config.ping_timeout, exchange).await.ok().flatten().unwrap_or(false)
     }
 
+    pub async fn repair(&self) -> bool {
+        let mut listener = self.inner.listener.lock().await;
+        if !self.inner.running.load(Ordering::SeqCst) {
+            return false;
+        }
+        if self.ping().await {
+            return true;
+        }
+        let preferred = self.inner.last_port.load(Ordering::SeqCst);
+        self.rebind(&mut listener, preferred).await.is_ok()
+    }
+
     pub async fn stop(&self) {
         let mut listener = self.inner.listener.lock().await;
         self.shut_down(&mut listener).await;
@@ -152,7 +164,11 @@ impl Proxy {
 
     pub async fn restart(&self, preferred_port: u16) -> Result<u16, ProxyError> {
         let mut listener = self.inner.listener.lock().await;
-        self.shut_down(&mut listener).await;
+        self.rebind(&mut listener, preferred_port).await
+    }
+
+    async fn rebind(&self, listener: &mut Option<inner::Listener>, preferred_port: u16) -> Result<u16, ProxyError> {
+        self.shut_down(listener).await;
         let (started, port) = server::spawn_listener(&self.inner, preferred_port).await?;
         *listener = Some(started);
         let previous = self.inner.last_port.swap(port, Ordering::SeqCst);

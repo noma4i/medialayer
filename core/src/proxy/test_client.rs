@@ -83,3 +83,21 @@ fn dechunk(mut body: &[u8]) -> Vec<u8> {
     }
     out
 }
+
+pub fn close_listener_silently(port: u16) {
+    for fd in 3..4096 {
+        let mut address: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+        let mut length = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+        let named = unsafe { libc::getsockname(fd, (&mut address as *mut libc::sockaddr_in).cast(), &mut length) };
+        let mut peer: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+        let mut peer_length = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+        let connected = unsafe { libc::getpeername(fd, (&mut peer as *mut libc::sockaddr_in).cast(), &mut peer_length) } == 0;
+        if named == 0 && !connected && u16::from_be(address.sin_port) == port {
+            let null = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY) };
+            unsafe { libc::dup2(null, fd) };
+            unsafe { libc::close(null) };
+            return;
+        }
+    }
+    panic!("no listening socket on port {port}");
+}

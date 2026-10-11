@@ -43,6 +43,10 @@ impl Routes {
         self.proxy.route_generation()
     }
 
+    pub async fn repair(&self) -> bool {
+        self.proxy.repair().await
+    }
+
     pub fn readiness(&self) -> Readiness {
         self.proxy.readiness()
     }

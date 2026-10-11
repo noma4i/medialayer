@@ -6,6 +6,7 @@ use crate::session::{Action, Event, Sample};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+#[derive(PartialEq)]
 enum Wake {
     Watchdog,
     Retry,
@@ -63,7 +64,15 @@ impl Stage {
             Action::Arm { delay_ms } => self.wake_after(key, delay_ms, Wake::Watchdog),
             Action::Retry(delay_ms) => self.wake_after(key, delay_ms, Wake::Retry),
             Action::Disarm => self.cancel_task(&key),
-            Action::Recover | Action::Replay => self.reload(&key),
+            Action::Replay => self.reload(&key),
+            Action::Recover => {
+                let stage = self.clone();
+                self.inner.handle.spawn(async move {
+                    stage.inner.routes.repair().await;
+                    stage.refresh_stale_route(&key);
+                    stage.reload(&key);
+                });
+            }
             Action::PurgeCache(url) => {
                 let stage = self.clone();
                 self.inner.handle.spawn(async move {
@@ -98,6 +107,9 @@ impl Stage {
         let target = key.clone();
         let task = self.inner.handle.spawn(async move {
             tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+            if wake != Wake::Watchdog {
+                stage.inner.routes.repair().await;
+            }
             match wake {
                 Wake::Watchdog => stage.sample_watchdog(&target).await,
                 Wake::Retry => stage.retry_due(&target),
@@ -125,6 +137,12 @@ impl Stage {
             readiness: self.inner.routes.readiness(),
         };
         self.feed(key, event);
+    }
+
+    fn refresh_stale_route(&self, key: &str) {
+        let mut state = self.state();
+        let Some(loaded) = state.loaded.get_mut(key) else { return };
+        loaded.route = self.inner.routes.refresh(&loaded.source, &loaded.route);
     }
 
     fn reload(&self, key: &str) {

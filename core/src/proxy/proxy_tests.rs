@@ -495,6 +495,37 @@ async fn inv_proxy_17_ping_and_readiness_follow_the_lifecycle() {
 }
 
 #[tokio::test]
+async fn inv_proxy_23_a_listener_closed_under_the_accept_loop_is_rebound_by_repair() {
+    let rig = rig().await;
+    let port = rig.proxy.port();
+    super::test_client::close_listener_silently(port);
+
+    assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err());
+    assert_eq!(rig.proxy.readiness(), Readiness::Ready);
+    assert!(!rig.proxy.ping().await);
+
+    assert!(rig.proxy.repair().await);
+
+    assert!(rig.proxy.ping().await);
+    rig.fetcher.route("https://o.test/a.mp4", Script::ok(pattern(10, 3)));
+    let url = rig.proxy.url_for("https://o.test/a.mp4", &HashMap::new()).unwrap();
+    let reply = get(rig.proxy.port(), &path_of(&url)).await;
+    assert_eq!(reply.body, pattern(10, 3));
+}
+
+#[tokio::test]
+async fn inv_proxy_23_repair_leaves_a_healthy_or_stopped_proxy_alone() {
+    let rig = rig().await;
+    let (port, generation) = (rig.proxy.port(), rig.proxy.route_generation());
+    assert!(rig.proxy.repair().await);
+    assert_eq!((rig.proxy.port(), rig.proxy.route_generation()), (port, generation));
+
+    rig.proxy.stop().await;
+    assert!(!rig.proxy.repair().await);
+    assert_eq!(rig.proxy.readiness(), Readiness::Stopped);
+}
+
+#[tokio::test]
 async fn inv_proxy_07_stop_closes_open_connections_and_cancels_their_downloads() {
     let rig = rig().await;
     rig.fetcher.route("https://o.test/slow.mp4", Script::filled(10 * 1024 * 1024).chunked(16 * 1024).chunk_delay(Duration::from_millis(5)));

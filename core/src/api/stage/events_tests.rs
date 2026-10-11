@@ -162,6 +162,33 @@ async fn inv_api_06_a_foreground_pass_that_finds_the_proxy_down_is_retried_until
 }
 
 #[tokio::test]
+async fn inv_api_06_a_load_refused_by_a_dead_proxy_listener_rebinds_it_before_the_retry() {
+    let rig = rig().await;
+    let (slot, player) = playing(&rig, video(&url_of(0))).await;
+    crate::proxy::test_client::close_listener_silently(rig.parts.proxy.port());
+    assert!(!rig.parts.proxy.ping().await);
+
+    rig.parts.stage.failed(slot as usize, 0, "Could not connect to the server".to_string());
+
+    eventually(|| player.loads() >= 2).await;
+    assert!(rig.parts.proxy.ping().await);
+}
+
+#[tokio::test]
+async fn inv_api_06_returning_to_the_foreground_rebinds_a_listener_that_died_in_the_background() {
+    let rig = rig().await;
+    let (_, player) = playing(&rig, video(&url_of(0))).await;
+    PoolControl::background(&rig.parts.stage);
+    crate::proxy::test_client::close_listener_silently(rig.parts.proxy.port());
+    let before = player.calls().iter().filter(|call| **call == SlotCall::Play).count();
+
+    PoolControl::foreground(&rig.parts.stage);
+
+    eventually(|| player.calls().iter().filter(|call| **call == SlotCall::Play).count() > before).await;
+    assert!(rig.parts.proxy.ping().await);
+}
+
+#[tokio::test]
 async fn inv_api_13_a_slot_that_renders_ends_and_plays_again_moves_the_place_through_rendered_and_ended() {
     let rig = rig().await;
     let stage = &rig.parts.stage;

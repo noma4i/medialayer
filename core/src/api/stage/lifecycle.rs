@@ -42,9 +42,13 @@ impl PoolControl for Stage {
         };
         self.dispatch(commands);
         self.inner.prefetcher.resume();
-        for key in keys {
-            self.feed(&key, Event::Foreground);
-        }
+        let stage = self.clone();
+        self.inner.handle.spawn(async move {
+            stage.inner.routes.repair().await;
+            for key in keys {
+                stage.feed(&key, Event::Foreground);
+            }
+        });
     }
 }
 

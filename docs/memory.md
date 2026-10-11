@@ -8,7 +8,7 @@ Memory is managed automatically. You do not call anything: there is no pressure 
 | Slots drop from hot to warm to cold | After a slot sits idle for `trim_delay` (default 30 seconds) |
 | Prefetch stops, then far slots are released, then the playing slot last | The system reports memory pressure (iOS memory warning, Android `onTrimMemory` and `onLowMemory`) |
 | Everything except the chosen slot is released, prefetch stops | The app goes to the background |
-| Slots return one by one | The app returns to the foreground |
+| Slots return one by one, the local proxy checks its own port and binds it again if the system closed it while the app slept | The app returns to the foreground |
 | Fewer slots (at least 2), shorter buffer, lower bitrate, fewer parallel loads | The device is low-memory: Android `isLowRamDevice` or little RAM, iOS little physical memory |
 | Everything stays under one limit | The `memory` option (default 256 MiB) covers players and proxy buffers. Image memory has its own limit, `imageMemoryBytes` of `open` (default 128 MiB) |
 
