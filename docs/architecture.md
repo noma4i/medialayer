@@ -9,7 +9,7 @@ All behavior is in the Rust core (`core/`). Swift (`MediaLayer/`) and Kotlin (`k
 | Part | Responsibility |
 | ---- | -------------- |
 | `cache` | One disk cache for all media, budget, eviction strategy, statistics, purge |
-| `proxy` | Local HTTP server on 127.0.0.1 for native players, Range requests, playlist rewriting. An origin that answers a Range request with 200 and the whole body is read by one download that streams every range as 206 while it runs and caches the file after the response closes, at any size |
+| `proxy` | Local HTTP server on 127.0.0.1 for native players, Range requests, playlist rewriting. An origin that answers a Range request with 200 and the whole body is read by one download that streams every range as 206 while it runs and caches the file after the response closes, at any size. An origin that sends no `Content-Length` (chunked, or a CDN that compresses) is stored first, then every range is served from the stored file as 206 with a right `Content-Range` |
 | `hls` | Playlist parsing, leading segments, variant choice |
 | `prefetch` | Deduplication, queue, priorities, cancel, settled events |
 | `pool` | Pool of native players and its assignment policies (`ring`, `lru`, `pinned`) |
