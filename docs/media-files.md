@@ -173,7 +173,6 @@ val media = MediaLayer.open(
 | `settings` | none | Local storage for saved limits |
 | `spec` | the defaults of the core | JSON from `medialayer-gen spec`. Gives the default limits, the pool settings and the namespace headers |
 | `directory` (Swift) | `Caches/MediaLayer` | Folder of the disk cache. The cache folder of the app on Kotlin |
-| `startMuted` (Swift) | false | Creates every player muted. Debug builds do it always |
 | `callFactory` (Kotlin) | `OkHttpClient()` | HTTP client of the players |
 | `silent` | false | All players stay muted until the app quits. No place and no `Media.muted` can unmute them. Use it while you build the app |
 | `imageMemoryBytes` | 128 MiB | Memory limit of the decoder of images (Nuke `ImageCache`, Coil `MemoryCache`). Must be above 0 |

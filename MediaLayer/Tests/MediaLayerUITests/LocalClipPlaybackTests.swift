@@ -34,7 +34,7 @@ private func eventually(_ condition: () -> Bool) async -> Bool {
 }
 
 extension GlobalMedia {
-  @Suite(.timeLimit(.minutes(1)))
+  @Suite(.serialized, .timeLimit(.minutes(1)))
   struct LocalClipPlaybackTests {
     private static var clip: String {
       Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!.absoluteString
@@ -92,6 +92,27 @@ extension GlobalMedia {
 
       try await Task.sleep(for: .milliseconds(300))
       #expect(await MainActor.run { slot.player.isMuted })
+    }
+
+    @Test
+    func aClaimToUnmuteReachesASlotOfANonSilentLayer() async throws {
+      let media = try MediaLayer.open(
+        fetcher: CountingFetcher(),
+        settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
+        directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
+        silent: false
+      )
+      let item = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: nil, blurHash: nil, looping: true)
+
+      media.visible(source: item, visible: true)
+      media.setMuted(key: Self.clip, muted: false)
+      media.setPlaying(key: Self.clip, playing: true)
+
+      let unmuted = await eventually {
+        guard let slot = LoadedSlots.shared.slot(for: Self.clip) else { return false }
+        return !slot.player.isMuted
+      }
+      #expect(unmuted)
     }
 
     @Test

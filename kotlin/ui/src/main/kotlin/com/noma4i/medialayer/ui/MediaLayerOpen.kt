@@ -78,7 +78,7 @@ internal fun openMediaLayer(
   open: (OpenConfig) -> MediaLayer
 ): MediaLayer {
   val app = context.applicationContext
-  val factory = ExoPlayerSlotFactory(app, callFactory, startMuted = silent || isDebuggable(app))
+  val factory = ExoPlayerSlotFactory(app, callFactory, startMuted = silent)
   val dir = File(app.cacheDir, "medialayer").apply { mkdirs() }
   lateinit var layer: MediaLayer
   val imageLoader = mediaImageLoader(app, ImageBytes { url, headers -> layer.fetchImage(url, headers) }, imageMemoryBytes)

@@ -81,8 +81,8 @@ public struct MediaVideo<Content: View>: View {
     let claims = KeyClaims.of(places)
     guard visible else { return claims.release(owner: owner, key: source.url) }
     claims.visible(owner: owner, source: item, visible: true)
-    claims.setPlaying(owner: owner, key: source.url, playing: playing)
     claims.setMuted(owner: owner, key: source.url, muted: muted)
+    claims.setPlaying(owner: owner, key: source.url, playing: playing)
   }
 
   private func follow() async {
