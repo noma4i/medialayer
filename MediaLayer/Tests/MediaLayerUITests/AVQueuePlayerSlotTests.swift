@@ -215,7 +215,27 @@ struct AVQueuePlayerSlotTests {
 
     #expect(log.count("ended") == endedEvents)
     #expect(slot.sample().isLooping == looping)
-    #expect(slot.player.actionAtItemEnd == (looping ? .none : .pause))
+    #expect(slot.player.actionAtItemEnd == (looping ? .advance : .pause))
+  }
+
+  @Test(arguments: [(true, 2), (false, 1)])
+  func aLoopingClipKeepsTheNextRoundQueued(looping: Bool, queued: Int) async throws {
+    let log = PlayerEventLog()
+    let slot = makeSlot(log)
+    slot.load(key: "clip", route: route(Self.silentClip, looping: looping))
+    await log.wait(for: "ready")
+    await drainMain()
+    let first = slot.loadedItem
+
+    #expect(slot.player.items().count == queued)
+    guard looping else { return }
+
+    await MainActor.run { slot.player.advanceToNextItem() }
+    await drainMain()
+    await drainMain()
+
+    #expect(slot.loadedItem !== first)
+    #expect(slot.player.items().count == queued)
   }
 
   @Test

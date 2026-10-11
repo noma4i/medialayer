@@ -55,6 +55,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private var item: AVPlayerItem?
   private var observations: [NSKeyValueObservation] = []
   private var traceObservations: [NSKeyValueObservation] = []
+  private var currentItemObservation: NSKeyValueObservation?
   private var notificationTokens: [NSObjectProtocol] = []
   private var timeToken: Any?
   private var prerollRequested = false
@@ -104,10 +105,14 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
       let item = AVPlayerItem(asset: AVURLAsset(url: url, options: Self.assetOptions(for: route)))
       self.item = item
       looping = route.looping
-      player.actionAtItemEnd = route.looping ? .none : .pause
+      player.actionAtItemEnd = route.looping ? .advance : .pause
       self.key = key
       observe(item)
       player.insert(item, after: nil)
+      queueNextRound()
+      currentItemObservation = player.observe(\.currentItem) { [weak self] _, _ in
+        DispatchQueue.main.async { self?.currentItemChanged() }
+      }
       slots.assign(self, key: key)
     }
   }
@@ -156,9 +161,9 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   public func retain(level: RetainLevel) {
     onMain { [self] in
       switch level {
-      case .hot: item?.preferredForwardBufferDuration = 0
-      case .warm: item?.preferredForwardBufferDuration = Self.warmBuffer
-      case .cold: item?.preferredForwardBufferDuration = Self.coldBuffer
+      case .hot: player.items().forEach { $0.preferredForwardBufferDuration = 0 }
+      case .warm: player.items().forEach { $0.preferredForwardBufferDuration = Self.warmBuffer }
+      case .cold: player.items().forEach { $0.preferredForwardBufferDuration = Self.coldBuffer }
       }
     }
   }
@@ -217,9 +222,13 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     DispatchQueue.main.async(execute: work)
   }
 
-  private func observe(_ item: AVPlayerItem) {
-    itemReady = false
-    visualReadySent = false
+  private func observe(_ item: AVPlayerItem, resetState: Bool = true) {
+    observations.forEach { $0.invalidate() }
+    notificationTokens.forEach { NotificationCenter.default.removeObserver($0) }
+    if resetState {
+      itemReady = false
+      visualReadySent = false
+    }
     observations = [
       item.observe(\.status, options: [.initial]) { [weak self] item, _ in self?.statusChanged(item) },
       layer.observe(\.isReadyForDisplay, options: [.initial]) { [weak self] _, _ in self?.displayChanged() }
@@ -227,7 +236,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     let center = NotificationCenter.default
     notificationTokens = [
       center.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
-        self?.itemEnded()
+        self?.itemEnded(item)
       },
       center.addObserver(forName: .AVPlayerItemNewErrorLogEntry, object: item, queue: .main) { [weak self] _ in
         guard let self, MediaTrace.isOn, let event = item.errorLog()?.events.last else { return }
@@ -244,20 +253,31 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
         events.with { $0.stalled(slot: self.id, positionMs: position) }
       }
     ]
+    guard timeToken == nil else { return }
+
     timeToken = player.addPeriodicTimeObserver(forInterval: Self.sampleInterval, queue: .main) { [weak self] _ in
       self?.refreshSample()
     }
   }
 
-  private func itemEnded() {
-    guard looping else {
-      events.with { $0.ended(slot: id) }
-      return
-    }
-    player.seek(to: .zero) { [weak self] _ in
-      guard let self, self.wantsPlay else { return }
-      self.player.play()
-    }
+  private func itemEnded(_ finished: AVPlayerItem) {
+    guard finished === item, !looping else { return }
+
+    events.with { $0.ended(slot: id) }
+  }
+
+  private func currentItemChanged() {
+    guard looping, let next = player.currentItem, next !== item else { return }
+
+    item = next
+    observe(next, resetState: false)
+    queueNextRound()
+  }
+
+  private func queueNextRound() {
+    guard looping, let last = player.items().last, let next = last.copy() as? AVPlayerItem else { return }
+
+    player.insert(next, after: last)
   }
 
   private func statusChanged(_ item: AVPlayerItem) {
@@ -291,6 +311,8 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   }
 
   private func tearDownItem() {
+    currentItemObservation?.invalidate()
+    currentItemObservation = nil
     observations.forEach { $0.invalidate() }
     observations = []
     notificationTokens.forEach { NotificationCenter.default.removeObserver($0) }
