@@ -1,7 +1,6 @@
 package com.noma4i.medialayer.ui
 
 import android.content.Context
-import android.content.pm.ApplicationInfo
 import androidx.media3.common.C
 import androidx.media3.common.util.Clock
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -68,7 +67,7 @@ class SlotPlayers internal constructor() {
 class ExoPlayerSlotFactory(
   context: Context,
   callFactory: Call.Factory = OkHttpClient(),
-  val startMuted: Boolean = isDebuggable(context),
+  val startMuted: Boolean = false,
   val loadControl: LoadControlConfig = LoadControlConfig()
 ) : PlayerSlotFactory {
   internal val appContext: Context = context.applicationContext
@@ -91,7 +90,4 @@ class ExoPlayerSlotFactory(
     created.forEach { it.release() }
     created.clear()
   }
-
 }
-
-internal fun isDebuggable(context: Context): Boolean = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
