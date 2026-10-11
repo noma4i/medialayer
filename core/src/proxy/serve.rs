@@ -280,7 +280,13 @@ async fn flight_response(
     range: Option<ByteRange>,
     head_only: bool,
 ) -> Step {
-    let progress = subscription.wait_started().await;
+    let mut progress = subscription.wait_started().await;
+    if range.is_some() && progress.head.as_ref().is_some_and(|head| head.total.is_none()) {
+        progress = subscription.wait_finished().await;
+        if matches!(progress.outcome, FlightOutcome::Complete) {
+            return Step::Retry;
+        }
+    }
     let head = match (progress.outcome, progress.head) {
         (FlightOutcome::Rejected(rejection), _) => return Step::Done(rejected(&rejection, head_only)),
         (FlightOutcome::Failed(message), _) => return Step::Done(text(502, &message)),
@@ -328,8 +334,8 @@ async fn direct_response(
     let upstream_range = match range {
         None => None,
         Some(ByteRange::From { start, end }) => Some((start, end)),
-        Some(ByteRange::Suffix(length)) => match probe_total(inner, target, headers.clone()).await {
-            Ok(Probe { total, .. }) if total > 0 => Some((total.saturating_sub(length), Some(total - 1))),
+        Some(ByteRange::Suffix(length)) => match probe_sized(inner, target, headers.clone()).await {
+            Ok((total, _)) if total > 0 => Some((total.saturating_sub(length), Some(total - 1))),
             Ok(_) => return unsatisfiable(0),
             Err(failure) => return *failure,
         },
@@ -350,17 +356,17 @@ async fn direct_response(
 }
 
 async fn head_from_origin(inner: &ProxyShared, target: &str, headers: Upstream) -> Response<ProxyBody> {
-    match probe_total(inner, target, headers).await {
-        Ok(probe) => {
-            let content_type = content_type_for(target, probe.origin_type.as_deref());
-            respond(200, media_headers(&content_type, probe.total, None), empty(), false)
+    match probe_sized(inner, target, headers).await {
+        Ok((total, origin_type)) => {
+            let content_type = content_type_for(target, origin_type.as_deref());
+            respond(200, media_headers(&content_type, total, None), empty(), false)
         }
         Err(failure) => *failure,
     }
 }
 
 struct Probe {
-    total: u64,
+    total: Option<u64>,
     origin_type: Option<String>,
     ignored_range: bool,
 }
@@ -376,9 +382,18 @@ async fn probe_total(inner: &ProxyShared, target: &str, headers: Upstream) -> Re
         });
     let origin_type = header_value(&response.headers, "content-type").map(str::to_string);
     match (response.status, total) {
-        (200 | 206, Some(total)) => Ok(Probe { total, origin_type, ignored_range: response.status == 200 }),
-        (200 | 206, None) => Err(Box::new(text(502, "origin did not report a size"))),
+        (200, total) => Ok(Probe { total, origin_type, ignored_range: true }),
+        (206, Some(total)) => Ok(Probe { total: Some(total), origin_type, ignored_range: false }),
+        (206, None) => Err(Box::new(text(502, "origin did not report a size"))),
         (status, _) => Err(Box::new(text(status, "origin refused the request"))),
+    }
+}
+
+async fn probe_sized(inner: &ProxyShared, target: &str, headers: Upstream) -> Result<(u64, Option<String>), Failure> {
+    let probe = probe_total(inner, target, headers).await?;
+    match probe.total {
+        Some(total) => Ok((total, probe.origin_type)),
+        None => Err(Box::new(text(502, "origin did not report a size"))),
     }
 }
 
@@ -594,6 +609,7 @@ async fn block_range_response(
     let origin_type = match cursor.open().await {
         Ok(content_type) => content_type,
         Err(OpenFailure::Rejected(rejection)) => return Some(rejected(&rejection, false)),
+        Err(OpenFailure::Failed(_)) if inner.ignores_range(&inner.key(target, &headers)) => return None,
         Err(OpenFailure::Failed(message)) => return Some(text(502, &message)),
     };
     let content_type = content_type_for(target, origin_type.as_deref());
@@ -643,6 +659,5 @@ async fn probe_once(
         inner.mark_ignores_range(key);
         return Ok(None);
     }
-    inner.remember_total(key, probe.total);
-    Ok(Some(probe.total))
+    Ok(probe.total.inspect(|total| inner.remember_total(key, *total)))
 }

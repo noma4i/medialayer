@@ -40,6 +40,8 @@ pub struct Script {
     pub cut_after: Option<u64>,
     pub hang: bool,
     pub ignore_range: bool,
+    pub unsized_body: bool,
+    pub ignore_range_after: Option<usize>,
 }
 
 impl Script {
@@ -62,6 +64,8 @@ impl Script {
             cut_after: None,
             hang: false,
             ignore_range: false,
+            unsized_body: false,
+            ignore_range_after: None,
         }
     }
 
@@ -97,6 +101,16 @@ impl Script {
 
     pub fn hanging(mut self) -> Self {
         self.hang = true;
+        self
+    }
+
+    pub fn ignoring_range_after(mut self, ranged_requests: usize) -> Self {
+        self.ignore_range_after = Some(ranged_requests);
+        self
+    }
+
+    pub fn without_length(mut self) -> Self {
+        self.unsized_body = true;
         self
     }
 
@@ -235,9 +249,11 @@ impl Fetcher for MockFetcher {
             std::future::pending::<()>().await;
         }
         let total = script.payload.len();
+        let ranged = self.requests().iter().filter(|seen| seen.url == request.url && seen.range.is_some()).count();
+        let ignores = script.ignore_range || script.ignore_range_after.is_some_and(|after| ranged > after);
         let mut headers = script.headers.clone();
         let (status, start, end) = match request.range {
-            Some(_) if script.ignore_range => (script.status, 0, total),
+            Some(_) if ignores => (script.status, 0, total),
             Some((start, _)) if start >= total => {
                 headers.insert("Content-Range".to_string(), format!("bytes */{total}"));
                 (416, 0, 0)
@@ -249,7 +265,9 @@ impl Fetcher for MockFetcher {
             }
             _ => (script.status, 0, total),
         };
-        headers.insert("Content-Length".to_string(), (end - start).to_string());
+        if !script.unsized_body {
+            headers.insert("Content-Length".to_string(), (end - start).to_string());
+        }
         let cursor = BodyCursor {
             payload: script.payload,
             position: start,

@@ -230,6 +230,7 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
     let expected = if flight.range.is_some() { 206 } else { 200 };
     if fetched.status != expected {
         if flight.range.is_some() && fetched.status == 200 {
+            inner.mark_ignores_range(&flight.base_key);
             return FlightOutcome::Failed("origin ignored the range".to_string());
         }
         let content_type = header_value(&fetched.headers, "content-type").map(str::to_string);
