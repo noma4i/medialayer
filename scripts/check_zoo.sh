@@ -170,8 +170,10 @@ for key in allowed:
     if parts[0] == "spawn" and unowned.get(parts[1], 0) < int(parts[2]):
         findings.append(f"Z4 the allowlist grants {parts[2]} unowned tasks to {parts[1]} but it starts {unowned.get(parts[1], 0)}: lower the entry")
 
-# Z5 temporary and print code in production.
+# Z5 temporary and print code in production. trace.rs is the ML_TRACE sink and prints by design.
 for path in production:
+    if rel(path) == "trace.rs":
+        continue
     text = path.read_text()
     for number, line in enumerate(text.splitlines(), 1):
         if "TEMPORARY" in line or re.search(r"\b(?:dbg|println|eprintln)!\(", strip_comments(line)):
