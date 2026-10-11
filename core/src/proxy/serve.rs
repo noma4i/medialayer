@@ -492,8 +492,13 @@ impl BlockCursor {
             resumed: false,
             resume: Resume::new(&self.inner, &self.target, &self.headers, block_start),
         };
+        let whole_block = (block_start + size).min(self.total) - block_start;
         for _ in 0..ATTEMPTS {
-            if self.inner.store.len(&stored_key).await.is_some() {
+            let stored = self.inner.store.len(&stored_key).await;
+            if stored.is_some_and(|length| length != whole_block) {
+                crate::trace!("cache", "bad block {} stored={stored:?} expected={whole_block}", crate::trace::tail(&stored_key));
+                self.inner.store.remove(&stored_key).await;
+            } else if stored.is_some() {
                 let content_type = self.inner.store.meta(&stored_key).await.and_then(|meta| meta.content_type);
                 self.source = Some(cursor);
                 return Ok(content_type);

@@ -21,5 +21,7 @@ pub trait StoreWriter: Send {
     // Dropping a writer without commit discards the entry, like abort.
     async fn append(&mut self, bytes: &[u8]) -> bool;
     async fn commit(self: Box<Self>) -> bool;
+    // Commits only when exactly `length` bytes were appended; a short or long body is discarded.
+    async fn commit_exact(self: Box<Self>, length: u64) -> bool;
     async fn abort(self: Box<Self>);
 }

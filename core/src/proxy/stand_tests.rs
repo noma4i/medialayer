@@ -125,6 +125,13 @@ impl StoreWriter for FlakyWriter {
         self.inner.commit().await
     }
 
+    async fn commit_exact(self: Box<Self>, length: u64) -> bool {
+        if self.store.roll(4) {
+            return false;
+        }
+        self.inner.commit_exact(length).await
+    }
+
     async fn abort(self: Box<Self>) {
         self.inner.abort().await;
     }

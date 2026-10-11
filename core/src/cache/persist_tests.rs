@@ -5,7 +5,7 @@ use crate::cache::entry::Entry;
 use crate::proxy::Meta;
 
 fn sample(meta: Meta) -> Entry {
-    Entry { size: 42, kind: Kind::Stream, created: 7, last_access: 9, hits: 3, meta }
+    Entry { check: super::entry::Check::Legacy, size: 42, kind: Kind::Stream, created: 7, last_access: 9, hits: 3, meta }
 }
 
 #[test]

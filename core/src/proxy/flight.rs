@@ -247,6 +247,16 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
     if let Some(length) = object_length.filter(|_| flight.range.is_some()) {
         inner.remember_total(&flight.base_key, length);
     }
+    let expected = match flight.range {
+        Some((start, end)) => match header_value(&fetched.headers, "content-range").and_then(parse_content_range) {
+            Some((first, last)) if first != start || last > end => {
+                return FlightOutcome::Failed(format!("origin answered bytes {first}-{last} for {start}-{end}"));
+            }
+            Some((first, last)) => Some(last - first + 1),
+            None => total,
+        },
+        None => total,
+    };
     let meta = Meta { content_type: content_type.clone(), total_length: object_length };
     let Some(mut writer) = inner.store.begin_write(&flight.key, meta).await else {
         return FlightOutcome::Unstorable;
@@ -295,13 +305,24 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
         }
     }
     drop(body);
-    if total.is_some_and(|expected| expected != written) {
+    if expected.is_some_and(|expected| expected != written) {
         writer.abort().await;
         return FlightOutcome::Failed("origin body truncated".to_string());
     }
-    if writer.commit().await {
+    let committed = match expected {
+        Some(length) => writer.commit_exact(length).await,
+        None => writer.commit().await,
+    };
+    if committed {
         FlightOutcome::Complete
     } else {
         FlightOutcome::Unstorable
     }
+}
+
+fn parse_content_range(value: &str) -> Option<(u64, u64)> {
+    let span = value.trim().strip_prefix("bytes ")?.split_once('/')?.0;
+    let (first, last) = span.split_once('-')?;
+    let (first, last) = (first.trim().parse().ok()?, last.trim().parse().ok()?);
+    (first <= last).then_some((first, last))
 }

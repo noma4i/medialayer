@@ -1,4 +1,4 @@
-use super::entry::{Entry, Kind};
+use super::entry::{Check, Entry, Kind};
 use super::error::CacheError;
 use super::evict::trigger_eviction;
 use super::inner::{delete_files, CacheShared};
@@ -6,6 +6,8 @@ use crate::proxy::Meta;
 use super::naming::{bin_path, file_name, part_path};
 use super::reservation::SpaceReservation;
 use super::save::mark_dirty;
+use super::verify::sum_of;
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -46,6 +48,7 @@ pub struct Writer {
     _registration: Registration,
     file: Option<tokio::fs::File>,
     reservation: SpaceReservation,
+    hasher: Sha256,
     renamed: bool,
 }
 
@@ -56,7 +59,7 @@ impl Writer {
         let part = part_path(&inner.dir, &name, inner.part_sequence.fetch_add(1, Ordering::SeqCst));
         let registration = Registration::new(&inner, &name, &part);
         let reservation = SpaceReservation::new(inner.clone());
-        let mut writer = Writer { inner, key: key.to_string(), name, kind, meta: Meta::default(), part, _registration: registration, file: None, reservation, renamed: false };
+        let mut writer = Writer { inner, key: key.to_string(), name, kind, meta: Meta::default(), part, _registration: registration, file: None, reservation, hasher: Sha256::new(), renamed: false };
         writer.file = Some(create_part(&writer.inner.handle, &writer.part).await?);
         Ok(writer)
     }
@@ -75,6 +78,7 @@ impl Writer {
         let file = self.file.as_mut().ok_or_else(|| CacheError::Io("writer is closed".to_string()))?;
         file.write_all(data).await?;
         file.flush().await?;
+        self.hasher.update(data);
         Ok(())
     }
 
@@ -82,6 +86,13 @@ impl Writer {
         self.file.take();
         self.renamed = true;
         delete_files(vec![self.part.clone()]).await;
+    }
+
+    pub async fn commit_exact(self, length: u64) -> Result<(), CacheError> {
+        if self.reservation.held() != length {
+            return Err(CacheError::Io(format!("body has {} of {length} bytes", self.reservation.held())));
+        }
+        self.commit().await
     }
 
     pub async fn commit(mut self) -> Result<(), CacheError> {
@@ -102,8 +113,9 @@ impl Writer {
             let mut state = inner.state();
             let size = self.reservation.held();
             self.reservation.settle(&mut state);
-            let entry = Entry { size, kind: self.kind, created: now, last_access: now, hits: 0, meta: self.meta.clone() };
-            state.insert(self.name.clone(), self.key.clone(), entry);
+            let check = Check::Sum(sum_of(self.hasher.clone()));
+            let entry = Entry { size, check, kind: self.kind, created: now, last_access: now, hits: 0, meta: self.meta.clone() };
+            state.insert(self.name.clone(), self.key.clone(), entry, true);
         }
         mark_dirty(&inner);
         trigger_eviction(&inner);

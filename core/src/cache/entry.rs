@@ -28,9 +28,16 @@ impl Kind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Check {
+    Legacy,
+    Sum(u64),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     pub size: u64,
+    pub check: Check,
     pub kind: Kind,
     pub created: u64,
     pub last_access: u64,

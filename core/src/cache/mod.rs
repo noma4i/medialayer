@@ -13,6 +13,7 @@ mod reader;
 mod reservation;
 mod save;
 mod state;
+mod verify;
 mod store;
 mod writer;
 

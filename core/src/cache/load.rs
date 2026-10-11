@@ -35,9 +35,11 @@ fn merge(inner: &CacheShared, batch: &[(String, Entry)], bins: &HashMap<String, 
     let hashed: Vec<(String, &(String, Entry))> = batch.iter().map(|record| (file_name(&record.0), record)).collect();
     let mut state = inner.state();
     for (name, (key, entry)) in hashed {
-        let Some(size) = bins.get(&name) else { continue };
+        if bins.get(&name) != Some(&entry.size) {
+            continue;
+        }
         if !state.contains(&name) {
-            state.insert(name, key.clone(), Entry { size: *size, ..entry.clone() });
+            state.insert(name, key.clone(), entry.clone(), false);
         }
     }
 }

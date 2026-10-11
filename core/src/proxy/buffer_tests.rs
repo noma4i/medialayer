@@ -92,6 +92,10 @@ impl StoreWriter for ProbeWriter {
         self.writer.commit().await
     }
 
+    async fn commit_exact(self: Box<Self>, length: u64) -> bool {
+        self.writer.commit_exact(length).await
+    }
+
     async fn abort(self: Box<Self>) {
         self.writer.abort().await
     }

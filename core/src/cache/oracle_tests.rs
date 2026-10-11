@@ -289,7 +289,7 @@ async fn inv_cache_07_a_directory_copied_at_any_moment_opens_to_a_consistent_cac
 }
 
 #[tokio::test]
-async fn inv_cache_07_a_rewrite_on_disk_before_its_index_and_a_torn_index_tmp_open_to_the_whole_file() {
+async fn inv_cache_07_a_rewrite_on_disk_before_its_index_is_not_trusted_and_a_torn_index_tmp_is_ignored() {
     let dir = tempfile::tempdir().unwrap();
     let slow_index = Options { persist_delay: Duration::from_secs(3600), ..Options::default() };
     let roomy = limits(1 << 30, 0.9, EvictionStrategy::Lru);
@@ -303,11 +303,12 @@ async fn inv_cache_07_a_rewrite_on_disk_before_its_index_and_a_torn_index_tmp_op
 
     let reopened = Cache::open(dir.path(), roomy);
     reopened.ready().await;
-    assert_eq!(reopened.get("https://o.test/k").await, Some(vec![2u8; 250]), "the rewrite on disk must read back whole");
-    assert_eq!(reopened.len("https://o.test/k").await, Some(250), "the length comes from the file, not from the stale index");
+    assert_eq!(reopened.get("https://o.test/k").await, None, "a file that disagrees with its index is dropped and fetched again");
+    assert_eq!(reopened.len("https://o.test/k").await, None);
     assert!(!reopened.contains("https://o.test/only-on-disk").await, "a file without an index line is an orphan");
     let stats = reopened.stats().await;
-    assert_eq!((stats.file_count, stats.total_bytes), (1, 250));
+    assert_eq!((stats.file_count, stats.total_bytes), (0, 0));
+    reopened.put("https://o.test/k", Kind::Image, &[2u8; 250]).await.unwrap();
     reopened.flush().await;
     let again = Cache::open(dir.path(), roomy);
     again.ready().await;

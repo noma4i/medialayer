@@ -9,7 +9,7 @@ use std::os::unix::fs::FileExt;
 use std::sync::{Arc, Mutex, PoisonError};
 use url::Url;
 
-const READ_STEP: u64 = 256 * 1024;
+pub(super) const READ_STEP: u64 = 256 * 1024;
 const IMAGE_EXTENSIONS: [&str; 8] = ["jpg", "jpeg", "png", "webp", "gif", "heic", "heif", "avif"];
 const AUDIO_EXTENSIONS: [&str; 6] = ["mp3", "m4a", "aac", "wav", "ogg", "flac"];
 
@@ -143,6 +143,13 @@ impl StoreWriter for OpenWrite {
     async fn commit(mut self: Box<Self>) -> bool {
         match self.writer.take() {
             Some(writer) => writer.commit().await.is_ok(),
+            None => false,
+        }
+    }
+
+    async fn commit_exact(mut self: Box<Self>, length: u64) -> bool {
+        match self.writer.take() {
+            Some(writer) => writer.commit_exact(length).await.is_ok(),
             None => false,
         }
     }

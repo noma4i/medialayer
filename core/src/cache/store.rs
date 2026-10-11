@@ -7,6 +7,7 @@ use super::naming::{bin_path, file_name};
 use super::options::Options;
 use super::reader::{Pin, Reader};
 use super::save::{mark_dirty, write_index};
+use super::verify::verified;
 use super::writer::Writer;
 use crate::limits::{Limits, LimitsError};
 use crate::proxy::Meta;
@@ -59,6 +60,7 @@ impl Cache {
             return None;
         }
         let name = file_name(key);
+        verified(&self.inner, &name).await?;
         let (pin, size) = Pin::acquire(&self.inner, &name)?;
         match tokio::fs::File::open(bin_path(&self.inner.dir, &name)).await {
             Ok(file) => Some(Reader::new(pin, file, size)),
@@ -84,22 +86,22 @@ impl Cache {
     }
 
     pub async fn len(&self, key: &str) -> Option<u64> {
-        self.entry_of(key).map(|entry| entry.size)
+        self.entry_of(key).await.map(|entry| entry.size)
     }
 
     pub async fn meta(&self, key: &str) -> Option<Meta> {
-        self.entry_of(key).map(|entry| entry.meta)
+        self.entry_of(key).await.map(|entry| entry.meta)
     }
 
-    fn entry_of(&self, key: &str) -> Option<Entry> {
+    async fn entry_of(&self, key: &str) -> Option<Entry> {
         if !self.is_ready() {
             return None;
         }
-        self.inner.state().entry(&file_name(key))
+        verified(&self.inner, &file_name(key)).await
     }
 
     pub async fn contains(&self, key: &str) -> bool {
-        self.is_ready() && self.inner.state().contains(&file_name(key))
+        self.entry_of(key).await.is_some()
     }
 
     pub async fn remove(&self, key: &str) -> bool {

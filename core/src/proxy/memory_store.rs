@@ -180,6 +180,11 @@ impl StoreWriter for MemoryWriter {
         }
     }
 
+    async fn commit_exact(self: Box<Self>, length: u64) -> bool {
+        let fits = self.shared.entries.lock().unwrap_or_else(PoisonError::into_inner).get(&self.key).is_some_and(|entry| entry.data.len() as u64 == length);
+        fits && self.commit().await
+    }
+
     async fn abort(mut self: Box<Self>) {
         self.discard();
     }

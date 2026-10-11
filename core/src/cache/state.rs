@@ -1,4 +1,4 @@
-use super::entry::{Entry, Kind, KindStats, CacheStats};
+use super::entry::{Check, Entry, Kind, KindStats, CacheStats};
 use crate::limits::Limits;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound;
@@ -8,6 +8,7 @@ pub struct Slot {
     pub key: String,
     pub entry: Entry,
     pub readers: u32,
+    pub verified: bool,
 }
 
 pub struct Item {
@@ -46,17 +47,24 @@ impl State {
         self.entries.contains_key(name)
     }
 
-    pub fn entry(&self, name: &str) -> Option<Entry> {
-        self.entries.get(name).map(|slot| slot.entry.clone())
+    pub fn entry_state(&self, name: &str) -> Option<(String, Entry, bool)> {
+        self.entries.get(name).map(|slot| (slot.key.clone(), slot.entry.clone(), slot.verified))
     }
 
-    pub fn insert(&mut self, name: String, key: String, entry: Entry) {
+    pub fn mark_verified(&mut self, name: &str, sum: u64) {
+        if let Some(slot) = self.entries.get_mut(name) {
+            slot.entry.check = Check::Sum(sum);
+            slot.verified = true;
+        }
+    }
+
+    pub fn insert(&mut self, name: String, key: String, entry: Entry, verified: bool) {
         let readers = self.take(&name).map_or(0, |slot| slot.readers);
         self.used += entry.size;
         let stats = &mut self.per_kind[entry.kind.index()];
         stats.bytes += entry.size;
         stats.files += 1;
-        self.entries.insert(name, Slot { key, entry, readers });
+        self.entries.insert(name, Slot { key, entry, readers, verified });
     }
 
     pub fn take(&mut self, name: &str) -> Option<Slot> {

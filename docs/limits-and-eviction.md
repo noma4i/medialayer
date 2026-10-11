@@ -59,4 +59,8 @@ media.clear(Kind.VIDEO)
 media.purge(url)
 ```
 
+## Cache integrity
+
+Every cached file is stored with its length and a checksum. The first read of a file in each run checks both. A file that was cut short, rewritten or damaged on disk is never served: it is removed and downloaded again by itself, only that block of a video, with at most 3 attempts before the load fails like any other network failure. A cache written by an older version is kept: its files are checked and given a checksum on first use, and a file whose length disagrees with the index is dropped. An origin that answers a Range request with another range, or with a body shorter than announced, is never stored. With `ML_TRACE=1` each dropped file prints a `bad block` line.
+
 Limits are saved in the platform's local storage (UserDefaults on iOS, SharedPreferences on Android) through the `SettingsStore` you pass to `open`. Defaults come from your media file, and a saved value wins over the default. An invalid saved value is dropped and the default is used.

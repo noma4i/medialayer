@@ -73,3 +73,66 @@ async fn inv_cache_07_entries_over_budget_after_load_are_evicted() {
     reopened.ready().await;
     wait_for_file_count(&reopened, 1).await;
 }
+
+fn bin_of(dir: &std::path::Path, key: &str) -> std::path::PathBuf {
+    super::naming::bin_path(dir, &super::naming::file_name(key))
+}
+
+async fn reopened_after(damage: impl Fn(&mut Vec<u8>)) -> (tempfile::TempDir, Cache) {
+    let f = fixture(roomy(), &[]).await;
+    f.put("good", Kind::Stream, 1000).await;
+    f.put("bad", Kind::Stream, 1000).await;
+    f.cache.flush().await;
+    let path = bin_of(f.dir.path(), "bad");
+    let mut bytes = std::fs::read(&path).unwrap();
+    damage(&mut bytes);
+    std::fs::write(&path, bytes).unwrap();
+    let reopened = Cache::open(f.dir.path(), roomy());
+    reopened.ready().await;
+    (f.dir, reopened)
+}
+
+#[tokio::test]
+async fn inv_cache_17_a_damaged_file_is_never_served_and_is_dropped_on_first_touch() {
+    let damages: [(&str, Box<dyn Fn(&mut Vec<u8>)>); 4] = [
+        ("flipped byte", Box::new(|bytes| bytes[500] ^= 0xff)),
+        ("zeroed tail", Box::new(|bytes| bytes[600..].fill(0))),
+        ("torn short", Box::new(|bytes| bytes.truncate(600))),
+        ("garbage appended", Box::new(|bytes| bytes.extend_from_slice(b"junk"))),
+    ];
+    for (name, damage) in damages {
+        let (dir, cache) = reopened_after(damage).await;
+        assert!(cache.get("good").await == Some(payload(1000)), "{name}");
+        assert_eq!(cache.get("bad").await, None, "{name}");
+        assert!(!cache.contains("bad").await, "{name}");
+        assert_eq!(cache.stats().await.file_count, 1, "{name}");
+        wait_until(|| !bin_of(dir.path(), "bad").exists()).await;
+    }
+}
+
+#[tokio::test]
+async fn inv_cache_17_legacy_entries_are_checked_on_first_touch_and_get_a_checksum() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut index = String::new();
+    for (key, indexed, on_disk) in [("fine", 100usize, 100usize), ("short", 100, 40), ("other", 60, 60)] {
+        std::fs::write(bin_of(dir.path(), key), vec![b'q'; on_disk]).unwrap();
+        index.push_str(&format!("{}\t{indexed}\tstream\t1\t2\t3\t\t\n", super::naming::hex_encode(key)));
+    }
+    std::fs::write(dir.path().join("index.tsv"), index).unwrap();
+    let cache = Cache::open(dir.path(), roomy());
+    cache.ready().await;
+
+    assert!(cache.get("fine").await == Some(vec![b'q'; 100]));
+    assert!(!cache.contains("short").await);
+    assert_eq!(cache.stats().await.file_count, 2);
+    cache.flush().await;
+
+    let saved = std::fs::read_to_string(dir.path().join("index.tsv")).unwrap();
+    let sum_of = |key: &str| {
+        let prefix = super::naming::hex_encode(key);
+        saved.lines().find(|line| line.starts_with(&prefix)).map(|line| line.split('\t').nth(8).unwrap_or_default().to_string())
+    };
+    assert!(sum_of("fine").is_some_and(|sum| !sum.is_empty()));
+    assert_eq!(sum_of("other"), Some(String::new()));
+    assert_eq!(sum_of("short"), None);
+}
