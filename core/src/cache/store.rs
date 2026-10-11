@@ -1,3 +1,4 @@
+use super::byte_store::read_at;
 use super::entry::{Entry, Kind, CacheStats};
 use super::error::CacheError;
 use super::evict::{evict_if_needed, names_where, remove_names};
@@ -17,6 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const WRITE_CHUNK: usize = 1024 * 1024;
+const READ_ATTEMPTS: usize = 3;
 
 #[derive(Clone)]
 pub struct Cache {
@@ -48,11 +50,44 @@ impl Cache {
     }
 
     pub async fn get(&self, key: &str) -> Option<Vec<u8>> {
-        self.open_reader(key).await?.read_all().await.ok()
+        self.get_range(key, 0, u64::MAX).await
     }
 
     pub async fn get_range(&self, key: &str, start: u64, len: u64) -> Option<Vec<u8>> {
-        self.open_reader(key).await?.read_range(start, len).await.ok()
+        for _ in 0..READ_ATTEMPTS {
+            let (pin, size) = self.pinned(key).await?;
+            let path = bin_path(&self.inner.dir, &file_name(key));
+            let wanted = len.min(size.saturating_sub(start));
+            let read = tokio::task::spawn_blocking(move || {
+                let _pin = pin;
+                let file = std::fs::File::open(&path).ok()?;
+                Some(if file.metadata().ok()?.len() == size { read_at(&file, start, wanted) } else { None })
+            })
+            .await;
+            match read {
+                Ok(Some(Some(bytes))) => return Some(bytes),
+                Ok(Some(None)) => continue,
+                _ => break,
+            }
+        }
+        self.forget_missing(key);
+        None
+    }
+
+    async fn pinned(&self, key: &str) -> Option<(Pin, u64)> {
+        if !self.is_ready() {
+            return None;
+        }
+        let name = file_name(key);
+        verified(&self.inner, &name).await?;
+        Pin::acquire(&self.inner, &name)
+    }
+
+    fn forget_missing(&self, key: &str) {
+        let name = file_name(key);
+        if !bin_path(&self.inner.dir, &name).exists() && self.inner.state().take(&name).is_some() {
+            mark_dirty(&self.inner);
+        }
     }
 
     pub async fn open_reader(&self, key: &str) -> Option<Reader> {

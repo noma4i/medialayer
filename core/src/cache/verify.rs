@@ -1,9 +1,10 @@
 use super::entry::{Check, Entry};
-use super::byte_store::READ_STEP;
 use super::inner::CacheShared;
 use super::naming::bin_path;
 use super::save::mark_dirty;
 use sha2::{Digest, Sha256};
+
+const READ_STEP: usize = 256 * 1024;
 use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
@@ -17,7 +18,7 @@ pub fn sum_of(hasher: Sha256) -> u64 {
 fn file_sum(path: &Path, length: u64) -> Option<u64> {
     let mut file = std::fs::File::open(path).ok()?;
     let mut hasher = Sha256::new();
-    let mut buffer = vec![0u8; READ_STEP as usize];
+    let mut buffer = vec![0u8; READ_STEP.min(length as usize + 1)];
     let mut total = 0u64;
     loop {
         let read = file.read(&mut buffer).ok()?;

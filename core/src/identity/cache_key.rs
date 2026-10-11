@@ -20,6 +20,16 @@ pub fn namespaced_key(url: &str, headers: &HashMap<String, String>, names: &[Str
     format!("{}{NAMESPACE_MARK}{}", cache_key(url), cache_namespace(url, &selected))
 }
 
+pub fn hex_lower(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut text = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        text.push(DIGITS[usize::from(byte >> 4)] as char);
+        text.push(DIGITS[usize::from(byte & 15)] as char);
+    }
+    text
+}
+
 pub fn key_file_name(key: &str) -> String {
-    Sha256::digest(key.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect()
+    hex_lower(&Sha256::digest(key.as_bytes()))
 }

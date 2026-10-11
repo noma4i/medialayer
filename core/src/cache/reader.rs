@@ -1,8 +1,7 @@
 use super::error::CacheError;
 use super::inner::CacheShared;
-use std::io::SeekFrom;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::io::AsyncReadExt;
 
 pub struct Pin {
     inner: Arc<CacheShared>,
@@ -45,19 +44,6 @@ impl Reader {
         let mut buffer = vec![0u8; self.pin.inner.chunk_size];
         let read = self.file.read(&mut buffer).await?;
         buffer.truncate(read);
-        Ok(buffer)
-    }
-
-    pub(super) async fn read_all(&mut self) -> Result<Vec<u8>, CacheError> {
-        let mut buffer = Vec::with_capacity(self.size as usize);
-        self.file.read_to_end(&mut buffer).await?;
-        Ok(buffer)
-    }
-
-    pub(super) async fn read_range(&mut self, start: u64, len: u64) -> Result<Vec<u8>, CacheError> {
-        self.file.seek(SeekFrom::Start(start)).await?;
-        let mut buffer = Vec::new();
-        (&mut self.file).take(len).read_to_end(&mut buffer).await?;
         Ok(buffer)
     }
 }

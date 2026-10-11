@@ -57,8 +57,8 @@ async fn body_after_the_rest(mut client: Client) -> Vec<u8> {
 async fn inv_proxy_04_an_entry_removed_in_the_middle_of_a_response_is_continued_from_the_origin_with_the_right_bytes() {
     let rig = rig().await;
     let stream = client_paused_after_the_first_bytes(&rig).await;
-    assert!(rig.cache.remove(URL).await);
     let calls_before = rig.fetcher.calls();
+    assert!(rig.cache.remove(URL).await);
 
     let body = body_after_the_rest(stream).await;
 

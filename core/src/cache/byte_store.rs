@@ -9,7 +9,6 @@ use std::os::unix::fs::FileExt;
 use std::sync::{Arc, Mutex, PoisonError};
 use url::Url;
 
-pub(super) const READ_STEP: u64 = 256 * 1024;
 const IMAGE_EXTENSIONS: [&str; 8] = ["jpg", "jpeg", "png", "webp", "gif", "heic", "heif", "avif"];
 const AUDIO_EXTENSIONS: [&str; 6] = ["mp3", "m4a", "aac", "wav", "ogg", "flac"];
 
@@ -41,17 +40,17 @@ fn extension_of(key: &str) -> Option<String> {
     segment.rsplit_once('.').map(|(_, extension)| extension.to_ascii_lowercase())
 }
 
-fn read_at(file: &File, start: u64, len: u64) -> Option<Vec<u8>> {
-    let mut buffer = Vec::new();
-    let mut chunk = vec![0u8; len.min(READ_STEP) as usize];
-    while (buffer.len() as u64) < len {
-        let wanted = chunk.len().min((len - buffer.len() as u64) as usize);
-        let read = file.read_at(&mut chunk[..wanted], start + buffer.len() as u64).ok()?;
+pub(super) fn read_at(file: &File, start: u64, len: u64) -> Option<Vec<u8>> {
+    let mut buffer = vec![0u8; len as usize];
+    let mut filled = 0;
+    while filled < buffer.len() {
+        let read = file.read_at(&mut buffer[filled..], start + filled as u64).ok()?;
         if read == 0 {
             break;
         }
-        buffer.extend_from_slice(&chunk[..read]);
+        filled += read;
     }
+    buffer.truncate(filled);
     Some(buffer)
 }
 

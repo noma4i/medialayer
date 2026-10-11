@@ -319,6 +319,34 @@ fn stats_of(samples: &mut Vec<f64>) -> (f64, f64, f64) {
     stats(samples)
 }
 
+async fn touch_all(args: &Args) {
+    let dir = PathBuf::from(args.text("dir"));
+    let (cache, took) = open_cache(&dir, 64 * GIB).await;
+    let store = CacheStore::new(cache.clone(), Arc::new(classify_kind));
+    let (mut total, mut bytes, mut gone) = (0u64, 0u64, 0u64);
+    let started = Instant::now();
+    for kind in ["block", "image"] {
+        for item in load_manifest(&dir, kind) {
+            total += 1;
+            match store.len(&item.key).await {
+                Some(length) => bytes += length,
+                None => gone += 1,
+            }
+        }
+    }
+    let touched = started.elapsed();
+    let flushed = Instant::now();
+    cache.flush().await;
+    println!(
+        "RESULT ready_ms={:.1} entries={total} gone={gone} gib={:.2} touch_all_ms={:.0} touch_ms_per_gib={:.0} flush_ms={:.1}",
+        took.as_secs_f64() * 1e3,
+        bytes as f64 / GIB as f64,
+        touched.as_secs_f64() * 1e3,
+        touched.as_secs_f64() * 1e3 / (bytes as f64 / GIB as f64),
+        flushed.elapsed().as_secs_f64() * 1e3
+    );
+}
+
 async fn http_range(port: u16, target: &str, start: u64, end: u64) -> Option<(f64, f64, u64, u16)> {
     let started = Instant::now();
     let mut stream = TcpStream::connect(("127.0.0.1", port)).await.ok()?;
@@ -408,13 +436,23 @@ async fn read_proxy(args: &Args) {
     println!("SUMMARY origin_fetches_total={network_total}");
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
-async fn main() {
+fn main() {
     let (mode, args) = Args::parse();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(args.number("workers", 4usize))
+        .max_blocking_threads(args.number("blocking", 512usize))
+        .enable_all()
+        .build()
+        .expect("runtime");
+    runtime.block_on(run(mode, args));
+}
+
+async fn run(mode: String, args: Args) {
     match mode.as_str() {
         "fill" => fill(&args).await,
         "read" => read_cache(&args).await,
         "proxy" => read_proxy(&args).await,
-        other => eprintln!("usage: cache_bench fill|read|proxy --dir D [--gib G] [--budget-gib B] [--repeats N] [--samples N] [--slow-ms M] [--churn PER_SECOND] (got {other:?})"),
+        "touch" => touch_all(&args).await,
+        other => eprintln!("usage: cache_bench fill|read|proxy --dir D [--gib G] [--budget-gib B] [--repeats N] [--samples N] [--slow-ms M] [--churn PER_SECOND] [--workers N] [--blocking N] (got {other:?})"),
     }
 }

@@ -1,4 +1,4 @@
-use crate::identity::key_file_name;
+use crate::identity::{hex_lower, key_file_name};
 use std::path::{Path, PathBuf};
 
 pub const INDEX_FILE: &str = "index.tsv";
@@ -7,7 +7,7 @@ pub const BIN_SUFFIX: &str = ".bin";
 pub const PART_SUFFIX: &str = ".part";
 
 pub fn hex_encode(text: &str) -> String {
-    text.bytes().map(|byte| format!("{byte:02x}")).collect()
+    hex_lower(text.as_bytes())
 }
 
 pub fn hex_decode(hex: &str) -> Option<String> {
