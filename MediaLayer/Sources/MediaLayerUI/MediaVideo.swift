@@ -27,6 +27,7 @@ public struct MediaVideo<Content: View>: View {
   @State private var owner = UUID()
   private let source: any MediaSource
   private let playing: Bool
+  private let peeking: Bool
   private let muted: Bool
   private let loop: Bool
   private let gravity: AVLayerVideoGravity
@@ -37,6 +38,7 @@ public struct MediaVideo<Content: View>: View {
   public init(
     _ source: some MediaSource,
     playing: Bool = true,
+    peeking: Bool = false,
     muted: Bool = false,
     loop: Bool = true,
     gravity: AVLayerVideoGravity = .resizeAspectFill,
@@ -46,6 +48,7 @@ public struct MediaVideo<Content: View>: View {
   ) {
     self.source = source
     self.playing = playing
+    self.peeking = peeking
     self.muted = muted
     self.loop = loop
     self.gravity = gravity
@@ -67,6 +70,7 @@ public struct MediaVideo<Content: View>: View {
     .onAppear { declare(visible: true) }
     .onDisappear { declare(visible: false) }
     .onChange(of: playing) { _, value in context.map { KeyClaims.of($0.places).setPlaying(owner: owner, key: source.url, playing: value) } }
+    .onChange(of: peeking) { _, value in context.map { KeyClaims.of($0.places).setPeeking(owner: owner, key: source.url, peeking: value) } }
     .onChange(of: muted) { _, value in context.map { KeyClaims.of($0.places).setMuted(owner: owner, key: source.url, muted: value) } }
   }
 
@@ -83,6 +87,7 @@ public struct MediaVideo<Content: View>: View {
     claims.visible(owner: owner, source: item, visible: true)
     claims.setMuted(owner: owner, key: source.url, muted: muted)
     claims.setPlaying(owner: owner, key: source.url, playing: playing)
+    claims.setPeeking(owner: owner, key: source.url, peeking: peeking)
   }
 
   private func follow() async {
@@ -101,12 +106,13 @@ extension MediaVideo where Content == EmptyView {
   public init(
     _ source: some MediaSource,
     playing: Bool = true,
+    peeking: Bool = false,
     muted: Bool = false,
     loop: Bool = true,
     gravity: AVLayerVideoGravity = .resizeAspectFill,
     onFirstFrame: @escaping () -> Void = {},
     onEnd: @escaping () -> Void = {}
   ) {
-    self.init(source, playing: playing, muted: muted, loop: loop, gravity: gravity, onFirstFrame: onFirstFrame, onEnd: onEnd) { _ in EmptyView() }
+    self.init(source, playing: playing, peeking: peeking, muted: muted, loop: loop, gravity: gravity, onFirstFrame: onFirstFrame, onEnd: onEnd) { _ in EmptyView() }
   }
 }

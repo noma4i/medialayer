@@ -213,6 +213,10 @@ impl MediaLayer {
         self.declare(move |assembled| assembled.stage.set_playing(&key, playing));
     }
 
+    pub fn set_peeking(&self, key: String, peeking: bool) {
+        self.declare(move |assembled| assembled.stage.set_peeking(&key, peeking));
+    }
+
     pub fn set_rate(&self, key: String, rate: f32) {
         self.declare(move |assembled| assembled.stage.set_rate(&key, rate));
     }

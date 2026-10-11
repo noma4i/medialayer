@@ -42,7 +42,7 @@ fun MediaLayerProvider(media: MediaLayer, imageLoader: ImageLoader? = null, play
 }
 
 @Composable
-internal fun rememberPlace(source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean = true): MediaState {
+internal fun rememberPlace(source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean = true, peeking: Boolean = false): MediaState {
   val media = LocalMediaEnvironment.current.media
   val item = remember(source, loop) { source.toItem().copy(looping = loop) }
   val owner = remember { Any() }
@@ -60,6 +60,12 @@ internal fun rememberPlace(source: MediaSource, playing: Boolean?, muted: Boolea
     DisposableEffect(media, item.url, playing) {
       media.claims.setPlaying(owner, item.url, playing)
       onDispose { }
+    }
+  }
+  if (peeking) {
+    DisposableEffect(media, item.url) {
+      media.claims.setPeeking(owner, item.url, true)
+      onDispose { media.claims.setPeeking(owner, item.url, false) }
     }
   }
   return remember(media, item.url) { media.stateFlow(item.url) }.collectAsState(MediaState.Idle).value

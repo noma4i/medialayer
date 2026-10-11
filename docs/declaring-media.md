@@ -181,6 +181,8 @@ MediaVideo(source, playing = isActive) { state ->
 
 Every place takes `playing` and `muted`. A player that is not playing stays prepared and paused. `Media.muted` mutes the whole app. Muting changes only the volume of the player; it never touches the audio session, so another app's music is not interrupted by a mute toggle.
 
+A pager declares the neighbour page that the finger is dragging into with `peeking: true`. The player of that page plays muted beside the page that plays, so the drag shows a moving picture. When the page becomes `playing` its player keeps running and gets its sound, with no restart. When `peeking` ends without `playing`, the player pauses. One page peeks at a time, and a page that plays never peeks.
+
 MediaLayer never sets up or activates the audio session. Your app chooses the category and activates it (`AVAudioSession` on iOS); on Android Media3 asks for audio focus when a player starts.
 
 You report only whether a place is visible or active. Prefetch, preroll, handoff and release follow from that.

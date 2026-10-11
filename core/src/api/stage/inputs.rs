@@ -58,6 +58,12 @@ impl Stage {
         self.dispatch(commands);
     }
 
+    pub fn set_peeking(&self, key: &str, peeking: bool) {
+        crate::trace!("stage", "set_peeking {} {peeking}", crate::trace::tail(key));
+        let commands = self.state().ring.set_peeking(key, peeking);
+        self.dispatch(commands);
+    }
+
     pub fn attach(&self, key: &str, view_token: u64) {
         let slot = {
             let mut state = self.state();

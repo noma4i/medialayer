@@ -22,6 +22,8 @@ mod lru_tests;
 #[cfg(test)]
 mod memory_tests;
 #[cfg(test)]
+mod peek_tests;
+#[cfg(test)]
 mod pinned_tests;
 #[cfg(test)]
 mod playback_tests;

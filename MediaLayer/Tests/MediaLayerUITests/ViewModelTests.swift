@@ -20,6 +20,7 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
 
   func visible(source: MediaItem, visible: Bool) { record("visible \(visible)") }
   func setPlaying(key: String, playing: Bool) { record("playing \(playing)") }
+  func setPeeking(key: String, peeking: Bool) { record("peeking \(peeking)") }
   func setMuted(key: String, muted: Bool) { record("muted \(muted)") }
   func setMutedAll(muted: Bool) { record("mutedAll \(muted)") }
   func setRate(key: String, rate: Float) { record("rate \(rate)") }
@@ -198,6 +199,21 @@ struct ViewModelTests {
 
     claims.setPlaying(owner: playing, key: "k", playing: false)
     #expect(places.recorded == ["playing true", "playing false"])
+  }
+
+  @Test
+  func aPeekedKeyIsForwardedOnceAndWithdrawnWhenItsLastViewLeaves() {
+    let places = RecordingPlaces()
+    let claims = KeyClaims(places: places)
+    let first = UUID(), second = UUID()
+
+    claims.setPeeking(owner: first, key: "k", peeking: true)
+    claims.setPeeking(owner: second, key: "k", peeking: true)
+    claims.release(owner: first, key: "k")
+    #expect(places.recorded == ["peeking true"])
+
+    claims.release(owner: second, key: "k")
+    #expect(places.recorded == ["peeking true", "peeking false"])
   }
 
   @Test

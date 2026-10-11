@@ -38,6 +38,7 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
 
   override fun visible(source: MediaItem, visible: Boolean) { items.add(source); calls.add("visible:${source.url}:$visible") }
   override fun setPlaying(key: String, playing: Boolean) { calls.add("playing:$key:$playing") }
+  override fun setPeeking(key: String, peeking: Boolean) { calls.add("peeking:$key:$peeking") }
   override fun setMuted(key: String, muted: Boolean) { calls.add("muted:$key:$muted") }
   override fun setMutedAll(muted: Boolean) { calls.add("mutedAll:$muted") }
   override fun setRate(key: String, rate: Float) { calls.add("rate:$key:$rate") }

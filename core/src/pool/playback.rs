@@ -11,15 +11,45 @@ impl Ring {
                 if slot == target {
                     continue;
                 }
-                if let Some(binding) = self.bindings[slot].as_mut().filter(|binding| binding.is_playing) {
+                if let Some(binding) = self.bindings[slot].as_mut().filter(|binding| binding.is_playing || binding.is_peeking) {
                     binding.is_playing = false;
+                    binding.is_peeking = false;
                     out.push(Command::Pause { slot });
                 }
             }
         }
         if let Some(binding) = self.bindings[target].as_mut().filter(|binding| binding.is_playing != playing) {
             binding.is_playing = playing;
-            out.push(if playing { Command::Play { slot: target } } else { Command::Pause { slot: target } });
+            let was_peeking = std::mem::take(&mut binding.is_peeking);
+            if !(playing && was_peeking) {
+                out.push(if playing { Command::Play { slot: target } } else { Command::Pause { slot: target } });
+            }
+        }
+        out.extend(self.sync_mute());
+        out
+    }
+
+    pub fn set_peeking(&mut self, key: &str, peeking: bool) -> Vec<Command> {
+        let Some(target) = self.slot_of(key) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        let Some(binding) = self.bindings[target].as_mut().filter(|binding| !binding.is_playing && binding.is_peeking != peeking) else {
+            return out;
+        };
+        binding.is_peeking = peeking;
+        if peeking {
+            for slot in (0..self.slots).filter(|slot| *slot != target) {
+                if let Some(other) = self.bindings[slot].as_mut().filter(|other| other.is_peeking) {
+                    other.is_peeking = false;
+                    out.push(Command::Pause { slot });
+                }
+            }
+            out.extend(self.sync_mute());
+            out.push(Command::Play { slot: target });
+        } else {
+            out.push(Command::Pause { slot: target });
+            out.extend(self.sync_mute());
         }
         out
     }
@@ -34,12 +64,15 @@ impl Ring {
         let mut out = Vec::new();
         if let Some(binding) = self.bindings[target].as_mut().filter(|binding| !binding.is_playing) {
             binding.is_playing = true;
-            out.push(Command::Play { slot: target });
+            if !std::mem::take(&mut binding.is_peeking) {
+                out.push(Command::Play { slot: target });
+            }
         }
         if let Some(binding) = self.bindings[source].as_mut() {
             binding.is_playing = false;
         }
         out.push(Command::Pause { slot: source });
+        out.extend(self.sync_mute());
         out
     }
 
@@ -71,7 +104,7 @@ impl Ring {
             let Some(binding) = self.bindings[slot].as_ref() else {
                 continue;
             };
-            let muted = self.muted_all || self.muted_keys.contains(&binding.key);
+            let muted = self.muted_all || self.muted_keys.contains(&binding.key) || binding.is_peeking;
             if muted == self.native_muted[slot] {
                 continue;
             }

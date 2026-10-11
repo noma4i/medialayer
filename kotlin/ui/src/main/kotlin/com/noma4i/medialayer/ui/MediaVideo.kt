@@ -37,6 +37,7 @@ internal class VideoEdges {
 fun MediaVideo(
   source: MediaSource,
   playing: Boolean = false,
+  peeking: Boolean = false,
   muted: Boolean = false,
   modifier: Modifier = Modifier,
   contentScale: ContentScale = ContentScale.Crop,
@@ -46,7 +47,7 @@ fun MediaVideo(
   content: @Composable (MediaState) -> Unit = {}
 ) {
   val environment = LocalMediaEnvironment.current
-  val state = rememberPlace(source, playing, muted, loop)
+  val state = rememberPlace(source, playing, muted, loop, peeking)
   val edges = remember(source.url) { VideoEdges() }
   val firstFrame by rememberUpdatedState(onFirstFrame)
   val end by rememberUpdatedState(onEnd)

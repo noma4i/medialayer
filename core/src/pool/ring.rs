@@ -31,6 +31,7 @@ pub(super) struct Binding {
     pub owner: Holder,
     pub page: Option<usize>,
     pub is_playing: bool,
+    pub is_peeking: bool,
     pub is_prerolled: bool,
     pub level: Retention,
     pub positional: Retention,
@@ -195,7 +196,9 @@ impl Ring {
             }
             if !binding.is_playing && should_play {
                 binding.is_playing = true;
-                plays.push(Command::Play { slot });
+                if !std::mem::take(&mut binding.is_peeking) {
+                    plays.push(Command::Play { slot });
+                }
             }
             if !should_play && is_ring && !binding.is_prerolled {
                 binding.is_prerolled = true;
@@ -277,6 +280,7 @@ impl Ring {
             owner,
             page,
             is_playing: false,
+            is_peeking: false,
             is_prerolled: false,
             level: Retention::Warm,
             positional: Retention::Warm,

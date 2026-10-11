@@ -420,3 +420,23 @@ async fn inv_api_21_a_declared_place_keeps_its_mute_when_its_player_is_unloaded_
     let last = slot.calls().into_iter().rev().find(|call| matches!(call, SlotCall::Mute | SlotCall::Unmute));
     assert_eq!(last, Some(SlotCall::Mute));
 }
+
+#[tokio::test]
+async fn inv_api_30_a_peeked_neighbour_plays_muted_beside_the_active_page_and_is_not_restarted_when_promoted() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    stage.set_window(5, videos(20));
+    stage.set_playing(&url_of(5), true);
+    eventually(|| rig.factory.slot_holding(&url_of(6)).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Preroll))).await;
+
+    stage.set_peeking(&url_of(6), true);
+    eventually(|| rig.holder(&url_of(6)).1.calls().contains(&SlotCall::Play)).await;
+    let calls = rig.holder(&url_of(6)).1.calls();
+    let mute = calls.iter().position(|call| *call == SlotCall::Mute).unwrap();
+    assert!(mute < calls.iter().position(|call| *call == SlotCall::Play).unwrap());
+    assert!(!rig.holder(&url_of(5)).1.calls().contains(&SlotCall::Pause));
+
+    stage.set_playing(&url_of(6), true);
+    eventually(|| rig.holder(&url_of(5)).1.calls().contains(&SlotCall::Pause) && rig.holder(&url_of(6)).1.calls().contains(&SlotCall::Unmute)).await;
+    assert_eq!(rig.holder(&url_of(6)).1.calls().iter().filter(|call| **call == SlotCall::Play).count(), 1);
+}

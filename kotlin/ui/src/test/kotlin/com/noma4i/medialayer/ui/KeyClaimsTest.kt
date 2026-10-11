@@ -25,6 +25,20 @@ class KeyClaimsTest {
   }
 
   @Test
+  fun aPeekedKeyIsForwardedOnceAndWithdrawnWhenItsLastViewLeaves() {
+    val first = Any()
+    val second = Any()
+
+    claims.setPeeking(first, "k", true)
+    claims.setPeeking(second, "k", true)
+    claims.release(first, "k")
+    assertEquals(listOf("peeking:k:true"), layer.calls.toList())
+
+    claims.release(second, "k")
+    assertEquals(listOf("peeking:k:true", "peeking:k:false"), layer.calls.toList())
+  }
+
+  @Test
   fun aViewThatDoesNotPlayNeverStopsAnotherViewOfTheSameKey() {
     val playing = Any()
     val idle = Any()
