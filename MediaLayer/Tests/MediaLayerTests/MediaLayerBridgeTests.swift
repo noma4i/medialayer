@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 @testable import MediaLayer
@@ -13,6 +14,23 @@ private final class MemorySettings: SettingsStore, @unchecked Sendable {
   func read(key: String) -> String? { lock.withLock { values[key] } }
   func write(key: String, value: String) { lock.withLock { values[key] = value } }
   func remove(key: String) { lock.withLock { values[key] = nil } }
+}
+
+private func closeListenerSilently(port: UInt16) {
+  for descriptor in 3..<4096 {
+    var address = sockaddr_in()
+    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+    let named = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(Int32(descriptor), $0, &length) } }
+    var peer = sockaddr_in()
+    var peerLength = socklen_t(MemoryLayout<sockaddr_in>.size)
+    let connected = withUnsafeMutablePointer(to: &peer) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getpeername(Int32(descriptor), $0, &peerLength) } } == 0
+    guard named == 0, !connected, UInt16(bigEndian: address.sin_port) == port else { continue }
+    let null = open("/dev/null", O_RDONLY)
+    dup2(null, Int32(descriptor))
+    close(null)
+    return
+  }
+  Issue.record("no listening socket on port \(port)")
 }
 
 private final class OfflineFetcher: Fetcher, @unchecked Sendable {
@@ -195,5 +213,31 @@ struct MediaLayerBridgeTests {
       #expect(http.value(forHTTPHeaderField: "Content-Range") == "bytes \(bytes.lowerBound)-\(bytes.upperBound)/20000", "\(range)")
       #expect(data == payload[bytes], "\(range)")
     }
+  }
+
+  @Test
+  func inv_proxy_23_a_listener_the_system_closed_is_bound_again_when_the_app_returns_to_the_foreground() async throws {
+    let media = try MediaLayer.open(config: OpenConfig(
+      dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
+      fetcher: RangeIgnoringOrigin(),
+      settings: MemorySettings(),
+      slots: nil,
+      device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
+      defaults: defaultLimits(),
+      pool: defaultPoolSettings()
+    ))
+    let route = try await media.playUrl(source: MediaItem(kind: .audio, url: "https://o.test/voice.m4a", headers: [:], cover: nil, blurHash: nil))
+    let url = try #require(URL(string: route.url))
+    closeListenerSilently(port: UInt16(try #require(url.port)))
+    await #expect(throws: (any Error).self) { _ = try await URLSession.shared.data(from: url) }
+
+    media.playerEvents().foreground()
+
+    var status = 0
+    for _ in 0..<100 where status != 200 {
+      if let (_, response) = try? await URLSession.shared.data(from: url) { status = (response as? HTTPURLResponse)?.statusCode ?? 0 }
+      try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    #expect(status == 200)
   }
 }
