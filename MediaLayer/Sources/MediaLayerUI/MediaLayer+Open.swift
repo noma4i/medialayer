@@ -10,12 +10,13 @@ extension MediaLayer {
     fetcher: Fetcher,
     settings: SettingsStore,
     directory: URL? = nil,
+    startMuted: Bool = false,
     silent: Bool = false,
     imageMemoryBytes: Int = MediaImagePipeline.defaultMemoryLimit
   ) throws -> MediaLayer {
     let defaults = SpecDefaults(defaults: defaultLimits(), pool: defaultPoolSettings(), namespaceHeaders: [])
     return try open(
-      defaults: defaults, fetcher: fetcher, settings: settings, directory: directory, silent: silent, imageMemoryBytes: imageMemoryBytes
+      defaults: defaults, fetcher: fetcher, settings: settings, directory: directory, startMuted: startMuted, silent: silent, imageMemoryBytes: imageMemoryBytes
     )
   }
 
@@ -24,11 +25,12 @@ extension MediaLayer {
     fetcher: Fetcher,
     settings: SettingsStore,
     directory: URL? = nil,
+    startMuted: Bool = false,
     silent: Bool = false,
     imageMemoryBytes: Int = MediaImagePipeline.defaultMemoryLimit
   ) throws -> MediaLayer {
     try open(
-      defaults: specDefaults(json: spec), fetcher: fetcher, settings: settings, directory: directory, silent: silent,
+      defaults: specDefaults(json: spec), fetcher: fetcher, settings: settings, directory: directory, startMuted: startMuted, silent: silent,
       imageMemoryBytes: imageMemoryBytes
     )
   }
@@ -38,13 +40,14 @@ extension MediaLayer {
     fetcher: Fetcher,
     settings: SettingsStore,
     directory: URL?,
+    startMuted: Bool,
     silent: Bool,
     imageMemoryBytes: Int
   ) throws -> MediaLayer {
     guard imageMemoryBytes > 0 else { throw MediaError.InvalidSpec(detail: "imageMemoryBytes must be positive") }
     let imageCache = ImageCache(costLimit: imageMemoryBytes)
     let (config, factory) = try makeConfig(
-      defaults: defaults, fetcher: fetcher, settings: settings, directory: directory, silent: silent, imageCache: imageCache
+      defaults: defaults, fetcher: fetcher, settings: settings, directory: directory, startMuted: startMuted, silent: silent, imageCache: imageCache
     )
     let media = try MediaLayer.open(config: config)
     ImageMemory.install(imageCache, on: media)
@@ -58,10 +61,11 @@ extension MediaLayer {
     fetcher: Fetcher,
     settings: SettingsStore,
     directory: URL?,
+    startMuted: Bool,
     silent: Bool,
     imageCache: ImageCache = ImageCache(costLimit: MediaImagePipeline.defaultMemoryLimit)
   ) throws -> (OpenConfig, AVQueuePlayerSlotFactory) {
-    let factory = AVQueuePlayerSlotFactory(startMuted: silent)
+    let factory = AVQueuePlayerSlotFactory(startMuted: startMuted || silent)
     let config = OpenConfig(
       dir: try (directory ?? defaultDirectory()).path,
       fetcher: fetcher,
