@@ -33,6 +33,32 @@ private final class RecordingFetcher: Fetcher, @unchecked Sendable {
   }
 }
 
+private final class MemoryBody: BodyReader, @unchecked Sendable {
+  private let lock = NSLock()
+  private var rest: Data
+
+  init(_ data: Data) { rest = data }
+
+  func nextChunk() async throws -> Data? {
+    lock.withLock {
+      let count = min(rest.count, 4096)
+      guard count > 0 else { return nil }
+      defer { rest.removeFirst(count) }
+      return Data(rest.prefix(count))
+    }
+  }
+
+  func release() {}
+}
+
+private final class RangeIgnoringOrigin: Fetcher, @unchecked Sendable {
+  static let payload = Data((0..<20_000).map { UInt8($0 % 251) })
+
+  func fetch(request: FetchRequest) async throws -> FetchResponse {
+    FetchResponse(status: 200, headers: ["Content-Type": "audio/mp4"], body: MemoryBody(Self.payload))
+  }
+}
+
 private struct Poster: MediaSource {
   let url: String
   var kind: Kind { .image }
@@ -144,5 +170,30 @@ struct MediaLayerBridgeTests {
 
     #expect(route.url.hasPrefix("http://127.0.0.1:"))
     #expect(placeholderFor(source: source, cache: .missing, ready: false) == .firstFrame)
+  }
+
+  @Test
+  func inv_proxy_22_an_origin_that_ignores_range_and_sends_no_length_still_answers_a_player_range_with_206() async throws {
+    let media = try MediaLayer.open(config: OpenConfig(
+      dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
+      fetcher: RangeIgnoringOrigin(),
+      settings: MemorySettings(),
+      slots: nil,
+      device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
+      defaults: defaultLimits(),
+      pool: defaultPoolSettings()
+    ))
+    let route = try await media.playUrl(source: MediaItem(kind: .audio, url: "https://o.test/voice.m4a", headers: [:], cover: nil, blurHash: nil))
+    let payload = RangeIgnoringOrigin.payload
+
+    for (range, bytes) in [("bytes=0-1", 0...1), ("bytes=-100", 19_900...19_999), ("bytes=10000-", 10_000...19_999)] {
+      var request = URLRequest(url: URL(string: route.url)!)
+      request.setValue(range, forHTTPHeaderField: "Range")
+      let (data, response) = try await URLSession.shared.data(for: request)
+      let http = try #require(response as? HTTPURLResponse)
+      #expect(http.statusCode == 206, "\(range)")
+      #expect(http.value(forHTTPHeaderField: "Content-Range") == "bytes \(bytes.lowerBound)-\(bytes.upperBound)/20000", "\(range)")
+      #expect(data == payload[bytes], "\(range)")
+    }
   }
 }

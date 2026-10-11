@@ -4,11 +4,13 @@ import java.nio.file.Files
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -47,6 +49,26 @@ private class UrlFetcher : Fetcher {
   override suspend fun fetch(request: FetchRequest): FetchResponse {
     urls.add(request.url)
     throw MediaException.Fetch("offline")
+  }
+}
+
+private class MemoryBody(data: ByteArray) : BodyReader {
+  private var rest = data
+
+  override suspend fun nextChunk(): ByteArray? {
+    if (rest.isEmpty()) return null
+    val count = minOf(rest.size, 4096)
+    return rest.copyOfRange(0, count).also { rest = rest.copyOfRange(count, rest.size) }
+  }
+
+  override fun release() {}
+}
+
+private class RangeIgnoringOrigin : Fetcher {
+  override suspend fun fetch(request: FetchRequest): FetchResponse = FetchResponse(200u, mapOf("Content-Type" to "audio/mp4"), MemoryBody(PAYLOAD))
+
+  companion object {
+    val PAYLOAD = ByteArray(20_000) { (it % 251).toByte() }
   }
 }
 
@@ -267,5 +289,22 @@ class MediaLayerBridgeTest {
 
     assertTrue(route.url.startsWith("http://127.0.0.1:"))
     assertEquals(Placeholder.FirstFrame, placeholderFor(source, CacheState.MISSING, false))
+  }
+
+  @Test
+  fun inv_proxy_22_an_origin_that_ignores_range_and_sends_no_length_still_answers_a_player_range_with_206() = runBlocking {
+    val media = openWith(RangeIgnoringOrigin(), LoggingSlots(), silent = true)
+    val route = media.playUrl(MediaItem(Kind.AUDIO, "https://o.test/voice.m4a", emptyMap(), null, null))
+    val cases = listOf(Triple("bytes=0-1", 0, 1), Triple("bytes=-100", 19_900, 19_999), Triple("bytes=10000-", 10_000, 19_999))
+
+    for ((range, first, last) in cases) {
+      val connection = java.net.URL(route.url).openConnection() as java.net.HttpURLConnection
+      connection.setRequestProperty("Range", range)
+      val body = withContext(Dispatchers.IO) { connection.inputStream.readBytes() }
+
+      assertEquals(range, 206, connection.responseCode)
+      assertEquals(range, "bytes $first-$last/20000", connection.getHeaderField("Content-Range"))
+      assertTrue(range, RangeIgnoringOrigin.PAYLOAD.copyOfRange(first, last + 1).contentEquals(body))
+    }
   }
 }
