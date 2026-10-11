@@ -57,6 +57,9 @@ fun MediaAudio(source: MediaSource, muted: Boolean = false, rate: Float = 1f, co
   DisposableEffect(player) {
     val exo = player
     val listener = object : Player.Listener {
+      override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+        if (exo != null) control.progress = control.fractionOf(exo)
+      }
       override fun onPlaybackStateChanged(playbackState: Int) {
         if (playbackState == Player.STATE_ENDED) control.pause()
       }
