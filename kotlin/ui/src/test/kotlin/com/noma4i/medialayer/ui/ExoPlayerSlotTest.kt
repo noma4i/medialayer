@@ -12,6 +12,7 @@ import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.test.utils.FakeClock
 import androidx.media3.test.utils.FakeMediaSource
 import androidx.test.core.app.ApplicationProvider
 import com.noma4i.medialayer.PlaybackRoute
@@ -98,6 +99,45 @@ class ExoPlayerSlotTest {
       assertEquals(looping, slot.sample().isLooping)
       assertEquals(if (looping) emptyList() else listOf("ended:5"), events.calls.toList())
     }
+  }
+
+  private fun playUntilReady(clock: FakeClock, slot: ExoPlayerSlot) {
+    repeat(100) {
+      if (slot.player!!.isPlaying) return
+      clock.advanceTime(50); idle(); Thread.sleep(20)
+    }
+  }
+
+  @Test
+  fun inv_idle_05_a_slot_sample_follows_the_playhead_between_events_without_a_tick() {
+    val clock = FakeClock(0)
+    val slot = factory().also { it.clock = clock }.create(0u)
+    slot.load("k", route); idle()
+    slot.play(); idle()
+    playUntilReady(clock, slot)
+    assertTrue("the player must be playing for the extrapolation to run, state ${slot.player!!.playbackState}", slot.player!!.isPlaying)
+
+    val start = slot.sample().positionMs.toLong()
+    clock.advanceTime(1000)
+    assertEquals(start + 1000.0, slot.sample().positionMs.toDouble(), 150.0)
+
+    slot.pause(); idle()
+    val paused = slot.sample().positionMs.toLong()
+    clock.advanceTime(1000)
+    assertEquals(paused, slot.sample().positionMs.toLong())
+
+    slot.setRate(2f); slot.play(); idle()
+    playUntilReady(clock, slot)
+    val fast = slot.sample().positionMs.toLong()
+    clock.advanceTime(500)
+    assertEquals(fast + 1000.0, slot.sample().positionMs.toDouble(), 150.0)
+
+    slot.seek(300u); idle()
+    assertEquals(300.0, slot.sample().positionMs.toDouble(), 150.0)
+
+    playUntilReady(clock, slot)
+    clock.advanceTime(60_000)
+    assertEquals(slot.sample().durationMs, slot.sample().positionMs)
   }
 
   @Test
