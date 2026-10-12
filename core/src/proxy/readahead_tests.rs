@@ -3,6 +3,7 @@ use super::proxy_tests::follow;
 use super::test_client::{get, Reply};
 use super::*;
 use crate::fetch::mock::{MockFetcher, Script};
+use crate::pool::Retention;
 use futures_util::future::join_all;
 use std::sync::atomic::AtomicU64;
 use std::sync::Mutex;
@@ -10,9 +11,10 @@ use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
 
 const MEDIA: &str = "https://o.test/clip/media.m3u8";
+const NEIGHBOUR: &str = "https://o.test/clip/neighbour.m3u8";
 const SEGMENTS: usize = 8;
 const SEGMENT_BYTES: usize = 1_200;
-const CHUNKS_AHEAD: usize = 3;
+const CHUNKS_AHEAD: usize = 2;
 const SEGMENT_MS: u64 = 3_000;
 const TARGET_MS: u64 = 4_000;
 
@@ -33,11 +35,13 @@ struct FakePlayhead {
     position: AtomicU64,
     delay: Mutex<Duration>,
     hints: Mutex<Vec<u64>>,
+    warm: Mutex<Vec<String>>,
+    by_playlist: Mutex<Vec<(String, u64)>>,
 }
 
 impl FakePlayhead {
     fn new() -> Arc<FakePlayhead> {
-        Arc::new(FakePlayhead { position: AtomicU64::new(0), delay: Mutex::new(Duration::ZERO), hints: Mutex::new(Vec::new()) })
+        Arc::new(FakePlayhead { position: AtomicU64::new(0), delay: Mutex::new(Duration::ZERO), hints: Mutex::new(Vec::new()), warm: Mutex::new(Vec::new()), by_playlist: Mutex::new(Vec::new()) })
     }
 
     fn move_to(&self, position_ms: u64) {
@@ -59,8 +63,13 @@ impl Playhead for FakePlayhead {
         })
     }
 
-    fn readahead(&self, _playlist: &str, hint_ms: u64) {
+    fn level(&self, playlist: &str) -> Option<Retention> {
+        Some(if self.warm.lock().unwrap().iter().any(|warm| warm == playlist) { Retention::Warm } else { Retention::Hot })
+    }
+
+    fn readahead(&self, playlist: &str, hint_ms: u64) {
         self.hints.lock().unwrap().push(hint_ms);
+        self.by_playlist.lock().unwrap().push((playlist.to_string(), hint_ms));
     }
 }
 
@@ -80,6 +89,7 @@ async fn rig() -> Rig {
 async fn rig_with(config: Config, with_playhead: bool) -> Rig {
     let fetcher = Arc::new(MockFetcher::new());
     fetcher.route(MEDIA, Script::ok(clip()));
+    fetcher.route(NEIGHBOUR, Script::ok(clip()));
     for index in 0..SEGMENTS {
         fetcher.route(&segment_url(index), Script::ok(vec![index as u8; SEGMENT_BYTES]));
     }
@@ -135,7 +145,7 @@ async fn inv_readahead_02_a_held_segment_is_released_by_the_playhead_and_a_seek_
     let held = ask(&rig, &targets[5]);
     settle(250).await;
     assert_eq!((held.is_finished(), origin_calls(&rig, 5)), (false, 0));
-    rig.playhead.move_to(2 * SEGMENT_MS);
+    rig.playhead.move_to(3 * SEGMENT_MS);
     let reply = tokio::time::timeout(Duration::from_millis(1_400), held).await.expect("released by the playhead").unwrap();
     assert_eq!((reply.status, origin_calls(&rig, 5)), (200, 1));
 
@@ -182,7 +192,7 @@ async fn inv_readahead_03_the_playing_item_is_never_blocked_by_an_unknown_or_lat
 async fn inv_readahead_04_a_stall_grows_the_cap_by_one_chunk_up_to_eight_and_a_new_playlist_starts_over() {
     let rig = rig().await;
     let targets = playlist_lines(&rig).await;
-    let held = ask(&rig, &targets[4]);
+    let held = ask(&rig, &targets[3]);
     settle(250).await;
     assert_eq!(held.is_finished(), false);
     rig.proxy.grow_window(MEDIA);
@@ -215,4 +225,19 @@ async fn inv_readahead_07_a_memory_step_lowers_the_cap_and_the_hint_down_to_one_
     rig.proxy.set_readahead_percent(100);
     let reply = tokio::time::timeout(Duration::from_millis(300), held).await.expect("released by the full cap").unwrap();
     assert_eq!(reply.status, 200);
+}
+
+#[tokio::test]
+async fn inv_readahead_08_a_stream_that_is_not_the_playing_one_is_admitted_one_chunk_ahead_and_hinted_one_target() {
+    let rig = rig().await;
+    rig.playhead.warm.lock().unwrap().push(NEIGHBOUR.to_string());
+    let port = rig.proxy.port();
+    let url = rig.proxy.url_for(NEIGHBOUR, &HashMap::new()).expect("proxy url");
+    let reply = get(port, &follow(&url, &url)).await;
+    let targets: Vec<String> =
+        reply.text().lines().filter(|line| !line.starts_with('#') && !line.is_empty()).map(|line| follow(&url, line)).collect();
+    assert_eq!(rig.playhead.by_playlist.lock().unwrap().last(), Some(&(NEIGHBOUR.to_string(), TARGET_MS)));
+    let asks = join_all(targets.iter().map(|target| tokio::time::timeout(Duration::from_millis(400), get(port, target)))).await;
+    assert_eq!(asks.len(), SEGMENTS);
+    assert!(origin_segments(&rig) <= 2, "a warm stream pulled {} segments", origin_segments(&rig));
 }

@@ -1,27 +1,10 @@
 use super::guard::AbortOnDrop;
 use super::lane::Queue;
 use super::source::PlaybackRoute;
-use crate::pool::{Command, Retention};
+use crate::pool::Command;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use tokio::runtime::Handle;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
-pub enum RetainLevel {
-    Hot,
-    Warm,
-    Cold,
-}
-
-impl From<Retention> for RetainLevel {
-    fn from(level: Retention) -> Self {
-        match level {
-            Retention::Hot => RetainLevel::Hot,
-            Retention::Warm => RetainLevel::Warm,
-            Retention::Cold => RetainLevel::Cold,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
 pub struct SlotSample {
@@ -41,7 +24,6 @@ pub trait PlayerSlot: Send + Sync {
     fn pause(&self);
     fn mute(&self);
     fn unmute(&self);
-    fn retain(&self, level: RetainLevel);
     fn attach(&self, view_token: u64);
     fn detach(&self);
     fn seek(&self, position_ms: u64);
@@ -64,7 +46,6 @@ pub enum SlotCall {
     Pause,
     Mute,
     Unmute,
-    Retain(RetainLevel),
     Attach { view_token: u64 },
     Detach,
     Seek { position_ms: u64 },
@@ -73,8 +54,8 @@ pub enum SlotCall {
 }
 
 impl SlotCall {
-    pub fn from_command(command: Command, route: Option<PlaybackRoute>) -> (usize, SlotCall) {
-        match command {
+    pub fn from_command(command: Command, route: Option<PlaybackRoute>) -> Option<(usize, SlotCall)> {
+        Some(match command {
             Command::Load { slot, key } => {
                 let route = route.unwrap_or_else(|| PlaybackRoute { url: key.clone(), headers: HashMap::new(), generation: None, hls: false, looping: true });
                 (slot, SlotCall::Load { key, route })
@@ -85,8 +66,8 @@ impl SlotCall {
             Command::Pause { slot } => (slot, SlotCall::Pause),
             Command::Mute { slot } => (slot, SlotCall::Mute),
             Command::Unmute { slot } => (slot, SlotCall::Unmute),
-            Command::Retain { slot, level } => (slot, SlotCall::Retain(level.into())),
-        }
+            Command::Retain { .. } => return None,
+        })
     }
 
     pub fn label(&self) -> String {
@@ -105,7 +86,6 @@ impl SlotCall {
             SlotCall::Pause => player.pause(),
             SlotCall::Mute => player.mute(),
             SlotCall::Unmute => player.unmute(),
-            SlotCall::Retain(level) => player.retain(level),
             SlotCall::Attach { view_token } => player.attach(view_token),
             SlotCall::Detach => player.detach(),
             SlotCall::Seek { position_ms } => player.seek(position_ms),

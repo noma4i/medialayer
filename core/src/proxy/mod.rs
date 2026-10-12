@@ -122,6 +122,10 @@ impl Proxy {
         self.inner.windows.nudge(playlist);
     }
 
+    pub fn window_hint(&self, playlist: &str) -> Option<u64> {
+        self.inner.windows.hint_for(playlist)
+    }
+
     pub fn grow_window(&self, playlist: &str) {
         self.inner.windows.grow(playlist);
     }

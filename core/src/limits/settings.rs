@@ -73,7 +73,7 @@ impl Default for Limits {
             max_concurrent: 2,
             dedupe_window_seconds: 60,
             dedupe_max_entries: 500,
-            playback_chunks_ahead: 3,
+            playback_chunks_ahead: 2,
             strategy: EvictionStrategy::Lru,
         }
     }

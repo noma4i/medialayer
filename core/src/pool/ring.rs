@@ -227,6 +227,10 @@ impl Ring {
             .collect()
     }
 
+    pub fn retention_of(&self, slot: usize) -> Option<Retention> {
+        self.bindings.get(slot)?.as_ref().map(|binding| if binding.is_playing { Retention::Hot } else { binding.level })
+    }
+
     pub fn slot_of(&self, key: &str) -> Option<usize> {
         self.bindings.iter().position(|binding| binding.as_ref().is_some_and(|binding| binding.key == key))
     }

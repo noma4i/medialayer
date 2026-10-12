@@ -104,8 +104,8 @@ fn inv_limits_02_decode_rejects_bad_text() {
 }
 
 #[test]
-fn inv_readahead_05_playback_chunks_ahead_defaults_to_3_and_accepts_only_1_to_8_with_an_error_naming_the_key() {
-    assert_eq!(Limits::default().playback_chunks_ahead, 3);
+fn inv_readahead_05_playback_chunks_ahead_defaults_to_2_and_accepts_only_1_to_8_with_an_error_naming_the_key() {
+    assert_eq!(Limits::default().playback_chunks_ahead, 2);
     for (value, accepted) in [(0, false), (1, true), (8, true), (9, false)] {
         let result = Limits { playback_chunks_ahead: value, ..Limits::default() }.validate();
         assert_eq!(result.is_ok(), accepted, "value {value}");

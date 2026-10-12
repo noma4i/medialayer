@@ -1,5 +1,6 @@
 use super::{Inner, Stage};
 use crate::api::slots::SlotCall;
+use crate::pool::Retention;
 use crate::proxy::{Playhead, PositionProbe};
 use std::sync::{Arc, PoisonError, Weak};
 use std::time::{Duration, Instant};
@@ -16,6 +17,11 @@ impl Playhead for StagePlayhead {
         let inner = self.inner.upgrade();
         let playlist = playlist.to_string();
         Box::pin(async move { Stage { inner: inner? }.position_of(&playlist).await })
+    }
+
+    fn level(&self, playlist: &str) -> Option<Retention> {
+        let inner = self.inner.upgrade()?;
+        Stage { inner }.level_of(playlist)
     }
 
     fn readahead(&self, playlist: &str, hint_ms: u64) {
@@ -59,10 +65,30 @@ impl Stage {
         }
     }
 
+    fn level_of(&self, url: &str) -> Option<Retention> {
+        let state = self.state();
+        let levels: Vec<Retention> =
+            state.loaded.values().filter(|loaded| loaded.source.url == url).filter_map(|loaded| state.ring.retention_of(loaded.slot)).collect();
+        [Retention::Hot, Retention::Warm, Retention::Cold].into_iter().find(|level| levels.contains(level))
+    }
+
     fn send_readahead(&self, url: &str, hint_ms: u64) {
         let slots: Vec<usize> = self.state().loaded.values().filter(|loaded| loaded.source.url == url).map(|loaded| loaded.slot).collect();
+        let mut sent = self.inner.hints.lock().unwrap_or_else(PoisonError::into_inner);
         for slot in slots {
+            sent.insert(slot, hint_ms);
             self.inner.runner.send(slot, SlotCall::Readahead { ms: hint_ms });
+        }
+    }
+
+    pub(super) fn refresh_hints(&self) {
+        let loaded: Vec<(usize, String)> = self.state().loaded.values().map(|loaded| (loaded.slot, loaded.source.url.clone())).collect();
+        for (slot, url) in loaded {
+            let Some(hint_ms) = self.inner.routes.window_hint(&url) else { continue };
+            let mut sent = self.inner.hints.lock().unwrap_or_else(PoisonError::into_inner);
+            if sent.insert(slot, hint_ms) != Some(hint_ms) {
+                self.inner.runner.send(slot, SlotCall::Readahead { ms: hint_ms });
+            }
         }
     }
 }

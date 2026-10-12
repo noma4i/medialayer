@@ -27,7 +27,7 @@ pub async fn eventually(mut condition: impl FnMut() -> bool) {
 
 use super::assemble::{Assembly, PoolSettings};
 use super::ports::{CacheControl, MemoryRelease, PoolControl, PrefetchControl, SettingsStore, SlotDirectives, TransportControl};
-use super::slots::{PlayerSlot, PlayerSlotFactory, RetainLevel, SlotCall, SlotSample};
+use super::slots::{PlayerSlot, PlayerSlotFactory, SlotCall, SlotSample};
 use super::source::{MediaItem, PlaybackRoute};
 use super::types::Kind;
 use crate::cache::{self, classify_kind, Cache, CacheStore};
@@ -305,10 +305,6 @@ impl PlayerSlot for MockSlot {
 
     fn unmute(&self) {
         self.calls.lock().unwrap().push(SlotCall::Unmute);
-    }
-
-    fn retain(&self, level: RetainLevel) {
-        self.calls.lock().unwrap().push(SlotCall::Retain(level));
     }
 
     fn attach(&self, view_token: u64) {

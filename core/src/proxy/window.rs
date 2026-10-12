@@ -1,5 +1,6 @@
 use super::inner::{locked, ProxyShared};
 use crate::limits::MAX_CHUNKS_AHEAD;
+use crate::pool::Retention;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
@@ -10,6 +11,7 @@ use tokio::sync::Notify;
 use tokio::time::Instant;
 
 const MAX_STREAMS: usize = 16;
+const WARM_CHUNKS_AHEAD: usize = 1;
 const RECHECK_MIN: Duration = Duration::from_millis(100);
 const RECHECK_MAX: Duration = Duration::from_secs(1);
 const FULL_PERCENT: u32 = 100;
@@ -21,6 +23,7 @@ pub type PositionProbe = Pin<Box<dyn Future<Output = Option<u64>> + Send>>;
 
 pub trait Playhead: Send + Sync {
     fn position_ms(&self, playlist: &str) -> PositionProbe;
+    fn level(&self, playlist: &str) -> Option<Retention>;
     fn readahead(&self, playlist: &str, hint_ms: u64);
 }
 
@@ -89,8 +92,21 @@ impl Windows {
         (base + stream.grown.load(Ordering::SeqCst)).min(MAX_CHUNKS_AHEAD) as usize
     }
 
+    fn ahead(&self, stream: &Stream) -> usize {
+        match self.playhead().and_then(|playhead| playhead.level(&stream.root)) {
+            None | Some(Retention::Hot) => self.cap(stream),
+            Some(Retention::Warm) => WARM_CHUNKS_AHEAD,
+            Some(Retention::Cold) => 0,
+        }
+    }
+
     fn hint_ms(&self, stream: &Stream) -> u64 {
-        self.cap(stream) as u64 * stream.target_ms
+        self.ahead(stream).max(1) as u64 * stream.target_ms
+    }
+
+    pub fn hint_for(&self, root: &str) -> Option<u64> {
+        let stream = locked(&self.table).by_root.get(root).cloned()?;
+        Some(self.hint_ms(&stream))
     }
 
     pub fn remember_variant(&self, variant: &str, root: &str) {
@@ -151,7 +167,7 @@ impl Windows {
 
     pub fn grow(&self, root: &str) {
         let Some(stream) = locked(&self.table).by_root.get(root).cloned() else { return };
-        if self.cap(&stream) as u32 >= MAX_CHUNKS_AHEAD {
+        if self.cap(&stream) as u32 >= MAX_CHUNKS_AHEAD || self.ahead(&stream) != self.cap(&stream) {
             return;
         }
         stream.grown.fetch_add(1, Ordering::SeqCst);
@@ -173,12 +189,12 @@ impl ProxyShared {
             let nudged = stream.nudge.notified();
             tokio::pin!(nudged);
             nudged.as_mut().enable();
-            let cap = self.windows.cap(&stream);
-            if index <= cap || self.store.contains(key).await || locked(&self.flights).contains_key(key) {
+            let ahead = self.windows.ahead(&stream);
+            if index <= ahead || self.store.contains(key).await || locked(&self.flights).contains_key(key) {
                 return;
             }
             let Some(position) = self.playhead_position(&stream).await else { return };
-            if index <= stream.index_at(position) + cap {
+            if index <= stream.index_at(position) + ahead {
                 return;
             }
             let left = deadline.saturating_duration_since(Instant::now());
@@ -186,7 +202,7 @@ impl ProxyShared {
                 crate::trace!("window", "hold ceiling reached for {}", crate::trace::tail(target));
                 return;
             }
-            let opens_at = stream.starts_ms[index - cap];
+            let opens_at = stream.starts_ms[index - ahead];
             let wait = Duration::from_millis(opens_at.saturating_sub(position)).clamp(RECHECK_MIN, RECHECK_MAX);
             tokio::select! {
                 _ = tokio::time::sleep(wait.min(left)) => {}

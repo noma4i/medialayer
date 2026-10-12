@@ -16,7 +16,6 @@ import androidx.media3.test.utils.FakeClock
 import androidx.media3.test.utils.FakeMediaSource
 import androidx.test.core.app.ApplicationProvider
 import com.noma4i.medialayer.PlaybackRoute
-import com.noma4i.medialayer.RetainLevel
 import kotlin.concurrent.thread
 import okhttp3.OkHttpClient
 import org.junit.After
@@ -197,20 +196,15 @@ class ExoPlayerSlotTest {
   }
 
   @Test
-  fun unloadAndColdRetainDropTheMediaAndOnlyUnloadFreesTheKey() {
+  fun unloadDropsTheMediaAndFreesTheKey() {
     val factory = factory()
     val slot = factory.create(0u)
     slot.load("k", route); slot.play(); idle()
     val player = slot.player!!
 
-    slot.retain(RetainLevel.WARM); idle()
     assertEquals(1, player.mediaItemCount)
-
-    slot.retain(RetainLevel.COLD); idle()
-    assertEquals(0, player.mediaItemCount)
     assertSame(player, factory.players.keyed.value["k"])
 
-    slot.load("k", route); slot.play(); idle()
     slot.unload(); idle()
     assertEquals(0, player.mediaItemCount)
     assertEquals(Player.STATE_IDLE, player.playbackState)

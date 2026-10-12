@@ -84,6 +84,7 @@ struct Inner {
     foreground_passes: AtomicU64,
     wakes: AtomicU64,
     seeks: Mutex<HashMap<String, (u64, std::time::Instant)>>,
+    hints: Mutex<HashMap<usize, u64>>,
 }
 
 #[derive(Clone)]
@@ -220,6 +221,7 @@ impl Stage {
             foreground_passes: AtomicU64::new(0),
             wakes: AtomicU64::new(0),
             seeks: Mutex::new(HashMap::new()),
+            hints: Mutex::new(HashMap::new()),
         });
         let tick = handle.spawn(tick_loop(Arc::downgrade(&inner), inner.due.subscribe(), parts.ledger));
         *inner.tick.lock().unwrap_or_else(PoisonError::into_inner) = Some(AbortOnDrop::new(tick));
@@ -306,6 +308,7 @@ impl Stage {
         for (slot, call) in calls {
             self.inner.runner.send(slot, call);
         }
+        self.refresh_hints();
         for key in unloaded {
             self.inner.places.unloaded(&key);
             self.forget_preferences_from(&key, is_restore_attempt);
@@ -344,7 +347,8 @@ impl Stage {
                 if let Some(position_ms) = resume {
                     self.note_seek(&state.loaded[key].source.url, position_ms);
                 }
-                calls.push(SlotCall::from_command(command, Some(route)));
+                self.inner.hints.lock().unwrap_or_else(PoisonError::into_inner).remove(&slot);
+                calls.extend(SlotCall::from_command(command, Some(route)));
                 if self.inner.silent {
                     calls.push((slot, SlotCall::Mute));
                 }
@@ -369,7 +373,7 @@ impl Stage {
                     state.tasks.remove(&key);
                     unloaded.push(key);
                 }
-                calls.push(SlotCall::from_command(command, None));
+                calls.extend(SlotCall::from_command(command, None));
             }
             Command::Play { slot } | Command::Pause { slot } => {
                 let event = if matches!(command, Command::Play { .. }) { Event::Play { position_ms: 0 } } else { Event::Pause };
@@ -382,10 +386,10 @@ impl Stage {
                     }
                     self.advance(state, &key, event, actions);
                 }
-                calls.push(SlotCall::from_command(command, None));
+                calls.extend(SlotCall::from_command(command, None));
             }
             Command::Unmute { slot } if self.inner.silent => calls.push((*slot, SlotCall::Mute)),
-            _ => calls.push(SlotCall::from_command(command, None)),
+            _ => calls.extend(SlotCall::from_command(command, None)),
         }
     }
 

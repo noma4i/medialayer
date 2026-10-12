@@ -40,6 +40,10 @@ impl Routes {
         self.proxy.nudge_window(playlist);
     }
 
+    pub fn window_hint(&self, playlist: &str) -> Option<u64> {
+        self.proxy.window_hint(playlist)
+    }
+
     pub fn grow_window(&self, playlist: &str) {
         self.proxy.grow_window(playlist);
     }

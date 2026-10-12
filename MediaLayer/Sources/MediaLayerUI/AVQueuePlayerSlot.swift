@@ -152,8 +152,6 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     onMain { [self] in player.isMuted = false }
   }
 
-  public func retain(level _: RetainLevel) {}
-
   public func setReadahead(ms: UInt64) {
     onMain { [self] in
       readahead = TimeInterval(ms) / 1000

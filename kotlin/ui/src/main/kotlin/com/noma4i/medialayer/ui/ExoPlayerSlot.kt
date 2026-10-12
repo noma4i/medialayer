@@ -11,7 +11,6 @@ import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import com.noma4i.medialayer.PlaybackRoute
 import com.noma4i.medialayer.PlayerSlot
-import com.noma4i.medialayer.RetainLevel
 import com.noma4i.medialayer.SlotSample
 
 class ExoPlayerSlot internal constructor(private val id: UInt, private val host: ExoPlayerSlotFactory) : PlayerSlot {
@@ -122,10 +121,6 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
 
   override fun setReadahead(ms: ULong) {
     loadControl?.setReadaheadMs(ms.toLong())
-  }
-
-  override fun retain(level: RetainLevel) = onMain {
-    if (level == RetainLevel.COLD) clear()
   }
 
   override fun sample(): SlotSample = SlotSample(livePosition().toULong(), durationMs?.toULong(), looping, viewAttached, frameRendered)

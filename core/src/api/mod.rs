@@ -25,7 +25,7 @@ pub use places::Places;
 pub use ports::{CacheControl, MemoryRelease, PoolControl, PrefetchControl, SettingsStore, SlotDirectives, TransportControl};
 pub use routes::Routes;
 pub use signals::Signals;
-pub use slots::{PlayerSlot, PlayerSlotFactory, RetainLevel, SlotCall, SlotRunner, SlotSample};
+pub use slots::{PlayerSlot, PlayerSlotFactory, SlotCall, SlotRunner, SlotSample};
 pub use source::{MediaItem, PlaybackRoute};
 pub use stage::{Stage, StageParts};
 pub use stats_feed::follow_stats;
