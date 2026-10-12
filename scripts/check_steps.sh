@@ -48,9 +48,35 @@ run_bounded() {
 # Step table engine. A step with a build slot gets its limit inside the slot ({limit} in the command, see check_bounded.sh)
 # and the limit plus CHECK_QUEUE_ALLOWANCE (3600 s) outside, so the wait for a slot never counts as test time.
 # The library script defines `steps` (lines "lane|name|limit seconds|paths|command"), then calls
-# run_checks "$@". Lane "cheap" runs first, serial, and stops everything on a failure. The other lanes run in parallel.
+# run_checks "$@". Lanes run one after another (never 2 build slot commands of one check): cheap first, table order, final last, the first red lane stops the run.
 # --fast keeps the steps whose paths prefix a changed file ("*" always): the same commands, a subset of the full run.
-# Lane "final" runs after the parallel lanes when they all passed (checks of their outputs). --list prints the selected steps. --only <lane> runs one lane.
+# Lane "final" runs last, only when every lane passed (checks of their outputs). --list prints the selected steps. --only <lane> runs one lane.
+
+# CPU seconds of processes the waited-children counter (`times`) cannot see, sampled once per second: processes below a
+# java process of this check (single-use daemon, test executors) and the Gradle and Kotlin daemons that carry this
+# worktree's check-owner-<id> tag in a JVM option (-XX:ErrorFile, Gradle drops plain -D options from the daemon command line), with their children. A daemon of another worktree carries another id and is
+# not counted. The highest CPU time seen per pid counts, the CPU a daemon had before the run is subtracted.
+counted_processes_cpu() {
+  ps -axo pid=,ppid=,cputime=,command= | awk -v root="$$" -v owner="check-owner-${CHECK_OWNER_ID:-none}-" '
+    { parent[$1] = $2; n = split($3, a, ":"); sec[$1] = a[n] + 60 * a[n - 1] + (n > 2 ? 3600 * a[n - 2] : 0)
+      isjava[$1] = ($0 ~ /\/java( |$)/) ? 1 : 0
+      tagged[$1] = ($0 ~ /GradleDaemon|KotlinCompileDaemon/ && index($0, owner) > 0) ? 1 : 0 }
+    END {
+      for (pid in parent) {
+        inside = 0; below = 0; under_tagged = 0; up = parent[pid]
+        for (hops = 0; up > 1 && hops < 30; hops++) { if (up == root) inside = 1; if (isjava[up]) below = 1; if (tagged[up]) under_tagged = 1; up = parent[up] }
+        if ((inside && below) || tagged[pid] || under_tagged) print pid, sec[pid]
+      }
+    }'
+}
+
+sample_java_cpu() {
+  local file="$1"
+  while :; do
+    counted_processes_cpu >> "$file"
+    sleep 1
+  done
+}
 
 changed_files() {
   local base
@@ -124,25 +150,34 @@ run_checks() {
   fi
   logdir="$root/target/check-logs"
   mkdir -p "$logdir"
-  local start=$SECONDS lanes=() pids=() failed=0 i
+  local start=$SECONDS lanes=() ordered=() failed=0 cpu sampled before sampler cpu_children daemon
+  CHECK_OWNER_ID="$(printf '%s' "$root" | shasum | cut -c1-12)"
+  export CHECK_OWNER_ID
+  sampled="$(mktemp)"
+  before="$(mktemp)"
+  counted_processes_cpu > "$before"
+  export CHECK_SAMPLES_FILE="$sampled"
+  sample_java_cpu "$sampled" &
+  sampler=$!
   while IFS= read -r lane; do lanes+=("$lane"); done < <(printf '%s\n' "${selected[@]}" | cut -d'|' -f1 | awk '!seen[$0]++')
-  if printf '%s\n' "${lanes[@]}" | grep -qx cheap; then
-    run_lane cheap || { echo "check: cheap lane failed, nothing was built"; return 1; }
-  fi
+  # One lane at a time: the check never holds more than one build slot command, the first red lane stops the run.
+  ordered=(cheap)
   for lane in "${lanes[@]}"; do
-    [ "$lane" = cheap ] || [ "$lane" = final ] && continue
-    run_lane "$lane" > "$logdir/lane-$lane.out" 2>&1 &
-    pids+=("$!")
+    [ "$lane" = cheap ] || [ "$lane" = final ] || ordered+=("$lane")
   done
-  for i in "${!pids[@]}"; do
-    wait "${pids[$i]}" || failed=1
+  ordered+=(final)
+  for lane in "${ordered[@]}"; do
+    printf '%s\n' "${lanes[@]}" | grep -qx "$lane" || continue
+    run_lane "$lane" || { failed=1; break; }
   done
-  for lane in "${lanes[@]}"; do
-    [ -f "$logdir/lane-$lane.out" ] && cat "$logdir/lane-$lane.out"
-  done
-  if [ "$failed" -eq 0 ] && printf '%s\n' "${lanes[@]}" | grep -qx final; then
-    run_lane final || failed=1
-  fi
-  echo "check: $([ "$failed" -eq 0 ] && echo ok || echo FAILED) in $((SECONDS - start)) s, load $(uptime | sed 's/.*averages*: //')"
+  times > "$logdir/times.txt"
+  cpu_children="$(tail -1 "$logdir/times.txt" | tr 'ms' '  ' | awk '{printf "%d", $1 * 60 + $2 + $3 * 60 + $4}')"
+  kill "$sampler" 2> /dev/null; wait "$sampler" 2> /dev/null
+  daemon="$(awk -v before="$before" 'BEGIN { while ((getline line < before) > 0) { split(line, p, " "); was[p[1]] = p[2] } }
+    { if ($2 > best[$1]) best[$1] = $2 }
+    END { for (pid in best) total += best[pid] - (pid in was ? was[pid] : 0); printf "%d", total }' "$sampled")"
+  rm -f "$sampled" "$before"
+  cpu=$((cpu_children + daemon))
+  echo "check: $([ "$failed" -eq 0 ] && echo ok || echo FAILED), at least $cpu CPU seconds, a lower bound from 1 s samples ($cpu_children in waited children, $daemon in daemons and processes below java), ${#selected[@]} steps selected, wall $((SECONDS - start)) s, load $(uptime | sed 's/.*averages*: //')"
   return "$failed"
 }

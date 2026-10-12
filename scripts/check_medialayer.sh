@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The whole MediaLayer check. Cheap checks run first and stop everything on a failure, then the cargo, swift, kotlin
-# and ship lanes run in parallel (every heavy command takes a build slot, so at most BUILD_SLOTS run at once).
+# The whole MediaLayer check. Cheap checks run first, then the cargo, swift, kotlin and ship lanes one after another: the check
+# holds one build slot command at a time and the first red lane stops the run.
 # Every step has a time limit and its process group is killed past it. --fast runs the cheap lane plus the lanes of
 # the touched paths. --list prints the steps. --only <lane> runs one lane.
 set -uo pipefail
@@ -24,7 +24,7 @@ steps=(
   "swift|ios-slices|600|MediaLayer/|$slot bash-step bash scripts/build_ios.sh --check"
   "swift|swift-test|900|MediaLayer/|$slot swift-step swift test --package-path MediaLayer"
   "kotlin|kotlin-bindings|600|kotlin/|$slot bash-step bash scripts/build_kotlin.sh --host"
-  "kotlin|gradle-test|900|kotlin/|$slot gradle-step $gradle -p kotlin testDebugUnitTest --console=plain --no-watch-fs"
+  "kotlin|gradle-test|900|kotlin/|$slot gradle-step $gradle -p kotlin testDebugUnitTest --console=plain --no-watch-fs -Dorg.gradle.daemon.idletimeout=600000 -Dorg.gradle.jvmargs=\"-Xmx3g -XX:ErrorFile=/tmp/check-owner-\$CHECK_OWNER_ID-%p.log\" -Pkotlin.compiler.execution.strategy=in-process"
   "ship|android-abis|900|-|$slot bash-step bash scripts/build_kotlin.sh --abis"
   "ship|ios-device-check|600|-|$slot ios-check bash -c 'cargo check --manifest-path core/Cargo.toml --target aarch64-apple-ios && cargo check --manifest-path core/Cargo.toml --target x86_64-apple-ios'"
 )

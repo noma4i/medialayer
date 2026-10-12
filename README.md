@@ -92,4 +92,4 @@ export PATH=/opt/homebrew/opt/rustup/bin:$PATH
 bash scripts/check_medialayer.sh
 ```
 
-Runs the cheap checks first (duplicate mechanisms, docs, invariants and their self test), then Rust, Swift, Kotlin and the ship lane (libraries for 4 Android ABIs, iOS device compile check) in parallel. `--fast` runs only the steps of the touched directories, `--list` prints the steps.
+Runs the cheap checks first (duplicate mechanisms, docs, invariants and their self test), then the Rust, Swift, Kotlin and ship lanes (libraries for 4 Android ABIs, iOS device compile check) one after another, the first red lane stops the run. `--fast` runs only the steps of the touched directories, `--list` prints the steps. `specs/` is not in git: the invariants check reads `specs/invariants.md` of the main tree, or the file named by `SPEC=<file>`.

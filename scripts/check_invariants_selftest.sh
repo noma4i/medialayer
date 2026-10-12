@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self test of the checks themselves: INV-CHECK-01..07. Each function builds a fixture repository, breaks it in
+# Self test of the checks themselves: INV-CHECK-01..08. Each function builds a fixture repository, breaks it in
 # one way and expects the matching check to go red. Runs in seconds, takes no build slot.
 set -uo pipefail
 unset SPEC TEST_DIRS DOC_PATHS
@@ -210,6 +210,64 @@ inv_check_06_fast_and_full_fail_on_the_same_step_and_cheap_runs_first() {
   fast_list="$(engine --fast --list; cat "$work/engine.out")"
   [ -n "$fast_list" ] && [ -z "$(comm -13 <(echo "$full" | sort) <(echo "$fast_list" | sort))" ] \
     || { echo "FAIL expect_green: a fast step is not a full step"; failed=1; }
+}
+
+inv_check_06_lanes_run_one_after_another_and_the_first_red_lane_stops_the_run() {
+  root="$work/engine"
+  mkdir -p "$root/target"
+  rm -f "$root"/overlap "$root"/ran-*
+  rmdir "$root/lock" 2> /dev/null
+  changed_files() { echo "$CHANGED"; }
+  local hold='mkdir lock 2> /dev/null || touch overlap; sleep 1; rmdir lock 2> /dev/null; true'
+  steps=("a|a1|20|-|$hold" "b|b1|20|-|$hold" "c|c1|20|-|touch ran-c1; false" "d|d1|20|-|touch ran-d1")
+  (run_checks) > "$work/engine.out" 2>&1
+  [ ! -e "$root/overlap" ] || { echo "FAIL expect_red: 2 lanes ran at the same time"; failed=1; }
+  [ -e "$root/ran-c1" ] && [ ! -e "$root/ran-d1" ] || { echo "FAIL expect_red: a lane ran after the first red lane"; failed=1; }
+}
+
+expect_green_counter() {
+  [ "$1" -ge "$(($2 > 1 ? $2 - 1 : 1))" ] || { echo "FAIL the counter printed $1 CPU seconds for a child that burned $2"; failed=1; }
+}
+
+inv_check_08_the_cpu_counter_sees_a_build_daemon() {
+  root="$work/engine"
+  mkdir -p "$root/target" "$work/jdk"
+  rm -f "$work/marker-java"
+  changed_files() { echo "$CHANGED"; }
+  cp "$(command -v perl)" "$work/jdk/java"
+  local child='while ((times)[0] + (times)[1] < 3) {} open(F, q(>), q(MARKER)); print F $$, q( ), int((times)[0] + (times)[1]); close(F); sleep 60' waiting='until [ -s MARKER ] && awk -v pid=$(cut -d" " -f1 MARKER) -v cpu=$(cut -d" " -f2 MARKER) "\$1 == pid && \$2 >= cpu - 1 { found = 1 } END { exit !found }" "$CHECK_SAMPLES_FILE"; do sleep 1; done'
+  child="${child//MARKER/$work/marker-java}"
+  waiting="${waiting//MARKER/$work/marker-java}"
+  rm -f "$work/release"
+  steps=("a|a1|280|-|$work/jdk/java -e 'if (!fork) { exec(q(perl), q(-e), q($child)) } until (-e q($work/release)) { sleep 1 }' & $waiting; touch $work/release; wait")
+  (run_checks) > "$work/engine.out" 2>&1
+  pkill -f "perl -e while .(times)" 2> /dev/null
+  local counted
+  counted="$(sed -n 's/^check: ok, at least \([0-9]*\) CPU seconds.*/\1/p' "$work/engine.out")"
+  expect_green_counter "${counted:-0}" "$(cut -d' ' -f2 "$work/marker-java" 2> /dev/null || echo 0)"
+}
+
+expect_green_run_daemon() {
+  [ "$1" -ge "$(($2 > 1 ? $2 - 1 : 1))" ] && [ "$1" -le $(($2 + 2)) ] || { echo "FAIL the counter printed $1 CPU seconds: the daemon of this run burned $2, the daemon of another run kept burning"; failed=1; }
+}
+
+inv_check_08_a_daemon_that_outlives_the_step_is_counted_and_another_runs_daemon_is_not() {
+  root="$work/engine"
+  mkdir -p "$root/target" "$work/jdk"
+  rm -f "$work/marker-mine"
+  changed_files() { echo "$CHANGED"; }
+  cp "$(command -v perl)" "$work/jdk/java"
+  local mine other waiting='until [ -s MARKER ] && awk -v pid=$(cut -d" " -f1 MARKER) -v cpu=$(cut -d" " -f2 MARKER) "\$1 == pid && \$2 >= cpu - 1 { found = 1 } END { exit !found }" "$CHECK_SAMPLES_FILE"; do sleep 1; done'
+  mine='if (!fork) { exec(q(perl), q(-e), q(while ((times)[0] + (times)[1] < 3) {} open(F, q(>), q(MARKER)); print F $$, q( ), int((times)[0] + (times)[1]); close(F); sleep 60), q(GradleDaemon), q(-XX:ErrorFile=/tmp/check-owner-) . $ENV{CHECK_OWNER_ID} . q(-x.log)) }'
+  other='if (!fork) { exec(q(perl), q(-e), q(1 while 1), q(GradleDaemon), q(-XX:ErrorFile=/tmp/check-owner-other-run-x.log)) }'
+  mine="${mine//MARKER/$work/marker-mine}"
+  waiting="${waiting//MARKER/$work/marker-mine}"
+  steps=("a|a1|280|-|$work/jdk/java -e '$mine'; $work/jdk/java -e '$other'; $waiting")
+  (run_checks) > "$work/engine.out" 2>&1
+  pkill -f 'GradleDaemon -XX:ErrorFile=/tmp/check-owner-' 2> /dev/null
+  local counted
+  counted="$(sed -n 's/^check: ok, at least \([0-9]*\) CPU seconds.*/\1/p' "$work/engine.out")"
+  expect_green_run_daemon "${counted:-0}" "$(cut -d' ' -f2 "$work/marker-mine" 2> /dev/null || echo 0)"
 }
 
 inv_check_07_a_name_without_a_row_is_red() {
