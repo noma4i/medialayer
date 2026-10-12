@@ -354,12 +354,12 @@ async fn inv_idle_04_a_trim_tick_between_a_refusal_and_the_freed_room_keeps_the_
 
     stage.visible(video(&url_of(7)), true);
     stage.set_playing(&url_of(7), true);
-    let (_, neighbour) = rig.holder(&url_of(0));
-    let retains = |calls: Vec<SlotCall>| calls.iter().filter(|call| matches!(call, SlotCall::Retain(_) | SlotCall::Unload)).count();
-    let before = retains(neighbour.calls());
-    tokio::time::timeout(std::time::Duration::from_secs(3), eventually(|| retains(neighbour.calls()) > before))
+    let (neighbour, _) = rig.holder(&url_of(0));
+    let level = || stage.state().ring.retention_of(neighbour as usize);
+    let before = level();
+    tokio::time::timeout(std::time::Duration::from_secs(3), eventually(|| level() != before))
         .await
-        .unwrap_or_else(|_| panic!("the trim tick never came: {:?}", neighbour.calls()));
+        .unwrap_or_else(|_| panic!("the trim tick never came: the neighbour stayed {before:?}"));
     assert!(rig.factory.slot_holding(&url_of(7)).is_none(), "the ledger kept the wanted key out");
 
     rig.parts.ledger.set_ceiling(rig.parts.ledger.used() * 4);
