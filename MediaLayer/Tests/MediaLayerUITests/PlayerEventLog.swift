@@ -1,26 +1,39 @@
 import Foundation
 import MediaLayer
+import Testing
 
 final class PlayerEventLog: PlayerEventsProtocol, @unchecked Sendable {
   private let lock = NSLock()
   private var recorded: [String] = []
   private var memory: [Pressure] = []
-  private var waiters: [(String, CheckedContinuation<Void, Never>)] = []
+  private var waiters: [(id: UUID, name: String, continuation: CheckedContinuation<Void, Never>)] = []
 
   var all: [String] { lock.withLock { recorded } }
   var pressures: [Pressure] { lock.withLock { memory } }
 
   func count(_ name: String) -> Int { all.filter { $0 == name }.count }
 
-  func wait(for name: String) async {
+  func wait(for name: String, timeout: Duration = .seconds(10)) async {
+    let id = UUID()
+    let timer = Task { [self] in
+      try? await Task.sleep(for: timeout)
+      guard !Task.isCancelled, let waiter = lock.withLock({ () -> CheckedContinuation<Void, Never>? in
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return nil }
+        return waiters.remove(at: index).continuation
+      }) else { return }
+
+      Issue.record("player event \"\(name)\" never arrived within \(timeout)")
+      waiter.resume()
+    }
     await withCheckedContinuation { continuation in
       let present = lock.withLock { () -> Bool in
         let present = recorded.contains(name)
-        if !present { waiters.append((name, continuation)) }
+        if !present { waiters.append((id, name, continuation)) }
         return present
       }
       if present { continuation.resume() }
     }
+    timer.cancel()
   }
 
   func background() { record("background") }
@@ -40,8 +53,8 @@ final class PlayerEventLog: PlayerEventsProtocol, @unchecked Sendable {
   private func record(_ name: String) {
     let matched = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
       recorded.append(name)
-      let matched = waiters.filter { $0.0 == name }.map(\.1)
-      waiters.removeAll { $0.0 == name }
+      let matched = waiters.filter { $0.name == name }.map(\.continuation)
+      waiters.removeAll { $0.name == name }
       return matched
     }
     matched.forEach { $0.resume() }

@@ -138,9 +138,12 @@ private class StateRecorder : StateListener {
   override fun changed(state: MediaState) { states.add(state) }
 }
 
-private fun eventually(condition: () -> Boolean) {
-  repeat(500) { if (!condition()) Thread.sleep(10) }
-  assertTrue("condition never became true", condition())
+private fun eventually(what: String, timeoutMs: Long = 5_000, condition: () -> Boolean) {
+  val deadline = System.nanoTime() + timeoutMs * 1_000_000
+  while (!condition()) {
+    if (System.nanoTime() > deadline) throw AssertionError("never became true within $timeoutMs ms: $what")
+    Thread.sleep(10)
+  }
 }
 
 class MediaLayerBridgeTest {
@@ -176,7 +179,7 @@ class MediaLayerBridgeTest {
 
     media.replaceImageWindow("grid", 0, (0 until 4).map { listOf(Poster("https://o.test/p$it.jpg")) })
 
-    eventually { fetcher.urls.toSet().size >= 2 }
+    eventually("2 distinct urls were fetched") { fetcher.urls.toSet().size >= 2 }
     Thread.sleep(100)
     assertEquals(setOf("https://o.test/p0.jpg", "https://o.test/p1.jpg"), fetcher.urls.toSet())
   }
@@ -188,12 +191,12 @@ class MediaLayerBridgeTest {
     val item = MediaItem(Kind.VIDEO, "https://o.test/a.mp4", emptyMap(), null, null)
 
     media.visible(item, true)
-    eventually { slots.loaded() != null }
+    eventually("a slot holds a loaded key") { slots.loaded() != null }
     media.setMutedAll(true)
     media.setMutedAll(false)
     media.setMuted(item.url, false)
 
-    eventually { slots.loaded()!!.log.count { it == "mute" } >= 2 }
+    eventually("the slot received 2 mute calls") { slots.loaded()!!.log.count { it == "mute" } >= 2 }
     Thread.sleep(200)
     val log = slots.loaded()!!.log.toList()
     assertEquals("mute", log[log.indexOf("load") + 1])
@@ -213,14 +216,14 @@ class MediaLayerBridgeTest {
     media.replaceWindow(0u, listOf(item, item.copy(url = "file:///bundle/next.mp4")))
     media.visible(item, true)
     media.setPlaying(item.url, true)
-    eventually { slots.loaded()?.log?.contains("play") == true }
+    eventually("the slot received play") { slots.loaded()?.log?.contains("play") == true }
     val slot = slots.loaded()!!
     media.playerEvents().ready(slot.id)
     media.playerEvents().visualReady(slot.id)
-    eventually { states.states.lastOrNull() == MediaState.Rendered }
+    eventually("the place state reached Rendered") { states.states.lastOrNull() == MediaState.Rendered }
     media.playerEvents().ended(slot.id)
 
-    eventually { states.states.lastOrNull() == MediaState.Ended }
+    eventually("the place state reached Ended") { states.states.lastOrNull() == MediaState.Ended }
     assertEquals(listOf<Any?>("file:///bundle/intro.mp4", false, null), listOf(slot.route!!.url, slot.route!!.looping, slot.route!!.generation))
     assertTrue("rate:1.5" in slot.log)
     Thread.sleep(200)
@@ -271,7 +274,7 @@ class MediaLayerBridgeTest {
     assertEquals(setOf("medialayer.limits"), settings.values.keys)
     assertEquals(0uL, stats.totalBytes)
     assertEquals(0uL, stats.fileCount)
-    repeat(200) { if (recorder.totals.isEmpty()) delay(10) }
+    eventually("the stats listener received the first stats") { recorder.totals.isNotEmpty() }
     assertEquals(listOf(0uL), recorder.totals.toList())
     subscription.close()
   }

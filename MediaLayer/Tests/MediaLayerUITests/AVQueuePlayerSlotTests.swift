@@ -246,12 +246,20 @@ struct AVQueuePlayerSlotTests {
     await log.wait(for: "ready")
 
     slot.seek(positionMs: 300)
-    var moved = false
-    for _ in 0..<5000 where !moved {
-      await MainActor.run { moved = slot.player.currentTime().seconds >= 0.29 }
-    }
 
-    #expect(moved)
+    await eventually("the playhead reached 0.29 s") { await MainActor.run { slot.player.currentTime().seconds >= 0.29 } }
+  }
+
+  @Test
+  func inv_idle_05_a_slot_sample_reads_the_live_playhead_without_a_periodic_observer() async {
+    let log = PlayerEventLog()
+    let slot = makeSlot(log)
+    slot.load(key: "clip", route: route(Self.silentClip))
+    await log.wait(for: "ready")
+
+    slot.seek(positionMs: 300)
+
+    await eventually("sample() reports the sought position") { slot.sample().positionMs >= 290 }
   }
 
   @Test(arguments: [

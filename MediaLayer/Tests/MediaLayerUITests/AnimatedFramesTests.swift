@@ -131,7 +131,7 @@ struct AnimatedFramesTests {
   func inv_image_06_a_cancelled_decode_stops_between_frames_and_returns_nothing() async {
     let data = transparentGif(frames: 60, side: 16)
     let task = Task { () -> AnimatedFrames? in
-      while !Task.isCancelled { await Task.yield() }
+      try? await Task.sleep(for: .seconds(30))
       return await AnimatedFrames.load(data, maxPixel: 16)
     }
     task.cancel()

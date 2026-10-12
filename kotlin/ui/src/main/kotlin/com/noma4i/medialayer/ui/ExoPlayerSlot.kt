@@ -5,6 +5,7 @@ import android.os.Looper
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -23,7 +24,10 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
   @Volatile internal var player: ExoPlayer? = null
   @Volatile internal var viewAttached = false
   @Volatile private var looping = false
-  @Volatile private var positionMs = 0L
+  @Volatile private var anchorMs = 0L
+  @Volatile private var anchorAt = 0L
+  @Volatile private var speed = 1f
+  @Volatile private var advancing = false
   @Volatile private var durationMs: Long? = null
   @Volatile private var frameRendered = false
 
@@ -44,20 +48,15 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
       host.events?.visualReady(id)
     }
 
-    override fun onIsPlayingChanged(isPlaying: Boolean) {
-      if (isPlaying) scheduleTick()
-    }
+    override fun onIsPlayingChanged(isPlaying: Boolean) = refresh()
+
+    override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) = refresh()
+
+    override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) = refresh()
 
     override fun onPlayerError(error: PlaybackException) {
       if (released) return
       host.events?.failed(id, httpStatus(error), error.message ?: error.errorCodeName)
-    }
-  }
-
-  private val tick = object : Runnable {
-    override fun run() {
-      refresh()
-      if (player?.isPlaying == true) main.postDelayed(this, TICK_MS)
     }
   }
 
@@ -84,7 +83,8 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     retract()
     key = null
     frameRendered = false
-    positionMs = 0
+    anchorMs = 0
+    advancing = false
     durationMs = null
   }
 
@@ -97,7 +97,6 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     val exo = player ?: return@onMain
     if (exo.playbackState == Player.STATE_IDLE) exo.prepare()
     exo.playWhenReady = true
-    scheduleTick()
   }
 
   override fun pause() = onMain { player?.playWhenReady = false }
@@ -124,7 +123,12 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     if (level == RetainLevel.COLD) clear()
   }
 
-  override fun sample(): SlotSample = SlotSample(positionMs.toULong(), durationMs?.toULong(), looping, viewAttached, frameRendered)
+  override fun sample(): SlotSample = SlotSample(livePosition().toULong(), durationMs?.toULong(), looping, viewAttached, frameRendered)
+
+  private fun livePosition(): Long {
+    val position = if (advancing) anchorMs + ((host.clock.elapsedRealtime() - anchorAt) * speed).toLong() else anchorMs
+    return durationMs?.let { position.coerceAtMost(it) } ?: position
+  }
 
   internal fun release() {
     main.post { releaseNow() }
@@ -132,7 +136,6 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
 
   private fun releaseNow() {
     released = true
-    main.removeCallbacks(tick)
     hideFromView()
     player?.removeListener(listener)
     player?.release()
@@ -181,23 +184,17 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     host.players.retract(current, this)
   }
 
-  private fun scheduleTick() {
-    main.removeCallbacks(tick)
-    main.post(tick)
-  }
-
   private fun currentPosition(): Long = player?.currentPosition ?: 0L
 
   private fun refresh() {
     val exo = player ?: return
-    positionMs = exo.currentPosition
+    anchorMs = exo.currentPosition
+    anchorAt = host.clock.elapsedRealtime()
+    speed = exo.playbackParameters.speed
+    advancing = exo.isPlaying
     durationMs = exo.duration.takeIf { it != C.TIME_UNSET }
   }
 
   private fun httpStatus(error: PlaybackException): Int =
     generateSequence(error.cause) { it.cause }.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()?.responseCode ?: 0
-
-  private companion object {
-    const val TICK_MS = 250L
-  }
 }

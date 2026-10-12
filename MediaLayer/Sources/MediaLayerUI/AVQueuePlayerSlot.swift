@@ -38,7 +38,6 @@ public final class AVQueuePlayerSlotFactory: PlayerSlotFactory, @unchecked Senda
 public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable {
   public static let warmBuffer: TimeInterval = 2
   public static let coldBuffer: TimeInterval = 0.5
-  private static let sampleInterval = CMTime(value: 1, timescale: 4)
 
   public let id: UInt32
   public let player = AVQueuePlayer()
@@ -57,7 +56,6 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private var traceObservations: [NSKeyValueObservation] = []
   private var currentItemObservation: NSKeyValueObservation?
   private var notificationTokens: [NSObjectProtocol] = []
-  private var timeToken: Any?
   private var prerollRequested = false
   private var visualReadySent = false
   private var itemReady = false
@@ -81,11 +79,9 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     let player = player
     let observations = observations
     let tokens = notificationTokens
-    let timeToken = timeToken
     DispatchQueue.main.async {
       observations.forEach { $0.invalidate() }
       tokens.forEach { NotificationCenter.default.removeObserver($0) }
-      if let timeToken { player.removeTimeObserver(timeToken) }
       player.removeAllItems()
     }
   }
@@ -169,7 +165,9 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   }
 
   public func sample() -> SlotSample {
-    sampleLock.withLock { cachedSample }
+    var sample = sampleLock.withLock { cachedSample }
+    if player.currentItem != nil { sample.positionMs = positionMs() }
+    return sample
   }
 
   public func seek(positionMs: UInt64) {
@@ -253,11 +251,6 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
         events.with { $0.stalled(slot: self.id, positionMs: position) }
       }
     ]
-    guard timeToken == nil else { return }
-
-    timeToken = player.addPeriodicTimeObserver(forInterval: Self.sampleInterval, queue: .main) { [weak self] _ in
-      self?.refreshSample()
-    }
   }
 
   private func itemEnded(_ finished: AVPlayerItem) {
@@ -317,8 +310,6 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     observations = []
     notificationTokens.forEach { NotificationCenter.default.removeObserver($0) }
     notificationTokens = []
-    if let timeToken { player.removeTimeObserver(timeToken) }
-    timeToken = nil
     item?.asset.cancelLoading()
     player.pause()
     player.removeAllItems()
