@@ -222,3 +222,25 @@ fn inv_pool_10_the_ring_never_shrinks_below_the_window_it_must_hold() {
 
     assert_eq!(ring.slots(), 3);
 }
+
+#[test]
+fn inv_readahead_08_a_bound_slot_is_only_ever_hot_or_warm() {
+    let mut pool = ring(5, 1);
+    let pages = keys(9);
+    let mut seen = Vec::new();
+    for (step, page) in [0usize, 4, 1, 6, 3, 8].into_iter().enumerate() {
+        let step = step as u64;
+        pool.plan(step * 40_000, page, Some(page), &pages);
+        for moment in [step * 40_000, step * 40_000 + 35_000] {
+            for slot in 0..5 {
+                if let Some(level) = pool.retention_of(slot) {
+                    if !seen.contains(&level) {
+                        seen.push(level);
+                    }
+                }
+            }
+            pool.tick(moment + 35_000);
+        }
+    }
+    assert!(seen.contains(&Retention::Hot) && seen.contains(&Retention::Warm) && seen.len() == 2, "{seen:?}");
+}

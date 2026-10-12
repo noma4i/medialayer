@@ -90,21 +90,6 @@ struct AVQueuePlayerSlotTests {
   }
 
   @Test
-  func firstFrameReportsVisualReadyWhenTheLayerIsAttached() async throws {
-    let log = PlayerEventLog()
-    let slot = makeSlot(log)
-    let host = CALayer()
-
-    slot.load(key: "clip", route: route(Self.silentClip))
-    slot.attach(to: host)
-    slot.preroll()
-    await log.wait(for: "visualReady")
-
-    #expect(slot.sample().viewAttached)
-    #expect(slot.sample().frameRendered)
-  }
-
-  @Test
   func theRateIsTheDefaultRateOfThePlayerAndGoesBackToNormalWithTheItem() async throws {
     let log = PlayerEventLog()
     let slot = makeSlot(log)

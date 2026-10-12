@@ -69,7 +69,7 @@ impl Stage {
         let state = self.state();
         let levels: Vec<Retention> =
             state.loaded.values().filter(|loaded| loaded.source.url == url).filter_map(|loaded| state.ring.retention_of(loaded.slot)).collect();
-        [Retention::Hot, Retention::Warm, Retention::Cold].into_iter().find(|level| levels.contains(level))
+        [Retention::Hot, Retention::Warm].into_iter().find(|level| levels.contains(level))
     }
 
     fn send_readahead(&self, url: &str, hint_ms: u64) {

@@ -95,8 +95,7 @@ impl Windows {
     fn ahead(&self, stream: &Stream) -> usize {
         match self.playhead().and_then(|playhead| playhead.level(&stream.root)) {
             None | Some(Retention::Hot) => self.cap(stream),
-            Some(Retention::Warm) => WARM_CHUNKS_AHEAD,
-            Some(Retention::Cold) => 0,
+            Some(Retention::Warm | Retention::Cold) => WARM_CHUNKS_AHEAD,
         }
     }
 
