@@ -1,35 +1,33 @@
 use super::loader::{LoadError, Loader};
+use super::plan::Plan;
 use super::settled::Outcome;
 use super::source::{Source, SourceKind};
-use crate::hls::{extract_leading_segments, extract_variants, is_manifest_url, is_multivariant, resolve_url};
+use crate::hls::{extract_leading_chunks, Chunk, extract_variants, is_manifest_url, is_multivariant, resolve_url};
+use crate::limits::LeadingChunks;
 use crate::proxy::Priority;
 use std::future::Future;
 use std::time::Duration;
 
-pub(super) async fn load_source(loader: &dyn Loader, source: &Source, depth: Duration, timeout: Duration) -> Outcome {
-    let loaded = match source.kind {
-        SourceKind::Image => whole_file(loader, source, timeout).await,
-        SourceKind::Audio => first_block(loader, source, timeout).await,
-        SourceKind::Video if is_manifest_url(&source.url) => leading_segments(loader, source, depth, timeout).await,
-        SourceKind::Video => first_block(loader, source, timeout).await,
-    };
-    loaded.map_or_else(|outcome| outcome, |()| Outcome::Loaded)
+pub(super) fn is_hls(source: &Source) -> bool {
+    source.kind == SourceKind::Video && is_manifest_url(&source.url)
 }
 
-async fn bounded(timeout: Duration, load: impl Future<Output = Result<(), LoadError>>) -> Result<(), Outcome> {
+pub(super) async fn load_unit(loader: &dyn Loader, source: &Source, timeout: Duration) -> Outcome {
+    let loaded = match source.kind {
+        SourceKind::Image => bounded(timeout, loader.load(&source.url, &source.headers, Priority::ImagePrefetch)).await,
+        SourceKind::Audio | SourceKind::Video => {
+            bounded(timeout, loader.load_first_block(&source.url, &source.headers, Priority::Prefetch)).await
+        }
+    };
+    loaded.map_or_else(|outcome| outcome, |_| Outcome::Loaded)
+}
+
+pub(super) async fn bounded(timeout: Duration, load: impl Future<Output = Result<u64, LoadError>>) -> Result<u64, Outcome> {
     match tokio::time::timeout(timeout, load).await {
         Err(_) => Err(Outcome::TimedOut),
         Ok(Err(error)) => Err(Outcome::Failed(error.0)),
-        Ok(Ok(())) => Ok(()),
+        Ok(Ok(bytes)) => Ok(bytes),
     }
-}
-
-async fn whole_file(loader: &dyn Loader, source: &Source, timeout: Duration) -> Result<(), Outcome> {
-    bounded(timeout, loader.load(&source.url, &source.headers, Priority::ImagePrefetch)).await
-}
-
-async fn first_block(loader: &dyn Loader, source: &Source, timeout: Duration) -> Result<(), Outcome> {
-    bounded(timeout, loader.load_first_block(&source.url, &source.headers, Priority::Prefetch)).await
 }
 
 async fn playlist_text(loader: &dyn Loader, source: &Source, url: &str, timeout: Duration) -> Result<String, Outcome> {
@@ -38,7 +36,7 @@ async fn playlist_text(loader: &dyn Loader, source: &Source, url: &str, timeout:
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-async fn leading_segments(loader: &dyn Loader, source: &Source, depth: Duration, timeout: Duration) -> Result<(), Outcome> {
+pub(super) async fn read_plan(loader: &dyn Loader, source: &Source, timeout: Duration) -> Result<Plan, Outcome> {
     let mut playlist_url = source.url.clone();
     let mut text = playlist_text(loader, source, &playlist_url, timeout).await?;
     if is_multivariant(&text) {
@@ -49,10 +47,9 @@ async fn leading_segments(loader: &dyn Loader, source: &Source, depth: Duration,
         playlist_url = resolve_url(&playlist_url, &variant);
         text = playlist_text(loader, source, &playlist_url, timeout).await?;
     }
-    let leading = extract_leading_segments(&text, depth.as_secs_f64());
-    for segment in leading.init_segments.iter().chain(&leading.segments) {
-        let url = resolve_url(&playlist_url, segment);
-        bounded(timeout, loader.load(&url, &source.headers, Priority::Prefetch)).await?;
-    }
-    Ok(())
+    let chunks = extract_leading_chunks(&text, LeadingChunks::MAX_CHUNKS)
+        .into_iter()
+        .map(|chunk| Chunk { segment: resolve_url(&playlist_url, &chunk.segment), init: chunk.init.map(|init| resolve_url(&playlist_url, &init)) })
+        .collect();
+    Ok(Plan { chunks, headers: source.headers.clone() })
 }

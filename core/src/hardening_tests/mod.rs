@@ -122,17 +122,18 @@ impl Drop for Active<'_> {
 
 #[async_trait]
 impl Loader for HangingLoader {
-    async fn load(&self, _: &str, _: &HashMap<String,String>, _: Priority) -> Result<(), LoadError> {
+    async fn load(&self, _: &str, _: &HashMap<String,String>, _: Priority) -> Result<u64, LoadError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.active.fetch_add(1, Ordering::SeqCst);
         let _active = Active(self);
         self.started.notify_one();
         std::future::pending().await
     }
-    async fn load_first_block(&self, url: &str, headers: &HashMap<String,String>, priority: Priority) -> Result<(), LoadError> {
+    async fn load_first_block(&self, url: &str, headers: &HashMap<String,String>, priority: Priority) -> Result<u64, LoadError> {
         self.load(url, headers, priority).await
     }
     async fn stored(&self, _: &str, _: &HashMap<String,String>) -> Option<Vec<u8>> { None }
+    async fn evict(&self, _: &str, _: &HashMap<String,String>) {}
 }
 
 fn sources() -> Vec<Option<Source>> {

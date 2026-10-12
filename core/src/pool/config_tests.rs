@@ -34,10 +34,10 @@ fn inv_pool_14_low_and_normal_profiles_give_different_slot_plans() {
 }
 
 #[test]
-fn inv_pool_14_config_follows_limits_slots_and_depth() {
-    let limits = Limits { slots: 4, depth_seconds: 7, ..Limits::default() };
+fn inv_pool_14_config_follows_limits_slots() {
+    let limits = Limits { slots: 4, ..Limits::default() };
     let config = PoolConfig::from_limits(&limits, 1);
-    assert_eq!((config.slots, config.buffer_seconds), (4, 7));
+    assert_eq!(config.slots, 4);
 }
 
 #[test]

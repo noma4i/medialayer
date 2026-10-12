@@ -2,6 +2,7 @@ mod gate;
 mod ledger;
 mod load_source;
 mod loader;
+mod plan;
 mod runner;
 mod settled;
 mod source;
@@ -16,6 +17,8 @@ pub use window::{diff_window, wanted_jobs, wanted_page_jobs, PageWindow, Prefetc
 
 #[cfg(test)]
 mod mock_loader;
+#[cfg(test)]
+mod chunk_tests;
 #[cfg(test)]
 mod ledger_tests;
 #[cfg(test)]

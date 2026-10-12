@@ -14,7 +14,7 @@ const SEGMENT_0: &str = "https://o.test/hls/v0/s0.m4s";
 const SEGMENT_1: &str = "https://o.test/hls/v0/s1.m4s";
 
 #[tokio::test]
-async fn inv_prefetch_06_an_hls_source_lands_in_the_disk_cache_through_the_proxy_up_to_the_leading_depth() {
+async fn inv_prefetch_06_an_hls_source_lands_in_the_disk_cache_through_the_proxy_up_to_the_chunks_of_its_distance() {
     let dir = tempfile::tempdir().unwrap();
     let cache = Cache::open(dir.path(), Limits::default());
     cache.ready().await;
@@ -29,7 +29,7 @@ async fn inv_prefetch_06_an_hls_source_lands_in_the_disk_cache_through_the_proxy
     fetcher.route(SEGMENT_0, Script::ok(vec![2; 4000]).chunked(1000));
     fetcher.route(SEGMENT_1, Script::ok(vec![3; 4000]));
     let proxy = Proxy::start(Config::default(), fetcher.clone(), store.clone()).await.unwrap();
-    let limits = Limits::default();
+    let limits = Limits { leading_chunks: crate::limits::LeadingChunks::new(&[1]).unwrap(), ..Limits::default() };
     let prefetcher = Prefetcher::new(
         Arc::new(ProxyLoader::new(proxy)),
         &limits,
@@ -68,4 +68,27 @@ async fn inv_prefetch_06_the_first_block_of_an_mp4_lands_as_one_ranged_block_not
     assert_eq!(fetcher.requests().iter().map(|request| request.range).collect::<Vec<_>>(), vec![Some((0, Some(1024 * 1024 - 1)))]);
     assert!(cache.contains("https://o.test/clip.mp4#0").await);
     assert!(!cache.contains(url).await);
+}
+
+#[tokio::test]
+async fn inv_proxy_05_a_prefetch_of_a_chunk_the_player_is_reading_joins_its_flight_and_downloads_it_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::open(dir.path(), Limits::default());
+    cache.ready().await;
+    let store: Arc<dyn ByteStore> = Arc::new(CacheStore::new(cache.clone(), Arc::new(classify_kind)));
+    let fetcher = Arc::new(MockFetcher::new());
+    fetcher.route(SEGMENT_0, Script::ok(vec![2; 4000]).chunked(500).head_delay(Duration::from_millis(100)).chunk_delay(Duration::from_millis(5)));
+    let proxy = Proxy::start(Config::default(), fetcher.clone(), store).await.unwrap();
+    let port = proxy.port();
+    let parsed = url::Url::parse(&proxy.url_for(SEGMENT_0, &HashMap::new()).unwrap()).unwrap();
+    let target = format!("{}?{}", parsed.path(), parsed.query().unwrap_or_default());
+    let loader = ProxyLoader::new(proxy);
+
+    let player = tokio::spawn(async move { crate::proxy::test_client::get(port, &target).await });
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    let bytes = loader.load(SEGMENT_0, &HashMap::new(), crate::proxy::Priority::Prefetch).await.unwrap();
+    let reply = player.await.unwrap();
+
+    assert_eq!((reply.status, reply.body.len(), bytes), (200, 4000, 4000));
+    assert_eq!(fetcher.calls_for(SEGMENT_0), 1);
 }

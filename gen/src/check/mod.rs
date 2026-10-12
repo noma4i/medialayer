@@ -18,6 +18,7 @@ enum Want {
     Evict,
     Headers,
     Range,
+    Chunks,
 }
 
 impl Want {
@@ -31,6 +32,7 @@ impl Want {
             Want::Evict => "one of :lru, :fifo, :lfu, :largest_first or expire_after <duration>",
             Want::Headers => "a list of symbols such as [:authorization]",
             Want::Range => "a range such as 1...3",
+            Want::Chunks => "a list of 1 to 8 chunk counts between 1 and 8 that never grow, such as [3, 2, 1]",
         }
     }
 
@@ -44,6 +46,7 @@ impl Want {
             Want::Evict => build::evict(node).is_some(),
             Want::Headers => build::headers(node).is_some(),
             Want::Range => build::range(node).is_some(),
+            Want::Chunks => build::chunks(node).is_some(),
         }
     }
 }
@@ -64,12 +67,13 @@ const CACHE: &[Rule] = &[
     Rule { word: "timeout", args: &[Want::Duration], keys: &[] },
     Rule { word: "max_concurrent", args: &[Want::Int], keys: &[] },
     Rule { word: "dedupe", args: &[], keys: &[("window", Want::Duration), ("entries", Want::Int)] },
+    Rule { word: "prefetch_budget", args: &[Want::Size], keys: &[] },
     Rule { word: "namespace", args: &[], keys: &[("headers", Want::Headers)] },
 ];
 
 const VIDEO: &[Rule] = &[
     Rule { word: "cover", args: &[Want::Symbol], keys: &[] },
-    Rule { word: "prefetch", args: &[], keys: &[("from", Want::Int), ("to", Want::Int), ("depth", Want::Duration)] },
+    Rule { word: "prefetch", args: &[], keys: &[("from", Want::Int), ("to", Want::Int), ("chunks", Want::Chunks)] },
     Rule {
         word: "pool",
         args: &[],

@@ -5,7 +5,7 @@ use crate::limits::{EvictionStrategy, Limits, LimitsError};
 fn sample() -> MediaSpec {
     let mut video = VideoSpec::new("moment_video");
     video.cover_field = Some("coverUrl".to_string());
-    video.prefetch = PrefetchSpec { from: 1, to: 4, depth: 3 };
+    video.prefetch = PrefetchSpec { from: 1, to: 4, chunks: crate::limits::LeadingChunks::new(&[4, 2]).unwrap() };
     video.pool = PoolSpec { slots: 4, reach: 2, hold_off: 5, trim_delay: 60, low_ram_slots: Some(3), low_ram_reach: None };
     video.evict = Some(Evict::Lfu);
     MediaSpec {
@@ -60,7 +60,7 @@ fn inv_spec_04_limits_take_cache_values_and_the_first_video_and_default_to_core_
     assert_eq!(limits.budget, 2 * 1024 * 1024 * 1024);
     assert_eq!(limits.shrink_to, 0.8);
     assert_eq!(limits.strategy, EvictionStrategy::ExpireAfter(604800));
-    assert_eq!((limits.slots, limits.prefetch_from, limits.prefetch_to, limits.depth_seconds), (4, 1, 4, 3));
+    assert_eq!((limits.slots, limits.prefetch_from, limits.prefetch_to, limits.leading_chunks.to_vec()), (4, 1, 4, vec![4, 2]));
     assert_eq!(limits.timeout_seconds, 30);
 }
 
@@ -83,7 +83,7 @@ fn inv_spec_03_validate_rejects_bad_specs() {
             "second video window inverted",
             Box::new(|spec| {
                 let mut video = VideoSpec::new("other");
-                video.prefetch = PrefetchSpec { from: 5, to: 2, depth: 2 };
+                video.prefetch = PrefetchSpec { from: 5, to: 2, ..PrefetchSpec::default() };
                 spec.videos.push(video);
             }),
             SpecError::Video { name: "other".to_string(), error: LimitsError::PrefetchWindowInverted { from: 5, to: 2 } },

@@ -109,7 +109,7 @@ impl Drop for MediaLayer {
 impl MediaLayer {
     #[uniffi::constructor]
     pub fn open(config: OpenConfig) -> Result<Arc<MediaLayer>, MediaError> {
-        let defaults: crate::limits::Limits = config.defaults.into();
+        let defaults = crate::limits::Limits::try_from(config.defaults)?;
         defaults.validate()?;
         let runtime = Builder::new_multi_thread()
             .worker_threads(WORKER_THREADS)
@@ -139,7 +139,8 @@ impl MediaLayer {
     }
 
     pub async fn set_limits(&self, limits: Limits) -> Result<(), MediaError> {
-        self.with_assembled(|assembled| async move { assembled.controls.set_limits(limits.into()).await }).await?
+        let limits = crate::limits::Limits::try_from(limits)?;
+        self.with_assembled(|assembled| async move { assembled.controls.set_limits(limits).await }).await?
     }
 
     pub async fn reset_limits(&self) -> Result<(), MediaError> {

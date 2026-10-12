@@ -1,4 +1,4 @@
-use super::leading_segments::STREAM_INF_TAG;
+use super::leading_chunks::STREAM_INF_TAG;
 
 pub fn keep_first_variant(manifest: &str) -> String {
     if manifest.matches(STREAM_INF_TAG).count() < 2 {

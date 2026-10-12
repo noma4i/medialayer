@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::fetch::DEFAULT_FORWARDED_HEADERS;
-use crate::limits::{EvictionStrategy, Limits};
+use crate::limits::{EvictionStrategy, LeadingChunks, Limits};
 use crate::prefetch::PageWindow;
 
 
@@ -39,6 +39,7 @@ pub struct CacheSpec {
     pub max_concurrent: u32,
     pub dedupe_window: u32,
     pub dedupe_entries: u32,
+    pub prefetch_budget_mib: u32,
     pub namespace_headers: Vec<String>,
 }
 
@@ -55,6 +56,7 @@ impl Default for CacheSpec {
             max_concurrent: limits.max_concurrent,
             dedupe_window: limits.dedupe_window_seconds,
             dedupe_entries: limits.dedupe_max_entries,
+            prefetch_budget_mib: limits.prefetch_budget_mib,
             namespace_headers: Vec::new(),
         }
     }
@@ -65,13 +67,13 @@ impl Default for CacheSpec {
 pub struct PrefetchSpec {
     pub from: u32,
     pub to: u32,
-    pub depth: u32,
+    pub chunks: LeadingChunks,
 }
 
 impl Default for PrefetchSpec {
     fn default() -> Self {
         let limits = Limits::default();
-        PrefetchSpec { from: limits.prefetch_from, to: limits.prefetch_to, depth: limits.depth_seconds }
+        PrefetchSpec { from: limits.prefetch_from, to: limits.prefetch_to, chunks: limits.leading_chunks }
     }
 }
 
@@ -196,7 +198,8 @@ impl MediaSpec {
             slots: pool.slots,
             prefetch_from: prefetch.from,
             prefetch_to: prefetch.to,
-            depth_seconds: prefetch.depth,
+            leading_chunks: prefetch.chunks,
+            prefetch_budget_mib: self.cache.prefetch_budget_mib,
             timeout_seconds: self.cache.timeout,
             max_concurrent: self.cache.max_concurrent,
             dedupe_window_seconds: self.cache.dedupe_window,

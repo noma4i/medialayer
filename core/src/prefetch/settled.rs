@@ -3,6 +3,7 @@ pub enum Outcome {
     Loaded,
     Failed(String),
     TimedOut,
+    OverBudget,
     Cancelled,
 }
 

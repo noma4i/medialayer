@@ -103,7 +103,7 @@ fn inv_ffi_02_open_wires_the_real_parts_so_limits_reach_the_store_and_stats_answ
     let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), settings.clone(), None)).unwrap();
     let smaller = Limits { budget: 512 * 1024 * 1024, ..default_limits() };
     let (limits, stats) = caller.block_on(async {
-        layer.set_limits(smaller).await.unwrap();
+        layer.set_limits(smaller.clone()).await.unwrap();
         (layer.limits().await, layer.stats().await)
     });
 
@@ -314,7 +314,7 @@ fn inv_ffi_05_open_takes_the_spec_defaults_without_writing_them_and_a_saved_limi
     let caller = caller();
     let from_spec = |dir: &std::path::Path| {
         let mut open = config(dir, Arc::new(Offline), settings.clone(), None);
-        open.defaults = parsed.defaults;
+        open.defaults = parsed.defaults.clone();
         open.pool = parsed.pool;
         MediaLayer::open(open).unwrap()
     };
@@ -325,8 +325,8 @@ fn inv_ffi_05_open_takes_the_spec_defaults_without_writing_them_and_a_saved_limi
 
     assert_eq!((limits.budget, limits.slots), (3_000_000_000, 5));
     assert!(settings.writes.lock().unwrap().is_empty());
-    let saved = Limits { budget: 600_000_000, ..parsed.defaults };
-    caller.block_on(layer.set_limits(saved)).unwrap();
+    let saved = Limits { budget: 600_000_000, ..parsed.defaults.clone() };
+    caller.block_on(layer.set_limits(saved.clone())).unwrap();
     drop(layer);
     let second_dir = tempfile::tempdir().unwrap();
     assert_eq!(caller.block_on(from_spec(second_dir.path()).limits()), saved);

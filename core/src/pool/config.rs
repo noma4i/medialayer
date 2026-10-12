@@ -33,7 +33,7 @@ impl PoolConfig {
     }
 
     pub fn from_limits(limits: &Limits, reach: usize) -> Self {
-        Self { buffer_seconds: limits.depth_seconds, ..Self::new(limits.slots as usize, reach) }
+        Self::new(limits.slots as usize, reach)
     }
 
     pub fn for_profile(self, profile: DeviceProfile, tuning: ProfileTuning) -> Self {

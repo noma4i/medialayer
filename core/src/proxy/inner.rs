@@ -238,7 +238,7 @@ impl ProxyShared {
         crate::trace!("flight", "start {} range={:?} {priority:?}", crate::trace::tail(&flight.url), flight.range);
         let started = std::time::Instant::now();
         let outcome = download(self, &flight, headers, priority).await;
-        crate::trace!("flight", "end {} range={:?} {outcome:?} after={}ms", crate::trace::tail(&flight.url), flight.range, started.elapsed().as_millis());
+        crate::trace!("flight", "end {} range={:?} {outcome:?} bytes={} {priority:?} after={}ms", crate::trace::tail(&flight.url), flight.range, flight.written(), started.elapsed().as_millis());
         {
             let mut flights = locked(&self.flights);
             if flights.get(&flight.key).is_some_and(|current| Arc::ptr_eq(current, &flight)) {

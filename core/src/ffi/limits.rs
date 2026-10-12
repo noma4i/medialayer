@@ -1,4 +1,4 @@
-use crate::limits::{EvictionStrategy, Limits as CoreLimits};
+use crate::limits::{EvictionStrategy, LeadingChunks, Limits as CoreLimits, LimitsError};
 use crate::api::PoolSettings as CorePoolSettings;
 use crate::memory::DeviceMemory as CoreDeviceMemory;
 use crate::pool::ProfileTuning;
@@ -13,7 +13,7 @@ pub enum Evict {
     ExpireAfter { seconds: u32 },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct Limits {
     pub budget: u64,
     pub min_budget: u64,
@@ -22,7 +22,8 @@ pub struct Limits {
     pub slots: u32,
     pub prefetch_from: u32,
     pub prefetch_to: u32,
-    pub depth_seconds: u32,
+    pub leading_chunks: Vec<u32>,
+    pub prefetch_budget_mib: u32,
     pub timeout_seconds: u32,
     pub max_concurrent: u32,
     pub dedupe_window_seconds: u32,
@@ -133,7 +134,8 @@ impl From<CoreLimits> for Limits {
             slots: limits.slots,
             prefetch_from: limits.prefetch_from,
             prefetch_to: limits.prefetch_to,
-            depth_seconds: limits.depth_seconds,
+            leading_chunks: limits.leading_chunks.to_vec(),
+            prefetch_budget_mib: limits.prefetch_budget_mib,
             timeout_seconds: limits.timeout_seconds,
             max_concurrent: limits.max_concurrent,
             dedupe_window_seconds: limits.dedupe_window_seconds,
@@ -143,9 +145,11 @@ impl From<CoreLimits> for Limits {
     }
 }
 
-impl From<Limits> for CoreLimits {
-    fn from(limits: Limits) -> Self {
-        CoreLimits {
+impl TryFrom<Limits> for CoreLimits {
+    type Error = LimitsError;
+
+    fn try_from(limits: Limits) -> Result<Self, LimitsError> {
+        Ok(CoreLimits {
             budget: limits.budget,
             min_budget: limits.min_budget,
             shrink_to: limits.shrink_to,
@@ -153,13 +157,14 @@ impl From<Limits> for CoreLimits {
             slots: limits.slots,
             prefetch_from: limits.prefetch_from,
             prefetch_to: limits.prefetch_to,
-            depth_seconds: limits.depth_seconds,
+            leading_chunks: LeadingChunks::new(&limits.leading_chunks)?,
+            prefetch_budget_mib: limits.prefetch_budget_mib,
             timeout_seconds: limits.timeout_seconds,
             max_concurrent: limits.max_concurrent,
             dedupe_window_seconds: limits.dedupe_window_seconds,
             dedupe_max_entries: limits.dedupe_max_entries,
             strategy: limits.evict.into(),
-        }
+        })
     }
 }
 

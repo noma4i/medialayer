@@ -1,5 +1,5 @@
 use super::*;
-use crate::limits::{EvictionStrategy, Limits as CoreLimits};
+use crate::limits::{EvictionStrategy, LeadingChunks, Limits as CoreLimits};
 
 #[test]
 fn inv_limits_06_every_limit_survives_the_trip_across_the_bridge_types() {
@@ -11,7 +11,8 @@ fn inv_limits_06_every_limit_survives_the_trip_across_the_bridge_types() {
         slots: 4,
         prefetch_from: 1,
         prefetch_to: 6,
-        depth_seconds: 3,
+        leading_chunks: LeadingChunks::new(&[4, 2, 1]).unwrap(),
+        prefetch_budget_mib: 96,
         timeout_seconds: 45,
         max_concurrent: 5,
         dedupe_window_seconds: 90,
@@ -19,7 +20,7 @@ fn inv_limits_06_every_limit_survives_the_trip_across_the_bridge_types() {
         strategy: EvictionStrategy::ExpireAfter(3600),
     };
 
-    assert_eq!(CoreLimits::from(Limits::from(core)), core);
+    assert_eq!(CoreLimits::try_from(Limits::from(core)), Ok(core));
 }
 
 #[test]

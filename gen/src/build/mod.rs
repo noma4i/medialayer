@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use medialayer::limits::LeadingChunks;
 use medialayer::spec::{AudioSpec, CacheSpec, Evict, ImageSpec, MediaSpec, VideoSpec};
 
 use crate::parser::{Call, Node, Value};
@@ -69,6 +70,13 @@ pub fn symbol(node: &Node<Value>) -> Option<String> {
 pub fn range(node: &Node<Value>) -> Option<(u32, u32)> {
     match node.item {
         Value::Range { from, to } => Some((u32::try_from(from).ok()?, u32::try_from(to).ok()?)),
+        _ => None,
+    }
+}
+
+pub fn chunks(node: &Node<Value>) -> Option<LeadingChunks> {
+    match &node.item {
+        Value::Array(items) => LeadingChunks::new(&items.iter().map(int).collect::<Option<Vec<u32>>>()?).ok(),
         _ => None,
     }
 }
@@ -153,6 +161,7 @@ fn cache(body: &[Call]) -> CacheSpec {
         max_concurrent: argument(body, "max_concurrent", int).unwrap_or(base.max_concurrent),
         dedupe_window: keyed(body, "dedupe", "window", duration).unwrap_or(base.dedupe_window),
         dedupe_entries: keyed(body, "dedupe", "entries", int).unwrap_or(base.dedupe_entries),
+        prefetch_budget_mib: argument(body, "prefetch_budget", size).map_or(base.prefetch_budget_mib, |bytes| (bytes / (1024 * 1024)) as u32),
         namespace_headers: keyed(body, "namespace", "headers", headers).unwrap_or(base.namespace_headers),
     }
 }
@@ -162,7 +171,7 @@ fn video(name: String, body: &[Call]) -> VideoSpec {
     video.cover_field = argument(body, "cover", symbol);
     video.prefetch.from = keyed(body, "prefetch", "from", int).unwrap_or(video.prefetch.from);
     video.prefetch.to = keyed(body, "prefetch", "to", int).unwrap_or(video.prefetch.to);
-    video.prefetch.depth = keyed(body, "prefetch", "depth", duration).unwrap_or(video.prefetch.depth);
+    video.prefetch.chunks = keyed(body, "prefetch", "chunks", chunks).unwrap_or(video.prefetch.chunks);
     video.pool.slots = keyed(body, "pool", "slots", int).unwrap_or(video.pool.slots);
     video.pool.reach = keyed(body, "pool", "reach", int).unwrap_or(video.pool.reach);
     video.pool.hold_off = keyed(body, "pool", "hold_off", duration).unwrap_or(video.pool.hold_off);

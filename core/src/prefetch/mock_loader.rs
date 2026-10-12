@@ -23,6 +23,9 @@ struct Script {
     calls: Vec<Call>,
     bodies: HashMap<String, Vec<u8>>,
     failing: HashSet<String>,
+    hanging: HashSet<String>,
+    sizes: HashMap<String, u64>,
+    evicted: Vec<String>,
 }
 
 #[derive(Default)]
@@ -53,6 +56,18 @@ impl Drop for Active<'_> {
 impl MockLoader {
     pub fn serve(&self, url: &str, body: &str) {
         self.script().bodies.insert(url.to_string(), body.as_bytes().to_vec());
+    }
+
+    pub fn hang(&self, url: &str) {
+        self.script().hanging.insert(url.to_string());
+    }
+
+    pub fn size(&self, url: &str, bytes: u64) {
+        self.script().sizes.insert(url.to_string(), bytes);
+    }
+
+    pub fn evicted(&self) -> Vec<String> {
+        self.script().evicted.clone()
     }
 
     pub fn hang_all(&self) {
@@ -92,26 +107,27 @@ impl MockLoader {
         self.script.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    async fn run(&self, url: &str, fetch: Fetch, priority: Priority) -> Result<(), LoadError> {
+    async fn run(&self, url: &str, fetch: Fetch, priority: Priority) -> Result<u64, LoadError> {
         let _active = Active::enter(self);
-        let failing = {
+        let (failing, hanging, bytes) = {
             let mut script = self.script();
             script.calls.push(Call { url: url.to_string(), fetch, priority });
-            script.failing.contains(url)
+            (script.failing.contains(url), script.hanging.contains(url), script.sizes.get(url).copied().unwrap_or(1))
         };
-        if self.hang_all.load(Ordering::SeqCst) {
+        tokio::task::yield_now().await;
+        if hanging || self.hang_all.load(Ordering::SeqCst) {
             std::future::pending::<()>().await;
         }
         if failing {
             return Err(LoadError(format!("{url} refused")));
         }
-        Ok(())
+        Ok(bytes)
     }
 }
 
 #[async_trait]
 impl Loader for MockLoader {
-    async fn load(&self, url: &str, _headers: &HashMap<String, String>, priority: Priority) -> Result<(), LoadError> {
+    async fn load(&self, url: &str, _headers: &HashMap<String, String>, priority: Priority) -> Result<u64, LoadError> {
         self.run(url, Fetch::Whole, priority).await
     }
 
@@ -120,12 +136,16 @@ impl Loader for MockLoader {
         url: &str,
         _headers: &HashMap<String, String>,
         priority: Priority,
-    ) -> Result<(), LoadError> {
+    ) -> Result<u64, LoadError> {
         self.run(url, Fetch::FirstBlock, priority).await
     }
 
     async fn stored(&self, url: &str, _headers: &HashMap<String, String>) -> Option<Vec<u8>> {
         self.stored_reads.fetch_add(1, Ordering::SeqCst);
         self.script().bodies.get(url).cloned()
+    }
+
+    async fn evict(&self, url: &str, _headers: &HashMap<String, String>) {
+        self.script().evicted.push(url.to_string());
     }
 }

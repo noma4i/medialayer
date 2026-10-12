@@ -1,4 +1,7 @@
+use super::chunks::LeadingChunks;
+
 pub(crate) const MIB: u64 = 1024 * 1024;
+const MAX_PREFETCH_BUDGET_MIB: u32 = 512;
 const GIB: u64 = 1024 * MIB;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,7 +22,8 @@ pub struct Limits {
     pub slots: u32,
     pub prefetch_from: u32,
     pub prefetch_to: u32,
-    pub depth_seconds: u32,
+    pub leading_chunks: LeadingChunks,
+    pub prefetch_budget_mib: u32,
     pub timeout_seconds: u32,
     pub max_concurrent: u32,
     pub dedupe_window_seconds: u32,
@@ -37,6 +41,10 @@ pub enum LimitsError {
     PrefetchWindowInverted { from: u32, to: u32 },
     #[error("{field} must not be zero")]
     Zero { field: &'static str },
+    #[error("leading_chunks {reason}")]
+    LeadingChunks { reason: &'static str },
+    #[error("prefetch_budget_mib must be between 1 and {MAX_PREFETCH_BUDGET_MIB}")]
+    PrefetchBudget,
     #[error("line {line} is not key=value")]
     MalformedLine { line: usize },
     #[error("unknown key {key}")]
@@ -53,9 +61,10 @@ impl Default for Limits {
             shrink_to: 0.9,
             memory_budget: 256 * MIB,
             slots: 3,
-            prefetch_from: 2,
+            prefetch_from: 1,
             prefetch_to: 5,
-            depth_seconds: 2,
+            leading_chunks: LeadingChunks::default(),
+            prefetch_budget_mib: 64,
             timeout_seconds: 30,
             max_concurrent: 2,
             dedupe_window_seconds: 60,
@@ -71,7 +80,7 @@ impl Limits {
             ("budget", self.budget),
             ("memory_budget", self.memory_budget),
             ("slots", self.slots.into()),
-            ("depth_seconds", self.depth_seconds.into()),
+            ("prefetch_budget_mib", self.prefetch_budget_mib.into()),
             ("timeout_seconds", self.timeout_seconds.into()),
             ("max_concurrent", self.max_concurrent.into()),
             ("dedupe_window_seconds", self.dedupe_window_seconds.into()),
@@ -79,6 +88,9 @@ impl Limits {
         ];
         if let Some((field, _)) = required.iter().find(|(_, value)| *value == 0) {
             return Err(LimitsError::Zero { field });
+        }
+        if self.prefetch_budget_mib > MAX_PREFETCH_BUDGET_MIB {
+            return Err(LimitsError::PrefetchBudget);
         }
         if self.strategy == EvictionStrategy::ExpireAfter(0) {
             return Err(LimitsError::Zero { field: "strategy" });
@@ -98,7 +110,7 @@ impl Limits {
     pub fn encode(&self) -> String {
         format!(
             "budget={}\nmin_budget={}\nshrink_to={}\nmemory_budget={}\nslots={}\nprefetch_from={}\nprefetch_to={}\n\
-             depth_seconds={}\ntimeout_seconds={}\nmax_concurrent={}\ndedupe_window_seconds={}\ndedupe_max_entries={}\n\
+             leading_chunks={}\nprefetch_budget_mib={}\ntimeout_seconds={}\nmax_concurrent={}\ndedupe_window_seconds={}\ndedupe_max_entries={}\n\
              strategy={}\n",
             self.budget,
             self.min_budget,
@@ -107,7 +119,8 @@ impl Limits {
             self.slots,
             self.prefetch_from,
             self.prefetch_to,
-            self.depth_seconds,
+            self.leading_chunks.to_vec().iter().map(u32::to_string).collect::<Vec<_>>().join(","),
+            self.prefetch_budget_mib,
             self.timeout_seconds,
             self.max_concurrent,
             self.dedupe_window_seconds,
@@ -138,7 +151,8 @@ impl Limits {
             "slots" => self.slots = number("slots", value)?,
             "prefetch_from" => self.prefetch_from = number("prefetch_from", value)?,
             "prefetch_to" => self.prefetch_to = number("prefetch_to", value)?,
-            "depth_seconds" => self.depth_seconds = number("depth_seconds", value)?,
+            "leading_chunks" => self.leading_chunks = leading_chunks(value)?,
+            "prefetch_budget_mib" => self.prefetch_budget_mib = number("prefetch_budget_mib", value)?,
             "timeout_seconds" => self.timeout_seconds = number("timeout_seconds", value)?,
             "max_concurrent" => self.max_concurrent = number("max_concurrent", value)?,
             "dedupe_window_seconds" => self.dedupe_window_seconds = number("dedupe_window_seconds", value)?,
@@ -174,6 +188,11 @@ impl EvictionStrategy {
                 .ok_or(LimitsError::InvalidValue { key: "strategy" }),
         }
     }
+}
+
+fn leading_chunks(value: &str) -> Result<LeadingChunks, LimitsError> {
+    let values: Vec<u32> = value.split(',').map(|entry| entry.trim().parse().map_err(|_| LimitsError::InvalidValue { key: "leading_chunks" })).collect::<Result<_, _>>()?;
+    LeadingChunks::new(&values)
 }
 
 fn number<T: std::str::FromStr>(key: &'static str, value: &str) -> Result<T, LimitsError> {

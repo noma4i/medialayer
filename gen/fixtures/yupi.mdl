@@ -1,12 +1,13 @@
 cache do
   budget 2.gib, min: 64.mib
   evict :lru
+  prefetch_budget 48.mib
   namespace headers: [:authorization]
 end
 
 video :moment_video do
   cover :coverUrl
-  prefetch from: 1, to: 3
+  prefetch from: 1, to: 3, chunks: [4, 2]
   pool slots: 3, low_ram_slots: 2, low_ram_reach: 0
 end
 

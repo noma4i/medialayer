@@ -18,7 +18,7 @@ fn ruby_blocks(path: &str) -> Vec<String> {
 fn media_files_spec() -> MediaSpec {
     let mut video = VideoSpec::new("moment_video");
     video.cover_field = Some("coverUrl".into());
-    video.prefetch = PrefetchSpec { from: 2, to: 5, depth: 2 };
+    video.prefetch = PrefetchSpec { from: 1, to: 5, chunks: medialayer::limits::LeadingChunks::new(&[3, 2, 1]).unwrap() };
     video.pool = PoolSpec { slots: 3, reach: 1, hold_off: 1, trim_delay: 30, low_ram_slots: Some(2), low_ram_reach: Some(0) };
     video.forward_headers = vec!["Authorization".into(), "Cookie".into(), "User-Agent".into()];
     video.evict = Some(Evict::Lfu);

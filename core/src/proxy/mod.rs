@@ -188,6 +188,16 @@ impl Proxy {
         Ok(port)
     }
 
+    pub async fn stored_len(&self, url: &str, headers: &HashMap<String, String>) -> Option<u64> {
+        let upstream = self.inner.upstream_headers(url, headers);
+        self.inner.store.len(&self.inner.key(url, &upstream)).await
+    }
+
+    pub async fn remove_stored(&self, url: &str, headers: &HashMap<String, String>) {
+        let upstream = self.inner.upstream_headers(url, headers);
+        self.inner.store.remove(&self.inner.key(url, &upstream)).await;
+    }
+
     pub async fn fetch_into_store(
         &self,
         url: &str,

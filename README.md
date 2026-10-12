@@ -12,7 +12,7 @@ One Rust core serves iOS and Android. It contains a local caching HTTP proxy, a 
 - **Placeholders.** Images show BlurHash then the image. Videos show the cover if one is given, otherwise the first frame cut from the first chunk, and play at once when already cached.
 - **Player pool.** A pool of native players that the library juggles: it assigns sources, prerolls neighbors, hands playback over and recycles slots.
 - **Image loaders stay.** Nuke on iOS and Coil on Android keep decoding, resizing and memory caching. Their network access and disk cache use the MediaLayer core.
-- **Everything is configurable.** Budget, minimum size, prefetch windows, depth, timeouts and concurrency are settings with defaults, not constants.
+- **Everything is configurable.** Budget, minimum size, prefetch windows, chunks per distance, prefetch byte budget, timeouts and concurrency are settings with defaults, not constants.
 - **Eviction strategy.** Choose `lru`, `fifo`, `lfu`, `largest_first` or `expire_after`. When the budget is reached, the cache shrinks to a configured share of it. Entries in use are never evicted.
 - **Never blocks.** Public calls are cheap or asynchronous, network and disk run in parallel on library threads, and optional work waits for idle time (UNBUILT: the library has no idle signal yet).
 - **Memory under control.** Player slots are recycled and freed completely, memory pressure shrinks everything, and a low-end profile keeps weak Android devices alive.
@@ -54,7 +54,7 @@ end
 
 video :moment_video do
   cover :coverUrl
-  prefetch from: 2, to: 5, depth: 2.seconds
+  prefetch from: 1, to: 5, chunks: [3, 2, 1]
 end
 
 image :avatar do

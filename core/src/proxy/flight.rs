@@ -82,6 +82,10 @@ impl Flight {
         })
     }
 
+    pub fn written(&self) -> u64 {
+        self.progress.borrow().written
+    }
+
     pub fn promote(&self) {
         if !self.promoted.swap(true, Ordering::SeqCst) {
             self.promote.notify_one();

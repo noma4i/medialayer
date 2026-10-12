@@ -11,12 +11,13 @@ cache do
   timeout 30.seconds
   max_concurrent 2
   dedupe window: 60.seconds, entries: 500
+  prefetch_budget 64.mib
   namespace headers: [:authorization]
 end
 
 video :moment_video do
   cover :coverUrl
-  prefetch from: 2, to: 5, depth: 2.seconds
+  prefetch from: 1, to: 5, chunks: [3, 2, 1]
   pool slots: 3, reach: 1, hold_off: 1.second, trim_delay: 30.seconds, low_ram_slots: 2, low_ram_reach: 0
   forward_headers [:authorization, :cookie, :user_agent]
   evict :lfu
@@ -48,6 +49,7 @@ Durations are written `30.seconds`, `5.minutes`, `2.days`. Sizes are written `64
 | `max_concurrent` | 2 | Prefetch loads that run at once. Loading what is playing never waits for them |
 | `dedupe window:` | 60 seconds | Time during which a repeated prefetch of the same source is skipped |
 | `dedupe entries:` | 500 | Most sources remembered for that skip. The oldest are dropped |
+| `prefetch_budget` | 64 MiB | Hard limit for the bytes of prefetched stream chunks that were never played. 1 to 512 MiB. When a new chunk would go over it, the chunks of the farthest items are removed first. A chunk of the farthest item is not fetched at all, and that item settles as over budget |
 | `namespace headers:` | none | Request headers that become part of the cache key. By default the key is the URL alone. Set it when the same URL returns different bytes for different users. The key then is the URL plus a hash of the listed header values; a request without those headers keeps the plain URL key. `purge(url)` removes every variant |
 
 UNBUILT: `memory` counts players and proxy buffers. Image decoding in Nuke and Coil is not counted in it. The decoder memory has its own limit, `imageMemoryBytes` of `open`.
@@ -71,8 +73,8 @@ The cache key is the URL. The cache lives on disk; image memory caches stay with
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
 | `cover` | none | Name of the field of your own model that holds the cover image URL (the symbol is only a name for your data). The generated type gets an optional `cover` parameter. If given, the cover shows until the video is ready. If not, the first frame is cut from the first chunk and shown instead |
-| `prefetch from:, to:` | 2, 5 | Pages ahead of the active page whose first chunk is loaded in advance. Both ends are included: `from: 2, to: 5` loads the pages 2, 3, 4 and 5 ahead |
-| `prefetch depth:` | 2 seconds | How much of the start of each prefetched video is loaded |
+| `prefetch from:, to:` | 1, 5 | Pages ahead of the active page that are loaded in advance. Both ends are included: `from: 1, to: 5` loads the pages 1 to 5 ahead |
+| `prefetch chunks:` | `[3, 2, 1]` | How many chunks (HLS segments) of each prefetched stream are loaded, by distance from the active page. The page 1 ahead gets 3 chunks, the page 2 ahead 2, every page farther 1. The list has 1 to 8 entries, each between 1 and 8, and never grows with the distance. A wrong list is an error, it is never cut. The init segment is loaded with the first chunk and is not counted. Moving the active page loads only the missing chunks of an item that came closer, and cancels the deeper requests of an item that went away. Loaded chunks stay in the cache until its budget removes them |
 | `pool slots:` | 3 | Number of native players in the pool. A low-memory device gets `low_ram_slots` instead |
 | `pool reach:` | 1 | Pages kept ready on each side of the active page |
 | `pool hold_off:` | 1 second | Time before a slot released under memory pressure may load again |

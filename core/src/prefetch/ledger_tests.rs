@@ -1,4 +1,7 @@
 use super::*;
+use crate::hls::Chunk;
+use crate::prefetch::plan::Plan;
+use std::collections::HashMap;
 use std::time::Duration;
 
 fn secs(value: u64) -> Duration {
@@ -9,45 +12,52 @@ fn ledger() -> PrefetchLedger {
     PrefetchLedger::new(secs(60), 500)
 }
 
+fn plan(count: usize) -> Plan {
+    Plan { chunks: (0..count).map(|index| Chunk { segment: format!("c{index}"), init: None }).collect(), headers: HashMap::new() }
+}
+
+fn load_unit(ledger: &mut PrefetchLedger, key: &str, now: Duration) -> bool {
+    let needed = ledger.needed(key, 1, now, true);
+    if needed {
+        ledger.record_unit(key);
+    }
+    needed
+}
+
 #[test]
-fn inv_prefetch_01_admits_first_and_dedupes_shallower_inside_window() {
+fn inv_prefetch_01_loads_first_and_skips_a_loaded_source_inside_the_window() {
     let mut ledger = ledger();
-    assert!(ledger.admit("a", secs(2), secs(100)));
-    assert!(!ledger.admit("a", secs(2), secs(130)));
-    assert!(!ledger.admit("a", secs(1), secs(159)));
+    assert!(load_unit(&mut ledger, "a", secs(100)));
+    assert!(!load_unit(&mut ledger, "a", secs(130)));
+    assert!(!load_unit(&mut ledger, "a", secs(159)));
 }
 
 #[test]
 fn inv_prefetch_01_reopens_after_window() {
     let mut ledger = ledger();
-    ledger.admit("a", secs(2), secs(100));
-    assert!(ledger.admit("a", secs(2), secs(160)));
+    load_unit(&mut ledger, "a", secs(100));
+    assert!(load_unit(&mut ledger, "a", secs(160)));
 }
 
 #[test]
-fn inv_prefetch_01_deeper_request_extends_and_raises_the_covered_depth() {
+fn inv_prefetch_01_a_larger_target_is_needed_until_the_chunks_are_loaded() {
     let mut ledger = ledger();
-    ledger.admit("a", secs(2), secs(100));
-    assert!(ledger.admit("a", secs(5), secs(110)));
-    assert!(!ledger.admit("a", secs(4), secs(120)));
-}
-
-#[test]
-fn inv_prefetch_01_forget_reopens_key() {
-    let mut ledger = ledger();
-    ledger.admit("a", secs(2), secs(100));
-    ledger.forget("a");
-    assert!(ledger.admit("a", secs(2), secs(101)));
+    assert!(ledger.needed("a", 1, secs(100), true));
+    ledger.set_plan("a", plan(5));
+    ledger.record_chunk("a", 0, vec![("c0".into(), 10)], None, u64::MAX);
+    assert!(!ledger.needed("a", 1, secs(110), true));
+    assert!(ledger.needed("a", 3, secs(110), false));
+    assert_eq!(ledger.loaded_chunks("a"), 1);
 }
 
 #[test]
 fn inv_prefetch_01_entries_stay_within_max_and_oldest_is_dropped() {
     let mut ledger = ledger();
     for index in 0..501u64 {
-        ledger.admit(&format!("k{index}"), secs(2), Duration::from_millis(index * 10));
+        load_unit(&mut ledger, &format!("k{index}"), Duration::from_millis(index * 10));
     }
-    let oldest_dropped = ledger.admit("k0", secs(2), secs(6));
-    let newest_kept = ledger.admit("k500", secs(2), secs(6));
+    let oldest_dropped = load_unit(&mut ledger, "k0", secs(6));
+    let newest_kept = load_unit(&mut ledger, "k500", secs(6));
     assert_eq!(ledger.dedupe_count(), 500);
     assert!(oldest_dropped);
     assert!(!newest_kept);
@@ -56,12 +66,12 @@ fn inv_prefetch_01_entries_stay_within_max_and_oldest_is_dropped() {
 #[test]
 fn inv_prefetch_01_limits_are_parameters() {
     let mut ledger = PrefetchLedger::new(secs(10), 2);
-    ledger.admit("a", secs(1), secs(0));
-    ledger.admit("b", secs(1), secs(1));
-    ledger.admit("c", secs(1), secs(2));
+    load_unit(&mut ledger, "a", secs(0));
+    load_unit(&mut ledger, "b", secs(1));
+    load_unit(&mut ledger, "c", secs(2));
     assert_eq!(ledger.dedupe_count(), 2);
-    assert!(ledger.admit("a", secs(1), secs(3)));
-    assert!(ledger.admit("b", secs(1), secs(11)));
+    assert!(load_unit(&mut ledger, "a", secs(3)));
+    assert!(load_unit(&mut ledger, "b", secs(11)));
 }
 
 #[test]
@@ -93,10 +103,8 @@ fn inv_prefetch_07_cancel_counts_only_when_something_was_pending() {
     assert!(!ledger.cancel("a", false));
     assert_eq!(ledger.counters.cancelled, 0);
 
-    ledger.admit("a", secs(2), secs(100));
     assert!(!ledger.cancel("a", true));
     assert_eq!(ledger.counters.cancelled, 1);
-    assert!(ledger.admit("a", secs(2), secs(101)));
 
     ledger.enqueue("b");
     assert!(ledger.cancel("b", false));
@@ -106,21 +114,19 @@ fn inv_prefetch_07_cancel_counts_only_when_something_was_pending() {
 #[test]
 fn inv_prefetch_01_set_limits_changes_the_repeat_skip_window_and_the_remembered_count() {
     let mut ledger = PrefetchLedger::new(Duration::from_secs(60), 100);
-    let depth = Duration::from_secs(2);
-    assert!(ledger.admit("a", depth, Duration::from_secs(0)));
-    assert!(!ledger.admit("a", depth, Duration::from_secs(20)));
+    assert!(load_unit(&mut ledger, "a", secs(0)));
+    assert!(!load_unit(&mut ledger, "a", secs(20)));
 
     ledger.set_limits(Duration::from_secs(10), 1);
 
-    assert!(ledger.admit("a", depth, Duration::from_secs(20)));
-    assert!(ledger.admit("b", depth, Duration::from_secs(21)));
+    assert!(load_unit(&mut ledger, "a", secs(20)));
+    assert!(load_unit(&mut ledger, "b", secs(21)));
     assert_eq!(ledger.dedupe_count(), 1);
 }
 
 #[test]
 fn inv_prefetch_01_inv_prefetch_07_random_operations_keep_the_dedupe_bounded_and_the_cancel_flags_exact() {
     use crate::seeded::Dice;
-    use std::collections::HashMap;
     let mut dice = Dice::new("inv_prefetch_01_inv_prefetch_07_random_operations_keep_the_dedupe_bounded_and_the_cancel_flags_exact");
     let window = Duration::from_secs(10);
     let max = 8;
@@ -135,19 +141,18 @@ fn inv_prefetch_01_inv_prefetch_07_random_operations_keep_the_dedupe_bounded_and
         let key = format!("u{}", dice.below(14));
         match dice.below(6) {
             0..=2 => {
-                let depth = Duration::from_secs(dice.between(1, 4));
                 let before = admitted_at.get(&key).copied();
-                let verdict = ledger.admit(&key, depth, now);
+                let verdict = load_unit(&mut ledger, &key, now);
                 if verdict {
                     admits += 1;
-                    admitted_at.insert(key.clone(), (now, before.map_or(depth, |(_, deepest)| deepest.max(depth))));
+                    admitted_at.insert(key.clone(), (now, Duration::ZERO));
                 } else {
                     covered += 1;
-                    let (at, deepest) = before.unwrap_or_else(|| panic!("step {step}: {key} was refused without ever being admitted"));
-                    assert!(now - at < window && depth <= deepest, "step {step}: {key} refused although the window ended or the request is deeper");
+                    let (at, _) = before.unwrap_or_else(|| panic!("step {step}: {key} was refused without ever being loaded"));
+                    assert!(now - at < window, "step {step}: {key} refused although the window ended");
                 }
-                let again = ledger.admit(&key, depth, now);
-                assert!(!again, "step {step}: admitting {key} twice at the same instant gave a second slot");
+                let again = load_unit(&mut ledger, &key, now);
+                assert!(!again, "step {step}: loading {key} twice at the same instant gave a second slot");
                 assert!(ledger.dedupe_count() <= max, "step {step}: {} dedupe entries over the limit {max}", ledger.dedupe_count());
             }
             3 => {
@@ -172,7 +177,6 @@ fn inv_prefetch_01_inv_prefetch_07_random_operations_keep_the_dedupe_bounded_and
                 if had_queued {
                     flagged.insert(key.clone(), true);
                 }
-                admitted_at.remove(&key);
             }
         }
     }

@@ -26,7 +26,7 @@ fn inv_limits_01_zero_in_forbidden_field_is_rejected() {
         ("budget", Limits { budget: 0, min_budget: 0, ..Limits::default() }),
         ("memory_budget", Limits { memory_budget: 0, ..Limits::default() }),
         ("slots", Limits { slots: 0, ..Limits::default() }),
-        ("depth_seconds", Limits { depth_seconds: 0, ..Limits::default() }),
+        ("prefetch_budget_mib", Limits { prefetch_budget_mib: 0, ..Limits::default() }),
         ("timeout_seconds", Limits { timeout_seconds: 0, ..Limits::default() }),
         ("max_concurrent", Limits { max_concurrent: 0, ..Limits::default() }),
         ("dedupe_window_seconds", Limits { dedupe_window_seconds: 0, ..Limits::default() }),

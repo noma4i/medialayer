@@ -30,25 +30,18 @@ fn page_urls(prefix: &str, pages: &[usize]) -> HashSet<String> {
     pages.iter().flat_map(|page| ["a", "b"].map(|side| format!("https://o.test/{prefix}{page}{side}.jpg"))).collect()
 }
 
-fn video(url: &str) -> Source {
+pub(super) fn video(url: &str) -> Source {
     Source { url: url.to_string(), headers: HashMap::new(), kind: SourceKind::Video }
 }
 
-struct HlsCase<'a> {
-    depth: u32,
-    start: &'a str,
-    playlists: &'a [(&'a str, &'a str)],
-    expected: &'a [&'a str],
+pub(super) struct Rig {
+    pub(super) prefetcher: Prefetcher,
+    pub(super) loader: Arc<MockLoader>,
+    pub(super) clock: Arc<ManualClock>,
 }
 
-struct Rig {
-    prefetcher: Prefetcher,
-    loader: Arc<MockLoader>,
-    clock: Arc<ManualClock>,
-}
-
-fn rig_with(tweak: impl FnOnce(&mut Limits)) -> Rig {
-    let mut limits = Limits { max_concurrent: 8, ..Limits::default() };
+pub(super) fn rig_with(tweak: impl FnOnce(&mut Limits)) -> Rig {
+    let mut limits = Limits { max_concurrent: 8, prefetch_from: 2, prefetch_to: 5, ..Limits::default() };
     tweak(&mut limits);
     let loader = Arc::new(MockLoader::default());
     let clock = Arc::new(ManualClock::new(1_000));
@@ -57,11 +50,11 @@ fn rig_with(tweak: impl FnOnce(&mut Limits)) -> Rig {
     Rig { prefetcher, loader, clock }
 }
 
-fn rig() -> Rig {
+pub(super) fn rig() -> Rig {
     rig_with(|_| {})
 }
 
-async fn eventually(mut condition: impl FnMut() -> bool) {
+pub(super) async fn eventually(mut condition: impl FnMut() -> bool) {
     for _ in 0..500 {
         if condition() {
             return;
@@ -71,11 +64,11 @@ async fn eventually(mut condition: impl FnMut() -> bool) {
     panic!("condition not reached in time");
 }
 
-async fn next(events: &mut Receiver<Settled>) -> Settled {
+pub(super) async fn next(events: &mut Receiver<Settled>) -> Settled {
     tokio::time::timeout(Duration::from_secs(5), events.recv()).await.expect("event in time").expect("channel open")
 }
 
-async fn quiet() {
+pub(super) async fn quiet() {
     for _ in 0..50 {
         tokio::task::yield_now().await;
     }
@@ -187,39 +180,19 @@ async fn inv_prefetch_03_each_started_source_settles_exactly_once() {
 }
 
 #[tokio::test]
-async fn inv_prefetch_06_hls_sources_load_the_first_variant_and_the_leading_segments_to_the_configured_depth() {
+async fn inv_prefetch_06_hls_sources_load_the_first_variant_and_the_init_before_the_chunk_of_their_distance() {
     let master = "https://o.test/hls/master.m3u8";
     let multivariant = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=900\nv0/index.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=300\nv1/index.m3u8\n";
     let mapped = "#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:2.0,\ns0.m4s\n#EXTINF:2.0,\ns1.m4s\n#EXTINF:2.0,\ns2.m4s\n";
-    let direct = "#EXTM3U\n#EXTINF:2.0,\nhttps://cdn.test/a0.ts\n#EXTINF:2.0,\nhttps://cdn.test/a1.ts\n#EXTINF:2.0,\nhttps://cdn.test/a2.ts\n#EXTINF:2.0,\nhttps://cdn.test/a3.ts\n";
-    let cases = [
-        HlsCase {
-            depth: 2,
-            start: master,
-            playlists: &[(master, multivariant), ("https://o.test/hls/v0/index.m3u8", mapped)],
-            expected: &[master, "https://o.test/hls/v0/index.m3u8", "https://o.test/hls/v0/init.mp4", "https://o.test/hls/v0/s0.m4s"],
-        },
-        HlsCase {
-            depth: 5,
-            start: "https://o.test/direct.m3u8",
-            playlists: &[("https://o.test/direct.m3u8", direct)],
-            expected: &["https://o.test/direct.m3u8", "https://cdn.test/a0.ts", "https://cdn.test/a1.ts", "https://cdn.test/a2.ts"],
-        },
-    ];
-    for HlsCase { depth, start, playlists, expected } in cases {
-        let rig = rig_with(|limits| limits.depth_seconds = depth);
-        for (playlist, body) in playlists {
-            rig.loader.serve(playlist, body);
-        }
-        let mut feed: Vec<Option<Source>> = vec![None, None];
-        feed.push(Some(video(start)));
-        let mut events = rig.prefetcher.settled();
-        rig.prefetcher.set_window(0, feed);
-        assert_eq!(next(&mut events).await.outcome, Outcome::Loaded, "depth {depth}");
+    let rig = rig_with(|limits| limits.leading_chunks = crate::limits::LeadingChunks::new(&[1]).unwrap());
+    rig.loader.serve(master, multivariant);
+    rig.loader.serve("https://o.test/hls/v0/index.m3u8", mapped);
+    let mut events = rig.prefetcher.settled();
+    rig.prefetcher.set_window(0, vec![None, None, Some(video(master))]);
+    assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
 
-        assert_eq!(rig.loader.urls(), expected, "depth {depth}");
-        assert!(rig.loader.calls().iter().all(|call| call.priority == Priority::Prefetch && call.fetch == Fetch::Whole));
-    }
+    assert_eq!(rig.loader.urls(), [master, "https://o.test/hls/v0/index.m3u8", "https://o.test/hls/v0/init.mp4", "https://o.test/hls/v0/s0.m4s"]);
+    assert!(rig.loader.calls().iter().all(|call| call.priority == Priority::Prefetch && call.fetch == Fetch::Whole));
 }
 
 #[tokio::test]
