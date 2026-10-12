@@ -1,6 +1,6 @@
 use super::Stage;
 use crate::api::ports::{PoolControl, SlotDirectives};
-use crate::memory::Step;
+use crate::memory::{Step, StepPlan};
 use crate::pool::{Directive, Pressure, PoolStats};
 use crate::session::Event;
 
@@ -11,6 +11,7 @@ impl PoolControl for Stage {
 
     fn set_step(&self, step: Step) {
         self.state().ring.set_step(step);
+        self.inner.routes.set_readahead_percent(StepPlan::for_step(step).readahead_percent.into());
     }
 
     fn release_under(&self, now_ms: u64, pressure: Pressure) -> Vec<Directive> {

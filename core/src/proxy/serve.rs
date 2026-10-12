@@ -6,7 +6,7 @@ use super::route::{
 };
 use super::slots::Priority;
 use crate::fetch::{header_value, FetchError, Request};
-use crate::hls::{is_manifest_url, is_multivariant, keep_first_variant, rewrite_playlist};
+use crate::hls::{extract_variants, is_manifest_url, is_multivariant, keep_first_variant, rewrite_playlist};
 use crate::memory::Reservation;
 use bytes::Bytes;
 use futures_util::{stream, Stream, StreamExt};
@@ -185,7 +185,14 @@ fn playlist_response(inner: &ProxyShared, target: &str, bytes: &[u8], headers: &
     let source = String::from_utf8_lossy(bytes);
     let absolute = absolutize_playlist(&source, target);
     inner.inherit_headers(&playlist_references(&absolute), headers);
-    let body = rewrite_playlist(&keep_first_variant(&absolute));
+    let kept = keep_first_variant(&absolute);
+    if !head_only {
+        match extract_variants(&kept).first() {
+            Some(variant) => inner.windows.remember_variant(variant, target),
+            None => inner.windows.register(target, &kept),
+        }
+    }
+    let body = rewrite_playlist(&kept);
     let headers = vec![("content-type", PLAYLIST_TYPE.to_string()), ("content-length", body.len().to_string())];
     respond(200, headers, full(Bytes::from(body)), head_only)
 }
@@ -198,6 +205,9 @@ async fn media(
     head_only: bool,
 ) -> Response<ProxyBody> {
     let key = inner.key(target, &headers);
+    if !head_only {
+        inner.hold_for_playhead(target, &key).await;
+    }
     for _ in 0..ATTEMPTS {
         let mut joined = inner.existing_flight(target, &headers);
         if joined.is_none() {

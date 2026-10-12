@@ -86,6 +86,7 @@ const VIDEO: &[Rule] = &[
             ("low_ram_reach", Want::Int),
         ],
     },
+    Rule { word: "playback", args: &[], keys: &[("chunks_ahead", Want::Int)] },
     Rule { word: "forward_headers", args: &[Want::Headers], keys: &[] },
     EVICT,
 ];

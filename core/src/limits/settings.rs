@@ -3,6 +3,7 @@ use super::chunks::LeadingChunks;
 pub(crate) const MIB: u64 = 1024 * 1024;
 const MAX_PREFETCH_BUDGET_MIB: u32 = 512;
 const GIB: u64 = 1024 * MIB;
+pub const MAX_CHUNKS_AHEAD: u32 = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EvictionStrategy {
@@ -28,6 +29,7 @@ pub struct Limits {
     pub max_concurrent: u32,
     pub dedupe_window_seconds: u32,
     pub dedupe_max_entries: u32,
+    pub playback_chunks_ahead: u32,
     pub strategy: EvictionStrategy,
 }
 
@@ -43,6 +45,8 @@ pub enum LimitsError {
     Zero { field: &'static str },
     #[error("leading_chunks {reason}")]
     LeadingChunks { reason: &'static str },
+    #[error("playback_chunks_ahead must be between 1 and {MAX_CHUNKS_AHEAD}")]
+    ChunksAhead,
     #[error("prefetch_budget_mib must be between 1 and {MAX_PREFETCH_BUDGET_MIB}")]
     PrefetchBudget,
     #[error("line {line} is not key=value")]
@@ -69,6 +73,7 @@ impl Default for Limits {
             max_concurrent: 2,
             dedupe_window_seconds: 60,
             dedupe_max_entries: 500,
+            playback_chunks_ahead: 3,
             strategy: EvictionStrategy::Lru,
         }
     }
@@ -92,6 +97,9 @@ impl Limits {
         if self.prefetch_budget_mib > MAX_PREFETCH_BUDGET_MIB {
             return Err(LimitsError::PrefetchBudget);
         }
+        if !(1..=MAX_CHUNKS_AHEAD).contains(&self.playback_chunks_ahead) {
+            return Err(LimitsError::ChunksAhead);
+        }
         if self.strategy == EvictionStrategy::ExpireAfter(0) {
             return Err(LimitsError::Zero { field: "strategy" });
         }
@@ -111,7 +119,7 @@ impl Limits {
         format!(
             "budget={}\nmin_budget={}\nshrink_to={}\nmemory_budget={}\nslots={}\nprefetch_from={}\nprefetch_to={}\n\
              leading_chunks={}\nprefetch_budget_mib={}\ntimeout_seconds={}\nmax_concurrent={}\ndedupe_window_seconds={}\ndedupe_max_entries={}\n\
-             strategy={}\n",
+             playback_chunks_ahead={}\nstrategy={}\n",
             self.budget,
             self.min_budget,
             self.shrink_to,
@@ -125,6 +133,7 @@ impl Limits {
             self.max_concurrent,
             self.dedupe_window_seconds,
             self.dedupe_max_entries,
+            self.playback_chunks_ahead,
             self.strategy.encode(),
         )
     }
@@ -157,6 +166,7 @@ impl Limits {
             "max_concurrent" => self.max_concurrent = number("max_concurrent", value)?,
             "dedupe_window_seconds" => self.dedupe_window_seconds = number("dedupe_window_seconds", value)?,
             "dedupe_max_entries" => self.dedupe_max_entries = number("dedupe_max_entries", value)?,
+            "playback_chunks_ahead" => self.playback_chunks_ahead = number("playback_chunks_ahead", value)?,
             "strategy" => self.strategy = EvictionStrategy::decode(value)?,
             _ => return Err(LimitsError::UnknownKey { key: key.to_string() }),
         }

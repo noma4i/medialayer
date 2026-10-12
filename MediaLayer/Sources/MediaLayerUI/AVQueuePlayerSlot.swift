@@ -36,9 +36,6 @@ public final class AVQueuePlayerSlotFactory: PlayerSlotFactory, @unchecked Senda
 }
 
 public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable {
-  public static let warmBuffer: TimeInterval = 2
-  public static let coldBuffer: TimeInterval = 0.5
-
   public let id: UInt32
   public let player = AVQueuePlayer()
   public let layer: AVPlayerLayer
@@ -61,6 +58,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private var itemReady = false
   private var looping = false
   private var wantsPlay = false
+  private var readahead: TimeInterval = 0
 
   public init(id: UInt32, events: PlayerEventsLink, startMuted: Bool, slots: LoadedSlots = .shared, hosts: HostLayers = .shared) {
     self.id = id
@@ -154,13 +152,12 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     onMain { [self] in player.isMuted = false }
   }
 
-  public func retain(level: RetainLevel) {
+  public func retain(level _: RetainLevel) {}
+
+  public func setReadahead(ms: UInt64) {
     onMain { [self] in
-      switch level {
-      case .hot: player.items().forEach { $0.preferredForwardBufferDuration = 0 }
-      case .warm: player.items().forEach { $0.preferredForwardBufferDuration = Self.warmBuffer }
-      case .cold: player.items().forEach { $0.preferredForwardBufferDuration = Self.coldBuffer }
-      }
+      readahead = TimeInterval(ms) / 1000
+      player.items().forEach { $0.preferredForwardBufferDuration = readahead }
     }
   }
 
@@ -270,6 +267,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private func queueNextRound() {
     guard looping, let last = player.items().last, let next = last.copy() as? AVPlayerItem else { return }
 
+    next.preferredForwardBufferDuration = readahead
     player.insert(next, after: last)
   }
 
@@ -318,6 +316,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     prerollRequested = false
     itemReady = false
     visualReadySent = false
+    readahead = 0
     looping = false
     refreshSample()
   }

@@ -6,7 +6,7 @@ mod settings;
 pub use chunks::LeadingChunks;
 pub use eviction::eviction_target;
 pub use resolve::resolve;
-pub use settings::{EvictionStrategy, Limits, LimitsError};
+pub use settings::{EvictionStrategy, Limits, LimitsError, MAX_CHUNKS_AHEAD};
 pub(crate) use settings::MIB;
 
 #[cfg(test)]

@@ -85,24 +85,23 @@ fn inv_memory_05_plans_shrink_monotonically_down_the_ladder() {
     let steps = [Step::Normal, Step::LowerQuality, Step::ShorterBuffer, Step::FewerSlots, Step::PlayingSlotOnly, Step::PlaceholdersOnly];
     for pair in steps.windows(2) {
         let (before, after) = (StepPlan::for_step(pair[0]), StepPlan::for_step(pair[1]));
-        assert!(after.buffer_seconds(4) <= before.buffer_seconds(4));
+        assert!(after.readahead_percent <= before.readahead_percent);
         assert!(after.slot_limit(6) <= before.slot_limit(6));
         assert!(after.reach_limit(2) <= before.reach_limit(2));
         assert!(after.admission_percent <= before.admission_percent);
-        assert!(after.bitrate_cap_kbps.unwrap_or(u32::MAX) <= before.bitrate_cap_kbps.unwrap_or(u32::MAX));
     }
 }
 
 #[test]
 fn inv_memory_05_plan_values_per_step() {
     let normal = StepPlan::for_step(Step::Normal);
-    assert_eq!((normal.bitrate_cap_kbps, normal.buffer_seconds(4), normal.slot_limit(6), normal.reach_limit(2)), (None, 4, 6, 2));
+    assert_eq!((normal.readahead_percent, normal.slot_limit(6), normal.reach_limit(2)), (100, 6, 2));
     let fewer = StepPlan::for_step(Step::FewerSlots);
     assert_eq!((fewer.slot_limit(6), fewer.reach_limit(2)), (3, 1));
     assert_eq!(StepPlan::for_step(Step::FewerSlots).slot_limit(2), 2);
     let playing = StepPlan::for_step(Step::PlayingSlotOnly);
     assert_eq!((playing.slot_limit(6), playing.reach_limit(2)), (1, 0));
-    assert_eq!(playing.buffer_seconds(1), 1);
+    assert_eq!(playing.readahead_percent, 25);
     let none = StepPlan::for_step(Step::PlaceholdersOnly);
-    assert_eq!((none.slot_limit(6), none.reach_limit(2), none.buffer_seconds(4)), (0, 0, 0));
+    assert_eq!((none.slot_limit(6), none.reach_limit(2), none.readahead_percent), (0, 0, 0));
 }

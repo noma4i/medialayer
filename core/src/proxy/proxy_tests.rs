@@ -58,7 +58,7 @@ fn path_of(proxy_url: &str) -> String {
     format!("{}?{}", parsed.path(), parsed.query().unwrap_or_default())
 }
 
-fn follow(base: &str, line: &str) -> String {
+pub(super) fn follow(base: &str, line: &str) -> String {
     let resolved = Url::parse(base).unwrap().join(line).unwrap();
     match resolved.query() {
         Some(query) => format!("{}?{query}", resolved.path()),

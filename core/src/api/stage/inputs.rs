@@ -107,6 +107,9 @@ impl Stage {
     pub fn seek(&self, key: &str, position_ms: u64) {
         let slot = self.state().loaded.get(key).map(|loaded| loaded.slot);
         if let Some(slot) = slot {
+            if let Some(url) = self.url_of(key) {
+                self.note_seek(&url, position_ms);
+            }
             self.inner.runner.send(slot, SlotCall::Seek { position_ms });
         }
     }

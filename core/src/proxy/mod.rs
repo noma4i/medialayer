@@ -9,6 +9,7 @@ mod server;
 mod slots;
 mod tasks;
 mod cursor;
+mod window;
 
 #[cfg(test)]
 mod memory_store;
@@ -19,6 +20,7 @@ pub use byte_store::{ByteStore, Meta, StoreWriter};
 pub use config::Config;
 pub use route::block_key;
 pub use slots::Priority;
+pub use window::{Playhead, PositionProbe};
 
 use crate::fetch::Fetcher;
 use crate::limits::Limits;
@@ -105,6 +107,23 @@ impl Proxy {
         self.inner.set_timeout(Duration::from_secs(limits.timeout_seconds.into()));
         self.inner.slots.set_max(limits.max_concurrent as usize);
         self.inner.image_slots.set_max(limits.max_concurrent as usize);
+        self.inner.windows.set_chunks_ahead(limits.playback_chunks_ahead);
+    }
+
+    pub fn set_playhead(&self, playhead: Arc<dyn Playhead>) {
+        self.inner.windows.set_playhead(playhead);
+    }
+
+    pub fn set_readahead_percent(&self, percent: u32) {
+        self.inner.windows.set_scale_percent(percent);
+    }
+
+    pub fn nudge_window(&self, playlist: &str) {
+        self.inner.windows.nudge(playlist);
+    }
+
+    pub fn grow_window(&self, playlist: &str) {
+        self.inner.windows.grow(playlist);
     }
 
     pub fn key_for(&self, url: &str, headers: &HashMap<String, String>) -> String {
@@ -282,3 +301,5 @@ mod route_tests;
 mod slots_tests;
 #[cfg(test)]
 mod stand_tests;
+#[cfg(test)]
+mod readahead_tests;

@@ -4,6 +4,7 @@ use super::config::Config;
 use super::flight::{download, Flight, FlightOutcome, FlightSubscription};
 use super::route::block_key;
 use super::tasks::Tasks;
+use super::window::Windows;
 use crate::hls::is_manifest_url;
 use super::slots::{Priority, PrioritySlots};
 use crate::fetch::Fetcher;
@@ -51,6 +52,7 @@ pub(super) struct ProxyShared {
     pub flights: Mutex<HashMap<String, Arc<Flight>>>,
     pub registered_headers: Mutex<Registry>,
     pub tasks: Tasks,
+    pub windows: Windows,
     pub playlist_stamps: Mutex<HashMap<String, Instant>>,
     pub totals: Mutex<HashMap<String, u64>>,
     whole_only: Mutex<HashSet<String>>,
@@ -99,6 +101,7 @@ pub(super) fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 impl ProxyShared {
     pub fn new(config: Config, fetcher: Arc<dyn Fetcher>, store: Arc<dyn ByteStore>, tasks: Tasks) -> Self {
         let timeout_ms = AtomicU64::new(config.policy.timeout.as_millis() as u64);
+        let chunks_ahead = config.chunks_ahead;
         ProxyShared {
             slots: PrioritySlots::new(config.max_concurrent, config.playback_reserved, config.max_waiting),
             image_slots: PrioritySlots::new(config.max_concurrent, config.playback_reserved, config.max_waiting),
@@ -109,6 +112,7 @@ impl ProxyShared {
             flights: Mutex::new(HashMap::new()),
             registered_headers: Mutex::new(Registry::default()),
             tasks,
+            windows: Windows::new(chunks_ahead),
             playlist_stamps: Mutex::new(HashMap::new()),
             totals: Mutex::new(HashMap::new()),
             whole_only: Mutex::new(HashSet::new()),

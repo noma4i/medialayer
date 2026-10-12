@@ -28,6 +28,7 @@ pub struct Limits {
     pub max_concurrent: u32,
     pub dedupe_window_seconds: u32,
     pub dedupe_max_entries: u32,
+    pub playback_chunks_ahead: u32,
     pub evict: Evict,
 }
 
@@ -140,6 +141,7 @@ impl From<CoreLimits> for Limits {
             max_concurrent: limits.max_concurrent,
             dedupe_window_seconds: limits.dedupe_window_seconds,
             dedupe_max_entries: limits.dedupe_max_entries,
+            playback_chunks_ahead: limits.playback_chunks_ahead,
             evict: limits.strategy.into(),
         }
     }
@@ -163,6 +165,7 @@ impl TryFrom<Limits> for CoreLimits {
             max_concurrent: limits.max_concurrent,
             dedupe_window_seconds: limits.dedupe_window_seconds,
             dedupe_max_entries: limits.dedupe_max_entries,
+            playback_chunks_ahead: limits.playback_chunks_ahead,
             strategy: limits.evict.into(),
         })
     }

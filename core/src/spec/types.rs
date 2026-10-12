@@ -79,6 +79,18 @@ impl Default for PrefetchSpec {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
+pub struct PlaybackSpec {
+    pub chunks_ahead: u32,
+}
+
+impl Default for PlaybackSpec {
+    fn default() -> Self {
+        PlaybackSpec { chunks_ahead: Limits::default().playback_chunks_ahead }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct PoolSpec {
     pub slots: u32,
     pub reach: u32,
@@ -104,6 +116,8 @@ pub struct VideoSpec {
     pub prefetch: PrefetchSpec,
     #[serde(default)]
     pub pool: PoolSpec,
+    #[serde(default)]
+    pub playback: PlaybackSpec,
     #[serde(default = "default_forward_headers")]
     pub forward_headers: Vec<String>,
     #[serde(default)]
@@ -121,6 +135,7 @@ impl VideoSpec {
             cover_field: None,
             prefetch: PrefetchSpec::default(),
             pool: PoolSpec::default(),
+            playback: PlaybackSpec::default(),
             forward_headers: default_forward_headers(),
             evict: None,
         }
@@ -190,6 +205,7 @@ impl MediaSpec {
     pub(super) fn limits_for(&self, video: Option<&VideoSpec>) -> Limits {
         let prefetch = video.map(|video| video.prefetch.clone()).unwrap_or_default();
         let pool = video.map(|video| video.pool.clone()).unwrap_or_default();
+        let playback = video.map(|video| video.playback.clone()).unwrap_or_default();
         Limits {
             budget: self.cache.budget,
             min_budget: self.cache.min,
@@ -204,6 +220,7 @@ impl MediaSpec {
             max_concurrent: self.cache.max_concurrent,
             dedupe_window_seconds: self.cache.dedupe_window,
             dedupe_max_entries: self.cache.dedupe_entries,
+            playback_chunks_ahead: playback.chunks_ahead,
             strategy: self.cache.evict.into(),
         }
     }

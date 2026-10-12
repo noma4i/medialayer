@@ -199,6 +199,18 @@ for key in allowed:
     if parts[0] == "periodic" and parts[1] not in periodic:
         findings.append(f"Z6 the allowlist grants {parts[2]} timers to {parts[1]} but it has none: remove the entry")
 
+# Z7 the playback readahead belongs to the core: no buffer length in the wrappers, no second buffer policy in config.
+DEAD_BUFFER_NAMES = ["warmBuffer", "coldBuffer", "buffer_seconds", "low_buffer_seconds", "bufferSeconds"]
+wrapper_files = [*(root / "MediaLayer" / "Sources").rglob("*.swift"), *(root / "kotlin").glob("**/src/main/**/*.kt")]
+for path in [*production, *wrapper_files]:
+    text = strip_comments(path.read_text())
+    place = rel(path) if path in production else str(path.relative_to(root))
+    for name in DEAD_BUFFER_NAMES:
+        if re.search(rf"\b{name}\b", text):
+            findings.append(f"Z7 {place} names {name}: the readahead comes from the core (set_readahead), a buffer policy in config or a wrapper is a second copy")
+    if path in wrapper_files and re.search(r"preferredForwardBufferDuration\s*=\s*[0-9]|setBufferDurationsMs\([^)]*\b[0-9]", text):
+        findings.append(f"Z7 {place} sets a buffer length by a literal: only the core hint may set it")
+
 if findings:
     print("zoo check found", len(findings), "problem(s):")
     for finding in findings:

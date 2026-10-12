@@ -17,6 +17,7 @@ fn inv_limits_06_every_limit_survives_the_trip_across_the_bridge_types() {
         max_concurrent: 5,
         dedupe_window_seconds: 90,
         dedupe_max_entries: 800,
+        playback_chunks_ahead: 5,
         strategy: EvictionStrategy::ExpireAfter(3600),
     };
 

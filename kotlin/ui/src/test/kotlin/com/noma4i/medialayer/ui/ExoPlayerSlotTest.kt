@@ -294,7 +294,7 @@ class ExoPlayerSlotTest {
   }
 
   @Test
-  fun theLoadControlStartsLoadingBelowFiveSecondsStopsAtTenAndWaitsForTheStartBuffers() {
+  fun theLoadControlStopsLoadingAtTheReadaheadTheCoreSetsAndWaitsForTheStartBuffers() {
     val control = LoadControlConfig().create(androidx.media3.exoplayer.upstream.DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE))
     val player = androidx.media3.exoplayer.analytics.PlayerId.UNSET
     val timeline = androidx.media3.test.utils.FakeTimeline()
@@ -304,9 +304,10 @@ class ExoPlayerSlotTest {
     )
     control.onPrepared(player)
 
-    assertTrue(control.shouldContinueLoading(parameters(4_999_000)))
-    assertTrue(control.shouldContinueLoading(parameters(9_999_000)))
-    assertFalse(control.shouldContinueLoading(parameters(10_000_000)))
+    assertTrue(control.shouldContinueLoading(parameters(30_000_000)))
+    control.setReadaheadMs(12_000)
+    assertTrue(control.shouldContinueLoading(parameters(11_999_000)))
+    assertFalse(control.shouldContinueLoading(parameters(12_000_000)))
     assertFalse(control.shouldStartPlayback(parameters(999_000)))
     assertTrue(control.shouldStartPlayback(parameters(1_000_000)))
     assertFalse(control.shouldStartPlayback(parameters(1_999_000, rebuffering = true)))

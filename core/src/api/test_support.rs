@@ -327,6 +327,10 @@ impl PlayerSlot for MockSlot {
         self.calls.lock().unwrap().push(SlotCall::Rate { rate });
     }
 
+    fn set_readahead(&self, ms: u64) {
+        self.calls.lock().unwrap().push(SlotCall::Readahead { ms });
+    }
+
     fn sample(&self) -> SlotSample {
         let taken = self.samples.fetch_add(1, Ordering::SeqCst) as u64 + 1;
         let mut sample = *self.sample.lock().unwrap();

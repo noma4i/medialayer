@@ -3,7 +3,7 @@ use super::ports::CacheControl;
 use super::source::{is_local_url, MediaItem, PlaybackRoute};
 use super::types::Kind;
 use crate::hls::is_manifest_url;
-use crate::proxy::{block_key, Proxy, Readiness};
+use crate::proxy::{block_key, Playhead, Proxy, Readiness};
 use crate::session::RouteStaleness;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,6 +26,22 @@ impl Routes {
             Some(url) => PlaybackRoute { url, headers: HashMap::new(), generation: Some(self.proxy.route_generation()), hls, looping },
             None => PlaybackRoute { url: source.url.clone(), headers: source.headers.clone(), generation: None, hls, looping },
         }
+    }
+
+    pub fn set_playhead(&self, playhead: Arc<dyn Playhead>) {
+        self.proxy.set_playhead(playhead);
+    }
+
+    pub fn set_readahead_percent(&self, percent: u32) {
+        self.proxy.set_readahead_percent(percent);
+    }
+
+    pub fn nudge_window(&self, playlist: &str) {
+        self.proxy.nudge_window(playlist);
+    }
+
+    pub fn grow_window(&self, playlist: &str) {
+        self.proxy.grow_window(playlist);
     }
 
     pub fn is_stale(&self, route: &PlaybackRoute) -> bool {

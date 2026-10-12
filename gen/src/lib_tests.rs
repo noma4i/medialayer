@@ -112,3 +112,11 @@ fn generated_kotlin_is_valid_kotlin() {
         Err(_) => eprintln!("kotlinc is not installed: kotlin syntax check skipped"),
     }
 }
+
+#[test]
+fn inv_readahead_05_a_video_declares_how_many_chunks_ahead_it_plays() {
+    let spec = parse_spec("video :v do\n  playback chunks_ahead: 5\nend\nvideo :w do\nend\n").unwrap();
+    assert_eq!((spec.videos[0].playback.chunks_ahead, spec.videos[1].playback.chunks_ahead), (5, 3));
+    let errors = parse_spec("video :v do\n  playback chunks_ahead: 1.second\nend\n").unwrap_err();
+    assert_eq!(errors[0].message, "`chunks_ahead:` must be a whole number");
+}

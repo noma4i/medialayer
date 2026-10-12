@@ -21,8 +21,7 @@ impl Step {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StepPlan {
-    pub bitrate_cap_kbps: Option<u32>,
-    pub buffer_percent: u8,
+    pub readahead_percent: u8,
     pub slot_percent: u8,
     pub min_slots: usize,
     pub reach_percent: u8,
@@ -31,29 +30,21 @@ pub struct StepPlan {
 
 impl StepPlan {
     pub fn for_step(step: Step) -> Self {
-        let plan = |bitrate_cap_kbps, buffer_percent, slot_percent, min_slots, reach_percent, admission_percent| Self {
-            bitrate_cap_kbps,
-            buffer_percent,
+        let plan = |readahead_percent, slot_percent, min_slots, reach_percent, admission_percent| Self {
+            readahead_percent,
             slot_percent,
             min_slots,
             reach_percent,
             admission_percent,
         };
         match step {
-            Step::Normal => plan(None, 100, 100, 0, 100, 100),
-            Step::LowerQuality => plan(Some(2_500), 100, 100, 0, 100, 95),
-            Step::ShorterBuffer => plan(Some(1_500), 50, 100, 0, 100, 90),
-            Step::FewerSlots => plan(Some(1_000), 50, 50, 2, 50, 80),
-            Step::PlayingSlotOnly => plan(Some(700), 25, 0, 1, 0, 65),
-            Step::PlaceholdersOnly => plan(Some(0), 0, 0, 0, 0, 40),
+            Step::Normal => plan(100, 100, 0, 100, 100),
+            Step::LowerQuality => plan(100, 100, 0, 100, 95),
+            Step::ShorterBuffer => plan(50, 100, 0, 100, 90),
+            Step::FewerSlots => plan(50, 50, 2, 50, 80),
+            Step::PlayingSlotOnly => plan(25, 0, 1, 0, 65),
+            Step::PlaceholdersOnly => plan(0, 0, 0, 0, 40),
         }
-    }
-
-    pub fn buffer_seconds(&self, base: u32) -> u32 {
-        if self.buffer_percent == 0 {
-            return 0;
-        }
-        (base * u32::from(self.buffer_percent) / 100).max(1).min(base)
     }
 
     pub fn slot_limit(&self, slots: usize) -> usize {

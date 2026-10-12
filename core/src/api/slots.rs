@@ -46,6 +46,7 @@ pub trait PlayerSlot: Send + Sync {
     fn detach(&self);
     fn seek(&self, position_ms: u64);
     fn set_rate(&self, rate: f32);
+    fn set_readahead(&self, ms: u64);
     fn sample(&self) -> SlotSample;
 }
 
@@ -68,6 +69,7 @@ pub enum SlotCall {
     Detach,
     Seek { position_ms: u64 },
     Rate { rate: f32 },
+    Readahead { ms: u64 },
 }
 
 impl SlotCall {
@@ -108,6 +110,7 @@ impl SlotCall {
             SlotCall::Detach => player.detach(),
             SlotCall::Seek { position_ms } => player.seek(position_ms),
             SlotCall::Rate { rate } => player.set_rate(rate),
+            SlotCall::Readahead { ms } => player.set_readahead(ms),
         }
     }
 }

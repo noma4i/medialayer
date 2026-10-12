@@ -34,6 +34,9 @@ impl Stage {
     pub fn stalled(&self, slot: usize, position_ms: u64) {
         crate::trace!("event", "stalled slot={slot} position={position_ms} key={:?}", self.key_at(slot).as_deref().map(crate::trace::tail));
         let Some(key) = self.key_at(slot).filter(|key| self.state().is_playing(key)) else { return };
+        if let Some(url) = self.url_of(&key) {
+            self.inner.routes.grow_window(&url);
+        }
         self.feed(&key, Event::Play { position_ms });
     }
 

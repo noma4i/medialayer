@@ -44,6 +44,20 @@ struct AVQueuePlayerSlotTests {
   }
 
   @Test
+  func theReadaheadOfTheCoreReachesEveryItemOfTheSlotAndTheLoopCopy() async {
+    let log = PlayerEventLog()
+    let slot = makeSlot(log)
+    slot.load(key: "a", route: route(Self.silentClip, looping: true))
+    await log.wait(for: "ready")
+
+    slot.setReadahead(ms: 12_000)
+    await drainMain()
+
+    let durations = await MainActor.run { slot.player.items().map(\.preferredForwardBufferDuration) }
+    #expect(durations.count == 2 && durations.allSatisfy { $0 == 12 })
+  }
+
+  @Test
   func reloadingTheSameKeyKeepsTheHost() async {
     let log = PlayerEventLog()
     let slot = makeSlot(log)

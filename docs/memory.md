@@ -9,18 +9,18 @@ Memory is managed automatically. You do not call anything: there is no pressure 
 | Prefetch stops, then far slots are released, then the playing slot last | The system reports memory pressure (iOS memory warning, Android `onTrimMemory` and `onLowMemory`) |
 | Everything except the chosen slot is released, prefetch stops | The app goes to the background |
 | Slots return one by one, the local proxy checks its own port and binds it again if the system closed it while the app slept | The app returns to the foreground |
-| Fewer slots (at least 2), shorter buffer, lower bitrate, fewer parallel loads | The device is low-memory: Android `isLowRamDevice` or little RAM, iOS little physical memory |
+| Fewer slots (at least 2), fewer chunks ahead of the playing position | The device is low-memory: Android `isLowRamDevice` or little RAM, iOS little physical memory |
 | Everything stays under one limit | The `memory` option (default 256 MiB) covers players and proxy buffers. Image memory has its own limit, `imageMemoryBytes` of `open` (default 128 MiB) |
 
 ## It cannot run the device out of memory
 
 Every buffer, player slot, decode and queue reserves room in one counter before it allocates. If there is no room, the library first frees what is least needed. If that is not enough, it refuses the allocation: a place keeps its placeholder, a load waits, a prefetch is cancelled. Nothing is allocated past the limit, and a refused allocation never crashes the app.
 
-The limit is the smaller of your `memory` option and a share of what the device really has (the Android heap class, the iOS physical memory). A low-memory device therefore cannot be pushed past its share by a large setting. Under growing pressure the library steps down in order: lower quality, a shorter buffer, fewer slots, only the playing slot, only placeholders. Images are decoded at the `size` from your media file or, without it, at the size of their view, never at original size.
+The limit is the smaller of your `memory` option and a share of what the device really has (the Android heap class, the iOS physical memory). A low-memory device therefore cannot be pushed past its share by a large setting. Under growing pressure the library steps down in order: lower quality, fewer chunks ahead, fewer slots, only the playing slot, only placeholders. Images are decoded at the `size` from your media file or, without it, at the size of their view, never at original size.
 
-Retention levels: `hot` plays or is next, `warm` keeps metadata and a small buffer, `cold` holds nothing.
+Retention levels: `hot` plays or is next, `warm` keeps metadata, `cold` holds nothing.
 
-UNBUILT: the steps lower the slot count, the reach and the admission share today. The bitrate cap and the shorter buffer of the steps do not reach the players yet. Image decoding in Nuke and Coil does not reserve room in the counter; its memory is limited by `imageMemoryBytes`. A low-memory device gets fewer slots and a shorter reach, not a lower bitrate or fewer parallel loads.
+UNBUILT: the steps lower the slot count, the reach, the admission share and the chunks ahead of the playing position (down to 1) today. A lower bitrate does not exist. Image decoding in Nuke and Coil does not reserve room in the counter; its memory is limited by `imageMemoryBytes`. A low-memory device gets fewer slots and a shorter reach, not fewer parallel loads.
 
 ## Opening is enough
 

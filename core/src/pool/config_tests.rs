@@ -3,19 +3,19 @@ use super::*;
 use crate::limits::Limits;
 
 fn tuning() -> ProfileTuning {
-    ProfileTuning { low_ram_below_mb: 3072, low_slots: 2, low_reach: 0, low_buffer_seconds: 1 }
+    ProfileTuning { low_ram_below_mb: 3072, low_slots: 2, low_reach: 0 }
 }
 
 #[test]
 fn inv_pool_14_profile_picks_the_base_or_the_low_ram_config() {
-    let custom = ProfileTuning { low_ram_below_mb: 100, low_slots: 1, low_reach: 1, low_buffer_seconds: 5 };
+    let custom = ProfileTuning { low_ram_below_mb: 100, low_slots: 1, low_reach: 1 };
     let base = PoolConfig::new(3, 1);
-    let shape = |config: PoolConfig| (config.slots, config.reach, config.buffer_seconds);
+    let shape = |config: PoolConfig| (config.slots, config.reach);
     let cases = [
         ("normal keeps the base", PoolConfig::new(3, 1), DeviceProfile { ram_mb: 8192, low_ram: false }, tuning(), shape(base.clone())),
-        ("low ram flag", PoolConfig::new(3, 1), DeviceProfile { ram_mb: 8192, low_ram: true }, tuning(), (2, 0, 1)),
-        ("small ram without the flag", PoolConfig::new(3, 1), DeviceProfile { ram_mb: 2048, low_ram: false }, tuning(), (2, 0, 1)),
-        ("custom tuning, slots never below two", PoolConfig::new(4, 1), DeviceProfile { ram_mb: 8192, low_ram: true }, custom, (2, 1, 2)),
+        ("low ram flag", PoolConfig::new(3, 1), DeviceProfile { ram_mb: 8192, low_ram: true }, tuning(), (2, 0)),
+        ("small ram without the flag", PoolConfig::new(3, 1), DeviceProfile { ram_mb: 2048, low_ram: false }, tuning(), (2, 0)),
+        ("custom tuning, slots never below two", PoolConfig::new(4, 1), DeviceProfile { ram_mb: 8192, low_ram: true }, custom, (2, 1)),
     ];
     assert_eq!(base.clone().for_profile(DeviceProfile { ram_mb: 8192, low_ram: false }, tuning()), base);
     for (name, config, profile, tuning, expected) in cases {

@@ -102,3 +102,19 @@ fn inv_limits_02_decode_rejects_bad_text() {
         assert_eq!(Limits::decode(Limits::default(), text), Err(error), "{text}");
     }
 }
+
+#[test]
+fn inv_readahead_05_playback_chunks_ahead_defaults_to_3_and_accepts_only_1_to_8_with_an_error_naming_the_key() {
+    assert_eq!(Limits::default().playback_chunks_ahead, 3);
+    for (value, accepted) in [(0, false), (1, true), (8, true), (9, false)] {
+        let result = Limits { playback_chunks_ahead: value, ..Limits::default() }.validate();
+        assert_eq!(result.is_ok(), accepted, "value {value}");
+        if let Err(error) = result {
+            assert!(error.to_string().contains("playback_chunks_ahead"), "{error}");
+        }
+    }
+    let text = Limits { playback_chunks_ahead: 6, ..Limits::default() }.encode();
+    assert_eq!(Limits::decode(Limits::default(), &text).unwrap().playback_chunks_ahead, 6);
+    let error = Limits::decode(Limits::default(), "playback_chunks_ahead=nine").unwrap_err();
+    assert!(error.to_string().contains("playback_chunks_ahead"), "{error}");
+}

@@ -24,7 +24,6 @@ use tokio::runtime::Handle;
 const LOW_RAM_BELOW_MB: u32 = 3_072;
 const LOW_RAM_SLOTS: usize = 2;
 const LOW_RAM_REACH: usize = 0;
-const LOW_RAM_BUFFER_SECONDS: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PoolSettings {
@@ -44,7 +43,6 @@ impl From<&PoolSpec> for PoolSettings {
                 low_ram_below_mb: LOW_RAM_BELOW_MB,
                 low_slots: spec.low_ram_slots.map_or(LOW_RAM_SLOTS, |slots| slots as usize),
                 low_reach: spec.low_ram_reach.map_or(LOW_RAM_REACH, |reach| reach as usize),
-                low_buffer_seconds: LOW_RAM_BUFFER_SECONDS,
             },
         }
     }

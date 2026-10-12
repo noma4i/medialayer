@@ -178,6 +178,7 @@ fn video(name: String, body: &[Call]) -> VideoSpec {
     video.pool.trim_delay = keyed(body, "pool", "trim_delay", duration).unwrap_or(video.pool.trim_delay);
     video.pool.low_ram_slots = keyed(body, "pool", "low_ram_slots", int);
     video.pool.low_ram_reach = keyed(body, "pool", "low_ram_reach", int);
+    video.playback.chunks_ahead = keyed(body, "playback", "chunks_ahead", int).unwrap_or(video.playback.chunks_ahead);
     video.forward_headers = argument(body, "forward_headers", headers).unwrap_or(video.forward_headers);
     video.evict = argument(body, "evict", evict);
     video

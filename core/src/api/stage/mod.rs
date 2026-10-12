@@ -1,6 +1,7 @@
 mod events;
 mod inputs;
 mod lifecycle;
+mod playhead;
 mod positions;
 
 use self::positions::ResumePositions;
@@ -82,6 +83,7 @@ struct Inner {
     change: Arc<Change>,
     foreground_passes: AtomicU64,
     wakes: AtomicU64,
+    seeks: Mutex<HashMap<String, (u64, std::time::Instant)>>,
 }
 
 #[derive(Clone)]
@@ -217,10 +219,13 @@ impl Stage {
             change: parts.change,
             foreground_passes: AtomicU64::new(0),
             wakes: AtomicU64::new(0),
+            seeks: Mutex::new(HashMap::new()),
         });
         let tick = handle.spawn(tick_loop(Arc::downgrade(&inner), inner.due.subscribe(), parts.ledger));
         *inner.tick.lock().unwrap_or_else(PoisonError::into_inner) = Some(AbortOnDrop::new(tick));
-        Stage { inner }
+        let stage = Stage { inner };
+        stage.inner.routes.set_playhead(stage.playhead());
+        stage
     }
 
     pub fn wakes(&self) -> u64 {
@@ -336,6 +341,9 @@ impl Stage {
                 let rate = state.rates.get(key).copied();
                 let resume = state.positions.take(key);
                 let slot = *slot;
+                if let Some(position_ms) = resume {
+                    self.note_seek(&state.loaded[key].source.url, position_ms);
+                }
                 calls.push(SlotCall::from_command(command, Some(route)));
                 if self.inner.silent {
                     calls.push((slot, SlotCall::Mute));
@@ -367,6 +375,9 @@ impl Stage {
                 let event = if matches!(command, Command::Play { .. }) { Event::Play { position_ms: 0 } } else { Event::Pause };
                 if let Some(key) = state.slot_keys.get(slot).cloned() {
                     if matches!(command, Command::Play { .. }) {
+                        if let Some(loaded) = state.loaded.get(&key) {
+                            self.inner.routes.nudge_window(&loaded.source.url);
+                        }
                         resumed.push(key.clone());
                     }
                     self.advance(state, &key, event, actions);
@@ -497,6 +508,8 @@ impl Drop for StateGuard<'_> {
 mod events_tests;
 #[cfg(test)]
 mod inputs_tests;
+#[cfg(test)]
+mod playhead_tests;
 
 #[cfg(test)]
 mod positions_tests;

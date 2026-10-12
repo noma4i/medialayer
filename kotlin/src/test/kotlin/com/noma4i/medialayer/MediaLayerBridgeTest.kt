@@ -117,6 +117,7 @@ private class LoggingSlot(val id: UInt) : PlayerSlot {
   override fun mute() { log.add("mute") }
   override fun unmute() { log.add("unmute") }
   override fun retain(level: RetainLevel) { log.add("retain") }
+  override fun setReadahead(ms: ULong) { log.add("readahead $ms") }
   override fun attach(viewToken: ULong) { log.add("attach") }
   override fun detach() { log.add("detach") }
   override fun seek(positionMs: ULong) { log.add("seek") }

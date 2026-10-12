@@ -70,6 +70,7 @@ fn fold(calls: &VecDeque<SlotCall>) -> VecDeque<SlotCall> {
     let mut view = None;
     let mut seek = None;
     let mut rate = None;
+    let mut readahead = None;
     for call in calls {
         match call {
             SlotCall::Mute | SlotCall::Unmute => sound = Some(call.clone()),
@@ -81,17 +82,19 @@ fn fold(calls: &VecDeque<SlotCall>) -> VecDeque<SlotCall> {
                 view = None;
                 seek = None;
                 rate = None;
+                readahead = None;
             }
             SlotCall::Retain(_) => retain = Some(call.clone()),
             SlotCall::Play | SlotCall::Pause => play = Some(call.clone()),
             SlotCall::Attach { .. } | SlotCall::Detach => view = Some(call.clone()),
             SlotCall::Seek { .. } => seek = Some(call.clone()),
             SlotCall::Rate { .. } => rate = Some(call.clone()),
+            SlotCall::Readahead { .. } => readahead = Some(call.clone()),
             SlotCall::Preroll => {}
         }
     }
     let release = release.filter(|_| source != Some(SlotCall::Unload));
-    [sound, release, source, retain, view, rate, seek, play].into_iter().flatten().collect()
+    [sound, release, source, retain, readahead, view, rate, seek, play].into_iter().flatten().collect()
 }
 
 #[cfg(test)]

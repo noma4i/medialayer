@@ -11,6 +11,8 @@ const MAX_WAITING: usize = 64;
 const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);
 const PING_TIMEOUT: Duration = Duration::from_secs(1);
 const MIN_BUFFER: usize = 4 * 1024;
+const HOLD_CEILING: Duration = Duration::from_secs(3);
+const PROBE_LIMIT: Duration = Duration::from_millis(300);
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -27,6 +29,9 @@ pub struct Config {
     pub ledger: Ledger,
     pub min_buffer: usize,
     pub namespace_headers: Vec<String>,
+    pub chunks_ahead: u32,
+    pub hold_ceiling: Duration,
+    pub probe_limit: Duration,
 }
 
 impl Config {
@@ -45,6 +50,9 @@ impl Config {
             ledger: Ledger::unbounded(),
             min_buffer: MIN_BUFFER,
             namespace_headers: Vec::new(),
+            chunks_ahead: limits.playback_chunks_ahead,
+            hold_ceiling: HOLD_CEILING,
+            probe_limit: PROBE_LIMIT,
         }
     }
 }
