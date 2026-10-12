@@ -52,6 +52,10 @@ struct AnimatedFrames {
 
   func loopDuration(rate: Double) -> TimeInterval { rate > 0 ? duration / rate : duration }
 
+  func frameTick(elapsed: TimeInterval, rate: Double) -> Int {
+    Int(elapsed / (loopDuration(rate: rate) / Double(frameCount)))
+  }
+
   func image(at index: Int) -> CGImage? {
     switch storage {
     case let .decoded(images): images.indices.contains(index) ? images[index] : nil
@@ -108,11 +112,43 @@ struct AnimatedFrames {
 #if canImport(UIKit)
 import UIKit
 
+final class FrameImageView: UIImageView {
+  var windowChanged: (() -> Void)?
+
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    windowChanged?()
+  }
+}
+
 struct AnimatedFramesView: UIViewRepresentable {
+  struct StreamPlan {
+    let stream: FrameStream
+    let frames: AnimatedFrames
+    let rate: Double
+
+    var interval: TimeInterval { frames.loopDuration(rate: rate) / Double(frames.frameCount) }
+  }
+
   final class Playback {
     var token: UUID?
-    var stream: Task<Void, Never>?
-    var streamInterval: TimeInterval = 0
+    var plan: StreamPlan?
+    private var task: Task<Void, Never>?
+    private var runningInterval: TimeInterval = 0
+
+    func sync(_ view: UIImageView) {
+      guard let plan, view.window != nil else { return stop() }
+      guard task == nil || runningInterval != plan.interval else { return }
+
+      stop()
+      runningInterval = plan.interval
+      task = AnimatedFramesView.play(plan, on: view)
+    }
+
+    func stop() {
+      task?.cancel()
+      task = nil
+    }
   }
 
   let frames: AnimatedFrames
@@ -123,7 +159,7 @@ struct AnimatedFramesView: UIViewRepresentable {
   func makeCoordinator() -> Playback { Playback() }
 
   func makeUIView(context: Context) -> UIImageView {
-    let view = UIImageView()
+    let view = FrameImageView()
     view.isOpaque = false
     view.backgroundColor = .clear
     view.clipsToBounds = true
@@ -133,10 +169,12 @@ struct AnimatedFramesView: UIViewRepresentable {
   func updateUIView(_ view: UIImageView, context: Context) {
     view.contentMode = contentMode == .fill ? .scaleAspectFill : .scaleAspectFit
     let playback = context.coordinator
+    (view as? FrameImageView)?.windowChanged = { [weak playback, weak view] in
+      if let playback, let view { playback.sync(view) }
+    }
     if playback.token != frames.token {
       playback.token = frames.token
-      playback.stream?.cancel()
-      playback.stream = nil
+      playback.stop()
       view.stopAnimating()
       switch frames.storage {
       case let .decoded(images):
@@ -149,6 +187,7 @@ struct AnimatedFramesView: UIViewRepresentable {
     }
     switch frames.storage {
     case .decoded:
+      playback.plan = nil
       view.animationDuration = frames.loopDuration(rate: playbackRate)
       if isPlaying {
         if !view.isAnimating { view.startAnimating() }
@@ -156,33 +195,35 @@ struct AnimatedFramesView: UIViewRepresentable {
         view.stopAnimating()
       }
     case let .streamed(stream):
-      let interval = frames.loopDuration(rate: playbackRate) / Double(frames.frameCount)
-      if !isPlaying {
-        playback.stream?.cancel()
-        playback.stream = nil
-      } else if playback.stream == nil || playback.streamInterval != interval {
-        playback.stream?.cancel()
-        playback.streamInterval = interval
-        playback.stream = Self.play(stream, count: frames.frameCount, interval: interval, on: view)
-      }
+      playback.plan = isPlaying ? StreamPlan(stream: stream, frames: frames, rate: playbackRate) : nil
     }
+    playback.sync(view)
   }
 
   static func dismantleUIView(_ view: UIImageView, coordinator: Playback) {
-    coordinator.stream?.cancel()
-    coordinator.stream = nil
+    coordinator.plan = nil
+    coordinator.stop()
   }
 
-  private static func play(_ stream: FrameStream, count: Int, interval: TimeInterval, on view: UIImageView) -> Task<Void, Never> {
+  private static func play(_ plan: StreamPlan, on view: UIImageView) -> Task<Void, Never> {
     Task { @MainActor [weak view] in
-      var index = 0
+      let clock = ContinuousClock()
+      let start = clock.now
+      var shown = -1
       while !Task.isCancelled, let view {
-        let next = (index + 1) % count
-        let prefetch = Task.detached { stream.image(at: next) }
-        if let image = await Task.detached(operation: { stream.image(at: index) }).value { view.image = UIImage(cgImage: image) }
-        try? await Task.sleep(for: .seconds(interval))
-        _ = await prefetch.value
-        index = next
+        let parts = (clock.now - start).components
+        let tick = plan.frames.frameTick(elapsed: Double(parts.seconds) + Double(parts.attoseconds) * 1e-18, rate: plan.rate)
+        let index = tick % plan.frames.frameCount
+        if index != shown {
+          let image = await Task.detached(operation: { plan.stream.image(at: index) }).value
+          guard !Task.isCancelled else { return }
+
+          if let image { view.image = UIImage(cgImage: image) }
+          shown = index
+        }
+        let upcoming = (tick + 1) % plan.frames.frameCount
+        Task.detached { _ = plan.stream.image(at: upcoming) }
+        try? await clock.sleep(until: start + .seconds(Double(tick + 1) * plan.interval))
       }
     }
   }
