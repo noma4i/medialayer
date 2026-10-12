@@ -226,12 +226,13 @@ for path in files:
     body = texts[path]
     inline_tests = re.search(r"#\[cfg\(test\)\]\s*mod\s+\w+\s*\{", body)
     for number, line in enumerate((body[: inline_tests.start()] if inline_tests else body).splitlines(), 1):
-        if not PANIC_CALL.search(line):
-            continue
         granted = [entry for entry in panic_allowed if entry[0] == rel(path) and entry[1] in line]
         panic_used.update(map(tuple, granted))
-        if not granted:
-            findings.append(f"Z8 a phone library never panics on the environment, return an error or a degraded answer: {rel(path)}:{number}: {line.strip()}")
+        covered = [span for entry in granted for span in (match.span() for match in re.finditer(re.escape(entry[1]), line))]
+        for call in PANIC_CALL.finditer(line):
+            if not any(start <= call.end() - 1 < end for start, end in covered):
+                findings.append(f"Z8 a phone library never panics on the environment, return an error or a degraded answer: {rel(path)}:{number}: {line.strip()}")
+                break
 for entry in panic_allowed:
     if tuple(entry) not in panic_used:
         findings.append(f"Z8 the allowlist grants a panic call to {entry[0]} matching `{entry[1]}` but the code has none: remove the entry")
