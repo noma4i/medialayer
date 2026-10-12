@@ -93,13 +93,21 @@ extension MediaImagePipeline {
 
 public final class ImageMemoryReleaser: MemoryReleaser, @unchecked Sendable {
   private let cache: ImageCache
+  private let frames: FrameCache
 
   public init(cache: ImageCache = .shared) {
     self.cache = cache
+    frames = .shared
+  }
+
+  init(cache: ImageCache, frames: FrameCache) {
+    self.cache = cache
+    self.frames = frames
   }
 
   public func dropMemoryCaches() {
     cache.removeAll()
+    frames.removeAll()
     let capacity = URLCache.shared.memoryCapacity
     URLCache.shared.memoryCapacity = 0
     URLCache.shared.memoryCapacity = capacity

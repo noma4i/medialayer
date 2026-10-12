@@ -97,7 +97,7 @@ public struct MediaImage<Content: View>: View {
     }
     guard let container, container.type == .gif, let data = container.data, let pixels = key.pixels else { return }
 
-    let frames = await AnimatedFrames.load(data, maxPixel: Int(max(pixels.width, pixels.height)))
+    let frames = await FrameCache.shared.load(url: source.url, data: data, maxPixel: Int(max(pixels.width, pixels.height)))
     guard !Task.isCancelled, loaded?.key == key else { return }
 
     loaded?.frames = frames

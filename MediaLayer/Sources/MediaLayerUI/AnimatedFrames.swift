@@ -50,6 +50,12 @@ struct AnimatedFrames {
   let firstImage: CGImage
   let duration: TimeInterval
 
+  var decodedBytes: Int {
+    guard case let .decoded(images) = storage else { return 0 }
+
+    return images.reduce(0) { $0 + $1.bytesPerRow * $1.height }
+  }
+
   func loopDuration(rate: Double) -> TimeInterval { rate > 0 ? duration / rate : duration }
 
   func frameTick(elapsed: TimeInterval, rate: Double) -> Int {
