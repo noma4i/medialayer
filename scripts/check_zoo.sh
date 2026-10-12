@@ -211,6 +211,31 @@ for path in [*production, *wrapper_files]:
     if path in wrapper_files and re.search(r"preferredForwardBufferDuration\s*=\s*[0-9]|setBufferDurationsMs\([^)]*\b[0-9]", text):
         findings.append(f"Z7 {place} sets a buffer length by a literal: only the core hint may set it")
 
+# Z8 a phone library never panics on the environment: a production panic call needs `panic:<file>:<fragment>` in the allowlist with the reason it cannot fail.
+PANIC_CALL = re.compile(r"\.(?:expect|unwrap)\(|\b(?:panic|unreachable|todo|unimplemented)!\(")
+test_gated = set()
+for path in files:
+    for gated in re.finditer(r"#\[cfg\(test\)\]\s*(?:pub(?:\([a-z]+\))?\s+)?mod\s+(\w+)\s*;", texts[path]):
+        base = path.parent if path.name in ("mod.rs", "lib.rs") else path.parent / path.stem
+        test_gated.update(candidate for candidate in (base / f"{gated.group(1)}.rs", base / gated.group(1) / "mod.rs") if candidate.exists())
+panic_allowed = [entry[len("panic:"):].split(":", 1) for entry in allowed if entry.startswith("panic:")]
+panic_used = set()
+for path in files:
+    if is_test(path) or path in test_gated:
+        continue
+    body = texts[path]
+    inline_tests = re.search(r"#\[cfg\(test\)\]\s*mod\s+\w+\s*\{", body)
+    for number, line in enumerate((body[: inline_tests.start()] if inline_tests else body).splitlines(), 1):
+        if not PANIC_CALL.search(line):
+            continue
+        granted = [entry for entry in panic_allowed if entry[0] == rel(path) and entry[1] in line]
+        panic_used.update(map(tuple, granted))
+        if not granted:
+            findings.append(f"Z8 a phone library never panics on the environment, return an error or a degraded answer: {rel(path)}:{number}: {line.strip()}")
+for entry in panic_allowed:
+    if tuple(entry) not in panic_used:
+        findings.append(f"Z8 the allowlist grants a panic call to {entry[0]} matching `{entry[1]}` but the code has none: remove the entry")
+
 if findings:
     print("zoo check found", len(findings), "problem(s):")
     for finding in findings:

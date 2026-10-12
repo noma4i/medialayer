@@ -23,3 +23,8 @@ periodic MediaLayer/Sources/MediaLayerUI/MediaAudio.swift 1 # progress sampling 
 periodic MediaLayer/Sources/MediaLayerUI/AVQueuePlayerSlot.swift 1 # trace snapshot timer 0.5 s, only with ML_TRACE=1
 periodic MediaLayer/Sources/MediaLayerUI/URLSessionFetcher.swift 1 # one-shot ML_FETCH_DELAY_MS probe delay, debug only, not a period
 periodic kotlin/ui/src/main/kotlin/com/noma4i/medialayer/ui/MediaAudio.kt 1 # progress sampling of a PLAYING audio cell every 250 ms (PROGRESS_TICK_MS), stops when paused, owner the composable effect
+panic:ffi/deferred.rs:expect("a settled outcome holds a value") # wait_for(Option::is_some) returned, so the outcome is Some
+panic:limits/chunks.rs:expect("the default list is valid") # the constant list [2, 1] is inside the entry bounds
+panic:prefetch/gate.rs:expect("the gate outlives its waiters") # the waiter sender is dropped only by grant after send, and acquire holds the Arc<Gate>
+panic:prefetch/ledger.rs:expect("evicted entry exists") # both callers pass a key just returned by farthest on the same &mut self
+panic:spec/types.rs:expect("spec serializes") # MediaSpec is a derived Serialize tree of plain fields with no maps
