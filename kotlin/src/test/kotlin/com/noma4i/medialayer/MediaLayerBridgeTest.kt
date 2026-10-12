@@ -174,7 +174,7 @@ class MediaLayerBridgeTest {
       )
     )
 
-    media.setImageWindow("grid", 0, (0 until 4).map { listOf(Poster("https://o.test/p$it.jpg")) })
+    media.replaceImageWindow("grid", 0, (0 until 4).map { listOf(Poster("https://o.test/p$it.jpg")) })
 
     eventually { fetcher.urls.toSet().size >= 2 }
     Thread.sleep(100)
@@ -210,7 +210,7 @@ class MediaLayerBridgeTest {
     val subscription = media.subscribeState(item.url, states)
 
     media.setRate(item.url, 1.5f)
-    media.setWindow(0u, listOf(item, item.copy(url = "file:///bundle/next.mp4")))
+    media.replaceWindow(0u, listOf(item, item.copy(url = "file:///bundle/next.mp4")))
     media.visible(item, true)
     media.setPlaying(item.url, true)
     eventually { slots.loaded()?.log?.contains("play") == true }

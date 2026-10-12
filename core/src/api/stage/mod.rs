@@ -54,6 +54,8 @@ struct State {
     views: HashMap<String, u64>,
     rates: HashMap<String, f32>,
     positions: ResumePositions,
+    window: Vec<Option<MediaItem>>,
+    image_windows: HashMap<String, Vec<Vec<MediaItem>>>,
 }
 
 struct Inner {
@@ -155,6 +157,8 @@ impl Stage {
             views: HashMap::new(),
             rates: HashMap::new(),
             positions: ResumePositions::default(),
+            window: Vec::new(),
+            image_windows: HashMap::new(),
         };
         let inner = Arc::new(Inner {
             state: Mutex::new(state),

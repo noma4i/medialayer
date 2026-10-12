@@ -16,7 +16,7 @@ fn hls() -> MediaItem {
 
 async fn playing(rig: &Rig, source: MediaItem) -> (u32, Arc<crate::api::test_support::MockSlot>) {
     let url = source.url.clone();
-    rig.parts.stage.set_window(0, vec![Some(source)]);
+    rig.parts.stage.replace_window(0, vec![Some(source)]);
     rig.parts.stage.set_playing(&url, true);
     eventually(|| rig.factory.slot_holding(&url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
     rig.holder(&url)
@@ -26,7 +26,7 @@ async fn playing(rig: &Rig, source: MediaItem) -> (u32, Arc<crate::api::test_sup
 async fn inv_api_03_the_ready_events_move_a_declared_place_to_ready() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
-    stage.set_window(0, videos(3));
+    stage.replace_window(0, videos(3));
     stage.visible(video(&url_of(0)), true);
     eventually(|| rig.factory.slot_holding(&url_of(0)).is_some()).await;
     let (slot, _) = rig.holder(&url_of(0));
@@ -103,7 +103,7 @@ async fn inv_api_06_a_player_whose_clock_moves_is_checked_again_and_left_alone()
 async fn inv_api_06_a_stall_arms_the_watchdog_only_for_the_playing_slot() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
-    stage.set_window(0, videos(3));
+    stage.replace_window(0, videos(3));
     eventually(|| rig.factory.slot_holding(&url_of(1)).is_some()).await;
     let (idle_slot, idle) = rig.holder(&url_of(1));
     stage.stalled(idle_slot as usize, 0);

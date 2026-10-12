@@ -120,7 +120,7 @@ struct MediaLayerBridgeTests {
       imageWindows: [ImageWindow(name: "grid", behind: 0, from: 0, to: 2)]
     ))
 
-    media.setImageWindow("grid", active: 0, pages: (0..<4).map { [Poster(url: "https://o.test/p\($0).jpg")] })
+    media.replaceImageWindow("grid", active: 0, pages: (0..<4).map { [Poster(url: "https://o.test/p\($0).jpg")] })
 
     for _ in 0..<200 where fetcher.urls.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
     try await Task.sleep(for: .milliseconds(50))

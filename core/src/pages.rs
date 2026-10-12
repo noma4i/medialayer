@@ -64,6 +64,23 @@ impl<T> Sliced<T> {
         Sliced { first, count, items: items.into_iter().skip(first).take(end - first).collect() }
     }
 
+    pub fn slice(items: &[Option<T>], range: Range<usize>) -> Sliced<T>
+    where
+        T: Clone,
+    {
+        let count = items.len();
+        let first = range.start.min(count);
+        let end = range.end.min(count);
+        Sliced { first, count, items: items[first..end].to_vec() }
+    }
+
+    pub fn slice_pages<P: Clone>(pages: &[P], range: Range<usize>) -> Sliced<P> {
+        let count = pages.len();
+        let first = range.start.min(count);
+        let end = range.end.min(count);
+        Sliced { first, count, items: pages[first..end].iter().cloned().map(Some).collect() }
+    }
+
     pub fn map<U>(&self, convert: impl Fn(&T) -> Option<U>) -> Sliced<U> {
         Sliced { first: self.first, count: self.count, items: self.items.iter().map(|item| item.as_ref().and_then(&convert)).collect() }
     }

@@ -201,12 +201,20 @@ impl MediaLayer {
         self.declare(move |assembled| assembled.stage.seek(&key, position_ms));
     }
 
-    pub fn set_window(&self, active: u32, sources: Vec<Option<MediaItem>>) {
-        self.declare(move |assembled| assembled.stage.set_window(active as usize, sources));
+    pub fn replace_window(&self, active: u32, sources: Vec<Option<MediaItem>>) {
+        self.declare(move |assembled| assembled.stage.replace_window(active as usize, sources));
     }
 
-    pub fn set_image_window(&self, name: String, active: u32, pages: Vec<Vec<MediaItem>>) {
-        self.declare(move |assembled| assembled.stage.set_image_window(&name, active as usize, pages));
+    pub fn move_window(&self, active: u32) {
+        self.declare(move |assembled| assembled.stage.move_window(active as usize));
+    }
+
+    pub fn move_image_window(&self, name: String, active: u32) {
+        self.declare(move |assembled| assembled.stage.move_image_window(&name, active as usize));
+    }
+
+    pub fn replace_image_window(&self, name: String, active: u32, pages: Vec<Vec<MediaItem>>) {
+        self.declare(move |assembled| assembled.stage.replace_image_window(&name, active as usize, pages));
     }
 
     pub fn set_playing(&self, key: String, playing: bool) {

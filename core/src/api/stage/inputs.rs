@@ -10,16 +10,23 @@ const MIN_RATE: f32 = 0.25;
 const MAX_RATE: f32 = 4.0;
 
 impl Stage {
-    pub fn set_window(&self, active: usize, sources: Vec<Option<MediaItem>>) {
-        let count = sources.len();
+    pub fn replace_window(&self, active: usize, sources: Vec<Option<MediaItem>>) {
+        self.state().window = sources;
+        self.move_window(active);
+    }
+
+    pub fn move_window(&self, active: usize) {
+        let (count, reach) = {
+            let state = self.state();
+            (state.window.len(), state.ring.pages(active, state.window.len()))
+        };
         crate::trace!("stage", "window active={active} count={count}");
-        let reach = self.state().ring.pages(active, count);
         let wanted = self.inner.prefetcher.window_range(active, count);
-        let sources = Sliced::of(sources, reach.start.min(wanted.start)..reach.end.max(wanted.end));
-        let keys = sources.map(|source| (source.kind != Kind::Image).then(|| source.url.clone()));
         let now = self.now();
-        let commands = {
+        let (commands, sources) = {
             let mut state = self.state();
+            let sources = Sliced::slice(&state.window, reach.start.min(wanted.start)..reach.end.max(wanted.end));
+            let keys = sources.map(|source| (source.kind != Kind::Image).then(|| source.url.clone()));
             for source in sources.present() {
                 state.catalog.insert(source.url.clone(), source.clone());
             }
@@ -31,17 +38,22 @@ impl Stage {
             let kept: HashSet<&str> = sources.present().map(|source| source.url.as_str()).collect();
             let State { catalog, loaded, leases, views, .. } = &mut *state;
             catalog.retain(|key, _| kept.contains(key.as_str()) || loaded.contains_key(key) || leases.contains_key(key) || views.contains_key(key));
-            commands
+            (commands, sources)
         };
         self.dispatch(commands);
         let remote = sources.map(|source| (!source.is_local()).then(|| source.for_prefetch()));
         self.inner.prefetcher.set_window(active, remote);
     }
 
-    pub fn set_image_window(&self, name: &str, active: usize, pages: Vec<Vec<MediaItem>>) {
-        let count = pages.len();
+    pub fn replace_image_window(&self, name: &str, active: usize, pages: Vec<Vec<MediaItem>>) {
+        self.state().image_windows.insert(name.to_string(), pages);
+        self.move_image_window(name, active);
+    }
+
+    pub fn move_image_window(&self, name: &str, active: usize) {
+        let count = self.state().image_windows.get(name).map_or(0, Vec::len);
         let range = self.inner.prefetcher.image_window_range(name, active, count);
-        let pages = Sliced::of(pages.into_iter().map(Some).collect(), range);
+        let pages = Sliced::<Vec<MediaItem>>::slice_pages(self.state().image_windows.get(name).map(Vec::as_slice).unwrap_or_default(), range);
         let remote = pages.map(|page| Some(page.iter().filter(|source| !source.is_local()).map(MediaItem::for_prefetch).collect()));
         self.inner.prefetcher.set_image_window(name, active, remote);
     }
@@ -172,6 +184,8 @@ impl Stage {
             state.views.clear();
             state.rates.clear();
             state.positions.clear();
+            state.window.clear();
+            state.image_windows.clear();
             state.ring.release_all()
         };
         self.dispatch(commands);

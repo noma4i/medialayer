@@ -156,7 +156,7 @@ fn inv_ffi_02_declarations_reach_the_platform_slots_and_the_player_events_move_t
     let _subscription = layer.subscribe_state(url.to_string(), seen.clone());
     let caller = caller();
 
-    layer.set_window(1, (0..3).map(|index| Some(MediaItem::bare_video(&format!("https://o.test/v{index}.mp4")))).collect());
+    layer.replace_window(1, (0..3).map(|index| Some(MediaItem::bare_video(&format!("https://o.test/v{index}.mp4")))).collect());
     layer.set_playing(url.to_string(), true);
     layer.set_muted_all(true);
     layer.visible(MediaItem::bare_video(url), true);
@@ -294,7 +294,7 @@ fn inv_ffi_03_an_item_state_from_a_native_loader_reaches_the_state_subscribers_a
     caller.block_on(eventually(|| seen.0.lock().unwrap().last() == Some(&MediaState::Ready)));
 
     let url = "https://o.test/v1.mp4";
-    layer.set_window(0, vec![Some(MediaItem::bare_video(url))]);
+    layer.replace_window(0, vec![Some(MediaItem::bare_video(url))]);
     caller.block_on(eventually(|| factory.slot_holding(url).is_some()));
     layer.seek(url.to_string(), 1_500);
     layer.player_events().attach(url.to_string(), 5);
@@ -373,7 +373,7 @@ fn inv_ffi_06_an_image_prefetched_by_a_window_is_a_cache_hit_for_fetch_image() {
     let (layer, origin) = origin_layer(dir.path());
     let caller = caller();
 
-    layer.set_image_window("grid".to_string(), 0, poster_pages(1));
+    layer.replace_image_window("grid".to_string(), 0, poster_pages(1));
     caller.block_on(eventually(|| !origin.seen.lock().unwrap().is_empty()));
     let fetched = caller.block_on(layer.fetch_image("https://o.test/p0.jpg".to_string(), HashMap::new()));
 
@@ -408,7 +408,7 @@ fn inv_ffi_07_calls_made_before_the_assembly_ends_run_after_it_in_call_order_and
     let _subscription = layer.subscribe_state(url.to_string(), seen.clone());
     let caller = caller();
 
-    layer.set_window(0, vec![Some(MediaItem::bare_video(url))]);
+    layer.replace_window(0, vec![Some(MediaItem::bare_video(url))]);
     layer.set_playing(url.to_string(), true);
     layer.player_events().attach(url.to_string(), 5);
     let declared_in = started.elapsed();

@@ -146,9 +146,9 @@ async fn inv_prefetch_10_assembling_with_image_windows_gives_each_name_its_range
         (0..count).map(|index| vec![MediaItem::bare(&format!("https://o.test/p{index}.jpg"), Kind::Image)]).collect()
     };
 
-    parts.stage.set_image_window("avatar", 0, pages(5));
+    parts.stage.replace_image_window("avatar", 0, pages(5));
     assert_eq!(parts.prefetcher.counters().requested, 1);
-    parts.stage.set_image_window("grid", 0, pages(5));
+    parts.stage.replace_image_window("grid", 0, pages(5));
 
     assert_eq!(parts.prefetcher.counters().requested, 1 + 5);
 }

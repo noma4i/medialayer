@@ -28,7 +28,7 @@ extension MediaSource {
 }
 
 extension MediaLayer {
-  public func setImageWindow<Source: MediaSource>(_ name: String, active: Int, pages: [[Source]]) {
-    setImageWindow(name: name, active: UInt32(clamping: max(active, 0)), pages: pages.map { $0.map(\.item) })
+  public func replaceImageWindow<Source: MediaSource>(_ name: String, active: Int, pages: [[Source]]) {
+    replaceImageWindow(name: name, active: UInt32(clamping: max(active, 0)), pages: pages.map { $0.map(\.item) })
   }
 }

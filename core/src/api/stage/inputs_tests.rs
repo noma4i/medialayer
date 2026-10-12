@@ -14,7 +14,7 @@ async fn inv_api_04_the_window_loads_the_neighbours_through_the_proxy_and_the_ac
     let rig = rig().await;
     let stage = &rig.parts.stage;
 
-    stage.set_window(5, videos(20));
+    stage.replace_window(5, videos(20));
     stage.set_playing(&url_of(5), true);
 
     eventually(|| [4, 5, 6].iter().all(|page| rig.factory.slot_holding(&url_of(*page)).is_some())).await;
@@ -32,13 +32,13 @@ async fn inv_api_04_the_window_loads_the_neighbours_through_the_proxy_and_the_ac
 async fn inv_api_04_declaring_the_same_window_again_sends_no_commands() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
-    stage.set_window(5, videos(20));
+    stage.replace_window(5, videos(20));
     stage.set_playing(&url_of(5), true);
     eventually(|| rig.factory.slot_holding(&url_of(6)).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Preroll))).await;
     eventually(|| stage.commands_idle()).await;
     let settled = total_calls(&rig);
 
-    stage.set_window(5, videos(20));
+    stage.replace_window(5, videos(20));
     stage.set_playing(&url_of(5), true);
     eventually(|| stage.commands_idle()).await;
 
@@ -49,11 +49,11 @@ async fn inv_api_04_declaring_the_same_window_again_sends_no_commands() {
 async fn inv_api_04_a_page_that_still_wants_to_play_gets_a_player_again_after_its_slot_was_taken() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
-    stage.set_window(5, videos(20));
+    stage.replace_window(5, videos(20));
     stage.set_playing(&url_of(5), true);
     eventually(|| rig.factory.slot_holding(&url_of(5)).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
 
-    stage.set_window(0, Vec::new());
+    stage.replace_window(0, Vec::new());
     eventually(|| rig.factory.slot_holding(&url_of(5)).is_none() && stage.commands_idle()).await;
 
     eventually(|| rig.factory.slot_holding(&url_of(5)).is_some_and(|(_, slot)| slot.calls().last() == Some(&SlotCall::Play))).await;
@@ -66,7 +66,7 @@ async fn inv_pool_01_hundreds_of_window_shifts_never_create_more_players_than_sl
 
     for step in 0..300usize {
         let active = (step * 7) % 20;
-        stage.set_window(active, videos(20));
+        stage.replace_window(active, videos(20));
         stage.set_playing(&url_of(active), true);
     }
 
@@ -78,7 +78,7 @@ async fn inv_pool_01_hundreds_of_window_shifts_never_create_more_players_than_sl
 async fn inv_pool_02_the_latest_playing_intent_wins_and_only_one_slot_plays() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
-    stage.set_window(5, videos(20));
+    stage.replace_window(5, videos(20));
 
     stage.set_playing(&url_of(5), true);
     stage.set_playing(&url_of(6), true);
@@ -94,7 +94,7 @@ async fn inv_pool_02_the_latest_playing_intent_wins_and_only_one_slot_plays() {
 async fn inv_pool_12_muting_all_or_one_key_changes_only_the_volume_and_only_when_the_value_changes() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
-    stage.set_window(5, videos(20));
+    stage.replace_window(5, videos(20));
     eventually(|| [4, 5, 6].iter().all(|page| rig.factory.slot_holding(&url_of(*page)).is_some())).await;
     let mutes = |page| rig.holder(&url_of(page)).1.calls().iter().filter(|call| **call == SlotCall::Mute).count();
 
@@ -114,12 +114,12 @@ async fn inv_api_04_a_pinned_key_survives_window_moves_and_release_all_frees_eve
     let rig = rig_with(|config| config.defaults.slots = 4).await;
     let stage = &rig.parts.stage;
     let intro = "https://o.test/intro.mp4";
-    stage.set_window(0, videos(20));
+    stage.replace_window(0, videos(20));
 
     stage.pin(intro);
     eventually(|| rig.factory.slot_holding(intro).is_some()).await;
     for active in [4, 9, 14] {
-        stage.set_window(active, videos(20));
+        stage.replace_window(active, videos(20));
     }
     eventually(|| stage.commands_idle()).await;
     let (_, pinned) = rig.holder(intro);
@@ -140,7 +140,7 @@ async fn inv_api_04_an_unpinned_key_goes_back_to_the_normal_rules() {
     eventually(|| rig.factory.slot_holding(intro).is_some()).await;
 
     stage.unpin(intro);
-    stage.set_window(0, videos(20));
+    stage.replace_window(0, videos(20));
     stage.visible(video("https://o.test/chat1.mp4"), true);
     stage.visible(video("https://o.test/chat2.mp4"), true);
 
@@ -152,7 +152,7 @@ async fn inv_api_04_a_visible_place_outside_the_window_takes_a_slot_and_gives_it
     let rig = rig_with(|config| config.defaults.slots = 4).await;
     let stage = &rig.parts.stage;
     let chat = "https://o.test/chat.mp4";
-    stage.set_window(0, videos(20));
+    stage.replace_window(0, videos(20));
 
     stage.visible(video(chat), true);
     eventually(|| rig.factory.slot_holding(chat).is_some()).await;
@@ -169,7 +169,7 @@ async fn inv_api_04_the_window_also_drives_prefetch_ahead_of_the_active_page() {
         rig.fetcher.route(&url_of(page), Script::ok(vec![1; 2 * 1024 * 1024]));
     }
 
-    rig.parts.stage.set_window(0, videos(8));
+    rig.parts.stage.replace_window(0, videos(8));
 
     eventually_async(|| async { rig.parts.cache.contains(&format!("{}#0", url_of(2))).await }).await;
     assert_eq!(rig.fetcher.calls_for(&url_of(7)), 0);
@@ -181,7 +181,7 @@ async fn inv_api_04_a_view_attaches_to_the_slot_that_holds_its_key_even_when_it_
     let stage = &rig.parts.stage;
     stage.attach(&url_of(1), 9);
 
-    stage.set_window(0, videos(3));
+    stage.replace_window(0, videos(3));
 
     eventually(|| rig.factory.slot_holding(&url_of(1)).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Attach { view_token: 9 }))).await;
     let calls = rig.holder(&url_of(1)).1.calls();
@@ -206,14 +206,14 @@ fn sound_calls(rig: &crate::api::test_support::Rig) -> Vec<SlotCall> {
 async fn inv_api_14_a_silent_layer_never_unmutes_a_slot_whatever_the_places_ask() {
     let rig = rig_with(|config| config.silent = true).await;
     let stage = &rig.parts.stage;
-    stage.set_window(5, videos(20));
+    stage.replace_window(5, videos(20));
     eventually(|| [4, 5, 6].iter().all(|page| rig.factory.slot_holding(&url_of(*page)).is_some())).await;
 
     stage.set_muted_all(true);
     stage.set_muted(&url_of(5), true);
     stage.set_muted(&url_of(5), false);
     stage.set_muted_all(false);
-    stage.set_window(9, videos(20));
+    stage.replace_window(9, videos(20));
 
     eventually(|| [8, 9, 10].iter().all(|page| rig.factory.slot_holding(&url_of(*page)).is_some()) && stage.commands_idle()).await;
     assert!(!sound_calls(&rig).contains(&SlotCall::Unmute));
@@ -229,7 +229,7 @@ async fn inv_api_14_a_silent_layer_never_unmutes_a_slot_whatever_the_places_ask(
 async fn inv_api_14_a_layer_that_is_not_silent_still_unmutes_on_request() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
-    stage.set_window(5, videos(20));
+    stage.replace_window(5, videos(20));
     eventually(|| rig.factory.slot_holding(&url_of(5)).is_some()).await;
 
     stage.set_muted(&url_of(5), true);
@@ -245,7 +245,7 @@ async fn inv_api_16_a_rate_is_sent_after_the_load_of_its_key_and_reaches_the_slo
     let rates = |page: usize| rig.holder(&url_of(page)).1.calls().into_iter().filter_map(|call| if let SlotCall::Rate { rate } = call { Some(rate) } else { None }).collect::<Vec<f32>>();
 
     stage.set_rate(&url_of(5), 1.5);
-    stage.set_window(5, videos(20));
+    stage.replace_window(5, videos(20));
     eventually(|| rig.factory.slot_holding(&url_of(5)).is_some_and(|(_, slot)| slot.calls().iter().any(|call| matches!(call, SlotCall::Rate { .. })))).await;
     let calls = rig.holder(&url_of(5)).1.calls();
     let position = |wanted: &dyn Fn(&SlotCall) -> bool| calls.iter().position(wanted).unwrap();
@@ -269,7 +269,7 @@ async fn inv_api_15_a_local_file_in_the_window_is_never_prefetched_and_plays_fro
     let local = |index: usize| MediaItem::bare_video(&format!("file:///bundle/clip{index}.mp4"));
     let window: Vec<Option<MediaItem>> = (0..4).map(|index| Some(local(index))).collect();
 
-    rig.parts.stage.set_window(0, window);
+    rig.parts.stage.replace_window(0, window);
     rig.parts.stage.visible(local(0), true);
 
     eventually(|| rig.factory.slot_holding("file:///bundle/clip0.mp4").is_some()).await;
@@ -286,7 +286,7 @@ async fn inv_api_15_a_local_file_in_the_window_is_never_prefetched_and_plays_fro
 async fn inv_api_17_an_image_window_prefetches_remote_images_into_the_cache_and_never_touches_the_pool_or_local_files() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
-    stage.set_window(5, videos(20));
+    stage.replace_window(5, videos(20));
     stage.set_playing(&url_of(5), true);
     eventually(|| rig.factory.slot_holding(&url_of(6)).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Preroll))).await;
     eventually(|| stage.commands_idle()).await;
@@ -299,7 +299,7 @@ async fn inv_api_17_an_image_window_prefetches_remote_images_into_the_cache_and_
         rig.fetcher.route(&remote(index), Script::ok(vec![index as u8; 32]));
     }
 
-    stage.set_image_window("grid", 0, (0..4).map(page).collect());
+    stage.replace_image_window("grid", 0, (0..4).map(page).collect());
 
     for index in 0..4 {
         eventually_async(|| async { rig.parts.cache.contains(&cache_key(&remote(index))).await }).await;
@@ -318,7 +318,7 @@ async fn inv_api_18_a_place_that_leaves_while_not_playing_resumes_at_its_positio
     let rig = rig_with(|config| config.defaults.slots = 4).await;
     let stage = &rig.parts.stage;
     let chat = "https://o.test/chat.mp4";
-    stage.set_window(0, videos(20));
+    stage.replace_window(0, videos(20));
     stage.visible(video(chat), true);
     eventually(|| rig.factory.slot_holding(chat).is_some()).await;
     rig.holder(chat).1.sample.lock().unwrap().position_ms = 14_000;
@@ -355,7 +355,7 @@ async fn inv_api_19_scrolling_a_feed_keeps_the_active_page_playing_and_its_neigh
         if active > 0 {
             stage.set_playing(&url_of(active - 1), false);
         }
-        stage.set_window(active, all.clone());
+        stage.replace_window(active, all.clone());
         stage.set_playing(&url_of(active), true);
 
         eventually(|| stage.commands_idle()).await;
@@ -375,14 +375,14 @@ async fn inv_api_20_declaring_a_window_costs_the_same_for_a_short_and_a_long_lis
     let stage = &rig.parts.stage;
     let measure = |count: usize| {
         let sources = videos(count);
-        crate::alloc_probe::allocations_of(|| stage.set_window(count / 2, sources))
+        crate::alloc_probe::allocations_of(|| stage.replace_window(count / 2, sources))
     };
     measure(20);
     measure(2000);
     let short = measure(20);
     let long = measure(2000);
 
-    assert!(long <= short * 2, "set_window allocated {long} times for 2000 sources and {short} for 20");
+    assert!(long <= short * 2, "replace_window allocated {long} times for 2000 sources and {short} for 20");
 }
 
 #[tokio::test]
@@ -408,12 +408,12 @@ async fn inv_api_21_a_declared_place_keeps_its_mute_when_its_player_is_unloaded_
     let source = video(&url_of(5));
     stage.visible(source, true);
     stage.set_muted(&url_of(5), true);
-    stage.set_window(5, videos(20));
+    stage.replace_window(5, videos(20));
     eventually(|| rig.factory.slot_holding(&url_of(5)).is_some()).await;
 
-    stage.set_window(15, videos(20));
+    stage.replace_window(15, videos(20));
     eventually(|| rig.factory.slot_holding(&url_of(5)).is_none() && stage.commands_idle()).await;
-    stage.set_window(5, videos(20));
+    stage.replace_window(5, videos(20));
     eventually(|| rig.factory.slot_holding(&url_of(5)).is_some() && stage.commands_idle()).await;
 
     let (_, slot) = rig.holder(&url_of(5));
@@ -425,7 +425,7 @@ async fn inv_api_21_a_declared_place_keeps_its_mute_when_its_player_is_unloaded_
 async fn inv_api_30_a_peeked_neighbour_plays_muted_beside_the_active_page_and_is_not_restarted_when_promoted() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
-    stage.set_window(5, videos(20));
+    stage.replace_window(5, videos(20));
     stage.set_playing(&url_of(5), true);
     eventually(|| rig.factory.slot_holding(&url_of(6)).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Preroll))).await;
 
@@ -446,14 +446,14 @@ async fn inv_api_31_a_playing_place_resumes_at_its_position_when_the_whole_windo
     let rig = rig_with(|config| config.defaults.slots = 4).await;
     let stage = &rig.parts.stage;
     let clip = url_of(0);
-    stage.set_window(0, videos(20));
+    stage.replace_window(0, videos(20));
     stage.set_playing(&clip, true);
     eventually(|| rig.factory.slot_holding(&clip).is_some()).await;
     rig.holder(&clip).1.sample.lock().unwrap().position_ms = 5_600;
 
-    stage.set_window(0, Vec::new());
+    stage.replace_window(0, Vec::new());
     eventually(|| rig.factory.slot_holding(&clip).is_none()).await;
-    stage.set_window(0, videos(20));
+    stage.replace_window(0, videos(20));
     stage.set_playing(&clip, true);
 
     let resumed = |calls: &[SlotCall]| calls.iter().any(|call| matches!(call, SlotCall::Seek { position_ms } if *position_ms >= 5_600));
@@ -462,4 +462,51 @@ async fn inv_api_31_a_playing_place_resumes_at_its_position_when_the_whole_windo
     let load = calls.iter().rposition(|call| matches!(call, SlotCall::Load { .. })).unwrap();
     let seek = calls.iter().rposition(|call| matches!(call, SlotCall::Seek { position_ms } if *position_ms >= 5_600));
     assert!(seek.is_some_and(|seek| seek > load));
+}
+
+#[tokio::test]
+async fn inv_api_22_moving_the_active_page_reuses_the_declared_list_and_loads_the_new_neighbours() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    stage.replace_window(2, videos(20));
+
+    stage.move_window(10);
+    stage.set_playing(&url_of(10), true);
+
+    eventually(|| [9, 10, 11].iter().all(|page| rig.factory.slot_holding(&url_of(*page)).is_some())).await;
+    eventually(|| rig.holder(&url_of(10)).1.calls().contains(&SlotCall::Play)).await;
+    assert!(rig.factory.slot_holding(&url_of(2)).is_none());
+}
+
+#[tokio::test]
+async fn inv_api_22_moving_before_any_list_was_declared_or_after_release_all_does_nothing() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+
+    stage.move_window(3);
+    stage.replace_window(0, videos(20));
+    stage.release_all();
+    stage.move_window(7);
+
+    eventually(|| stage.commands_idle()).await;
+    assert!(rig.factory.slot_holding(&url_of(7)).is_none());
+    assert_eq!(rig.parts.prefetcher.live_tasks(), 0);
+}
+
+#[tokio::test]
+async fn inv_api_22_moving_an_image_window_prefetches_the_pages_around_the_new_position_from_the_declared_pages() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    let remote = |index: usize| format!("https://o.test/poster{index}.jpg");
+    for index in 0..30 {
+        rig.fetcher.route(&remote(index), Script::ok(vec![index as u8; 32]));
+    }
+    stage.replace_image_window("grid", 0, (0..30).map(|index| vec![MediaItem::bare(&remote(index), Kind::Image)]).collect());
+    eventually_async(|| async { rig.parts.cache.contains(&cache_key(&remote(0))).await }).await;
+    assert_eq!(rig.fetcher.calls_for(&remote(25)), 0);
+
+    stage.move_image_window("grid", 25);
+
+    eventually_async(|| async { rig.parts.cache.contains(&cache_key(&remote(25))).await }).await;
+    assert_eq!(rig.fetcher.calls_for(&remote(25)), 1);
 }

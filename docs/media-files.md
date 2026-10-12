@@ -94,20 +94,20 @@ The cache key is the URL. The cache lives on disk; image memory caches stay with
 
 ### Image windows
 
-A grid, a chat or a feed keeps one image window per list. The window has a name. A page is one row, one message or one post, and it can hold several images. `setImageWindow` takes the name, the active page and the sources of every page. The window loads the images of the pages around the active page into the disk cache, nearest pages first. A window is independent of other windows and of the video window. An image that two windows want loads once. An empty list of pages cancels the window.
+A grid, a chat or a feed keeps one image window per list. The window has a name. A page is one row, one message or one post, and it can hold several images. `replaceImageWindow` takes the name, the active page and the sources of every page. `moveImageWindow` takes the name and the active page and reuses the pages of the last `replaceImageWindow`. The window loads the images of the pages around the active page into the disk cache, nearest pages first. A window is independent of other windows and of the video window. An image that two windows want loads once. An empty list of pages cancels the window.
 
 A window named like an `image` block takes the range of that block (`prefetch window:` and `prefetch behind:`). Any other name takes the default: 2 pages behind, pages 0 to 8 ahead. A `file://` source is never loaded.
 
 #### Swift
 
 ```swift
-media.setImageWindow("avatar", active: row, pages: rows.map { $0.map { Avatar(url: $0.avatarUrl) } })
+media.replaceImageWindow("avatar", active: row, pages: rows.map { $0.map { Avatar(url: $0.avatarUrl) } })
 ```
 
 #### Kotlin
 
 ```kotlin
-media.setImageWindow("avatar", active = row, pages = rows.map { page -> page.map { Avatar(url = it.avatarUrl) } })
+media.replaceImageWindow("avatar", active = row, pages = rows.map { page -> page.map { Avatar(url = it.avatarUrl) } })
 ```
 
 ### Image size and memory

@@ -40,7 +40,7 @@ Slot and reach changes made with `setLimits` apply at once: extra players are un
 
 ## Cost of a window
 
-The cost of `setWindow` and `setImageWindow` depends on the size of the window, not on the length of your list. The pool copies only the pages it needs, so a feed of 2000 pages costs the same as a feed of 20.
+The pool keeps the list you declared with `replaceWindow`. `moveWindow` takes only the active page, so a scroll step costs the size of the window, not the length of your list. `replaceWindow` takes the list and the active page in one call: call it when the sources change. The pool copies only the pages it needs, so a feed of 2000 pages costs the same as a feed of 20 when the list does not change. Image windows work the same way with `replaceImageWindow` and `moveImageWindow`. A move before any list was declared, or after `releaseAll`, does nothing.
 
 ## Preferences of a place
 
