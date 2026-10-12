@@ -48,7 +48,7 @@ run_bounded() {
 # Step table engine. The library script defines `steps` (lines "lane|name|limit seconds|paths|command"), then calls
 # run_checks "$@". Lane "cheap" runs first, serial, and stops everything on a failure. The other lanes run in parallel.
 # --fast keeps the steps whose paths prefix a changed file ("*" always): the same commands, a subset of the full run.
-# --list prints the selected steps. --only <lane> runs one lane.
+# Lane "final" runs after the parallel lanes when they all passed (checks of their outputs). --list prints the selected steps. --only <lane> runs one lane.
 
 changed_files() {
   local base
@@ -125,7 +125,7 @@ run_checks() {
     run_lane cheap || { echo "check: cheap lane failed, nothing was built"; return 1; }
   fi
   for lane in "${lanes[@]}"; do
-    [ "$lane" = cheap ] && continue
+    [ "$lane" = cheap ] || [ "$lane" = final ] && continue
     run_lane "$lane" > "$logdir/lane-$lane.out" 2>&1 &
     pids+=("$!")
   done
@@ -135,6 +135,9 @@ run_checks() {
   for lane in "${lanes[@]}"; do
     [ -f "$logdir/lane-$lane.out" ] && cat "$logdir/lane-$lane.out"
   done
+  if [ "$failed" -eq 0 ] && printf '%s\n' "${lanes[@]}" | grep -qx final; then
+    run_lane final || failed=1
+  fi
   echo "check: $([ "$failed" -eq 0 ] && echo ok || echo FAILED) in $((SECONDS - start)) s, load $(uptime | sed 's/.*averages*: //')"
   return "$failed"
 }

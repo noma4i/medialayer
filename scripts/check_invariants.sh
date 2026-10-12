@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Strict traceability: invariant (specs/invariants.md) -> test inv_<area>_<nn>_* with an assertion in its body.
-# Exit 1 when a REQUIRED row has no such test, an UNBUILT row has no `reason:` in its last cell, a REQUIRED row has no
+# Exit 1 when a REQUIRED row has no such test, an UNBUILT row has no real `reason:` in its last cell (at least 25 characters, not the restated status or the docs template), a REQUIRED row has no
 # mutation text, a test, doc or spec names an invariant that has no row, ids repeat, or the registry is missing. There is no mode that exits 0 on a gap.
 # --list prints every invariant with the names of its tests.
 # Env: SPEC (registry file), TEST_DIRS (space separated, relative to the repository root) for the self test.
@@ -31,7 +31,8 @@ trap 'rm -rf "$work"' EXIT
 awk -F'|' '/^\| INV-[A-Z]+-[0-9]+ \| (REQUIRED|UNBUILT|OPEN) \|/ {
   id = $2; status = $3; mutation = $8
   gsub(/ /, "", id); gsub(/ /, "", status)
-  reason = ($(NF - 1) ~ /reason: *[^ ]/) ? "reason" : "-"
+  why = $(NF - 1); sub(/^.*reason: */, "", why); sub(/ +$/, "", why)
+  reason = ($(NF - 1) ~ /reason:/ && length(why) >= 25 && why !~ /no test named|^promised by the docs, no implementation$|^(todo|tbd|later|none|unbuilt)/) ? "reason" : "-"
   gsub(/[ `-]/, "", mutation)
   has = (length(mutation) > 0) ? "mutation" : "-"
   ran = (mutation ~ /ran:[0-9a-f]/) ? "ran" : "-"
@@ -53,25 +54,49 @@ done
 # name, 1 when the body holds an assertion, else 0
 if [ "${#files[@]}" -gt 0 ]; then
   awk '
-  FNR == 1 { infn = 0 }
+  # clean(): drops comments and string literals so that names, braces and assertions are read from code only
+  function clean(line, sh,    out, i, n, c, pair, triple) {
+    out = ""; n = length(line); i = 1
+    while (i <= n) {
+      c = substr(line, i, 1); pair = substr(line, i, 2); triple = substr(line, i, 3)
+      if (block) { if (pair == "*/") { block = 0; i += 2 } else i++; continue }
+      if (multiline) { if (triple == "\"\"\"") { multiline = 0; i += 3 } else i++; continue }
+      if (!sh && pair == "/*") { block = 1; i += 2; continue }
+      if (!sh && pair == "//") break
+      if (sh && c == "#" && (i == 1 || substr(line, i - 1, 1) ~ /[ \t]/)) break
+      if (!sh && triple == "\"\"\"") { multiline = 1; i += 3; out = out "\"\""; continue }
+      if (c == "\"") {
+        i++
+        while (i <= n) { c = substr(line, i, 1); if (c == "\\") { i += 2; continue } if (c == "\"") break; i++ }
+        i++; out = out "\"\""; continue
+      }
+      out = out c; i++
+    }
+    return out
+  }
+  FNR == 1 { infn = 0; block = 0; multiline = 0; pending_ignore = 0 }
   {
-    line = $0
+    sh = (FILENAME ~ /\.sh$/)
+    code = clean($0, sh)
     if (!infn) {
       name = ""
-      if (FILENAME !~ /\.sh$/ && match(line, /(fn|func|fun) +inv_[a-z0-9_]+/)) { name = substr(line, RSTART, RLENGTH); sub(/^(fn|func|fun) +/, "", name) }
-      else if (FILENAME ~ /\.sh$/ && match(line, /^inv_[a-z0-9_]+\(\)/)) { name = substr(line, RSTART, RLENGTH); gsub(/[ ()]/, "", name) }
-      if (name == "") next
+      if (!sh && match(code, /(fn|func|fun) +inv_[a-z0-9_]+/)) { name = substr(code, RSTART, RLENGTH); sub(/^(fn|func|fun) +/, "", name) }
+      else if (sh && match(code, /^inv_[a-z0-9_]+\(\)/)) { name = substr(code, RSTART, RLENGTH); gsub(/[ ()]/, "", name) }
+      if (name == "") {
+        if (code ~ /#\[ignore|@Ignore|@Disabled|\.disabled/) pending_ignore = 1
+        else if (code ~ /[^ \t]/ && code !~ /^[ \t]*(#\[|@)/) pending_ignore = 0
+        next
+      }
       infn = 1; depth = 0; started = 0; asserted = 0
+      ignored = pending_ignore || (code ~ /#\[ignore|@Ignore|@Disabled|\.disabled/)
+      pending_ignore = 0
     }
-    code = line
-    if (code ~ /^[ \t]*(\/\/|#)/) code = ""
-    stripped = code
-    gsub(/"([^"\\]|\\.)*"/, "\"\"", stripped)
-    opens = gsub(/\{/, "{", stripped); closes = gsub(/\}/, "}", stripped)
+    opens = gsub(/\{/, "{", code); closes = gsub(/\}/, "}", code)
     if (opens > 0) started = 1
     depth += opens - closes
-    if (code ~ /assert|#expect|#require|XCTAssert|XCTFail|Issue\.record|panic!|[^a-z_]fail\(|[^a-z_.]expect\(|expect_(red|green)|wait_until|eventually/) asserted = 1
-    if (started && depth <= 0) { print name "\t" asserted; infn = 0 }
+    if (code ~ /(^|[^A-Za-z0-9_])(assert[A-Za-z_]*!?\(|debug_assert[a-z_]*!\(|#expect\(|#require\(|XCTAssert[A-Za-z]*\(|XCTFail\(|Issue\.record\(|panic!\(|fail\(|wait_until[A-Za-z_]*\(|eventually\()/ || \
+        (sh && code ~ /(^|[^A-Za-z0-9_])expect_(red|green)[a-z_]*([^A-Za-z0-9_]|$)/)) asserted = 1
+    if (started && depth <= 0) { print name "\t" (ignored ? 0 : asserted); infn = 0 }
   }' "${files[@]}" | sort -u > "$work/tests.txt"
 else
   : > "$work/tests.txt"
