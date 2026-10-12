@@ -66,14 +66,14 @@ pub struct KindUsage {
     pub files: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, uniffi::Record)]
 pub struct SlotCounts {
     pub hot: u32,
     pub warm: u32,
     pub cold: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, uniffi::Record)]
 pub struct ReleaseCounts {
     pub timer: u64,
     pub pressure: u64,
@@ -82,7 +82,7 @@ pub struct ReleaseCounts {
     pub explicit: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record)]
 pub struct MediaStats {
     pub total_bytes: u64,
     pub file_count: u64,

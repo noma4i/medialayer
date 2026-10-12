@@ -487,3 +487,33 @@ async fn inv_idle_02_stats_are_published_by_change_events_and_only_with_a_subscr
     assert!(assembled.controls.wakes() - subscribed <= 3, "a burst of 100 writes merges: {}", assembled.controls.wakes() - subscribed);
     assert_eq!(totals.0.lock().unwrap().last(), Some(&(301 * 10)));
 }
+
+fn failed_layer(runtime: tokio::runtime::Runtime) -> Arc<MediaLayer> {
+    MediaLayer::assembling(runtime, async { Err(MediaError::Unexpected { detail: "loopback bind failed".to_string() }) }, None)
+}
+
+#[test]
+fn inv_ffi_04_a_layer_that_failed_to_assemble_answers_the_non_throwing_calls_with_empty_values() {
+    let layer = failed_layer(tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap());
+    let item = crate::api::test_support::video("https://o.test/a.mp4");
+
+    caller().block_on(async {
+        assert_eq!(layer.stats().await, MediaStats::default());
+        assert_eq!(layer.limits().await, default_limits());
+        assert!(!layer.is_cached(item.clone()).await);
+        layer.clear(None).await;
+        layer.purge(item.url.clone()).await;
+        layer.evict_now().await;
+        assert!(matches!(layer.play_url(item).await, Err(MediaError::Unexpected { .. })));
+    });
+}
+
+#[test]
+fn inv_ffi_04_a_panicking_media_task_is_an_error_not_a_panic_across_the_bridge() {
+    let dir = tempfile::tempdir().unwrap();
+    let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared(), None)).unwrap();
+
+    let outcome = caller().block_on(layer.with_assembled(|_| async { panic!("a media task failed") }));
+
+    assert!(matches!(outcome, Err(MediaError::Unexpected { .. })));
+}

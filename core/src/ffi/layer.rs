@@ -2,7 +2,7 @@ use super::assembled::Assembled;
 use super::deferred::Deferred;
 use super::events::PlayerEvents;
 use super::fetcher::{Fetcher, ForeignFetcher};
-use super::limits::{DeviceMemory, ImageWindow, Limits, PoolSettings};
+use super::limits::{default_limits, DeviceMemory, ImageWindow, Limits, PoolSettings};
 use crate::api::{
     assemble, placeholder_for, CacheState, Placeholder, Assembly, Kind, MediaError, MediaItem, MediaState, MediaStats, Parts, PlaybackRoute,
     PlayerSlotFactory, SettingsStore, Subscription,
@@ -64,7 +64,7 @@ impl MediaLayer {
         layer
     }
 
-    fn assembling(runtime: Runtime, assembling: impl Future<Output = Result<Parts, MediaError>> + Send + 'static, releaser: Option<Arc<dyn MemoryReleaser>>) -> Arc<MediaLayer> {
+    pub(crate) fn assembling(runtime: Runtime, assembling: impl Future<Output = Result<Parts, MediaError>> + Send + 'static, releaser: Option<Arc<dyn MemoryReleaser>>) -> Arc<MediaLayer> {
         let handle = runtime.handle().clone();
         let layer = MediaLayer::pending(Some(runtime), handle.clone());
         let assembled = layer.assembled.clone();
@@ -85,13 +85,13 @@ impl MediaLayer {
         self.assembled.run(work);
     }
 
-    async fn with_assembled<T: Send + 'static, Work: Future<Output = T> + Send + 'static>(&self, work: impl FnOnce(Arc<Assembled>) -> Work) -> Result<T, MediaError> {
+    pub(crate) async fn with_assembled<T: Send + 'static, Work: Future<Output = T> + Send + 'static>(&self, work: impl FnOnce(Arc<Assembled>) -> Work) -> Result<T, MediaError> {
         let assembled = self.assembled.wait().await?;
-        Ok(self.handle.spawn(work(assembled)).await.expect("a media task panicked"))
+        self.handle.spawn(work(assembled)).await.map_err(|error| MediaError::Unexpected { detail: error.to_string() })
     }
 
-    async fn on_assembled<T: Send + 'static, Work: Future<Output = T> + Send + 'static>(&self, work: impl FnOnce(Arc<Assembled>) -> Work) -> T {
-        self.with_assembled(work).await.expect("the media layer failed to assemble")
+    async fn on_assembled<T: Send + 'static, Work: Future<Output = T> + Send + 'static>(&self, empty: T, work: impl FnOnce(Arc<Assembled>) -> Work) -> T {
+        self.with_assembled(work).await.unwrap_or(empty)
     }
 }
 
@@ -132,7 +132,7 @@ impl MediaLayer {
     }
 
     pub async fn limits(&self) -> Limits {
-        self.on_assembled(|assembled| async move { assembled.controls.limits().await.into() }).await
+        self.on_assembled(default_limits(), |assembled| async move { assembled.controls.limits().await.into() }).await
     }
 
     pub async fn set_limits(&self, limits: Limits) -> Result<(), MediaError> {
@@ -145,19 +145,19 @@ impl MediaLayer {
     }
 
     pub async fn stats(&self) -> MediaStats {
-        self.on_assembled(|assembled| async move { assembled.controls.stats().await }).await
+        self.on_assembled(MediaStats::default(), |assembled| async move { assembled.controls.stats().await }).await
     }
 
     pub async fn clear(&self, kind: Option<Kind>) {
-        self.on_assembled(|assembled| async move { assembled.controls.clear(kind).await }).await
+        self.on_assembled((), |assembled| async move { assembled.controls.clear(kind).await }).await
     }
 
     pub async fn purge(&self, url: String) {
-        self.on_assembled(|assembled| async move { assembled.controls.purge(&url).await }).await
+        self.on_assembled((), |assembled| async move { assembled.controls.purge(&url).await }).await
     }
 
     pub async fn evict_now(&self) {
-        self.on_assembled(|assembled| async move { assembled.controls.evict_now().await }).await
+        self.on_assembled((), |assembled| async move { assembled.controls.evict_now().await }).await
     }
 
     pub fn subscribe_stats(&self, listener: Arc<dyn StatsListener>) -> Arc<Subscription> {
@@ -183,7 +183,7 @@ impl MediaLayer {
     }
 
     pub async fn is_cached(&self, source: MediaItem) -> bool {
-        self.on_assembled(|assembled| async move { assembled.routes.is_cached(&source.url, &source.headers).await }).await
+        self.on_assembled(false, |assembled| async move { assembled.routes.is_cached(&source.url, &source.headers).await }).await
     }
 
     pub async fn placeholder(&self, source: MediaItem, ready: bool) -> Placeholder {
