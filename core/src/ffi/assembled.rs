@@ -1,5 +1,5 @@
 use super::layer::MemoryReleaser;
-use crate::api::{spawn_pulse, AbortOnDrop, ControlPorts, Controls, MemoryRelease, Parts, Places, Routes, Signals, Stage};
+use crate::api::{follow_stats, AbortOnDrop, ControlPorts, Controls, MemoryRelease, Parts, Places, Routes, Signals, Stage};
 use std::sync::Arc;
 use tokio::runtime::Handle;
 
@@ -9,7 +9,7 @@ pub struct Assembled {
     pub stage: Stage,
     pub places: Arc<Places>,
     pub routes: Arc<Routes>,
-    _pulse: AbortOnDrop,
+    _stats_feed: AbortOnDrop,
 }
 
 struct ForeignRelease(Option<Arc<dyn MemoryReleaser>>);
@@ -36,7 +36,7 @@ impl Assembled {
             pool_settings: parts.pool,
             release: release.clone(),
         };
-        let controls = Arc::new(Controls::new(handle.clone(), ports, parts.defaults));
+        let controls = Arc::new(Controls::new(handle.clone(), ports, parts.defaults, parts.change.clone()));
         let signals = Arc::new(Signals::new(
             handle,
             Arc::new(parts.stage.clone()),
@@ -50,7 +50,7 @@ impl Assembled {
         handle.spawn(async move {
             warm.limits().await;
         });
-        let pulse = spawn_pulse(handle, Arc::downgrade(&controls), parts.stats_interval);
-        Assembled { controls, signals, stage: parts.stage, places: parts.places, routes: parts.routes, _pulse: pulse }
+        let stats_feed = follow_stats(handle, Arc::downgrade(&controls), parts.change);
+        Assembled { controls, signals, stage: parts.stage, places: parts.places, routes: parts.routes, _stats_feed: stats_feed }
     }
 }

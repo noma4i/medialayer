@@ -1,6 +1,7 @@
 use super::clock::Clock;
 use super::entry::Kind;
 use super::state::{Item, State};
+use crate::change::Change;
 use crate::limits::{EvictionStrategy, Limits};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
@@ -22,6 +23,7 @@ pub struct CacheShared {
     pub chunk_size: usize,
     pub kind_priority: [Kind; 3],
     pub persist_delay: Duration,
+    pub change: Arc<Change>,
     pub handle: Handle,
     pub part_sequence: AtomicU64,
     pub max_hold: AtomicU64,
@@ -44,6 +46,7 @@ impl CacheShared {
             chunk_size: options.chunk_size.max(1),
             kind_priority: options.kind_priority,
             persist_delay: options.persist_delay,
+            change: options.change,
             handle,
             part_sequence: AtomicU64::new(0),
             max_hold: AtomicU64::new(0),

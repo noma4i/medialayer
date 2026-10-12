@@ -175,8 +175,7 @@ fn inv_ffi_02_a_cache_write_reaches_a_stats_subscriber_without_any_controls_call
     let dir = tempfile::tempdir().unwrap();
     let caller = caller();
     let (layer, cache) = caller.block_on(async {
-        let mut assembled = assembly(dir.path(), Arc::new(MockFetcher::default()), shared::<MockFactory>());
-        assembled.stats_interval = std::time::Duration::from_millis(10);
+        let assembled = assembly(dir.path(), Arc::new(MockFetcher::default()), shared::<MockFactory>());
         let parts = crate::api::assemble(assembled).await.unwrap();
         let cache = parts.cache.clone();
         (MediaLayer::from_parts(None, Handle::current(), parts, None), cache)
@@ -421,4 +420,70 @@ fn inv_ffi_07_calls_made_before_the_assembly_ends_run_after_it_in_call_order_and
     let (index, _) = factory.slot_holding(url).unwrap();
     layer.player_events().ready(index);
     caller.block_on(eventually(|| seen.0.lock().unwrap().last() == Some(&MediaState::Ready)));
+}
+
+const IDLE: std::time::Duration = std::time::Duration::from_secs(10);
+const IDLE_STEP: std::time::Duration = std::time::Duration::from_millis(50);
+
+async fn elapse(span: std::time::Duration) {
+    for _ in 0..span.as_millis() / IDLE_STEP.as_millis() {
+        tokio::time::advance(IDLE_STEP).await;
+    }
+}
+
+async fn idle_wakes(declare: bool) -> (u64, u64, usize) {
+    let dir = tempfile::tempdir().unwrap();
+    let fetcher = Arc::new(MockFetcher::default());
+    let factory = shared::<MockFactory>();
+    let config = assembly(dir.path(), fetcher.clone(), factory.clone());
+    let parts = crate::api::assemble(config).await.unwrap();
+    let assembled = super::assembled::Assembled::new(&Handle::current(), parts, None);
+    if declare {
+        let url = crate::api::test_support::url_of(0);
+        assembled.stage.replace_window(0, crate::api::test_support::videos(3));
+        assembled.stage.set_playing(&url, true);
+        eventually(|| factory.slot_holding(&url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
+    }
+    elapse(std::time::Duration::from_secs(1)).await;
+    let (stats, tick, requests) = (assembled.controls.wakes(), assembled.stage.wakes(), fetcher.calls());
+    elapse(IDLE).await;
+    (assembled.controls.wakes() - stats, assembled.stage.wakes() - tick, fetcher.calls() - requests)
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_idle_01_idle_census_shows_no_timer_task_or_request_in_ten_seconds() {
+    assert_eq!(idle_wakes(false).await, (0, 0, 0), "nothing declared");
+    assert_eq!(idle_wakes(true).await, (0, 0, 0), "a window declared and a video playing");
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_idle_02_stats_are_published_by_change_events_and_only_with_a_subscriber() {
+    let dir = tempfile::tempdir().unwrap();
+    let parts = crate::api::assemble(assembly(dir.path(), Arc::new(MockFetcher::default()), shared::<MockFactory>())).await.unwrap();
+    parts.cache.ready().await;
+    let cache = parts.cache.clone();
+    let assembled = super::assembled::Assembled::new(&Handle::current(), parts, None);
+    for index in 0..200 {
+        cache.put(&format!("https://o.test/{index}.jpg"), crate::cache::Kind::Image, &[1; 10]).await.unwrap();
+    }
+    elapse(std::time::Duration::from_secs(1)).await;
+    assert_eq!(assembled.controls.wakes(), 0, "200 cache writes with no subscriber");
+
+    let totals = Arc::new(Totals(Mutex::new(Vec::new())));
+    let sink = totals.clone();
+    let _subscription = assembled.controls.subscribe_stats(Arc::new(move |stats: MediaStats| sink.changed(stats)));
+    elapse(std::time::Duration::from_secs(1)).await;
+    let subscribed = assembled.controls.wakes();
+    assert_eq!(subscribed, 1, "the subscription delivers the current stats once");
+
+    cache.put("https://o.test/one.jpg", crate::cache::Kind::Image, &[1; 10]).await.unwrap();
+    elapse(std::time::Duration::from_secs(1)).await;
+    assert_eq!(assembled.controls.wakes() - subscribed, 1, "one write, one publication");
+
+    for index in 0..100 {
+        cache.put(&format!("https://o.test/burst{index}.jpg"), crate::cache::Kind::Image, &[1; 10]).await.unwrap();
+    }
+    elapse(std::time::Duration::from_secs(1)).await;
+    assert!(assembled.controls.wakes() - subscribed <= 3, "a burst of 100 writes merges: {}", assembled.controls.wakes() - subscribed);
+    assert_eq!(totals.0.lock().unwrap().last(), Some(&(301 * 10)));
 }

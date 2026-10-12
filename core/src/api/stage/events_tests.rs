@@ -209,3 +209,46 @@ async fn inv_api_13_a_slot_that_renders_ends_and_plays_again_moves_the_place_thr
 
     eventually(|| state() == MediaState::Rendered).await;
 }
+
+fn quick_trim(config: &mut crate::api::Assembly) {
+    config.pool = crate::api::PoolSettings { trim_delay_ms: 300, ..crate::api::PoolSettings::default() };
+}
+
+#[tokio::test]
+async fn inv_idle_03_a_pending_trim_wakes_the_stage_at_its_deadline_and_not_before() {
+    let rig = rig_with(quick_trim).await;
+    let stage = &rig.parts.stage;
+    stage.visible(video(&url_of(0)), true);
+    eventually(|| rig.factory.slot_holding(&url_of(0)).is_some()).await;
+    let (_, slot) = rig.holder(&url_of(0));
+    let armed = stage.wakes();
+
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    assert_eq!(stage.wakes(), armed, "no wake before the trim deadline");
+    assert!(!slot.calls().contains(&SlotCall::Unload));
+
+    tokio::time::timeout(std::time::Duration::from_secs(3), eventually(|| slot.calls().contains(&SlotCall::Unload))).await.expect("the trim never came");
+    assert!(stage.wakes() > armed, "the deadline woke the stage");
+}
+
+#[tokio::test]
+async fn inv_idle_04_a_wanted_key_that_lost_its_slot_returns_after_the_retry_period_and_not_by_polling() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    let url = url_of(0);
+    stage.replace_window(0, vec![Some(video(&url))]);
+    stage.visible(video(&url), true);
+    stage.set_playing(&url, true);
+    eventually(|| rig.factory.slot_holding(&url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
+    let (index, slot) = rig.holder(&url);
+    let _ = index;
+    let directives = stage.release_under(rig.parts.clock.now_ms(), crate::pool::Pressure::Critical);
+    stage.apply(directives);
+    eventually(|| slot.calls().last() == Some(&SlotCall::Unload)).await;
+    let unloaded = stage.wakes();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert_eq!(stage.wakes(), unloaded, "no wake before the retry period");
+
+    tokio::time::timeout(std::time::Duration::from_secs(3), eventually(|| rig.factory.slot_holding(&url).is_some())).await.expect("the key never came back");
+    assert!(stage.wakes() > unloaded);
+}

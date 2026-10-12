@@ -400,7 +400,6 @@ pub fn assembly(dir: &Path, fetcher: Arc<MockFetcher>, factory: Arc<MockFactory>
         image_windows: Vec::new(),
         silent: false,
         watchdog: fast_watchdog(),
-        stats_interval: Duration::from_millis(10),
     }
 }
 

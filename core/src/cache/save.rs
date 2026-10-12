@@ -8,6 +8,7 @@ use tokio::io::AsyncWriteExt;
 const SAVE_BATCH: usize = 1000;
 
 pub fn mark_dirty(inner: &Arc<CacheShared>) {
+    inner.change.mark();
     inner.dirty.store(true, Ordering::SeqCst);
     if inner.persisting.swap(true, Ordering::SeqCst) {
         return;

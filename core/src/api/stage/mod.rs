@@ -10,6 +10,7 @@ use super::slots::{SlotCall, SlotRunner};
 use super::source::{MediaItem, PlaybackRoute};
 use super::types::Kind;
 use crate::cache::Clock;
+use crate::change::Change;
 use crate::hls::is_manifest_url;
 use crate::pages::PageKeys;
 use crate::pool::{Command, Ring};
@@ -17,10 +18,12 @@ use crate::prefetch::Prefetcher;
 use crate::session::{self, next_action, Action, Context, Election, Event, RecoveryState, WatchdogConfig};
 use std::collections::HashMap;
 use std::ops::Range;
-use std::sync::atomic::AtomicU64;
+use std::ops::{Deref, DerefMut};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 use tokio::runtime::Handle;
+use tokio::sync::watch;
 use super::guard::AbortOnDrop;
 
 pub struct StageParts {
@@ -32,8 +35,11 @@ pub struct StageParts {
     pub clock: Arc<dyn Clock>,
     pub watchdog: WatchdogConfig,
     pub silent: bool,
-    pub tick: Duration,
+    pub change: Arc<Change>,
 }
+
+const RETRY_MIN_MS: u64 = 250;
+const RETRY_MAX_MS: u64 = 5_000;
 
 struct Loaded {
     slot: usize,
@@ -56,6 +62,9 @@ struct State {
     positions: ResumePositions,
     window: Vec<Option<MediaItem>>,
     image_windows: HashMap<String, Vec<Vec<MediaItem>>>,
+    retried_at: u64,
+    retry_ms: u64,
+    is_restore_pending: bool,
 }
 
 struct Inner {
@@ -69,7 +78,10 @@ struct Inner {
     silent: bool,
     handle: Handle,
     tick: Mutex<Option<AbortOnDrop>>,
+    due: watch::Sender<Option<u64>>,
+    change: Arc<Change>,
     foreground_passes: AtomicU64,
+    wakes: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -99,9 +111,21 @@ impl State {
         commands
     }
 
+    fn unloaded_wanted(&self) -> impl Iterator<Item = &String> {
+        self.leases.keys().filter(|key| self.catalog.contains_key(*key) && !self.loaded.contains_key(*key))
+    }
+
+    fn has_pending_restore(&self) -> bool {
+        self.ring.is_restoring() || (!self.ring.is_background() && self.unloaded_wanted().next().is_some())
+    }
+
+    fn next_due(&self) -> Option<u64> {
+        let retry = self.has_pending_restore().then(|| self.retried_at.saturating_add(self.retry_ms));
+        self.ring.next_due().into_iter().chain(retry).min()
+    }
+
     fn restore_wanted(&mut self, now: u64) -> Vec<Command> {
-        let wanted: Vec<String> =
-            self.leases.keys().filter(|key| self.catalog.contains_key(*key) && !self.loaded.contains_key(*key)).cloned().collect();
+        let wanted: Vec<String> = self.unloaded_wanted().cloned().collect();
         let mut commands = Vec::new();
         for key in wanted {
             commands.extend(self.ring.touch(now, &key));
@@ -159,6 +183,9 @@ impl Stage {
             positions: ResumePositions::default(),
             window: Vec::new(),
             image_windows: HashMap::new(),
+            retried_at: 0,
+            retry_ms: RETRY_MIN_MS,
+            is_restore_pending: false,
         };
         let inner = Arc::new(Inner {
             state: Mutex::new(state),
@@ -171,11 +198,18 @@ impl Stage {
             silent: parts.silent,
             handle: handle.clone(),
             tick: Mutex::new(None),
+            due: watch::channel(None).0,
+            change: parts.change,
             foreground_passes: AtomicU64::new(0),
+            wakes: AtomicU64::new(0),
         });
-        let tick = handle.spawn(tick_loop(Arc::downgrade(&inner), parts.tick));
+        let tick = handle.spawn(tick_loop(Arc::downgrade(&inner), inner.due.subscribe()));
         *inner.tick.lock().unwrap_or_else(PoisonError::into_inner) = Some(AbortOnDrop::new(tick));
         Stage { inner }
+    }
+
+    pub fn wakes(&self) -> u64 {
+        self.inner.wakes.load(Ordering::Relaxed)
     }
 
     #[cfg(test)]
@@ -214,8 +248,8 @@ impl Stage {
         }
     }
 
-    fn state(&self) -> MutexGuard<'_, State> {
-        self.inner.state.lock().unwrap_or_else(PoisonError::into_inner)
+    fn state(&self) -> StateGuard<'_> {
+        StateGuard { guard: self.inner.state.lock().unwrap_or_else(PoisonError::into_inner), inner: &self.inner, is_changed: false }
     }
 
     fn now(&self) -> u64 {
@@ -325,19 +359,89 @@ impl Stage {
     }
 }
 
-async fn tick_loop(inner: Weak<Inner>, every: Duration) {
+async fn tick_loop(inner: Weak<Inner>, mut due: watch::Receiver<Option<u64>>) {
     loop {
-        tokio::time::sleep(every).await;
+        let wait = match *due.borrow_and_update() {
+            Some(at) => {
+                let Some(inner) = inner.upgrade() else { return };
+                Some(Duration::from_millis(at.saturating_sub(inner.clock.now_ms())))
+            }
+            None => None,
+        };
+        let is_due = match wait {
+            Some(wait) => tokio::select! {
+                () = tokio::time::sleep(wait) => true,
+                changed = due.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                    false
+                }
+            },
+            None => {
+                if due.changed().await.is_err() {
+                    return;
+                }
+                false
+            }
+        };
         let Some(inner) = inner.upgrade() else { return };
+        inner.wakes.fetch_add(1, Ordering::Relaxed);
+        if !is_due {
+            continue;
+        }
         let stage = Stage { inner };
         let commands = {
             let now = stage.now();
             let mut state = stage.state();
+            let is_pending = state.has_pending_restore();
             let mut commands = state.ring.tick(now);
             commands.extend(state.restore_wanted(now));
+            state.retry_ms = if is_pending && commands.is_empty() { state.retry_ms.saturating_mul(2).min(RETRY_MAX_MS) } else { RETRY_MIN_MS };
+            state.retried_at = now;
             commands
         };
         stage.dispatch(commands);
+    }
+}
+
+struct StateGuard<'a> {
+    guard: MutexGuard<'a, State>,
+    inner: &'a Inner,
+    is_changed: bool,
+}
+
+impl Deref for StateGuard<'_> {
+    type Target = State;
+
+    fn deref(&self) -> &State {
+        &self.guard
+    }
+}
+
+impl DerefMut for StateGuard<'_> {
+    fn deref_mut(&mut self) -> &mut State {
+        self.is_changed = true;
+        &mut self.guard
+    }
+}
+
+impl Drop for StateGuard<'_> {
+    fn drop(&mut self) {
+        if !self.is_changed {
+            return;
+        }
+        self.inner.change.mark();
+        let is_pending = self.guard.has_pending_restore();
+        if is_pending != self.guard.is_restore_pending {
+            self.guard.is_restore_pending = is_pending;
+            if is_pending {
+                self.guard.retried_at = self.inner.clock.now_ms();
+                self.guard.retry_ms = RETRY_MIN_MS;
+            }
+        }
+        let next = self.guard.next_due();
+        self.inner.due.send_if_modified(|due| std::mem::replace(due, next) != next);
     }
 }
 

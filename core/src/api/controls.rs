@@ -3,8 +3,10 @@ use super::hub::{Deliver, Hub, Subscription};
 use super::assemble::{pool_config, PoolSettings};
 use super::ports::{CacheControl, MemoryRelease, PoolControl, PrefetchControl, SettingsStore, TransportControl};
 use super::types::{Kind, MediaStats};
+use crate::change::Change;
 use crate::limits::{resolve, Limits};
 use crate::memory::{effective_ceiling, DeviceMemory, Ledger, ShareTuning};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use tokio::runtime::Handle;
 use tokio::sync::Mutex as AsyncMutex;
@@ -30,6 +32,8 @@ pub struct Controls {
     diagnostics: Mutex<Vec<String>>,
     published: Mutex<Option<MediaStats>>,
     stats_hub: Hub<MediaStats>,
+    change: Arc<Change>,
+    wakes: AtomicU64,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -37,7 +41,7 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Controls {
-    pub fn new(handle: Handle, ports: ControlPorts, defaults: Limits) -> Controls {
+    pub fn new(handle: Handle, ports: ControlPorts, defaults: Limits, change: Arc<Change>) -> Controls {
         Controls {
             ports,
             defaults,
@@ -45,7 +49,17 @@ impl Controls {
             diagnostics: Mutex::new(Vec::new()),
             published: Mutex::new(None),
             stats_hub: Hub::new(handle),
+            change,
+            wakes: AtomicU64::new(0),
         }
+    }
+
+    pub fn count_wake(&self) {
+        self.wakes.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn wakes(&self) -> u64 {
+        self.wakes.load(Ordering::Relaxed)
     }
 
     pub async fn limits(&self) -> Limits {
@@ -109,7 +123,13 @@ impl Controls {
 
     pub fn subscribe_stats(&self, deliver: Deliver<MediaStats>) -> Subscription {
         *locked(&self.published) = None;
-        self.stats_hub.subscribe(deliver)
+        let subscription = self.stats_hub.subscribe(deliver);
+        self.change.want();
+        subscription
+    }
+
+    pub fn has_stats_listener(&self) -> bool {
+        self.stats_hub.listener_count() > 0
     }
 
     pub async fn publish_stats(&self) {
@@ -145,6 +165,7 @@ impl Controls {
         let (limits, rejected) = resolve(self.defaults, saved.as_deref());
         if let Some(error) = rejected {
             locked(&self.diagnostics).push(format!("saved limits rejected: {error}"));
+            self.change.mark();
         }
         if limits != self.defaults {
             let _ = self.apply(limits).await;

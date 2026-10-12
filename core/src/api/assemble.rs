@@ -4,7 +4,8 @@ use super::ports::{CacheControl, PrefetchControl, SettingsStore, TransportContro
 use super::routes::Routes;
 use super::slots::{PlayerSlotFactory, SlotRunner};
 use super::stage::{Stage, StageParts};
-use crate::cache::{classify_kind, Cache, CacheStore, Clock, SystemClock};
+use crate::cache::{classify_kind, Cache, CacheStore, Clock, Options as CacheOptions, SystemClock};
+use crate::change::Change;
 use crate::fetch::Fetcher;
 use crate::identity::cache_key;
 use crate::limits::{Limits, LimitsError};
@@ -20,9 +21,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::runtime::Handle;
 
-const MIN_TICK_MS: u64 = 50;
-const MAX_TICK_MS: u64 = 5_000;
-const TICKS_PER_TRIM_DELAY: u64 = 4;
 const LOW_RAM_BELOW_MB: u32 = 3_072;
 const LOW_RAM_SLOTS: usize = 2;
 const LOW_RAM_REACH: usize = 0;
@@ -70,7 +68,6 @@ pub struct Assembly {
     pub image_windows: Vec<(String, PageWindow)>,
     pub silent: bool,
     pub watchdog: WatchdogConfig,
-    pub stats_interval: Duration,
 }
 
 pub struct Parts {
@@ -85,7 +82,7 @@ pub struct Parts {
     pub clock: Arc<dyn Clock>,
     pub defaults: Limits,
     pub device: DeviceMemory,
-    pub stats_interval: Duration,
+    pub change: Arc<Change>,
     pub pool: PoolSettings,
 }
 
@@ -148,7 +145,7 @@ impl PrefetchControl for Prefetcher {
 }
 
 pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
-    let Assembly { dir, fetcher, settings, factory, device, defaults, pool, namespace_headers, image_windows, silent, watchdog, stats_interval } = config;
+    let Assembly { dir, fetcher, settings, factory, device, defaults, pool, namespace_headers, image_windows, silent, watchdog } = config;
     #[cfg(test)]
     if let Some(delay) = super::test_support::assembly_delay(&dir) {
         tokio::time::sleep(delay).await;
@@ -157,7 +154,8 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
     let handle = Handle::current();
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let ledger = ledger_for(&defaults, device);
-    let cache = Cache::open(dir, defaults);
+    let change = Change::new();
+    let cache = Cache::open_with(dir, defaults, CacheOptions { change: change.clone(), ..CacheOptions::default() });
     let store: Arc<dyn ByteStore> = Arc::new(CacheStore::new(cache.clone(), Arc::new(classify_kind)));
     let proxy = Proxy::start(ProxyConfig { ledger: ledger.clone(), namespace_headers, ..ProxyConfig::from_limits(&defaults) }, fetcher, store)
         .await
@@ -169,7 +167,6 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
     let routes = Arc::new(Routes::new(proxy.clone(), Arc::new(cache.clone())));
     let places = Arc::new(Places::new(handle.clone()));
     let ring_config = pool_config(&defaults, device, &pool);
-    let tick = Duration::from_millis((ring_config.trim_delay_ms / TICKS_PER_TRIM_DELAY).clamp(MIN_TICK_MS, MAX_TICK_MS));
     let stage = Stage::new(
         handle.clone(),
         StageParts {
@@ -181,8 +178,8 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
             clock: clock.clone(),
             watchdog,
             silent,
-            tick,
+            change: change.clone(),
         },
     );
-    Ok(Parts { cache, proxy, prefetcher, stage, places, routes, settings, ledger, clock, defaults, device, stats_interval, pool })
+    Ok(Parts { cache, proxy, prefetcher, stage, places, routes, settings, ledger, clock, defaults, device, change, pool })
 }

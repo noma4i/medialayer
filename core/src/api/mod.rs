@@ -7,12 +7,12 @@ mod lane;
 mod placeholder;
 mod places;
 mod ports;
-mod pulse;
 mod routes;
 mod signals;
 mod slots;
 mod source;
 mod stage;
+mod stats_feed;
 mod types;
 
 pub use assemble::{assemble, ledger_for, pool_config, Assembly, Parts, PoolSettings};
@@ -23,12 +23,12 @@ pub use hub::{Deliver, Hub, Subscription};
 pub use placeholder::{placeholder_for, CacheState, Placeholder};
 pub use places::Places;
 pub use ports::{CacheControl, MemoryRelease, PoolControl, PrefetchControl, SettingsStore, SlotDirectives, TransportControl};
-pub use pulse::spawn_pulse;
 pub use routes::Routes;
 pub use signals::Signals;
 pub use slots::{PlayerSlot, PlayerSlotFactory, RetainLevel, SlotCall, SlotRunner, SlotSample};
 pub use source::{MediaItem, PlaybackRoute};
 pub use stage::{Stage, StageParts};
+pub use stats_feed::follow_stats;
 pub use types::{Kind, KindUsage, MediaState, MediaStats, Pressure, ReleaseCounts, SlotCounts};
 
 #[cfg(test)]

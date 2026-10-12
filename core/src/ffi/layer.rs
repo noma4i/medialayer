@@ -12,11 +12,9 @@ use crate::session::WatchdogConfig;
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use tokio::runtime::{Builder, Handle, Runtime};
 
 const WORKER_THREADS: usize = 2;
-const STATS_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(uniffi::Record)]
 pub struct OpenConfig {
@@ -129,7 +127,6 @@ impl MediaLayer {
             image_windows: config.image_windows.iter().map(Into::into).collect(),
             silent: config.silent,
             watchdog: WatchdogConfig::default(),
-            stats_interval: STATS_INTERVAL,
         };
         Ok(MediaLayer::assembling(runtime, assemble(assembly), config.memory_releaser))
     }

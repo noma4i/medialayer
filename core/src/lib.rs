@@ -3,6 +3,7 @@ uniffi::setup_scaffolding!();
 pub mod api;
 pub mod blurhash;
 pub mod cache;
+pub mod change;
 pub mod fetch;
 pub mod ffi;
 pub mod hls;

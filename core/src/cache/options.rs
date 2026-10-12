@@ -1,4 +1,5 @@
 use super::clock::{Clock, SystemClock};
+use crate::change::Change;
 use super::entry::Kind;
 use crate::limits::EvictionStrategy;
 use std::collections::HashMap;
@@ -15,6 +16,7 @@ pub struct Options {
     pub clock: Arc<dyn Clock>,
     pub chunk_size: usize,
     pub persist_delay: Duration,
+    pub change: Arc<Change>,
 }
 
 impl Default for Options {
@@ -25,6 +27,7 @@ impl Default for Options {
             clock: Arc::new(SystemClock),
             chunk_size: DEFAULT_CHUNK_SIZE,
             persist_delay: DEFAULT_PERSIST_DELAY,
+            change: Change::new(),
         }
     }
 }

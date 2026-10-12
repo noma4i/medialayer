@@ -49,7 +49,7 @@ fn rig_on(settings: Arc<FakeSettings>) -> Rig {
         pool_settings: PoolSettings::default(),
         release: release.clone(),
     };
-    let controls = Controls::new(Handle::current(), ports, Limits::default());
+    let controls = Controls::new(Handle::current(), ports, Limits::default(), crate::change::Change::new());
     Rig { cache, pool, prefetch, transport, settings, release, ledger, controls }
 }
 

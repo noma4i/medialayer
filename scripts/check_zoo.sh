@@ -179,6 +179,26 @@ for path in production:
         if "TEMPORARY" in line or re.search(r"\b(?:dbg|println|eprintln)!\(", strip_comments(line)):
             findings.append(f"Z5 {rel(path)}:{number} temporary or print code in production")
 
+# Z6 repeating timers and sleeps in the wrappers (INV-IDLE-05): each one needs an allowlist entry `periodic <path> <count>` with its period and owner.
+PERIODIC = {".swift": re.compile(r"addPeriodicTimeObserver|scheduledTimer|Timer\.publish|Task\.sleep"), ".kt": re.compile(r"postDelayed|(?<![.\w])delay\(|scheduleAtFixedRate|fixedRateTimer")}
+wrapper_roots = [root / "MediaLayer" / "Sources", root / "kotlin" / "src" / "main", root / "kotlin" / "ui" / "src" / "main"]
+periodic = {}
+for base in wrapper_roots:
+    for path in sorted(base.rglob("*")) if base.exists() else []:
+        if path.suffix not in (".swift", ".kt"):
+            continue
+        count = len(PERIODIC[path.suffix].findall(re.sub(r"//[^\n]*", "", path.read_text())))
+        if count:
+            periodic[str(path.relative_to(root))] = count
+for path, count in sorted(periodic.items()):
+    granted = next((int(key.split()[2]) for key in allowed if key.split()[:2] == ["periodic", path]), 0)
+    if count != granted:
+        findings.append(f"Z6 {path} has {count} repeating timer or sleep call(s), the allowlist grants {granted}")
+for key in allowed:
+    parts = key.split()
+    if parts[0] == "periodic" and parts[1] not in periodic:
+        findings.append(f"Z6 the allowlist grants {parts[2]} timers to {parts[1]} but it has none: remove the entry")
+
 if findings:
     print("zoo check found", len(findings), "problem(s):")
     for finding in findings:

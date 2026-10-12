@@ -19,3 +19,7 @@ spawn ffi/fetcher.rs 1 # closes the platform reader on the blocking pool after t
 spawn ffi/assembled.rs 1 # limits warm-up after assembly, ends with the read
 spawn ffi/layer.rs 1 # assemble on the new runtime, ends with the assembly and hands the result to Deferred
 spawn prefetch/runner.rs 1 # load jobs owned by prefetch::Owner through the cancel notify of every job
+periodic MediaLayer/Sources/MediaLayerUI/MediaAudio.swift 1 # progress sampling of a PLAYING audio cell every 250 ms (AudioSampling.interval), stops when paused, owner the audio cell task
+periodic MediaLayer/Sources/MediaLayerUI/AVQueuePlayerSlot.swift 1 # trace snapshot timer 0.5 s, only with ML_TRACE=1
+periodic MediaLayer/Sources/MediaLayerUI/URLSessionFetcher.swift 1 # one-shot ML_FETCH_DELAY_MS probe delay, debug only, not a period
+periodic kotlin/ui/src/main/kotlin/com/noma4i/medialayer/ui/MediaAudio.kt 1 # progress sampling of a PLAYING audio cell every 250 ms (PROGRESS_TICK_MS), stops when paused, owner the composable effect
