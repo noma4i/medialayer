@@ -261,6 +261,21 @@ async fn inv_idle_04_a_wanted_key_without_a_slot_wakes_nothing_until_an_event_gi
     eventually(|| rig.factory.slot_holding(&url).is_some()).await;
 }
 
+#[tokio::test]
+async fn inv_idle_04_a_foreground_restores_every_saved_slot_without_another_event() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    stage.replace_window(1, videos(3));
+    eventually(|| (0..3).all(|index| rig.factory.slot_holding(&url_of(index)).is_some())).await;
+
+    let directives = PoolControl::background(stage);
+    stage.apply(directives);
+    eventually(|| (0..3).filter(|index| rig.factory.slot_holding(&url_of(*index)).is_some()).count() == 1).await;
+    PoolControl::foreground(stage);
+
+    eventually(|| (0..3).all(|index| rig.factory.slot_holding(&url_of(index)).is_some())).await;
+}
+
 fn idle_watchdog(config: &mut crate::api::Assembly) {
     const HOUR: u64 = 3_600_000;
     config.watchdog = WatchdogConfig {
