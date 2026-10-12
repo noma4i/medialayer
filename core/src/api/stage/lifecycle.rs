@@ -10,7 +10,9 @@ impl PoolControl for Stage {
     }
 
     fn set_step(&self, step: Step) {
-        self.state().ring.set_step(step);
+        let mut state = self.state();
+        state.ring.set_step(step);
+        state.is_restore_requested = true;
     }
 
     fn release_under(&self, now_ms: u64, pressure: Pressure) -> Vec<Directive> {
@@ -37,6 +39,7 @@ impl PoolControl for Stage {
         let (commands, keys) = {
             let mut state = self.state();
             state.ring.foreground();
+            state.is_restore_requested = true;
             let orders = state.election.set_foreground(true);
             (state.commands_for(orders), state.loaded.keys().cloned().collect::<Vec<String>>())
         };

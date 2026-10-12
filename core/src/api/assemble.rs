@@ -179,6 +179,7 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
             watchdog,
             silent,
             change: change.clone(),
+            ledger: ledger.clone(),
         },
     );
     Ok(Parts { cache, proxy, prefetcher, stage, places, routes, settings, ledger, clock, defaults, device, change, pool })

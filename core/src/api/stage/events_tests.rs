@@ -231,8 +231,8 @@ async fn inv_idle_03_a_pending_trim_wakes_the_stage_at_its_deadline_and_not_befo
     assert!(stage.wakes() > armed, "the deadline woke the stage");
 }
 
-#[tokio::test]
-async fn inv_idle_04_a_wanted_key_that_lost_its_slot_returns_after_the_retry_period_and_not_by_polling() {
+#[tokio::test(start_paused = true)]
+async fn inv_idle_04_a_wanted_key_without_a_slot_wakes_nothing_until_an_event_gives_it_room() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
     let url = url_of(0);
@@ -240,15 +240,23 @@ async fn inv_idle_04_a_wanted_key_that_lost_its_slot_returns_after_the_retry_per
     stage.visible(video(&url), true);
     stage.set_playing(&url, true);
     eventually(|| rig.factory.slot_holding(&url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
-    let (index, slot) = rig.holder(&url);
-    let _ = index;
+    let (_, slot) = rig.holder(&url);
+
+    stage.set_step(crate::memory::Step::PlaceholdersOnly);
     let directives = stage.release_under(rig.parts.clock.now_ms(), crate::pool::Pressure::Critical);
     stage.apply(directives);
     eventually(|| slot.calls().last() == Some(&SlotCall::Unload)).await;
-    let unloaded = stage.wakes();
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    assert_eq!(stage.wakes(), unloaded, "no wake before the retry period");
+    for _ in 0..4 {
+        tokio::time::advance(std::time::Duration::from_millis(50)).await;
+    }
+    let settled = stage.wakes();
 
-    tokio::time::timeout(std::time::Duration::from_secs(3), eventually(|| rig.factory.slot_holding(&url).is_some())).await.expect("the key never came back");
-    assert!(stage.wakes() > unloaded);
+    for _ in 0..200 {
+        tokio::time::advance(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(stage.wakes(), settled, "10 s with a wanted key that has no slot and no event");
+    assert!(rig.factory.slot_holding(&url).is_none(), "nothing gave the key room");
+
+    stage.set_step(crate::memory::Step::Normal);
+    eventually(|| rig.factory.slot_holding(&url).is_some()).await;
 }

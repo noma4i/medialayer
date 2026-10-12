@@ -70,7 +70,7 @@ impl Ring {
             return None;
         }
         let trims = self.bindings.iter().flatten().filter(|binding| !binding.is_playing && binding.owner != super::ring::Holder::Pinned);
-        trims.map(|binding| binding.since.saturating_add(self.config.trim_delay_ms)).chain(self.hold.as_ref().and_then(|hold| hold.until)).min()
+        trims.map(|binding| binding.since.saturating_add(self.config.trim_delay_ms)).min()
     }
 
     pub fn is_restoring(&self) -> bool {
@@ -84,9 +84,6 @@ impl Ring {
     pub fn tick(&mut self, now: u64) -> Vec<Command> {
         if self.is_background {
             return Vec::new();
-        }
-        if self.hold.as_ref().is_some_and(|hold| hold.until.is_some_and(|until| now >= until)) {
-            self.hold = None;
         }
         let mut out = self.restore_one(now);
         let mut is_released = false;

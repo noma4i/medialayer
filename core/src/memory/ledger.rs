@@ -102,6 +102,10 @@ impl Ledger {
         self.0.freed.notify_waiters();
     }
 
+    pub fn freed(&self) -> &Notify {
+        &self.0.freed
+    }
+
     pub fn waiting(&self) -> usize {
         self.0.waiting.load(Ordering::SeqCst)
     }

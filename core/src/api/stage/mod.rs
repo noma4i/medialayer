@@ -12,6 +12,7 @@ use super::types::Kind;
 use crate::cache::Clock;
 use crate::change::Change;
 use crate::hls::is_manifest_url;
+use crate::memory::Ledger;
 use crate::pages::PageKeys;
 use crate::pool::{Command, Ring};
 use crate::prefetch::Prefetcher;
@@ -36,10 +37,8 @@ pub struct StageParts {
     pub watchdog: WatchdogConfig,
     pub silent: bool,
     pub change: Arc<Change>,
+    pub ledger: Ledger,
 }
-
-const RETRY_MIN_MS: u64 = 250;
-const RETRY_MAX_MS: u64 = 5_000;
 
 struct Loaded {
     slot: usize,
@@ -62,9 +61,8 @@ struct State {
     positions: ResumePositions,
     window: Vec<Option<MediaItem>>,
     image_windows: HashMap<String, Vec<Vec<MediaItem>>>,
-    retried_at: u64,
-    retry_ms: u64,
-    is_restore_pending: bool,
+    is_restore_requested: bool,
+    is_room_wanted: bool,
 }
 
 struct Inner {
@@ -120,8 +118,8 @@ impl State {
     }
 
     fn next_due(&self) -> Option<u64> {
-        let retry = self.has_pending_restore().then(|| self.retried_at.saturating_add(self.retry_ms));
-        self.ring.next_due().into_iter().chain(retry).min()
+        let attempt = (self.is_restore_requested && self.has_pending_restore()).then_some(0);
+        self.ring.next_due().into_iter().chain(attempt).min()
     }
 
     fn restore_wanted(&mut self, now: u64) -> Vec<Command> {
@@ -183,9 +181,8 @@ impl Stage {
             positions: ResumePositions::default(),
             window: Vec::new(),
             image_windows: HashMap::new(),
-            retried_at: 0,
-            retry_ms: RETRY_MIN_MS,
-            is_restore_pending: false,
+            is_restore_requested: false,
+            is_room_wanted: false,
         };
         let inner = Arc::new(Inner {
             state: Mutex::new(state),
@@ -203,7 +200,7 @@ impl Stage {
             foreground_passes: AtomicU64::new(0),
             wakes: AtomicU64::new(0),
         });
-        let tick = handle.spawn(tick_loop(Arc::downgrade(&inner), inner.due.subscribe()));
+        let tick = handle.spawn(tick_loop(Arc::downgrade(&inner), inner.due.subscribe(), parts.ledger));
         *inner.tick.lock().unwrap_or_else(PoisonError::into_inner) = Some(AbortOnDrop::new(tick));
         Stage { inner }
     }
@@ -257,6 +254,10 @@ impl Stage {
     }
 
     fn dispatch(&self, commands: Vec<Command>) {
+        self.dispatch_from(commands, false);
+    }
+
+    fn dispatch_from(&self, commands: Vec<Command>, is_restore_attempt: bool) {
         if commands.is_empty() {
             return;
         }
@@ -273,6 +274,9 @@ impl Stage {
         }
         for (slot, call) in calls {
             self.inner.runner.send(slot, call);
+        }
+        if !unloaded.is_empty() && !is_restore_attempt {
+            self.state().is_restore_requested = true;
         }
         for key in unloaded {
             self.inner.places.unloaded(&key);
@@ -359,8 +363,11 @@ impl Stage {
     }
 }
 
-async fn tick_loop(inner: Weak<Inner>, mut due: watch::Receiver<Option<u64>>) {
+async fn tick_loop(inner: Weak<Inner>, mut due: watch::Receiver<Option<u64>>, ledger: Ledger) {
     loop {
+        let freed = ledger.freed().notified();
+        tokio::pin!(freed);
+        freed.as_mut().enable();
         let wait = match *due.borrow_and_update() {
             Some(at) => {
                 let Some(inner) = inner.upgrade() else { return };
@@ -368,41 +375,53 @@ async fn tick_loop(inner: Weak<Inner>, mut due: watch::Receiver<Option<u64>>) {
             }
             None => None,
         };
-        let is_due = match wait {
-            Some(wait) => tokio::select! {
-                () = tokio::time::sleep(wait) => true,
-                changed = due.changed() => {
-                    if changed.is_err() {
-                        return;
-                    }
-                    false
-                }
-            },
-            None => {
-                if due.changed().await.is_err() {
+        let wake = tokio::select! {
+            () = async { tokio::time::sleep(wait.unwrap_or_default()).await }, if wait.is_some() => Wake::Due,
+            changed = due.changed() => {
+                if changed.is_err() {
                     return;
                 }
-                false
+                Wake::Changed
             }
+            () = &mut freed => Wake::Freed,
         };
         let Some(inner) = inner.upgrade() else { return };
         inner.wakes.fetch_add(1, Ordering::Relaxed);
-        if !is_due {
-            continue;
-        }
         let stage = Stage { inner };
+        match wake {
+            Wake::Changed => continue,
+            Wake::Freed => {
+                let is_waiting = {
+                    let state = stage.state();
+                    state.is_room_wanted && state.has_pending_restore()
+                };
+                if is_waiting {
+                    stage.state().is_restore_requested = true;
+                }
+                continue;
+            }
+            Wake::Due => {}
+        }
         let commands = {
             let now = stage.now();
             let mut state = stage.state();
-            let is_pending = state.has_pending_restore();
+            let is_requested = std::mem::take(&mut state.is_restore_requested);
             let mut commands = state.ring.tick(now);
-            commands.extend(state.restore_wanted(now));
-            state.retry_ms = if is_pending && commands.is_empty() { state.retry_ms.saturating_mul(2).min(RETRY_MAX_MS) } else { RETRY_MIN_MS };
-            state.retried_at = now;
+            if is_requested {
+                commands.extend(state.restore_wanted(now));
+            }
+            state.is_restore_requested = state.ring.is_restoring() && !commands.is_empty();
+            state.is_room_wanted = is_requested && commands.is_empty() && state.has_pending_restore();
             commands
         };
-        stage.dispatch(commands);
+        stage.dispatch_from(commands, true);
     }
+}
+
+enum Wake {
+    Due,
+    Changed,
+    Freed,
 }
 
 struct StateGuard<'a> {
@@ -432,14 +451,6 @@ impl Drop for StateGuard<'_> {
             return;
         }
         self.inner.change.mark();
-        let is_pending = self.guard.has_pending_restore();
-        if is_pending != self.guard.is_restore_pending {
-            self.guard.is_restore_pending = is_pending;
-            if is_pending {
-                self.guard.retried_at = self.inner.clock.now_ms();
-                self.guard.retry_ms = RETRY_MIN_MS;
-            }
-        }
         let next = self.guard.next_due();
         self.inner.due.send_if_modified(|due| std::mem::replace(due, next) != next);
     }
