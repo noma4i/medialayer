@@ -48,9 +48,9 @@ struct AnimatedFramesTests {
   func inv_image_06_every_frame_of_a_gif_keeps_its_transparency_and_the_loop_runs_for_the_sum_of_the_delays() throws {
     let frames = try #require(AnimatedFrames.decode(transparentGif(frames: 3, side: 16), maxPixel: 16))
 
-    #expect(frames.images.count == 3)
+    #expect(frames.frameCount == 3)
     #expect(abs(frames.duration - 0.3) < 0.001)
-    for image in frames.images {
+    for image in (0 ..< frames.frameCount).compactMap(frames.image(at:)) {
       #expect(alpha(of: image, x: 0, y: 0) == 0)
       #expect(alpha(of: image, x: 8, y: 8) == 255)
     }
@@ -69,7 +69,7 @@ struct AnimatedFramesTests {
     let data = try #require(container.data)
 
     #expect(container.type == .gif)
-    #expect(AnimatedFrames.decode(data, maxPixel: 8)?.images.count == 3)
+    #expect(AnimatedFrames.decode(data, maxPixel: 8)?.frameCount == 3)
   }
 
   @Test
@@ -79,5 +79,35 @@ struct AnimatedFramesTests {
     #expect(abs(frames.loopDuration(rate: 1) - 2) < 0.001)
     #expect(abs(frames.loopDuration(rate: 0.5) - 4) < 0.001)
     #expect(abs(frames.loopDuration(rate: 0) - 2) < 0.001)
+  }
+
+  @Test
+  func inv_image_06_a_cancelled_decode_stops_between_frames_and_returns_nothing() async {
+    let data = transparentGif(frames: 60, side: 16)
+    let task = Task { () -> AnimatedFrames? in
+      while !Task.isCancelled { await Task.yield() }
+      return await AnimatedFrames.load(data, maxPixel: 16)
+    }
+    task.cancel()
+
+    #expect(await task.value == nil)
+    var checks = 0
+    let stopped = AnimatedFrames.decode(data, maxPixel: 16, isCancelled: { checks += 1; return checks > 3 })
+    #expect(stopped == nil)
+    #expect(checks == 4)
+  }
+
+  @Test
+  func inv_image_06_a_gif_over_the_byte_budget_streams_a_bounded_window_and_keeps_its_loop() throws {
+    let data = transparentGif(frames: 40, side: 16, delay: 0.05)
+    let frames = try #require(AnimatedFrames.decode(data, maxPixel: 16, byteBudget: 16 * 16 * 4 * 5))
+    guard case let .streamed(stream) = frames.storage else { Issue.record("expected a streamed source"); return }
+
+    #expect(frames.frameCount == 40)
+    #expect(abs(frames.loopDuration(rate: 1) - 2) < 0.001)
+    for index in 0 ..< 40 { #expect(frames.image(at: index) != nil) }
+    #expect(stream.cachedCount <= FrameStream.window)
+    let inBudget = try #require(AnimatedFrames.decode(data, maxPixel: 16))
+    guard case .decoded = inBudget.storage else { Issue.record("expected decoded frames under the budget"); return }
   }
 }

@@ -76,8 +76,8 @@ extension GlobalMedia {
       let data = try fixture(name)
       let frames = try #require(AnimatedFrames.decode(data, maxPixel: side))
 
-      #expect(frames.images.count == 3)
-      for (index, image) in frames.images.enumerated() {
+      #expect(frames.frameCount == 3)
+      for (index, image) in (0 ..< frames.frameCount).compactMap(frames.image(at:)).enumerated() {
         let shown = overBlue(image)
         #expect(Array(shown[0 ..< 4]) == [0, 0, 255, 255])
         #expect(worstChannelError(shown, reference(data, index: index)) <= 3)
