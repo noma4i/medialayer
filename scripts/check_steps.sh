@@ -45,7 +45,9 @@ run_bounded() {
   return "$code"
 }
 
-# Step table engine. The library script defines `steps` (lines "lane|name|limit seconds|paths|command"), then calls
+# Step table engine. A step with a build slot gets its limit inside the slot ({limit} in the command, see check_bounded.sh)
+# and the limit plus CHECK_QUEUE_ALLOWANCE (3600 s) outside, so the wait for a slot never counts as test time.
+# The library script defines `steps` (lines "lane|name|limit seconds|paths|command"), then calls
 # run_checks "$@". Lane "cheap" runs first, serial, and stops everything on a failure. The other lanes run in parallel.
 # --fast keeps the steps whose paths prefix a changed file ("*" always): the same commands, a subset of the full run.
 # Lane "final" runs after the parallel lanes when they all passed (checks of their outputs). --list prints the selected steps. --only <lane> runs one lane.
@@ -75,7 +77,10 @@ run_step() {
   log="$logdir/$name.log"
   start=$SECONDS
   code=0
-  run_bounded "$limit" "$name" bash -c 'cd -- "$1" && shift && eval "$1"' _ "$root" "$command" > "$log" 2>&1 || code=$?
+  command="${command//\{limit\}/$limit}"
+  outer="$limit"
+  [[ "$command" == *build-slot* ]] && outer=$((limit + ${CHECK_QUEUE_ALLOWANCE:-3600}))
+  run_bounded "$outer" "$name" bash -c 'cd -- "$1" && shift && eval "$1"' _ "$root" "$command" > "$log" 2>&1 || code=$?
   waited="$(sed -n 's/.*got slot[0-9]* after \([0-9]*\)s.*/\1/p' "$log" | paste -sd+ - | bc 2> /dev/null)"
   printf '%-8s %-20s %-8s %4ss (queue for a build slot %ss)\n' "$lane" "$name" "$([ "$code" -eq 0 ] && echo ok || echo "FAIL($code)")" "$((SECONDS - start))" "${waited:-0}"
   if [ "$code" -ne 0 ]; then

@@ -142,8 +142,19 @@ expect_red_step_killed() {
 
 inv_check_05_a_step_past_its_limit_leaves_no_process() {
   local code=0
-  run_bounded 2 selftest bash -c 'set -m; sleep 601.7 & wait' 2> /dev/null || code=$?
+  bash "$here/check_bounded.sh" 2 selftest bash -c 'set -m; sleep 601.7 & wait' 2> /dev/null || code=$?
   expect_red_step_killed "$code"
+}
+
+inv_check_05_the_wait_for_a_build_slot_is_not_test_time() {
+  root="$work/engine"
+  mkdir -p "$root/target"
+  changed_files() { echo "$CHANGED"; }
+  steps=("final|queued|1|-|echo build-slot > /dev/null; sleep 3" "cheap|plain|1|*|sleep 3")
+  (run_checks --only final) > "$work/engine.out" 2>&1 \
+    || { echo "FAIL expected green: a step with a build slot must get the limit plus the queue allowance"; failed=1; }
+  steps=("cheap|plain|1|*|sleep 3")
+  (run_checks) > "$work/engine.out" 2>&1 && { echo "FAIL expected red: a step without a slot must stop at its limit"; failed=1; }
 }
 
 engine() {
