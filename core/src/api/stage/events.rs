@@ -1,6 +1,7 @@
 use super::Stage;
 use crate::api::guard::AbortOnDrop;
 use crate::api::slots::{SlotCall, SlotSample};
+use crate::api::types::MediaState;
 use crate::proxy::Readiness;
 use crate::session::{Action, Event, Sample};
 use std::sync::atomic::Ordering;
@@ -19,6 +20,7 @@ impl Stage {
         let Some(key) = self.key_at(slot) else { return };
         self.feed(&key, Event::Loaded);
         self.inner.places.ready(&key);
+        self.sync_foreground();
     }
 
     pub fn visual_ready(&self, slot: usize) {
@@ -26,6 +28,7 @@ impl Stage {
         if let Some(key) = self.key_at(slot) {
             self.inner.places.rendered(&key);
         }
+        self.sync_foreground();
     }
 
     pub fn stalled(&self, slot: usize, position_ms: u64) {
@@ -39,6 +42,7 @@ impl Stage {
         let Some(key) = self.key_at(slot) else { return };
         let event = if status > 0 { Event::HttpError { status } } else { Event::PlaybackFailed { reason: detail } };
         self.feed(&key, event);
+        self.sync_foreground();
     }
 
     pub fn ended(&self, slot: usize) {
@@ -46,6 +50,15 @@ impl Stage {
             self.feed(&key, Event::Pause);
             self.inner.places.ended(&key);
         }
+    }
+
+    pub(super) fn sync_foreground(&self) {
+        let playing = {
+            let state = self.state();
+            state.election.active().and_then(|lease| state.keys_by_lease.get(&lease).cloned())
+        };
+        let busy = playing.is_some_and(|key| self.inner.places.state(&key) == MediaState::Loading);
+        self.inner.prefetcher.set_foreground_busy(busy);
     }
 
     pub(super) fn feed(&self, key: &str, event: Event) {

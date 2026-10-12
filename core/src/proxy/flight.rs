@@ -306,6 +306,9 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
                 }
                 written += chunk.len() as u64;
                 flight.publish_written(written);
+                if expected == Some(written) {
+                    break;
+                }
             }
         }
     }

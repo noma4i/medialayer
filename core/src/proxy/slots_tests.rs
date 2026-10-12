@@ -170,3 +170,27 @@ async fn inv_proxy_10_random_tasks_never_hold_more_than_max_or_more_prefetch_tha
         assert_eq!((slots.in_use(), slots.waiting()), (0, 0), "round {round}: slots or waiters leaked");
     }
 }
+
+#[tokio::test]
+async fn inv_proxy_27_queued_player_requests_are_granted_before_a_waiting_prefetch() {
+    for reserved in [0, 1] {
+        let slots = PrioritySlots::new(3, reserved, 8);
+        let first = slots.acquire(Priority::Playback).await.unwrap();
+        let second = slots.acquire(Priority::Playback).await.unwrap();
+        let third = slots.acquire(Priority::Playback).await.unwrap();
+        let prefetch = tokio::spawn({ let slots = slots.clone(); async move { slots.acquire(Priority::Prefetch).await.unwrap() } });
+        tokio::time::sleep(SHORT).await;
+        let player = |slots: &PrioritySlots| tokio::spawn({ let slots = slots.clone(); async move { slots.acquire(Priority::Playback).await.unwrap() } });
+        let (a, b) = (player(&slots), player(&slots));
+        tokio::time::sleep(SHORT).await;
+
+        drop(first);
+        let a = timeout(Duration::from_secs(1), a).await.expect("the first queued player request was not granted").unwrap();
+        assert!(!prefetch.is_finished(), "reserved {reserved}: prefetch started while a player request waited");
+        drop(second);
+        let b = timeout(Duration::from_secs(1), b).await.expect("the second queued player request was not granted").unwrap();
+        assert!(!prefetch.is_finished(), "reserved {reserved}: prefetch started while a player request waited");
+        drop((third, a, b));
+        timeout(Duration::from_secs(1), prefetch).await.expect("prefetch starved").unwrap();
+    }
+}

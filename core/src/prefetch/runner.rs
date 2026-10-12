@@ -40,6 +40,7 @@ struct State {
     last: HashMap<WindowKey, (Vec<PrefetchJob>, Vec<Source>)>,
     running: HashMap<String, Job>,
     next_id: u64,
+    busy: bool,
 }
 
 impl State {
@@ -146,7 +147,7 @@ impl Prefetcher {
             image_windows: Mutex::new(HashMap::new()),
             gate: Gate::new(limits.max_concurrent as usize),
             clock,
-            state: Mutex::new(State { ledger, windows: HashMap::new(), last: HashMap::new(), running: HashMap::new(), next_id: 0 }),
+            state: Mutex::new(State { ledger, windows: HashMap::new(), last: HashMap::new(), running: HashMap::new(), next_id: 0, busy: false }),
             live: AtomicUsize::new(0),
             events: broadcast::channel(EVENT_CAPACITY).0,
             handle: Handle::current(),
@@ -231,6 +232,24 @@ impl Prefetcher {
         state.cancel_job(url);
     }
 
+    pub fn set_foreground_busy(&self, busy: bool) {
+        {
+            let mut state = self.shared.state();
+            if state.busy == busy {
+                return;
+            }
+            state.busy = busy;
+            if busy {
+                let running: Vec<String> = state.running.keys().cloned().collect();
+                for url in running {
+                    state.cancel_job(&url);
+                }
+                return;
+            }
+        }
+        self.resume();
+    }
+
     pub fn stop_all(&self) {
         Prefetcher::cancel_everything(&self.shared);
     }
@@ -274,6 +293,9 @@ impl Prefetcher {
     }
 
     fn start(&self, state: &mut State, source: Source, distance: usize, entering: bool, now: Duration, tuning: &Tuning) {
+        if state.busy {
+            return;
+        }
         if entering {
             state.ledger.counters.requested += 1;
         }

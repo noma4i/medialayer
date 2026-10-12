@@ -26,6 +26,7 @@ struct Script {
     hanging: HashSet<String>,
     sizes: HashMap<String, u64>,
     evicted: Vec<String>,
+    alive: Vec<String>,
 }
 
 #[derive(Default)]
@@ -37,19 +38,24 @@ pub struct MockLoader {
     stored_reads: AtomicUsize,
 }
 
-struct Active<'a>(&'a MockLoader);
+struct Active<'a>(&'a MockLoader, String);
 
 impl<'a> Active<'a> {
-    fn enter(loader: &'a MockLoader) -> Active<'a> {
+    fn enter(loader: &'a MockLoader, url: &str) -> Active<'a> {
         let now = loader.active.fetch_add(1, Ordering::SeqCst) + 1;
         loader.peak.fetch_max(now, Ordering::SeqCst);
-        Active(loader)
+        loader.script().alive.push(url.to_string());
+        Active(loader, url.to_string())
     }
 }
 
 impl Drop for Active<'_> {
     fn drop(&mut self) {
         self.0.active.fetch_sub(1, Ordering::SeqCst);
+        let mut script = self.0.script();
+        if let Some(position) = script.alive.iter().position(|url| *url == self.1) {
+            script.alive.remove(position);
+        }
     }
 }
 
@@ -91,6 +97,10 @@ impl MockLoader {
         self.calls().into_iter().map(|call| call.url).collect()
     }
 
+    pub fn alive(&self) -> Vec<String> {
+        self.script().alive.clone()
+    }
+
     pub fn active(&self) -> usize {
         self.active.load(Ordering::SeqCst)
     }
@@ -108,7 +118,7 @@ impl MockLoader {
     }
 
     async fn run(&self, url: &str, fetch: Fetch, priority: Priority) -> Result<u64, LoadError> {
-        let _active = Active::enter(self);
+        let _active = Active::enter(self, url);
         let (failing, hanging, bytes) = {
             let mut script = self.script();
             script.calls.push(Call { url: url.to_string(), fetch, priority });

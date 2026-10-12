@@ -3,7 +3,7 @@ use super::*;
 use crate::limits::{LeadingChunks, Limits, LimitsError, MIB};
 use std::collections::{HashMap, HashSet};
 
-const POLICY: [usize; 3] = [3, 2, 1];
+const POLICY: [usize; 2] = [2, 1];
 
 fn master(item: usize) -> String {
     format!("https://o.test/v{item}/master.m3u8")
@@ -63,7 +63,7 @@ async fn inv_prefetch_11_an_item_at_distance_d_gets_the_chunks_of_its_distance_a
     settle(&rig, &mut events, 9).await;
 
     let counts: Vec<usize> = (1..10).map(|item| requested(&rig, item)).collect();
-    assert_eq!(counts, [3, 2, 1, 1, 1, 1, 1, 1, 1]);
+    assert_eq!(counts, [2, 1, 1, 1, 1, 1, 1, 1, 1]);
     assert_eq!(requested(&rig, 0), 0);
 }
 
@@ -119,8 +119,8 @@ async fn inv_prefetch_14_chunks_go_by_distance_first_and_chunk_index_second() {
 
     let order: Vec<String> = rig.loader.urls();
     let expected = [
-        master(1), chunk(1, 0), chunk(1, 1), chunk(1, 2),
-        master(2), chunk(2, 0), chunk(2, 1),
+        master(1), chunk(1, 0), chunk(1, 1),
+        master(2), chunk(2, 0),
         master(3), chunk(3, 0),
     ];
     assert_eq!(order, expected);
@@ -136,7 +136,7 @@ async fn inv_prefetch_15_the_init_segment_loads_once_before_the_first_chunk_and_
     rig.prefetcher.set_window(0, vec![None, Some(video(&master(1)))]);
 
     let init = "https://o.test/v1/init.mp4";
-    assert_eq!(rig.loader.urls(), [master(1), init.to_string(), chunk(1, 0), chunk(1, 1), chunk(1, 2)]);
+    assert_eq!(rig.loader.urls(), [master(1), init.to_string(), chunk(1, 0), chunk(1, 1)]);
 }
 
 #[test]
@@ -155,8 +155,8 @@ fn inv_prefetch_16_an_invalid_chunk_list_or_budget_is_an_error_that_names_the_ke
         let error = Limits::decode(Limits::default(), text).expect_err(text);
         assert!(error.to_string().contains(key), "{text}: {error}");
     }
-    let limits = Limits::decode(Limits::default(), "leading_chunks=4, 2,1\nprefetch_budget_mib=512").unwrap();
-    assert_eq!(limits.leading_chunks.to_vec(), [4, 2, 1]);
+    let limits = Limits::decode(Limits::default(), "leading_chunks=2, 2,1\nprefetch_budget_mib=512").unwrap();
+    assert_eq!(limits.leading_chunks.to_vec(), [2, 2, 1]);
     assert_eq!(LeadingChunks::new(&[]), Err(LimitsError::LeadingChunks { reason: "must not be empty" }));
 }
 
@@ -206,11 +206,11 @@ async fn inv_prefetch_17_a_chunk_that_would_be_the_farthest_over_the_budget_is_n
         outcomes.insert(settled.url, settled.outcome);
     }
 
-    assert_eq!(outcomes[&master(1)], Outcome::OverBudget);
+    assert_eq!(outcomes[&master(1)], Outcome::Loaded);
     assert_eq!(outcomes[&master(2)], Outcome::OverBudget);
     assert_eq!(outcomes[&master(3)], Outcome::OverBudget);
     let urls = rig.loader.urls();
-    assert!(urls.contains(&chunk(1, 1)) && !urls.contains(&chunk(1, 2)) && !urls.contains(&chunk(2, 0)) && !urls.contains(&chunk(3, 0)));
+    assert!(urls.contains(&chunk(1, 1)) && !urls.contains(&chunk(2, 0)) && !urls.contains(&chunk(3, 0)));
     assert!(rig.prefetcher.held_bytes() <= 2 * MIB);
 }
 
@@ -240,4 +240,50 @@ async fn inv_prefetch_19_after_the_loads_settle_the_prefetcher_holds_no_task_and
 
     assert_eq!(rig.loader.urls().len(), calls);
     assert_eq!(rig.prefetcher.live_tasks(), 0);
+}
+
+#[tokio::test]
+async fn inv_prefetch_20_when_the_active_item_changes_no_request_of_a_departed_item_stays_alive() {
+    let rig = rig_for(12, 8, |limits| limits.prefetch_to = 3);
+    rig.loader.hang_all();
+    rig.prefetcher.set_window(0, feed(12));
+    eventually(|| rig.loader.alive().len() == 3).await;
+
+    rig.prefetcher.set_window(5, feed(12));
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let alive: HashSet<String> = rig.loader.alive().into_iter().collect();
+    assert!(alive.is_subset(&[master(6), master(7), master(8)].into_iter().collect()), "{alive:?}");
+    assert!(!alive.is_empty());
+}
+
+#[tokio::test]
+async fn inv_prefetch_21_while_the_playing_item_has_no_first_frame_nothing_starts_and_everything_alive_stops() {
+    let rig = rig_for(8, 8, |limits| limits.prefetch_to = 3);
+    let mut events = rig.prefetcher.settled();
+    rig.prefetcher.set_window(0, feed(8));
+    settle(&rig, &mut events, 3).await;
+    let before = rig.loader.urls().len();
+
+    rig.prefetcher.set_foreground_busy(true);
+    rig.prefetcher.set_window(1, feed(8));
+    eventually(|| rig.prefetcher.live_tasks() == 0).await;
+    assert_eq!(rig.loader.urls().len(), before, "a request started while the playing item was busy");
+    assert_eq!(rig.loader.alive().len(), 0);
+
+    rig.prefetcher.set_foreground_busy(false);
+    settle(&rig, &mut events, 2).await;
+    let after: Vec<String> = rig.loader.urls().split_off(before);
+    assert_eq!(after, [chunk(2, 1), master(4), chunk(4, 0)]);
+}
+
+#[tokio::test]
+async fn inv_prefetch_21_a_busy_signal_cancels_the_requests_that_are_in_flight() {
+    let rig = rig_for(8, 8, |limits| limits.prefetch_to = 3);
+    rig.loader.hang_all();
+    rig.prefetcher.set_window(0, feed(8));
+    eventually(|| rig.loader.alive().len() == 3).await;
+
+    rig.prefetcher.set_foreground_busy(true);
+    eventually(|| rig.loader.alive().is_empty() && rig.prefetcher.live_tasks() == 0).await;
 }

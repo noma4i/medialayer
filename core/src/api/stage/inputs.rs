@@ -71,6 +71,7 @@ impl Stage {
             }
         };
         self.dispatch(commands);
+        self.sync_foreground();
     }
 
     pub fn set_peeking(&self, key: &str, peeking: bool) {
@@ -170,6 +171,7 @@ impl Stage {
         self.inner.handle.spawn(async move {
             let is_cached = inner.routes.is_cached(&url, &headers).await;
             inner.places.declared(&url, is_cached);
+            Stage { inner }.sync_foreground();
         });
     }
 

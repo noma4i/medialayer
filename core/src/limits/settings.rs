@@ -62,7 +62,7 @@ impl Default for Limits {
             memory_budget: 256 * MIB,
             slots: 3,
             prefetch_from: 1,
-            prefetch_to: 5,
+            prefetch_to: 3,
             leading_chunks: LeadingChunks::default(),
             prefetch_budget_mib: 64,
             timeout_seconds: 30,

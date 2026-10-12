@@ -1,7 +1,7 @@
 use crate::api::slots::SlotCall;
 use crate::api::source::MediaItem;
 use crate::api::test_support::{eventually, eventually_async, rig, rig_with, url_of, video, videos};
-use crate::api::types::Kind;
+use crate::api::types::{Kind, MediaState};
 use crate::fetch::mock::Script;
 use crate::identity::cache_key;
 
@@ -170,6 +170,28 @@ async fn inv_api_04_the_window_also_drives_prefetch_ahead_of_the_active_page() {
     }
 
     rig.parts.stage.replace_window(0, videos(8));
+
+    eventually_async(|| async { rig.parts.cache.contains(&format!("{}#0", url_of(2))).await }).await;
+    assert_eq!(rig.fetcher.calls_for(&url_of(7)), 0);
+}
+
+#[tokio::test]
+async fn inv_prefetch_21_the_window_prefetches_only_after_the_playing_item_has_its_first_frame() {
+    let rig = rig().await;
+    for page in 0..8 {
+        rig.fetcher.route(&url_of(page), Script::ok(vec![1; 2 * 1024 * 1024]));
+    }
+    let stage = &rig.parts.stage;
+    stage.visible(video(&url_of(0)), true);
+    stage.set_playing(&url_of(0), true);
+    eventually(|| rig.parts.places.state(&url_of(0)) == MediaState::Loading).await;
+
+    stage.replace_window(0, videos(8));
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    assert_eq!((1..4).map(|page| rig.fetcher.calls_for(&url_of(page))).sum::<usize>(), 0);
+
+    eventually(|| rig.factory.slot_holding(&url_of(0)).is_some()).await;
+    stage.ready(rig.holder(&url_of(0)).0 as usize);
 
     eventually_async(|| async { rig.parts.cache.contains(&format!("{}#0", url_of(2))).await }).await;
     assert_eq!(rig.fetcher.calls_for(&url_of(7)), 0);

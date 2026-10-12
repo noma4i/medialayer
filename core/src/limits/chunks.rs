@@ -2,7 +2,7 @@ use super::settings::LimitsError;
 use serde::{Deserialize, Serialize};
 
 const MAX_ENTRIES: usize = 8;
-const MAX_CHUNKS: u32 = 8;
+const MAX_CHUNKS: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "Vec<u32>", into = "Vec<u32>")]
@@ -23,7 +23,7 @@ impl LeadingChunks {
             return fail("has more than 8 entries");
         }
         if values.iter().any(|value| !(1..=MAX_CHUNKS).contains(value)) {
-            return fail("entries must be between 1 and 8");
+            return fail("entries must be between 1 and 2, the owner cap");
         }
         if values.windows(2).any(|pair| pair[1] > pair[0]) {
             return fail("must not grow with the distance");
@@ -47,7 +47,7 @@ impl LeadingChunks {
 
 impl Default for LeadingChunks {
     fn default() -> Self {
-        LeadingChunks::new(&[3, 2, 1]).expect("the default list is valid")
+        LeadingChunks::new(&[2, 1]).expect("the default list is valid")
     }
 }
 

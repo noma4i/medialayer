@@ -32,7 +32,7 @@ impl Want {
             Want::Evict => "one of :lru, :fifo, :lfu, :largest_first or expire_after <duration>",
             Want::Headers => "a list of symbols such as [:authorization]",
             Want::Range => "a range such as 1...3",
-            Want::Chunks => "a list of 1 to 8 chunk counts between 1 and 8 that never grow, such as [3, 2, 1]",
+            Want::Chunks => "a list of up to 8 chunk counts, each 1 or 2 (the owner cap), that never grow, such as [2, 1]",
         }
     }
 

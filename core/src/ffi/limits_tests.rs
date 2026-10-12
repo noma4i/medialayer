@@ -11,7 +11,7 @@ fn inv_limits_06_every_limit_survives_the_trip_across_the_bridge_types() {
         slots: 4,
         prefetch_from: 1,
         prefetch_to: 6,
-        leading_chunks: LeadingChunks::new(&[4, 2, 1]).unwrap(),
+        leading_chunks: LeadingChunks::new(&[2, 2, 1]).unwrap(),
         prefetch_budget_mib: 96,
         timeout_seconds: 45,
         max_concurrent: 5,

@@ -4,7 +4,7 @@ use crate::spec::{CacheSpec, Evict as SpecEvict, ImageSpec, MediaSpec, PoolSpec,
 
 fn spec() -> MediaSpec {
     let mut video = VideoSpec::new("moment_video");
-    video.prefetch = PrefetchSpec { from: 1, to: 4, chunks: crate::limits::LeadingChunks::new(&[4, 2]).unwrap() };
+    video.prefetch = PrefetchSpec { from: 1, to: 4, chunks: crate::limits::LeadingChunks::new(&[2, 2]).unwrap() };
     video.pool = PoolSpec { slots: 4, reach: 2, hold_off: 5, trim_delay: 60, low_ram_slots: Some(3), low_ram_reach: Some(1) };
     let mut second = VideoSpec::new("chat_video");
     second.pool.slots = 9;

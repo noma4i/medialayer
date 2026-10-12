@@ -1084,3 +1084,52 @@ async fn inv_proxy_21_a_range_of_an_origin_that_ignores_ranges_starts_answering_
     tokio::io::AsyncReadExt::read_to_end(&mut stream, &mut rest).await.unwrap();
     assert!(rest.ends_with(&data[2..]));
 }
+
+#[tokio::test]
+async fn inv_proxy_25_a_download_that_received_every_byte_is_committed_even_when_the_last_client_leaves_before_the_stream_ends() {
+    let rig = rig().await;
+    rig.fetcher.route("https://o.test/last.ts", Script::ok(pattern(4000, 5)).chunked(1000).end_delay(Duration::from_millis(400)));
+    let target = path_of(&rig.proxy.url_for("https://o.test/last.ts", &HashMap::new()).unwrap());
+    let port = rig.proxy.port();
+
+    let mut stream = open(port, "GET", &target, &[]).await;
+    assert!(read_at_least(&mut stream, 4000).await >= 4000);
+    drop(stream);
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    assert_eq!(rig.store.commits(), 1);
+    let again = get(port, &target).await;
+    assert_eq!((again.status, again.body), (200, pattern(4000, 5)));
+    assert_eq!(rig.fetcher.calls_for("https://o.test/last.ts"), 1);
+}
+
+#[tokio::test]
+async fn inv_proxy_26_a_player_request_does_not_wait_for_prefetch_flights_in_progress() {
+    let rig = rig_with(config(2)).await;
+    for index in 0..3 {
+        rig.fetcher.route(&format!("https://o.test/p{index}.ts"), Script::ok(pattern(100, index)).head_delay(Duration::from_millis(400)));
+    }
+    for name in ["alone", "contended"] {
+        rig.fetcher.route(&format!("https://o.test/{name}.ts"), Script::ok(pattern(100, 9)).head_delay(Duration::from_millis(50)));
+    }
+    let port = rig.proxy.port();
+    let timed = |name: &'static str| {
+        let target = path_of(&rig.proxy.url_for(&format!("https://o.test/{name}.ts"), &HashMap::new()).unwrap());
+        async move {
+            let started = std::time::Instant::now();
+            let reply = get(port, &target).await;
+            assert_eq!(reply.status, 200);
+            started.elapsed()
+        }
+    };
+    let alone = timed("alone").await;
+    for index in 0..3 {
+        let proxy = rig.proxy.clone();
+        tokio::spawn(async move { proxy.fetch_into_store(&format!("https://o.test/p{index}.ts"), &HashMap::new(), Priority::Prefetch).await });
+    }
+    assert!(eventually(|| rig.fetcher.calls_for("https://o.test/p0.ts") == 1).await);
+
+    let contended = timed("contended").await;
+
+    assert!(contended < alone + Duration::from_millis(150), "player request took {contended:?} against {alone:?} alone");
+}

@@ -161,10 +161,10 @@ struct MediaLayerBridgeTests {
   @Test
   func inv_prefetch_16_theChunkPolicyAndTheByteBudgetCrossTheBridgeAndAWrongListIsRefusedWithItsKey() async throws {
     let limits = defaultLimits()
-    #expect(limits.leadingChunks == [3, 2, 1])
+    #expect(limits.leadingChunks == [2, 1])
     #expect(limits.prefetchBudgetMib == 64)
-    let parsed = try specDefaults(json: #"{"cache":{"prefetch_budget_mib":96},"videos":[{"name":"clip","prefetch":{"from":1,"to":4,"chunks":[4,2]}}]}"#)
-    #expect(parsed.defaults.leadingChunks == [4, 2])
+    let parsed = try specDefaults(json: #"{"cache":{"prefetch_budget_mib":96},"videos":[{"name":"clip","prefetch":{"from":1,"to":4,"chunks":[2,2]}}]}"#)
+    #expect(parsed.defaults.leadingChunks == [2, 2])
     #expect(parsed.defaults.prefetchBudgetMib == 96)
     #expect(throws: MediaError.self) { try specDefaults(json: #"{"videos":[{"name":"clip","prefetch":{"chunks":[1,2]}}]}"#) }
 

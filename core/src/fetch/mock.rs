@@ -37,6 +37,7 @@ pub struct Script {
     pub chunk_size: usize,
     pub head_delay: Duration,
     pub chunk_delay: Duration,
+    pub end_delay: Duration,
     pub cut_after: Option<u64>,
     pub hang: bool,
     pub ignore_range: bool,
@@ -61,6 +62,7 @@ impl Script {
             chunk_size: 16 * 1024,
             head_delay: Duration::ZERO,
             chunk_delay: Duration::ZERO,
+            end_delay: Duration::ZERO,
             cut_after: None,
             hang: false,
             ignore_range: false,
@@ -91,6 +93,11 @@ impl Script {
 
     pub fn chunk_delay(mut self, delay: Duration) -> Self {
         self.chunk_delay = delay;
+        self
+    }
+
+    pub fn end_delay(mut self, delay: Duration) -> Self {
+        self.end_delay = delay;
         self
     }
 
@@ -144,6 +151,7 @@ struct BodyCursor {
     served: u64,
     script_chunk: usize,
     chunk_delay: Duration,
+    end_delay: Duration,
     cut_after: Option<u64>,
     broken: bool,
     live: Arc<AtomicUsize>,
@@ -152,7 +160,13 @@ struct BodyCursor {
 }
 
 async fn next_chunk(mut cursor: BodyCursor) -> Option<(Result<Bytes, FetchError>, BodyCursor)> {
-    if cursor.broken || cursor.position >= cursor.end {
+    if cursor.broken {
+        return None;
+    }
+    if cursor.position >= cursor.end {
+        if !cursor.end_delay.is_zero() {
+            tokio::time::sleep(cursor.end_delay).await;
+        }
         return None;
     }
     if !cursor.chunk_delay.is_zero() {
@@ -275,6 +289,7 @@ impl Fetcher for MockFetcher {
             served: 0,
             script_chunk: script.chunk_size,
             chunk_delay: script.chunk_delay,
+            end_delay: script.end_delay,
             cut_after: script.cut_after,
             broken: false,
             live: self.live.clone(),

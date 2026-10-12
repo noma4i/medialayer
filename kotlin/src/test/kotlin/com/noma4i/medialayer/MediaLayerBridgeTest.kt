@@ -291,10 +291,10 @@ class MediaLayerBridgeTest {
   @Test
   fun inv_prefetch_16_theChunkPolicyAndTheByteBudgetCrossTheBridgeAndAWrongListIsRefusedWithItsKey() = runBlocking {
     val limits = defaultLimits()
-    assertEquals(listOf(3u, 2u, 1u), limits.leadingChunks)
+    assertEquals(listOf(2u, 1u), limits.leadingChunks)
     assertEquals(64u, limits.prefetchBudgetMib)
-    val parsed = specDefaults("""{"cache":{"prefetch_budget_mib":96},"videos":[{"name":"clip","prefetch":{"from":1,"to":4,"chunks":[4,2]}}]}""")
-    assertEquals(listOf(4u, 2u), parsed.defaults.leadingChunks)
+    val parsed = specDefaults("""{"cache":{"prefetch_budget_mib":96},"videos":[{"name":"clip","prefetch":{"from":1,"to":4,"chunks":[2,2]}}]}""")
+    assertEquals(listOf(2u, 2u), parsed.defaults.leadingChunks)
     assertEquals(96u, parsed.defaults.prefetchBudgetMib)
     try {
       specDefaults("""{"videos":[{"name":"clip","prefetch":{"chunks":[1,2]}}]}""")

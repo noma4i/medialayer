@@ -17,7 +17,7 @@ Every size, window, timeout and concurrency value is a setting with a default. A
 | `largest_first` | The biggest entry |
 | `expire_after` | Entries older than the given age, then the oldest |
 
-The strategy is set once for the cache and can be overridden per media kind (`image`, `video`, `audio`). The same options, with defaults, are written in the `.mdl` file: budget 4 GiB, min 64 MiB, shrink_to 90%, strategy `lru`, memory 256 MiB, timeout 30 seconds, 2 concurrent prefetch loads, repeat skip window 60 seconds and 500 entries, prefetch chunks 3, 2, 1 by distance and a prefetch budget of 64 MiB. Entries being read or written are never evicted. If new data still does not fit, the call fails with `NotEnoughSpace`.
+The strategy is set once for the cache and can be overridden per media kind (`image`, `video`, `audio`). The same options, with defaults, are written in the `.mdl` file: budget 4 GiB, min 64 MiB, shrink_to 90%, strategy `lru`, memory 256 MiB, timeout 30 seconds, 2 concurrent prefetch loads, repeat skip window 60 seconds and 500 entries, prefetch chunks 2, 1 by distance and a prefetch budget of 64 MiB. Entries being read or written are never evicted. If new data still does not fit, the call fails with `NotEnoughSpace`.
 
 ## Controls
 

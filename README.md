@@ -54,7 +54,7 @@ end
 
 video :moment_video do
   cover :coverUrl
-  prefetch from: 1, to: 5, chunks: [3, 2, 1]
+  prefetch from: 1, to: 3, chunks: [2, 1]
 end
 
 image :avatar do

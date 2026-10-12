@@ -30,7 +30,7 @@ fn invalid_sources_are_reported_with_line_column_and_message() {
         ("cache do\n  budget 1.mib\nend\n", expected(1, 1, "cache: budget 1048576 is below min_budget 67108864")),
         ("cache do\n  shrink_to 0.percent\nend\n", expected(1, 1, "cache: shrink_to must be in (0, 1]")),
         ("video :a do\n  prefetch from: 5, to: 2\nend\n", expected(1, 1, "video `a`: prefetch window from 5 is above to 2")),
-        ("video :a do\n  prefetch chunks: [1, 2]\nend\n", expected(2, 20, "`chunks:` must be a list of 1 to 8 chunk counts between 1 and 8 that never grow, such as [3, 2, 1]")),
+        ("video :a do\n  prefetch chunks: [1, 2]\nend\n", expected(2, 20, "`chunks:` must be a list of up to 8 chunk counts, each 1 or 2 (the owner cap), that never grow, such as [2, 1]")),
         ("cache do\n  prefetch_budget 600.mib\nend\n", expected(1, 1, "cache: prefetch_budget_mib must be between 1 and 512")),
         ("image :a do\n  size 0, 288\nend\n", expected(1, 1, "`a` has a zero width or height")),
         (
