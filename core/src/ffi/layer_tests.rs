@@ -165,7 +165,7 @@ fn inv_ffi_02_declarations_reach_the_platform_slots_and_the_player_events_move_t
     layer.player_events().ready(index);
 
     caller.block_on(eventually(|| seen.0.lock().unwrap().last() == Some(&MediaState::Ready)));
-    assert!(slot.calls().contains(&SlotCall::Mute));
+    caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Mute)));
     layer.release_all();
     caller.block_on(eventually(|| slot.calls().last() == Some(&SlotCall::Unload)));
 }
