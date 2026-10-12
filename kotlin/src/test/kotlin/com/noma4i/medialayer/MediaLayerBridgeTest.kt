@@ -289,6 +289,30 @@ class MediaLayerBridgeTest {
   }
 
   @Test
+  fun inv_prefetch_16_theChunkPolicyAndTheByteBudgetCrossTheBridgeAndAWrongListIsRefusedWithItsKey() = runBlocking {
+    val limits = defaultLimits()
+    assertEquals(listOf(3u, 2u, 1u), limits.leadingChunks)
+    assertEquals(64u, limits.prefetchBudgetMib)
+    val parsed = specDefaults("""{"cache":{"prefetch_budget_mib":96},"videos":[{"name":"clip","prefetch":{"from":1,"to":4,"chunks":[4,2]}}]}""")
+    assertEquals(listOf(4u, 2u), parsed.defaults.leadingChunks)
+    assertEquals(96u, parsed.defaults.prefetchBudgetMib)
+    try {
+      specDefaults("""{"videos":[{"name":"clip","prefetch":{"chunks":[1,2]}}]}""")
+      fail("expected MediaException.InvalidSpec")
+    } catch (error: MediaException.InvalidSpec) {
+      assertTrue(error.detail.contains("leading_chunks"))
+    }
+
+    val media = open(MemorySettings())
+    try {
+      media.setLimits(defaultLimits().copy(leadingChunks = listOf(3u, 9u)))
+      fail("expected MediaException.InvalidLimits")
+    } catch (error: MediaException.InvalidLimits) {
+      assertTrue(error.detail.contains("leading_chunks"))
+    }
+  }
+
+  @Test
   fun statsFlowDeliversTheCurrentStats() = runBlocking {
     val media = open(MemorySettings())
     val collected = async { withTimeout(5000) { media.statsFlow().first() } }
