@@ -6,7 +6,7 @@ use super::route::{
 };
 use super::slots::Priority;
 use crate::fetch::{header_value, FetchError, Request};
-use crate::hls::{is_manifest_url, is_multivariant, rewrite_playlist};
+use crate::hls::{is_manifest_url, is_multivariant, keep_first_variant, rewrite_playlist};
 use crate::memory::Reservation;
 use bytes::Bytes;
 use futures_util::{stream, Stream, StreamExt};
@@ -185,7 +185,7 @@ fn playlist_response(inner: &ProxyShared, target: &str, bytes: &[u8], headers: &
     let source = String::from_utf8_lossy(bytes);
     let absolute = absolutize_playlist(&source, target);
     inner.inherit_headers(&playlist_references(&absolute), headers);
-    let body = rewrite_playlist(&absolute);
+    let body = rewrite_playlist(&keep_first_variant(&absolute));
     let headers = vec![("content-type", PLAYLIST_TYPE.to_string()), ("content-length", body.len().to_string())];
     respond(200, headers, full(Bytes::from(body)), head_only)
 }

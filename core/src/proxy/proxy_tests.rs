@@ -130,6 +130,19 @@ async fn inv_proxy_03_first_pass_tees_into_the_store_and_keeps_playlists_raw() {
 }
 
 #[tokio::test]
+async fn inv_proxy_24_a_master_playlist_reaches_the_player_with_its_first_variant_only() {
+    let rig = rig().await;
+    let ladder = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1280x720\nhttps://o.test/hls/media.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=6000000,RESOLUTION=1920x1080\nhttps://o.test/hls/hd.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360\nhttps://o.test/hls/sd.m3u8\n";
+    rig.fetcher.route(MASTER, Script::ok(ladder.as_bytes().to_vec()));
+    let master_url = rig.proxy.url_for(MASTER, &HashMap::new()).expect("proxy url");
+    let master = get(rig.proxy.port(), &path_of(&master_url)).await;
+    assert_eq!(master.status, 200);
+    let text = master.text();
+    assert_eq!(text.matches("#EXT-X-STREAM-INF").count(), 1, "{text}");
+    assert_eq!(media_lines(&master), vec!["./https://o.test/hls/media.m3u8".to_string()]);
+}
+
+#[tokio::test]
 async fn inv_proxy_12_offline_replay_serves_everything_from_the_store_then_clear_empties_it() {
     let rig = rig().await;
     hls_origin(&rig);
