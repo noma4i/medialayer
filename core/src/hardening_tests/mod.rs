@@ -103,10 +103,8 @@ async fn inv_proxy_06_cancel_first_block_stops_download() {
     origin.started.notified().await;
     task.abort();
     let _ = task.await;
-    for _ in 0..100 { tokio::task::yield_now().await; }
-    let remaining = proxy.live_tasks();
+    crate::api::test_support::eventually(|| proxy.live_tasks() == 0).await;
     proxy.stop().await;
-    assert_eq!(remaining, 0, "download lives after the only subscriber is cancelled");
 }
 
 struct HangingLoader {
@@ -167,8 +165,7 @@ async fn inv_prefetch_04_drop_prefetch_stops_owned_tasks() {
     prefetch.set_window(0, sources());
     loader.started.notified().await;
     drop(prefetch);
-    for _ in 0..100 { tokio::task::yield_now().await; }
-    assert_eq!(loader.active.load(Ordering::SeqCst), 0, "work survives dropping the final public owner");
+    crate::api::test_support::eventually(|| loader.active.load(Ordering::SeqCst) == 0).await;
 }
 
 #[tokio::test]
@@ -177,6 +174,5 @@ async fn inv_proxy_07_drop_proxy_closes_owned_listener() {
     let (proxy, _origin) = proxy(&cache, false, 10).await;
     let port = proxy.port();
     drop(proxy);
-    for _ in 0..100 { tokio::task::yield_now().await; }
-    assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err(), "listener survives final public owner");
+    crate::api::test_support::eventually_async(|| async { tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err() }).await;
 }

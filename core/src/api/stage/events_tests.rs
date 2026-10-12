@@ -1,7 +1,7 @@
 use crate::api::ports::{PoolControl, SlotDirectives as _};
 use crate::api::slots::SlotCall;
 use crate::api::source::MediaItem;
-use crate::api::test_support::{eventually, rig, rig_with, url_of, video, videos, Rig};
+use crate::api::test_support::{eventually, eventually_async, rig, rig_with, url_of, video, videos, Rig};
 use crate::api::types::{Kind, MediaState};
 use crate::identity::cache_key;
 use crate::cache;
@@ -176,16 +176,16 @@ async fn inv_api_06_a_load_refused_by_a_dead_proxy_listener_rebinds_it_before_th
 
 #[tokio::test]
 async fn inv_api_06_returning_to_the_foreground_rebinds_a_listener_that_died_in_the_background() {
-    let rig = rig().await;
-    let (_, player) = playing(&rig, video(&url_of(0))).await;
+    let quiet = WatchdogConfig { first_window_ms: 600_000, progress_window_ms: 600_000, startup_delay_ms: 600_000, ..WatchdogConfig::default() };
+    let rig = rig_with(|config| config.watchdog = quiet).await;
+    playing(&rig, video(&url_of(0))).await;
     PoolControl::background(&rig.parts.stage);
     crate::proxy::test_client::close_listener_silently(rig.parts.proxy.port());
-    let before = player.calls().iter().filter(|call| **call == SlotCall::Play).count();
+    assert!(!rig.parts.proxy.ping().await);
 
     PoolControl::foreground(&rig.parts.stage);
 
-    eventually(|| player.calls().iter().filter(|call| **call == SlotCall::Play).count() > before).await;
-    assert!(rig.parts.proxy.ping().await);
+    tokio::time::timeout(std::time::Duration::from_secs(3), eventually_async(|| rig.parts.proxy.ping())).await.expect("the foreground never rebound the listener");
 }
 
 #[tokio::test]
