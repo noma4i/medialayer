@@ -1,33 +1,41 @@
 #!/usr/bin/env bash
-# Traceability report: invariant (specs/invariants.md) -> tests named inv_<area>_<nn>_* in core/src, gen/src, MediaLayer/Tests and kotlin test sources.
-# Report mode always exits 0. --strict exits 1 when a REQUIRED invariant has no test, a test names an unknown invariant or ids repeat.
+# Strict traceability: invariant (specs/invariants.md) -> test inv_<area>_<nn>_* with an assertion in its body.
+# Exit 1 when a REQUIRED row has no such test, an UNBUILT row has no `reason:` in its last cell, a REQUIRED row has no
+# mutation text, a test, doc or spec names an invariant that has no row, ids repeat, or the registry is missing. There is no mode that exits 0 on a gap.
 # --list prints every invariant with the names of its tests.
+# Env: SPEC (registry file), TEST_DIRS (space separated, relative to the repository root) for the self test.
 set -euo pipefail
 
-mode=report
+mode=check
 case "${1:-}" in
-  --strict) mode=strict ;;
   --list) mode=list ;;
   "") ;;
-  *) echo "usage: check_invariants.sh [--strict|--list]" >&2; exit 2 ;;
+  *) echo "usage: check_invariants.sh [--list]" >&2; exit 2 ;;
 esac
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-spec="$root/specs/invariants.md"
-
+spec="${SPEC:-$root/specs/invariants.md}"
+if [ ! -f "$spec" ] && [ -z "${SPEC:-}" ]; then
+  common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  [ -n "$common" ] && spec="$(dirname -- "$common")/specs/invariants.md"
+fi
 if [ ! -f "$spec" ]; then
-  echo "check_invariants: $spec is missing (specs/ is not tracked), nothing to report"
-  [ "$mode" = strict ] && exit 1
-  exit 0
+  echo "check_invariants: registry $spec is missing" >&2
+  exit 1
 fi
 
+test_dirs="${TEST_DIRS:-core/src gen/src swift/Tests MediaLayer/Tests kotlin/src/test kotlin/ui/src/test scripts}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 awk -F'|' '/^\| INV-[A-Z]+-[0-9]+ \| (REQUIRED|UNBUILT|OPEN) \|/ {
-  id = $2; status = $3
+  id = $2; status = $3; mutation = $8
   gsub(/ /, "", id); gsub(/ /, "", status)
-  print id, status
+  reason = ($(NF - 1) ~ /reason: *[^ ]/) ? "reason" : "-"
+  gsub(/[ `-]/, "", mutation)
+  has = (length(mutation) > 0) ? "mutation" : "-"
+  ran = (mutation ~ /ran:[0-9a-f]/) ? "ran" : "-"
+  print id "\t" status "\t" reason "\t" has "\t" ran
 }' "$spec" > "$work/registry.txt"
 
 if [ ! -s "$work/registry.txt" ]; then
@@ -35,75 +43,113 @@ if [ ! -s "$work/registry.txt" ]; then
   exit 1
 fi
 
-dups="$(awk '{print $1}' "$work/registry.txt" | sort | uniq -d)"
+dups="$(cut -f1 "$work/registry.txt" | sort | uniq -d | tr '\n' ' ')"
 
-{
-  grep -rhoE --include='*.rs' 'fn inv_[a-z0-9_]+' "$root/core/src" "$root/gen/src" 2>/dev/null || true
-  grep -rhoE --include='*.swift' 'func inv_[a-z0-9_]+' "$root/MediaLayer/Tests" 2>/dev/null || true
-  grep -rhoE --include='*.kt' 'fun inv_[a-z0-9_]+' "$root/kotlin/src/test" "$root/kotlin/ui/src/test" 2>/dev/null || true
-} | sed -E 's/^(fn|func|fun) //' | sort -u > "$work/tests.txt"
+files=()
+for dir in $test_dirs; do
+  [ -d "$root/$dir" ] && while IFS= read -r file; do files+=("$file"); done < <(find "$root/$dir" \( -name '*.rs' -o -name '*.swift' -o -name '*.kt' -o -name '*.sh' \) -not -path '*/target*' -not -path '*/build/*' -not -path '*/.build/*')
+done
+
+# name, 1 when the body holds an assertion, else 0
+if [ "${#files[@]}" -gt 0 ]; then
+  awk '
+  FNR == 1 { infn = 0 }
+  {
+    line = $0
+    if (!infn) {
+      name = ""
+      if (FILENAME !~ /\.sh$/ && match(line, /(fn|func|fun) +inv_[a-z0-9_]+/)) { name = substr(line, RSTART, RLENGTH); sub(/^(fn|func|fun) +/, "", name) }
+      else if (FILENAME ~ /\.sh$/ && match(line, /^inv_[a-z0-9_]+\(\)/)) { name = substr(line, RSTART, RLENGTH); gsub(/[ ()]/, "", name) }
+      if (name == "") next
+      infn = 1; depth = 0; started = 0; asserted = 0
+    }
+    code = line
+    if (code ~ /^[ \t]*(\/\/|#)/) code = ""
+    stripped = code
+    gsub(/"([^"\\]|\\.)*"/, "\"\"", stripped)
+    opens = gsub(/\{/, "{", stripped); closes = gsub(/\}/, "}", stripped)
+    if (opens > 0) started = 1
+    depth += opens - closes
+    if (code ~ /assert|#expect|#require|XCTAssert|XCTFail|Issue\.record|panic!|[^a-z_]fail\(|[^a-z_.]expect\(|expect_(red|green)|wait_until|eventually/) asserted = 1
+    if (started && depth <= 0) { print name "\t" asserted; infn = 0 }
+  }' "${files[@]}" | sort -u > "$work/tests.txt"
+else
+  : > "$work/tests.txt"
+fi
 
 if [ "$mode" = list ]; then
-  while read -r id status; do
+  while IFS=$'\t' read -r id status _; do
     prefix="$(printf '%s' "$id" | tr 'A-Z-' 'a-z_')_"
     echo "$id $status"
-    grep -F "$prefix" "$work/tests.txt" | sed 's/^/    /' || true
+    awk -F'\t' -v p="$prefix" 'index($1, p) > 0 { print "    " $1 ($2 == 0 ? "  (no assertion)" : "") }' "$work/tests.txt"
   done < "$work/registry.txt"
   exit 0
 fi
 
-awk -v tests="$work/tests.txt" '
+awk -F'\t' -v tests="$work/tests.txt" '
 BEGIN {
-  while ((getline line < tests) > 0) names[++count] = line
-  printf "%-24s %-9s %-6s %s\n", "invariant", "status", "tests", "covered"
+  while ((getline line < tests) > 0) { split(line, p, "\t"); names[++count] = p[1]; asserts[count] = p[2] }
+  printf "%-24s %-9s %-6s %-9s %s\n", "invariant", "status", "tests", "asserting", "verdict"
 }
 {
-  id = $1; status = $2
+  id = $1; status = $2; reason = $3; mutation = $4; ran = $5
   prefix = tolower(id); gsub(/-/, "_", prefix); prefix = prefix "_"
-  found = 0
-  for (i = 1; i <= count; i++) if (index(names[i], prefix) > 0) found++
-  covered = (found > 0) ? "yes" : "no"
-  if (status != "REQUIRED" && found == 0) covered = "-"
-  printf "%-24s %-9s %-6d %s\n", id, status, found, covered
+  found = 0; good = 0
+  for (i = 1; i <= count; i++) if (index(names[i], prefix) > 0) { found++; if (asserts[i] == 1) good++ }
+  verdict = "-"
   total[status]++
-  if (status == "REQUIRED") { if (found > 0) done++; else missing++ }
-  if (status != "REQUIRED" && found > 0) early++
+  if (status == "REQUIRED") {
+    if (good > 0) { verdict = "covered"; done++ }
+    else if (found > 0) { verdict = "NO ASSERTION"; noassert++ }
+    else { verdict = "NO TEST"; notest++ }
+    if (mutation == "-") { verdict = verdict " NO MUTATION"; nomutation++ }
+    if (ran == "ran") ranrows++
+  } else if (status == "UNBUILT") {
+    if (reason == "-") { verdict = "NO REASON"; noreason++ }
+    else if (good > 0) { verdict = "test ahead of status"; ahead++ }
+    else verdict = "unbuilt"
+  }
+  printf "%-24s %-9s %-6d %-9d %s\n", id, status, found, good, verdict
 }
 END {
-  printf "\nREQUIRED %d: with tests %d, without tests %d\n", total["REQUIRED"], done, missing
-  printf "UNBUILT %d, OPEN %d, tests ahead of status %d\n", total["UNBUILT"], total["OPEN"], early
-  print missing + 0 > "/dev/stderr"
-}' "$work/registry.txt" > "$work/table.txt" 2> "$work/missing.txt"
+  printf "\nREQUIRED %d: covered %d, no test %d, test without assertion %d, no mutation text %d, mutation run recorded %d\n", total["REQUIRED"], done, notest, noassert, nomutation, ranrows
+  printf "UNBUILT %d (without reason %d, test ahead of status %d), OPEN %d\n", total["UNBUILT"], noreason, ahead, total["OPEN"]
+  print notest + noassert + nomutation + noreason > "/dev/stderr"
+}' "$work/registry.txt" > "$work/table.txt" 2> "$work/bad.txt"
 
 cat "$work/table.txt"
 
-known="$(awk '{print tolower($1)}' "$work/registry.txt" | tr '-' '_')"
+doc_paths="${DOC_PATHS:-docs README.md specs}"
+mentioned=""
+for entry in $doc_paths; do
+  [ -e "$root/$entry" ] && mentioned="$mentioned$(grep -rhoE 'INV-[A-Z]+-[0-9]+' "$root/$entry" 2> /dev/null | sort -u | tr '\n' ' ' || true)"
+done
+mentioned="$mentioned$(grep -hoE 'INV-[A-Z]+-[0-9]+' "$spec" | sort -u | tr '\n' ' ' || true)"
+missing_rows=""
+for id in $(printf '%s\n' $mentioned | sort -u); do
+  cut -f1 "$work/registry.txt" | grep -qx "$id" || missing_rows="$missing_rows$id "
+done
+
+known="$(awk -F'\t' '{print tolower($1)}' "$work/registry.txt" | tr '-' '_')"
 orphans=""
-while IFS= read -r name; do
+while IFS=$'\t' read -r name _; do
   [ -z "$name" ] && continue
   for part in $(printf '%s\n' "$name" | grep -oE 'inv_[a-z]+_[0-9]{2}_' || true); do
     id="${part%_}"
-    if ! printf '%s\n' "$known" | grep -qx "$id"; then
-      orphans="$orphans$name (unknown invariant $id)"$'\n'
-    fi
+    printf '%s\n' "$known" | grep -qx "$id" || orphans="$orphans$name (unknown invariant $id)"$'\n'
   done
 done < "$work/tests.txt"
 
-if [ -n "$dups" ]; then
-  echo "duplicate invariant ids in registry: $(echo $dups)"
-fi
+[ -n "$dups" ] && echo "duplicate invariant ids in registry: $dups"
+[ -n "$missing_rows" ] && echo "named by docs, specs or the registry but without a row: $missing_rows"
 if [ -n "$orphans" ]; then
   echo "tests naming an unknown invariant:"
   printf '%s' "$orphans"
 fi
 
-missing="$(tr -d '[:space:]' < "$work/missing.txt")"
-if [ "$mode" = strict ]; then
-  if [ "${missing:-0}" != "0" ] || [ -n "$orphans" ] || [ -n "$dups" ]; then
-    echo "check_invariants --strict: failed (REQUIRED without tests: ${missing:-0})" >&2
-    exit 1
-  fi
-  echo "check_invariants --strict: ok"
-else
-  echo "check_invariants: report only, REQUIRED without tests: ${missing:-0} (use --strict to fail)"
+bad="$(tr -d '[:space:]' < "$work/bad.txt")"
+if [ "${bad:-0}" != "0" ] || [ -n "$orphans" ] || [ -n "$dups" ] || [ -n "$missing_rows" ]; then
+  echo "check_invariants: failed (rows to fix: ${bad:-0})" >&2
+  exit 1
 fi
+echo "check_invariants: ok"

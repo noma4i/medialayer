@@ -92,4 +92,4 @@ export PATH=/opt/homebrew/opt/rustup/bin:$PATH
 bash scripts/check_medialayer.sh
 ```
 
-Runs Rust tests, builds the xcframework and runs Swift tests, builds libraries for 4 Android ABIs and runs Kotlin tests.
+Runs the cheap checks first (duplicate mechanisms, docs, invariants and their self test), then Rust, Swift, Kotlin and the ship lane (libraries for 4 Android ABIs, iOS device compile check) in parallel. `--fast` runs only the steps of the touched directories, `--list` prints the steps.
