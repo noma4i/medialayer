@@ -1,6 +1,6 @@
 use url::Url;
 
-const STREAM_INF_TAG: &str = "#EXT-X-STREAM-INF";
+pub(super) const STREAM_INF_TAG: &str = "#EXT-X-STREAM-INF";
 const MAP_TAG: &str = "#EXT-X-MAP";
 const EXTINF_TAG: &str = "#EXTINF";
 const UNKNOWN_DURATION_SEGMENT_CAP: usize = 2;

@@ -1,4 +1,4 @@
-const STREAM_INF_TAG: &str = "#EXT-X-STREAM-INF";
+use super::leading_segments::STREAM_INF_TAG;
 
 pub fn keep_first_variant(manifest: &str) -> String {
     if manifest.matches(STREAM_INF_TAG).count() < 2 {
