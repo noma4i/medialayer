@@ -54,7 +54,7 @@ fun MediaAudio(source: MediaSource, muted: Boolean = false, rate: Float = 1f, co
   }
   control.state = rememberPlace(source, control.isPlaying, muted)
   val player by remember(environment, source.url) { environment.players?.player(source.url) ?: flowOf(null) }.collectAsState(null)
-  DisposableEffect(player) {
+  DisposableEffect(player, control) {
     val exo = player
     val listener = object : Player.Listener {
       override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
