@@ -23,6 +23,9 @@ impl Stage {
             for source in sources.present() {
                 state.catalog.insert(source.url.clone(), source.clone());
             }
+            if count == 0 {
+                state.remember_playing_positions(&self.inner.runner);
+            }
             let playing = state.playing_page(&keys, reach.start..reach.end);
             let commands = state.ring.plan(now, active, playing, &keys);
             let kept: HashSet<&str> = sources.present().map(|source| source.url.as_str()).collect();

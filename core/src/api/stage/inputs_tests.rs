@@ -440,3 +440,26 @@ async fn inv_api_30_a_peeked_neighbour_plays_muted_beside_the_active_page_and_is
     eventually(|| rig.holder(&url_of(5)).1.calls().contains(&SlotCall::Pause) && rig.holder(&url_of(6)).1.calls().contains(&SlotCall::Unmute)).await;
     assert_eq!(rig.holder(&url_of(6)).1.calls().iter().filter(|call| **call == SlotCall::Play).count(), 1);
 }
+
+#[tokio::test]
+async fn inv_api_31_a_playing_place_resumes_at_its_position_when_the_whole_window_leaves_and_returns() {
+    let rig = rig_with(|config| config.defaults.slots = 4).await;
+    let stage = &rig.parts.stage;
+    let clip = url_of(0);
+    stage.set_window(0, videos(20));
+    stage.set_playing(&clip, true);
+    eventually(|| rig.factory.slot_holding(&clip).is_some()).await;
+    rig.holder(&clip).1.sample.lock().unwrap().position_ms = 5_600;
+
+    stage.set_window(0, Vec::new());
+    eventually(|| rig.factory.slot_holding(&clip).is_none()).await;
+    stage.set_window(0, videos(20));
+    stage.set_playing(&clip, true);
+
+    let resumed = |calls: &[SlotCall]| calls.iter().any(|call| matches!(call, SlotCall::Seek { position_ms } if *position_ms >= 5_600));
+    eventually(|| rig.factory.slot_holding(&clip).is_some_and(|(_, slot)| resumed(&slot.calls()))).await;
+    let calls = rig.holder(&clip).1.calls();
+    let load = calls.iter().rposition(|call| matches!(call, SlotCall::Load { .. })).unwrap();
+    let seek = calls.iter().rposition(|call| matches!(call, SlotCall::Seek { position_ms } if *position_ms >= 5_600));
+    assert!(seek.is_some_and(|seek| seek > load));
+}

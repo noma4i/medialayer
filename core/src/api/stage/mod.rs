@@ -114,6 +114,15 @@ impl State {
         self.leases.get(key).is_some_and(|lease| self.election.active() == Some(*lease))
     }
 
+    fn remember_playing_positions(&mut self, runner: &SlotRunner) {
+        let playing: Vec<(usize, String)> = self.slot_keys.iter().filter(|(_, key)| self.is_playing(key)).map(|(slot, key)| (*slot, key.clone())).collect();
+        for (slot, key) in playing {
+            if let Some(position) = runner.sample_now(slot).map(|sample| sample.position_ms).filter(|position| *position > 0) {
+                self.positions.remember(&key, position);
+            }
+        }
+    }
+
     fn playing_page(&self, keys: &impl PageKeys, pages: Range<usize>) -> Option<usize> {
         let lease = self.election.active()?;
         let playing = self.keys_by_lease.get(&lease)?;

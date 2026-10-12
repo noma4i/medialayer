@@ -52,4 +52,4 @@ The pages of the window around the active page always keep their players. A plac
 
 ## Position of a place that left
 
-A place that leaves the screen while it is not playing keeps its position. When the same source comes back, the new player starts at that position. A playing place restarts from the beginning, and the library keeps the last 32 positions.
+A place that leaves the screen while it is not playing keeps its position. When the same source comes back, the new player starts at that position. A playing place keeps its position too when the whole window is cleared (the screen is covered by another screen) and restarts from the beginning when it only scrolls out of the window. The library keeps the last 32 positions.
