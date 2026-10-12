@@ -172,6 +172,26 @@ struct ViewModelTests {
   }
 
   @Test
+  func aCancelledLoadAnsweredFromTheMemoryCacheDeliversNothing() async {
+    let places = RecordingPlaces()
+    places.imageResult = .success(pngData(side: 8))
+    let source = TestImageSource()
+    let request = MediaImagePipeline.request(for: source)!
+    let pipeline = MediaImagePipeline.make(places: places)
+    let warm = await MediaImagePipeline.load(source, request: request, places: places, pipeline: pipeline)
+    #expect(warm != nil)
+    let recorded = places.recorded.count
+
+    let image = await Task {
+      withUnsafeCurrentTask { $0?.cancel() }
+      return await MediaImagePipeline.load(source, request: request, places: places, pipeline: pipeline)
+    }.value
+
+    #expect(image == nil)
+    #expect(places.recorded.count == recorded)
+  }
+
+  @Test
   func twoViewsOfOneKeyKeepItVisibleUntilTheLastOneLeaves() {
     let places = RecordingPlaces()
     let claims = KeyClaims(places: places)
