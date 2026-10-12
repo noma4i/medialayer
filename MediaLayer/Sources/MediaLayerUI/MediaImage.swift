@@ -20,6 +20,7 @@ public struct MediaImage<Content: View>: View {
   @State private var loaded: LoadedImage?
   @State private var state: MediaState = .idle
   @State private var isVisible = false
+  private static var coldFadeDuration: Double { 0.22 }
   private let source: any MediaSource
   private let contentMode: ContentMode
   private let playbackRate: Double
@@ -43,7 +44,7 @@ public struct MediaImage<Content: View>: View {
         if let frames = loaded.flatMap({ $0.key == key ? $0.frames : nil }) {
           AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isVisible, playbackRate: playbackRate)
         } else if let shown {
-          Image(platform: shown).resizable().aspectRatio(contentMode: contentMode)
+          Image(platform: shown).resizable().aspectRatio(contentMode: contentMode).transition(.opacity)
         }
         content(state)
       }
@@ -79,13 +80,21 @@ public struct MediaImage<Content: View>: View {
   private func load(key: ImageKey, points: CGSize) async {
     guard let context, key.pixels != nil, let request = request(points: points) else { return }
     let container: ImageContainer?
+    let isCold: Bool
     if let hit = MediaImagePipeline.cachedContainer(for: request, in: context.pipeline) {
       context.places.itemState(key: source.url, state: .ready)
       container = hit
+      isCold = false
     } else {
       container = await MediaImagePipeline.load(source, request: request, places: context.places, pipeline: context.pipeline)
+      isCold = true
     }
-    loaded = container.map { LoadedImage(key: key, image: $0.image) }
+    let next = container.map { LoadedImage(key: key, image: $0.image) }
+    if isCold {
+      withAnimation(.easeOut(duration: Self.coldFadeDuration)) { loaded = next }
+    } else {
+      loaded = next
+    }
     guard let container, container.type == .gif, let data = container.data, let pixels = key.pixels else { return }
 
     let frames = await AnimatedFrames.load(data, maxPixel: Int(max(pixels.width, pixels.height)))
