@@ -260,3 +260,135 @@ async fn inv_idle_04_a_wanted_key_without_a_slot_wakes_nothing_until_an_event_gi
     stage.set_step(crate::memory::Step::Normal);
     eventually(|| rig.factory.slot_holding(&url).is_some()).await;
 }
+
+fn idle_watchdog(config: &mut crate::api::Assembly) {
+    const HOUR: u64 = 3_600_000;
+    config.watchdog = WatchdogConfig {
+        first_window_ms: HOUR,
+        progress_window_ms: HOUR,
+        cooldown_ms: HOUR,
+        startup_delay_ms: HOUR,
+        retry_delays_ms: vec![HOUR; 5],
+        foreground_delays_ms: vec![HOUR; 3],
+        ..WatchdogConfig::default()
+    };
+}
+
+async fn silence(stage: &crate::api::Stage) -> u64 {
+    let before = stage.wakes();
+    for _ in 0..200 {
+        tokio::time::advance(std::time::Duration::from_millis(50)).await;
+    }
+    stage.wakes() - before
+}
+
+async fn settle() {
+    for _ in 0..40 {
+        tokio::time::advance(std::time::Duration::from_millis(50)).await;
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_idle_04_a_key_refused_by_the_ledger_returns_when_the_ceiling_frees_room() {
+    let rig = rig_with(idle_watchdog).await;
+    let stage = &rig.parts.stage;
+    stage.replace_window(0, videos(1));
+    eventually(|| rig.factory.slot_holding(&url_of(0)).is_some()).await;
+    rig.parts.ledger.set_ceiling(rig.parts.ledger.used());
+
+    stage.visible(video(&url_of(1)), true);
+    stage.set_playing(&url_of(1), true);
+    settle().await;
+    assert!(rig.factory.slot_holding(&url_of(1)).is_none(), "the ledger refused the slot");
+    assert_eq!(silence(stage).await, 0, "10 s of silence after the refusal");
+
+    rig.parts.ledger.set_ceiling(rig.parts.ledger.used() * 4);
+    eventually(|| rig.factory.slot_holding(&url_of(1)).is_some()).await;
+}
+
+async fn crowded_for_slots(event: impl FnOnce(&crate::api::Stage)) {
+    let rig = rig_with(|config| {
+        idle_watchdog(config);
+        config.pool = crate::api::PoolSettings { reach: 0, ..crate::api::PoolSettings::default() };
+        config.defaults.slots = 2;
+    })
+    .await;
+    let stage = &rig.parts.stage;
+    stage.pin(&url_of(0));
+    stage.pin(&url_of(1));
+    eventually(|| rig.factory.slot_holding(&url_of(0)).is_some() && rig.factory.slot_holding(&url_of(1)).is_some()).await;
+
+    stage.visible(video(&url_of(2)), true);
+    stage.set_playing(&url_of(2), true);
+    settle().await;
+    assert!(rig.factory.slot_holding(&url_of(2)).is_none(), "every slot is pinned, slots={}", stage.slot_count());
+    assert_eq!(silence(stage).await, 0, "10 s of silence after the refusal");
+
+    event(stage);
+    eventually(|| rig.factory.slot_holding(&url_of(2)).is_some()).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_idle_04_a_key_refused_for_slots_returns_when_an_unpin_makes_a_spare() {
+    crowded_for_slots(|stage| stage.unpin(&url_of(0))).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_idle_04_a_key_refused_for_slots_returns_when_the_other_pin_is_released() {
+    crowded_for_slots(|stage| stage.unpin(&url_of(1))).await;
+}
+
+#[tokio::test]
+async fn inv_idle_04_a_trim_tick_between_a_refusal_and_the_freed_room_keeps_the_wait_for_room() {
+    let rig = rig_with(|config| {
+        idle_watchdog(config);
+        config.pool = crate::api::PoolSettings { reach: 1, trim_delay_ms: 300, ..crate::api::PoolSettings::default() };
+        config.defaults.slots = 5;
+    })
+    .await;
+    let stage = &rig.parts.stage;
+    stage.pin(&url_of(9));
+    stage.replace_window(1, videos(3));
+    eventually(|| (0..3).all(|index| rig.factory.slot_holding(&url_of(index)).is_some()) && rig.factory.slot_holding(&url_of(9)).is_some()).await;
+    rig.parts.ledger.set_ceiling(rig.parts.ledger.used().saturating_sub(1));
+
+    stage.visible(video(&url_of(7)), true);
+    stage.set_playing(&url_of(7), true);
+    let (_, neighbour) = rig.holder(&url_of(0));
+    let retains = |calls: Vec<SlotCall>| calls.iter().filter(|call| matches!(call, SlotCall::Retain(_) | SlotCall::Unload)).count();
+    let before = retains(neighbour.calls());
+    tokio::time::timeout(std::time::Duration::from_secs(3), eventually(|| retains(neighbour.calls()) > before))
+        .await
+        .unwrap_or_else(|_| panic!("the trim tick never came: {:?}", neighbour.calls()));
+    assert!(rig.factory.slot_holding(&url_of(7)).is_none(), "the ledger kept the wanted key out");
+
+    rig.parts.ledger.set_ceiling(rig.parts.ledger.used() * 4);
+    tokio::time::timeout(std::time::Duration::from_secs(3), eventually(|| rig.factory.slot_holding(&url_of(7)).is_some()))
+        .await
+        .expect("the freed room never brought the key back");
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_idle_04_a_ledger_release_that_leaves_the_room_unchanged_does_not_start_an_attempt() {
+    let rig = rig_with(idle_watchdog).await;
+    let stage = &rig.parts.stage;
+    let ledger = &rig.parts.ledger;
+    stage.replace_window(0, videos(1));
+    eventually(|| rig.factory.slot_holding(&url_of(0)).is_some()).await;
+    ledger.set_ceiling(ledger.used() + 10);
+    let early = ledger.reserve(crate::memory::Owner::ImageDecode, 4).unwrap();
+
+    stage.visible(video(&url_of(1)), true);
+    stage.set_playing(&url_of(1), true);
+    settle().await;
+    assert!(rig.factory.slot_holding(&url_of(1)).is_none(), "the ledger refused the slot");
+    assert_eq!(silence(stage).await, 0, "10 s of silence after the refusal");
+
+    let late = ledger.reserve(crate::memory::Owner::ImageDecode, 4).unwrap();
+    drop(early);
+    assert_eq!(silence(stage).await, 1, "one freed wake and no attempt: the room is the same as at the refusal");
+
+    drop(late);
+    ledger.set_ceiling(ledger.used() * 4);
+    eventually(|| rig.factory.slot_holding(&url_of(1)).is_some()).await;
+}

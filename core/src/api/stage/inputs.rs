@@ -29,6 +29,7 @@ impl Stage {
             let keys = sources.map(|source| (source.kind != Kind::Image).then(|| source.url.clone()));
             for source in sources.present() {
                 state.catalog.insert(source.url.clone(), source.clone());
+                state.refresh_pending(&source.url);
             }
             if count == 0 {
                 state.remember_playing_positions(&self.inner.runner);
@@ -38,6 +39,7 @@ impl Stage {
             let kept: HashSet<&str> = sources.present().map(|source| source.url.as_str()).collect();
             let State { catalog, loaded, leases, views, .. } = &mut *state;
             catalog.retain(|key, _| kept.contains(key.as_str()) || loaded.contains_key(key) || leases.contains_key(key) || views.contains_key(key));
+            state.prune_pending();
             (commands, sources)
         };
         self.dispatch(commands);
@@ -164,6 +166,7 @@ impl Stage {
             let mut state = self.state();
             let is_player = source.kind != Kind::Image;
             state.catalog.insert(url.clone(), source);
+            state.refresh_pending(&url);
             if is_player { state.ring.touch(now, &url) } else { Vec::new() }
         };
         self.dispatch(commands);
@@ -183,6 +186,7 @@ impl Stage {
                 state.forget_lease(&key);
             }
             state.catalog.clear();
+            state.pending_wanted.clear();
             state.views.clear();
             state.rates.clear();
             state.positions.clear();

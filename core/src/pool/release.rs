@@ -77,6 +77,10 @@ impl Ring {
         !self.is_background && !self.restore.is_empty()
     }
 
+    pub fn restore_len(&self) -> usize {
+        self.restore.len()
+    }
+
     pub fn is_background(&self) -> bool {
         self.is_background
     }

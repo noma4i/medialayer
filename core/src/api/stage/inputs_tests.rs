@@ -54,9 +54,14 @@ async fn inv_api_04_a_page_that_still_wants_to_play_gets_a_player_again_after_it
     eventually(|| rig.factory.slot_holding(&url_of(5)).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
 
     stage.replace_window(0, Vec::new());
-    eventually(|| rig.factory.slot_holding(&url_of(5)).is_none() && stage.commands_idle()).await;
 
-    eventually(|| rig.factory.slot_holding(&url_of(5)).is_some_and(|(_, slot)| slot.calls().last() == Some(&SlotCall::Play))).await;
+    eventually(|| {
+        rig.factory.slot_holding(&url_of(5)).is_some_and(|(_, slot)| {
+            let calls = slot.calls();
+            calls.contains(&SlotCall::Unload) && calls.last() == Some(&SlotCall::Play)
+        })
+    })
+    .await;
 }
 
 #[tokio::test]

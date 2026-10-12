@@ -17,7 +17,7 @@ use crate::pages::PageKeys;
 use crate::pool::{Command, Ring};
 use crate::prefetch::Prefetcher;
 use crate::session::{self, next_action, Action, Context, Election, Event, RecoveryState, WatchdogConfig};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -63,6 +63,8 @@ struct State {
     image_windows: HashMap<String, Vec<Vec<MediaItem>>>,
     is_restore_requested: bool,
     is_room_wanted: bool,
+    refusal_room: u64,
+    pending_wanted: HashSet<String>,
 }
 
 struct Inner {
@@ -95,6 +97,7 @@ impl State {
         let lease = self.election.register(key, Context::Ring.policy());
         self.leases.insert(key.to_string(), lease);
         self.keys_by_lease.insert(lease, key.to_string());
+        self.refresh_pending(key);
         lease
     }
 
@@ -106,15 +109,25 @@ impl State {
         let commands = self.commands_for(orders);
         self.leases.remove(key);
         self.keys_by_lease.remove(&lease);
+        self.pending_wanted.remove(key);
         commands
     }
 
-    fn unloaded_wanted(&self) -> impl Iterator<Item = &String> {
-        self.leases.keys().filter(|key| self.catalog.contains_key(*key) && !self.loaded.contains_key(*key))
+    fn refresh_pending(&mut self, key: &str) {
+        if self.leases.contains_key(key) && self.catalog.contains_key(key) && !self.loaded.contains_key(key) {
+            self.pending_wanted.insert(key.to_string());
+        } else {
+            self.pending_wanted.remove(key);
+        }
+    }
+
+    fn prune_pending(&mut self) {
+        let catalog = &self.catalog;
+        self.pending_wanted.retain(|key| catalog.contains_key(key));
     }
 
     fn has_pending_restore(&self) -> bool {
-        self.ring.is_restoring() || (!self.ring.is_background() && self.unloaded_wanted().next().is_some())
+        self.ring.is_restoring() || (!self.ring.is_background() && !self.pending_wanted.is_empty())
     }
 
     fn next_due(&self) -> Option<u64> {
@@ -122,16 +135,19 @@ impl State {
         self.ring.next_due().into_iter().chain(attempt).min()
     }
 
-    fn restore_wanted(&mut self, now: u64) -> Vec<Command> {
-        let wanted: Vec<String> = self.unloaded_wanted().cloned().collect();
+    fn restore_wanted(&mut self, now: u64) -> (Vec<Command>, bool) {
+        let wanted: Vec<String> = self.pending_wanted.iter().cloned().collect();
         let mut commands = Vec::new();
+        let mut is_refused = false;
         for key in wanted {
-            commands.extend(self.ring.touch(now, &key));
+            let touched = self.ring.touch(now, &key);
+            is_refused |= !touched.iter().any(|command| matches!(command, Command::Load { .. }));
+            commands.extend(touched);
             if self.is_playing(&key) {
                 commands.extend(self.ring.set_playing(&key, true));
             }
         }
-        commands
+        (commands, is_refused)
     }
 
     fn is_playing(&self, key: &str) -> bool {
@@ -183,6 +199,8 @@ impl Stage {
             image_windows: HashMap::new(),
             is_restore_requested: false,
             is_room_wanted: false,
+            refusal_room: 0,
+            pending_wanted: HashSet::new(),
         };
         let inner = Arc::new(Inner {
             state: Mutex::new(state),
@@ -235,10 +253,14 @@ impl Stage {
     }
 
     fn forget_preferences(&self, key: &str) {
+        self.forget_preferences_from(key, false);
+    }
+
+    fn forget_preferences_from(&self, key: &str, is_restore_attempt: bool) {
         if self.inner.places.is_declared(key) {
             return;
         }
-        let mut state = self.state();
+        let mut state = if is_restore_attempt { self.state_quiet() } else { self.state() };
         if !state.loaded.contains_key(key) {
             state.rates.remove(key);
             state.ring.forget_mute(key);
@@ -246,7 +268,11 @@ impl Stage {
     }
 
     fn state(&self) -> StateGuard<'_> {
-        StateGuard { guard: self.inner.state.lock().unwrap_or_else(PoisonError::into_inner), inner: &self.inner, is_changed: false }
+        StateGuard { guard: self.inner.state.lock().unwrap_or_else(PoisonError::into_inner), inner: &self.inner, is_changed: false, is_quiet: false }
+    }
+
+    fn state_quiet(&self) -> StateGuard<'_> {
+        StateGuard { guard: self.inner.state.lock().unwrap_or_else(PoisonError::into_inner), inner: &self.inner, is_changed: false, is_quiet: true }
     }
 
     fn now(&self) -> u64 {
@@ -266,7 +292,7 @@ impl Stage {
         let mut unloaded = Vec::new();
         let mut resumed = Vec::new();
         {
-            let mut state = self.state();
+            let mut state = if is_restore_attempt { self.state_quiet() } else { self.state() };
             for command in commands {
                 crate::trace!("stage", "command {command:?}");
                 self.translate(&mut state, command, &mut calls, &mut actions, &mut unloaded, &mut resumed);
@@ -275,12 +301,9 @@ impl Stage {
         for (slot, call) in calls {
             self.inner.runner.send(slot, call);
         }
-        if !unloaded.is_empty() && !is_restore_attempt {
-            self.state().is_restore_requested = true;
-        }
         for key in unloaded {
             self.inner.places.unloaded(&key);
-            self.forget_preferences(&key);
+            self.forget_preferences_from(&key, is_restore_attempt);
         }
         for key in resumed {
             self.inner.places.resumed(&key);
@@ -308,6 +331,7 @@ impl Stage {
                 next_action(&mut recovery, Event::Source { key: key.clone(), via_proxy_hls }, self.now());
                 state.slot_keys.insert(*slot, key.clone());
                 state.loaded.insert(key.clone(), Loaded { slot: *slot, recovery, source, route: route.clone() });
+                state.pending_wanted.remove(key);
                 let view = state.views.get(key).copied();
                 let rate = state.rates.get(key).copied();
                 let resume = state.positions.take(key);
@@ -333,6 +357,7 @@ impl Stage {
                         state.positions.remember(&key, position);
                     }
                     state.loaded.remove(&key);
+                    state.refresh_pending(&key);
                     state.tasks.remove(&key);
                     unloaded.push(key);
                 }
@@ -364,10 +389,10 @@ impl Stage {
 }
 
 async fn tick_loop(inner: Weak<Inner>, mut due: watch::Receiver<Option<u64>>, ledger: Ledger) {
+    let freed = ledger.freed().notified();
+    tokio::pin!(freed);
+    freed.as_mut().enable();
     loop {
-        let freed = ledger.freed().notified();
-        tokio::pin!(freed);
-        freed.as_mut().enable();
         let wait = match *due.borrow_and_update() {
             Some(at) => {
                 let Some(inner) = inner.upgrade() else { return };
@@ -383,7 +408,7 @@ async fn tick_loop(inner: Weak<Inner>, mut due: watch::Receiver<Option<u64>>, le
                 }
                 Wake::Changed
             }
-            () = &mut freed => Wake::Freed,
+            () = freed.as_mut() => Wake::Freed,
         };
         let Some(inner) = inner.upgrade() else { return };
         inner.wakes.fetch_add(1, Ordering::Relaxed);
@@ -391,12 +416,12 @@ async fn tick_loop(inner: Weak<Inner>, mut due: watch::Receiver<Option<u64>>, le
         match wake {
             Wake::Changed => continue,
             Wake::Freed => {
-                let is_waiting = {
-                    let state = stage.state();
-                    state.is_room_wanted && state.has_pending_restore()
-                };
-                if is_waiting {
-                    stage.state().is_restore_requested = true;
+                freed.set(ledger.freed().notified());
+                freed.as_mut().enable();
+                let mut state = stage.state_quiet();
+                let room = ledger.ceiling().saturating_sub(ledger.used());
+                if state.is_room_wanted && room > state.refusal_room && state.has_pending_restore() {
+                    state.is_restore_requested = true;
                 }
                 continue;
             }
@@ -404,14 +429,22 @@ async fn tick_loop(inner: Weak<Inner>, mut due: watch::Receiver<Option<u64>>, le
         }
         let commands = {
             let now = stage.now();
-            let mut state = stage.state();
+            let mut state = stage.state_quiet();
             let is_requested = std::mem::take(&mut state.is_restore_requested);
+            let queued = state.ring.restore_len();
             let mut commands = state.ring.tick(now);
+            let drained = queued.saturating_sub(state.ring.restore_len());
+            let mut is_refused = state.ring.is_restoring() && drained == 0 && queued > 0;
             if is_requested {
-                commands.extend(state.restore_wanted(now));
+                let (restored, refused) = state.restore_wanted(now);
+                commands.extend(restored);
+                is_refused |= refused;
             }
-            state.is_restore_requested = state.ring.is_restoring() && !commands.is_empty();
-            state.is_room_wanted = is_requested && commands.is_empty() && state.has_pending_restore();
+            state.is_restore_requested = state.ring.is_restoring() && drained > 0;
+            if is_requested || queued > 0 {
+                state.is_room_wanted = is_refused;
+                state.refusal_room = ledger.ceiling().saturating_sub(ledger.used());
+            }
             commands
         };
         stage.dispatch_from(commands, true);
@@ -428,6 +461,7 @@ struct StateGuard<'a> {
     guard: MutexGuard<'a, State>,
     inner: &'a Inner,
     is_changed: bool,
+    is_quiet: bool,
 }
 
 impl Deref for StateGuard<'_> {
@@ -451,6 +485,9 @@ impl Drop for StateGuard<'_> {
             return;
         }
         self.inner.change.mark();
+        if !self.is_quiet && self.guard.has_pending_restore() {
+            self.guard.is_restore_requested = true;
+        }
         let next = self.guard.next_due();
         self.inner.due.send_if_modified(|due| std::mem::replace(due, next) != next);
     }

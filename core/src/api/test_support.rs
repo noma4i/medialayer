@@ -1,26 +1,28 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-const ATTEMPTS: usize = 20_000_000;
+const WAIT_LIMIT: Duration = Duration::from_secs(20);
 
 pub async fn eventually_async<F: std::future::Future<Output = bool>>(mut condition: impl FnMut() -> F) {
-    for _ in 0..ATTEMPTS {
+    let deadline = std::time::Instant::now() + WAIT_LIMIT;
+    while std::time::Instant::now() < deadline {
         if condition().await {
             return;
         }
         tokio::task::yield_now().await;
     }
-    panic!("condition never became true");
+    panic!("condition never became true within {WAIT_LIMIT:?}");
 }
 
 pub async fn eventually(mut condition: impl FnMut() -> bool) {
-    for _ in 0..ATTEMPTS {
+    let deadline = std::time::Instant::now() + WAIT_LIMIT;
+    while std::time::Instant::now() < deadline {
         if condition() {
             return;
         }
         tokio::task::yield_now().await;
     }
-    panic!("condition never became true");
+    panic!("condition never became true within {WAIT_LIMIT:?}");
 }
 
 use super::assemble::{Assembly, PoolSettings};
