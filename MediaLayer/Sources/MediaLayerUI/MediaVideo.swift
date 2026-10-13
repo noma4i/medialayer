@@ -21,6 +21,16 @@ struct VideoEdges {
   }
 }
 
+enum VideoProgress {
+  static let interval: Duration = .milliseconds(100)
+
+  static func fraction(positionMs: UInt64, durationMs: UInt64?) -> Double? {
+    guard let durationMs, durationMs > 0 else { return nil }
+
+    return min(Double(positionMs) / Double(durationMs), 1)
+  }
+}
+
 public struct MediaVideo<Content: View>: View {
   @Environment(\.mediaContext) private var context
   @State private var state: MediaState = .idle
@@ -33,6 +43,7 @@ public struct MediaVideo<Content: View>: View {
   private let gravity: AVLayerVideoGravity
   private let onFirstFrame: () -> Void
   private let onEnd: () -> Void
+  private let onProgress: ((Double) -> Void)?
   private let content: (MediaState) -> Content
 
   public init(
@@ -44,6 +55,7 @@ public struct MediaVideo<Content: View>: View {
     gravity: AVLayerVideoGravity = .resizeAspectFill,
     onFirstFrame: @escaping () -> Void = {},
     onEnd: @escaping () -> Void = {},
+    onProgress: ((Double) -> Void)? = nil,
     @ViewBuilder content: @escaping (MediaState) -> Content
   ) {
     self.source = source
@@ -54,6 +66,7 @@ public struct MediaVideo<Content: View>: View {
     self.gravity = gravity
     self.onFirstFrame = onFirstFrame
     self.onEnd = onEnd
+    self.onProgress = onProgress
     self.content = content
   }
 
@@ -67,6 +80,7 @@ public struct MediaVideo<Content: View>: View {
     }
     .clipped()
     .task(id: source.url) { await follow() }
+    .task(id: Sampling(url: source.url, playing: playing)) { await sample() }
     .onAppear { declare(visible: true) }
     .onDisappear { declare(visible: false) }
     .onChange(of: playing) { _, value in context.map { KeyClaims.of($0.places).setPlaying(owner: owner, key: source.url, playing: value) } }
@@ -78,6 +92,25 @@ public struct MediaVideo<Content: View>: View {
     var item = source.item
     item.looping = loop
     return item
+  }
+
+  private struct Sampling: Equatable {
+    let url: String
+    let playing: Bool
+  }
+
+  private func sample() async {
+    guard let onProgress, let slots = context?.slots else { return }
+
+    repeat {
+      if let sample = slots.slot(for: source.url)?.sample(),
+         let fraction = VideoProgress.fraction(positionMs: sample.positionMs, durationMs: sample.durationMs) {
+        onProgress(fraction)
+      }
+      guard playing else { return }
+
+      try? await Task.sleep(for: VideoProgress.interval)
+    } while !Task.isCancelled
   }
 
   private func declare(visible: Bool) {
@@ -111,8 +144,9 @@ extension MediaVideo where Content == EmptyView {
     loop: Bool = true,
     gravity: AVLayerVideoGravity = .resizeAspectFill,
     onFirstFrame: @escaping () -> Void = {},
-    onEnd: @escaping () -> Void = {}
+    onEnd: @escaping () -> Void = {},
+    onProgress: ((Double) -> Void)? = nil
   ) {
-    self.init(source, playing: playing, peeking: peeking, muted: muted, loop: loop, gravity: gravity, onFirstFrame: onFirstFrame, onEnd: onEnd) { _ in EmptyView() }
+    self.init(source, playing: playing, peeking: peeking, muted: muted, loop: loop, gravity: gravity, onFirstFrame: onFirstFrame, onEnd: onEnd, onProgress: onProgress) { _ in EmptyView() }
   }
 }
