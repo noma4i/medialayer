@@ -21,6 +21,7 @@ import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.Placeholder
 import com.noma4i.medialayer.isReady
 import com.noma4i.medialayer.toItem
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
@@ -35,6 +36,16 @@ internal class VideoEdges {
   }
 }
 
+internal object VideoProgress {
+  const val INTERVAL_MS = 100L
+
+  fun fraction(positionMs: ULong, durationMs: ULong?): Double? {
+    if (durationMs == null || durationMs == 0uL) return null
+
+    return minOf(positionMs.toDouble() / durationMs.toDouble(), 1.0)
+  }
+}
+
 @Composable
 fun MediaVideo(
   source: MediaSource,
@@ -46,6 +57,7 @@ fun MediaVideo(
   loop: Boolean = true,
   onFirstFrame: () -> Unit = {},
   onEnd: () -> Unit = {},
+  onProgress: ((Double) -> Unit)? = null,
   content: @Composable (MediaState) -> Unit = {}
 ) {
   val environment = LocalMediaEnvironment.current
@@ -55,6 +67,16 @@ fun MediaVideo(
   val item = remember(source) { source.toItem() }
   val firstFrame by rememberUpdatedState(onFirstFrame)
   val end by rememberUpdatedState(onEnd)
+  val progress by rememberUpdatedState(onProgress)
+  LaunchedEffect(environment, source.url, playing) {
+    do {
+      val report = progress ?: return@LaunchedEffect
+      environment.players?.sample(source.url)?.let { VideoProgress.fraction(it.positionMs, it.durationMs) }?.let(report)
+      if (!playing) return@LaunchedEffect
+
+      delay(VideoProgress.INTERVAL_MS)
+    } while (true)
+  }
   LaunchedEffect(edges, state) {
     val (isFirstFrame, isEnd) = edges.advance(state)
     if (isFirstFrame) {

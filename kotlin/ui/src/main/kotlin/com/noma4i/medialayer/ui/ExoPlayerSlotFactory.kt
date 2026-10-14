@@ -11,6 +11,7 @@ import androidx.media3.exoplayer.upstream.DefaultAllocator
 import com.noma4i.medialayer.PlaybackRoute
 import com.noma4i.medialayer.PlayerEventsInterface
 import com.noma4i.medialayer.PlayerSlotFactory
+import com.noma4i.medialayer.SlotSample
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
@@ -52,6 +53,8 @@ class SlotPlayers internal constructor() {
   }
 
   internal fun view(token: ULong): ViewHandle? = views[token]
+
+  internal fun sample(key: String): SlotSample? = slots[key]?.sample()
 
   internal fun route(key: String): PlaybackRoute? = slots[key]?.route
 

@@ -115,6 +115,26 @@ MediaVideo(
 )
 ```
 
+## Video position
+
+`onProgress` receives the played part of a video as a number from 0 to 1: the position divided by the duration. It runs 10 times a second while the video plays. A paused video reports once when it appears or when `playing` changes, then stops, so a paused list does not wake up. A video without a known duration reports nothing. The callback runs on the main thread: do not do heavy work in it.
+
+### Swift
+
+```swift
+MediaVideo(VoiceClip(url: clip.url), playing: true, onProgress: { fraction in ring = fraction })
+```
+
+### Kotlin
+
+```kotlin
+MediaVideo(
+  source = VoiceClip(url = clip.url),
+  playing = true,
+  onProgress = { fraction -> ring = fraction }
+)
+```
+
 ## Audio speed
 
 `rate` sets the speed of an audio place. The default is 1. The library keeps values from 0.25 to 4 and ignores values that are not numbers. `audio.setRate(_:)` on Swift and `audio.rate = ` on Kotlin change it while the place is shown. The rate resets to 1 when the player is reused for another source.
