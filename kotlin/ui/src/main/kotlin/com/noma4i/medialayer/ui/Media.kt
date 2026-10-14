@@ -21,7 +21,7 @@ object Media {
   var muted: Boolean by mutableStateOf(false)
 }
 
-internal class MediaEnvironment(val media: MediaLayer, val players: SlotPlayers?, val imageLoader: ImageLoader)
+internal class MediaEnvironment(val media: MediaLayer, val players: SlotPlayers?, val imageLoader: ImageLoader, val frames: FrameSource = MetadataFrames)
 
 internal val LocalMediaEnvironment = staticCompositionLocalOf<MediaEnvironment> { error("Wrap the screen in MediaLayerProvider") }
 

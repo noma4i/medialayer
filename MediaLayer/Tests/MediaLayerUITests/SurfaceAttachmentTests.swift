@@ -24,6 +24,7 @@ private final class PlacesLog: MediaPlaces, @unchecked Sendable {
   func itemState(key: String, state: MediaState) {}
   func fetchImage(url: String, headers: [String: String]) async throws -> Data { Data() }
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder { fatalError("unused") }
+  func submitTonePixels(source: MediaItem, width: UInt32, height: UInt32, rgba: Data) {}
   func stateStream(key: String) -> AsyncStream<MediaState> { AsyncStream { $0.finish() } }
 }
 

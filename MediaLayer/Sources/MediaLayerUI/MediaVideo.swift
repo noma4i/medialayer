@@ -129,7 +129,10 @@ public struct MediaVideo<Content: View>: View {
     for await value in places.stateStream(key: source.url) {
       state = value
       let reached = edges.advance(to: value)
-      if reached.firstFrame { onFirstFrame() }
+      if reached.firstFrame {
+        onFirstFrame()
+        ToneFrames.submitFirstFrame(of: item, slots: context?.slots, places: places)
+      }
       if reached.ended { onEnd() }
     }
   }

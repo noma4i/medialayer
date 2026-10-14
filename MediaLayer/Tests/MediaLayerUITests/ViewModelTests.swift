@@ -6,8 +6,20 @@ import QuartzCore
 import Testing
 @testable import MediaLayerUI
 
+struct TonePixelsCall: Equatable {
+  let url: String
+  let width: Int
+  let height: Int
+  let bytes: Int
+  let onMain: Bool
+}
+
 final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   private let lock = NSLock()
+  private var tones: [TonePixelsCall] = []
+
+  var submittedTones: [TonePixelsCall] { lock.withLock { tones } }
+
   private var calls: [String] = []
   var imageResult: Result<Data, Error> = .success(Data())
   private var fetches: [String] = []
@@ -31,6 +43,9 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
     return try imageResult.get()
   }
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder { .none }
+  func submitTonePixels(source: MediaItem, width: UInt32, height: UInt32, rgba: Data) {
+    lock.withLock { tones.append(TonePixelsCall(url: source.url, width: Int(width), height: Int(height), bytes: rgba.count, onMain: Thread.isMainThread)) }
+  }
   func stateStream(key: String) -> AsyncStream<MediaState> { AsyncStream { $0.finish() } }
   func attachView(key: String, token: UInt64) { record("attach \(key)") }
   func detachView(key: String) { record("detach \(key)") }

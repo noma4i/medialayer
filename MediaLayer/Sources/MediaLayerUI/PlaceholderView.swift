@@ -21,7 +21,7 @@ struct PlaceholderView: View {
       cover = nil
       switch plan {
       case .blurHash(let hash): blur = PlaceholderPixels.blurHash(hash)?.cgImage
-      case .cover(let url): cover = await load(url)
+      case .cover(let url): cover = await Self.loadCover(url, for: item, context: context)
       case .firstFrame, .none: break
       }
     }
@@ -32,8 +32,10 @@ struct PlaceholderView: View {
     let ready: Bool
   }
 
-  private func load(_ url: String) async -> PlatformImage? {
-    guard let address = URL(string: url) else { return nil }
-    return try? await context.pipeline.image(for: ImageRequest(url: address))
+  static func loadCover(_ url: String, for item: MediaItem, context: MediaContext) async -> PlatformImage? {
+    guard let address = URL(string: url), let image = try? await context.pipeline.image(for: ImageRequest(url: address)) else { return nil }
+
+    ToneFrames.submit(image.toneImage, source: item, places: context.places)
+    return image
   }
 }

@@ -10,6 +10,7 @@ import com.noma4i.medialayer.Placeholder
 import com.noma4i.medialayer.Pressure
 import com.noma4i.medialayer.StateListener
 import com.noma4i.medialayer.Subscription
+import android.os.Looper
 import java.util.concurrent.CopyOnWriteArrayList
 
 internal class RecordingEvents : PlayerEvents(NoHandle) {
@@ -27,11 +28,14 @@ internal class RecordingEvents : PlayerEvents(NoHandle) {
   override fun memoryWarning(level: Pressure) { calls.add("memory:$level") }
 }
 
+internal data class ToneCall(val url: String, val width: Int, val height: Int, val bytes: Int, val onMain: Boolean)
+
 internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents()) : MediaLayer(NoHandle) {
   val calls = CopyOnWriteArrayList<String>()
   val listeners = CopyOnWriteArrayList<Pair<String, StateListener>>()
   var closed = false
   var image: ByteArray = ByteArray(0)
+  val tones = CopyOnWriteArrayList<ToneCall>()
 
   override fun playerEvents(): PlayerEvents = events
   val items = CopyOnWriteArrayList<MediaItem>()
@@ -59,6 +63,10 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
       source.kind == Kind.IMAGE -> source.blurHash?.let { Placeholder.BlurHash(it) } ?: Placeholder.None
       else -> source.cover?.let { Placeholder.Cover(it) } ?: Placeholder.FirstFrame
     }
+
+  override fun submitTonePixels(source: MediaItem, width: UInt, height: UInt, rgba: ByteArray) {
+    tones.add(ToneCall(source.url, width.toInt(), height.toInt(), rgba.size, Looper.getMainLooper().isCurrentThread))
+  }
 
   override fun close() { closed = true }
 }

@@ -13,6 +13,7 @@ public protocol MediaPlaces: AnyObject, Sendable {
   func itemState(key: String, state: MediaState)
   func fetchImage(url: String, headers: [String: String]) async throws -> Data
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder
+  func submitTonePixels(source: MediaItem, width: UInt32, height: UInt32, rgba: Data)
   func stateStream(key: String) -> AsyncStream<MediaState>
   func attachView(key: String, token: UInt64)
   func detachView(key: String)

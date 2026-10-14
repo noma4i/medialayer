@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -33,6 +34,7 @@ import com.noma4i.medialayer.toItem
 import java.nio.ByteBuffer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
@@ -47,6 +49,7 @@ fun MediaImage(
   val environment = LocalMediaEnvironment.current
   val media = environment.media
   rememberPlace(source, playing = null, muted = null)
+  val tones = rememberCoroutineScope()
   BoxWithConstraints(modifier) {
     val pixels = decodePixels(source, constraints, density)
     val scale = contentScale.toScale()
@@ -67,6 +70,7 @@ fun MediaImage(
         if (reached != null) {
           state = reached
           media.itemState(source.url, reached)
+          if (painterState is AsyncImagePainter.State.Success) tones.launch { ToneFrames.submit(media, source.toItem(), painterState.result.drawable) }
         }
       },
       modifier = Modifier.fillMaxSize()

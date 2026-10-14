@@ -53,6 +53,8 @@ class SlotPlayers internal constructor() {
 
   internal fun view(token: ULong): ViewHandle? = views[token]
 
+  internal fun route(key: String): PlaybackRoute? = slots[key]?.route
+
   internal fun publish(key: String, slot: ExoPlayerSlot, player: ExoPlayer) {
     slots[key] = slot
     published.update { it + (key to player) }

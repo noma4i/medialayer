@@ -21,6 +21,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
   private var viewToken: ULong? = null
 
   @Volatile internal var player: ExoPlayer? = null
+  @Volatile internal var route: PlaybackRoute? = null
   private var loadControl: ReadaheadLoadControl? = null
   @Volatile internal var viewAttached = false
   @Volatile private var looping = false
@@ -64,6 +65,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     val exo = player ?: createPlayer()
     retract()
     this.key = key
+    this.route = route
     hasBeenReady = false
     frameRendered = false
     looping = route.looping
@@ -82,6 +84,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     clear()
     retract()
     key = null
+    route = null
     frameRendered = false
     anchorMs = 0
     advancing = false
