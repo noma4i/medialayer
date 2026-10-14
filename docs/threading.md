@@ -30,3 +30,9 @@ media.statsFlow().collect { stats ->
   withContext(Dispatchers.Main) { cacheBytes = stats.totalBytes }
 }
 ```
+
+### Kotlin: raw bridge and inline dispatchers
+
+`MediaLayer.open(context, ...)` from the `ui` module calls `NativeCallbacks.install()` for you. Call it yourself once, before the first `MediaLayer.open(OpenConfig)`, only when you use the generated bridge without `ui`.
+
+It keeps library threads attached to the JVM after a native callback. Without it, a suspend call such as `stats()` or `playUrl()` resumed inline on a library thread (`Dispatchers.Unconfined`, a test dispatcher that does not dispatch) detaches that thread under its own frames, and Android aborts with "attempting to detach while still running code".

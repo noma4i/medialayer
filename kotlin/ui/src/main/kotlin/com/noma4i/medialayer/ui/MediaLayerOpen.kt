@@ -14,6 +14,7 @@ import com.noma4i.medialayer.DeviceMemory
 import com.noma4i.medialayer.Fetcher
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.MemoryReleaser
+import com.noma4i.medialayer.NativeCallbacks
 import com.noma4i.medialayer.OpenConfig
 import com.noma4i.medialayer.PlayerEventsInterface
 import com.noma4i.medialayer.Pressure
@@ -77,6 +78,7 @@ internal fun openMediaLayer(
   imageMemoryBytes: Int = DEFAULT_IMAGE_MEMORY_BYTES,
   open: (OpenConfig) -> MediaLayer
 ): MediaLayer {
+  NativeCallbacks.install()
   val app = context.applicationContext
   val factory = ExoPlayerSlotFactory(app, callFactory, startMuted = silent)
   val dir = File(app.cacheDir, "medialayer").apply { mkdirs() }
