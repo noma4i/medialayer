@@ -50,3 +50,5 @@ mod stand_tests;
 mod store_tests;
 #[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod tone_tests;

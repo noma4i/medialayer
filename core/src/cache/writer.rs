@@ -114,7 +114,7 @@ impl Writer {
             let size = self.reservation.held();
             self.reservation.settle(&mut state);
             let check = Check::Sum(sum_of(self.hasher.clone()));
-            let entry = Entry { size, check, kind: self.kind, created: now, last_access: now, hits: 0, meta: self.meta.clone() };
+            let entry = Entry { size, check, kind: self.kind, created: now, last_access: now, hits: 0, meta: self.meta.clone(), tone: None };
             state.insert(self.name.clone(), self.key.clone(), entry, true);
         }
         mark_dirty(&inner);

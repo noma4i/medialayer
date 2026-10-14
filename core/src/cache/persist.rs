@@ -1,10 +1,12 @@
 use super::entry::{Check, Entry, Kind};
-use super::naming::{hex_decode, hex_encode};
+use super::naming::{hex_decode, hex_decode_bytes, hex_encode};
+use crate::analysis::ToneData;
+use crate::identity::hex_lower;
 use crate::proxy::Meta;
 
 pub fn encode_line(key: &str, entry: &Entry) -> String {
     format!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
         hex_encode(key),
         entry.size,
         entry.kind.code(),
@@ -17,6 +19,7 @@ pub fn encode_line(key: &str, entry: &Entry) -> String {
             Check::Sum(sum) => format!("{sum:016x}"),
             Check::Legacy => String::new(),
         },
+        entry.tone.as_ref().map(|tone| hex_lower(&tone.encode())).unwrap_or_default(),
     )
 }
 
@@ -34,10 +37,11 @@ pub fn decode_line(line: &str) -> Option<(String, Entry)> {
         None | Some("") => Check::Legacy,
         Some(sum) => Check::Sum(u64::from_str_radix(sum, 16).ok()?),
     };
+    let tone = fields.next().and_then(|field| hex_decode_bytes(field).and_then(|bytes| ToneData::decode(&bytes)));
     if fields.next().is_some() {
         return None;
     }
-    Some((key, Entry { size, check, kind, created, last_access, hits, meta: Meta { content_type, total_length } }))
+    Some((key, Entry { size, check, kind, created, last_access, hits, meta: Meta { content_type, total_length }, tone }))
 }
 
 fn optional<T>(field: &str, parse: impl FnOnce(&str) -> Option<T>) -> Option<Option<T>> {

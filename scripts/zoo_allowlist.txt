@@ -18,6 +18,7 @@ spawn cache/writer.rs 2 # part cleanup after a dropped writer, part creation tha
 spawn ffi/fetcher.rs 1 # closes the platform reader on the blocking pool after the body is dropped
 spawn ffi/assembled.rs 1 # limits warm-up after assembly, ends with the read
 spawn ffi/layer.rs 1 # assemble on the new runtime, ends with the assembly and hands the result to Deferred
+spawn api/tones.rs 1 # pixel analysis of one key, one run per key through the running set, ends with the analysis and the tone write
 spawn prefetch/runner.rs 1 # load jobs owned by prefetch::Owner through the cancel notify of every job
 periodic MediaLayer/Sources/MediaLayerUI/MediaAudio.swift 1 # progress sampling of a PLAYING audio cell every 250 ms (AudioSampling.interval), stops when paused, owner the audio cell task
 periodic MediaLayer/Sources/MediaLayerUI/AVQueuePlayerSlot.swift 1 # trace snapshot timer 0.5 s, only with ML_TRACE=1

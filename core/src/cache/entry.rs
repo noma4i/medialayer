@@ -1,3 +1,4 @@
+use crate::analysis::ToneData;
 use crate::proxy::Meta;
 use std::collections::BTreeMap;
 
@@ -43,6 +44,7 @@ pub struct Entry {
     pub last_access: u64,
     pub hits: u64,
     pub meta: Meta,
+    pub tone: Option<ToneData>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

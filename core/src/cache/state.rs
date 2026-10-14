@@ -1,4 +1,5 @@
 use super::entry::{Check, Entry, Kind, KindStats, CacheStats};
+use crate::analysis::ToneData;
 use crate::limits::Limits;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound;
@@ -56,6 +57,10 @@ impl State {
             slot.entry.check = Check::Sum(sum);
             slot.verified = true;
         }
+    }
+
+    pub fn set_tone(&mut self, name: &str, tone: ToneData) -> bool {
+        self.entries.get_mut(name).map(|slot| slot.entry.tone = Some(tone)).is_some()
     }
 
     pub fn insert(&mut self, name: String, key: String, entry: Entry, verified: bool) {

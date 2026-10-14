@@ -10,6 +10,7 @@ use super::reader::{Pin, Reader};
 use super::save::{mark_dirty, write_index};
 use super::verify::verified;
 use super::writer::Writer;
+use crate::analysis::ToneData;
 use crate::limits::{Limits, LimitsError};
 use crate::proxy::Meta;
 use std::path::PathBuf;
@@ -133,6 +134,21 @@ impl Cache {
             return None;
         }
         verified(&self.inner, &file_name(key)).await
+    }
+
+    pub fn tone(&self, key: &str) -> Option<ToneData> {
+        if !self.is_ready() {
+            return None;
+        }
+        self.inner.state().entry_state(&file_name(key)).and_then(|(_, entry, _)| entry.tone)
+    }
+
+    pub fn set_tone(&self, key: &str, tone: ToneData) -> bool {
+        if !self.is_ready() || !self.inner.state().set_tone(&file_name(key), tone) {
+            return false;
+        }
+        mark_dirty(&self.inner);
+        true
     }
 
     pub async fn contains(&self, key: &str) -> bool {

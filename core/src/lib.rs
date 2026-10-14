@@ -1,5 +1,6 @@
 uniffi::setup_scaffolding!();
 
+pub mod analysis;
 pub mod api;
 pub mod blurhash;
 pub mod cache;

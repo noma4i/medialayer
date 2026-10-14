@@ -1,5 +1,5 @@
 use super::layer::MemoryReleaser;
-use crate::api::{follow_stats, AbortOnDrop, ControlPorts, Controls, MemoryRelease, Parts, Places, Routes, Signals, Stage};
+use crate::api::{follow_stats, AbortOnDrop, ControlPorts, Controls, MemoryRelease, Parts, Places, Routes, Signals, Stage, Tones};
 use std::sync::Arc;
 use tokio::runtime::Handle;
 
@@ -9,6 +9,7 @@ pub struct Assembled {
     pub stage: Stage,
     pub places: Arc<Places>,
     pub routes: Arc<Routes>,
+    pub tones: Arc<Tones>,
     _stats_feed: AbortOnDrop,
 }
 
@@ -51,6 +52,6 @@ impl Assembled {
             warm.limits().await;
         });
         let stats_feed = follow_stats(handle, Arc::downgrade(&controls), parts.change);
-        Assembled { controls, signals, stage: parts.stage, places: parts.places, routes: parts.routes, _stats_feed: stats_feed }
+        Assembled { controls, signals, stage: parts.stage, places: parts.places, routes: parts.routes, tones: parts.tones, _stats_feed: stats_feed }
     }
 }

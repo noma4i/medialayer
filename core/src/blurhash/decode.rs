@@ -58,7 +58,7 @@ fn parse_header(hash: &str) -> Result<Header, BlurHashError> {
     Ok(Header { columns, rows })
 }
 
-fn srgb_to_linear(value: u32) -> f64 {
+pub(crate) fn srgb_to_linear(value: u32) -> f64 {
     let scaled = value as f64 / 255.0;
     if scaled <= 0.04045 {
         scaled / 12.92
@@ -67,7 +67,7 @@ fn srgb_to_linear(value: u32) -> f64 {
     }
 }
 
-fn linear_to_srgb(value: f64) -> u8 {
+pub(crate) fn linear_to_srgb(value: f64) -> u8 {
     let clamped = value.clamp(0.0, 1.0);
     let scaled = if clamped <= 0.0031308 {
         clamped * 12.92

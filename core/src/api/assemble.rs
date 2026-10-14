@@ -4,6 +4,7 @@ use super::ports::{CacheControl, PrefetchControl, SettingsStore, TransportContro
 use super::routes::Routes;
 use super::slots::{PlayerSlotFactory, SlotRunner};
 use super::stage::{Stage, StageParts};
+use super::tones::{CacheTones, Tones, MEMO_ENTRIES};
 use crate::cache::{classify_kind, Cache, CacheStore, Clock, Options as CacheOptions, SystemClock};
 use crate::change::Change;
 use crate::fetch::Fetcher;
@@ -75,6 +76,7 @@ pub struct Parts {
     pub stage: Stage,
     pub places: Arc<Places>,
     pub routes: Arc<Routes>,
+    pub tones: Arc<Tones>,
     pub settings: Arc<dyn SettingsStore>,
     pub ledger: Ledger,
     pub clock: Arc<dyn Clock>,
@@ -163,6 +165,11 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
     let prefetcher = Prefetcher::new(Arc::new(ProxyLoader::new(proxy.clone())), &defaults, prefetch_ledger, clock.clone());
     prefetcher.set_image_windows(image_windows.into_iter().collect());
     let routes = Arc::new(Routes::new(proxy.clone(), Arc::new(cache.clone())));
+    let keying = {
+        let proxy = proxy.clone();
+        Arc::new(move |url: &str, headers: &std::collections::HashMap<String, String>| proxy.key_for(url, headers))
+    };
+    let tones = Tones::new(handle.clone(), Arc::new(CacheTones::new(cache.clone(), keying)), MEMO_ENTRIES);
     let places = Arc::new(Places::new(handle.clone()));
     let ring_config = pool_config(&defaults, device, &pool);
     let stage = Stage::new(
@@ -180,5 +187,5 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
             ledger: ledger.clone(),
         },
     );
-    Ok(Parts { cache, proxy, prefetcher, stage, places, routes, settings, ledger, clock, defaults, device, change, pool })
+    Ok(Parts { cache, proxy, prefetcher, stage, places, routes, tones, settings, ledger, clock, defaults, device, change, pool })
 }

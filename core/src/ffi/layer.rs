@@ -2,6 +2,7 @@ use super::assembled::Assembled;
 use super::deferred::Deferred;
 use super::events::PlayerEvents;
 use super::fetcher::{Fetcher, ForeignFetcher};
+use crate::analysis::{MediaTone, ToneSource};
 use super::limits::{default_limits, DeviceMemory, ImageWindow, Limits, PoolSettings};
 use crate::api::{
     assemble, placeholder_for, CacheState, Placeholder, Assembly, Kind, MediaError, MediaItem, MediaState, MediaStats, Parts, PlaybackRoute,
@@ -43,6 +44,11 @@ pub trait MemoryReleaser: Send + Sync {
 #[uniffi::export(with_foreign)]
 pub trait StatsListener: Send + Sync {
     fn changed(&self, stats: MediaStats);
+}
+
+#[uniffi::export(with_foreign)]
+pub trait ToneListener: Send + Sync {
+    fn changed(&self, source: ToneSource);
 }
 
 #[uniffi::export(with_foreign)]
@@ -166,6 +172,19 @@ impl MediaLayer {
 
     pub fn subscribe_state(&self, key: String, listener: Arc<dyn StateListener>) -> Arc<Subscription> {
         Arc::new(self.assembled.hold(move |assembled| assembled.places.subscribe(&key, Arc::new(move |state| listener.changed(state)))))
+    }
+
+    pub fn subscribe_tone(&self, url: String, listener: Arc<dyn ToneListener>) -> Arc<Subscription> {
+        Arc::new(self.assembled.hold(move |assembled| assembled.tones.subscribe(&url, Arc::new(move |source| listener.changed(source)))))
+    }
+
+    pub async fn tone(&self, source: MediaItem, band: f32) -> Result<Option<MediaTone>, MediaError> {
+        let assembled = self.assembled.wait().await?;
+        Ok(assembled.tones.tone(&source, band).await?)
+    }
+
+    pub fn submit_tone_pixels(&self, source: MediaItem, width: u32, height: u32, rgba: Vec<u8>) {
+        self.declare(move |assembled| assembled.tones.submit(source, width, height, rgba));
     }
 
     pub async fn play_url(&self, source: MediaItem) -> Result<PlaybackRoute, MediaError> {

@@ -6,11 +6,12 @@ pub struct InputLimits {
     pub playlist_bytes: u64,
     pub response_bytes: u64,
     pub blurhash_chars: u64,
+    pub tone_pixels: u64,
 }
 
 impl Default for InputLimits {
     fn default() -> Self {
-        Self { playlist_bytes: 2 * MIB, response_bytes: 16 * MIB, blurhash_chars: 200 }
+        Self { playlist_bytes: 2 * MIB, response_bytes: 16 * MIB, blurhash_chars: 200, tone_pixels: 128 * 128 }
     }
 }
 

@@ -10,6 +10,8 @@ pub enum MediaError {
     Fetch { detail: String },
     #[error("blurhash: {detail}")]
     BlurHash { detail: String },
+    #[error("tone: {detail}")]
+    Tone { detail: String },
     #[error("unexpected: {detail}")]
     Unexpected { detail: String },
 }
@@ -17,6 +19,12 @@ pub enum MediaError {
 impl From<LimitsError> for MediaError {
     fn from(error: LimitsError) -> Self {
         MediaError::InvalidLimits { detail: error.to_string() }
+    }
+}
+
+impl From<crate::analysis::ToneError> for MediaError {
+    fn from(error: crate::analysis::ToneError) -> Self {
+        MediaError::Tone { detail: error.to_string() }
     }
 }
 

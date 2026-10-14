@@ -13,6 +13,7 @@ mod slots;
 mod source;
 mod stage;
 mod stats_feed;
+mod tones;
 mod types;
 
 pub use assemble::{assemble, ledger_for, pool_config, Assembly, Parts, PoolSettings};
@@ -29,6 +30,7 @@ pub use slots::{PlayerSlot, PlayerSlotFactory, SlotCall, SlotRunner, SlotSample}
 pub use source::{MediaItem, PlaybackRoute};
 pub use stage::{Stage, StageParts};
 pub use stats_feed::follow_stats;
+pub use tones::{CacheTones, Keying, ToneStore, Tones, MEMO_ENTRIES};
 pub use types::{Kind, KindUsage, MediaState, MediaStats, Pressure, ReleaseCounts, SlotCounts};
 
 #[cfg(test)]
@@ -49,3 +51,5 @@ mod routes_tests;
 mod signals_tests;
 #[cfg(test)]
 mod slots_tests;
+#[cfg(test)]
+mod tones_tests;
