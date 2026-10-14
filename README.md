@@ -71,6 +71,7 @@ end
 - [Limits and eviction](docs/limits-and-eviction.md)
 - [Threading and performance](docs/threading.md)
 - [Placeholders](docs/placeholders.md)
+- [Tone](docs/tone.md)
 - [Declaring media](docs/declaring-media.md)
 - [Player pool](docs/player-pool.md)
 - [Memory control](docs/memory.md)
