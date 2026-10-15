@@ -109,6 +109,8 @@ A `SurfaceView` does not follow the animations of its parent like a texture does
 | Order with other views | Draws inside the Compose tree, overlays work | Draws behind the Compose content: the `content` slot draws over it, a `Dialog` or popup is placed by the compositor and can differ |
 | Screenshot, `drawToBitmap`, window capture | Contains the video | Contains a hole or a black rectangle |
 
+Do not use `Window` in a pager on Android yet: a measured run on a Pixel 4a (Android 13, 30 swipes of the feed, 5 pairs) gave no gain (median janky frames 53.6 % against 38.6 % with `Texture`, p90 143 ms against 103 ms) and 5 of 10 runs ended with a native crash in `android.view.SurfaceView$SurfaceViewPositionUpdateListener.positionChanged` (libhwui worker thread) while the pager moved the view; the same build with `Texture` did not crash. Keep `Texture` for every pager page. The notes below apply only to a view that is not moved by a pager.
+
 Use `Window` for a full-width feed page that the app does not clip, fade or rotate. Keep `Texture` where the video sits under a rounded clip, an alpha animation or a shared-element transition. The pool is unchanged: the same players, the same claims, the same window. Only the view that shows a player differs.
 
 Kotlin only (the example is an indented block because Swift draws video on an `AVPlayerLayer` and has no such choice):
