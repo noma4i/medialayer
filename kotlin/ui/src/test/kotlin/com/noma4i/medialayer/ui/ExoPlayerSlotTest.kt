@@ -212,6 +212,23 @@ class ExoPlayerSlotTest {
   }
 
   @Test
+  fun aPoolOfThreeSlotsNeverCreatesMoreThanThreePlayersWhateverTheNumberOfKeys() {
+    val factory = factory()
+    val slots = (0u..2u).map { factory.create(it) }
+
+    val created = mutableSetOf<Player>()
+    repeat(12) { page ->
+      val slot = slots[page % 3]
+      slot.unload(); slot.load("k$page", route); slot.preroll(); idle()
+      created.add(slot.player!!)
+    }
+
+    assertEquals(3, created.size)
+    assertEquals(3, factory.players.keyed.value.size)
+    assertEquals(setOf("k9", "k10", "k11"), factory.players.keyed.value.keys)
+  }
+
+  @Test
   fun playerListenerEventsReachThePlatformEventsWithTheSlotNumber() {
     val slot = factory().create(7u)
     slot.load("k", route.copy(looping = false)); idle()

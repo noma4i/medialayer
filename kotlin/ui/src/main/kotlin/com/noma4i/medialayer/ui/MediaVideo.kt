@@ -14,7 +14,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.media3.ui.compose.ContentFrame
-import androidx.media3.ui.compose.SURFACE_TYPE_TEXTURE_VIEW
 import coil.compose.AsyncImage
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
@@ -55,6 +54,7 @@ fun MediaVideo(
   modifier: Modifier = Modifier,
   contentScale: ContentScale = ContentScale.Crop,
   loop: Boolean = true,
+  output: MediaOutput = MediaOutput.Texture,
   onFirstFrame: () -> Unit = {},
   onEnd: () -> Unit = {},
   onProgress: ((Double) -> Unit)? = null,
@@ -100,7 +100,7 @@ fun MediaVideo(
     }
   }
   Box(modifier) {
-    player?.let { ContentFrame(it, Modifier.fillMaxSize(), SURFACE_TYPE_TEXTURE_VIEW, contentScale, true, {}) }
+    player?.let { ContentFrame(it, Modifier.fillMaxSize(), output.contentFrameType(), contentScale, true, {}) }
     VideoPlaceholder(source, state.isReady, contentScale)
     content(state)
   }

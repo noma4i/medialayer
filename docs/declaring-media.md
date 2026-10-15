@@ -95,6 +95,30 @@ Kotlin only (the example is an indented block because Swift has no `weight` yet)
 
 Swift has no `weight` yet: the Swift `MediaImage` has no cost measured in a tile grid.
 
+## Video output
+
+A Kotlin `MediaVideo` draws the player on a `TextureView` by default (`output = MediaOutput.Texture`). A texture copies every video frame on the GPU, follows the alpha, clip and translation of its parent, and costs RenderThread time in a scrolling feed. Pass `output = MediaOutput.Window` to draw on a `SurfaceView`: the decoder writes into its own buffer and the compositor places it, with no copy per frame.
+
+A `SurfaceView` does not follow the animations of its parent like a texture does:
+
+| Parent does | `MediaOutput.Texture` | `MediaOutput.Window` |
+| ----------- | --------------------- | -------------------- |
+| Rounded clip (`clip` with a shape) | Clips the video | Does not clip the video, the corners stay square |
+| `alpha`, fade, cross-fade between pages | Fades the video | Video stays opaque while the rest fades |
+| Translation, scale, rotation of the pager | Moves the video with the page | Follows the position of the page, can lag one frame during a fling, does not rotate or scale with the parent |
+| Order with other views | Draws inside the Compose tree, overlays work | Draws behind the Compose content: the `content` slot draws over it, a `Dialog` or popup is placed by the compositor and can differ |
+| Screenshot, `drawToBitmap`, window capture | Contains the video | Contains a hole or a black rectangle |
+
+Use `Window` for a full-width feed page that the app does not clip, fade or rotate. Keep `Texture` where the video sits under a rounded clip, an alpha animation or a shared-element transition. The pool is unchanged: the same players, the same claims, the same window. Only the view that shows a player differs.
+
+Kotlin only (the example is an indented block because Swift draws video on an `AVPlayerLayer` and has no such choice):
+
+    MediaVideo(
+      source = MomentVideo(url = moment.videoUrl, cover = moment.coverUrl),
+      playing = isActive,
+      output = MediaOutput.Window
+    )
+
 ## Audio
 
 ### Swift
