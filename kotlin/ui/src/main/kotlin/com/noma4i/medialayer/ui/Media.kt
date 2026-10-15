@@ -6,6 +6,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.collectAsState
@@ -43,6 +44,13 @@ fun MediaLayerProvider(media: MediaLayer, imageLoader: ImageLoader? = null, play
 
 @Composable
 internal fun rememberPlace(source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean = true, peeking: Boolean = false): MediaState {
+  declarePlace(source, playing, muted, loop, peeking)
+  val media = LocalMediaEnvironment.current.media
+  return remember(media, source.url) { media.stateFlow(source.url) }.collectAsState(MediaState.Idle).value
+}
+
+@Composable
+internal fun declarePlace(source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean = true, peeking: Boolean = false) {
   val media = LocalMediaEnvironment.current.media
   val item = remember(source, loop) { source.toItem().copy(looping = loop) }
   val owner = remember { Any() }
@@ -68,5 +76,15 @@ internal fun rememberPlace(source: MediaSource, playing: Boolean?, muted: Boolea
       onDispose { media.claims.setPeeking(owner, item.url, false) }
     }
   }
-  return remember(media, item.url) { media.stateFlow(item.url) }.collectAsState(MediaState.Idle).value
+}
+
+@Composable
+internal fun claimTile(source: MediaSource) {
+  val media = LocalMediaEnvironment.current.media
+  val owner = remember { Any() }
+  val latest by rememberUpdatedState(source)
+  DisposableEffect(media, source.url) {
+    media.claims.visible(owner, latest.toItem(), true)
+    onDispose { media.claims.release(owner, source.url) }
+  }
 }

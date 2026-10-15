@@ -3,6 +3,7 @@ package com.noma4i.medialayer.ui
 import android.content.Context
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -42,13 +43,22 @@ fun MediaImage(
   source: MediaSource,
   modifier: Modifier = Modifier,
   contentScale: ContentScale = ContentScale.Crop,
+  weight: MediaWeight = MediaWeight.Full,
   content: @Composable (MediaState) -> Unit = {}
 ) {
+  when (weight) {
+    MediaWeight.Full -> FullImage(source, modifier, contentScale, content)
+    MediaWeight.Tile -> TileImage(source, modifier, contentScale, content)
+  }
+}
+
+@Composable
+private fun FullImage(source: MediaSource, modifier: Modifier, contentScale: ContentScale, content: @Composable (MediaState) -> Unit) {
   val context = LocalContext.current
   val density = LocalDensity.current.density
   val environment = LocalMediaEnvironment.current
   val media = environment.media
-  rememberPlace(source, playing = null, muted = null)
+  declarePlace(source, playing = null, muted = null)
   val tones = rememberCoroutineScope()
   BoxWithConstraints(modifier) {
     val pixels = decodePixels(source, constraints, density)
@@ -77,6 +87,43 @@ fun MediaImage(
     )
     content(state)
   }
+}
+
+@Composable
+private fun TileImage(source: MediaSource, modifier: Modifier, contentScale: ContentScale, content: @Composable (MediaState) -> Unit) {
+  val context = LocalContext.current
+  val environment = LocalMediaEnvironment.current
+  val media = environment.media
+  claimTile(source)
+  val scale = contentScale.toScale()
+  val request = remember(source, scale) { imageRequest(context, source, source.size?.let { (width, height) -> PixelSize(width.toUInt(), height.toUInt()) }, scale) }
+  var state: MediaState by remember(source.url) { mutableStateOf(MediaState.Idle) }
+  Box(modifier) {
+    if (state != MediaState.Ready) TileBlur(source, contentScale)
+    AsyncImage(
+      model = request,
+      contentDescription = null,
+      imageLoader = environment.imageLoader,
+      contentScale = contentScale,
+      onState = { painterState ->
+        painterState.toMediaState()?.let { reached ->
+          state = reached
+          media.itemState(source.url, reached)
+        }
+      },
+      modifier = Modifier.fillMaxSize()
+    )
+    content(state)
+  }
+}
+
+@Composable
+private fun TileBlur(source: MediaSource, contentScale: ContentScale) {
+  val media = LocalMediaEnvironment.current.media
+  val blur by produceState<ImageBitmap?>(null, media, source) {
+    value = (media.placeholder(source.toItem(), false) as? Placeholder.BlurHash)?.let { decodeBlur(it.hash) }
+  }
+  blur?.let { Image(it, "blurhash", Modifier.fillMaxSize(), contentScale = contentScale) }
 }
 
 private fun decodePixels(source: MediaSource, constraints: Constraints, density: Float): PixelSize? {

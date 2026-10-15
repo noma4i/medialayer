@@ -36,6 +36,7 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
   var closed = false
   var image: ByteArray = ByteArray(0)
   val tones = CopyOnWriteArrayList<ToneCall>()
+  val placeholders = CopyOnWriteArrayList<Pair<String, Boolean>>()
 
   override fun playerEvents(): PlayerEvents = events
   val items = CopyOnWriteArrayList<MediaItem>()
@@ -57,12 +58,14 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
   override fun itemState(key: String, state: MediaState) { calls.add("itemState:$key:${state::class.simpleName}") }
   override fun seek(key: String, positionMs: ULong) { calls.add("seek:$key:$positionMs") }
   override suspend fun fetchImage(url: String, headers: Map<String, String>): ByteArray { calls.add("fetchImage:$url"); return image }
-  override suspend fun placeholder(source: MediaItem, ready: Boolean): Placeholder =
-    when {
+  override suspend fun placeholder(source: MediaItem, ready: Boolean): Placeholder {
+    placeholders.add(source.url to ready)
+    return when {
       ready -> Placeholder.None
       source.kind == Kind.IMAGE -> source.blurHash?.let { Placeholder.BlurHash(it) } ?: Placeholder.None
       else -> source.cover?.let { Placeholder.Cover(it) } ?: Placeholder.FirstFrame
     }
+  }
 
   override fun submitTonePixels(source: MediaItem, width: UInt, height: UInt, rgba: ByteArray) {
     tones.add(ToneCall(source.url, width.toInt(), height.toInt(), rgba.size, Looper.getMainLooper().isCurrentThread))

@@ -71,6 +71,30 @@ MediaImage(
 )
 ```
 
+## Image in a grid of tiles
+
+A grid of small images (a profile of moments, a gallery) pays for every tile while it scrolls. Pass `weight = MediaWeight.Tile` (Kotlin) to make a tile light. A tile keeps what a correct place needs: one claim per tile (the key stays alive for the Stage while any view of it is on screen, and leaves with the last view), the state reported to the core, the BlurHash while the image loads, the decode at the declared size.
+
+A tile leaves out what a grid does not use:
+
+| A full image does | A tile does not |
+| ----------------- | --------------- |
+| Reads the view size with `BoxWithConstraints` | Uses `source.size` as the decode size. Without it, Coil takes the size from the layout |
+| Submits the pixels of the image for its tone | Submits nothing. `tone(source, band)` answers from the BlurHash of the source only |
+| Asks the core for a placeholder again when the image is ready | Asks once, and drops the BlurHash when the image is ready |
+
+Give a tile source its pixel size in `source.size`. Do not use a tile where the app reads the tone of the image or draws a placeholder other than the BlurHash.
+
+Kotlin only (the example is an indented block because Swift has no `weight` yet):
+
+    MediaImage(
+      source = MomentThumb(url = moment.thumbUrl, blurHash = moment.blurHash, size = 352 to 352),
+      modifier = Modifier.aspectRatio(1f),
+      weight = MediaWeight.Tile
+    )
+
+Swift has no `weight` yet: the Swift `MediaImage` has no cost measured in a tile grid.
+
 ## Audio
 
 ### Swift
