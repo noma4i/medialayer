@@ -158,6 +158,9 @@ impl Stage {
         let headers = source.headers.clone();
         crate::trace!("stage", "visible {} {visible}", crate::trace::tail(&url));
         if !visible {
+            if self.state().leave(&url) {
+                return;
+            }
             let commands = self.state().ring.untouch(&url);
             self.dispatch(commands);
             self.inner.places.retired(&url);
@@ -167,6 +170,7 @@ impl Stage {
         let now = self.now();
         let commands = {
             let mut state = self.state();
+            *state.shown.entry(url.clone()).or_insert(0) += 1;
             let is_player = source.kind != Kind::Image;
             state.catalog.insert(url.clone(), source);
             state.refresh_pending(&url);
@@ -191,6 +195,7 @@ impl Stage {
             state.catalog.clear();
             state.pending_wanted.clear();
             state.views.clear();
+            state.shown.clear();
             state.rates.clear();
             state.positions.clear();
             state.window.clear();

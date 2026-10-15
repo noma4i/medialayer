@@ -537,3 +537,21 @@ async fn inv_api_22_moving_an_image_window_prefetches_the_pages_around_the_new_p
     eventually_async(|| async { rig.parts.cache.contains(&cache_key(&remote(25))).await }).await;
     assert_eq!(rig.fetcher.calls_for(&remote(25)), 1);
 }
+
+#[tokio::test]
+async fn inv_api_22_a_place_shown_by_two_views_stays_ready_when_one_view_leaves() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    let url = "https://o.test/chat.gif";
+    let image = || MediaItem::bare(url, Kind::Image);
+    stage.visible(image(), true);
+    rig.parts.places.item_state(url, MediaState::Ready);
+    stage.visible(image(), true);
+    stage.visible(image(), false);
+
+    eventually(|| stage.commands_idle()).await;
+
+    assert_eq!(rig.parts.places.state(url), MediaState::Ready, "2 views appeared, 1 left, 1 still shows the place");
+    stage.visible(image(), false);
+    assert_eq!(rig.parts.places.state(url), MediaState::Idle, "the last view left");
+}

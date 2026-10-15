@@ -58,6 +58,7 @@ struct State {
     tasks: HashMap<String, AbortOnDrop>,
     catalog: HashMap<String, MediaItem>,
     views: HashMap<String, u64>,
+    shown: HashMap<String, usize>,
     rates: HashMap<String, f32>,
     positions: ResumePositions,
     window: Vec<Option<MediaItem>>,
@@ -93,6 +94,19 @@ pub struct Stage {
 }
 
 impl State {
+    fn leave(&mut self, key: &str) -> bool {
+        match self.shown.get_mut(key) {
+            Some(count) if *count > 1 => {
+                *count -= 1;
+                true
+            }
+            _ => {
+                self.shown.remove(key);
+                false
+            }
+        }
+    }
+
     fn lease_for(&mut self, key: &str) -> u64 {
         if let Some(lease) = self.leases.get(key) {
             return *lease;
@@ -196,6 +210,7 @@ impl Stage {
             tasks: HashMap::new(),
             catalog: HashMap::new(),
             views: HashMap::new(),
+            shown: HashMap::new(),
             rates: HashMap::new(),
             positions: ResumePositions::default(),
             window: Vec::new(),

@@ -207,4 +207,4 @@ A pager declares the neighbour page that the finger is dragging into with `peeki
 
 MediaLayer never sets up or activates the audio session. Your app chooses the category and activates it (`AVAudioSession` on iOS); on Android Media3 asks for audio focus when a player starts.
 
-You report only whether a place is visible or active. Prefetch, preroll, handoff and release follow from that.
+You report only whether a place is visible or active. Prefetch, preroll, handoff and release follow from that. Several views can show the same url at once (a chat row and its message preview). The place keeps its state until the last of them reports that it left, so a view that stays on screen never falls back to idle because another view of the same url disappeared.
