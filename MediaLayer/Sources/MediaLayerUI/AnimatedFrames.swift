@@ -173,8 +173,11 @@ struct AnimatedFramesView: UIViewRepresentable {
   }
 
   func updateUIView(_ view: UIImageView, context: Context) {
+    update(view, playback: context.coordinator)
+  }
+
+  func update(_ view: UIImageView, playback: Playback) {
     view.contentMode = contentMode == .fill ? .scaleAspectFill : .scaleAspectFit
-    let playback = context.coordinator
     (view as? FrameImageView)?.windowChanged = { [weak playback, weak view] in
       if let playback, let view { playback.sync(view) }
     }
@@ -184,7 +187,7 @@ struct AnimatedFramesView: UIViewRepresentable {
       view.stopAnimating()
       switch frames.storage {
       case let .decoded(images):
-        view.image = nil
+        view.image = UIImage(cgImage: frames.firstImage)
         view.animationImages = images.map { UIImage(cgImage: $0) }
       case .streamed:
         view.animationImages = nil
