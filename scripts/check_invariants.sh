@@ -151,17 +151,18 @@ for entry in $doc_paths; do
 done
 mentioned="$mentioned$(grep -hoE 'INV-[A-Z]+-[0-9]+' "$spec" | sort -u | tr '\n' ' ' || true)"
 missing_rows=""
+cut -f1 "$work/registry.txt" > "$work/ids.txt"
 for id in $(printf '%s\n' $mentioned | sort -u); do
-  cut -f1 "$work/registry.txt" | grep -qx "$id" || missing_rows="$missing_rows$id "
+  grep -qx "$id" "$work/ids.txt" || missing_rows="$missing_rows$id "
 done
 
-known="$(awk -F'\t' '{print tolower($1)}' "$work/registry.txt" | tr '-' '_')"
+awk -F'\t' '{print tolower($1)}' "$work/registry.txt" | tr '-' '_' > "$work/known.txt"
 orphans=""
 while IFS=$'\t' read -r name _; do
   [ -z "$name" ] && continue
   for part in $(printf '%s\n' "$name" | grep -oE 'inv_[a-z]+_[0-9]{2}_' || true); do
     id="${part%_}"
-    printf '%s\n' "$known" | grep -qx "$id" || orphans="$orphans$name (unknown invariant $id)"$'\n'
+    grep -qx "$id" "$work/known.txt" || orphans="$orphans$name (unknown invariant $id)"$'\n'
   done
 done < "$work/tests.txt"
 

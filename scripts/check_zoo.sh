@@ -237,6 +237,13 @@ for entry in panic_allowed:
     if tuple(entry) not in panic_used:
         findings.append(f"Z8 the allowlist grants a panic call to {entry[0]} matching `{entry[1]}` but the code has none: remove the entry")
 
+# Z9 a script never decides membership through a pipe into an early-exit reader: under pipefail the producer gets SIGPIPE and a present name reads as absent. Read a file instead.
+EARLY_EXIT = re.compile(r"\|\s*(?:grep|egrep|rg)\s+(?:-[A-Za-z]*q|-m ?\d+|--max-count)")
+for path in sorted((root / "scripts").glob("*.sh")):
+    for number, line in enumerate(path.read_text().splitlines(), 1):
+        if not line.lstrip().startswith("#") and EARLY_EXIT.search(line):
+            findings.append(f"Z9 {path.relative_to(root)}:{number} pipes into an early-exit grep, read from a file: {line.strip()}")
+
 if findings:
     print("zoo check found", len(findings), "problem(s):")
     for finding in findings:

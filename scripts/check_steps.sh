@@ -173,7 +173,7 @@ run_checks() {
   done
   ordered+=(final)
   for lane in "${ordered[@]}"; do
-    printf '%s\n' "${lanes[@]}" | grep -qx "$lane" || continue
+    [[ " ${lanes[*]} " == *" $lane "* ]] || continue
     run_lane "$lane" || { failed=1; break; }
   done
   times > "$logdir/times.txt"
