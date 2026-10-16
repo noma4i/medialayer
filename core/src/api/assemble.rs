@@ -124,6 +124,7 @@ impl CacheControl for Cache {
     }
 
     async fn contains(&self, key: &str) -> bool {
+        Cache::ready(self).await;
         Cache::contains(self, key).await
     }
 }

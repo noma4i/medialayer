@@ -106,17 +106,18 @@ extension GlobalMedia {
       ImageMemory.install(ImageCache(), on: places)
       let context = MediaContext(places: places)
       let source = TestImage(url: "https://o.test/shown.png")
-      func firstFrame() -> [UInt8]? {
+      func shownFirstFrame() -> [UInt8]? {
         let view = MediaImage(source).environment(\.mediaContext, context).environment(\.displayScale, 2).frame(width: 50, height: 50)
-        let renderer = ImageRenderer(content: view)
-        renderer.scale = 1
-        return centerPixel(renderer.cgImage)
+        return centerPixel(firstFrame(of: view, size: CGSize(width: 50, height: 50)))
       }
       let request = try #require(MediaImagePipeline.request(for: source, points: CGSize(width: 50, height: 50), scale: 2))
 
-      let cold = firstFrame()
+      let held = Latch()
+      places.fetchLatch = held
+      let cold = shownFirstFrame()
+      held.open()
       _ = try await context.pipeline.image(for: request)
-      let warm = firstFrame()
+      let warm = shownFirstFrame()
 
       let larger = try #require(MediaImagePipeline.request(for: source, points: CGSize(width: 80, height: 80), scale: 2))
       #expect(MediaImagePipeline.cachedImage(for: request, in: context.pipeline) != nil)

@@ -139,10 +139,16 @@ struct AnimatedFramesView: UIViewRepresentable {
   final class Playback {
     var token: UUID?
     var plan: StreamPlan?
+    var animatesImages = false
     private var task: Task<Void, Never>?
     private var runningInterval: TimeInterval = 0
 
     func sync(_ view: UIImageView) {
+      if animatesImages, view.window != nil {
+        if !view.isAnimating { view.startAnimating() }
+      } else if view.isAnimating {
+        view.stopAnimating()
+      }
       guard let plan, view.window != nil else { return stop() }
       guard task == nil || runningInterval != plan.interval else { return }
 
@@ -197,13 +203,10 @@ struct AnimatedFramesView: UIViewRepresentable {
     switch frames.storage {
     case .decoded:
       playback.plan = nil
+      playback.animatesImages = isPlaying
       view.animationDuration = frames.loopDuration(rate: playbackRate)
-      if isPlaying {
-        if !view.isAnimating { view.startAnimating() }
-      } else {
-        view.stopAnimating()
-      }
     case let .streamed(stream):
+      playback.animatesImages = false
       playback.plan = isPlaying ? StreamPlan(stream: stream, frames: frames, rate: playbackRate) : nil
     }
     playback.sync(view)
@@ -211,6 +214,7 @@ struct AnimatedFramesView: UIViewRepresentable {
 
   static func dismantleUIView(_ view: UIImageView, coordinator: Playback) {
     coordinator.plan = nil
+    coordinator.animatesImages = false
     coordinator.stop()
   }
 

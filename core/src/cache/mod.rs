@@ -41,6 +41,8 @@ mod cancel_tests;
 #[cfg(test)]
 mod concurrency_tests;
 #[cfg(test)]
+mod ready_reads_tests;
+#[cfg(test)]
 mod eviction_tests;
 #[cfg(test)]
 mod recovery_tests;

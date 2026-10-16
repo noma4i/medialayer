@@ -21,7 +21,7 @@ fn spawn_ticker(stop: Arc<AtomicBool>) -> tokio::task::JoinHandle<u32> {
     })
 }
 
-fn write_prepared_dir(dir: &std::path::Path, files: usize, hot_key: &str) {
+pub(super) fn write_prepared_dir(dir: &std::path::Path, files: usize, hot_key: &str) {
     let mut index = String::new();
     for number in 0..files {
         let key = format!("entry-{number}");

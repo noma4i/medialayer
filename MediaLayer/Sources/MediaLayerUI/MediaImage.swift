@@ -11,7 +11,14 @@ struct ImageKey: Equatable {
 private struct LoadedImage {
   let key: ImageKey
   let image: PlatformImage
+  var gif: Data?
   var frames: AnimatedFrames?
+}
+
+private struct FramesJob: Equatable {
+  let key: ImageKey
+  let hasGif: Bool
+  let playing: Bool
 }
 
 public struct MediaImage<Content: View>: View {
@@ -19,7 +26,10 @@ public struct MediaImage<Content: View>: View {
   @Environment(\.displayScale) private var displayScale
   @State private var loaded: LoadedImage?
   @State private var state: MediaState = .idle
-  @State private var isVisible = false
+  @State private var owner = UUID()
+  @State private var claimedURL: String?
+  @State private var onScreen = false
+  @State private var inBackground = false
   private static var coldFadeDuration: Double { 0.22 }
   private let source: any MediaSource
   private let contentMode: ContentMode
@@ -42,7 +52,7 @@ public struct MediaImage<Content: View>: View {
           PlaceholderView(item: source.item, ready: false, context: context)
         }
         if let frames = loaded.flatMap({ $0.key == key ? $0.frames : nil }) {
-          AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isVisible, playbackRate: playbackRate)
+          AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isPlaying, playbackRate: playbackRate)
         } else if let shown {
           Image(platform: shown).resizable().aspectRatio(contentMode: contentMode).transition(.opacity)
         }
@@ -51,15 +61,32 @@ public struct MediaImage<Content: View>: View {
       .frame(width: geometry.size.width, height: geometry.size.height)
       .clipped()
       .task(id: key) { await load(key: key, points: geometry.size) }
+      .task(id: framesJob(for: key)) { [job = framesJob(for: key)] in await decodeFrames(job) }
     }
+    .background(OnScreenProbe { screen($0) })
     .task(id: source.url) { await follow() }
-    .onAppear {
-      isVisible = true
-      context?.places.visible(source: source.item, visible: true)
+    .onChange(of: source.url) { syncClaim() }
+    .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.background)) { _ in inBackground = true }
+    .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
+  }
+
+  private var isPlaying: Bool { onScreen && !inBackground }
+
+  private func screen(_ visible: Bool) {
+    onScreen = visible
+    syncClaim()
+  }
+
+  private func syncClaim() {
+    guard let places = context?.places else { return }
+    let claims = KeyClaims.of(places)
+    if let claimed = claimedURL, !onScreen || claimed != source.url {
+      claims.release(owner: owner, key: claimed)
+      claimedURL = nil
     }
-    .onDisappear {
-      isVisible = false
-      context?.places.visible(source: source.item, visible: false)
+    if onScreen, claimedURL == nil {
+      claims.visible(owner: owner, source: source.item, visible: true)
+      claimedURL = source.url
     }
   }
 
@@ -89,18 +116,25 @@ public struct MediaImage<Content: View>: View {
       container = await MediaImagePipeline.load(source, request: request, places: context.places, pipeline: context.pipeline)
       isCold = true
     }
-    let next = container.map { LoadedImage(key: key, image: $0.image) }
+    let next = container.map { LoadedImage(key: key, image: $0.image, gif: $0.type == .gif ? $0.data : nil) }
     if isCold {
       withAnimation(.easeOut(duration: Self.coldFadeDuration)) { loaded = next }
     } else {
       loaded = next
     }
-    guard let container, container.type == .gif, let data = container.data, let pixels = key.pixels else { return }
+  }
 
-    let frames = await FrameCache.shared.load(url: source.url, data: data, maxPixel: Int(max(pixels.width, pixels.height)))
-    guard !Task.isCancelled, loaded?.key == key else { return }
+  private func framesJob(for key: ImageKey) -> FramesJob {
+    FramesJob(key: key, hasGif: loaded.map { $0.key == key && $0.gif != nil } ?? false, playing: isPlaying)
+  }
 
-    loaded?.frames = frames
+  private func decodeFrames(_ job: FramesJob) async {
+    guard job.playing, job.hasGif, let loaded, loaded.key == job.key, loaded.frames == nil, let data = loaded.gif, let pixels = job.key.pixels else { return }
+
+    let frames = await FrameCache.shared.load(url: job.key.url, data: data, maxPixel: Int(max(pixels.width, pixels.height)))
+    guard !Task.isCancelled, self.loaded?.key == job.key else { return }
+
+    self.loaded?.frames = frames
   }
 
   private func follow() async {

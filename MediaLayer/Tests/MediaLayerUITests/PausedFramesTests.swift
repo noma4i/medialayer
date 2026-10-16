@@ -23,6 +23,13 @@ private func decodedFrames() throws -> AnimatedFrames {
 }
 
 @MainActor
+private func attach(_ view: UIView) -> UIWindow {
+  let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+  window.addSubview(view)
+  return window
+}
+
+@MainActor
 private func update(_ view: UIImageView, _ playback: AnimatedFramesView.Playback, _ frames: AnimatedFrames, playing: Bool) {
   AnimatedFramesView(frames: frames, contentMode: .fill, isPlaying: playing, playbackRate: 1).update(view, playback: playback)
 }
@@ -44,7 +51,8 @@ struct PausedFramesTests {
   @Test
   func a_gif_that_left_and_came_back_animates_again_and_keeps_a_frame_while_away() throws {
     let frames = try decodedFrames()
-    let view = UIImageView()
+    let view = FrameImageView()
+    let window = attach(view)
     let playback = AnimatedFramesView.Playback()
 
     update(view, playback, frames, playing: true)
@@ -53,6 +61,23 @@ struct PausedFramesTests {
     #expect(!view.isAnimating)
     #expect(view.image != nil, "away: image=\(String(describing: view.image))")
     update(view, playback, frames, playing: true)
+    #expect(view.isAnimating)
+    withExtendedLifetime(window) {}
+  }
+
+  @Test
+  func a_decoded_gif_animates_only_while_its_view_is_in_a_window() throws {
+    let frames = try decodedFrames()
+    let view = FrameImageView()
+    let playback = AnimatedFramesView.Playback()
+
+    update(view, playback, frames, playing: true)
+    #expect(!view.isAnimating)
+    let window = attach(view)
+    #expect(view.isAnimating)
+    view.removeFromSuperview()
+    #expect(!view.isAnimating)
+    window.addSubview(view)
     #expect(view.isAnimating)
   }
 }

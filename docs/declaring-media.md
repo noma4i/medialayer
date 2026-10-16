@@ -52,6 +52,8 @@ MediaImage(
 
 An image fills its view by default and is decoded at the size of the view. Pass `contentMode: .fit` (Swift) or `contentScale = ContentScale.Fit` (Kotlin) to show the whole image inside the view.
 
+On iOS a GIF animates and decodes its frames only while its view is on screen and the app is in the foreground. A view that is scrolled out of its scroll view, hidden, removed from its window or covered by a full screen is off screen. A transparent screen over the view does not stop it. Two views of one url and size share one frame decode, and the decode stops only when the last of them leaves. You declare nothing for this.
+
 A load of a task that is already cancelled delivers no image and reports no state. A task that is cancelled in the instant after the image arrived and before the task resumes still gets the image, because Nuke ignores a cancel after its result is final. The image is in the cache, so the view replaces it at the next key or on disappear and nothing is reported as failed. Do not add a second cancel check after the await: no test can reach that instant.
 
 ### Swift

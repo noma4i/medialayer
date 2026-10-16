@@ -66,4 +66,47 @@ struct FrameCacheTests {
     #expect(cache.count == 0)
     #expect(cache.bytes == 0)
   }
+
+  @Test
+  func twoWaitersOfOneGifShareOneDecode() async throws {
+    let cache = FrameCache()
+    let data = gif(frames: 120, side: 64, seed: 0)
+
+    async let first = cache.load(url: "https://o.test/a.gif", data: data, maxPixel: 64)
+    async let second = cache.load(url: "https://o.test/a.gif", data: data, maxPixel: 64)
+    let frames = try await (#require(first), #require(second))
+
+    #expect(cache.decodes == 1)
+    #expect(frames.0.token == frames.1.token)
+  }
+
+  @Test
+  func aWaiterThatLeavesDoesNotCancelTheDecodeOfTheOtherWaiter() async throws {
+    let cache = FrameCache()
+    let data = gif(frames: 1200, side: 64, seed: 0)
+    let leaving = Task { await cache.load(url: "https://o.test/a.gif", data: data, maxPixel: 64) }
+    let staying = Task { await cache.load(url: "https://o.test/a.gif", data: data, maxPixel: 64) }
+    await eventually("the decode started") { cache.decodes > 0 }
+
+    leaving.cancel()
+
+    #expect(await staying.value?.frameCount == 1200)
+    #expect(cache.decodes == 1)
+    #expect(cache.count == 1)
+  }
+
+  @Test
+  func whenTheLastWaiterLeavesTheDecodeStopsAndStoresNothing() async throws {
+    let cache = FrameCache()
+    let data = gif(frames: 1200, side: 64, seed: 0)
+    let only = Task { await cache.load(url: "https://o.test/a.gif", data: data, maxPixel: 64) }
+    await eventually("the decode started") { cache.decodes > 0 }
+
+    only.cancel()
+
+    #expect(await only.value == nil)
+    #expect(cache.count == 0)
+    #expect(await cache.load(url: "https://o.test/a.gif", data: data, maxPixel: 64) != nil)
+    #expect(cache.decodes == 2)
+  }
 }

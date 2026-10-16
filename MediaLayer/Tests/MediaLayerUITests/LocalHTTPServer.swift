@@ -19,6 +19,7 @@ final class LocalHTTPServer: @unchecked Sendable {
   private(set) var port: UInt16 = 0
   private var assets: [String: Data] = [:]
   private var seen: [String: [String: String]] = [:]
+  private var counts: [String: Int] = [:]
 
   init() throws {
     (closed, closedContinuation) = AsyncStream.makeStream()
@@ -49,6 +50,8 @@ final class LocalHTTPServer: @unchecked Sendable {
   func stop() { listener.cancel() }
 
   func serve(_ data: Data, at path: String) { lock.withLock { assets[path] = data } }
+
+  func requestCount(of path: String) -> Int { lock.withLock { counts[path] ?? 0 } }
 
   func headers(of path: String) -> [String: String] { lock.withLock { seen[path] ?? [:] } }
 
@@ -101,7 +104,10 @@ final class LocalHTTPServer: @unchecked Sendable {
       guard let colon = line.firstIndex(of: ":") else { continue }
       headers[line[..<colon].lowercased()] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
     }
-    lock.withLock { seen[path] = headers }
+    lock.withLock {
+      seen[path] = headers
+      counts[path, default: 0] += 1
+    }
     requestsContinuation.yield(path)
     if let asset = lock.withLock({ assets[path] }) {
       await send(connection, status: "200 OK", extra: ["Content-Type: application/octet-stream"], body: asset)

@@ -14,8 +14,42 @@ struct TonePixelsCall: Equatable {
   let onMain: Bool
 }
 
+struct VisibleCall: Equatable {
+  let url: String
+  let visible: Bool
+}
+
+final class Latch: @unchecked Sendable {
+  private let lock = NSLock()
+  private var isOpen = false
+  private var waiting: [CheckedContinuation<Void, Never>] = []
+
+  func wait() async {
+    await withCheckedContinuation { continuation in
+      let open = lock.withLock { () -> Bool in
+        if !isOpen { waiting.append(continuation) }
+        return isOpen
+      }
+      if open { continuation.resume() }
+    }
+  }
+
+  func open() {
+    let released = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+      isOpen = true
+      defer { waiting = [] }
+      return waiting
+    }
+    released.forEach { $0.resume() }
+  }
+}
+
 final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   private let lock = NSLock()
+  private var visibility: [VisibleCall] = []
+  var fetchLatch: Latch?
+
+  func visibleCalls(of url: String) -> [Bool] { lock.withLock { visibility.filter { $0.url == url }.map(\.visible) } }
   private var tones: [TonePixelsCall] = []
 
   var submittedTones: [TonePixelsCall] { lock.withLock { tones } }
@@ -30,7 +64,10 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
 
   private func record(_ call: String) { lock.withLock { calls.append(call) } }
 
-  func visible(source: MediaItem, visible: Bool) { record("visible \(visible)") }
+  func visible(source: MediaItem, visible: Bool) {
+    lock.withLock { visibility.append(VisibleCall(url: source.url, visible: visible)) }
+    record("visible \(visible)")
+  }
   func setPlaying(key: String, playing: Bool) { record("playing \(playing)") }
   func setPeeking(key: String, peeking: Bool) { record("peeking \(peeking)") }
   func setMuted(key: String, muted: Bool) { record("muted \(muted)") }
@@ -40,6 +77,7 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   func itemState(key: String, state: MediaState) { record("state \(state)") }
   func fetchImage(url: String, headers: [String: String]) async throws -> Data {
     lock.withLock { fetches.append(url) }
+    if let latch = lock.withLock({ fetchLatch }) { await latch.wait() }
     return try imageResult.get()
   }
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder { .none }

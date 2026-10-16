@@ -75,14 +75,17 @@ impl CacheStore {
 #[async_trait]
 impl ByteStore for CacheStore {
     async fn len(&self, key: &str) -> Option<u64> {
+        self.cache.ready().await;
         self.cache.len(key).await
     }
 
     async fn contains(&self, key: &str) -> bool {
+        self.cache.ready().await;
         self.cache.contains(key).await
     }
 
     async fn get_range(&self, key: &str, start: u64, len: u64) -> Option<Vec<u8>> {
+        self.cache.ready().await;
         if let Some(bytes) = self.cache.get_range(key, start, len).await {
             return Some(bytes);
         }
@@ -93,6 +96,7 @@ impl ByteStore for CacheStore {
     }
 
     async fn meta(&self, key: &str) -> Option<Meta> {
+        self.cache.ready().await;
         self.cache.meta(key).await
     }
 
