@@ -58,9 +58,11 @@ private fun FullImage(source: MediaSource, modifier: Modifier, contentScale: Con
   val density = LocalDensity.current.density
   val environment = LocalMediaEnvironment.current
   val media = environment.media
-  declarePlace(source, playing = null, muted = null)
+  val placement = rememberPlacement()
+  if (placement.placed) declarePlace(source, playing = null, muted = null)
   val tones = rememberCoroutineScope()
-  BoxWithConstraints(modifier) {
+  BoxWithConstraints(modifier.then(placement.modifier)) {
+    if (!placement.placed) return@BoxWithConstraints
     val pixels = decodePixels(source, constraints, density)
     val scale = contentScale.toScale()
     val request = remember(source, pixels, scale) { imageRequest(context, source, pixels, scale) }
@@ -94,11 +96,13 @@ private fun TileImage(source: MediaSource, modifier: Modifier, contentScale: Con
   val context = LocalContext.current
   val environment = LocalMediaEnvironment.current
   val media = environment.media
-  claimTile(source)
+  val placement = rememberPlacement()
+  if (placement.placed) claimTile(source)
   val scale = contentScale.toScale()
   val request = remember(source, scale) { imageRequest(context, source, source.size?.let { (width, height) -> PixelSize(width.toUInt(), height.toUInt()) }, scale) }
   var state: MediaState by remember(source.url) { mutableStateOf(MediaState.Idle) }
-  Box(modifier) {
+  Box(modifier.then(placement.modifier)) {
+    if (!placement.placed) return@Box
     if (state != MediaState.Ready) TileBlur(source, contentScale)
     AsyncImage(
       model = request,

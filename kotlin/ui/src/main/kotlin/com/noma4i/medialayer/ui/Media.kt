@@ -10,6 +10,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import coil.ImageLoader
 import com.noma4i.medialayer.MediaLayer
@@ -17,6 +19,7 @@ import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.stateFlow
 import com.noma4i.medialayer.toItem
+import kotlinx.coroutines.flow.flowOf
 
 object Media {
   var muted: Boolean by mutableStateOf(false)
@@ -24,6 +27,16 @@ object Media {
   var audio: MediaAudioSession? = null
     internal set
 }
+
+internal class Placement {
+  var placed by mutableStateOf(false)
+    private set
+
+  val modifier: Modifier = Modifier.onGloballyPositioned { placed = true }
+}
+
+@Composable
+internal fun rememberPlacement(): Placement = remember { Placement() }
 
 internal class MediaEnvironment(val media: MediaLayer, val players: SlotPlayers?, val imageLoader: ImageLoader, val frames: FrameSource = MetadataFrames)
 
@@ -46,10 +59,10 @@ fun MediaLayerProvider(media: MediaLayer, imageLoader: ImageLoader? = null, play
 }
 
 @Composable
-internal fun rememberPlace(source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean = true, peeking: Boolean = false): MediaState {
-  declarePlace(source, playing, muted, loop, peeking)
+internal fun rememberPlace(source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean = true, peeking: Boolean = false, placed: Boolean = true): MediaState {
+  if (placed) declarePlace(source, playing, muted, loop, peeking)
   val media = LocalMediaEnvironment.current.media
-  return remember(media, source.url) { media.stateFlow(source.url) }.collectAsState(MediaState.Idle).value
+  return remember(media, source.url, placed) { if (placed) media.stateFlow(source.url) else flowOf(MediaState.Idle) }.collectAsState(MediaState.Idle).value
 }
 
 @Composable
