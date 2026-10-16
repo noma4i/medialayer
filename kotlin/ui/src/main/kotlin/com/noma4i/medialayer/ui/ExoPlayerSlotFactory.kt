@@ -54,6 +54,8 @@ class SlotPlayers internal constructor() {
 
   internal fun view(token: ULong): ViewHandle? = views[token]
 
+  internal val liveViews: Int get() = views.size
+
   internal fun sample(key: String): SlotSample? = slots[key]?.sample()
 
   internal fun route(key: String): PlaybackRoute? = slots[key]?.route

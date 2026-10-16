@@ -67,6 +67,35 @@ class MediaPrecomposeTest {
   }
 
   @Test
+  fun aVideoDisposedBeforeItsFirstPlacementLeavesNoViewBehind() {
+    val page = Page("https://o.test/never.mp4", Kind.VIDEO)
+    val state = SubcomposeLayoutState()
+    rule.setContent {
+      MediaLayerProvider(layer, loader, slots.players) {
+        SubcomposeLayout(state, Modifier.size(50.dp)) { constraints -> layout(constraints.maxWidth, constraints.maxHeight) {} }
+      }
+    }
+    var handle: androidx.compose.ui.layout.SubcomposeLayoutState.PrecomposedSlotHandle? = null
+    rule.runOnIdle { handle = state.precompose("ahead") { MediaVideo(page, modifier = Modifier.size(50.dp)) } }
+    rule.waitForIdle()
+    val whilePrecomposed = slots.players.liveViews
+    rule.runOnIdle { handle?.dispose() }
+    rule.waitForIdle()
+
+    assertEquals("whilePrecomposed=0 afterDispose=0", "whilePrecomposed=$whilePrecomposed afterDispose=${slots.players.liveViews}")
+  }
+
+  @Test
+  fun aPlacedVideoReleasesItsViewWhenItLeaves() {
+    val page = Page("https://o.test/leaves.mp4", Kind.VIDEO)
+    var shown by mutableStateOf(true)
+    rule.setContent { MediaLayerProvider(layer, loader, slots.players) { if (shown) MediaVideo(page, modifier = Modifier.size(50.dp)) } }
+    rule.waitUntil(5000) { looper.idle(); slots.players.liveViews == 1 }
+    shown = false
+    rule.waitUntil(5000) { looper.idle(); slots.players.liveViews == 0 }
+  }
+
+  @Test
   fun aComposedButNeverMeasuredImageStartsNoWork() {
     val page = Page("https://o.test/composed.png", Kind.IMAGE)
     workFor(page, measured = false) { MediaImage(page, Modifier.size(50.dp)) }

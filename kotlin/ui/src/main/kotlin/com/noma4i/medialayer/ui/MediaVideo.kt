@@ -8,6 +8,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -86,19 +88,22 @@ fun MediaVideo(
     }
     if (isEnd) end()
   }
-  val view = remember(environment) { environment.players?.newView() }
+  var view by remember(environment) { mutableStateOf<ViewHandle?>(null) }
   val player by remember(view) { view?.player ?: flowOf(null) }.collectAsState(null)
-  DisposableEffect(environment, view, source.url, placement.placed) {
+  DisposableEffect(environment, source.url, placement.placed) {
     if (!placement.placed) return@DisposableEffect onDispose { }
     val events = environment.media.playerEvents()
     val owners = environment.players?.owners
-    if (view != null) {
-      owners?.claim(source.url, view.token)
-      events.attach(source.url, view.token)
+    val created = environment.players?.newView()
+    view = created
+    if (created != null) {
+      owners?.claim(source.url, created.token)
+      events.attach(source.url, created.token)
     }
     onDispose {
-      if (view != null && (owners?.release(source.url, view.token) != false)) events.detach(source.url)
-      view?.let { environment.players?.release(it) }
+      if (created != null && (owners?.release(source.url, created.token) != false)) events.detach(source.url)
+      created?.let { environment.players?.release(it) }
+      view = null
     }
   }
   Box(modifier.then(placement.modifier)) {
