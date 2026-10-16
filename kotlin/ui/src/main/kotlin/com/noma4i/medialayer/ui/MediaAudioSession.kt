@@ -24,6 +24,7 @@ class MediaAudioSession internal constructor(
     if (owner.reconcile()) return true
 
     synchronized(demand) { demand.setRecording(false) }
+    owner.reconcile()
     return false
   }
 

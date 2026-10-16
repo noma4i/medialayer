@@ -119,4 +119,54 @@ class MediaAudioSessionTest {
     assertFalse(session.activateRecording())
     assertFalse(session.isRecording)
   }
+
+  @Test
+  fun aRefusedRecordingKeepsTheDuckFocusOfTheHeardSlot() {
+    val session = session(MediaAudioFocus.Duck)
+    session.setAudible(1u, true)
+    port.grant = false
+
+    assertFalse(session.activateRecording())
+    advance(1000)
+
+    assertEquals(listOf("request:Duck", "request:Recording"), port.calls.toList())
+
+    session.setAudible(1u, false)
+    advance(300)
+
+    assertEquals(listOf("request:Duck", "request:Recording", "abandon"), port.calls.toList())
+  }
+
+  @Test
+  fun aRefusedRecordingDuringAPendingReleaseStillReleasesTheFocusOnTime() {
+    val session = session(MediaAudioFocus.Duck)
+    session.setAudible(1u, true)
+    session.setAudible(1u, false)
+    advance(100)
+    port.grant = false
+
+    assertFalse(session.activateRecording())
+    advance(199)
+
+    assertEquals(listOf("request:Duck", "request:Recording"), port.calls.toList())
+
+    advance(1)
+
+    assertEquals(listOf("request:Duck", "request:Recording", "abandon"), port.calls.toList())
+  }
+
+  @Test
+  fun aRecordingFocusRequestThatThrowsIsARefusalAndKeepsThePlaybackFocus() {
+    val session = session(MediaAudioFocus.Duck)
+    session.setAudible(1u, true)
+    port.throwOnRecording = true
+
+    assertFalse(session.activateRecording())
+    assertFalse(session.isRecording)
+    session.setAudible(2u, true)
+    session.setAudible(1u, false)
+    advance(1000)
+
+    assertEquals(listOf("request:Duck", "request:Recording"), port.calls.toList())
+  }
 }

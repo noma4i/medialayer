@@ -22,11 +22,10 @@ internal class AudioFocusOwner(
       if (held != null && pending == null) scheduleRelease()
       return true
     }
+    if (held != target && !runCatching { port.request(target) }.getOrDefault(false)) return false
+
     pending?.cancel()
     pending = null
-    if (held == target) return true
-    if (!port.request(target)) return false
-
     held = target
     true
   }
