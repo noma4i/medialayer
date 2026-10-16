@@ -8,10 +8,12 @@ bridge="$root/MediaLayer"
 build="$root/target/ios-build"
 targets=(aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios)
 check=0
+ios=0
 case "${1:-}" in
   --check) check=1; targets=(aarch64-apple-darwin aarch64-apple-ios-sim) ;;
+  --ios) ios=1; targets=(aarch64-apple-ios aarch64-apple-ios-sim) ;;
   "") ;;
-  *) echo "usage: build_ios.sh [--check]" >&2; exit 2 ;;
+  *) echo "usage: build_ios.sh [--check|--ios]" >&2; exit 2 ;;
 esac
 
 for target in "${targets[@]}"; do
@@ -30,7 +32,10 @@ cp "$build/swift/medialayerFFI.modulemap" "$build/headers/medialayerFFI/module.m
 cp "$build/swift/medialayer.swift" "$bridge/Sources/MediaLayer/medialayer.swift"
 
 mkdir -p "$build/ios-sim"
-if [ "$check" = 1 ]; then
+if [ "$ios" = 1 ]; then
+  cp "$root/target/aarch64-apple-ios-sim/release/libmedialayer.a" "$build/ios-sim/libmedialayer.a"
+  libraries=("$root/target/aarch64-apple-ios/release/libmedialayer.a" "$build/ios-sim/libmedialayer.a")
+elif [ "$check" = 1 ]; then
   cp "$root/target/aarch64-apple-ios-sim/release/libmedialayer.a" "$build/ios-sim/libmedialayer.a"
   libraries=("$root/target/aarch64-apple-darwin/release/libmedialayer.a" "$build/ios-sim/libmedialayer.a")
 else
