@@ -73,6 +73,24 @@ MediaImage(
 )
 ```
 
+## Image as a value
+
+To get the decoded image without a view (a share card drawn by `ImageRenderer`, a bitmap for a canvas), call `image` on the media context. It goes through the same loader, the same core cache, the same item state and tone as `MediaImage`, and it does not wait for a window or a lifecycle. It returns `nil` (`null`) when the source fails or the task is cancelled, and a second call for the same source and size reads the cache.
+
+### Swift
+
+```swift
+let avatar = await context.image(for: Avatar(url: user.avatarUrl), points: CGSize(width: 44, height: 44), scale: 3)
+```
+
+### Kotlin
+
+```kotlin
+val avatar = media.image(context, Avatar(url = user.avatarUrl), width = 44f, height = 44f, density = 3f)
+```
+
+Swift: `MediaContext.image(for:points:scale:)`. Kotlin: `MediaLayer.image(context, source, width, height, density)` is a `suspend` function. Width and height are in points (dp), the call decodes at pixels from `imagePixelSize`, `source.size` wins. The app must not call it for a list of views: use `MediaImage` there.
+
 ## Image in a grid of tiles
 
 A grid of small images (a profile of moments, a gallery) pays for every tile while it scrolls. Pass `weight = MediaWeight.Tile` (Kotlin) to make a tile light. A tile keeps what a correct place needs: one claim per tile (the key stays alive for the Stage while any view of it is on screen, and leaves with the last view), the state reported to the core, the BlurHash while the image loads, the decode at the declared size.
