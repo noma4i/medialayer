@@ -22,6 +22,20 @@ struct AudioDemandTests {
   }
 
   @Test
+  func volumeReadersHoldANonDuckingSessionOnlyWhileNothingIsHeard() {
+    var demand = AudioDemand()
+    demand.readVolume(1)
+    #expect(demand.target(for: .duck) == .active(.playback(.mix)))
+
+    _ = demand.setAudible(slot: 1, true)
+    #expect(demand.target(for: .duck) == .active(.playback(.duck)))
+    _ = demand.setAudible(slot: 1, false)
+    demand.readVolume(-1)
+    demand.readVolume(-1)
+    #expect(demand.target(for: .duck) == .idle)
+  }
+
+  @Test
   func thePlaybackOptionSetsDifferOnlyByDucking() {
     #expect(SessionPlan.playback(.exclusive).options.isEmpty)
     #expect(SessionPlan.playback(.mix).options == [.mixWithOthers])

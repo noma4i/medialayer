@@ -77,3 +77,20 @@ await Media.audio.deactivateRecording()
 ```kotlin
 // Android needs no session. Request RECORD_AUDIO and use MediaRecorder as before.
 ```
+
+## Read the volume
+
+`readVolume` gives the current system volume and a stream of the changes, for example to unmute when the user presses volume up. While the stream lives, MediaLayer keeps a session that mixes and never ducks, even under `duck`. End the stream and the session goes back to idle.
+
+### Swift
+
+```swift
+guard let reading = await Media.audio?.readVolume() else { return }
+for await volume in reading.changes { /* react */ }
+```
+
+### Kotlin
+
+```kotlin
+// Android: observe the system volume with the platform API. No focus is needed.
+```

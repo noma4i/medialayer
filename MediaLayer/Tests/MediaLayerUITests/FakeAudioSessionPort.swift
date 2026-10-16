@@ -6,9 +6,12 @@ final class FakeAudioSessionPort: AudioSessionPort, @unchecked Sendable {
   private var calls: [String] = []
   private var mainThreadCalls = 0
   private var busyDeactivations: Int
+  private var volumeSink: AsyncStream<Float>.Continuation?
+  let failActivation: Bool
 
-  init(busyDeactivations: Int = 0) {
+  init(busyDeactivations: Int = 0, failActivation: Bool = false) {
     self.busyDeactivations = busyDeactivations
+    self.failActivation = failActivation
   }
 
   static func category(_ plan: SessionPlan) -> String {
@@ -23,6 +26,7 @@ final class FakeAudioSessionPort: AudioSessionPort, @unchecked Sendable {
   }
 
   func setActive(_ active: Bool) throws {
+    if active && failActivation { throw NSError(domain: "fake", code: 2) }
     try lock.withLock {
       if !active && busyDeactivations > 0 {
         busyDeactivations -= 1
@@ -31,6 +35,18 @@ final class FakeAudioSessionPort: AudioSessionPort, @unchecked Sendable {
       }
     }
     record("active \(active)")
+  }
+
+  func outputVolume() -> Float { 0.5 }
+
+  func volumeChanges() -> AsyncStream<Float> {
+    let (stream, continuation) = AsyncStream<Float>.makeStream()
+    lock.withLock { volumeSink = continuation }
+    return stream
+  }
+
+  func pressVolume(_ value: Float) {
+    lock.withLock { volumeSink }?.yield(value)
   }
 
   private func record(_ call: String) {

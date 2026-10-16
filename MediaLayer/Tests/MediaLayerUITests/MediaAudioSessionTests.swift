@@ -91,4 +91,48 @@ struct MediaAudioSessionTests {
 
     #expect(port.log.suffix(3) == ["active false BUSY", "active false BUSY", "active false"])
   }
+
+  private func readOnePress(_ session: MediaAudioSession, _ port: FakeAudioSessionPort) async -> (Float, Float?) {
+    guard let reading = await session.readVolume() else { return (-1, nil) }
+
+    port.pressVolume(0.7)
+    var first: Float?
+    for await volume in reading.changes {
+      first = volume
+      break
+    }
+    return (reading.initial, first)
+  }
+
+  @Test
+  func readingTheVolumeHoldsANonDuckingSessionUntilTheStreamEnds() async {
+    let port = FakeAudioSessionPort()
+    let session = MediaAudioSession(focus: .duck, port: port, releaseDelay: .zero)
+
+    let (initial, pressed) = await readOnePress(session, port)
+
+    #expect(initial == 0.5)
+    #expect(pressed == 0.7)
+    #expect(port.log.prefix(2) == [category(.mix), "active true"])
+    await eventually("session released") { port.log.last == "active false" }
+  }
+
+  @Test
+  func aFailedRecordingActivationLeavesNoRecordingHeld() async {
+    let port = FakeAudioSessionPort(failActivation: true)
+    let session = MediaAudioSession(focus: .mix, port: port, releaseDelay: .zero)
+
+    #expect(await session.activateRecording() == false)
+    #expect(!session.isRecording)
+  }
+
+  @Test
+  func isRecordingFollowsTheActivationPair() async {
+    let session = MediaAudioSession(focus: .mix, port: FakeAudioSessionPort(), releaseDelay: .zero)
+
+    #expect(await session.activateRecording())
+    #expect(session.isRecording)
+    await session.deactivateRecording()
+    #expect(!session.isRecording)
+  }
 }

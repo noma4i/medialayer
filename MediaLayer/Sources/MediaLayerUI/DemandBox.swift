@@ -13,6 +13,8 @@ final class DemandBox: @unchecked Sendable {
     lock.withLock { change(&demand) }
   }
 
+  var isRecording: Bool { lock.withLock { demand.recording } }
+
   func target() -> SessionTarget {
     lock.withLock { demand.target(for: focus) }
   }
