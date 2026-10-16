@@ -15,7 +15,7 @@ MediaLayer can own the sound policy of your players: whether another app's music
 | ------ | ----------------- | ----------- | ------------- |
 | `exclusive` | Stops while a place plays | `playback`, mode `moviePlayback`, no options | Media3 requests `AUDIOFOCUS_GAIN` |
 | `mix` | Keeps playing at full volume | `playback`, mode `moviePlayback`, `mixWithOthers` | No request. The player does not hold the focus |
-| `duck` | Gets quieter while a place plays, then returns | as `mix` plus `duckOthers` | Request `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK`, abandon it when the sound ends |
+| `duck` | Gets quieter while a place plays, then returns | as `mix` plus `duckOthers` | MediaLayer requests `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` for the first heard place and abandons it 300 ms after the last one. The player does not hold the focus |
 
 Use `mix` when your app must never interrupt the user. MediaLayer writes nothing to the audio session while no place is heard, so a category your app set stays as it is. Use `duck` only when the user should hear your sound over the music.
 
@@ -59,10 +59,11 @@ Recording has its own call and its own plan. It does not follow the playback pol
 
 | Question | Answer |
 | -------- | ------ |
-| What does recording set | Category `playAndRecord`, mode `default`, option `defaultToSpeaker` |
+| What does recording set | iOS: category `playAndRecord`, mode `default`, option `defaultToSpeaker`. Android: `AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE` |
 | When | Only between `activateRecording` and `deactivateRecording` |
 | What does `deactivateRecording` do | Ends the recording session. The next heard place sets the playback category again |
 | Does the playback policy change recording | No. Recording works with every policy |
+| Returns | `false` when the system refuses the recording focus. The call leaves no recording demand then |
 
 ### Swift
 
@@ -75,8 +76,13 @@ await Media.audio.deactivateRecording()
 ### Kotlin
 
 ```kotlin
-// Android needs no session. Request RECORD_AUDIO and use MediaRecorder as before.
+// Request RECORD_AUDIO and use MediaRecorder as before. The library only holds the focus.
+if (!Media.audio!!.activateRecording()) return
+// record
+Media.audio!!.deactivateRecording()
 ```
+
+On Android recording asks for `AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE`, so other apps pause while you record. `deactivateRecording` abandons it after 300 ms and the playback focus of the policy returns when a place is heard.
 
 ## Read the volume
 

@@ -15,6 +15,10 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.test.utils.FakeClock
 import androidx.media3.test.utils.FakeMediaSource
 import androidx.test.core.app.ApplicationProvider
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import com.noma4i.medialayer.PlaybackRoute
 import kotlin.concurrent.thread
 import okhttp3.OkHttpClient
@@ -29,6 +33,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 class ExoPlayerSlotTest {
   private val context = ApplicationProvider.getApplicationContext<Context>()
@@ -36,8 +41,20 @@ class ExoPlayerSlotTest {
   private val route = PlaybackRoute("http://127.0.0.1:9/a.mp4", emptyMap(), null, false, true)
   private val factories = mutableListOf<ExoPlayerSlotFactory>()
 
-  private fun factory(startMuted: Boolean = true) =
-    ExoPlayerSlotFactory(context, OkHttpClient(), startMuted = startMuted).also {
+  private val focusPort = FakeFocusPort()
+  private val focusScope = TestScope()
+
+  private fun session(focus: MediaAudioFocus) = MediaAudioSession(focus, focusPort, 300, focusScope)
+
+  private fun settleAudioFocus() = repeat(20) { idle(); Thread.sleep(10) }
+
+  private fun advanceFocus(ms: Long) {
+    focusScope.advanceTimeBy(ms)
+    focusScope.runCurrent()
+  }
+
+  private fun factory(startMuted: Boolean = true, focus: MediaAudioFocus = MediaAudioFocus.Mix) =
+    ExoPlayerSlotFactory(context, OkHttpClient(), startMuted = startMuted, audio = session(focus)).also {
       it.mediaSourceFor = { FakeMediaSource() }
       it.bind(events)
       factories.add(it)
@@ -172,17 +189,88 @@ class ExoPlayerSlotTest {
 
   @Test
   fun muteAndUnmuteChangeOnlyTheVolumeAndNeverTouchAudioFocus() {
-    val slot = factory(startMuted = false).create(0u)
+    val slot = factory(startMuted = false, focus = MediaAudioFocus.Exclusive).create(0u)
     val audio = shadowOf(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
     slot.load("k", route); slot.play(); idle()
     untilIdle { audio.lastAudioFocusRequest != null }
     val grant = audio.lastAudioFocusRequest
+    assertEquals(AudioManager.AUDIOFOCUS_GAIN, grant!!.audioFocusRequest.focusGain)
+    assertEquals(emptyList<String>(), focusPort.calls.toList())
 
     repeat(10) { slot.mute(); idle(); assertEquals(0f, slot.player!!.volume, 0f); slot.unmute(); idle(); assertEquals(1f, slot.player!!.volume, 0f) }
     slot.unload(); idle()
     untilIdle { audio.lastAbandonedAudioFocusRequest != null }
 
     assertSame(grant, audio.lastAudioFocusRequest)
+  }
+
+  @Test
+  fun mixPlaysWithSoundAndNeverRequestsFocusFromThePlayerOrTheLibrary() {
+    val slot = factory(startMuted = false, focus = MediaAudioFocus.Mix).create(0u)
+    val audio = shadowOf(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
+
+    slot.load("k", route); slot.play(); settleAudioFocus(); advanceFocus(1000)
+
+    assertTrue(slot.player!!.playWhenReady)
+    assertNull(audio.lastAudioFocusRequest)
+    assertEquals(emptyList<String>(), focusPort.calls.toList())
+  }
+
+  @Test
+  fun duckAsksTheLibraryForTheFocusOnceAndThePlayerNever() {
+    val slot = factory(startMuted = false, focus = MediaAudioFocus.Duck).create(0u)
+    val audio = shadowOf(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
+
+    slot.load("k", route); idle(); advanceFocus(1000)
+
+    assertEquals(emptyList<String>(), focusPort.calls.toList())
+
+    slot.play(); settleAudioFocus()
+
+    assertEquals(listOf("request:Duck"), focusPort.calls.toList())
+    assertNull(audio.lastAudioFocusRequest)
+  }
+
+  @Test
+  fun duckFollowsMutePauseAndUnloadOfTheSlot() {
+    val slot = factory(startMuted = false, focus = MediaAudioFocus.Duck).create(0u)
+    slot.load("k", route); slot.play(); idle()
+
+    slot.mute(); idle(); advanceFocus(300)
+
+    assertEquals(listOf("request:Duck", "abandon"), focusPort.calls.toList())
+
+    slot.unmute(); idle()
+
+    assertEquals(listOf("request:Duck", "abandon", "request:Duck"), focusPort.calls.toList())
+
+    slot.pause(); idle(); advanceFocus(300)
+
+    assertEquals(listOf("request:Duck", "abandon", "request:Duck", "abandon"), focusPort.calls.toList())
+
+    slot.play(); idle(); slot.unload(); idle(); advanceFocus(300)
+
+    assertEquals(listOf("request:Duck", "abandon", "request:Duck", "abandon", "request:Duck", "abandon"), focusPort.calls.toList())
+  }
+
+  @Test
+  fun aMutedSlotStartedBySilentNeverTakesTheFocus() {
+    val slot = factory(startMuted = true, focus = MediaAudioFocus.Duck).create(0u)
+
+    slot.load("k", route); slot.play(); idle(); advanceFocus(1000)
+
+    assertEquals(emptyList<String>(), focusPort.calls.toList())
+  }
+
+  @Test
+  fun aSlotThatIsReleasedGivesItsFocusBack() {
+    val factory = factory(startMuted = false, focus = MediaAudioFocus.Duck)
+    val slot = factory.create(0u)
+    slot.load("k", route); slot.play(); idle()
+
+    factory.release(); idle(); advanceFocus(300)
+
+    assertEquals(listOf("request:Duck", "abandon"), focusPort.calls.toList())
   }
 
   @Test

@@ -20,6 +20,9 @@ import com.noma4i.medialayer.toItem
 
 object Media {
   var muted: Boolean by mutableStateOf(false)
+
+  var audio: MediaAudioSession? = null
+    internal set
 }
 
 internal class MediaEnvironment(val media: MediaLayer, val players: SlotPlayers?, val imageLoader: ImageLoader, val frames: FrameSource = MetadataFrames)

@@ -42,9 +42,10 @@ fun MediaLayer.Companion.open(
   settings: SettingsStore,
   callFactory: Call.Factory = OkHttpClient(),
   silent: Boolean = false,
+  audioFocus: MediaAudioFocus = MediaAudioFocus.Mix,
   imageMemoryBytes: Int = DEFAULT_IMAGE_MEMORY_BYTES
 ): MediaLayer =
-  openMediaLayer(context, fetcher, settings, callFactory, platformDefaults(), silent, ProcessLifecycleOwner.get().lifecycle, imageMemoryBytes) { MediaLayer.open(it) }
+  openMediaLayer(context, fetcher, settings, callFactory, platformDefaults(), silent, ProcessLifecycleOwner.get().lifecycle, audioFocus, imageMemoryBytes) { MediaLayer.open(it) }
 
 fun MediaLayer.Companion.open(
   context: Context,
@@ -53,9 +54,10 @@ fun MediaLayer.Companion.open(
   settings: SettingsStore,
   callFactory: Call.Factory = OkHttpClient(),
   silent: Boolean = false,
+  audioFocus: MediaAudioFocus = MediaAudioFocus.Mix,
   imageMemoryBytes: Int = DEFAULT_IMAGE_MEMORY_BYTES
 ): MediaLayer =
-  openMediaLayer(context, fetcher, settings, callFactory, specDefaults(spec), silent, ProcessLifecycleOwner.get().lifecycle, imageMemoryBytes) { MediaLayer.open(it) }
+  openMediaLayer(context, fetcher, settings, callFactory, specDefaults(spec), silent, ProcessLifecycleOwner.get().lifecycle, audioFocus, imageMemoryBytes) { MediaLayer.open(it) }
 
 private fun platformDefaults(): SpecDefaults = SpecDefaults(defaultLimits(), defaultPoolSettings(), emptyList())
 
@@ -63,6 +65,7 @@ fun MediaLayer.release() {
   bindings.remove(this)?.let {
     it.signals.unregister()
     it.factory.release()
+    if (Media.audio === it.factory.audio) Media.audio = null
   }
   close()
 }
@@ -75,12 +78,14 @@ internal fun openMediaLayer(
   defaults: SpecDefaults = platformDefaults(),
   silent: Boolean = false,
   lifecycle: Lifecycle,
+  audioFocus: MediaAudioFocus = MediaAudioFocus.Mix,
   imageMemoryBytes: Int = DEFAULT_IMAGE_MEMORY_BYTES,
   open: (OpenConfig) -> MediaLayer
 ): MediaLayer {
   NativeCallbacks.install()
   val app = context.applicationContext
-  val factory = ExoPlayerSlotFactory(app, callFactory, startMuted = silent)
+  val audio = MediaAudioSession(app, audioFocus)
+  val factory = ExoPlayerSlotFactory(app, callFactory, startMuted = silent, audio = audio)
   val dir = File(app.cacheDir, "medialayer").apply { mkdirs() }
   lateinit var layer: MediaLayer
   val imageLoader = mediaImageLoader(app, ImageBytes { url, headers -> layer.fetchImage(url, headers) }, imageMemoryBytes)
@@ -108,6 +113,7 @@ internal fun openMediaLayer(
   factory.bind(events)
   val signals = SystemSignals(app, events, lifecycle).also { it.register() }
   bindings[layer] = Binding(factory, signals, imageLoader)
+  Media.audio = audio
   return layer
 }
 

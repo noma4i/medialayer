@@ -73,7 +73,8 @@ class ExoPlayerSlotFactory(
   context: Context,
   callFactory: Call.Factory = OkHttpClient(),
   val startMuted: Boolean = false,
-  val loadControl: LoadControlConfig = LoadControlConfig()
+  val loadControl: LoadControlConfig = LoadControlConfig(),
+  val audio: MediaAudioSession = MediaAudioSession(context, MediaAudioFocus.Mix)
 ) : PlayerSlotFactory {
   internal val appContext: Context = context.applicationContext
   internal val allocator = DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE)
@@ -94,5 +95,6 @@ class ExoPlayerSlotFactory(
   fun release() {
     created.forEach { it.release() }
     created.clear()
+    audio.close()
   }
 }

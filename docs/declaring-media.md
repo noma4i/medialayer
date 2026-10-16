@@ -255,6 +255,6 @@ Every place takes `playing` and `muted`. A player that is not playing stays prep
 
 A pager declares the neighbour page that the finger is dragging into with `peeking: true`. The player of that page plays muted beside the page that plays, so the drag shows a moving picture. When the page becomes `playing` its player keeps running and gets its sound, with no restart. When `peeking` ends without `playing`, the player pauses. One page peeks at a time, and a page that plays never peeks.
 
-By default MediaLayer never sets up or activates the audio session, and your app chooses the category. Pass an `audioFocus` policy to `open` and MediaLayer owns it instead: [audio focus](audio-focus.md).
+MediaLayer owns the sound policy of the players: you pass an `audioFocus` policy to `open` (default `mix`), and the app writes no audio session or audio focus code for playback: [audio focus](audio-focus.md).
 
 You report only whether a place is visible or active. Prefetch, preroll, handoff and release follow from that. Several views can show the same url at once (a chat row and its message preview). The place keeps its state until the last of them reports that it left, so a view that stays on screen never falls back to idle because another view of the same url disappeared.

@@ -41,7 +41,12 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
         Player.STATE_ENDED -> if (!looping) host.events?.ended(id)
       }
       refresh()
+      reportAudible()
     }
+
+    override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) = reportAudible()
+
+    override fun onVolumeChanged(volume: Float) = reportAudible()
 
     override fun onRenderedFirstFrame() {
       if (released) return
@@ -139,6 +144,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
 
   private fun releaseNow() {
     released = true
+    host.audio.setAudible(id, false)
     hideFromView()
     player?.removeListener(listener)
     player?.release()
@@ -156,7 +162,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     loadControl = control
     val exo = ExoPlayer.Builder(host.appContext, host.renderersFactory)
       .setLoadControl(control)
-      .setAudioAttributes(attributes, true)
+      .setAudioAttributes(attributes, host.audio.focus == MediaAudioFocus.Exclusive)
       .setClock(host.clock)
       .build()
     exo.volume = if (host.startMuted) 0f else 1f
@@ -190,6 +196,11 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
   }
 
   private fun currentPosition(): Long = player?.currentPosition ?: 0L
+
+  private fun reportAudible() {
+    val exo = player ?: return
+    host.audio.setAudible(id, isAudible(exo.volume, exo.playWhenReady, exo.playbackState, exo.mediaItemCount > 0))
+  }
 
   private fun refresh() {
     val exo = player ?: return
