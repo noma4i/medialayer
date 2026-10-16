@@ -20,6 +20,7 @@ steps=(
   "cheap|docs|120|*|bash scripts/check_docs.sh"
   "cheap|invariants|120|*|bash scripts/check_invariants.sh"
   "cheap|invariants-selftest|120|*|bash scripts/check_invariants_selftest.sh"
+  "cheap|gradle-guard-selftest|120|*|bash scripts/check_gradle_guard_selftest.sh"
   "cargo|cargo-test|900|core/ gen/ Cargo.|$slot cargo-step cargo test --manifest-path core/Cargo.toml"
   "swift|ios-slices|600|MediaLayer/|$slot bash-step bash scripts/build_ios.sh --check"
   "swift|swift-test|900|MediaLayer/|$slot swift-step swift test --package-path MediaLayer"

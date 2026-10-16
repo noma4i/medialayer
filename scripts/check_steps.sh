@@ -3,6 +3,9 @@
 # runs the command in its own process group and, past the limit, kills the group and every descendant
 # (a test host that left the group included). Returns the command code, or 124 on the limit.
 
+# shellcheck source=gradle_host_guard.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/gradle_host_guard.sh"
+
 descendants() {
   local child
   for child in $(pgrep -P "$1" 2>/dev/null); do
@@ -148,6 +151,9 @@ run_checks() {
     printf '%s\n' "${selected[@]}"
     return 0
   fi
+  for line in "${selected[@]}"; do
+    case "$line" in *gradle-step* | *gradlew* | */bin/gradle\ * | *build_kotlin.sh*) IFS='|' read -r _ lane_name _ <<< "$line"; refuse_gradle_on_darwin "step $lane_name" || return $? ;; esac
+  done
   logdir="$root/target/check-logs"
   mkdir -p "$logdir"
   local start=$SECONDS lanes=() ordered=() failed=0 cpu sampled before sampler cpu_children daemon

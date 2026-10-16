@@ -7,12 +7,14 @@
 | Xcode (iOS 17+, macOS 14+) | Swift package and iOS simulator build |
 | Homebrew `rustup` with the iOS and Android targets | Rust core for every platform |
 | `cargo-ndk` and Android NDK | Android libraries |
-| JDK 17 and Gradle 9 | Kotlin module |
+| JDK 17 and Gradle 9, on brick only | Kotlin module |
 
 ```sh
 export PATH=/opt/homebrew/opt/rustup/bin:$PATH
 bash scripts/check_medialayer.sh
 ```
+
+On macOS the Kotlin lane, `scripts/build_kotlin.sh` and every Gradle step stop at once with `gradle runs only on brick` and a nonzero code. Run them on brick.
 
 ## Set up in your app
 

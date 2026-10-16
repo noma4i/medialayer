@@ -9,4 +9,5 @@ source "$here/check_steps.sh"
 limit="$1"
 name="$2"
 shift 2
+case "$name:$(basename -- "$1")" in gradle-step:* | *:gradle | *:gradlew)  refuse_gradle_on_darwin "step $name" || exit $? ;; esac
 run_bounded "$limit" "$name" "$@"

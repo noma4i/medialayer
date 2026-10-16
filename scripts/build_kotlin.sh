@@ -3,6 +3,11 @@
 # load through JNA), --abis builds the 4 Android libraries. No argument does both.
 set -euo pipefail
 
+here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=gradle_host_guard.sh
+source "$here/gradle_host_guard.sh"
+refuse_gradle_on_darwin build_kotlin.sh || exit $?
+
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$(sysctl -n hw.ncpu)}" RUST_TEST_THREADS="${RUST_TEST_THREADS:-$(sysctl -n hw.ncpu)}"
