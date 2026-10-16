@@ -25,6 +25,7 @@ public final class MediaAudioSession: Sendable {
     _ = box.update { $0.setRecording(true) }
     guard await owner.reconcile() else {
       _ = box.update { $0.setRecording(false) }
+      _ = await owner.reconcile()
       return false
     }
     return true

@@ -51,16 +51,17 @@ struct MediaAudioSessionTests {
   }
 
   @Test
-  func playbackDuringRecordingDoesNotChangeTheMicrophoneCategory() async {
+  func playbackDuringRecordingKeepsTheMicrophoneCategoryAndEndingItRestoresPlayback() async {
     let port = FakeAudioSessionPort()
     let session = MediaAudioSession(focus: .mix, port: port, releaseDelay: .zero)
     #expect(await session.activateRecording())
 
     session.setAudible(slot: 1, true)
-    session.setAudible(slot: 1, false)
     #expect(await session.settled())
-
     #expect(port.log == [FakeAudioSessionPort.category(.recording), "active true"])
+
+    await session.deactivateRecording()
+    #expect(port.log == [FakeAudioSessionPort.category(.recording), "active true", category(.mix)])
   }
 
   @Test
@@ -115,15 +116,21 @@ struct MediaAudioSessionTests {
     #expect(pressed == 0.7)
     #expect(port.log.prefix(2) == [category(.mix), "active true"])
     await eventually("session released") { port.log.last == "active false" }
+    await eventually("port stream ended") { port.volumeStreamEnded }
   }
 
   @Test
   func aFailedRecordingActivationLeavesNoRecordingHeld() async {
-    let port = FakeAudioSessionPort(failActivation: true)
+    let port = FakeAudioSessionPort(failingCategories: [.playback, .playAndRecord])
     let session = MediaAudioSession(focus: .mix, port: port, releaseDelay: .zero)
+    session.setAudible(slot: 1, true)
+    await eventually("playback activation attempted") { port.log.contains("active true FAILED") }
+    port.stopFailing(.playback)
 
     #expect(await session.activateRecording() == false)
+
     #expect(!session.isRecording)
+    #expect(port.log.suffix(2) == [category(.mix), "active true"])
   }
 
   @Test
