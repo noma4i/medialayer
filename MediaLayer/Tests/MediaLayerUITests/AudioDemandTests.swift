@@ -1,0 +1,42 @@
+import Testing
+@testable import MediaLayerUI
+
+struct AudioDemandTests {
+  @Test
+  func targetFollowsFocusAudibleSlotsAndRecording() {
+    var demand = AudioDemand()
+    #expect(demand.target(for: .duck) == .idle)
+
+    _ = demand.setAudible(slot: 1, true)
+    _ = demand.setAudible(slot: 2, true)
+    #expect(demand.target(for: .mix) == .active(.playback(.mix)))
+    #expect(demand.target(for: .exclusive) == .active(.playback(.exclusive)))
+
+    _ = demand.setAudible(slot: 1, false)
+    #expect(demand.target(for: .mix) != .idle)
+    _ = demand.setAudible(slot: 2, false)
+    #expect(demand.target(for: .mix) == .idle)
+
+    _ = demand.setRecording(true)
+    #expect(demand.target(for: .duck) == .active(.recording))
+  }
+
+  @Test
+  func thePlaybackOptionSetsDifferOnlyByDucking() {
+    #expect(SessionPlan.playback(.exclusive).options.isEmpty)
+    #expect(SessionPlan.playback(.mix).options == [.mixWithOthers])
+    #expect(SessionPlan.playback(.duck).options == [.mixWithOthers, .duckOthers])
+    #expect(SessionPlan.recording == SessionPlan(category: .playAndRecord, mode: .default, options: [.defaultToSpeaker]))
+  }
+
+  @Test
+  func changesReportOnlyRealTransitions() {
+    var demand = AudioDemand()
+    let changes = [
+      demand.setAudible(slot: 1, true), demand.setAudible(slot: 1, true),
+      demand.setAudible(slot: 1, false), demand.setAudible(slot: 1, false),
+      demand.setRecording(true), demand.setRecording(true)
+    ]
+    #expect(changes == [true, false, true, false, true, false])
+  }
+}

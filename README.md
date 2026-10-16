@@ -74,6 +74,7 @@ end
 - [Tone](docs/tone.md)
 - [Declaring media](docs/declaring-media.md)
 - [Player pool](docs/player-pool.md)
+- [Audio focus](docs/audio-focus.md)
 - [Memory control](docs/memory.md)
 
 ## Repository layout

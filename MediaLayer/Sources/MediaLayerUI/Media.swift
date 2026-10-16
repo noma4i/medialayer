@@ -37,6 +37,7 @@ final class MutedFlag: @unchecked Sendable {
 public enum Media {
   private static let flag = MutedFlag()
   nonisolated(unsafe) static weak var current: MediaPlaces?
+  nonisolated(unsafe) public internal(set) static var audio: MediaAudioSession?
 
   public static var muted: Bool {
     get { flag.value }

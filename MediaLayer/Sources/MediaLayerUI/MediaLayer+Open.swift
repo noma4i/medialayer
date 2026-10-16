@@ -11,11 +11,13 @@ extension MediaLayer {
     settings: SettingsStore,
     directory: URL? = nil,
     silent: Bool = false,
+    audioFocus: MediaAudioFocus = .mix,
     imageMemoryBytes: Int = MediaImagePipeline.defaultMemoryLimit
   ) throws -> MediaLayer {
     let defaults = SpecDefaults(defaults: defaultLimits(), pool: defaultPoolSettings(), namespaceHeaders: [])
     return try open(
-      defaults: defaults, fetcher: fetcher, settings: settings, directory: directory, silent: silent, imageMemoryBytes: imageMemoryBytes
+      defaults: defaults, fetcher: fetcher, settings: settings, directory: directory, silent: silent, audioFocus: audioFocus,
+      imageMemoryBytes: imageMemoryBytes
     )
   }
 
@@ -25,11 +27,12 @@ extension MediaLayer {
     settings: SettingsStore,
     directory: URL? = nil,
     silent: Bool = false,
+    audioFocus: MediaAudioFocus = .mix,
     imageMemoryBytes: Int = MediaImagePipeline.defaultMemoryLimit
   ) throws -> MediaLayer {
     try open(
       defaults: specDefaults(json: spec), fetcher: fetcher, settings: settings, directory: directory, silent: silent,
-      imageMemoryBytes: imageMemoryBytes
+      audioFocus: audioFocus, imageMemoryBytes: imageMemoryBytes
     )
   }
 
@@ -39,17 +42,20 @@ extension MediaLayer {
     settings: SettingsStore,
     directory: URL?,
     silent: Bool,
+    audioFocus: MediaAudioFocus,
     imageMemoryBytes: Int
   ) throws -> MediaLayer {
     guard imageMemoryBytes > 0 else { throw MediaError.InvalidSpec(detail: "imageMemoryBytes must be positive") }
     let imageCache = ImageCache(costLimit: imageMemoryBytes)
+    let audio = MediaAudioSession(focus: audioFocus)
     let (config, factory) = try makeConfig(
-      defaults: defaults, fetcher: fetcher, settings: settings, directory: directory, silent: silent, imageCache: imageCache
+      defaults: defaults, fetcher: fetcher, settings: settings, directory: directory, silent: silent, audio: audio, imageCache: imageCache
     )
     let media = try MediaLayer.open(config: config)
     ImageMemory.install(imageCache, on: media)
     media.followSystem(events: media.playerEvents(), link: factory.events, center: .default, names: .system)
     Media.current = media
+    Media.audio = audio
     return media
   }
 
@@ -59,9 +65,10 @@ extension MediaLayer {
     settings: SettingsStore,
     directory: URL?,
     silent: Bool,
+    audio: MediaAudioSession? = nil,
     imageCache: ImageCache = ImageCache(costLimit: MediaImagePipeline.defaultMemoryLimit)
   ) throws -> (OpenConfig, AVQueuePlayerSlotFactory) {
-    let factory = AVQueuePlayerSlotFactory(startMuted: silent)
+    let factory = AVQueuePlayerSlotFactory(startMuted: silent, audio: audio)
     let config = OpenConfig(
       dir: try (directory ?? defaultDirectory()).path,
       fetcher: fetcher,

@@ -181,6 +181,7 @@ val media = MediaLayer.open(
 | `directory` (Swift) | `Caches/MediaLayer` | Folder of the disk cache. The cache folder of the app on Kotlin |
 | `callFactory` (Kotlin) | `OkHttpClient()` | HTTP client of the players |
 | `silent` | false | All players stay muted until the app quits. No place and no `Media.muted` can unmute them. Use it while you build the app |
+| `audioFocus` | `mix` | What the players do to other apps' music: `exclusive`, `mix` or `duck`. See [audio focus](audio-focus.md) |
 | `imageMemoryBytes` | 128 MiB | Memory limit of the decoder of images (Nuke `ImageCache`, Coil `MemoryCache`). Must be above 0 |
 
 ## Local files

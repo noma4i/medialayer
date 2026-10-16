@@ -21,17 +21,19 @@ public final class PlayerEventsLink: @unchecked Sendable {
 public final class AVQueuePlayerSlotFactory: PlayerSlotFactory, @unchecked Sendable {
   public let events = PlayerEventsLink()
   private let startMuted: Bool
+  private let audio: MediaAudioSession?
   private let slots: LoadedSlots
   private let hosts: HostLayers
 
-  public init(startMuted: Bool = false, slots: LoadedSlots = .shared, hosts: HostLayers = .shared) {
+  public init(startMuted: Bool = false, audio: MediaAudioSession? = nil, slots: LoadedSlots = .shared, hosts: HostLayers = .shared) {
     self.startMuted = startMuted
+    self.audio = audio
     self.slots = slots
     self.hosts = hosts
   }
 
   public func create(slot: UInt32) -> PlayerSlot {
-    AVQueuePlayerSlot(id: slot, events: events, startMuted: startMuted, slots: slots, hosts: hosts)
+    AVQueuePlayerSlot(id: slot, events: events, startMuted: startMuted, audio: audio, slots: slots, hosts: hosts)
   }
 }
 
@@ -41,6 +43,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   public let layer: AVPlayerLayer
 
   private let events: PlayerEventsLink
+  private let audio: MediaAudioSession?
   private let slots: LoadedSlots
   private let hosts: HostLayers
   private let sampleLock = NSLock()
@@ -51,6 +54,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private var item: AVPlayerItem?
   private var observations: [NSKeyValueObservation] = []
   private var traceObservations: [NSKeyValueObservation] = []
+  private var audibleObservations: [NSKeyValueObservation] = []
   private var currentItemObservation: NSKeyValueObservation?
   private var notificationTokens: [NSObjectProtocol] = []
   private var prerollRequested = false
@@ -60,20 +64,26 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private var wantsPlay = false
   private var readahead: TimeInterval = 0
 
-  public init(id: UInt32, events: PlayerEventsLink, startMuted: Bool, slots: LoadedSlots = .shared, hosts: HostLayers = .shared) {
+  public init(
+    id: UInt32, events: PlayerEventsLink, startMuted: Bool, audio: MediaAudioSession? = nil, slots: LoadedSlots = .shared,
+    hosts: HostLayers = .shared
+  ) {
     self.id = id
     self.events = events
+    self.audio = audio
     self.slots = slots
     self.hosts = hosts
     layer = AVPlayerLayer(player: player)
     super.init()
     player.isMuted = startMuted
     player.automaticallyWaitsToMinimizeStalling = true
+    observeAudibility()
     layer.videoGravity = .resizeAspectFill
     traceStart()
   }
 
   deinit {
+    audio?.setAudible(slot: id, false)
     let player = player
     let observations = observations
     let tokens = notificationTokens
@@ -245,6 +255,19 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
         MediaTrace.emit("player", "slot=\(id) stalled key=\(key.map(MediaTrace.tail) ?? "-") position=\(position)")
         events.with { $0.stalled(slot: self.id, positionMs: position) }
       }
+    ]
+  }
+
+  private func observeAudibility() {
+    let report: (AVPlayer) -> Void = { [weak self] player in
+      guard let self else { return }
+
+      audio?.setAudible(slot: id, !player.isMuted && player.timeControlStatus != .paused && player.currentItem != nil)
+    }
+    audibleObservations = [
+      player.observe(\.isMuted, options: [.new]) { player, _ in report(player) },
+      player.observe(\.timeControlStatus, options: [.new]) { player, _ in report(player) },
+      player.observe(\.currentItem, options: [.new]) { player, _ in report(player) }
     ]
   }
 
