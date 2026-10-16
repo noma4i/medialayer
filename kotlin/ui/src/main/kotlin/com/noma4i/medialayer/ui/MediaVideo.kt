@@ -63,8 +63,8 @@ fun MediaVideo(
   content: @Composable (MediaState) -> Unit = {}
 ) {
   val environment = LocalMediaEnvironment.current
-  val placement = rememberPlacement()
-  val state = rememberPlace(source, playing, muted, loop, peeking, placement.placed)
+  val screen = rememberScreenVisibility()
+  val state = rememberPlace(source, playing, muted, loop, peeking, screen.visible)
   val edges = remember(source.url) { VideoEdges() }
   val tones = rememberCoroutineScope()
   val item = remember(source) { source.toItem() }
@@ -90,8 +90,8 @@ fun MediaVideo(
   }
   var view by remember(environment) { mutableStateOf<ViewHandle?>(null) }
   val player by remember(view) { view?.player ?: flowOf(null) }.collectAsState(null)
-  DisposableEffect(environment, source.url, placement.placed) {
-    if (!placement.placed) return@DisposableEffect onDispose { }
+  DisposableEffect(environment, source.url, screen.visible) {
+    if (!screen.visible) return@DisposableEffect onDispose { }
     val events = environment.media.playerEvents()
     val owners = environment.players?.owners
     val created = environment.players?.newView()
@@ -106,9 +106,9 @@ fun MediaVideo(
       view = null
     }
   }
-  Box(modifier.then(placement.modifier)) {
+  Box(modifier.then(screen.modifier)) {
     player?.let { ContentFrame(it, Modifier.fillMaxSize(), output.contentFrameType(), contentScale, true, {}) }
-    if (placement.placed) VideoPlaceholder(source, state.isReady, contentScale)
+    if (screen.visible) VideoPlaceholder(source, state.isReady, contentScale)
     content(state)
   }
 }

@@ -11,8 +11,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onVisibilityChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.findViewTreeLifecycleOwner
 import coil.ImageLoader
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.MediaSource
@@ -28,15 +32,30 @@ object Media {
     internal set
 }
 
-internal class Placement {
-  var placed by mutableStateOf(false)
-    private set
+internal class ScreenVisibility {
+  private var inViewport by mutableStateOf(false)
+  var started by mutableStateOf(true)
 
-  val modifier: Modifier = Modifier.onGloballyPositioned { placed = true }
+  val visible: Boolean get() = inViewport && started
+
+  val modifier: Modifier = Modifier.onVisibilityChanged(minFractionVisible = VISIBLE_FRACTION) { inViewport = it }
 }
 
+private const val VISIBLE_FRACTION = 0.01f
+
 @Composable
-internal fun rememberPlacement(): Placement = remember { Placement() }
+internal fun rememberScreenVisibility(): ScreenVisibility {
+  val screen = remember { ScreenVisibility() }
+  val lifecycle = LocalView.current.findViewTreeLifecycleOwner()?.lifecycle
+  DisposableEffect(screen, lifecycle) {
+    if (lifecycle == null) return@DisposableEffect onDispose { }
+    val observer = LifecycleEventObserver { _, _ -> screen.started = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }
+    screen.started = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+    lifecycle.addObserver(observer)
+    onDispose { lifecycle.removeObserver(observer) }
+  }
+  return screen
+}
 
 internal class MediaEnvironment(val media: MediaLayer, val players: SlotPlayers?, val imageLoader: ImageLoader, val frames: FrameSource = MetadataFrames)
 
@@ -59,10 +78,10 @@ fun MediaLayerProvider(media: MediaLayer, imageLoader: ImageLoader? = null, play
 }
 
 @Composable
-internal fun rememberPlace(source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean = true, peeking: Boolean = false, placed: Boolean = true): MediaState {
-  if (placed) declarePlace(source, playing, muted, loop, peeking)
+internal fun rememberPlace(source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean = true, peeking: Boolean = false, visible: Boolean = true): MediaState {
+  if (visible) declarePlace(source, playing, muted, loop, peeking)
   val media = LocalMediaEnvironment.current.media
-  return remember(media, source.url, placed) { if (placed) media.stateFlow(source.url) else flowOf(MediaState.Idle) }.collectAsState(MediaState.Idle).value
+  return remember(media, source.url, visible) { if (visible) media.stateFlow(source.url) else flowOf(MediaState.Idle) }.collectAsState(MediaState.Idle).value
 }
 
 @Composable

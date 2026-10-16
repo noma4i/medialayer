@@ -104,8 +104,8 @@ class MediaComposeTest {
     rule.setContent {
       MediaLayerProvider(layer, loader, slots.players) {
         Column {
-          MediaVideo(Clip("https://o.test/texture.mp4"), playing = true, muted = true, output = MediaOutput.Texture)
-          MediaVideo(Clip("https://o.test/window.mp4"), playing = true, muted = true, output = MediaOutput.Window)
+          MediaVideo(Clip("https://o.test/texture.mp4"), playing = true, muted = true, output = MediaOutput.Texture, modifier = Modifier.size(50.dp))
+          MediaVideo(Clip("https://o.test/window.mp4"), playing = true, muted = true, output = MediaOutput.Window, modifier = Modifier.size(50.dp))
         }
       }
     }
