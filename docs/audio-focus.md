@@ -76,7 +76,7 @@ await Media.audio.deactivateRecording()
 ### Kotlin
 
 ```kotlin
-// Request RECORD_AUDIO and use MediaRecorder as before. The library only holds the focus.
+// Request RECORD_AUDIO and record with your own recorder as before. The library only holds the focus.
 if (!Media.audio!!.activateRecording()) return
 // record
 Media.audio!!.deactivateRecording()
