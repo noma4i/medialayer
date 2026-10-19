@@ -178,10 +178,15 @@ impl PoolControl for FakePool {
 #[derive(Default)]
 pub struct FakePrefetch {
     pub stops: AtomicUsize,
+    pub forgotten: AtomicUsize,
     pub limits: Mutex<Vec<Limits>>,
 }
 
 impl PrefetchControl for FakePrefetch {
+    fn forget_loaded(&self) {
+        self.forgotten.fetch_add(1, Ordering::SeqCst);
+    }
+
     fn stop(&self) {
         self.stops.fetch_add(1, Ordering::SeqCst);
     }

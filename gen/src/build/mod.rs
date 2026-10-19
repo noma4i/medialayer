@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use medialayer::limits::LeadingChunks;
+use medialayer::prefetch::CacheStrategy;
 use medialayer::spec::{AudioSpec, CacheSpec, Evict, ImageSpec, MediaSpec, VideoSpec};
 
 use crate::parser::{Call, Node, Value};
@@ -95,6 +96,18 @@ pub fn evict(node: &Node<Value>) -> Option<Evict> {
     }
 }
 
+pub fn strategy(node: &Node<Value>) -> Option<CacheStrategy> {
+    match &node.item {
+        Value::Symbol(name) => match name.as_str() {
+            "window" => Some(CacheStrategy::Window),
+            "whole" => Some(CacheStrategy::Whole),
+            "on_demand" => Some(CacheStrategy::OnDemand),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 pub fn header_name(name: &str) -> String {
     let parts: Vec<String> = name
         .split('_')
@@ -142,7 +155,7 @@ pub fn build(files: &[Vec<Call>]) -> Built {
             match call.word.as_str() {
                 "video" => built.spec.videos.push(video(name, body)),
                 "image" => built.spec.images.push(image(name, body)),
-                _ => built.spec.audios.push(AudioSpec { name, evict: argument(body, "evict", evict) }),
+                _ => built.spec.audios.push(AudioSpec { name, evict: argument(body, "evict", evict), strategy: argument(body, "strategy", strategy).unwrap_or_default() }),
             }
         }
     }
@@ -181,6 +194,7 @@ fn video(name: String, body: &[Call]) -> VideoSpec {
     video.playback.chunks_ahead = keyed(body, "playback", "chunks_ahead", int).unwrap_or(video.playback.chunks_ahead);
     video.forward_headers = argument(body, "forward_headers", headers).unwrap_or(video.forward_headers);
     video.evict = argument(body, "evict", evict);
+    video.strategy = argument(body, "strategy", strategy).unwrap_or_default();
     video
 }
 
@@ -193,5 +207,6 @@ fn image(name: String, body: &[Call]) -> ImageSpec {
         prefetch_window: keyed(body, "prefetch", "window", range),
         prefetch_behind: keyed(body, "prefetch", "behind", int),
         evict: argument(body, "evict", evict),
+        strategy: argument(body, "strategy", strategy).unwrap_or_default(),
     }
 }

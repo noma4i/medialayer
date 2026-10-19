@@ -1,8 +1,9 @@
-use super::entry::Kind;
+use super::entry::{Entry, Kind};
 use super::inner::{scan, CacheShared};
 use super::naming::bin_path;
 use super::policy::victim_order;
 use super::save::mark_dirty;
+use super::state::Item;
 use crate::limits::eviction_target;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -57,10 +58,20 @@ pub async fn evict_to(inner: &Arc<CacheShared>, target: u64) -> usize {
     }
     let candidates = scan(inner).await;
     let (default, now) = (inner.state().limits.strategy, inner.now());
-    let pairs = candidates.into_iter().filter(|item| !item.protected).map(|item| (item.name, item.entry)).collect();
+    let (kept, others): (Vec<_>, Vec<_>) = {
+        let state = inner.state();
+        candidates.into_iter().filter(|item| !item.protected).partition(|item| state.is_kept(&item.key))
+    };
+    let pairs = |items: Vec<Item>| -> Vec<(String, Entry)> { items.into_iter().map(|item| (item.name, item.entry)).collect() };
+    let (others, kept) = (pairs(others), pairs(kept));
     let overrides = inner.overrides.clone();
     let priority = inner.kind_priority;
-    let ordered = tokio::task::spawn_blocking(move || victim_order(pairs, default, &overrides, &priority, now)).await;
+    let ordered = tokio::task::spawn_blocking(move || {
+        let mut order = victim_order(others, default, &overrides, &priority, now);
+        order.extend(victim_order(kept, default, &overrides, &priority, now));
+        order
+    })
+    .await;
     let Ok(order) = ordered else { return 0 };
     inner.eviction_backlog.store(order.len() as u64, Ordering::Relaxed);
     let _backlog = BacklogReset(&inner.eviction_backlog);

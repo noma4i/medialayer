@@ -17,9 +17,9 @@ class MediaSourceTest {
   @Test
   fun aSourceBecomesTheCoreItemWithItsCoverAndBlurHashWhenDeclared() {
     assertEquals(
-      MediaItem(Kind.VIDEO, "https://o.test/a.mp4", mapOf("Authorization" to "token"), "https://o.test/c.jpg", null),
+      MediaItem(Kind.VIDEO, "https://o.test/a.mp4", mapOf("Authorization" to "token"), "https://o.test/c.jpg", null, strategy = CacheStrategy.WINDOW),
       Clip("https://o.test/a.mp4", "https://o.test/c.jpg").toItem()
     )
-    assertEquals(MediaItem(Kind.IMAGE, "https://o.test/p.png", emptyMap(), null, null), Plain("https://o.test/p.png").toItem())
+    assertEquals(MediaItem(Kind.IMAGE, "https://o.test/p.png", emptyMap(), null, null, strategy = CacheStrategy.WINDOW), Plain("https://o.test/p.png").toItem())
   }
 }

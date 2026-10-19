@@ -55,7 +55,7 @@ extension GlobalMedia {
       let media = try open(silent: false, fetcher: fetcher)
       let log = StateLog()
       let subscription = media.subscribeState(key: Self.clip, listener: log)
-      let item = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: "https://o.test/cover.jpg", blurHash: nil, looping: false)
+      let item = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: "https://o.test/cover.jpg", blurHash: nil, looping: false, strategy: .window)
       let host = CALayer()
       let token = HostLayers.shared.register(host)
 
@@ -77,7 +77,7 @@ extension GlobalMedia {
     @Test
     func aSilentLayerKeepsEverySlotMutedWhateverThePlacesAsk() async throws {
       let media = try open(silent: true, fetcher: CountingFetcher())
-      let item = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: nil, blurHash: nil, looping: true)
+      let item = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: nil, blurHash: nil, looping: true, strategy: .window)
 
       media.visible(source: item, visible: true)
       media.setPlaying(key: Self.clip, playing: true)
@@ -102,7 +102,7 @@ extension GlobalMedia {
         directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
         silent: false
       )
-      let item = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: nil, blurHash: nil, looping: true)
+      let item = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: nil, blurHash: nil, looping: true, strategy: .window)
 
       media.visible(source: item, visible: true)
       media.setMuted(key: Self.clip, muted: false)
@@ -118,7 +118,7 @@ extension GlobalMedia {
     @Test
     func aRateSetOnTheLayerReachesThePlayerOfTheLoadedClip() async throws {
       let media = try open(silent: true, fetcher: CountingFetcher())
-      let item = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: nil, blurHash: nil, looping: true)
+      let item = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: nil, blurHash: nil, looping: true, strategy: .window)
 
       media.setRate(key: Self.clip, rate: 1.5)
       media.visible(source: item, visible: true)

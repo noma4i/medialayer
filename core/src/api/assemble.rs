@@ -140,6 +140,10 @@ impl PrefetchControl for Prefetcher {
         self.stop_all();
     }
 
+    fn forget_loaded(&self) {
+        Prefetcher::forget_loaded(self);
+    }
+
     fn set_limits(&self, limits: &Limits) {
         Prefetcher::set_limits(self, limits);
     }

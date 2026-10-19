@@ -3,6 +3,7 @@ use crate::api::slots::SlotCall;
 use crate::api::source::MediaItem;
 use crate::api::types::Kind;
 use crate::pages::Sliced;
+use crate::prefetch::CacheStrategy;
 use crate::session::Intent;
 use std::collections::HashSet;
 
@@ -10,7 +11,14 @@ const MIN_RATE: f32 = 0.25;
 const MAX_RATE: f32 = 4.0;
 
 impl Stage {
+    fn declare_whole<'a>(&self, sources: impl Iterator<Item = &'a MediaItem>) {
+        for source in sources.filter(|source| source.strategy == CacheStrategy::Whole && !source.is_local()) {
+            self.inner.prefetcher.keep_whole(source.for_prefetch());
+        }
+    }
+
     pub fn replace_window(&self, active: usize, sources: Vec<Option<MediaItem>>) {
+        self.declare_whole(sources.iter().flatten());
         self.state().window = sources;
         self.move_window(active);
     }
@@ -43,11 +51,12 @@ impl Stage {
             (commands, sources)
         };
         self.dispatch(commands);
-        let remote = sources.map(|source| (!source.is_local()).then(|| source.for_prefetch()));
+        let remote = sources.map(|source| (!source.is_local() && source.strategy == CacheStrategy::Window).then(|| source.for_prefetch()));
         self.inner.prefetcher.set_window(active, remote);
     }
 
     pub fn replace_image_window(&self, name: &str, active: usize, pages: Vec<Vec<MediaItem>>) {
+        self.declare_whole(pages.iter().flatten());
         self.state().image_windows.insert(name.to_string(), pages);
         self.move_image_window(name, active);
     }
@@ -56,7 +65,7 @@ impl Stage {
         let count = self.state().image_windows.get(name).map_or(0, Vec::len);
         let range = self.inner.prefetcher.image_window_range(name, active, count);
         let pages = Sliced::<Vec<MediaItem>>::slice_pages(self.state().image_windows.get(name).map(Vec::as_slice).unwrap_or_default(), range);
-        let remote = pages.map(|page| Some(page.iter().filter(|source| !source.is_local()).map(MediaItem::for_prefetch).collect()));
+        let remote = pages.map(|page| Some(page.iter().filter(|source| !source.is_local() && source.strategy == CacheStrategy::Window).map(MediaItem::for_prefetch).collect()));
         self.inner.prefetcher.set_image_window(name, active, remote);
     }
 
@@ -168,6 +177,7 @@ impl Stage {
             return;
         }
         let now = self.now();
+        self.declare_whole(std::iter::once(&source));
         let commands = {
             let mut state = self.state();
             *state.shown.entry(url.clone()).or_insert(0) += 1;

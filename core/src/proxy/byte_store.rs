@@ -14,6 +14,7 @@ pub trait ByteStore: Send + Sync {
     async fn meta(&self, key: &str) -> Option<Meta>;
     async fn begin_write(&self, key: &str, meta: Meta) -> Option<Box<dyn StoreWriter>>;
     async fn remove(&self, key: &str);
+    async fn keep(&self, _key: &str) {}
 }
 
 #[async_trait]

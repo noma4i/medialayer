@@ -3,7 +3,6 @@ use super::plan::Plan;
 use super::settled::Outcome;
 use super::source::{Source, SourceKind};
 use crate::hls::{extract_leading_chunks, Chunk, extract_variants, is_manifest_url, is_multivariant, resolve_url};
-use crate::limits::LeadingChunks;
 use crate::proxy::Priority;
 use std::future::Future;
 use std::time::Duration;
@@ -36,7 +35,7 @@ async fn playlist_text(loader: &dyn Loader, source: &Source, url: &str, timeout:
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-pub(super) async fn read_plan(loader: &dyn Loader, source: &Source, timeout: Duration) -> Result<Plan, Outcome> {
+pub(super) async fn read_plan(loader: &dyn Loader, source: &Source, timeout: Duration, max_chunks: usize) -> Result<Plan, Outcome> {
     let mut playlist_url = source.url.clone();
     let mut text = playlist_text(loader, source, &playlist_url, timeout).await?;
     if is_multivariant(&text) {
@@ -47,7 +46,7 @@ pub(super) async fn read_plan(loader: &dyn Loader, source: &Source, timeout: Dur
         playlist_url = resolve_url(&playlist_url, &variant);
         text = playlist_text(loader, source, &playlist_url, timeout).await?;
     }
-    let chunks = extract_leading_chunks(&text, LeadingChunks::MAX_CHUNKS)
+    let chunks = extract_leading_chunks(&text, max_chunks)
         .into_iter()
         .map(|chunk| Chunk { segment: resolve_url(&playlist_url, &chunk.segment), init: chunk.init.map(|init| resolve_url(&playlist_url, &init)) })
         .collect();

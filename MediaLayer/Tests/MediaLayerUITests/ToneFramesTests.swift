@@ -78,7 +78,7 @@ extension GlobalMedia {
     @Test
     func inv_tone_12_the_pixels_reach_the_core_off_the_main_thread() async throws {
       let places = RecordingPlaces()
-      let item = MediaItem(kind: .image, url: "https://o.test/a.png", headers: [:], cover: nil, blurHash: nil)
+      let item = MediaItem(kind: .image, url: "https://o.test/a.png", headers: [:], cover: nil, blurHash: nil, strategy: .window)
 
       ToneFrames.submit(try solid(width: 300, height: 200, red: 1, green: 2, blue: 3), source: item, places: places)
 
@@ -89,7 +89,7 @@ extension GlobalMedia {
     @Test
     func inv_tone_12_a_failed_decode_submits_nothing() async throws {
       let places = RecordingPlaces()
-      let item = MediaItem(kind: .video, url: "https://o.test/v.mp4", headers: [:], cover: nil, blurHash: nil)
+      let item = MediaItem(kind: .video, url: "https://o.test/v.mp4", headers: [:], cover: nil, blurHash: nil, strategy: .window)
 
       ToneFrames.submit(nil, source: item, places: places)
       ToneFrames.submitFirstFrame(of: AVURLAsset(url: URL(fileURLWithPath: "/nonexistent/clip.mp4")), source: item, places: places)
@@ -115,7 +115,7 @@ extension GlobalMedia {
     func inv_tone_12_a_video_cover_gives_the_video_its_tone() async throws {
       let media = try openLayer()
       let cover = try writePNG(solid(width: 90, height: 160, red: 10, green: 10, blue: 240))
-      let video = MediaItem(kind: .video, url: "https://o.test/v.mp4", headers: [:], cover: cover, blurHash: nil)
+      let video = MediaItem(kind: .video, url: "https://o.test/v.mp4", headers: [:], cover: cover, blurHash: nil, strategy: .window)
 
       let image = await PlaceholderView.loadCover(cover, for: video, context: MediaContext(places: media))
 
@@ -126,8 +126,8 @@ extension GlobalMedia {
     @Test
     func inv_tone_12_a_video_without_a_cover_gives_its_first_frame_and_a_covered_one_does_not() async throws {
       let media = try openLayer()
-      let bare = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: nil, blurHash: nil, looping: true)
-      let covered = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: "https://o.test/c.jpg", blurHash: nil, looping: true)
+      let bare = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: nil, blurHash: nil, looping: true, strategy: .window)
+      let covered = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: "https://o.test/c.jpg", blurHash: nil, looping: true, strategy: .window)
 
       media.visible(source: bare, visible: true)
       media.setPlaying(key: Self.clip, playing: true)

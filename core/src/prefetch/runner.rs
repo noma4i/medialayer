@@ -1,11 +1,13 @@
 use super::gate::{Gate, LoadPermit};
 use super::ledger::{Counters, Evicted, NextLoad, PrefetchLedger};
 use super::load_source::{bounded, is_hls, load_unit, read_plan};
+use super::whole::load_whole;
 use crate::hls::Chunk;
 use super::loader::Loader;
 use crate::proxy::Priority;
 use super::settled::{Outcome, Settled};
-use super::source::Source;
+use super::source::{Source, SourceKind};
+use super::strategy::CacheStrategy;
 use super::window::{diff_window, wanted_jobs, wanted_page_jobs, PageWindow, PrefetchJob, PrefetchWindow};
 use crate::cache::Clock;
 use crate::limits::{LeadingChunks, Limits, MIB};
@@ -19,6 +21,8 @@ use tokio::runtime::Handle;
 use tokio::sync::{broadcast, watch, Notify};
 
 const EVENT_CAPACITY: usize = 256;
+const WHOLE_MEDIA_PARALLEL: usize = 1;
+const WHOLE_IMAGE_PARALLEL: usize = 2;
 
 struct Job {
     id: u64,
@@ -26,6 +30,7 @@ struct Job {
     active: Arc<AtomicBool>,
     goal: watch::Sender<usize>,
     distance: Arc<AtomicUsize>,
+    whole: bool,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -39,6 +44,7 @@ struct State {
     windows: HashMap<WindowKey, Vec<PrefetchJob>>,
     last: HashMap<WindowKey, (Vec<PrefetchJob>, Vec<Source>)>,
     running: HashMap<String, Job>,
+    wholes: HashMap<String, Source>,
     next_id: u64,
     busy: bool,
 }
@@ -93,6 +99,7 @@ struct Shared {
     tuning: Mutex<Tuning>,
     image_windows: Mutex<HashMap<String, PageWindow>>,
     gate: Arc<Gate>,
+    whole_gates: [Arc<Gate>; 2],
     clock: Arc<dyn Clock>,
     state: Mutex<State>,
     live: AtomicUsize,
@@ -146,8 +153,9 @@ impl Prefetcher {
             tuning: Mutex::new(Tuning::from_limits(limits)),
             image_windows: Mutex::new(HashMap::new()),
             gate: Gate::new(limits.max_concurrent as usize),
+            whole_gates: [Gate::new(WHOLE_MEDIA_PARALLEL), Gate::new(WHOLE_IMAGE_PARALLEL)],
             clock,
-            state: Mutex::new(State { ledger, windows: HashMap::new(), last: HashMap::new(), running: HashMap::new(), next_id: 0, busy: false }),
+            state: Mutex::new(State { ledger, windows: HashMap::new(), last: HashMap::new(), running: HashMap::new(), wholes: HashMap::new(), next_id: 0, busy: false }),
             live: AtomicUsize::new(0),
             events: broadcast::channel(EVENT_CAPACITY).0,
             handle: Handle::current(),
@@ -240,7 +248,7 @@ impl Prefetcher {
             }
             state.busy = busy;
             if busy {
-                let running: Vec<String> = state.running.keys().cloned().collect();
+                let running: Vec<String> = state.running.iter().filter(|(_, job)| !job.whole).map(|(url, _)| url.clone()).collect();
                 for url in running {
                     state.cancel_job(&url);
                 }
@@ -248,6 +256,10 @@ impl Prefetcher {
             }
         }
         self.resume();
+    }
+
+    pub fn forget_loaded(&self) {
+        self.shared.state().ledger.forget_loaded();
     }
 
     pub fn stop_all(&self) {
@@ -260,11 +272,45 @@ impl Prefetcher {
         for (key, jobs, sources) in windows {
             self.apply_window(key, jobs, sources, None);
         }
+        let now = Duration::from_millis(self.shared.clock.now_ms());
+        let mut state = self.shared.state();
+        let wholes: Vec<Source> = state.wholes.values().cloned().collect();
+        for source in wholes {
+            self.start_whole(&mut state, source, now, false);
+        }
+    }
+
+    pub fn keep_whole(&self, source: Source) {
+        if source.strategy != CacheStrategy::Whole {
+            return;
+        }
+        let now = Duration::from_millis(self.shared.clock.now_ms());
+        let mut state = self.shared.state();
+        state.wholes.insert(source.url.clone(), source.clone());
+        self.start_whole(&mut state, source, now, true);
+    }
+
+    fn start_whole(&self, state: &mut State, source: Source, now: Duration, entering: bool) {
+        if entering {
+            state.ledger.counters.requested += 1;
+        }
+        if state.running.contains_key(&source.url) || !state.ledger.needed(&source.url, 1, now, entering) {
+            if entering {
+                state.ledger.counters.deduped += 1;
+            }
+            return;
+        }
+        if !entering {
+            state.ledger.counters.requested += 1;
+        }
+        self.launch(state, source, usize::MAX, true);
     }
 
     pub fn forget_windows(&self) {
         Prefetcher::cancel_everything(&self.shared);
-        self.shared.state().last.clear();
+        let mut state = self.shared.state();
+        state.last.clear();
+        state.wholes.clear();
     }
 
     fn cancel_everything(shared: &Shared) {
@@ -319,13 +365,18 @@ impl Prefetcher {
         if !entering {
             state.ledger.counters.requested += 1;
         }
+        self.launch(state, source, distance, false);
+    }
+
+    fn launch(&self, state: &mut State, source: Source, distance: usize, whole: bool) {
+        let tuning = self.shared.tuning();
         let id = state.next_id;
         state.next_id += 1;
-        let (goal, goal_receiver) = watch::channel(target);
-        let job = Job { id, cancel: Arc::new(Notify::new()), active: Arc::new(AtomicBool::new(false)), goal, distance: Arc::new(AtomicUsize::new(distance)) };
+        let (goal, goal_receiver) = watch::channel(tuning.target(&source, distance));
+        let job = Job { id, cancel: Arc::new(Notify::new()), active: Arc::new(AtomicBool::new(false)), goal, distance: Arc::new(AtomicUsize::new(distance)), whole };
         state.ledger.enqueue(&source.url);
         let live = LiveTask::new(&self.shared);
-        let run = Run { source: source.clone(), id, cancel: job.cancel.clone(), active: job.active.clone(), distance: job.distance.clone(), goal: goal_receiver, tuning: tuning.clone() };
+        let run = Run { source: source.clone(), id, cancel: job.cancel.clone(), active: job.active.clone(), distance: job.distance.clone(), goal: goal_receiver, tuning, whole };
         self.shared.handle.spawn(run_job(live, run));
         state.running.insert(source.url, job);
     }
@@ -339,6 +390,7 @@ struct Run {
     distance: Arc<AtomicUsize>,
     goal: watch::Receiver<usize>,
     tuning: Tuning,
+    whole: bool,
 }
 
 async fn run_job(live: LiveTask, mut run: Run) {
@@ -359,7 +411,21 @@ async fn run_job(live: LiveTask, mut run: Run) {
     let _ = shared.events.send(Settled { url: run.source.url, outcome });
 }
 
+async fn load_whole_source(shared: &Arc<Shared>, run: &Run) -> Outcome {
+    let gate = &shared.whole_gates[usize::from(run.source.kind == SourceKind::Image)];
+    let _permit = gate.acquire(None, &run.distance, 0).await;
+    mark_started(shared, &run.active);
+    let outcome = load_whole(shared.loader.as_ref(), &run.source, run.tuning.timeout).await;
+    if outcome == Outcome::Loaded {
+        shared.state().ledger.record_unit(&run.source.url);
+    }
+    outcome
+}
+
 async fn load(shared: &Arc<Shared>, run: &mut Run) -> Outcome {
+    if run.whole {
+        return load_whole_source(shared, run).await;
+    }
     if is_hls(&run.source) {
         return load_chunks(shared, run).await;
     }
@@ -395,7 +461,7 @@ async fn load_chunks(shared: &Arc<Shared>, run: &mut Run) -> Outcome {
             NextLoad::NeedPlan => {
                 permit = Some(shared.gate.acquire(permit.take(), &run.distance, 0).await);
                 mark_started(shared, &run.active);
-                match read_plan(shared.loader.as_ref(), source, run.tuning.timeout).await {
+                match read_plan(shared.loader.as_ref(), source, run.tuning.timeout, LeadingChunks::MAX_CHUNKS).await {
                     Ok(plan) => shared.state().ledger.set_plan(&source.url, plan),
                     Err(outcome) => return outcome,
                 }
@@ -460,7 +526,10 @@ async fn evict(shared: &Shared, evicted: Vec<Evicted>) {
 fn settle(shared: &Shared, url: &str, id: u64, outcome: &Outcome) {
     let mut state = shared.state();
     match outcome {
-        Outcome::Loaded => state.ledger.counters.completed += 1,
+        Outcome::Loaded => {
+            state.ledger.counters.completed += 1;
+            state.wholes.remove(url);
+        }
         Outcome::Failed(_) | Outcome::TimedOut => {
             state.ledger.counters.failed += 1;
             for jobs in state.windows.values_mut() {

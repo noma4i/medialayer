@@ -1,3 +1,4 @@
+use medialayer::prefetch::CacheStrategy;
 use medialayer::spec::{type_name, MediaSpec};
 
 use crate::source::{sources, Source};
@@ -18,8 +19,13 @@ fn declaration(source: &Source) -> String {
         .size
         .map(|(width, height)| format!("    override val size: Pair<Int, Int>? get() = Pair({width}, {height})\n"))
         .unwrap_or_default();
+    let strategy = match source.strategy {
+        CacheStrategy::Window => "",
+        CacheStrategy::Whole => "    override val strategy: com.noma4i.medialayer.CacheStrategy get() = com.noma4i.medialayer.CacheStrategy.WHOLE\n",
+        CacheStrategy::OnDemand => "    override val strategy: com.noma4i.medialayer.CacheStrategy get() = com.noma4i.medialayer.CacheStrategy.ON_DEMAND\n",
+    };
     format!(
-        "data class {name}(\n    override val url: String,\n{optional}    override val headers: Map<String, String> = emptyMap(),\n) : MediaSource {{\n    override val kind: Kind get() = Kind.{kind}\n{size}}}\n",
+        "data class {name}(\n    override val url: String,\n{optional}    override val headers: Map<String, String> = emptyMap(),\n) : MediaSource {{\n    override val kind: Kind get() = Kind.{kind}\n{size}{strategy}}}\n",
         name = type_name(source.name),
         kind = source.kind.to_uppercase(),
     )

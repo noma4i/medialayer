@@ -95,6 +95,14 @@ impl PrefetchLedger {
         self.trim(Duration::ZERO);
     }
 
+    pub fn forget_loaded(&mut self) {
+        for entry in self.entries.values_mut() {
+            entry.loaded = 0;
+            entry.inits.clear();
+            entry.blocked_at = None;
+        }
+    }
+
     pub fn dedupe_count(&self) -> usize {
         self.entries.len()
     }

@@ -19,6 +19,7 @@ enum Want {
     Headers,
     Range,
     Chunks,
+    Strategy,
 }
 
 impl Want {
@@ -32,6 +33,7 @@ impl Want {
             Want::Evict => "one of :lru, :fifo, :lfu, :largest_first or expire_after <duration>",
             Want::Headers => "a list of symbols such as [:authorization]",
             Want::Range => "a range such as 1...3",
+            Want::Strategy => "one of :window, :whole or :on_demand",
             Want::Chunks => "a list of up to 8 chunk counts, each 1 or 2 (the owner cap), that never grow, such as [2, 1]",
         }
     }
@@ -47,6 +49,7 @@ impl Want {
             Want::Headers => build::headers(node).is_some(),
             Want::Range => build::range(node).is_some(),
             Want::Chunks => build::chunks(node).is_some(),
+            Want::Strategy => build::strategy(node).is_some(),
         }
     }
 }
@@ -58,6 +61,7 @@ struct Rule {
 }
 
 const EVICT: Rule = Rule { word: "evict", args: &[Want::Evict], keys: &[] };
+const STRATEGY: Rule = Rule { word: "strategy", args: &[Want::Strategy], keys: &[] };
 
 const CACHE: &[Rule] = &[
     Rule { word: "budget", args: &[Want::Size], keys: &[("min", Want::Size)] },
@@ -89,6 +93,7 @@ const VIDEO: &[Rule] = &[
     Rule { word: "playback", args: &[], keys: &[("chunks_ahead", Want::Int)] },
     Rule { word: "forward_headers", args: &[Want::Headers], keys: &[] },
     EVICT,
+    STRATEGY,
 ];
 
 const IMAGE: &[Rule] = &[
@@ -96,9 +101,10 @@ const IMAGE: &[Rule] = &[
     Rule { word: "size", args: &[Want::Int, Want::Int], keys: &[] },
     Rule { word: "prefetch", args: &[], keys: &[("window", Want::Range), ("behind", Want::Int)] },
     EVICT,
+    STRATEGY,
 ];
 
-const AUDIO: &[Rule] = &[EVICT];
+const AUDIO: &[Rule] = &[EVICT, STRATEGY];
 
 pub fn check(files: &[Vec<Call>]) -> Result<medialayer::spec::MediaSpec, Vec<Found>> {
     let mut errors = Vec::new();

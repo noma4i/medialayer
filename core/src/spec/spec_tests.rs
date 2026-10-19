@@ -24,8 +24,9 @@ fn sample() -> MediaSpec {
             prefetch_window: Some((1, 3)),
             prefetch_behind: Some(2),
             evict: None,
+            strategy: Default::default(),
         }],
-        audios: vec![AudioSpec { name: "voice_note".to_string(), evict: Some(Evict::Fifo) }],
+        audios: vec![AudioSpec { name: "voice_note".to_string(), evict: Some(Evict::Fifo), strategy: Default::default() }],
     }
 }
 
@@ -70,7 +71,7 @@ fn inv_spec_03_validate_rejects_bad_specs() {
     let cases: Vec<(&str, Change, SpecError)> = vec![
         (
             "duplicate across kinds",
-            Box::new(|spec| spec.audios.push(AudioSpec { name: "moment_video".to_string(), evict: None })),
+            Box::new(|spec| spec.audios.push(AudioSpec { name: "moment_video".to_string(), evict: None, strategy: Default::default() })),
             SpecError::DuplicateName("moment_video".to_string()),
         ),
         (
@@ -118,8 +119,8 @@ fn inv_spec_01_names_that_cannot_become_a_type_are_rejected_for_every_kind() {
             spec.audios.clear();
             match kind {
                 0 => spec.videos.push(VideoSpec::new(name)),
-                1 => spec.images.push(ImageSpec { name: name.to_string(), blurhash_field: None, size: None, prefetch_window: None, prefetch_behind: None, evict: None }),
-                _ => spec.audios.push(AudioSpec { name: name.to_string(), evict: None }),
+                1 => spec.images.push(ImageSpec { name: name.to_string(), blurhash_field: None, size: None, prefetch_window: None, prefetch_behind: None, evict: None, strategy: Default::default() }),
+                _ => spec.audios.push(AudioSpec { name: name.to_string(), evict: None, strategy: Default::default() }),
             }
             assert_eq!(spec.validate(), Err(SpecError::InvalidName(name.to_string())), "name {name:?} kind {kind}");
         }

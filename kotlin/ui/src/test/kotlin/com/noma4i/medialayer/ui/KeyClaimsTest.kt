@@ -1,5 +1,6 @@
 package com.noma4i.medialayer.ui
 
+import com.noma4i.medialayer.CacheStrategy
 import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaItem
 import org.junit.Assert.assertEquals
@@ -8,7 +9,7 @@ import org.junit.Test
 class KeyClaimsTest {
   private val layer = RecordingLayer()
   private val claims = KeyClaims(layer)
-  private val item = MediaItem(kind = Kind.VIDEO, url = "https://o.test/a.mp4", headers = emptyMap(), cover = null, blurHash = null)
+  private val item = MediaItem(kind = Kind.VIDEO, url = "https://o.test/a.mp4", headers = emptyMap(), cover = null, blurHash = null, strategy = CacheStrategy.WINDOW)
 
   @Test
   fun twoViewsOfOneKeyKeepItVisibleUntilTheLastOneLeaves() {

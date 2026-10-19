@@ -36,7 +36,7 @@ fn inv_spec_05_a_spec_json_that_does_not_parse_or_does_not_validate_is_refused()
 
 #[test]
 fn inv_spec_06_the_image_prefetch_window_and_behind_reach_open_per_image_and_an_image_without_them_has_none() {
-    let image = |name: &str, window, behind| ImageSpec { name: name.to_string(), blurhash_field: None, size: None, prefetch_window: window, prefetch_behind: behind, evict: None };
+    let image = |name: &str, window, behind| ImageSpec { name: name.to_string(), blurhash_field: None, size: None, prefetch_window: window, prefetch_behind: behind, evict: None, strategy: Default::default() };
     let spec = MediaSpec {
         images: vec![image("avatar", Some((1, 3)), Some(2)), image("poster", Some((0, 4)), None), image("grid", None, Some(3)), image("plain", None, None)],
         ..MediaSpec::default()

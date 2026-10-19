@@ -9,6 +9,7 @@ fn source(kind: Kind, cover: Option<&str>, blur_hash: Option<&str>) -> MediaItem
         cover: cover.map(str::to_string),
         blur_hash: blur_hash.map(str::to_string),
         looping: true,
+        strategy: crate::prefetch::CacheStrategy::Window,
     }
 }
 

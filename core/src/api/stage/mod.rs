@@ -529,6 +529,8 @@ mod events_tests;
 mod inputs_tests;
 #[cfg(test)]
 mod playhead_tests;
+#[cfg(test)]
+mod strategy_tests;
 
 #[cfg(test)]
 mod positions_tests;

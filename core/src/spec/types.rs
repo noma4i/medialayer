@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::fetch::DEFAULT_FORWARDED_HEADERS;
 use crate::limits::{EvictionStrategy, LeadingChunks, Limits};
-use crate::prefetch::PageWindow;
+use crate::prefetch::{CacheStrategy, PageWindow};
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,6 +122,8 @@ pub struct VideoSpec {
     pub forward_headers: Vec<String>,
     #[serde(default)]
     pub evict: Option<Evict>,
+    #[serde(default)]
+    pub strategy: CacheStrategy,
 }
 
 fn default_forward_headers() -> Vec<String> {
@@ -138,6 +140,7 @@ impl VideoSpec {
             playback: PlaybackSpec::default(),
             forward_headers: default_forward_headers(),
             evict: None,
+            strategy: CacheStrategy::Window,
         }
     }
 }
@@ -156,6 +159,8 @@ pub struct ImageSpec {
     pub prefetch_behind: Option<u32>,
     #[serde(default)]
     pub evict: Option<Evict>,
+    #[serde(default)]
+    pub strategy: CacheStrategy,
 }
 
 impl ImageSpec {
@@ -174,6 +179,8 @@ pub struct AudioSpec {
     pub name: String,
     #[serde(default)]
     pub evict: Option<Evict>,
+    #[serde(default)]
+    pub strategy: CacheStrategy,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

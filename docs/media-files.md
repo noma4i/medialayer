@@ -22,6 +22,7 @@ video :moment_video do
   pool slots: 3, reach: 1, hold_off: 1.second, trim_delay: 30.seconds, low_ram_slots: 2, low_ram_reach: 0
   forward_headers [:authorization, :cookie, :user_agent]
   evict :lfu
+  strategy :whole
 end
 
 image :avatar do
@@ -85,6 +86,7 @@ The cache key is the URL. The cache lives on disk; image memory caches stay with
 | `pool low_ram_reach:` | 0 | Pages kept ready on each side of the active page on a low-memory device |
 | `forward_headers` | Authorization, Cookie, User-Agent, Connection, Accept, Accept-Encoding, Accept-Language, Range | Request headers passed to the origin server |
 | `evict` | the `cache` strategy | Override of the eviction strategy for videos |
+| `strategy` | `:window` | How the library caches and preloads this video: `:window`, `:whole` or `:on_demand`. See [cache strategies](cache-strategies.md) |
 
 The playing video always comes first. Until the playing video shows its first frame, no prefetch request starts and every running one is stopped. When the active page changes, the requests of pages that left the window are cancelled at once. The player has its own reserved connection, so prefetch never makes it wait, and when the player asks for a segment that prefetch is already downloading, it joins that download. After the first frame, prefetch continues and loads only the chunks that are still missing.
 
@@ -97,6 +99,7 @@ The playing video always comes first. Until the playing video shows its first fr
 | `prefetch window:` | `0...9` for a window without a block | Range of pages, counted from the active page, whose images are loaded in advance. `1...3` means pages 1 and 2 ahead (the end is not included, as in Ruby). Applies to the image window that has the name of the block |
 | `prefetch behind:` | 0 | Pages behind the active page whose images are loaded in advance |
 | `evict` | the `cache` strategy | Override of the eviction strategy for images |
+| `strategy` | `:window` | `:window`, `:whole` or `:on_demand`. See [cache strategies](cache-strategies.md) |
 
 ### Image windows
 
@@ -125,6 +128,7 @@ media.replaceImageWindow("avatar", active = row, pages = rows.map { page -> page
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
 | `evict` | the `cache` strategy | Override of the eviction strategy for audio |
+| `strategy` | `:window` | `:window`, `:whole` or `:on_demand`. See [cache strategies](cache-strategies.md) |
 
 ## What the generator makes
 

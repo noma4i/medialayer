@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
+import com.noma4i.medialayer.CacheStrategy
 import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaItem
 import com.noma4i.medialayer.MediaSource
@@ -34,7 +35,7 @@ private data class Covered(override val url: String, override val cover: String?
 private fun solid(width: Int, height: Int): Bitmap =
   Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.rgb(200, 20, 40)) }
 
-private fun item(url: String, cover: String? = null) = MediaItem(Kind.VIDEO, url, emptyMap(), cover, null)
+private fun item(url: String, cover: String? = null) = MediaItem(Kind.VIDEO, url, emptyMap(), cover, null, strategy = CacheStrategy.WINDOW)
 
 private val route = PlaybackRoute("http://127.0.0.1:1/v.mp4", emptyMap(), null, false, true)
 

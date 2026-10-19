@@ -203,7 +203,7 @@ struct MediaLayerBridgeTests {
   @Test
   func playUrlGoesThroughTheLocalProxyAndTheVideoPlaceholderIsTheFirstFrame() async throws {
     let media = try open(settings: MemorySettings())
-    let source = MediaItem(kind: .video, url: "https://o.test/a.mp4", headers: [:], cover: nil, blurHash: nil)
+    let source = MediaItem(kind: .video, url: "https://o.test/a.mp4", headers: [:], cover: nil, blurHash: nil, strategy: .window)
 
     let route = try await media.playUrl(source: source)
 
@@ -222,7 +222,7 @@ struct MediaLayerBridgeTests {
       defaults: defaultLimits(),
       pool: defaultPoolSettings()
     ))
-    let route = try await media.playUrl(source: MediaItem(kind: .audio, url: "https://o.test/voice.m4a", headers: [:], cover: nil, blurHash: nil))
+    let route = try await media.playUrl(source: MediaItem(kind: .audio, url: "https://o.test/voice.m4a", headers: [:], cover: nil, blurHash: nil, strategy: .window))
     let payload = RangeIgnoringOrigin.payload
 
     for (range, bytes) in [("bytes=0-1", 0...1), ("bytes=-100", 19_900...19_999), ("bytes=10000-", 10_000...19_999)] {
@@ -247,7 +247,7 @@ struct MediaLayerBridgeTests {
       defaults: defaultLimits(),
       pool: defaultPoolSettings()
     ))
-    let route = try await media.playUrl(source: MediaItem(kind: .audio, url: "https://o.test/voice.m4a", headers: [:], cover: nil, blurHash: nil))
+    let route = try await media.playUrl(source: MediaItem(kind: .audio, url: "https://o.test/voice.m4a", headers: [:], cover: nil, blurHash: nil, strategy: .window))
     let url = try #require(URL(string: route.url))
     closeListenerSilently(port: UInt16(try #require(url.port)))
     await #expect(throws: (any Error).self) { _ = try await URLSession.shared.data(from: url) }

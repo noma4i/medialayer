@@ -21,6 +21,36 @@ async fn present(f: &Fixture) -> Vec<&'static str> {
 }
 
 #[tokio::test]
+async fn inv_strategy_13_a_kept_entry_and_its_blocks_are_evicted_after_every_other_entry() {
+    let f = fixture(limits(100, 0.8, EvictionStrategy::Lru), &[]).await;
+    f.put("a", Kind::Image, 30).await;
+    f.put("a#1", Kind::Image, 30).await;
+    f.put("b", Kind::Image, 30).await;
+    f.cache.keep("a");
+    f.put("c", Kind::Image, 30).await;
+    assert_eq!(present(&f).await, vec!["a", "c"]);
+    assert!(f.cache.contains("a#1").await);
+
+    f.put("d", Kind::Image, 30).await;
+    f.put("e", Kind::Image, 30).await;
+    f.put("g", Kind::Image, 30).await;
+    f.put("h", Kind::Image, 30).await;
+    assert!(f.cache.contains("a").await && f.cache.contains("a#1").await);
+}
+
+#[tokio::test]
+async fn inv_strategy_13_a_kept_entry_is_evicted_when_nothing_else_is_left_to_fit_the_budget() {
+    let f = fixture(limits(100, 0.8, EvictionStrategy::Lru), &[]).await;
+    f.put("a", Kind::Image, 60).await;
+    f.cache.keep("a");
+
+    f.put("b", Kind::Image, 60).await;
+
+    assert!(!f.cache.contains("a").await);
+    assert!(f.cache.contains("b").await);
+}
+
+#[tokio::test]
 async fn inv_cache_08_lru_evicts_the_least_recently_read() {
     let f = three_of_thirty(EvictionStrategy::Lru).await;
     f.touch("a").await;

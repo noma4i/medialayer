@@ -2,6 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+use medialayer::prefetch::CacheStrategy;
 use medialayer::spec::{AudioSpec, CacheSpec, Evict, ImageSpec, MediaSpec, PoolSpec, PrefetchSpec, VideoSpec};
 
 use super::*;
@@ -22,6 +23,7 @@ fn media_files_spec() -> MediaSpec {
     video.pool = PoolSpec { slots: 3, reach: 1, hold_off: 1, trim_delay: 30, low_ram_slots: Some(2), low_ram_reach: Some(0) };
     video.forward_headers = vec!["Authorization".into(), "Cookie".into(), "User-Agent".into()];
     video.evict = Some(Evict::Lfu);
+    video.strategy = CacheStrategy::Whole;
     MediaSpec {
         cache: CacheSpec {
             memory: 256 * 1024 * 1024,
@@ -36,8 +38,9 @@ fn media_files_spec() -> MediaSpec {
             prefetch_window: Some((1, 3)),
             prefetch_behind: Some(2),
             evict: None,
+            strategy: CacheStrategy::Window,
         }],
-        audios: vec![AudioSpec { name: "voice_note".into(), evict: Some(Evict::Fifo) }],
+        audios: vec![AudioSpec { name: "voice_note".into(), evict: Some(Evict::Fifo), strategy: CacheStrategy::Window }],
     }
 }
 
@@ -50,7 +53,7 @@ fn the_media_files_reference_example_builds_the_documented_spec() {
 
 #[test]
 fn every_ruby_example_in_the_docs_parses() {
-    for path in ["README.md", "docs/memory.md", "docs/media-files.md"] {
+    for path in ["README.md", "docs/memory.md", "docs/media-files.md", "docs/cache-strategies.md"] {
         for block in ruby_blocks(path) {
             assert!(parse_spec(&block).is_ok(), "{path}: {block}");
         }
@@ -119,4 +122,30 @@ fn inv_readahead_05_a_video_declares_how_many_chunks_ahead_it_plays() {
     assert_eq!((spec.videos[0].playback.chunks_ahead, spec.videos[1].playback.chunks_ahead), (5, 2));
     let errors = parse_spec("video :v do\n  playback chunks_ahead: 1.second\nend\n").unwrap_err();
     assert_eq!(errors[0].message, "`chunks_ahead:` must be a whole number");
+}
+
+#[test]
+fn inv_strategy_14_every_kind_declares_its_cache_strategy_and_the_default_is_the_window() {
+    let spec = parse_spec(
+        "video :circle do\n  strategy :whole\nend\nimage :photo do\n  strategy :on_demand\nend\naudio :voice do\n  strategy :whole\nend\nvideo :feed do\nend\n",
+    )
+    .unwrap();
+    assert_eq!(
+        (spec.videos[0].strategy, spec.images[0].strategy, spec.audios[0].strategy, spec.videos[1].strategy),
+        (CacheStrategy::Whole, CacheStrategy::OnDemand, CacheStrategy::Whole, CacheStrategy::Window)
+    );
+    let errors = parse_spec("video :v do\n  strategy :forever\nend\n").unwrap_err();
+    assert_eq!(errors[0].message, "`strategy` must be one of :window, :whole or :on_demand");
+}
+
+#[test]
+fn inv_strategy_14_generated_swift_and_kotlin_types_carry_the_strategy_with_the_same_name() {
+    let spec = parse_spec("video :circle do\n  strategy :whole\nend\nimage :photo do\n  strategy :on_demand\nend\naudio :voice do\nend\n").unwrap();
+    let (swift, kotlin) = (swift(&spec), kotlin(&spec, "app.media"));
+    assert!(swift.contains("public var strategy: CacheStrategy { .whole }"), "{swift}");
+    assert!(swift.contains("public var strategy: CacheStrategy { .onDemand }"), "{swift}");
+    assert!(kotlin.contains("override val strategy: com.noma4i.medialayer.CacheStrategy get() = com.noma4i.medialayer.CacheStrategy.WHOLE"), "{kotlin}");
+    assert!(kotlin.contains("CacheStrategy.ON_DEMAND"), "{kotlin}");
+    assert_eq!(swift.matches("public var strategy").count(), 2);
+    assert_eq!(kotlin.matches("override val strategy").count(), 2);
 }

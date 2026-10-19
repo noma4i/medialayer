@@ -1,3 +1,4 @@
+use super::strategy::CacheStrategy;
 use crate::pages::Keyed;
 use std::collections::HashMap;
 
@@ -13,6 +14,7 @@ pub struct Source {
     pub url: String,
     pub headers: HashMap<String, String>,
     pub kind: SourceKind,
+    pub strategy: CacheStrategy,
 }
 
 impl Keyed for Source {

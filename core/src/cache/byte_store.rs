@@ -74,6 +74,10 @@ impl CacheStore {
 
 #[async_trait]
 impl ByteStore for CacheStore {
+    async fn keep(&self, key: &str) {
+        self.cache.keep(key);
+    }
+
     async fn len(&self, key: &str) -> Option<u64> {
         self.cache.ready().await;
         self.cache.len(key).await

@@ -63,12 +63,15 @@ image :avatar do
 end
 ```
 
+A source can declare how the library caches it: `strategy :whole` downloads it from the first to the last byte as soon as it is declared, and plays it from the local file ([cache strategies](docs/cache-strategies.md)).
+
 ## Documentation
 
 - [Getting started](docs/getting-started.md)
 - [Media files](docs/media-files.md)
 - [Architecture](docs/architecture.md)
 - [Limits and eviction](docs/limits-and-eviction.md)
+- [Cache strategies](docs/cache-strategies.md)
 - [Threading and performance](docs/threading.md)
 - [Placeholders](docs/placeholders.md)
 - [Tone](docs/tone.md)

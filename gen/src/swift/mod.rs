@@ -1,3 +1,4 @@
+use medialayer::prefetch::CacheStrategy;
 use medialayer::spec::{type_name, MediaSpec};
 
 use crate::source::{sources, Source};
@@ -21,8 +22,13 @@ fn declaration(source: &Source) -> String {
         .size
         .map(|(width, height)| format!("    public var size: MediaSize? {{ MediaSize(width: {width}, height: {height}) }}\n"))
         .unwrap_or_default();
+    let strategy = match source.strategy {
+        CacheStrategy::Window => "",
+        CacheStrategy::Whole => "    public var strategy: CacheStrategy { .whole }\n",
+        CacheStrategy::OnDemand => "    public var strategy: CacheStrategy { .onDemand }\n",
+    };
     format!(
-        "public struct {name}: MediaSource, Sendable {{\n    public let url: String\n{field}    public let headers: [String: String]\n    public var kind: Kind {{ .{kind} }}\n{size}\n    public init(url: String, {parameter}headers: [String: String] = [:]) {{\n        self.url = url\n{assignment}        self.headers = headers\n    }}\n}}\n",
+        "public struct {name}: MediaSource, Sendable {{\n    public let url: String\n{field}    public let headers: [String: String]\n    public var kind: Kind {{ .{kind} }}\n{size}{strategy}\n    public init(url: String, {parameter}headers: [String: String] = [:]) {{\n        self.url = url\n{assignment}        self.headers = headers\n    }}\n}}\n",
         name = type_name(source.name),
         kind = source.kind,
     )

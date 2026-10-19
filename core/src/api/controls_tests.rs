@@ -150,6 +150,16 @@ async fn inv_api_07_clear_purge_and_evict_now_go_to_the_cache() {
 }
 
 #[tokio::test]
+async fn inv_strategy_12_clear_and_purge_make_the_prefetcher_forget_what_it_loaded() {
+    let rig = rig_with_saved(None);
+
+    rig.controls.purge("https://cdn.test/a.mp4").await;
+    assert_eq!(rig.prefetch.forgotten.load(Ordering::SeqCst), 1);
+    rig.controls.clear(Some(Kind::Video)).await;
+    assert_eq!(rig.prefetch.forgotten.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
 async fn inv_image_03_clearing_everything_or_the_images_drops_the_decoder_memory_and_another_kind_does_not() {
     let rig = rig_with_saved(None);
     let drops = || rig.release.drops.load(Ordering::SeqCst);

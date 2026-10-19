@@ -245,6 +245,42 @@ impl Proxy {
             .await
     }
 
+    pub async fn keep(&self, url: &str, headers: &HashMap<String, String>) {
+        let upstream = self.inner.upstream_headers(url, headers);
+        self.inner.store.keep(&self.inner.key(url, &upstream)).await;
+    }
+
+    pub async fn fetch_all_blocks(
+        &self,
+        url: &str,
+        headers: &HashMap<String, String>,
+        priority: Priority,
+    ) -> Result<u64, ProxyError> {
+        let upstream = self.inner.upstream_headers(url, headers);
+        let base = self.inner.key(url, &upstream);
+        let first = route::block_key(&base, 0);
+        let started = self.download_into_store(&first, || self.inner.get_or_start_block(url, 0, None, upstream.clone(), priority)).await;
+        if let Err(error) = started {
+            if !self.inner.ignores_range(&base) {
+                return Err(error);
+            }
+            return self.fetch_single_file(url, headers, priority).await;
+        }
+        let Some(total) = self.inner.store.meta(&first).await.and_then(|meta| meta.total_length) else {
+            return self.fetch_single_file(url, headers, priority).await;
+        };
+        for block in 1..total.div_ceil(self.inner.config.chunk_size) {
+            let key = route::block_key(&base, block);
+            self.download_into_store(&key, || self.inner.get_or_start_block(url, block, Some(total), upstream.clone(), priority)).await?;
+        }
+        Ok(total)
+    }
+
+    async fn fetch_single_file(&self, url: &str, headers: &HashMap<String, String>, priority: Priority) -> Result<u64, ProxyError> {
+        self.fetch_into_store(url, headers, priority).await?;
+        Ok(self.stored_len(url, headers).await.unwrap_or(0))
+    }
+
     pub async fn fetch_first_block(
         &self,
         url: &str,

@@ -28,6 +28,7 @@ pub struct State {
     entries: BTreeMap<String, Slot>,
     per_kind: [KindStats; 3],
     writing: HashMap<String, u32>,
+    kept: HashSet<String>,
 }
 
 impl State {
@@ -41,7 +42,16 @@ impl State {
             entries: BTreeMap::new(),
             per_kind: [KindStats::default(); 3],
             writing: HashMap::new(),
+            kept: HashSet::new(),
         }
+    }
+
+    pub fn keep(&mut self, key: &str) {
+        self.kept.insert(key.to_string());
+    }
+
+    pub fn is_kept(&self, key: &str) -> bool {
+        self.kept.iter().any(|base| key == base || key.strip_prefix(base.as_str()).is_some_and(|rest| rest.starts_with('#')))
     }
 
     pub fn contains(&self, name: &str) -> bool {

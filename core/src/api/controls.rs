@@ -99,6 +99,7 @@ impl Controls {
 
     pub async fn clear(&self, kind: Option<Kind>) {
         self.ports.cache.clear(kind.map(Into::into)).await;
+        self.ports.prefetch.forget_loaded();
         if matches!(kind, None | Some(Kind::Image)) {
             let release = self.ports.release.clone();
             let _ = tokio::task::spawn_blocking(move || release.drop_caches()).await;
@@ -108,6 +109,7 @@ impl Controls {
 
     pub async fn purge(&self, url: &str) {
         self.ports.cache.purge(url).await;
+        self.ports.prefetch.forget_loaded();
         self.publish_stats().await;
     }
 

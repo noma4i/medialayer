@@ -188,7 +188,7 @@ class MediaLayerBridgeTest {
   fun aSilentLayerMutesEverySlotAndNeverUnmutesWhateverThePlacesAsk() {
     val slots = LoggingSlots()
     val media = openWith(OfflineFetcher(), slots, silent = true)
-    val item = MediaItem(Kind.VIDEO, "https://o.test/a.mp4", emptyMap(), null, null)
+    val item = MediaItem(Kind.VIDEO, "https://o.test/a.mp4", emptyMap(), null, null, strategy = CacheStrategy.WINDOW)
 
     media.visible(item, true)
     eventually("a slot holds a loaded key") { slots.loaded() != null }
@@ -208,7 +208,7 @@ class MediaLayerBridgeTest {
     val slots = LoggingSlots()
     val fetcher = CountingFetcher()
     val media = openWith(fetcher, slots, silent = true)
-    val item = MediaItem(Kind.VIDEO, "file:///bundle/intro.mp4", emptyMap(), "https://o.test/cover.jpg", null, looping = false)
+    val item = MediaItem(Kind.VIDEO, "file:///bundle/intro.mp4", emptyMap(), "https://o.test/cover.jpg", null, looping = false, strategy = CacheStrategy.WINDOW)
     val states = StateRecorder()
     val subscription = media.subscribeState(item.url, states)
 
@@ -338,7 +338,7 @@ class MediaLayerBridgeTest {
   @Test
   fun playUrlGoesThroughTheLocalProxyAndTheVideoPlaceholderIsTheFirstFrame() = runBlocking {
     val media = open(MemorySettings())
-    val source = MediaItem(Kind.VIDEO, "https://o.test/a.mp4", emptyMap(), null, null)
+    val source = MediaItem(Kind.VIDEO, "https://o.test/a.mp4", emptyMap(), null, null, strategy = CacheStrategy.WINDOW)
 
     val route = media.playUrl(source)
 
@@ -349,7 +349,7 @@ class MediaLayerBridgeTest {
   @Test
   fun inv_proxy_22_an_origin_that_ignores_range_and_sends_no_length_still_answers_a_player_range_with_206() = runBlocking {
     val media = openWith(RangeIgnoringOrigin(), LoggingSlots(), silent = true)
-    val route = media.playUrl(MediaItem(Kind.AUDIO, "https://o.test/voice.m4a", emptyMap(), null, null))
+    val route = media.playUrl(MediaItem(Kind.AUDIO, "https://o.test/voice.m4a", emptyMap(), null, null, strategy = CacheStrategy.WINDOW))
     val cases = listOf(Triple("bytes=0-1", 0, 1), Triple("bytes=-100", 19_900, 19_999), Triple("bytes=10000-", 10_000, 19_999))
 
     for ((range, first, last) in cases) {
@@ -366,7 +366,7 @@ class MediaLayerBridgeTest {
   @Test
   fun inv_proxy_23_a_listener_the_system_closed_is_bound_again_when_the_app_returns_to_the_foreground() = runBlocking {
     val media = openWith(RangeIgnoringOrigin(), LoggingSlots(), silent = true)
-    val route = media.playUrl(MediaItem(Kind.AUDIO, "https://o.test/voice.m4a", emptyMap(), null, null))
+    val route = media.playUrl(MediaItem(Kind.AUDIO, "https://o.test/voice.m4a", emptyMap(), null, null, strategy = CacheStrategy.WINDOW))
     val url = java.net.URL(route.url)
     closeListenerSilently(url.port)
     val refused = runCatching { withContext(Dispatchers.IO) { (url.openConnection() as java.net.HttpURLConnection).responseCode } }

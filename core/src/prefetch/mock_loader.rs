@@ -9,6 +9,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 pub enum Fetch {
     Whole,
     FirstBlock,
+    AllBlocks,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +27,7 @@ struct Script {
     hanging: HashSet<String>,
     sizes: HashMap<String, u64>,
     evicted: Vec<String>,
+    kept: Vec<String>,
     alive: Vec<String>,
 }
 
@@ -74,6 +76,10 @@ impl MockLoader {
 
     pub fn evicted(&self) -> Vec<String> {
         self.script().evicted.clone()
+    }
+
+    pub fn kept(&self) -> Vec<String> {
+        self.script().kept.clone()
     }
 
     pub fn hang_all(&self) {
@@ -148,6 +154,19 @@ impl Loader for MockLoader {
         priority: Priority,
     ) -> Result<u64, LoadError> {
         self.run(url, Fetch::FirstBlock, priority).await
+    }
+
+    async fn load_all_blocks(
+        &self,
+        url: &str,
+        _headers: &HashMap<String, String>,
+        priority: Priority,
+    ) -> Result<u64, LoadError> {
+        self.run(url, Fetch::AllBlocks, priority).await
+    }
+
+    async fn keep(&self, url: &str, _headers: &HashMap<String, String>) {
+        self.script().kept.push(url.to_string());
     }
 
     async fn stored(&self, url: &str, _headers: &HashMap<String, String>) -> Option<Vec<u8>> {

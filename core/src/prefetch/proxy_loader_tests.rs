@@ -38,7 +38,7 @@ async fn inv_prefetch_06_an_hls_source_lands_in_the_disk_cache_through_the_proxy
     );
     let mut events = prefetcher.settled();
 
-    let video = Source { url: MASTER.to_string(), headers: HashMap::new(), kind: SourceKind::Video };
+    let video = Source { url: MASTER.to_string(), headers: HashMap::new(), kind: SourceKind::Video, strategy: CacheStrategy::Window };
     prefetcher.set_window(0, vec![None, None, Some(video)]);
     let settled = tokio::time::timeout(Duration::from_secs(5), events.recv()).await.unwrap().unwrap();
 

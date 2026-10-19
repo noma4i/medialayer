@@ -190,6 +190,10 @@ impl Cache {
         self.inner.max_hold.store(0, Ordering::Relaxed);
     }
 
+    pub fn keep(&self, key: &str) {
+        self.inner.state().keep(key);
+    }
+
     pub async fn evict_now(&self) {
         evict_if_needed(&self.inner).await;
     }

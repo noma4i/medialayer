@@ -1,5 +1,5 @@
 use super::types::Kind;
-use crate::prefetch::{Source, SourceKind};
+use crate::prefetch::{CacheStrategy, Source, SourceKind};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -11,6 +11,7 @@ pub struct MediaItem {
     pub blur_hash: Option<String>,
     #[uniffi(default = true)]
     pub looping: bool,
+    pub strategy: CacheStrategy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -28,7 +29,7 @@ pub fn is_local_url(url: &str) -> bool {
 
 impl MediaItem {
     pub fn bare(url: &str, kind: Kind) -> MediaItem {
-        MediaItem { kind, url: url.to_string(), headers: HashMap::new(), cover: None, blur_hash: None, looping: true }
+        MediaItem { kind, url: url.to_string(), headers: HashMap::new(), cover: None, blur_hash: None, looping: true, strategy: CacheStrategy::Window }
     }
 
     pub fn is_local(&self) -> bool {
@@ -46,6 +47,6 @@ impl MediaItem {
             Kind::Video => SourceKind::Video,
             Kind::Audio => SourceKind::Audio,
         };
-        Source { url: self.url.clone(), headers: self.headers.clone(), kind }
+        Source { url: self.url.clone(), headers: self.headers.clone(), kind, strategy: self.strategy }
     }
 }

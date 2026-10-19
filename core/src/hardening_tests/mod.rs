@@ -4,7 +4,7 @@ use futures_util::{stream, StreamExt};
 use crate::cache::{classify_kind, Cache, CacheStore, Kind, SystemClock};
 use crate::fetch::{Fetcher, FetchError, Request, Response};
 use crate::limits::Limits;
-use crate::prefetch::{Loader, LoadError, Prefetcher, PrefetchLedger, Source, SourceKind};
+use crate::prefetch::{CacheStrategy, Loader, LoadError, Prefetcher, PrefetchLedger, Source, SourceKind};
 use crate::proxy::test_client::get as client_get;
 use crate::proxy::{Config, Priority, Proxy};
 use std::collections::HashMap;
@@ -130,12 +130,15 @@ impl Loader for HangingLoader {
     async fn load_first_block(&self, url: &str, headers: &HashMap<String,String>, priority: Priority) -> Result<u64, LoadError> {
         self.load(url, headers, priority).await
     }
+    async fn load_all_blocks(&self, url: &str, headers: &HashMap<String,String>, priority: Priority) -> Result<u64, LoadError> {
+        self.load(url, headers, priority).await
+    }
     async fn stored(&self, _: &str, _: &HashMap<String,String>) -> Option<Vec<u8>> { None }
     async fn evict(&self, _: &str, _: &HashMap<String,String>) {}
 }
 
 fn sources() -> Vec<Option<Source>> {
-    (0..4).map(|i| Some(Source { url: format!("https://o.test/{i}.jpg"), headers: HashMap::new(), kind: SourceKind::Image })).collect()
+    (0..4).map(|i| Some(Source { url: format!("https://o.test/{i}.jpg"), headers: HashMap::new(), kind: SourceKind::Image, strategy: CacheStrategy::Window })).collect()
 }
 
 fn prefetch() -> (Prefetcher, Arc<HangingLoader>, Limits) {

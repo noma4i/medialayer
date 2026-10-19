@@ -16,6 +16,13 @@ pub trait Loader: Send + Sync {
         headers: &HashMap<String, String>,
         priority: Priority,
     ) -> Result<u64, LoadError>;
+    async fn load_all_blocks(
+        &self,
+        url: &str,
+        headers: &HashMap<String, String>,
+        priority: Priority,
+    ) -> Result<u64, LoadError>;
+    async fn keep(&self, _url: &str, _headers: &HashMap<String, String>) {}
     async fn stored(&self, url: &str, headers: &HashMap<String, String>) -> Option<Vec<u8>>;
     async fn evict(&self, url: &str, headers: &HashMap<String, String>);
 }
@@ -45,6 +52,19 @@ impl Loader for ProxyLoader {
     ) -> Result<u64, LoadError> {
         self.proxy.fetch_first_block(url, headers, priority).await.map_err(|error| LoadError(error.to_string()))?;
         Ok(0)
+    }
+
+    async fn load_all_blocks(
+        &self,
+        url: &str,
+        headers: &HashMap<String, String>,
+        priority: Priority,
+    ) -> Result<u64, LoadError> {
+        self.proxy.fetch_all_blocks(url, headers, priority).await.map_err(|error| LoadError(error.to_string()))
+    }
+
+    async fn keep(&self, url: &str, headers: &HashMap<String, String>) {
+        self.proxy.keep(url, headers).await;
     }
 
     async fn stored(&self, url: &str, headers: &HashMap<String, String>) -> Option<Vec<u8>> {

@@ -14,12 +14,12 @@ fn url(index: usize) -> String {
 
 fn sources(count: usize) -> Vec<Option<Source>> {
     (0..count)
-        .map(|index| Some(Source { url: url(index), headers: HashMap::new(), kind: SourceKind::Image }))
+        .map(|index| Some(Source { url: url(index), headers: HashMap::new(), kind: SourceKind::Image, strategy: CacheStrategy::Window }))
         .collect()
 }
 
 fn image(url: &str) -> Source {
-    Source { url: url.to_string(), headers: HashMap::new(), kind: SourceKind::Image }
+    Source { url: url.to_string(), headers: HashMap::new(), kind: SourceKind::Image, strategy: CacheStrategy::Window }
 }
 
 fn pages_of(prefix: &str, count: usize) -> Vec<Vec<Source>> {
@@ -31,7 +31,7 @@ fn page_urls(prefix: &str, pages: &[usize]) -> HashSet<String> {
 }
 
 pub(super) fn video(url: &str) -> Source {
-    Source { url: url.to_string(), headers: HashMap::new(), kind: SourceKind::Video }
+    Source { url: url.to_string(), headers: HashMap::new(), kind: SourceKind::Video, strategy: CacheStrategy::Window }
 }
 
 pub(super) struct Rig {
@@ -201,8 +201,8 @@ async fn inv_prefetch_06_images_load_whole_while_audio_and_plain_video_load_only
     let feed = vec![
         None,
         None,
-        Some(Source { url: "https://o.test/a.jpg".to_string(), headers: HashMap::new(), kind: SourceKind::Image }),
-        Some(Source { url: "https://o.test/b.m4a".to_string(), headers: HashMap::new(), kind: SourceKind::Audio }),
+        Some(Source { url: "https://o.test/a.jpg".to_string(), headers: HashMap::new(), kind: SourceKind::Image, strategy: CacheStrategy::Window }),
+        Some(Source { url: "https://o.test/b.m4a".to_string(), headers: HashMap::new(), kind: SourceKind::Audio, strategy: CacheStrategy::Window }),
         Some(video("https://o.test/c.mp4")),
     ];
     let mut events = rig.prefetcher.settled();
