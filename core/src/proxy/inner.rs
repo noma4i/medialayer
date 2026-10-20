@@ -68,19 +68,19 @@ pub(super) struct ProxyShared {
 
 #[derive(Default)]
 pub(super) struct Registry {
-    map: HashMap<String, HashMap<String, String>>,
+    map: HashMap<String, (HashMap<String, String>, bool)>,
     order: VecDeque<String>,
 }
 
 impl Registry {
     fn get(&self, url: &str) -> Option<&HashMap<String, String>> {
-        self.map.get(url)
+        self.map.get(url).map(|(headers, _)| headers)
     }
 
     fn insert(&mut self, url: &str, headers: &HashMap<String, String>, replace: bool) {
         if let Some(existing) = self.map.get_mut(url) {
-            if replace {
-                *existing = headers.clone();
+            if replace || !existing.1 {
+                *existing = (headers.clone(), replace);
             }
             return;
         }
@@ -90,7 +90,7 @@ impl Registry {
             }
         }
         self.order.push_back(url.to_string());
-        self.map.insert(url.to_string(), headers.clone());
+        self.map.insert(url.to_string(), (headers.clone(), replace));
     }
 }
 
@@ -144,15 +144,10 @@ impl ProxyShared {
     }
 
     pub fn register_headers(&self, url: &str, headers: &HashMap<String, String>) {
-        if !headers.is_empty() {
-            locked(&self.registered_headers).insert(url, headers, true);
-        }
+        locked(&self.registered_headers).insert(url, headers, true);
     }
 
     pub fn inherit_headers(&self, urls: &[String], headers: &HashMap<String, String>) {
-        if headers.is_empty() {
-            return;
-        }
         let mut registry = locked(&self.registered_headers);
         for url in urls {
             registry.insert(url, headers, false);

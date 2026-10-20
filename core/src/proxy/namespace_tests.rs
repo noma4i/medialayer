@@ -60,3 +60,37 @@ async fn inv_proxy_15_prefetch_and_the_ready_check_use_the_same_namespaced_key()
     assert_ne!(key, proxy.key_for(URL, &authorization("user-b")));
     assert_eq!(proxy.key_for(URL, &HashMap::new()), URL);
 }
+
+#[tokio::test]
+async fn inv_proxy_15_empty_declarations_replace_authorization_and_cookie() {
+    for name in ["Authorization", "Cookie"] {
+        let (proxy, fetcher, store) = rig(&[name]).await;
+        for headers in [HashMap::from([(name.to_string(), "user-a".to_string())]), HashMap::new()] {
+            let routed = proxy.url_for(URL, &headers).unwrap();
+            let parsed = Url::parse(&routed).unwrap();
+            assert_eq!(get(proxy.port(), &format!("{}?{}", parsed.path(), parsed.query().unwrap())).await.status, 200);
+        }
+        assert_eq!(fetcher.calls_for(URL), 2, "anonymous declaration reused {name}");
+        assert_eq!(store.count(), 2);
+        assert!(!fetcher.requests().last().unwrap().headers.keys().any(|header| header.eq_ignore_ascii_case(name)));
+    }
+}
+
+#[tokio::test]
+async fn inv_proxy_15_hls_inheritance_replaces_old_headers_but_preserves_explicit_children() {
+    for name in ["Authorization", "Cookie"] {
+        let (proxy, _, _) = rig(&[name]).await;
+        let child = "https://o.test/segment.ts".to_string();
+        let explicit = "https://o.test/explicit.ts".to_string();
+        proxy.inner.register_headers(&explicit, &HashMap::new());
+        for headers in [
+            HashMap::from([(name.to_string(), "user-a".to_string())]),
+            HashMap::new(),
+            HashMap::from([(name.to_string(), "user-b".to_string())]),
+        ] {
+            proxy.inner.inherit_headers(&[child.clone(), explicit.clone()], &headers);
+            assert_eq!(proxy.inner.upstream_headers(&child, &HashMap::new()), headers);
+            assert_eq!(proxy.inner.upstream_headers(&explicit, &HashMap::new()), HashMap::new());
+        }
+    }
+}
