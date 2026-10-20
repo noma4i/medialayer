@@ -1,0 +1,12 @@
+video :whole_clip do
+  strategy :whole
+end
+
+image :max_image do
+  size 2147483647, 2147483647
+  strategy :on_demand
+end
+
+audio :whole_voice do
+  strategy :whole
+end

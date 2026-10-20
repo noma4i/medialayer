@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 
 use medialayer::prefetch::CacheStrategy;
 use medialayer::spec::{AudioSpec, CacheSpec, Evict, ImageSpec, MediaSpec, PoolSpec, PrefetchSpec, VideoSpec};
@@ -89,31 +88,6 @@ fn several_files_merge_and_errors_name_their_file() {
     let errors = parse_files(&[&first, &second]).unwrap_err();
     assert_eq!(errors[0].to_string(), format!("{}:1:7: `a` is declared twice", second.display()));
     assert_eq!(parse_files(&["/nonexistent/none.mdl"]).unwrap_err()[0].file, "/nonexistent/none.mdl");
-}
-
-#[test]
-fn generated_swift_is_valid_swift() {
-    let spec = parse_files(&[root().join("fixtures/yupi.mdl")]).unwrap();
-    let directory = tempfile::tempdir().unwrap();
-    let file = directory.path().join("MediaSources.swift");
-    fs::write(&file, swift(&spec)).unwrap();
-    let output = Command::new("swiftc").arg("-parse").arg(&file).output();
-    match output {
-        Ok(output) => assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr)),
-        Err(_) => eprintln!("swiftc is not installed: swift syntax check skipped"),
-    }
-}
-
-#[test]
-fn generated_kotlin_is_valid_kotlin() {
-    let spec = parse_files(&[root().join("fixtures/yupi.mdl")]).unwrap();
-    let directory = tempfile::tempdir().unwrap();
-    let file = directory.path().join("MediaSources.kt");
-    fs::write(&file, kotlin(&spec, "app.media")).unwrap();
-    match Command::new("kotlinc").arg(&file).arg("-d").arg(directory.path()).output() {
-        Ok(output) => assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr)),
-        Err(_) => eprintln!("kotlinc is not installed: kotlin syntax check skipped"),
-    }
 }
 
 #[test]

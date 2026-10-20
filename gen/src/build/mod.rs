@@ -54,6 +54,14 @@ pub fn size(node: &Node<Value>) -> Option<u64> {
     }
 }
 
+pub fn mib(node: &Node<Value>) -> Option<u32> {
+    u32::try_from(size(node)? / (1024 * 1024)).ok()
+}
+
+pub fn dimension(node: &Node<Value>) -> Option<u32> {
+    int(node).filter(|number| i32::try_from(*number).is_ok())
+}
+
 pub fn percent(node: &Node<Value>) -> Option<u32> {
     match &node.item {
         Value::Quantity { amount, unit } if unit == "percent" => u32::try_from(*amount).ok(),
@@ -174,7 +182,7 @@ fn cache(body: &[Call]) -> CacheSpec {
         max_concurrent: argument(body, "max_concurrent", int).unwrap_or(base.max_concurrent),
         dedupe_window: keyed(body, "dedupe", "window", duration).unwrap_or(base.dedupe_window),
         dedupe_entries: keyed(body, "dedupe", "entries", int).unwrap_or(base.dedupe_entries),
-        prefetch_budget_mib: argument(body, "prefetch_budget", size).map_or(base.prefetch_budget_mib, |bytes| (bytes / (1024 * 1024)) as u32),
+        prefetch_budget_mib: argument(body, "prefetch_budget", mib).unwrap_or(base.prefetch_budget_mib),
         namespace_headers: keyed(body, "namespace", "headers", headers).unwrap_or(base.namespace_headers),
     }
 }
@@ -199,7 +207,7 @@ fn video(name: String, body: &[Call]) -> VideoSpec {
 }
 
 fn image(name: String, body: &[Call]) -> ImageSpec {
-    let dimensions = command(body, "size").and_then(|call| Some((int(call.args.first()?)?, int(call.args.get(1)?)?)));
+    let dimensions = command(body, "size").and_then(|call| Some((dimension(call.args.first()?)?, dimension(call.args.get(1)?)?)));
     ImageSpec {
         name,
         blurhash_field: argument(body, "blurhash", symbol),

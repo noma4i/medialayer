@@ -3,6 +3,10 @@ name = "medialayer-gen"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+compile-swift = []
+compile-kotlin = []
+
 [lib]
 name = "medialayer_gen"
 

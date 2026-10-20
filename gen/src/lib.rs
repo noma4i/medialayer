@@ -85,3 +85,6 @@ fn parse_sources(sources: &[&str]) -> Result<MediaSpec, Vec<(usize, ParseError)>
 
 #[cfg(test)]
 mod lib_tests;
+
+#[cfg(all(test, any(feature = "compile-swift", feature = "compile-kotlin")))]
+mod compile_tests;

@@ -13,6 +13,8 @@ enum Want {
     Symbol,
     Int,
     Size,
+    Mib,
+    Dimension,
     Duration,
     Percent,
     Evict,
@@ -28,6 +30,8 @@ impl Want {
             Want::Symbol => "a symbol such as :name",
             Want::Int => "a whole number",
             Want::Size => "a size such as 64.mib or 4.gib",
+            Want::Mib => "a size fitting in 4294967295 MiB",
+            Want::Dimension => "a whole number no larger than 2147483647",
             Want::Duration => "a duration such as 30.seconds",
             Want::Percent => "a percentage such as 90.percent",
             Want::Evict => "one of :lru, :fifo, :lfu, :largest_first or expire_after <duration>",
@@ -43,6 +47,8 @@ impl Want {
             Want::Symbol => build::symbol(node).is_some(),
             Want::Int => build::int(node).is_some(),
             Want::Size => build::size(node).is_some(),
+            Want::Mib => build::mib(node).is_some(),
+            Want::Dimension => build::dimension(node).is_some(),
             Want::Duration => build::duration(node).is_some(),
             Want::Percent => build::percent(node).is_some(),
             Want::Evict => build::evict(node).is_some(),
@@ -71,7 +77,7 @@ const CACHE: &[Rule] = &[
     Rule { word: "timeout", args: &[Want::Duration], keys: &[] },
     Rule { word: "max_concurrent", args: &[Want::Int], keys: &[] },
     Rule { word: "dedupe", args: &[], keys: &[("window", Want::Duration), ("entries", Want::Int)] },
-    Rule { word: "prefetch_budget", args: &[Want::Size], keys: &[] },
+    Rule { word: "prefetch_budget", args: &[Want::Mib], keys: &[] },
     Rule { word: "namespace", args: &[], keys: &[("headers", Want::Headers)] },
 ];
 
@@ -98,13 +104,18 @@ const VIDEO: &[Rule] = &[
 
 const IMAGE: &[Rule] = &[
     Rule { word: "blurhash", args: &[Want::Symbol], keys: &[] },
-    Rule { word: "size", args: &[Want::Int, Want::Int], keys: &[] },
+    Rule { word: "size", args: &[Want::Dimension, Want::Dimension], keys: &[] },
     Rule { word: "prefetch", args: &[], keys: &[("window", Want::Range), ("behind", Want::Int)] },
     EVICT,
     STRATEGY,
 ];
 
 const AUDIO: &[Rule] = &[EVICT, STRATEGY];
+
+const GENERATED_TYPE_NAMES: &[&str] = &[
+    "MediaSpecJson", "MediaSpecJSON", "MediaSource", "MediaSize", "Kind", "CacheStrategy", "Sendable",
+    "String", "Int", "Pair", "Map",
+];
 
 pub fn check(files: &[Vec<Call>]) -> Result<medialayer::spec::MediaSpec, Vec<Found>> {
     let mut errors = Vec::new();
@@ -128,6 +139,9 @@ pub fn check(files: &[Vec<Call>]) -> Result<medialayer::spec::MediaSpec, Vec<Fou
                     continue;
                 }
             };
+            for pair in &call.options {
+                fail(pair.line, pair.column, format!("`{}` takes no key `{}`", call.word, pair.key));
+            }
             if call.word == "cache" {
                 if let Some(extra) = call.args.first() {
                     fail(extra.line, extra.column, "`cache` takes no name".to_string());
@@ -135,7 +149,11 @@ pub fn check(files: &[Vec<Call>]) -> Result<medialayer::spec::MediaSpec, Vec<Fou
             } else {
                 match call.args.as_slice() {
                     [Node { item: Value::Symbol(name), line, column }] => {
-                        if !type_names.insert(type_name(name)) {
+                        let generated = type_name(name);
+                        if GENERATED_TYPE_NAMES.contains(&generated.as_str()) {
+                            fail(*line, *column, format!("`{name}` conflicts with generated Swift or Kotlin type `{generated}`"));
+                        }
+                        if !type_names.insert(generated) {
                             fail(*line, *column, format!("`{name}` is declared twice"));
                         }
                     }
@@ -195,7 +213,11 @@ fn check_option(call: &Call, rules: &[Rule], block: &str, seen: &mut HashSet<Str
         }
     }
     let known: HashMap<&str, Want> = rule.keys.iter().copied().collect();
+    let mut keys = HashSet::new();
     for pair in &call.options {
+        if !keys.insert(&pair.key) {
+            errors.push((pair.line, pair.column, format!("`{}:` is set twice", pair.key)));
+        }
         match known.get(pair.key.as_str()) {
             None => errors.push((pair.line, pair.column, format!("unknown key `{}` for `{}`", pair.key, call.word))),
             Some(want) if !want.accepts(&pair.value) => {

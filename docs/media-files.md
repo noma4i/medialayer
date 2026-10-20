@@ -134,6 +134,28 @@ media.replaceImageWindow("avatar", active = row, pages = rows.map { page -> page
 
 One type per block, for example `MomentVideo`, `Avatar` and `VoiceNote`. Every type has `url`. A video with `cover` and an image with `blurhash` also get that optional parameter, named `cover` and `blurHash`. The names of the parameters come from the option names, not from the symbols.
 
+The parser rejects repeated option keys and keys attached to a top-level block.
+Numeric conversions reject overflow before building the spec.
+Image dimensions must fit Kotlin `Int`, from 1 through 2147483647.
+Source names cannot collide with types referenced or declared by the generated Swift or Kotlin code.
+
+### Checking generated consumers
+
+Run Rust checks with `cargo test -p medialayer-gen`.
+Compiler checks require separate features and compile `gen/fixtures/Consumer.swift` or `Consumer.kt` against the real library.
+The Rust-only command does not prove compilation in either language.
+Run every command through `~/.claude/bin/build-slot --`.
+
+| Check | Command | Required environment |
+| --- | --- | --- |
+| Swift for iOS Simulator | `cargo test -p medialayer-gen --features compile-swift` | `SWIFTC`: compiler path. `SWIFT_CHECK_ARGS`: JSON array containing `-target`, `-sdk` and search paths for the built MediaLayer module and FFI headers |
+| Kotlin on Linux | `cargo test -p medialayer-gen --features compile-kotlin` | `KOTLINC`: compiler path. `KOTLIN_CHECK_CLASSPATH`: classpath containing the built MediaLayer classes and their dependencies |
+
+A missing compiler, missing configuration, unavailable library or compiler error fails the selected check.
+The Swift check resolves types with `-typecheck`.
+The Kotlin check produces a consumer JAR and refuses execution on macOS.
+Both checks include all source kinds, explicit cache strategies and the maximum accepted image dimensions.
+
 ### Swift
 
 ```swift

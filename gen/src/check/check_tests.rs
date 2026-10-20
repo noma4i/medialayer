@@ -48,3 +48,53 @@ fn every_error_of_a_file_is_reported_at_once() {
     let errors = parse_spec("video :a do\n  bogus 1\n  other 2\nend\n").unwrap_err();
     assert_eq!(errors.iter().map(|error| error.line).collect::<Vec<_>>(), vec![2, 3]);
 }
+
+#[test]
+fn inv_gen_01_options_are_unique_and_numbers_reach_their_destination_without_truncation() {
+    let cases = [
+        "video :clip do\n  pool slots: 3, slots: 5\nend",
+        "video :clip do\n  prefetch from: 1, from: 2\nend",
+        "image :photo do\n  prefetch behind: 1, behind: 2\nend",
+        "cache do\n  budget 4.gib, min: 1.mib, min: 2.mib\nend",
+        "cache do\n  dedupe entries: 1, entries: 2\nend",
+        "cache do\n  namespace headers: [:cookie], headers: [:authorization]\nend",
+        "video :clip, ignored: 1 do\nend",
+        "image :photo, ignored: 1 do\nend",
+        "audio :voice, ignored: 1 do\nend",
+        "cache ignored: 1 do\nend",
+        "cache do\n  prefetch_budget 4294967297.mib\nend",
+        "cache do\n  prefetch_budget 4194304.gib\nend",
+    ];
+    let accepted: Vec<_> = cases.into_iter().filter(|source| parse_spec(source).is_ok()).collect();
+    assert!(accepted.is_empty(), "invalid inputs accepted: {accepted:#?}");
+    for amount in [1, 512] {
+        let spec = parse_spec(&format!("cache do\n  prefetch_budget {amount}.mib\nend")).unwrap();
+        assert_eq!(spec.cache.prefetch_budget_mib, amount);
+    }
+}
+
+#[test]
+fn inv_gen_02_names_and_dimensions_are_valid_for_both_generated_languages() {
+    let names = [
+        "media_spec_json", "media_spec_j_s_o_n", "media_source", "media_size", "kind", "cache_strategy", "sendable",
+        "string", "int", "pair", "map",
+    ];
+    let mut accepted = Vec::new();
+    for kind in ["video", "image", "audio"] {
+        for name in names {
+            let source = format!("{kind} :{name} do\nend");
+            if parse_spec(&source).is_ok() {
+                accepted.push(source);
+            }
+        }
+    }
+    for dimensions in ["2147483648, 1", "1, 2147483648", "4294967295, 4294967295"] {
+        let source = format!("image :photo do\n  size {dimensions}\nend");
+        if parse_spec(&source).is_ok() {
+            accepted.push(source);
+        }
+    }
+    assert!(accepted.is_empty(), "invalid inputs accepted: {accepted:#?}");
+    let spec = parse_spec("image :photo do\n  size 2147483647, 2147483647\nend").unwrap();
+    assert_eq!(spec.images[0].size, Some((i32::MAX as u32, i32::MAX as u32)));
+}
