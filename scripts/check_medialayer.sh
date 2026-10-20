@@ -21,13 +21,14 @@ steps=(
   "cheap|invariants|120|*|bash scripts/check_invariants.sh"
   "cheap|invariants-selftest|120|*|bash scripts/check_invariants_selftest.sh"
   "cheap|gradle-guard-selftest|120|*|bash scripts/check_gradle_guard_selftest.sh"
+  "cheap|build-modes|120|*|bash scripts/check_build_modes.sh"
   "cargo|cargo-test|900|core/ gen/ Cargo.|$slot cargo-step cargo test --manifest-path core/Cargo.toml"
   "swift|ios-slices|600|MediaLayer/|$slot bash-step bash scripts/build_ios.sh --check"
   "swift|swift-test|900|MediaLayer/|$slot swift-step swift test --package-path MediaLayer"
   "kotlin|kotlin-bindings|600|kotlin/|$slot bash-step bash scripts/build_kotlin.sh --host"
   "kotlin|gradle-test|900|kotlin/|$slot gradle-step $gradle -p kotlin testDebugUnitTest --console=plain --no-watch-fs -Dorg.gradle.daemon.idletimeout=600000 -Dorg.gradle.jvmargs=\"-Xmx3g -XX:ErrorFile=/tmp/check-owner-\$CHECK_OWNER_ID-%p.log\" -Pkotlin.compiler.execution.strategy=in-process"
-  "ship|android-abis|900|-|$slot bash-step bash scripts/build_kotlin.sh --abis"
-  "ship|ios-device-check|600|-|$slot ios-check bash -c 'cargo check --manifest-path core/Cargo.toml --target aarch64-apple-ios && cargo check --manifest-path core/Cargo.toml --target x86_64-apple-ios'"
+  "ship|android-release|900|-|$slot bash-step bash scripts/build_kotlin.sh --release"
+  "ship|ios-device|600|-|$slot bash-step bash scripts/build_ios.sh --device"
 )
 
 run_checks "$@"

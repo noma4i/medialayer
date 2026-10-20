@@ -36,7 +36,7 @@ case_run() {
   rm -rf "$tmp"
 }
 
-for arg in --host --abis ""; do
+for arg in --host --abis --release ""; do
   case_run Darwin refuse "darwin build_kotlin ${arg:-noargs}" build_kotlin.sh $arg
 done
 case_run Darwin refuse "darwin direct gradle-step" check_bounded.sh 5 gradle-step gradle -p kotlin testDebugUnitTest

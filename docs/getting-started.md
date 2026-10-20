@@ -16,6 +16,24 @@ bash scripts/check_medialayer.sh
 
 On macOS the Kotlin lane, `scripts/build_kotlin.sh` and every Gradle step stop at once with `gradle runs only on brick` and a nonzero code. Run them on brick.
 
+## Build modes
+
+| Command | Output |
+| ------- | ------ |
+| `bash scripts/build_ios.sh --device` | Release XCFramework containing only `aarch64-apple-ios`, for App Store archives |
+| `bash scripts/build_ios.sh --ios` | Release iOS device and arm64 simulator slices |
+| `bash scripts/build_ios.sh --check` | Release macOS arm64 and iOS arm64 simulator slices |
+| `bash scripts/build_ios.sh` | Release macOS arm64, iOS device and arm64 simulator slices |
+| `bash scripts/build_kotlin.sh --release` | Release `arm64-v8a` and `armeabi-v7a` libraries and Kotlin bindings, for Android AAB builds |
+| `bash scripts/build_kotlin.sh --abis` | All 4 Android ABIs, including `x86` and `x86_64`, without regenerating bindings |
+| `bash scripts/build_kotlin.sh --host` | Linux debug library and Kotlin bindings for JNA tests |
+| `bash scripts/build_kotlin.sh` | Linux debug library, Kotlin bindings and all 4 Android ABIs |
+
+iOS bindings come from a selected release static library. Android release bindings come from the `arm64-v8a` library.
+The separate `bindgen` package builds `uniffi-bindgen` without building a host MediaLayer library.
+Android `--release` removes previous `x86` and `x86_64` outputs from `jniLibs`.
+On Linux, install `cargo-ndk` and the Rust Android targets. Set `ANDROID_NDK_HOME` when the NDK is outside the SDK location detected by `cargo-ndk`.
+
 ## Set up in your app
 
 1. Describe your media in a `.mdl` file ([media files](media-files.md)).
