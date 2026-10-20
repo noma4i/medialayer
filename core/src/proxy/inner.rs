@@ -56,7 +56,7 @@ pub(super) struct ProxyShared {
     pub playlist_stamps: Mutex<HashMap<String, Instant>>,
     pub totals: Mutex<HashMap<String, u64>>,
     whole_only: Mutex<HashSet<String>>,
-    probe_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    probe_locks: Mutex<HashMap<String, (Arc<tokio::sync::Mutex<()>>, usize)>>,
     pub listener: tokio::sync::Mutex<Option<Listener>>,
     pub running: AtomicBool,
     pub alive: Arc<AtomicBool>,
@@ -70,6 +70,24 @@ pub(super) struct ProxyShared {
 pub(super) struct Registry {
     map: HashMap<String, (HashMap<String, String>, bool)>,
     order: VecDeque<String>,
+}
+
+pub(super) struct ProbeLock<'a> {
+    shared: &'a ProxyShared,
+    key: &'a str,
+    pub lock: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl Drop for ProbeLock<'_> {
+    fn drop(&mut self) {
+        let mut locks = locked(&self.shared.probe_locks);
+        if let Some((_, users)) = locks.get_mut(self.key) {
+            *users -= 1;
+            if *users == 0 {
+                locks.remove(self.key);
+            }
+        }
+    }
 }
 
 impl Registry {
@@ -287,15 +305,16 @@ impl ProxyShared {
         locked(&self.whole_only).contains(key)
     }
 
-    pub fn probe_lock(&self, key: &str) -> Arc<tokio::sync::Mutex<()>> {
-        locked(&self.probe_locks).entry(key.to_string()).or_default().clone()
+    pub fn probe_lock<'a>(&'a self, key: &'a str) -> ProbeLock<'a> {
+        let mut locks = locked(&self.probe_locks);
+        let (lock, users) = locks.entry(key.to_string()).or_default();
+        *users += 1;
+        ProbeLock { shared: self, key, lock: lock.clone() }
     }
 
-    pub fn release_probe_lock(&self, key: &str, lock: Arc<tokio::sync::Mutex<()>>) {
-        let mut locks = locked(&self.probe_locks);
-        if Arc::strong_count(&lock) == 2 {
-            locks.remove(key);
-        }
+    #[cfg(test)]
+    pub fn probe_count(&self) -> usize {
+        locked(&self.probe_locks).len()
     }
 
     pub fn known_total(&self, key: &str) -> Option<u64> {

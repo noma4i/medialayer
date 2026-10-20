@@ -24,6 +24,10 @@ const PLAYLIST_TYPE: &str = "application/vnd.apple.mpegurl";
 const PLAYLIST_END_TAG: &str = "#EXT-X-ENDLIST";
 const SEGMENT_TAG: &str = "#EXTINF";
 
+#[cfg(test)]
+#[path = "probe_tests.rs"]
+mod probe_tests;
+
 pub(super) type ProxyBody = UnsyncBoxBody<Bytes, io::Error>;
 
 type Headers = Vec<(&'static str, String)>;
@@ -645,9 +649,7 @@ async fn known_total(
         }
     }
     let lock = inner.probe_lock(key);
-    let total = probe_once(inner, target, key, headers, &lock).await;
-    inner.release_probe_lock(key, lock);
-    total
+    probe_once(inner, target, key, headers, &lock.lock).await
 }
 
 async fn probe_once(
