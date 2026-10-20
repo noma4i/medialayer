@@ -34,6 +34,7 @@ dependencies {
   implementation("androidx.media3:media3-exoplayer-hls:1.11.1")
   implementation("androidx.media3:media3-datasource-okhttp:1.11.1")
   implementation("androidx.media3:media3-ui-compose:1.11.1")
+  implementation("androidx.core:core-ktx:1.19.1")
   implementation("androidx.lifecycle:lifecycle-process:2.10.0")
   implementation("com.squareup.okhttp3:okhttp:5.5.0")
   implementation("io.coil-kt:coil-compose:2.7.0")
