@@ -1,7 +1,7 @@
 use super::hub::{Deliver, Hub, Subscription};
 use super::types::MediaState;
 use std::collections::HashMap;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use tokio::runtime::Handle;
 
 struct Place {
@@ -9,6 +9,10 @@ struct Place {
     is_declared: bool,
     hub: Option<Hub<MediaState>>,
 }
+
+#[cfg(test)]
+#[path = "places_cleanup_tests.rs"]
+mod cleanup_tests;
 
 impl Place {
     fn idle() -> Place {
@@ -32,12 +36,12 @@ impl Place {
 
 pub struct Places {
     handle: Handle,
-    entries: Mutex<HashMap<String, Place>>,
+    entries: Arc<Mutex<HashMap<String, Place>>>,
 }
 
 impl Places {
     pub fn new(handle: Handle) -> Places {
-        Places { handle, entries: Mutex::new(HashMap::new()) }
+        Places { handle, entries: Arc::new(Mutex::new(HashMap::new())) }
     }
 
     pub fn state(&self, key: &str) -> MediaState {
@@ -50,7 +54,15 @@ impl Places {
         let hub = place.hub.get_or_insert_with(|| Hub::new(self.handle.clone()));
         let subscription = hub.subscribe(deliver);
         hub.publish(place.state.clone());
-        subscription
+        let (entries, key) = (Arc::downgrade(&self.entries), key.to_string());
+        Subscription::cancelling(move || {
+            drop(subscription);
+            let Some(entries) = entries.upgrade() else { return };
+            let mut entries = entries.lock().unwrap_or_else(PoisonError::into_inner);
+            if entries.get(&key).is_some_and(Place::is_unused) {
+                entries.remove(&key);
+            }
+        })
     }
 
     pub fn is_declared(&self, key: &str) -> bool {
