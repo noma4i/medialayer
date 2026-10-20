@@ -47,7 +47,7 @@ struct SurfaceAttachmentTests {
   }
 
   @Test
-  func theHostWhoseOwnerStartsPlayingTakesTheLayerAndHandsItBackWhenItLeaves() {
+  func inv_native_04_the_playing_owner_hands_the_view_back_when_it_leaves() {
     let older = SurfaceAttachment(places: places, key: "k", layer: olderLayer, owner: olderOwner, hosts: hosts)
     var newer: SurfaceAttachment? = SurfaceAttachment(places: places, key: "k", layer: newerLayer, owner: newerOwner, hosts: hosts)
     let newerToken = newer!.token

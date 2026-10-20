@@ -50,7 +50,7 @@ internal object VideoProgress {
 @Composable
 fun MediaVideo(
   source: MediaSource,
-  playing: Boolean = false,
+  playing: Boolean = true,
   peeking: Boolean = false,
   muted: Boolean = false,
   modifier: Modifier = Modifier,
@@ -71,7 +71,8 @@ fun MediaVideo(
   val firstFrame by rememberUpdatedState(onFirstFrame)
   val end by rememberUpdatedState(onEnd)
   val progress by rememberUpdatedState(onProgress)
-  LaunchedEffect(environment, source.url, playing) {
+  LaunchedEffect(environment, source.url, playing, screen.visible, state) {
+    if (!screen.visible || state is MediaState.Ended) return@LaunchedEffect
     do {
       val report = progress ?: return@LaunchedEffect
       environment.players?.sample(source.url)?.let { VideoProgress.fraction(it.positionMs, it.durationMs) }?.let(report)
@@ -97,14 +98,25 @@ fun MediaVideo(
     val created = environment.players?.newView()
     view = created
     if (created != null) {
-      owners?.claim(source.url, created.token)
-      events.attach(source.url, created.token)
+      if (owners?.claim(source.url, created.token, playing) == true) events.attach(source.url, created.token)
     }
     onDispose {
-      if (created != null && (owners?.release(source.url, created.token) != false)) events.detach(source.url)
+      if (created != null) {
+        when (val released = owners?.release(source.url, created.token)) {
+          ViewRelease.Detach -> events.detach(source.url)
+          is ViewRelease.Handover -> events.attach(source.url, released.token)
+          else -> Unit
+        }
+      }
       created?.let { environment.players?.release(it) }
       view = null
     }
+  }
+  DisposableEffect(environment, source.url, view, playing) {
+    if (playing) view?.let { current ->
+      environment.players?.owners?.prefer(source.url, current.token)?.let { environment.media.playerEvents().attach(source.url, it) }
+    }
+    onDispose { }
   }
   Box(modifier.then(screen.modifier)) {
     player?.let { ContentFrame(it, Modifier.fillMaxSize(), output.contentFrameType(), contentScale, true, {}) }

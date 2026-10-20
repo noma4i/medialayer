@@ -1,5 +1,6 @@
 package com.noma4i.medialayer.ui
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -46,6 +47,7 @@ class AudioControl internal constructor(private val seekTo: (Long) -> Unit) {
 @Composable
 fun MediaAudio(source: MediaSource, muted: Boolean = false, rate: Float = 1f, content: @Composable (AudioControl) -> Unit) {
   val environment = LocalMediaEnvironment.current
+  val screen = rememberScreenVisibility()
   val control = remember(environment, source.url) { AudioControl { environment.media.seek(source.url, it.toULong()) }.also { it.rate = rate } }
   LaunchedEffect(rate) { control.rate = rate }
   DisposableEffect(environment.media, source.url, control.rate) {
@@ -67,7 +69,8 @@ fun MediaAudio(source: MediaSource, muted: Boolean = false, rate: Float = 1f, co
     exo?.addListener(listener)
     onDispose { exo?.removeListener(listener) }
   }
-  LaunchedEffect(player, control.isPlaying) {
+  LaunchedEffect(player, control.isPlaying, screen.visible) {
+    if (!screen.visible) return@LaunchedEffect
     val exo = player ?: return@LaunchedEffect
     while (control.isPlaying) {
       control.progress = control.fractionOf(exo)
@@ -75,7 +78,7 @@ fun MediaAudio(source: MediaSource, muted: Boolean = false, rate: Float = 1f, co
     }
     control.progress = control.fractionOf(exo)
   }
-  content(control)
+  Box(screen.modifier) { content(control) }
 }
 
 private const val PROGRESS_TICK_MS = 250L

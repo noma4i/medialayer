@@ -89,6 +89,8 @@ public struct MediaAudio<Content: View>: View {
   public var body: some View {
     if let context {
       Placed(source: source, playing: playing, muted: muted, rate: rate, context: context, content: content)
+        .id(source.url)
+        .id(ObjectIdentifier(context.places))
     }
   }
 
@@ -101,11 +103,14 @@ public struct MediaAudio<Content: View>: View {
     let content: (AudioPlayback) -> Content
     @State private var audio: AudioPlayback
     @State private var owner = UUID()
+    @State private var onScreen = false
+    @State private var inBackground = false
 
     private struct Sampling: Equatable {
       let url: String
       let isPlaying: Bool
       let epoch: Int
+      let active: Bool
     }
 
     init(source: any MediaSource, playing: Bool, muted: Bool, rate: Float, context: MediaContext, content: @escaping (AudioPlayback) -> Content) {
@@ -123,7 +128,8 @@ public struct MediaAudio<Content: View>: View {
         .task(id: source.url) {
           for await value in context.places.stateStream(key: source.url) { audio.follow(value) }
         }
-        .task(id: Sampling(url: source.url, isPlaying: audio.isPlaying, epoch: audio.pollEpoch)) {
+        .task(id: Sampling(url: source.url, isPlaying: audio.isPlaying, epoch: audio.pollEpoch, active: onScreen && !inBackground)) {
+          guard onScreen && !inBackground else { return }
           var pausedLeft = AudioSampling.pausedSamples
           while !Task.isCancelled {
             audio.refresh(from: context.slots.slot(for: source.url)?.sample())
@@ -133,6 +139,9 @@ public struct MediaAudio<Content: View>: View {
             try? await Task.sleep(for: AudioSampling.interval)
           }
         }
+        .background(OnScreenProbe { onScreen = $0 })
+        .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.background)) { _ in inBackground = true }
+        .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
         .onAppear {
           let claims = KeyClaims.of(context.places)
           claims.visible(owner: owner, source: source.item, visible: true)

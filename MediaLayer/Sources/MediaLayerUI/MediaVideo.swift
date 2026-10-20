@@ -35,6 +35,8 @@ public struct MediaVideo<Content: View>: View {
   @Environment(\.mediaContext) private var context
   @State private var state: MediaState = .idle
   @State private var owner = UUID()
+  @State private var onScreen = false
+  @State private var inBackground = false
   private let source: any MediaSource
   private let playing: Bool
   private let peeking: Bool
@@ -80,12 +82,17 @@ public struct MediaVideo<Content: View>: View {
     }
     .clipped()
     .task(id: source.url) { await follow() }
-    .task(id: Sampling(url: source.url, playing: playing)) { await sample() }
+    .task(id: Sampling(url: source.url, playing: playing, active: onScreen && !inBackground && state != .ended)) { await sample() }
+    .background(OnScreenProbe { onScreen = $0 })
+    .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.background)) { _ in inBackground = true }
+    .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
     .onAppear { declare(visible: true) }
     .onDisappear { declare(visible: false) }
     .onChange(of: playing) { _, value in context.map { KeyClaims.of($0.places).setPlaying(owner: owner, key: source.url, playing: value) } }
     .onChange(of: peeking) { _, value in context.map { KeyClaims.of($0.places).setPeeking(owner: owner, key: source.url, peeking: value) } }
     .onChange(of: muted) { _, value in context.map { KeyClaims.of($0.places).setMuted(owner: owner, key: source.url, muted: value) } }
+    .id(source.url)
+    .id(context.map { ObjectIdentifier($0.places) })
   }
 
   var item: MediaItem {
@@ -97,10 +104,11 @@ public struct MediaVideo<Content: View>: View {
   private struct Sampling: Equatable {
     let url: String
     let playing: Bool
+    let active: Bool
   }
 
   private func sample() async {
-    guard let onProgress, let slots = context?.slots else { return }
+    guard onScreen && !inBackground && state != .ended, let onProgress, let slots = context?.slots else { return }
 
     repeat {
       if let sample = slots.slot(for: source.url)?.sample(),
@@ -125,6 +133,7 @@ public struct MediaVideo<Content: View>: View {
 
   private func follow() async {
     guard let places = context?.places else { return }
+    state = .idle
     var edges = VideoEdges()
     for await value in places.stateStream(key: source.url) {
       state = value
