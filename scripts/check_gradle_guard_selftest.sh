@@ -6,6 +6,7 @@ set -uo pipefail
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 scripts_dir="${SCRIPTS_DIR:-$here}"
 fail=0
+unset BITRISE_IO
 
 # case_run <uname> <expect refuse|reach> <label> <script> <args...>
 case_run() {
@@ -39,6 +40,11 @@ case_run() {
 for arg in --host --abis --release ""; do
   case_run Darwin refuse "darwin build_kotlin ${arg:-noargs}" build_kotlin.sh $arg
 done
+for arg in --release ""; do
+  BITRISE_IO=true case_run Darwin reach "darwin bitrise build_kotlin ${arg:-noargs}" build_kotlin.sh $arg
+done
+BITRISE_IO=false case_run Darwin refuse "darwin BITRISE_IO=false build_kotlin --release" build_kotlin.sh --release
+BITRISE_IO=true case_run Darwin refuse "darwin bitrise gradle-step" check_bounded.sh 5 gradle-step gradle -p kotlin testDebugUnitTest
 case_run Darwin refuse "darwin direct gradle-step" check_bounded.sh 5 gradle-step gradle -p kotlin testDebugUnitTest
 case_run Darwin refuse "darwin direct gradle, any step name" check_bounded.sh 5 other-name gradle -p kotlin testDebugUnitTest
 case_run Darwin refuse "darwin check kotlin lane" check_medialayer.sh --only kotlin

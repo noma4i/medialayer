@@ -4,11 +4,11 @@ set -euo pipefail
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=gradle_host_guard.sh
 source "$here/gradle_host_guard.sh"
-refuse_gradle_on_darwin build_kotlin.sh || exit $?
+[ "${BITRISE_IO:-}" = true ] || refuse_gradle_on_darwin build_kotlin.sh || exit $?
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$(nproc)}" RUST_TEST_THREADS="${RUST_TEST_THREADS:-$(nproc)}"
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$(nproc 2> /dev/null || sysctl -n hw.ncpu)}" RUST_TEST_THREADS="${RUST_TEST_THREADS:-$(nproc 2> /dev/null || sysctl -n hw.ncpu)}"
 module="$root/kotlin"
 part="${1:-all}"
 case "$part" in --host | --abis | --release | all) ;; *) echo "usage: build_kotlin.sh [--host | --abis | --release]" >&2; exit 2 ;; esac
