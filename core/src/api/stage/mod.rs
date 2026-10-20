@@ -59,6 +59,7 @@ struct State {
     catalog: HashMap<String, MediaItem>,
     views: HashMap<String, u64>,
     shown: HashMap<String, usize>,
+    declarations: HashMap<String, Arc<()>>,
     rates: HashMap<String, f32>,
     positions: ResumePositions,
     window: Vec<Option<MediaItem>>,
@@ -86,6 +87,8 @@ struct Inner {
     wakes: AtomicU64,
     seeks: Mutex<HashMap<String, (u64, std::time::Instant)>>,
     hints: Mutex<HashMap<usize, u64>>,
+    #[cfg(test)]
+    declaration_completed: tokio::sync::Notify,
 }
 
 #[derive(Clone)]
@@ -211,6 +214,7 @@ impl Stage {
             catalog: HashMap::new(),
             views: HashMap::new(),
             shown: HashMap::new(),
+            declarations: HashMap::new(),
             rates: HashMap::new(),
             positions: ResumePositions::default(),
             window: Vec::new(),
@@ -237,6 +241,8 @@ impl Stage {
             wakes: AtomicU64::new(0),
             seeks: Mutex::new(HashMap::new()),
             hints: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            declaration_completed: tokio::sync::Notify::new(),
         });
         let tick = handle.spawn(tick_loop(Arc::downgrade(&inner), inner.due.subscribe(), parts.ledger));
         *inner.tick.lock().unwrap_or_else(PoisonError::into_inner) = Some(AbortOnDrop::new(tick));
@@ -301,11 +307,7 @@ impl Stage {
         self.inner.clock.now_ms()
     }
 
-    fn dispatch(&self, commands: Vec<Command>) {
-        self.dispatch_from(commands, false);
-    }
-
-    fn dispatch_from(&self, commands: Vec<Command>, is_restore_attempt: bool) {
+    fn dispatch(&self, mut state: StateGuard<'_>, commands: Vec<Command>) {
         if commands.is_empty() {
             return;
         }
@@ -313,24 +315,25 @@ impl Stage {
         let mut actions = Vec::new();
         let mut unloaded = Vec::new();
         let mut resumed = Vec::new();
-        {
-            let mut state = if is_restore_attempt { self.state_quiet() } else { self.state() };
-            for command in commands {
-                crate::trace!("stage", "command {command:?}");
-                self.translate(&mut state, command, &mut calls, &mut actions, &mut unloaded, &mut resumed);
-            }
+        for command in commands {
+            crate::trace!("stage", "command {command:?}");
+            self.translate(&mut state, command, &mut calls, &mut actions, &mut unloaded, &mut resumed);
         }
         for (slot, call) in calls {
             self.inner.runner.send(slot, call);
         }
-        self.refresh_hints();
         for key in unloaded {
             self.inner.places.unloaded(&key);
-            self.forget_preferences_from(&key, is_restore_attempt);
+            if !self.inner.places.is_declared(&key) && !state.loaded.contains_key(&key) {
+                state.rates.remove(&key);
+                state.ring.forget_mute(&key);
+            }
         }
         for key in resumed {
             self.inner.places.resumed(&key);
         }
+        drop(state);
+        self.refresh_hints();
         for (key, action) in actions {
             self.perform(key, action);
         }
@@ -355,27 +358,8 @@ impl Stage {
                 state.slot_keys.insert(*slot, key.clone());
                 state.loaded.insert(key.clone(), Loaded { slot: *slot, recovery, source, route: route.clone() });
                 state.pending_wanted.remove(key);
-                let view = state.views.get(key).copied();
-                let rate = state.rates.get(key).copied();
                 let resume = state.positions.take(key);
-                let slot = *slot;
-                if let Some(position_ms) = resume {
-                    self.note_seek(&state.loaded[key].source.url, position_ms);
-                }
-                self.inner.hints.lock().unwrap_or_else(PoisonError::into_inner).remove(&slot);
-                calls.extend(SlotCall::from_command(command, Some(route)));
-                if self.inner.silent {
-                    calls.push((slot, SlotCall::Mute));
-                }
-                if let Some(rate) = rate {
-                    calls.push((slot, SlotCall::Rate { rate }));
-                }
-                if let Some(position_ms) = resume {
-                    calls.push((slot, SlotCall::Seek { position_ms }));
-                }
-                if let Some(view_token) = view {
-                    calls.push((slot, SlotCall::Attach { view_token }));
-                }
+                calls.extend(self.load_calls(state, key, resume));
             }
             Command::Unload { slot } => {
                 if let Some(key) = state.slot_keys.remove(slot) {
@@ -406,6 +390,27 @@ impl Stage {
             Command::Unmute { slot } if self.inner.silent => calls.push((*slot, SlotCall::Mute)),
             _ => calls.extend(SlotCall::from_command(command, None)),
         }
+    }
+
+    fn load_calls(&self, state: &State, key: &str, resume: Option<u64>) -> Vec<(usize, SlotCall)> {
+        let loaded = &state.loaded[key];
+        let slot = loaded.slot;
+        let mut calls = vec![(slot, SlotCall::Load { key: key.to_string(), route: loaded.route.clone() })];
+        self.inner.hints.lock().unwrap_or_else(PoisonError::into_inner).remove(&slot);
+        if self.inner.silent {
+            calls.push((slot, SlotCall::Mute));
+        }
+        if let Some(rate) = state.rates.get(key) {
+            calls.push((slot, SlotCall::Rate { rate: *rate }));
+        }
+        if let Some(position_ms) = resume {
+            self.note_seek(&loaded.source.url, position_ms);
+            calls.push((slot, SlotCall::Seek { position_ms }));
+        }
+        if let Some(view_token) = state.views.get(key) {
+            calls.push((slot, SlotCall::Attach { view_token: *view_token }));
+        }
+        calls
     }
 
     fn advance(&self, state: &mut State, key: &str, event: Event, actions: &mut Vec<(String, Action)>) {
@@ -457,7 +462,7 @@ async fn tick_loop(inner: Weak<Inner>, mut due: watch::Receiver<Option<u64>>, le
             }
             Wake::Due => {}
         }
-        let commands = {
+        let (state, commands) = {
             let now = stage.now();
             let mut state = stage.state_quiet();
             let is_requested = std::mem::take(&mut state.is_restore_requested);
@@ -475,9 +480,9 @@ async fn tick_loop(inner: Weak<Inner>, mut due: watch::Receiver<Option<u64>>, le
                 state.is_room_wanted = is_refused;
                 state.refusal_room = ledger.ceiling().saturating_sub(ledger.used());
             }
-            commands
+            (state, commands)
         };
-        stage.dispatch_from(commands, true);
+        stage.dispatch(state, commands);
     }
 }
 

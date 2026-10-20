@@ -73,7 +73,8 @@ impl Stage {
     }
 
     fn send_readahead(&self, url: &str, hint_ms: u64) {
-        let slots: Vec<usize> = self.state().loaded.values().filter(|loaded| loaded.source.url == url).map(|loaded| loaded.slot).collect();
+        let state = self.state();
+        let slots: Vec<usize> = state.loaded.values().filter(|loaded| loaded.source.url == url).map(|loaded| loaded.slot).collect();
         let mut sent = self.inner.hints.lock().unwrap_or_else(PoisonError::into_inner);
         for slot in slots {
             sent.insert(slot, hint_ms);
@@ -85,6 +86,10 @@ impl Stage {
         let loaded: Vec<(usize, String)> = self.state().loaded.values().map(|loaded| (loaded.slot, loaded.source.url.clone())).collect();
         for (slot, url) in loaded {
             let Some(hint_ms) = self.inner.routes.window_hint(&url) else { continue };
+            let state = self.state();
+            if !state.loaded.values().any(|loaded| loaded.slot == slot && loaded.source.url == url) {
+                continue;
+            }
             let mut sent = self.inner.hints.lock().unwrap_or_else(PoisonError::into_inner);
             if sent.insert(slot, hint_ms) != Some(hint_ms) {
                 self.inner.runner.send(slot, SlotCall::Readahead { ms: hint_ms });

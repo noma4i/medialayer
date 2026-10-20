@@ -15,33 +15,42 @@ impl PoolControl for Stage {
     }
 
     fn release_under(&self, now_ms: u64, pressure: Pressure) -> Vec<Directive> {
-        self.state().ring.release_under(now_ms, pressure)
+        let mut state = self.state();
+        let directives = state.ring.release_under(now_ms, pressure);
+        let (commands, remaining) = split(directives);
+        self.dispatch(state, commands);
+        remaining
     }
 
     fn background(&self) -> Vec<Directive> {
-        let (directives, commands) = {
+        let (state, directives, commands) = {
             let mut state = self.state();
             let directives = state.ring.background();
             let orders = state.election.set_foreground(false);
-            (directives, state.commands_for(orders))
+            let (mut commands, directives) = split(directives);
+            commands.extend(state.commands_for(orders));
+            (state, directives, commands)
         };
-        self.dispatch(commands);
+        self.dispatch(state, commands);
         directives
     }
 
     fn set_slots(&self, slots: usize) {
-        let commands = self.state().ring.set_slots(slots);
-        self.dispatch(commands);
+        let mut state = self.state();
+        let commands = state.ring.set_slots(slots);
+        self.dispatch(state, commands);
     }
 
     fn foreground(&self) {
-        let (commands, keys) = {
+        let (state, commands, keys) = {
             let mut state = self.state();
             state.ring.foreground();
             let orders = state.election.set_foreground(true);
-            (state.commands_for(orders), state.loaded.keys().cloned().collect::<Vec<String>>())
+            let commands = state.commands_for(orders);
+            let keys = state.loaded.keys().cloned().collect::<Vec<String>>();
+            (state, commands, keys)
         };
-        self.dispatch(commands);
+        self.dispatch(state, commands);
         self.inner.prefetcher.resume();
         let stage = self.clone();
         self.inner.handle.spawn(async move {
@@ -62,6 +71,18 @@ impl SlotDirectives for Stage {
                 Directive::StopPrefetch | Directive::DropMemoryCache => None,
             })
             .collect();
-        self.dispatch(commands);
+        self.dispatch(self.state(), commands);
     }
+}
+
+fn split(directives: Vec<Directive>) -> (Vec<crate::pool::Command>, Vec<Directive>) {
+    let mut commands = Vec::new();
+    let mut remaining = Vec::new();
+    for directive in directives {
+        match directive {
+            Directive::Slot(command) => commands.push(command),
+            other => remaining.push(other),
+        }
+    }
+    (commands, remaining)
 }

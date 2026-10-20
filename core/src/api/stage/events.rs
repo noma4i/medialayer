@@ -161,26 +161,25 @@ impl Stage {
         loaded.route = self.inner.routes.refresh(&loaded.source, &loaded.route);
     }
 
-    fn reload(&self, key: &str) {
-        let calls = {
-            let state = self.state();
+    pub(super) fn reload(&self, key: &str) {
+        let (state, calls) = {
+            let mut state = self.state();
             let Some(loaded) = state.loaded.get(key) else { return };
-            let mut calls = vec![
-                (loaded.slot, SlotCall::Unload),
-                (loaded.slot, SlotCall::Load { key: key.to_string(), route: loaded.route.clone() }),
-            ];
-            if let Some(rate) = state.rates.get(key) {
-                calls.push((loaded.slot, SlotCall::Rate { rate: *rate }));
-            }
+            let slot = loaded.slot;
+            let mut calls = vec![(slot, SlotCall::Unload)];
+            let resume = state.positions.take(key);
+            calls.extend(self.load_calls(&state, key, resume));
             if state.is_playing(key) {
-                calls.push((loaded.slot, SlotCall::Play));
+                calls.push((slot, SlotCall::Play));
             }
-            calls
+            (state, calls)
         };
         let is_playing = calls.iter().any(|(_, call)| *call == SlotCall::Play);
         for (slot, call) in calls {
             self.inner.runner.send(slot, call);
         }
+        drop(state);
+        self.refresh_hints();
         if is_playing {
             self.feed(key, Event::Play { position_ms: 0 });
         }
@@ -202,10 +201,8 @@ impl Stage {
     }
 
     fn replay_play(&self, key: &str) {
-        let slot = {
-            let state = self.state();
-            state.loaded.get(key).filter(|_| state.is_playing(key)).map(|loaded| loaded.slot)
-        };
+        let state = self.state();
+        let slot = state.loaded.get(key).filter(|_| state.is_playing(key)).map(|loaded| loaded.slot);
         if let Some(slot) = slot {
             self.inner.runner.send(slot, SlotCall::Play);
         }

@@ -5,6 +5,66 @@ use crate::api::types::{Kind, MediaState};
 use crate::fetch::mock::Script;
 use crate::identity::cache_key;
 
+#[tokio::test]
+async fn inv_pool_01_old_pressure_commands_preserve_new_assignments() {
+    use crate::api::ports::{PoolControl, SlotDirectives};
+    for background in [false, true] {
+        let rig = rig().await;
+        let stage = &rig.parts.stage;
+        stage.replace_window(1, videos(20));
+        let directives = if background {
+            stage.background()
+        } else {
+            stage.release_under(0, crate::pool::Pressure::Critical)
+        };
+        stage.replace_window(10, videos(20));
+        let assigned = stage.state().slot_keys.clone();
+        assert!(!assigned.is_empty());
+        stage.apply(directives);
+        assert_eq!(stage.state().slot_keys, assigned, "stale unload removed new keys");
+    }
+}
+
+#[tokio::test]
+async fn inv_api_03_retired_declarations_ignore_late_cache_results() {
+    for release_all in [false, true] {
+        let rig = rig().await;
+        let stage = &rig.parts.stage;
+        let source = MediaItem::bare("file:///poster.jpg", Kind::Image);
+        stage.visible(source.clone(), true);
+        if release_all {
+            stage.release_all();
+        } else {
+            stage.visible(source.clone(), false);
+        }
+        stage.inner.declaration_completed.notified().await;
+        assert!(!rig.parts.places.is_declared(&source.url), "late cache check redeclared hidden image");
+    }
+}
+
+#[tokio::test]
+async fn inv_api_06_reload_restores_attached_view_and_playback_preferences() {
+    let rig = rig_with(|config| config.silent = true).await;
+    let stage = &rig.parts.stage;
+    let key = url_of(0);
+    stage.attach(&key, 42);
+    stage.set_rate(&key, 1.5);
+    stage.replace_window(0, videos(1));
+    stage.seek(&key, 100);
+    let slot = stage.state().loaded[&key].slot;
+    eventually(|| rig.factory.slot_holding(&key).is_some()).await;
+    let player = rig.factory.slot(slot as u32);
+    player.seeked.notified().await;
+    player.calls.lock().unwrap().clear();
+    stage.reload(&key);
+    stage.seek(&key, 200);
+    player.seeked.notified().await;
+    let calls = player.calls();
+    assert!(calls.contains(&SlotCall::Attach { view_token: 42 }), "{calls:?}");
+    assert!(calls.contains(&SlotCall::Mute), "{calls:?}");
+    assert!(calls.contains(&SlotCall::Rate { rate: 1.5 }), "{calls:?}");
+}
+
 fn total_calls(rig: &crate::api::test_support::Rig) -> usize {
     rig.factory.slots.lock().unwrap().values().map(|slot| slot.calls().len()).sum()
 }

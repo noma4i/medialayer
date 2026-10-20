@@ -270,6 +270,7 @@ pub struct MockSlot {
     pub sample: Mutex<SlotSample>,
     pub samples: AtomicUsize,
     pub advance_ms: u64,
+    pub seeked: tokio::sync::Notify,
 }
 
 impl MockSlot {
@@ -322,6 +323,7 @@ impl PlayerSlot for MockSlot {
 
     fn seek(&self, position_ms: u64) {
         self.calls.lock().unwrap().push(SlotCall::Seek { position_ms });
+        self.seeked.notify_one();
     }
 
     fn set_rate(&self, rate: f32) {
@@ -375,6 +377,7 @@ impl PlayerSlotFactory for MockFactory {
             sample: Mutex::new(idle),
             samples: AtomicUsize::new(0),
             advance_ms: *self.advance_ms.lock().unwrap(),
+            seeked: tokio::sync::Notify::new(),
         });
         self.created.lock().unwrap().push(slot);
         self.slots.lock().unwrap().insert(slot, player.clone());

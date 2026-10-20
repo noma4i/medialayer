@@ -19,20 +19,21 @@ impl Stage {
 
     pub fn replace_window(&self, active: usize, sources: Vec<Option<MediaItem>>) {
         self.declare_whole(sources.iter().flatten());
-        self.state().window = sources;
-        self.move_window(active);
+        let mut state = self.state();
+        state.window = sources;
+        self.move_window_from(state, active);
     }
 
     pub fn move_window(&self, active: usize) {
-        let (count, reach) = {
-            let state = self.state();
-            (state.window.len(), state.ring.pages(active, state.window.len()))
-        };
+        self.move_window_from(self.state(), active);
+    }
+
+    fn move_window_from(&self, mut state: super::StateGuard<'_>, active: usize) {
+        let (count, reach) = (state.window.len(), state.ring.pages(active, state.window.len()));
         crate::trace!("stage", "window active={active} count={count}");
         let wanted = self.inner.prefetcher.window_range(active, count);
         let now = self.now();
-        let (commands, sources) = {
-            let mut state = self.state();
+        let (state, commands, sources) = {
             let sources = Sliced::slice(&state.window, reach.start.min(wanted.start)..reach.end.max(wanted.end));
             let keys = sources.map(|source| (source.kind != Kind::Image).then(|| source.url.clone()));
             for source in sources.present() {
@@ -48,9 +49,9 @@ impl Stage {
             let State { catalog, loaded, leases, views, .. } = &mut *state;
             catalog.retain(|key, _| kept.contains(key.as_str()) || loaded.contains_key(key) || leases.contains_key(key) || views.contains_key(key));
             state.prune_pending();
-            (commands, sources)
+            (state, commands, sources)
         };
-        self.dispatch(commands);
+        self.dispatch(state, commands);
         let remote = sources.map(|source| (!source.is_local() && source.strategy == CacheStrategy::Window).then(|| source.for_prefetch()));
         self.inner.prefetcher.set_window(active, remote);
     }
@@ -71,55 +72,51 @@ impl Stage {
 
     pub fn set_playing(&self, key: &str, playing: bool) {
         crate::trace!("stage", "set_playing {} {playing}", crate::trace::tail(key));
-        let commands = {
+        let (state, commands) = {
             let mut state = self.state();
-            if !playing {
+            let commands = if !playing {
                 state.forget_lease(key)
             } else {
                 let lease = state.lease_for(key);
                 let orders = state.election.set_intent(key, lease, Intent::Play);
                 state.commands_for(orders)
-            }
+            };
+            (state, commands)
         };
-        self.dispatch(commands);
+        self.dispatch(state, commands);
         self.sync_foreground();
     }
 
     pub fn set_peeking(&self, key: &str, peeking: bool) {
         crate::trace!("stage", "set_peeking {} {peeking}", crate::trace::tail(key));
-        let commands = self.state().ring.set_peeking(key, peeking);
-        self.dispatch(commands);
+        let mut state = self.state();
+        let commands = state.ring.set_peeking(key, peeking);
+        self.dispatch(state, commands);
     }
 
     pub fn attach(&self, key: &str, view_token: u64) {
-        let slot = {
-            let mut state = self.state();
-            state.views.insert(key.to_string(), view_token);
-            state.loaded.get(key).map(|loaded| loaded.slot)
-        };
+        let mut state = self.state();
+        state.views.insert(key.to_string(), view_token);
+        let slot = state.loaded.get(key).map(|loaded| loaded.slot);
         if let Some(slot) = slot {
             self.inner.runner.send(slot, SlotCall::Attach { view_token });
         }
     }
 
     pub fn detach(&self, key: &str) {
-        let slot = {
-            let mut state = self.state();
-            state.views.remove(key);
-            state.loaded.get(key).map(|loaded| loaded.slot)
-        };
+        let mut state = self.state();
+        state.views.remove(key);
+        let slot = state.loaded.get(key).map(|loaded| loaded.slot);
         if let Some(slot) = slot {
             self.inner.runner.send(slot, SlotCall::Detach);
         }
     }
 
     pub fn seek(&self, key: &str, position_ms: u64) {
-        let slot = self.state().loaded.get(key).map(|loaded| loaded.slot);
-        if let Some(slot) = slot {
-            if let Some(url) = self.url_of(key) {
-                self.note_seek(&url, position_ms);
-            }
-            self.inner.runner.send(slot, SlotCall::Seek { position_ms });
+        let state = self.state();
+        if let Some(loaded) = state.loaded.get(key) {
+            self.note_seek(&loaded.source.url, position_ms);
+            self.inner.runner.send(loaded.slot, SlotCall::Seek { position_ms });
         }
     }
 
@@ -128,34 +125,35 @@ impl Stage {
             return;
         }
         let rate = rate.clamp(MIN_RATE, MAX_RATE);
-        let slot = {
-            let mut state = self.state();
-            if rate == 1.0 {
-                state.rates.remove(key);
-            } else {
-                state.rates.insert(key.to_string(), rate);
-            }
-            state.loaded.get(key).map(|loaded| loaded.slot)
-        };
+        let mut state = self.state();
+        if rate == 1.0 {
+            state.rates.remove(key);
+        } else {
+            state.rates.insert(key.to_string(), rate);
+        }
+        let slot = state.loaded.get(key).map(|loaded| loaded.slot);
         if let Some(slot) = slot {
             self.inner.runner.send(slot, SlotCall::Rate { rate });
         }
     }
 
     pub fn set_muted_all(&self, muted: bool) {
-        let commands = self.state().ring.set_muted_all(muted);
-        self.dispatch(commands);
+        let mut state = self.state();
+        let commands = state.ring.set_muted_all(muted);
+        self.dispatch(state, commands);
     }
 
     pub fn set_muted(&self, key: &str, muted: bool) {
-        let commands = self.state().ring.set_muted(key, muted);
-        self.dispatch(commands);
+        let mut state = self.state();
+        let commands = state.ring.set_muted(key, muted);
+        self.dispatch(state, commands);
     }
 
     pub fn pin(&self, key: &str) {
         let now = self.now();
-        let commands = self.state().ring.pin(now, key);
-        self.dispatch(commands);
+        let mut state = self.state();
+        let commands = state.ring.pin(now, key);
+        self.dispatch(state, commands);
     }
 
     pub fn unpin(&self, key: &str) {
@@ -167,36 +165,49 @@ impl Stage {
         let headers = source.headers.clone();
         crate::trace!("stage", "visible {} {visible}", crate::trace::tail(&url));
         if !visible {
-            if self.state().leave(&url) {
+            let mut state = self.state();
+            if state.leave(&url) {
                 return;
             }
-            let commands = self.state().ring.untouch(&url);
-            self.dispatch(commands);
+            state.declarations.remove(&url);
+            let commands = state.ring.untouch(&url);
             self.inner.places.retired(&url);
+            self.dispatch(state, commands);
             self.forget_preferences(&url);
             return;
         }
         let now = self.now();
         self.declare_whole(std::iter::once(&source));
-        let commands = {
+        let declaration = std::sync::Arc::new(());
+        let (state, commands) = {
             let mut state = self.state();
+            state.declarations.insert(url.clone(), declaration.clone());
             *state.shown.entry(url.clone()).or_insert(0) += 1;
             let is_player = source.kind != Kind::Image;
             state.catalog.insert(url.clone(), source);
             state.refresh_pending(&url);
-            if is_player { state.ring.touch(now, &url) } else { Vec::new() }
+            let commands = if is_player { state.ring.touch(now, &url) } else { Vec::new() };
+            (state, commands)
         };
-        self.dispatch(commands);
+        self.dispatch(state, commands);
         let inner = self.inner.clone();
         self.inner.handle.spawn(async move {
             let is_cached = inner.routes.is_cached(&url, &headers).await;
-            inner.places.declared(&url, is_cached);
-            Stage { inner }.sync_foreground();
+            let stage = Stage { inner: inner.clone() };
+            {
+                let state = stage.state();
+                if state.declarations.get(&url).is_some_and(|current| std::sync::Arc::ptr_eq(current, &declaration)) {
+                    inner.places.declared(&url, is_cached);
+                }
+            }
+            stage.sync_foreground();
+            #[cfg(test)]
+            inner.declaration_completed.notify_one();
         });
     }
 
     pub fn release_all(&self) {
-        let commands = {
+        let (state, commands) = {
             let mut state = self.state();
             let keys: Vec<String> = state.leases.keys().cloned().collect();
             for key in keys {
@@ -206,14 +217,16 @@ impl Stage {
             state.pending_wanted.clear();
             state.views.clear();
             state.shown.clear();
+            state.declarations.clear();
             state.rates.clear();
             state.positions.clear();
             state.window.clear();
             state.image_windows.clear();
-            state.ring.release_all()
+            let commands = state.ring.release_all();
+            self.inner.places.retire_all();
+            (state, commands)
         };
-        self.dispatch(commands);
+        self.dispatch(state, commands);
         self.inner.prefetcher.forget_windows();
-        self.inner.places.retire_all();
     }
 }
