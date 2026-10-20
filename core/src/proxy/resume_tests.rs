@@ -28,7 +28,7 @@ async fn rig() -> Rig {
     fetcher.route(URL, Script::ok(pattern()));
     let store = Arc::new(CacheStore::new(cache.clone(), Arc::new(classify_kind)));
     let proxy = Proxy::start(Config::default(), fetcher.clone(), store).await.unwrap();
-    proxy.fetch_into_store(URL, &HashMap::new(), Priority::Prefetch).await.unwrap();
+    proxy.fetch_into_store(URL, &HashMap::new(), Priority::Prefetch, None).await.unwrap();
     Rig { proxy, cache, fetcher, _dir: dir }
 }
 

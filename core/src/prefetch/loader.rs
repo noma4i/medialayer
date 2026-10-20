@@ -2,6 +2,7 @@ use crate::memory::InputLimits;
 use crate::proxy::{Priority, Proxy};
 use async_trait::async_trait;
 use std::collections::HashMap;
+use tokio::sync::Notify;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
@@ -9,7 +10,9 @@ pub struct LoadError(pub String);
 
 #[async_trait]
 pub trait Loader: Send + Sync {
-    async fn load(&self, url: &str, headers: &HashMap<String, String>, priority: Priority) -> Result<u64, LoadError>;
+    fn cache_key(&self, url: &str, headers: &HashMap<String, String>) -> String;
+    // Notify progress only after writing bytes or completing a stored block.
+    async fn load(&self, url: &str, headers: &HashMap<String, String>, priority: Priority, progress: &Notify) -> Result<u64, LoadError>;
     async fn load_first_block(
         &self,
         url: &str,
@@ -21,6 +24,7 @@ pub trait Loader: Send + Sync {
         url: &str,
         headers: &HashMap<String, String>,
         priority: Priority,
+        progress: &Notify,
     ) -> Result<u64, LoadError>;
     async fn keep(&self, _url: &str, _headers: &HashMap<String, String>) {}
     async fn stored(&self, url: &str, headers: &HashMap<String, String>) -> Option<Vec<u8>>;
@@ -40,8 +44,12 @@ impl ProxyLoader {
 
 #[async_trait]
 impl Loader for ProxyLoader {
-    async fn load(&self, url: &str, headers: &HashMap<String, String>, priority: Priority) -> Result<u64, LoadError> {
-        self.proxy.fetch_into_store(url, headers, priority).await.map_err(|error| LoadError(error.to_string()))?;
+    fn cache_key(&self, url: &str, headers: &HashMap<String, String>) -> String {
+        self.proxy.key_for(url, headers)
+    }
+
+    async fn load(&self, url: &str, headers: &HashMap<String, String>, priority: Priority, progress: &Notify) -> Result<u64, LoadError> {
+        self.proxy.fetch_into_store(url, headers, priority, Some(progress)).await.map_err(|error| LoadError(error.to_string()))?;
         Ok(self.proxy.stored_len(url, headers).await.unwrap_or(0))
     }
 
@@ -60,8 +68,9 @@ impl Loader for ProxyLoader {
         url: &str,
         headers: &HashMap<String, String>,
         priority: Priority,
+        progress: &Notify,
     ) -> Result<u64, LoadError> {
-        self.proxy.fetch_all_blocks(url, headers, priority).await.map_err(|error| LoadError(error.to_string()))
+        self.proxy.fetch_all_blocks(url, headers, priority, progress).await.map_err(|error| LoadError(error.to_string()))
     }
 
     async fn keep(&self, url: &str, headers: &HashMap<String, String>) {

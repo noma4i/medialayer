@@ -355,7 +355,7 @@ async fn inv_proxy_06_a_download_whose_last_client_just_left_is_not_cancelled_un
     let first = proxy.inner.get_or_start(url, HashMap::new(), Priority::Playback);
     drop(first);
     let mut second = proxy.inner.existing_flight(url, &HashMap::new()).expect("the download is still joinable");
-    let progress = tokio::time::timeout(std::time::Duration::from_secs(5), second.wait_finished()).await.expect("download hung");
+    let progress = tokio::time::timeout(std::time::Duration::from_secs(5), second.wait_finished(None)).await.expect("download hung");
     assert!(matches!(progress.outcome, super::flight::FlightOutcome::Complete), "the joined download ended as {:?}", progress.outcome);
     assert_eq!(progress.written, 4_000);
 }

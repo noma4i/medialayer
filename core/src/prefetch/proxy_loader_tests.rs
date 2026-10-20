@@ -86,7 +86,7 @@ async fn inv_proxy_05_a_prefetch_of_a_chunk_the_player_is_reading_joins_its_flig
 
     let player = tokio::spawn(async move { crate::proxy::test_client::get(port, &target).await });
     tokio::time::sleep(Duration::from_millis(30)).await;
-    let bytes = loader.load(SEGMENT_0, &HashMap::new(), crate::proxy::Priority::Prefetch).await.unwrap();
+    let bytes = loader.load(SEGMENT_0, &HashMap::new(), crate::proxy::Priority::Prefetch, &tokio::sync::Notify::new()).await.unwrap();
     let reply = player.await.unwrap();
 
     assert_eq!((reply.status, reply.body.len(), bytes), (200, 4000, 4000));

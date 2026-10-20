@@ -32,3 +32,7 @@ mod runner_tests;
 mod whole_tests;
 #[cfg(test)]
 mod window_tests;
+#[cfg(test)]
+mod identity_tests;
+#[cfg(test)]
+mod progress_tests;

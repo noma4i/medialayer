@@ -6,31 +6,38 @@ use crate::hls::{extract_leading_chunks, Chunk, extract_variants, is_manifest_ur
 use crate::proxy::Priority;
 use std::future::Future;
 use std::time::Duration;
+use tokio::sync::Notify;
 
 pub(super) fn is_hls(source: &Source) -> bool {
     source.kind == SourceKind::Video && is_manifest_url(&source.url)
 }
 
 pub(super) async fn load_unit(loader: &dyn Loader, source: &Source, timeout: Duration) -> Outcome {
+    let progress = Notify::new();
     let loaded = match source.kind {
-        SourceKind::Image => bounded(timeout, loader.load(&source.url, &source.headers, Priority::ImagePrefetch)).await,
+        SourceKind::Image => bounded(timeout, &progress, loader.load(&source.url, &source.headers, Priority::ImagePrefetch, &progress)).await,
         SourceKind::Audio | SourceKind::Video => {
-            bounded(timeout, loader.load_first_block(&source.url, &source.headers, Priority::Prefetch)).await
+            bounded(timeout, &progress, loader.load_first_block(&source.url, &source.headers, Priority::Prefetch)).await
         }
     };
     loaded.map_or_else(|outcome| outcome, |_| Outcome::Loaded)
 }
 
-pub(super) async fn bounded(timeout: Duration, load: impl Future<Output = Result<u64, LoadError>>) -> Result<u64, Outcome> {
-    match tokio::time::timeout(timeout, load).await {
-        Err(_) => Err(Outcome::TimedOut),
-        Ok(Err(error)) => Err(Outcome::Failed(error.0)),
-        Ok(Ok(bytes)) => Ok(bytes),
+pub(super) async fn bounded(timeout: Duration, progress: &Notify, load: impl Future<Output = Result<u64, LoadError>>) -> Result<u64, Outcome> {
+    tokio::pin!(load);
+    loop {
+        tokio::select! {
+            biased;
+            result = &mut load => return result.map_err(|error| Outcome::Failed(error.0)),
+            _ = progress.notified() => {},
+            _ = tokio::time::sleep(timeout) => return Err(Outcome::TimedOut),
+        }
     }
 }
 
 async fn playlist_text(loader: &dyn Loader, source: &Source, url: &str, timeout: Duration) -> Result<String, Outcome> {
-    bounded(timeout, loader.load(url, &source.headers, Priority::Prefetch)).await?;
+    let progress = Notify::new();
+    bounded(timeout, &progress, loader.load(url, &source.headers, Priority::Prefetch, &progress)).await?;
     let bytes = loader.stored(url, &source.headers).await.ok_or_else(|| Outcome::Failed(format!("playlist {url} is not stored")))?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }

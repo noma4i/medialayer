@@ -19,7 +19,7 @@ async fn inv_proxy_10_a_new_timeout_applies_to_the_next_origin_wait_without_a_re
     proxy.set_limits(&Limits { timeout_seconds: 1, ..Limits::default() });
     let load = tokio::spawn({
         let proxy = proxy.clone();
-        async move { proxy.fetch_into_store("https://o.test/hang.mp4", &HashMap::new(), Priority::Prefetch).await }
+        async move { proxy.fetch_into_store("https://o.test/hang.mp4", &HashMap::new(), Priority::Prefetch, None).await }
     });
     while fetcher.calls() == 0 {
         tokio::task::yield_now().await;
@@ -41,7 +41,7 @@ async fn inv_proxy_10_a_new_concurrency_limit_lets_waiting_downloads_start_in_pl
     }
     for name in ["a", "b"] {
         let proxy = proxy.clone();
-        tokio::spawn(async move { proxy.fetch_into_store(&format!("https://o.test/{name}.mp4"), &HashMap::new(), Priority::Prefetch).await });
+        tokio::spawn(async move { proxy.fetch_into_store(&format!("https://o.test/{name}.mp4"), &HashMap::new(), Priority::Prefetch, None).await });
     }
     while fetcher.calls() < 1 {
         tokio::task::yield_now().await;

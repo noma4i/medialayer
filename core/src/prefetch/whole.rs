@@ -1,16 +1,13 @@
-use super::load_source::{is_hls, read_plan};
-use super::loader::{LoadError, Loader};
+use super::load_source::{bounded, is_hls, read_plan};
+use super::loader::Loader;
 use super::settled::Outcome;
 use super::source::{Source, SourceKind};
 use crate::proxy::Priority;
 use std::future::Future;
 use std::time::Duration;
+use tokio::sync::Notify;
 
 const RETRY_WAITS: [Duration; 2] = [Duration::from_millis(500), Duration::from_millis(1000)];
-
-fn failed(error: LoadError) -> Outcome {
-    Outcome::Failed(error.0)
-}
 
 async fn retried<T, Call: Future<Output = Result<T, Outcome>>>(mut call: impl FnMut() -> Call) -> Result<T, Outcome> {
     let mut waits = RETRY_WAITS.into_iter();
@@ -28,9 +25,15 @@ async fn retried<T, Call: Future<Output = Result<T, Outcome>>>(mut call: impl Fn
 
 pub(super) async fn load_whole(loader: &dyn Loader, source: &Source, timeout: Duration) -> Outcome {
     let loaded = match source.kind {
-        SourceKind::Image => retried(|| async { loader.load(&source.url, &source.headers, Priority::ImagePrefetch).await.map_err(failed) }).await,
+        SourceKind::Image => retried(|| async {
+            let progress = Notify::new();
+            bounded(timeout, &progress, loader.load(&source.url, &source.headers, Priority::ImagePrefetch, &progress)).await
+        }).await,
         SourceKind::Audio | SourceKind::Video if !is_hls(source) => {
-            retried(|| async { loader.load_all_blocks(&source.url, &source.headers, Priority::Prefetch).await.map_err(failed) }).await
+            retried(|| async {
+                let progress = Notify::new();
+                bounded(timeout, &progress, loader.load_all_blocks(&source.url, &source.headers, Priority::Prefetch, &progress)).await
+            }).await
         }
         SourceKind::Audio | SourceKind::Video => load_stream(loader, source, timeout).await,
     };
@@ -54,7 +57,10 @@ async fn load_stream(loader: &dyn Loader, source: &Source, timeout: Duration) ->
     for chunk in &plan.chunks {
         let init = chunk.init.iter().filter(|init| loaded_inits.insert(init.as_str()));
         for url in init.chain([&chunk.segment]) {
-            let size = retried(|| async { loader.load(url, &source.headers, Priority::Prefetch).await.map_err(failed) }).await?;
+            let size = retried(|| async {
+                let progress = Notify::new();
+                bounded(timeout, &progress, loader.load(url, &source.headers, Priority::Prefetch, &progress)).await
+            }).await?;
             bytes += size;
             parts.push((url, size));
             loader.keep(url, &source.headers).await;

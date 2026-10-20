@@ -158,7 +158,7 @@ async fn inv_readahead_02_a_held_segment_is_released_by_the_playhead_and_a_seek_
     assert_eq!(reply.status, 200);
 
     rig.playhead.move_to(0);
-    rig.proxy.fetch_into_store(&segment_url(6), &HashMap::new(), Priority::Prefetch).await.expect("prefetched");
+    rig.proxy.fetch_into_store(&segment_url(6), &HashMap::new(), Priority::Prefetch, None).await.expect("prefetched");
     let started = Instant::now();
     let cached = get(rig.proxy.port(), &targets[6]).await;
     assert_eq!((cached.status, origin_calls(&rig, 6)), (200, 1));

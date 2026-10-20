@@ -148,7 +148,7 @@ async fn inv_proxy_13_downloads_reserve_their_buffers_and_never_pull_more_than_t
     }
 
     let no_headers = HashMap::new();
-    let loads = futures_util::future::join_all(urls.iter().map(|url| rig.proxy.fetch_into_store(url, &no_headers, Priority::Prefetch))).await;
+    let loads = futures_util::future::join_all(urls.iter().map(|url| rig.proxy.fetch_into_store(url, &no_headers, Priority::Prefetch, None))).await;
 
     assert!(loads.iter().all(Result::is_ok));
     assert!(urls.iter().all(|url| rig.store.bytes(url) == Some(pattern(200_000))));

@@ -155,7 +155,11 @@ impl MockLoader {
 
 #[async_trait]
 impl Loader for MockLoader {
-    async fn load(&self, url: &str, _headers: &HashMap<String, String>, priority: Priority) -> Result<u64, LoadError> {
+    fn cache_key(&self, url: &str, headers: &HashMap<String, String>) -> String {
+        crate::identity::namespaced_key(url, headers, &["authorization".into()])
+    }
+
+    async fn load(&self, url: &str, _headers: &HashMap<String, String>, priority: Priority, _progress: &tokio::sync::Notify) -> Result<u64, LoadError> {
         self.run(url, Fetch::Whole, priority).await
     }
 
@@ -173,6 +177,7 @@ impl Loader for MockLoader {
         url: &str,
         _headers: &HashMap<String, String>,
         priority: Priority,
+        _progress: &tokio::sync::Notify,
     ) -> Result<u64, LoadError> {
         self.run(url, Fetch::AllBlocks, priority).await
     }

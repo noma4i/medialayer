@@ -12,7 +12,7 @@ mod cursor;
 mod window;
 
 #[cfg(test)]
-mod memory_store;
+pub(crate) mod memory_store;
 #[cfg(test)]
 pub(crate) mod test_client;
 
@@ -32,6 +32,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::sync::Notify;
 
 const FETCH_ATTEMPTS: usize = 3;
 const PING_REQUEST: &str = "GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
@@ -135,7 +136,7 @@ impl Proxy {
     }
 
     pub async fn fetch_bytes(&self, url: &str, headers: &HashMap<String, String>, limit: u64) -> Result<Vec<u8>, ProxyError> {
-        self.fetch_into_store(url, headers, Priority::Image).await?;
+        self.fetch_into_store(url, headers, Priority::Image, None).await?;
         let key = self.key_for(url, headers);
         match self.inner.store.len(&key).await {
             Some(length) if length > limit => {
@@ -226,10 +227,11 @@ impl Proxy {
         url: &str,
         headers: &HashMap<String, String>,
         priority: Priority,
+        progress: Option<&Notify>,
     ) -> Result<(), ProxyError> {
         let upstream = self.inner.upstream_headers(url, headers);
         let key = self.inner.key(url, &upstream);
-        self.download_into_store(&key, || self.inner.get_or_start(url, upstream.clone(), priority)).await
+        self.download_into_store(&key, progress, || self.inner.get_or_start(url, upstream.clone(), priority)).await
     }
 
     pub async fn fetch_block_into_store(
@@ -241,7 +243,7 @@ impl Proxy {
     ) -> Result<(), ProxyError> {
         let upstream = self.inner.upstream_headers(url, headers);
         let key = route::block_key(&self.inner.key(url, &upstream), block_index);
-        self.download_into_store(&key, || self.inner.get_or_start_block(url, block_index, None, upstream.clone(), priority))
+        self.download_into_store(&key, None, || self.inner.get_or_start_block(url, block_index, None, upstream.clone(), priority))
             .await
     }
 
@@ -255,24 +257,25 @@ impl Proxy {
         url: &str,
         headers: &HashMap<String, String>,
         priority: Priority,
+        progress: &Notify,
     ) -> Result<u64, ProxyError> {
         let upstream = self.inner.upstream_headers(url, headers);
         let base = self.inner.key(url, &upstream);
         let first = route::block_key(&base, 0);
-        let started = self.download_into_store(&first, || self.inner.get_or_start_block(url, 0, None, upstream.clone(), priority)).await;
+        let started = self.download_into_store(&first, Some(progress), || self.inner.get_or_start_block(url, 0, None, upstream.clone(), priority)).await;
         if let Err(error) = started {
             if !self.inner.ignores_range(&base) {
                 return Err(error);
             }
-            return self.fetch_single_file(url, headers, priority).await;
+            return self.fetch_single_file(url, headers, priority, progress).await;
         }
         let Some(total) = self.inner.store.meta(&first).await.and_then(|meta| meta.total_length) else {
-            return self.fetch_single_file(url, headers, priority).await;
+            return self.fetch_single_file(url, headers, priority, progress).await;
         };
         self.inner.store.keep(&first).await;
         for block in 1..total.div_ceil(self.inner.config.chunk_size) {
             let key = route::block_key(&base, block);
-            self.download_into_store(&key, || self.inner.get_or_start_block(url, block, Some(total), upstream.clone(), priority)).await?;
+            self.download_into_store(&key, Some(progress), || self.inner.get_or_start_block(url, block, Some(total), upstream.clone(), priority)).await?;
             self.inner.store.keep(&key).await;
         }
         for block in 0..total.div_ceil(self.inner.config.chunk_size) {
@@ -285,8 +288,8 @@ impl Proxy {
         Ok(total)
     }
 
-    async fn fetch_single_file(&self, url: &str, headers: &HashMap<String, String>, priority: Priority) -> Result<u64, ProxyError> {
-        self.fetch_into_store(url, headers, priority).await?;
+    async fn fetch_single_file(&self, url: &str, headers: &HashMap<String, String>, priority: Priority, progress: &Notify) -> Result<u64, ProxyError> {
+        self.fetch_into_store(url, headers, priority, Some(progress)).await?;
         Ok(self.stored_len(url, headers).await.unwrap_or(0))
     }
 
@@ -302,14 +305,19 @@ impl Proxy {
     async fn download_into_store(
         &self,
         key: &str,
+        progress: Option<&Notify>,
         start: impl Fn() -> flight::FlightSubscription,
     ) -> Result<(), ProxyError> {
         for _ in 0..FETCH_ATTEMPTS {
             if self.inner.store.contains(key).await {
+                if let Some(progress) = progress { progress.notify_one(); }
                 return Ok(());
             }
-            match start().wait_finished().await.outcome {
-                FlightOutcome::Complete => return Ok(()),
+            match start().wait_finished(progress).await.outcome {
+                FlightOutcome::Complete => {
+                    if let Some(progress) = progress { progress.notify_one(); }
+                    return Ok(());
+                }
                 FlightOutcome::Rejected(rejection) => return Err(ProxyError::Status(rejection.status)),
                 FlightOutcome::Failed(message) => return Err(ProxyError::Fetch(message)),
                 FlightOutcome::Unstorable => return Err(ProxyError::StoreRefused),

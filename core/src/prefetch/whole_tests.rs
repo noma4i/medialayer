@@ -45,7 +45,7 @@ async fn inv_strategy_06_whole_above_budget_never_reports_complete() {
     stack.cache.set_limits(Limits { budget: (2 * MIB) as u64, min_budget: 1, ..Limits::default() }).await.unwrap();
     let url = "https://o.test/large.mp4";
     stack.fetcher.route(url, Script::ok(vec![7; 4 * MIB]));
-    let result = ProxyLoader::new(stack.proxy.clone()).load_all_blocks(url, &HashMap::new(), Priority::Prefetch).await;
+    let result = ProxyLoader::new(stack.proxy.clone()).load_all_blocks(url, &HashMap::new(), Priority::Prefetch, &tokio::sync::Notify::new()).await;
     assert!(result.is_err(), "incomplete source reported success: {result:?}");
 }
 
@@ -329,7 +329,7 @@ async fn inv_strategy_06_a_whole_mp4_is_stored_as_every_block_up_to_its_total_le
     stack.fetcher.route(url, Script::ok(vec![7; 3 * MIB + MIB / 2]));
     let loader = ProxyLoader::new(stack.proxy.clone());
 
-    let bytes = loader.load_all_blocks(url, &HashMap::new(), Priority::Prefetch).await.unwrap();
+    let bytes = loader.load_all_blocks(url, &HashMap::new(), Priority::Prefetch, &tokio::sync::Notify::new()).await.unwrap();
 
     assert_eq!(bytes, (3 * MIB + MIB / 2) as u64);
     assert_eq!(ranges(&stack.fetcher), (0..4).map(|block| block_range(block, 3)).collect::<Vec<_>>());
@@ -345,7 +345,7 @@ async fn inv_strategy_06_an_origin_that_ignores_range_is_stored_as_one_file() {
     stack.fetcher.route(url, Script::ok(vec![7; 2 * MIB]).ignoring_range());
     let loader = ProxyLoader::new(stack.proxy.clone());
 
-    let bytes = loader.load_all_blocks(url, &HashMap::new(), Priority::Prefetch).await.unwrap();
+    let bytes = loader.load_all_blocks(url, &HashMap::new(), Priority::Prefetch, &tokio::sync::Notify::new()).await.unwrap();
 
     assert_eq!(bytes, (2 * MIB) as u64);
     assert!(stack.cache.contains(url).await);
@@ -362,7 +362,7 @@ async fn inv_strategy_07_a_load_cut_by_a_restart_resumes_at_its_first_missing_bl
         first.proxy.fetch_block_into_store(url, block, &HashMap::new(), Priority::Prefetch).await.unwrap();
     }
     first.fetcher.route(url, Script::ok(body.clone()).cut_after(400_000));
-    assert!(loader.load_all_blocks(url, &HashMap::new(), Priority::Prefetch).await.is_err());
+    assert!(loader.load_all_blocks(url, &HashMap::new(), Priority::Prefetch, &tokio::sync::Notify::new()).await.is_err());
     assert!(first.cache.contains(&format!("{url}#1")).await);
     assert!(!first.cache.contains(&format!("{url}#2")).await);
     first.cache.flush().await.unwrap();
@@ -373,7 +373,7 @@ async fn inv_strategy_07_a_load_cut_by_a_restart_resumes_at_its_first_missing_bl
     let second = stack_in(dir).await;
     second.fetcher.route(url, Script::ok(body));
     let loader = ProxyLoader::new(second.proxy.clone());
-    let bytes = loader.load_all_blocks(url, &HashMap::new(), Priority::Prefetch).await.unwrap();
+    let bytes = loader.load_all_blocks(url, &HashMap::new(), Priority::Prefetch, &tokio::sync::Notify::new()).await.unwrap();
 
     assert_eq!(bytes, (3 * MIB + MIB / 2) as u64);
     assert_eq!(ranges(&second.fetcher), vec![block_range(2, 3), block_range(3, 3)]);

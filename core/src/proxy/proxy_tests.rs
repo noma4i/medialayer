@@ -425,9 +425,9 @@ async fn inv_proxy_09_playback_starts_while_prefetch_holds_every_prefetch_slot()
     rig.fetcher.route("https://o.test/low1.mp4", Script::ok(pattern(10, 0)).hanging());
     rig.fetcher.route("https://o.test/low2.mp4", Script::ok(pattern(10, 0)).hanging());
     rig.fetcher.route("https://o.test/now.mp4", Script::ok(pattern(10, 7)));
-    let first = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/low1.mp4", &HashMap::new(), Priority::Prefetch).await } });
+    let first = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/low1.mp4", &HashMap::new(), Priority::Prefetch, None).await } });
     assert!(eventually(|| rig.fetcher.calls_for("https://o.test/low1.mp4") == 1).await);
-    let second = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/low2.mp4", &HashMap::new(), Priority::Prefetch).await } });
+    let second = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/low2.mp4", &HashMap::new(), Priority::Prefetch, None).await } });
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(rig.fetcher.calls_for("https://o.test/low2.mp4"), 0);
 
@@ -441,10 +441,10 @@ async fn inv_proxy_09_playback_starts_while_prefetch_holds_every_prefetch_slot()
 async fn inv_proxy_03_prefetch_fills_the_store_and_later_playback_works_offline() {
     let rig = rig().await;
     rig.fetcher.route("https://o.test/p.mp4", Script::ok(pattern(5000, 6)).chunked(1000));
-    rig.proxy.fetch_into_store("https://o.test/p.mp4", &HashMap::new(), Priority::Prefetch).await.unwrap();
+    rig.proxy.fetch_into_store("https://o.test/p.mp4", &HashMap::new(), Priority::Prefetch, None).await.unwrap();
     assert_eq!(rig.store.bytes("https://o.test/p.mp4"), Some(pattern(5000, 6)));
 
-    rig.proxy.fetch_into_store("https://o.test/p.mp4", &HashMap::new(), Priority::Prefetch).await.unwrap();
+    rig.proxy.fetch_into_store("https://o.test/p.mp4", &HashMap::new(), Priority::Prefetch, None).await.unwrap();
     assert_eq!(rig.fetcher.calls(), 1);
     rig.fetcher.set_offline(true);
     let reply = get(rig.proxy.port(), &path_of(&rig.proxy.url_for("https://o.test/p.mp4", &HashMap::new()).unwrap())).await;
@@ -455,14 +455,14 @@ async fn inv_proxy_03_prefetch_fills_the_store_and_later_playback_works_offline(
 async fn inv_proxy_08_prefetch_reports_origin_status_and_fetch_failures() {
     let rig = rig().await;
     rig.fetcher.route("https://o.test/gone.mp4", Script::ok(b"x".to_vec()).status(404));
-    assert_eq!(rig.proxy.fetch_into_store("https://o.test/gone.mp4", &HashMap::new(), Priority::Prefetch).await, Err(ProxyError::Status(404)));
+    assert_eq!(rig.proxy.fetch_into_store("https://o.test/gone.mp4", &HashMap::new(), Priority::Prefetch, None).await, Err(ProxyError::Status(404)));
     rig.fetcher.set_offline(true);
-    let failure = rig.proxy.fetch_into_store("https://o.test/other.mp4", &HashMap::new(), Priority::Prefetch).await;
+    let failure = rig.proxy.fetch_into_store("https://o.test/other.mp4", &HashMap::new(), Priority::Prefetch, None).await;
     assert!(matches!(failure, Err(ProxyError::Fetch(_))));
     rig.fetcher.set_offline(false);
     rig.store.fail_at(Some(Failure::Begin));
     rig.fetcher.route("https://o.test/full.mp4", Script::ok(pattern(10, 0)));
-    assert_eq!(rig.proxy.fetch_into_store("https://o.test/full.mp4", &HashMap::new(), Priority::Prefetch).await, Err(ProxyError::StoreRefused));
+    assert_eq!(rig.proxy.fetch_into_store("https://o.test/full.mp4", &HashMap::new(), Priority::Prefetch, None).await, Err(ProxyError::StoreRefused));
 }
 
 #[tokio::test]
@@ -774,12 +774,12 @@ async fn inv_proxy_09_prefetch_over_the_wait_queue_limit_is_refused_at_once() {
     for name in ["a", "b", "c"] {
         rig.fetcher.route(&format!("https://o.test/{name}.mp4"), Script::ok(pattern(10, 0)).hanging());
     }
-    let running = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/a.mp4", &HashMap::new(), Priority::Prefetch).await } });
+    let running = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/a.mp4", &HashMap::new(), Priority::Prefetch, None).await } });
     assert!(eventually(|| rig.fetcher.calls_for("https://o.test/a.mp4") == 1).await);
-    let waiting = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/b.mp4", &HashMap::new(), Priority::Prefetch).await } });
+    let waiting = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/b.mp4", &HashMap::new(), Priority::Prefetch, None).await } });
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let refused = within(1, rig.proxy.fetch_into_store("https://o.test/c.mp4", &HashMap::new(), Priority::Prefetch)).await;
+    let refused = within(1, rig.proxy.fetch_into_store("https://o.test/c.mp4", &HashMap::new(), Priority::Prefetch, None)).await;
     assert_eq!(refused, Err(ProxyError::QueueFull));
     assert_eq!(rig.fetcher.calls_for("https://o.test/c.mp4"), 0);
     running.abort();
@@ -791,9 +791,9 @@ async fn inv_proxy_09_a_player_request_promotes_a_waiting_prefetch() {
     let rig = rig_with(config(2)).await;
     rig.fetcher.route("https://o.test/hold.mp4", Script::ok(pattern(10, 0)).hanging());
     rig.fetcher.route("https://o.test/next.mp4", Script::ok(pattern(10, 6)));
-    let hold = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/hold.mp4", &HashMap::new(), Priority::Prefetch).await } });
+    let hold = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/hold.mp4", &HashMap::new(), Priority::Prefetch, None).await } });
     assert!(eventually(|| rig.fetcher.calls_for("https://o.test/hold.mp4") == 1).await);
-    let queued = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/next.mp4", &HashMap::new(), Priority::Prefetch).await } });
+    let queued = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/next.mp4", &HashMap::new(), Priority::Prefetch, None).await } });
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(rig.fetcher.calls_for("https://o.test/next.mp4"), 0);
 
@@ -812,9 +812,9 @@ async fn inv_proxy_10_a_hung_origin_frees_its_slot_after_the_timeout() {
     let rig = rig_with(config).await;
     rig.fetcher.route("https://o.test/hang.mp4", Script::ok(pattern(10, 0)).hanging());
     rig.fetcher.route("https://o.test/after.mp4", Script::ok(pattern(10, 2)));
-    let hung = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/hang.mp4", &HashMap::new(), Priority::Prefetch).await } });
+    let hung = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/hang.mp4", &HashMap::new(), Priority::Prefetch, None).await } });
     assert!(eventually(|| rig.fetcher.calls_for("https://o.test/hang.mp4") == 1).await);
-    let queued = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/after.mp4", &HashMap::new(), Priority::Prefetch).await } });
+    let queued = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/after.mp4", &HashMap::new(), Priority::Prefetch, None).await } });
 
     assert!(matches!(within(2, hung).await.unwrap(), Err(ProxyError::Fetch(_))));
     assert_eq!(within(2, queued).await.unwrap(), Ok(()));
@@ -1125,7 +1125,7 @@ async fn inv_proxy_26_a_player_request_does_not_wait_for_prefetch_flights_in_pro
     let alone = timed("alone").await;
     for index in 0..3 {
         let proxy = rig.proxy.clone();
-        tokio::spawn(async move { proxy.fetch_into_store(&format!("https://o.test/p{index}.ts"), &HashMap::new(), Priority::Prefetch).await });
+        tokio::spawn(async move { proxy.fetch_into_store(&format!("https://o.test/p{index}.ts"), &HashMap::new(), Priority::Prefetch, None).await });
     }
     assert!(eventually(|| rig.fetcher.calls_for("https://o.test/p0.ts") == 1).await);
 

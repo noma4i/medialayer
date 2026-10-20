@@ -144,7 +144,7 @@ async fn playlist(inner: &Arc<ProxyShared>, target: &str, headers: Upstream, hea
             }
         }
         let mut subscription = inner.get_or_start(target, headers.clone(), Priority::Playback);
-        match subscription.wait_finished().await.outcome {
+        match subscription.wait_finished(None).await.outcome {
             FlightOutcome::Rejected(rejection) => return rejected(&rejection, head_only),
             FlightOutcome::Failed(message) => return text(502, &message),
             FlightOutcome::Unstorable => return playlist_direct(inner, target, headers, head_only).await,
@@ -296,7 +296,7 @@ async fn flight_response(
 ) -> Step {
     let mut progress = subscription.wait_started().await;
     if range.is_some() && progress.head.as_ref().is_some_and(|head| head.total.is_none()) {
-        progress = subscription.wait_finished().await;
+        progress = subscription.wait_finished(None).await;
         if matches!(progress.outcome, FlightOutcome::Complete) {
             return Step::Retry;
         }

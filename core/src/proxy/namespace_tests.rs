@@ -53,7 +53,7 @@ async fn inv_proxy_15_by_default_the_url_alone_is_the_key() {
 async fn inv_proxy_15_prefetch_and_the_ready_check_use_the_same_namespaced_key() {
     let (proxy, _fetcher, store) = rig(&["Authorization"]).await;
 
-    proxy.fetch_into_store(URL, &authorization("user-a"), Priority::Prefetch).await.unwrap();
+    proxy.fetch_into_store(URL, &authorization("user-a"), Priority::Prefetch, None).await.unwrap();
 
     let key = proxy.key_for(URL, &authorization("user-a"));
     assert!(store.bytes(&key).is_some());
@@ -130,7 +130,7 @@ async fn inv_proxy_29_custom_forward_headers_cannot_override_identity() {
         ("aCcEpT-EnCoDiNg".to_string(), "gzip".to_string()),
         ("ACCEPT-ENCODING".to_string(), "br".to_string()),
     ]);
-    proxy.fetch_into_store(URL, &headers, Priority::Prefetch).await.unwrap();
+    proxy.fetch_into_store(URL, &headers, Priority::Prefetch, None).await.unwrap();
     let requests = fetcher.requests();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].headers, HashMap::from([("Accept-Encoding".to_string(), "identity".to_string())]));

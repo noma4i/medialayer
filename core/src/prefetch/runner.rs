@@ -26,6 +26,7 @@ const WHOLE_IMAGE_PARALLEL: usize = 2;
 
 struct Job {
     id: u64,
+    url: String,
     cancel: Arc<Notify>,
     active: Arc<AtomicBool>,
     goal: watch::Sender<usize>,
@@ -42,7 +43,7 @@ enum WindowKey {
 struct State {
     ledger: PrefetchLedger,
     windows: HashMap<WindowKey, Vec<PrefetchJob>>,
-    last: HashMap<WindowKey, (Vec<PrefetchJob>, Vec<Source>)>,
+    last: HashMap<WindowKey, (Vec<PrefetchJob>, HashMap<String, Source>)>,
     running: HashMap<String, Job>,
     wholes: HashMap<String, Source>,
     next_id: u64,
@@ -187,9 +188,11 @@ impl Prefetcher {
 
     pub fn set_window(&self, active: usize, sources: impl Into<Sliced<Source>>) {
         let sources = sources.into();
-        let wanted = wanted_jobs(active, &sources, self.shared.tuning().window);
-        let played = sources.get(active).map(|source| source.url.clone());
-        self.apply_window(WindowKey::Stage, wanted, sources.into_present().collect(), played);
+        let keys = sources.map(|source| Some(self.shared.loader.cache_key(&source.url, &source.headers)));
+        let wanted = wanted_jobs(active, &keys, self.shared.tuning().window);
+        let played = keys.get(active).cloned();
+        let sources = keys.into_present().zip(sources.into_present()).collect();
+        self.apply_window(WindowKey::Stage, wanted, sources, played);
     }
 
     pub fn set_image_windows(&self, windows: HashMap<String, PageWindow>) {
@@ -198,19 +201,20 @@ impl Prefetcher {
 
     pub fn set_image_window(&self, name: &str, active: usize, pages: impl Into<Sliced<Vec<Source>>>) {
         let pages = pages.into();
-        let wanted = wanted_page_jobs(active, &pages, self.image_window(name));
-        self.apply_window(WindowKey::Image(name.to_string()), wanted, pages.into_present().flatten().collect(), None);
+        let keys = pages.map(|page| Some(page.iter().map(|source| self.shared.loader.cache_key(&source.url, &source.headers)).collect::<Vec<_>>()));
+        let wanted = wanted_page_jobs(active, &keys, self.image_window(name));
+        let sources = keys.into_present().flatten().zip(pages.into_present().flatten()).collect();
+        self.apply_window(WindowKey::Image(name.to_string()), wanted, sources, None);
     }
 
     fn image_window(&self, name: &str) -> PageWindow {
         self.shared.image_windows.lock().unwrap_or_else(PoisonError::into_inner).get(name).copied().unwrap_or(PageWindow::DEFAULT)
     }
 
-    fn apply_window(&self, key: WindowKey, wanted: Vec<PrefetchJob>, sources: Vec<Source>, played: Option<String>) {
+    fn apply_window(&self, key: WindowKey, wanted: Vec<PrefetchJob>, mut sources: HashMap<String, Source>, played: Option<String>) {
         let tuning = self.shared.tuning();
-        let wanted_urls: HashSet<&str> = wanted.iter().map(|job| job.key.as_str()).collect();
-        let by_url: HashMap<&str, &Source> =
-            sources.iter().filter(|source| wanted_urls.contains(source.url.as_str())).map(|source| (source.url.as_str(), source)).collect();
+        let wanted_keys: HashSet<&str> = wanted.iter().map(|job| job.key.as_str()).collect();
+        sources.retain(|key, _| wanted_keys.contains(key.as_str()));
         let now = Duration::from_millis(self.shared.clock.now_ms());
         let mut state = self.shared.state();
         let previous = state.windows.remove(&key).unwrap_or_default();
@@ -218,7 +222,7 @@ impl Prefetcher {
         if wanted.is_empty() {
             state.last.remove(&key);
         } else {
-            state.last.insert(key.clone(), (wanted.clone(), by_url.values().map(|source| (*source).clone()).collect()));
+            state.last.insert(key.clone(), (wanted.clone(), sources.clone()));
             state.windows.insert(key, wanted.clone());
         }
         for job in &diff.to_cancel {
@@ -232,18 +236,35 @@ impl Prefetcher {
         }
         let entering: HashSet<&str> = diff.to_start.iter().map(|job| job.key.as_str()).collect();
         for job in &wanted {
-            if let Some(source) = by_url.get(job.key.as_str()) {
-                self.start(&mut state, (*source).clone(), job.priority.unsigned_abs() as usize, entering.contains(job.key.as_str()), now, &tuning);
+            if let Some(source) = sources.get(job.key.as_str()) {
+                self.start(&mut state, job.key.clone(), source.clone(), job.priority.unsigned_abs() as usize, entering.contains(job.key.as_str()), now, &tuning);
             }
         }
     }
 
     pub fn cancel(&self, url: &str) {
         let mut state = self.shared.state();
-        for jobs in state.windows.values_mut() {
-            jobs.retain(|job| job.key != url);
+        let mut keys: HashSet<String> = state.running.iter().filter(|(_, job)| job.url == url).map(|(key, _)| key.clone()).collect();
+        state.wholes.retain(|key, source| {
+            if source.url != url { return true; }
+            keys.insert(key.clone());
+            false
+        });
+        for (jobs, sources) in state.last.values_mut() {
+            sources.retain(|key, source| {
+                if source.url != url { return true; }
+                keys.insert(key.clone());
+                false
+            });
+            jobs.retain(|job| sources.contains_key(&job.key));
         }
-        state.cancel_job(url);
+        for jobs in state.windows.values_mut() {
+            jobs.retain(|job| !keys.contains(&job.key));
+        }
+        for key in keys {
+            state.cancel_job(&key);
+            state.ledger.set_distance(&key, usize::MAX);
+        }
     }
 
     pub fn set_foreground_busy(&self, busy: bool) {
@@ -278,16 +299,16 @@ impl Prefetcher {
     }
 
     pub fn resume(&self) {
-        let windows: Vec<(WindowKey, Vec<PrefetchJob>, Vec<Source>)> =
+        let windows: Vec<_> =
             self.shared.state().last.iter().map(|(key, (jobs, sources))| (key.clone(), jobs.clone(), sources.clone())).collect();
         for (key, jobs, sources) in windows {
             self.apply_window(key, jobs, sources, None);
         }
         let now = Duration::from_millis(self.shared.clock.now_ms());
         let mut state = self.shared.state();
-        let wholes: Vec<Source> = state.wholes.values().cloned().collect();
-        for source in wholes {
-            self.start_whole(&mut state, source, now, false);
+        let wholes: Vec<_> = state.wholes.iter().map(|(key, source)| (key.clone(), source.clone())).collect();
+        for (key, source) in wholes {
+            self.start_whole(&mut state, key, source, now, false);
         }
     }
 
@@ -296,22 +317,23 @@ impl Prefetcher {
             return;
         }
         let now = Duration::from_millis(self.shared.clock.now_ms());
+        let key = self.shared.loader.cache_key(&source.url, &source.headers);
         let mut state = self.shared.state();
-        if !state.wholes.contains_key(&source.url) && state.wholes.len() >= self.shared.tuning().max_entries {
+        if !state.wholes.contains_key(&key) && state.wholes.len() >= self.shared.tuning().max_entries {
             state.ledger.counters.requested += 1;
             state.ledger.counters.failed += 1;
             let _ = self.shared.events.send(Settled { url: source.url, outcome: Outcome::Failed("whole queue is full".into()) });
             return;
         }
-        state.wholes.insert(source.url.clone(), source.clone());
-        self.start_whole(&mut state, source, now, true);
+        state.wholes.insert(key.clone(), source.clone());
+        self.start_whole(&mut state, key, source, now, true);
     }
 
-    fn start_whole(&self, state: &mut State, source: Source, now: Duration, entering: bool) {
+    fn start_whole(&self, state: &mut State, key: String, source: Source, now: Duration, entering: bool) {
         if entering {
             state.ledger.counters.requested += 1;
         }
-        if let Some(job) = state.running.get_mut(&source.url) {
+        if let Some(job) = state.running.get_mut(&key) {
             job.whole = true;
             job.goal.send_replace(usize::MAX);
             if entering {
@@ -319,8 +341,8 @@ impl Prefetcher {
             }
             return;
         }
-        if !state.ledger.needed(&source.url, usize::MAX, now, entering) {
-            state.wholes.remove(&source.url);
+        if !state.ledger.needed(&key, usize::MAX, now, entering) {
+            state.wholes.remove(&key);
             if entering {
                 state.ledger.counters.deduped += 1;
             }
@@ -329,7 +351,7 @@ impl Prefetcher {
         if !entering {
             state.ledger.counters.requested += 1;
         }
-        self.launch(state, source, usize::MAX, true);
+        self.launch(state, key, source, usize::MAX, true);
     }
 
     pub fn forget_windows(&self) {
@@ -364,7 +386,7 @@ impl Prefetcher {
         self.shared.live.load(Ordering::SeqCst)
     }
 
-    fn start(&self, state: &mut State, source: Source, distance: usize, entering: bool, now: Duration, tuning: &Tuning) {
+    fn start(&self, state: &mut State, key: String, source: Source, distance: usize, entering: bool, now: Duration, tuning: &Tuning) {
         if state.busy {
             return;
         }
@@ -372,7 +394,7 @@ impl Prefetcher {
             state.ledger.counters.requested += 1;
         }
         let target = tuning.target(&source, distance);
-        if let Some(job) = state.running.get(&source.url) {
+        if let Some(job) = state.running.get(&key) {
             if !job.whole {
                 job.distance.store(distance, Ordering::SeqCst);
                 job.goal.send_replace(target);
@@ -382,8 +404,8 @@ impl Prefetcher {
             }
             return;
         }
-        let needed = state.ledger.needed(&source.url, target, now, entering);
-        state.ledger.set_distance(&source.url, distance);
+        let needed = state.ledger.needed(&key, target, now, entering);
+        state.ledger.set_distance(&key, distance);
         if !needed {
             if entering {
                 state.ledger.counters.deduped += 1;
@@ -393,24 +415,25 @@ impl Prefetcher {
         if !entering {
             state.ledger.counters.requested += 1;
         }
-        self.launch(state, source, distance, false);
+        self.launch(state, key, source, distance, false);
     }
 
-    fn launch(&self, state: &mut State, source: Source, distance: usize, whole: bool) {
+    fn launch(&self, state: &mut State, key: String, source: Source, distance: usize, whole: bool) {
         let tuning = self.shared.tuning();
         let id = state.next_id;
         state.next_id += 1;
         let (goal, goal_receiver) = watch::channel(tuning.target(&source, distance));
-        let job = Job { id, cancel: Arc::new(Notify::new()), active: Arc::new(AtomicBool::new(false)), goal, distance: Arc::new(AtomicUsize::new(distance)), whole };
-        state.ledger.enqueue(&source.url);
+        let job = Job { id, url: source.url.clone(), cancel: Arc::new(Notify::new()), active: Arc::new(AtomicBool::new(false)), goal, distance: Arc::new(AtomicUsize::new(distance)), whole };
+        state.ledger.enqueue(&key);
         let live = LiveTask::new(&self.shared);
-        let run = Run { source: source.clone(), id, cancel: job.cancel.clone(), active: job.active.clone(), distance: job.distance.clone(), goal: goal_receiver, tuning, whole };
+        let run = Run { key: key.clone(), source, id, cancel: job.cancel.clone(), active: job.active.clone(), distance: job.distance.clone(), goal: goal_receiver, tuning, whole };
         self.shared.handle.spawn(run_job(live, run));
-        state.running.insert(source.url, job);
+        state.running.insert(key, job);
     }
 }
 
 struct Run {
+    key: String,
     source: Source,
     id: u64,
     cancel: Arc<Notify>,
@@ -423,7 +446,7 @@ struct Run {
 
 async fn run_job(live: LiveTask, mut run: Run) {
     let shared = live.0.clone();
-    shared.state().ledger.begin(&run.source.url);
+    shared.state().ledger.begin(&run.key);
     let mut outcome = {
         let cancel = run.cancel.clone();
         tokio::select! {
@@ -435,9 +458,9 @@ async fn run_job(live: LiveTask, mut run: Run) {
     loop {
         {
             let mut state = shared.state();
-            let promoted = state.running.get(&run.source.url).is_some_and(|job| job.id == run.id && job.whole);
+            let promoted = state.running.get(&run.key).is_some_and(|job| job.id == run.id && job.whole);
             if run.whole || !promoted || outcome != Outcome::Loaded {
-                settle(&mut state, &run.source.url, run.id, &outcome);
+                settle(&mut state, &run.key, run.id, &outcome);
                 break;
             }
             run.whole = true;
@@ -459,10 +482,10 @@ async fn load_whole_source(shared: &Arc<Shared>, run: &Run) -> Outcome {
     let outcome = load_whole(shared.loader.as_ref(), &run.source, run.tuning.timeout).await;
     if outcome == Outcome::Loaded {
         let mut state = shared.state();
-        if !state.owns(&run.source.url, run.id) {
+        if !state.owns(&run.key, run.id) {
             return Outcome::Cancelled;
         }
-        state.ledger.record_complete(&run.source.url);
+        state.ledger.record_complete(&run.key);
     }
     outcome
 }
@@ -479,10 +502,10 @@ async fn load(shared: &Arc<Shared>, run: &mut Run) -> Outcome {
     let outcome = load_unit(shared.loader.as_ref(), &run.source, run.tuning.timeout).await;
     if outcome == Outcome::Loaded {
         let mut state = shared.state();
-        if !state.owns(&run.source.url, run.id) {
+        if !state.owns(&run.key, run.id) {
             return Outcome::Cancelled;
         }
-        state.ledger.record_unit(&run.source.url);
+        state.ledger.record_unit(&run.key);
     }
     outcome
 }
@@ -498,7 +521,7 @@ async fn load_chunks(shared: &Arc<Shared>, run: &mut Run) -> Outcome {
     let mut permit: Option<LoadPermit> = None;
     loop {
         let step = {
-            shared.state().ledger.step(&source.url, *run.goal.borrow())
+            shared.state().ledger.step(&run.key, *run.goal.borrow())
         };
         match step {
             NextLoad::Done => return Outcome::Loaded,
@@ -508,16 +531,16 @@ async fn load_chunks(shared: &Arc<Shared>, run: &mut Run) -> Outcome {
                 match read_plan(shared.loader.as_ref(), source, run.tuning.timeout, LeadingChunks::MAX_CHUNKS).await {
                     Ok(plan) => {
                         let mut state = shared.state();
-                        if !state.owns(&source.url, run.id) {
+                        if !state.owns(&run.key, run.id) {
                             return Outcome::Cancelled;
                         }
-                        state.ledger.set_plan(&source.url, plan);
+                        state.ledger.set_plan(&run.key, plan);
                     }
                     Err(outcome) => return outcome,
                 }
             }
             NextLoad::Chunk { index, chunk, init_loaded } => {
-                let room = shared.state().ledger.make_room(&source.url, run.distance.load(Ordering::SeqCst), run.tuning.budget);
+                let room = shared.state().ledger.make_room(&run.key, run.distance.load(Ordering::SeqCst), run.tuning.budget);
                 let Some(evicted) = room else { return Outcome::OverBudget };
                 evict(shared, evicted).await;
                 permit = Some(shared.gate.acquire(permit.take(), &run.distance, index).await);
@@ -540,10 +563,10 @@ async fn load_chunks(shared: &Arc<Shared>, run: &mut Run) -> Outcome {
                 };
                 let (evicted, itself) = {
                     let mut state = shared.state();
-                    if !state.owns(&source.url, run.id) {
+                    if !state.owns(&run.key, run.id) {
                         return Outcome::Cancelled;
                     }
-                    state.ledger.record_chunk(&source.url, index, parts, init, run.tuning.budget)
+                    state.ledger.record_chunk(&run.key, index, parts, init, run.tuning.budget)
                 };
                 evict(shared, evicted).await;
                 if itself {
@@ -564,10 +587,12 @@ async fn load_chunk(
     let mut parts = Vec::new();
     let mut init = None;
     if let Some(url) = chunk.init.as_ref().filter(|_| !init_loaded) {
-        parts.push((url.clone(), bounded(timeout, loader.load(url, &source.headers, Priority::Prefetch)).await?));
+        let progress = Notify::new();
+        parts.push((url.clone(), bounded(timeout, &progress, loader.load(url, &source.headers, Priority::Prefetch, &progress)).await?));
         init = Some(url.clone());
     }
-    parts.push((chunk.segment.clone(), bounded(timeout, loader.load(&chunk.segment, &source.headers, Priority::Prefetch)).await?));
+    let progress = Notify::new();
+    parts.push((chunk.segment.clone(), bounded(timeout, &progress, loader.load(&chunk.segment, &source.headers, Priority::Prefetch, &progress)).await?));
     Ok((parts, init))
 }
 

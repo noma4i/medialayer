@@ -146,8 +146,18 @@ impl FlightSubscription {
         self.wait(|progress| progress.head.is_some() || !progress.is_running()).await
     }
 
-    pub async fn wait_finished(&mut self) -> FlightProgress {
-        self.wait(|progress| !progress.is_running()).await
+    pub async fn wait_finished(&mut self, progress: Option<&Notify>) -> FlightProgress {
+        let mut written = 0;
+        loop {
+            let current = self.snapshot();
+            if current.written > written {
+                written = current.written;
+                if let Some(progress) = progress { progress.notify_one(); }
+            }
+            if !current.is_running() || !self.changed().await {
+                return current;
+            }
+        }
     }
 
     async fn wait(&mut self, ready: impl FnMut(&FlightProgress) -> bool) -> FlightProgress {
