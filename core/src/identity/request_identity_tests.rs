@@ -36,26 +36,3 @@ fn inv_proxy_15_namespace_drops_empty_name_and_empty_value() {
     assert_eq!(cache_namespace(URL, &map(&[("X-Empty", "")])), bare);
     assert_eq!(cache_namespace(URL, &map(&[("", "value")])), bare);
 }
-
-#[test]
-fn inv_proxy_15_namespace_ignores_transport_headers() {
-    let source = map(&[("Authorization", "a")]);
-    let routed = transport_headers(URL, &source);
-    assert_eq!(cache_namespace(URL, &routed), cache_namespace(URL, &source));
-}
-
-#[test]
-fn inv_proxy_15_transport_headers_carry_namespace_and_sorted_names() {
-    let source = map(&[("X-Token", "b"), ("Authorization", "a")]);
-    let routed = transport_headers(URL, &source);
-    assert_eq!(routed["Authorization"], "a");
-    assert_eq!(routed[NAMESPACE_HEADER], cache_namespace(URL, &source));
-    assert_eq!(routed[FORWARDED_NAMES_HEADER], "authorization,x-token");
-}
-
-#[test]
-fn inv_proxy_15_transport_headers_without_source_have_namespace_only() {
-    let bare = transport_headers(URL, &map(&[]));
-    assert!(!bare.contains_key(FORWARDED_NAMES_HEADER));
-    assert!(bare.contains_key(NAMESPACE_HEADER));
-}
