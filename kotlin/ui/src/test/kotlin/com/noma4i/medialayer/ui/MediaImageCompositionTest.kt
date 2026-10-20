@@ -40,7 +40,7 @@ class MediaImageCompositionTest {
 
   @Test
   @OptIn(InternalComposeTracingApi::class)
-  fun sizedImagesComposeOnceInALazyList() {
+  fun inv_image_08_sizedImagesComposeOnceInALazyList() {
     val counts = IntArray(2)
     Composer.setTracer(object : CompositionTracer {
       override fun isTraceInProgress() = true
@@ -70,7 +70,7 @@ class MediaImageCompositionTest {
   }
 
   @Test
-  fun aSizedImageDoesNotCreateASubcomposeLayout() {
+  fun inv_image_07_aSizedImageDoesNotCreateASubcomposeLayout() {
     rule.setContent {
       MediaLayerProvider(layer, loader) {
         Column { MediaImage(SizedImage("https://o.test/sized.png"), Modifier.size(50.dp)) }

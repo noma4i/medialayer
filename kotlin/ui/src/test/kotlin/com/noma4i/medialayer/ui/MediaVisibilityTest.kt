@@ -69,7 +69,7 @@ class MediaVisibilityTest {
   private fun counters() = "started=${started.get()} cancelled=${cancelled.get()} decodes=${decodes.get()} claims=${claims()}"
 
   @Test
-  fun aPageThatLeavesTheViewportReleasesItsKeyCancelsItsRequestAndNeverDecodes() {
+  fun inv_image_09_aPageThatLeavesTheViewportReleasesItsKeyCancelsItsRequestAndNeverDecodes() {
     var x by mutableIntStateOf(0)
     rule.setContent {
       MediaLayerProvider(layer, loader, slots.players) {
