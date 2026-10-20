@@ -5,6 +5,32 @@ use tokio::time::timeout;
 const SHORT: Duration = Duration::from_millis(50);
 
 #[tokio::test]
+async fn inv_proxy_09_limit_changes_preserve_the_configured_playback_reservation() {
+    for (prefetch, playback) in [(Priority::Prefetch, Priority::Playback), (Priority::ImagePrefetch, Priority::Image)] {
+        for initial in [1, 2] {
+            let slots = PrioritySlots::new(initial, 1, 16);
+            slots.set_max(1);
+            let held = slots.acquire(prefetch).await.unwrap();
+            slots.set_max(2);
+            let waiting = slots.acquire(prefetch);
+            tokio::pin!(waiting);
+            assert!(futures_util::poll!(waiting.as_mut()).is_pending(), "prefetch consumed playback reservation");
+            let player = slots.acquire(playback);
+            tokio::pin!(player);
+            let player = match futures_util::poll!(player.as_mut()) {
+                std::task::Poll::Ready(Ok(permit)) => permit,
+                _ => panic!("playback could not take its reservation"),
+            };
+            drop(player);
+            assert!(futures_util::poll!(waiting.as_mut()).is_pending());
+            drop(held);
+            assert!(waiting.await.is_ok());
+            assert_eq!(slots.in_use(), 0);
+        }
+    }
+}
+
+#[tokio::test]
 async fn inv_proxy_10_grants_up_to_max_and_queues_the_rest() {
     let slots = PrioritySlots::new(2, 0, 8);
     let first = slots.acquire(Priority::Playback).await.unwrap();

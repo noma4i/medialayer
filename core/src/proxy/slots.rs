@@ -80,7 +80,7 @@ impl PrioritySlots {
             state: Arc::new(Mutex::new(State {
                 max,
                 max_waiting,
-                reserved: reserved.min(max - 1),
+                reserved,
                 in_use: 0,
                 playback: VecDeque::new(),
                 prefetch: VecDeque::new(),
@@ -91,7 +91,6 @@ impl PrioritySlots {
     pub fn set_max(&self, max: usize) {
         let mut state = lock(&self.state);
         state.max = max.max(1);
-        state.reserved = state.reserved.min(state.max - 1);
         state.hand_out(&self.state);
     }
 
@@ -139,7 +138,7 @@ impl State {
     }
 
     fn prefetch_limit(&self) -> usize {
-        self.max - self.reserved
+        self.max - self.reserved.min(self.max - 1)
     }
 
     fn can_take_now(&self, priority: Priority) -> bool {
