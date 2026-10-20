@@ -179,7 +179,9 @@ impl ProxyShared {
             merged.insert(name.clone(), value.clone());
         }
         let mut forwarded = self.config.policy.forward(&merged);
-        forwarded.retain(|name, _| !name.eq_ignore_ascii_case("range"));
+        forwarded.retain(|name, _| !name.eq_ignore_ascii_case("range") && !name.eq_ignore_ascii_case("accept-encoding"));
+        // Byte ranges and playlist parsing require uncompressed origin bytes.
+        forwarded.insert("Accept-Encoding".to_string(), "identity".to_string());
         forwarded
     }
 

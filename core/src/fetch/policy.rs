@@ -2,13 +2,12 @@ use crate::limits::Limits;
 use std::collections::HashMap;
 use std::time::Duration;
 
-pub const DEFAULT_FORWARDED_HEADERS: [&str; 8] = [
+pub const DEFAULT_FORWARDED_HEADERS: [&str; 7] = [
     "Authorization",
     "Cookie",
     "User-Agent",
     "Connection",
     "Accept",
-    "Accept-Encoding",
     "Accept-Language",
     "Range",
 ];

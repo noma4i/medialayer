@@ -89,8 +89,49 @@ async fn inv_proxy_15_hls_inheritance_replaces_old_headers_but_preserves_explici
             HashMap::from([(name.to_string(), "user-b".to_string())]),
         ] {
             proxy.inner.inherit_headers(&[child.clone(), explicit.clone()], &headers);
-            assert_eq!(proxy.inner.upstream_headers(&child, &HashMap::new()), headers);
-            assert_eq!(proxy.inner.upstream_headers(&explicit, &HashMap::new()), HashMap::new());
+            let identity = HashMap::from([("Accept-Encoding".to_string(), "identity".to_string())]);
+            let mut expected = headers;
+            expected.extend(identity.clone());
+            assert_eq!(proxy.inner.upstream_headers(&child, &HashMap::new()), expected);
+            assert_eq!(proxy.inner.upstream_headers(&explicit, &HashMap::new()), identity);
         }
     }
+}
+
+#[tokio::test]
+async fn inv_proxy_29_client_gzip_requests_identity_and_receives_playlist_text() {
+    let url = "https://o.test/live.m3u8";
+    let playlist = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-ENDLIST\n";
+    let fetcher = Arc::new(MockFetcher::new());
+    fetcher.route(url, Script::ok(playlist));
+    let proxy = Proxy::start(Config::default(), fetcher.clone(), Arc::new(MemoryStore::new())).await.unwrap();
+    let routed = Url::parse(&proxy.url_for(url, &HashMap::new()).unwrap()).unwrap();
+    let reply = super::test_client::request(
+        proxy.port(), "GET", &format!("{}?{}", routed.path(), routed.query().unwrap()),
+        &[("Accept-Encoding", "gzip")],
+    ).await;
+    let requests = fetcher.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(crate::fetch::header_value(&requests[0].headers, "accept-encoding"), Some("identity"));
+    assert_eq!(reply.status, 200);
+    assert_eq!(String::from_utf8(reply.body).unwrap(), playlist);
+}
+
+#[tokio::test]
+async fn inv_proxy_29_custom_forward_headers_cannot_override_identity() {
+    let config = Config {
+        policy: crate::fetch::FetchPolicy::default().with_forwarded_headers(&["Accept-Encoding"]),
+        ..Config::default()
+    };
+    let fetcher = Arc::new(MockFetcher::new());
+    fetcher.route(URL, Script::ok(vec![7; 3000]));
+    let proxy = Proxy::start(config, fetcher.clone(), Arc::new(MemoryStore::new())).await.unwrap();
+    let headers = HashMap::from([
+        ("aCcEpT-EnCoDiNg".to_string(), "gzip".to_string()),
+        ("ACCEPT-ENCODING".to_string(), "br".to_string()),
+    ]);
+    proxy.fetch_into_store(URL, &headers, Priority::Prefetch).await.unwrap();
+    let requests = fetcher.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].headers, HashMap::from([("Accept-Encoding".to_string(), "identity".to_string())]));
 }

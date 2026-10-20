@@ -15,7 +15,7 @@ fn inv_proxy_18_default_timeout_comes_from_limits() {
 }
 
 #[test]
-fn inv_proxy_18_default_whitelist_forwards_the_eight_v3_headers_and_drops_the_rest() {
+fn inv_proxy_18_default_whitelist_forwards_the_seven_v3_headers_and_drops_the_rest() {
     let input = headers(&[
         ("Authorization", "Bearer t"),
         ("cookie", "a=b"),
@@ -29,7 +29,8 @@ fn inv_proxy_18_default_whitelist_forwards_the_eight_v3_headers_and_drops_the_re
         ("Host", "localhost"),
     ]);
     let forwarded = FetchPolicy::default().forward(&input);
-    assert_eq!(forwarded.len(), 8);
+    assert_eq!(forwarded.len(), 7);
+    assert!(!forwarded.contains_key("Accept-Encoding"));
     assert!(!forwarded.contains_key("X-Custom"));
     assert!(!forwarded.contains_key("Host"));
     assert_eq!(forwarded.get("cookie").map(String::as_str), Some("a=b"));
