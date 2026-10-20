@@ -45,6 +45,7 @@ final class Latch: @unchecked Sendable {
 }
 
 final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
+  func cacheKey(url: String, headers: [String: String]) -> String { url }
   private let lock = NSLock()
   private var visibility: [VisibleCall] = []
   var fetchLatch: Latch?
@@ -186,7 +187,7 @@ struct ViewModelTests {
     let places = RecordingPlaces()
     places.imageResult = result
 
-    let request = MediaImagePipeline.request(for: TestImageSource())!
+    let request = MediaImagePipeline.request(places: places, for: TestImageSource())!
 
     _ = await MediaImagePipeline.load(TestImageSource(), request: request, places: places, pipeline: MediaImagePipeline.make(places: places))
 
@@ -212,7 +213,7 @@ struct ViewModelTests {
     let places = RecordingPlaces()
     places.imageResult = .success(pngData(side: 8))
     let source = TestImageSource()
-    let request = MediaImagePipeline.request(for: source)!
+    let request = MediaImagePipeline.request(places: places, for: source)!
     let pipeline = MediaImagePipeline.make(places: places)
 
     let image = await Task {
@@ -229,7 +230,7 @@ struct ViewModelTests {
     let places = RecordingPlaces()
     places.imageResult = .success(pngData(side: 8))
     let source = TestImageSource()
-    let request = MediaImagePipeline.request(for: source)!
+    let request = MediaImagePipeline.request(places: places, for: source)!
     let pipeline = MediaImagePipeline.make(places: places)
     let warm = await MediaImagePipeline.load(source, request: request, places: places, pipeline: pipeline)
     #expect(warm != nil)

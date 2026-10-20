@@ -37,8 +37,8 @@ final class StreamingBody: BodyReader, @unchecked Sendable {
     finished = true
     let waiter = self.waiter
     self.waiter = nil
-    lock.unlock()
     cancel()
+    lock.unlock()
     waiter?.resume(returning: nil)
   }
 
@@ -57,9 +57,11 @@ final class StreamingBody: BodyReader, @unchecked Sendable {
     chunks.append(data)
     buffered += data.count
     let shouldPause = buffered >= limit && !paused
-    if shouldPause { paused = true }
+    if shouldPause {
+      paused = true
+      pause()
+    }
     lock.unlock()
-    if shouldPause { pause() }
   }
 
   func finish(_ error: Error?) {
@@ -85,9 +87,11 @@ final class StreamingBody: BodyReader, @unchecked Sendable {
           let chunk = chunks.removeFirst()
           buffered -= chunk.count
           let shouldResume = paused && buffered < limit / 2
-          if shouldResume { paused = false }
+          if shouldResume {
+            paused = false
+            resume()
+          }
           lock.unlock()
-          if shouldResume { resume() }
           continuation.resume(returning: chunk)
         } else if finished {
           let error = failure
@@ -99,7 +103,7 @@ final class StreamingBody: BodyReader, @unchecked Sendable {
         }
       }
     } onCancel: {
-      cancel()
+      lock.withLock { cancel() }
     }
   }
 }

@@ -135,7 +135,7 @@ async fn inv_ffi_02_opening_reads_nothing_until_the_first_call_awaits() {
     assembled.settings = settings.clone();
     let parts = crate::api::assemble(assembled).await.unwrap();
 
-    let layer = MediaLayer::from_parts(None, Handle::current(), parts, None);
+    let layer = MediaLayer::from_parts(None, Handle::current(), parts, None, Vec::new());
 
     assert_eq!(settings.reads.load(std::sync::atomic::Ordering::SeqCst), 0);
     layer.limits().await;
@@ -226,7 +226,7 @@ fn inv_ffi_02_a_cache_write_reaches_a_stats_subscriber_without_any_controls_call
         let assembled = assembly(dir.path(), Arc::new(MockFetcher::default()), shared::<MockFactory>());
         let parts = crate::api::assemble(assembled).await.unwrap();
         let cache = parts.cache.clone();
-        (MediaLayer::from_parts(None, Handle::current(), parts, None), cache)
+        (MediaLayer::from_parts(None, Handle::current(), parts, None, Vec::new()), cache)
     });
     let totals = Arc::new(Totals(Mutex::new(Vec::new())));
     let _subscription = layer.subscribe_stats(totals.clone());
@@ -312,7 +312,7 @@ fn inv_placeholder_02_a_source_is_cached_by_its_first_block_and_the_placeholder_
     let (layer, cache) = caller.block_on(async {
         let parts = crate::api::assemble(assembly(dir.path(), Arc::new(MockFetcher::default()), shared::<MockFactory>())).await.unwrap();
         let cache = parts.cache.clone();
-        (MediaLayer::from_parts(None, Handle::current(), parts, None), cache)
+        (MediaLayer::from_parts(None, Handle::current(), parts, None, Vec::new()), cache)
     });
     let cached = MediaItem::bare_video("https://o.test/cached.mp4");
     let missing = MediaItem::bare_video("https://o.test/missing.mp4");
@@ -537,7 +537,7 @@ async fn inv_idle_02_stats_are_published_by_change_events_and_only_with_a_subscr
 }
 
 fn failed_layer(runtime: tokio::runtime::Runtime) -> Arc<MediaLayer> {
-    MediaLayer::assembling(runtime, async { Err(MediaError::Unexpected { detail: "loopback bind failed".to_string() }) }, None)
+    MediaLayer::assembling(runtime, async { Err(MediaError::Unexpected { detail: "loopback bind failed".to_string() }) }, None, Vec::new())
 }
 
 #[test]
@@ -570,7 +570,7 @@ fn inv_ffi_04_a_panicking_media_task_is_an_error_not_a_panic_across_the_bridge()
 async fn inv_ffi_09_cancelling_outer_call_drops_inner_work() {
     let dir = tempfile::tempdir().unwrap();
     let parts = crate::api::assemble(assembly(dir.path(), Arc::new(MockFetcher::default()), shared::<MockFactory>())).await.unwrap();
-    let layer = MediaLayer::from_parts(None, Handle::current(), parts, None);
+    let layer = MediaLayer::from_parts(None, Handle::current(), parts, None, Vec::new());
     let (started, running) = tokio::sync::oneshot::channel();
     let (resource, released) = tokio::sync::oneshot::channel::<()>();
     let outer = tokio::spawn(async move {

@@ -44,9 +44,28 @@ private func pixelWidth(_ image: PlatformImage) -> Int? {
 extension GlobalMedia {
   @Suite(.timeLimit(.minutes(1)))
   struct MediaImagePipelineTests {
+    @Test
+    func inv_memory_04_a_system_warning_clears_decoded_images() async throws {
+      let media = try MediaLayer.open(
+        fetcher: URLSessionFetcher(),
+        settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
+        directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+      )
+      _ = await media.stats()
+      let pipeline = MediaImagePipeline.make(places: media)
+      let request = try #require(MediaImagePipeline.request(places: media, for: TestImage(url: "https://o.test/warning.png")))
+      pipeline.cache[request] = ImageContainer(image: try ImageDecoders.Default().decode(pngData(side: 4)).image)
+      #expect(pipeline.cache[request] != nil)
+
+      NotificationCenter.default.post(name: SystemSignalNames.system.memoryWarning, object: nil)
+
+      await eventually("the system warning cleared decoded images") { pipeline.cache[request] == nil }
+      #expect(pipeline.cache[request] == nil)
+    }
+
     @Test(arguments: [(MediaSize?.some(MediaSize(width: 8, height: 8)), 1), (MediaSize?.none, 0)])
     func requestResizesToTheDeclaredSizeAndForwardsHeaders(size: MediaSize?, processors: Int) throws {
-      let request = try #require(MediaImagePipeline.request(for: TestImage(url: "https://o.test/a.png", headers: ["X-Token": "t"], size: size)))
+      let request = try #require(MediaImagePipeline.request(places: RecordingPlaces(), for: TestImage(url: "https://o.test/a.png", headers: ["X-Token": "t"], size: size)))
 
       #expect(request.processors.count == processors)
       #expect(request.urlRequest?.value(forHTTPHeaderField: "X-Token") == "t")
@@ -61,14 +80,14 @@ extension GlobalMedia {
     func inv_image_01_the_request_decodes_at_the_view_size_in_pixels_rounded_up_to_8_and_a_declared_size_wins(
       points: CGSize, scale: CGFloat, declared: MediaSize?, expected: String
     ) throws {
-      let request = MediaImagePipeline.request(for: TestImage(url: "https://o.test/a.png", size: declared), points: points, scale: scale)
+      let request = MediaImagePipeline.request(places: RecordingPlaces(), for: TestImage(url: "https://o.test/a.png", size: declared), points: points, scale: scale)
 
       #expect(resizeIdentifier(request).contains("s=\(expected)"))
     }
 
     @Test
     func inv_image_01_a_view_without_size_or_a_declared_size_has_nothing_to_decode_at() throws {
-      let request = try #require(MediaImagePipeline.request(for: TestImage(url: "https://o.test/a.png"), points: .zero, scale: 3))
+      let request = try #require(MediaImagePipeline.request(places: RecordingPlaces(), for: TestImage(url: "https://o.test/a.png"), points: .zero, scale: 3))
 
       #expect(request.processors.isEmpty)
     }
@@ -82,7 +101,7 @@ extension GlobalMedia {
       let source = TestImage(url: "https://o.test/a.png")
 
       for side in [CGFloat(50), 80] {
-        _ = try await pipeline.image(for: try #require(MediaImagePipeline.request(for: source, points: CGSize(width: side, height: side), scale: 2)))
+        _ = try await pipeline.image(for: try #require(MediaImagePipeline.request(places: places, for: source, points: CGSize(width: side, height: side), scale: 2)))
       }
 
       #expect(places.fetchedURLs == ["https://o.test/a.png", "https://o.test/a.png"])
@@ -91,8 +110,8 @@ extension GlobalMedia {
     @Test
     func inv_image_04_the_content_mode_picks_the_resize_mode_and_keeps_the_decode_size() throws {
       let source = TestImage(url: "https://o.test/a.png")
-      let fill = resizeIdentifier(MediaImagePipeline.request(for: source, points: CGSize(width: 50, height: 50), scale: 3, contentMode: .fill))
-      let fit = resizeIdentifier(MediaImagePipeline.request(for: source, points: CGSize(width: 50, height: 50), scale: 3, contentMode: .fit))
+      let fill = resizeIdentifier(MediaImagePipeline.request(places: RecordingPlaces(), for: source, points: CGSize(width: 50, height: 50), scale: 3, contentMode: .fill))
+      let fit = resizeIdentifier(MediaImagePipeline.request(places: RecordingPlaces(), for: source, points: CGSize(width: 50, height: 50), scale: 3, contentMode: .fit))
 
       #expect(fill.contains("cm=.aspectFill") && fill.contains("s=(152.0, 152.0)"))
       #expect(fit.contains("cm=.aspectFit") && fit.contains("s=(152.0, 152.0)"))
@@ -110,7 +129,7 @@ extension GlobalMedia {
         let view = MediaImage(source).environment(\.mediaContext, context).environment(\.displayScale, 2).frame(width: 50, height: 50)
         return centerPixel(firstFrame(of: view, size: CGSize(width: 50, height: 50)))
       }
-      let request = try #require(MediaImagePipeline.request(for: source, points: CGSize(width: 50, height: 50), scale: 2))
+      let request = try #require(MediaImagePipeline.request(places: places, for: source, points: CGSize(width: 50, height: 50), scale: 2))
 
       let held = Latch()
       places.fetchLatch = held
@@ -119,7 +138,7 @@ extension GlobalMedia {
       _ = try await context.pipeline.image(for: request)
       let warm = shownFirstFrame()
 
-      let larger = try #require(MediaImagePipeline.request(for: source, points: CGSize(width: 80, height: 80), scale: 2))
+      let larger = try #require(MediaImagePipeline.request(places: places, for: source, points: CGSize(width: 80, height: 80), scale: 2))
       #expect(MediaImagePipeline.cachedImage(for: request, in: context.pipeline) != nil)
       #expect(MediaImagePipeline.cachedImage(for: larger, in: context.pipeline) == nil)
       #expect(cold?.last == 0)
@@ -149,7 +168,7 @@ extension GlobalMedia {
         directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
       )
       let pipeline = MediaImagePipeline.make(places: media)
-      let request = try #require(MediaImagePipeline.request(for: TestImage(url: "https://o.test/a.png"), points: CGSize(width: 50, height: 50), scale: 2))
+      let request = try #require(MediaImagePipeline.request(places: media, for: TestImage(url: "https://o.test/a.png"), points: CGSize(width: 50, height: 50), scale: 2))
       pipeline.cache[request] = ImageContainer(image: try ImageDecoders.Default().decode(pngData(side: 4)).image)
       #expect(pipeline.cache[request] != nil)
 
@@ -171,7 +190,7 @@ extension GlobalMedia {
         directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
       )
       let source = TestImage(url: server.url("/image.png"), headers: ["Authorization": "Bearer t"], size: MediaSize(width: 4, height: 4))
-      let request = try #require(MediaImagePipeline.request(for: source))
+      let request = try #require(MediaImagePipeline.request(places: media, for: source))
 
       let first = try await MediaImagePipeline.make(places: media).image(for: request)
       server.stop()

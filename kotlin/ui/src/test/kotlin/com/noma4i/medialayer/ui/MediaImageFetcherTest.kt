@@ -18,6 +18,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import com.noma4i.medialayer.*
+import coil.size.Scale
+import java.nio.file.Files
 
 internal fun pngBytes(width: Int = 64, height: Int = 64): ByteArray {
   val out = ByteArrayOutputStream()
@@ -30,6 +33,32 @@ class MediaImageFetcherTest {
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val requested = CopyOnWriteArrayList<Pair<String, Map<String, String>>>()
   private val loader = mediaImageLoader(context, ImageBytes { url, headers -> requested.add(url to headers); pngBytes() })
+
+  @Test
+  fun selectedHeadersSeparateDecodedImagesAndUnselectedHeadersReuseThem() {
+    val media = MediaLayer.open(OpenConfig(
+      dir = Files.createTempDirectory("image-identity").toString(),
+      fetcher = object : com.noma4i.medialayer.Fetcher {
+        override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("unused origin")
+      },
+      settings = SharedPreferencesSettings(context, "image-identity"),
+      slots = null, device = DeviceMemory(4096u, null, false),
+      defaults = defaultLimits(), pool = defaultPoolSettings(), namespaceHeaders = listOf("Authorization")
+    ))
+    for (pixels in listOf(null, PixelSize(16u, 16u))) {
+      val url = "https://o.test/$pixels.png"
+      for ((account, ignored) in listOf("A" to "1", "B" to "1", "A" to "2")) {
+        val source = object : MediaSource {
+          override val url = url
+          override val kind = Kind.IMAGE
+          override val headers = mapOf("Authorization" to account, "X-Ignored" to ignored)
+        }
+        val request = imageRequest(context, source, pixels, Scale.FILL, media.cacheKey(url, source.headers))
+        assertTrue(load(request) is SuccessResult)
+      }
+      assertEquals(listOf("A", "B"), requested.filter { it.first == url }.map { it.second["Authorization"] })
+    }
+  }
 
   private fun load(request: ImageRequest): ImageResult {
     var result: ImageResult? = null
@@ -45,7 +74,7 @@ class MediaImageFetcherTest {
 
   @Test
   fun imageBytesComeFromTheCoreSourceDecodeAtTheDeclaredSizeAndCoilKeepsNoDisk() {
-    val data = MediaImageData("https://o.test/a.png", mapOf("Authorization" to "token"))
+    val data = MediaImageData("https://o.test/a.png", mapOf("Authorization" to "token"), "https://o.test/a.png")
 
     val result = load(ImageRequest.Builder(context).data(data).size(16, 16).build())
 
@@ -58,7 +87,7 @@ class MediaImageFetcherTest {
 
   @Test
   fun aSecondRequestForTheSameUrlIsServedFromCoilMemoryWithoutTheCore() {
-    val request = ImageRequest.Builder(context).data(MediaImageData("https://o.test/b.png", emptyMap())).size(16, 16).build()
+    val request = ImageRequest.Builder(context).data(MediaImageData("https://o.test/b.png", emptyMap(), "https://o.test/b.png")).size(16, 16).build()
 
     load(request)
     load(request)

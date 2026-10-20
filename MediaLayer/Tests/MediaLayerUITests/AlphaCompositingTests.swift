@@ -47,7 +47,7 @@ private func loadedImage(_ data: Data) async throws -> CGImage {
   let places = RecordingPlaces()
   places.imageResult = .success(data)
   ImageMemory.install(ImageCache(), on: places)
-  let request = try #require(MediaImagePipeline.request(for: AlphaSource(url: "https://o.test/a"), points: CGSize(width: side, height: side), scale: 1, contentMode: .fit))
+  let request = try #require(MediaImagePipeline.request(places: places, for: AlphaSource(url: "https://o.test/a"), points: CGSize(width: side, height: side), scale: 1, contentMode: .fit))
   let image = try await MediaImagePipeline.make(places: places).image(for: request)
   #if canImport(UIKit)
   return try #require(image.cgImage)

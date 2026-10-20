@@ -28,7 +28,7 @@ suspend fun MediaLayer.image(
   if (!currentCoroutineContext().isActive) return null
   val declared = source.size?.let { (w, h) -> PixelSize(w.toUInt(), h.toUInt()) }
   val pixels = declared ?: imagePixelSize(width.toDouble(), height.toDouble(), density.toDouble(), null)
-  val request = imageRequest(context, source, pixels, Scale.FILL).newBuilder().allowHardware(false).build()
+  val request = imageRequest(context, source, pixels, Scale.FILL, cacheKey(source.url, source.headers)).newBuilder().allowHardware(false).build()
   request.memoryCacheKey?.let { imageLoader.memoryCache?.get(it) }?.let { hit ->
     itemState(source.url, MediaState.Ready)
     return hit.bitmap.softwareCopy()

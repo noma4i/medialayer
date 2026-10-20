@@ -31,6 +31,7 @@ internal class RecordingEvents : PlayerEvents(NoHandle) {
 internal data class ToneCall(val url: String, val width: Int, val height: Int, val bytes: Int, val onMain: Boolean)
 
 internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents()) : MediaLayer(NoHandle) {
+  override fun cacheKey(url: String, headers: Map<String, String>): String = url
   val calls = CopyOnWriteArrayList<String>()
   val listeners = CopyOnWriteArrayList<Pair<String, StateListener>>()
   var closed = false

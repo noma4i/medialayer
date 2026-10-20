@@ -65,7 +65,7 @@ private fun FullImage(source: MediaSource, modifier: Modifier, contentScale: Con
     if (!screen.visible) return@BoxWithConstraints
     val pixels = decodePixels(source, constraints, density)
     val scale = contentScale.toScale()
-    val request = remember(source, pixels, scale) { imageRequest(context, source, pixels, scale) }
+    val request = remember(media, source, pixels, scale) { imageRequest(context, source, pixels, scale, media.cacheKey(source.url, source.headers)) }
     var state: MediaState by remember(source.url) { mutableStateOf(MediaState.Idle) }
     val blur by produceState<ImageBitmap?>(null, media, source, state == MediaState.Ready) {
       val placeholder = media.placeholder(source.toItem(), state == MediaState.Ready)
@@ -99,7 +99,7 @@ private fun TileImage(source: MediaSource, modifier: Modifier, contentScale: Con
   val screen = rememberScreenVisibility()
   if (screen.visible) claimTile(source)
   val scale = contentScale.toScale()
-  val request = remember(source, scale) { imageRequest(context, source, source.size?.let { (width, height) -> PixelSize(width.toUInt(), height.toUInt()) }, scale) }
+  val request = remember(media, source, scale) { imageRequest(context, source, source.size?.let { (width, height) -> PixelSize(width.toUInt(), height.toUInt()) }, scale, media.cacheKey(source.url, source.headers)) }
   var state: MediaState by remember(source.url) { mutableStateOf(MediaState.Idle) }
   Box(modifier.then(screen.modifier)) {
     if (!screen.visible) return@Box
@@ -137,14 +137,14 @@ private fun decodePixels(source: MediaSource, constraints: Constraints, density:
   return imagePixelSize(constraints.maxWidth / density.toDouble(), constraints.maxHeight / density.toDouble(), density.toDouble(), null)
 }
 
-internal fun imageRequest(context: Context, source: MediaSource, pixels: PixelSize?, scale: Scale): ImageRequest =
+internal fun imageRequest(context: Context, source: MediaSource, pixels: PixelSize?, scale: Scale, cacheKey: String): ImageRequest =
   ImageRequest.Builder(context)
-    .data(MediaImageData(source.url, source.headers))
+    .data(MediaImageData(source.url, source.headers, cacheKey))
     .scale(scale)
     .apply {
       pixels?.let {
         size(it.width.toInt(), it.height.toInt())
-        memoryCacheKey(MemoryCache.Key("${source.url}|${it.width}x${it.height}|$scale"))
+        memoryCacheKey(MemoryCache.Key("$cacheKey|${it.width}x${it.height}|$scale"))
       }
     }
     .build()

@@ -27,6 +27,7 @@ private struct StickerCell: View {
 }
 
 private final class CountingPlaces: MediaPlaces, @unchecked Sendable {
+  func cacheKey(url: String, headers: [String: String]) -> String { url }
   let inner: any MediaPlaces
   private let lock = NSLock()
   private var reads = 0

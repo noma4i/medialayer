@@ -3,6 +3,7 @@ import Observation
 import SwiftUI
 
 public protocol MediaPlaces: AnyObject, Sendable {
+  func cacheKey(url: String, headers: [String: String]) -> String
   func visible(source: MediaItem, visible: Bool)
   func setPlaying(key: String, playing: Bool)
   func setPeeking(key: String, peeking: Bool)

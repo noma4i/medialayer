@@ -24,17 +24,41 @@ private func gif(frames: Int, side: Int, seed: Int) -> Data {
 
 struct FrameCacheTests {
   @Test
+  func clearingOrCancellingADecodeRejectsItsLateResult() async throws {
+    let data = gif(frames: 2, side: 8, seed: 0)
+    let frames = try #require(await AnimatedFrames.load(data, maxPixel: 8))
+    for clear in [true, false] {
+      let started = AsyncStream<Void>.makeStream()
+      let released = AsyncStream<Void>.makeStream()
+      let cache = FrameCache { _, _ in
+        started.continuation.yield(())
+        var release = released.stream.makeAsyncIterator()
+        _ = await release.next()
+        return frames
+      }
+      let pending = Task { await cache.load(identity: "a", data: data, maxPixel: 8) }
+      var begins = started.stream.makeAsyncIterator()
+      _ = await begins.next()
+      if clear { cache.removeAll() } else { pending.cancel() }
+      released.continuation.yield(())
+      _ = await pending.value
+      #expect(cache.bytes == 0)
+      #expect(cache.count == 0)
+    }
+  }
+
+  @Test
   func theSameGifAppearingTwiceIsDecodedOnceAndTheSecondAppearanceGetsTheSameFrames() async throws {
     let cache = FrameCache()
     let data = gif(frames: 30, side: 32, seed: 0)
 
-    let first = try #require(await cache.load(url: "https://o.test/a.gif", data: data, maxPixel: 32))
-    let second = try #require(await cache.load(url: "https://o.test/a.gif", data: data, maxPixel: 32))
+    let first = try #require(await cache.load(identity: "https://o.test/a.gif", data: data, maxPixel: 32))
+    let second = try #require(await cache.load(identity: "https://o.test/a.gif", data: data, maxPixel: 32))
 
     #expect(cache.decodes == 1)
     #expect(second.token == first.token)
     #expect(second.frameCount == 30)
-    _ = try #require(await cache.load(url: "https://o.test/a.gif", data: data, maxPixel: 16))
+    _ = try #require(await cache.load(identity: "https://o.test/a.gif", data: data, maxPixel: 16))
     #expect(cache.decodes == 2)
   }
 
@@ -43,14 +67,14 @@ struct FrameCacheTests {
     let limit = 1 << 20
     let cache = FrameCache(byteLimit: limit)
     for index in 0 ..< 20 {
-      _ = await cache.load(url: "https://o.test/\(index).gif", data: gif(frames: 40, side: 64, seed: index), maxPixel: 64)
+      _ = await cache.load(identity: "https://o.test/\(index).gif", data: gif(frames: 40, side: 64, seed: index), maxPixel: 64)
       #expect(cache.bytes <= limit)
     }
     let decoded = cache.decodes
 
-    _ = await cache.load(url: "https://o.test/19.gif", data: gif(frames: 40, side: 64, seed: 19), maxPixel: 64)
+    _ = await cache.load(identity: "https://o.test/19.gif", data: gif(frames: 40, side: 64, seed: 19), maxPixel: 64)
     #expect(cache.decodes == decoded)
-    _ = await cache.load(url: "https://o.test/0.gif", data: gif(frames: 40, side: 64, seed: 0), maxPixel: 64)
+    _ = await cache.load(identity: "https://o.test/0.gif", data: gif(frames: 40, side: 64, seed: 0), maxPixel: 64)
     #expect(cache.decodes == decoded + 1)
   }
 
@@ -58,7 +82,7 @@ struct FrameCacheTests {
   func aMemoryPressureSignalEmptiesTheCache() async throws {
     let cache = FrameCache()
     let data = gif(frames: 10, side: 32, seed: 0)
-    _ = await cache.load(url: "https://o.test/a.gif", data: data, maxPixel: 32)
+    _ = await cache.load(identity: "https://o.test/a.gif", data: data, maxPixel: 32)
     #expect(cache.count == 1)
 
     ImageMemoryReleaser(cache: ImageCache(), frames: cache).dropMemoryCaches()
@@ -72,8 +96,8 @@ struct FrameCacheTests {
     let cache = FrameCache()
     let data = gif(frames: 120, side: 64, seed: 0)
 
-    async let first = cache.load(url: "https://o.test/a.gif", data: data, maxPixel: 64)
-    async let second = cache.load(url: "https://o.test/a.gif", data: data, maxPixel: 64)
+    async let first = cache.load(identity: "https://o.test/a.gif", data: data, maxPixel: 64)
+    async let second = cache.load(identity: "https://o.test/a.gif", data: data, maxPixel: 64)
     let frames = try await (#require(first), #require(second))
 
     #expect(cache.decodes == 1)
@@ -84,8 +108,8 @@ struct FrameCacheTests {
   func aWaiterThatLeavesDoesNotCancelTheDecodeOfTheOtherWaiter() async throws {
     let cache = FrameCache()
     let data = gif(frames: 1200, side: 64, seed: 0)
-    let leaving = Task { await cache.load(url: "https://o.test/a.gif", data: data, maxPixel: 64) }
-    let staying = Task { await cache.load(url: "https://o.test/a.gif", data: data, maxPixel: 64) }
+    let leaving = Task { await cache.load(identity: "https://o.test/a.gif", data: data, maxPixel: 64) }
+    let staying = Task { await cache.load(identity: "https://o.test/a.gif", data: data, maxPixel: 64) }
     await eventually("the decode started") { cache.decodes > 0 }
 
     leaving.cancel()
@@ -99,14 +123,14 @@ struct FrameCacheTests {
   func whenTheLastWaiterLeavesTheDecodeStopsAndStoresNothing() async throws {
     let cache = FrameCache()
     let data = gif(frames: 1200, side: 64, seed: 0)
-    let only = Task { await cache.load(url: "https://o.test/a.gif", data: data, maxPixel: 64) }
+    let only = Task { await cache.load(identity: "https://o.test/a.gif", data: data, maxPixel: 64) }
     await eventually("the decode started") { cache.decodes > 0 }
 
     only.cancel()
 
     #expect(await only.value == nil)
     #expect(cache.count == 0)
-    #expect(await cache.load(url: "https://o.test/a.gif", data: data, maxPixel: 64) != nil)
+    #expect(await cache.load(identity: "https://o.test/a.gif", data: data, maxPixel: 64) != nil)
     #expect(cache.decodes == 2)
   }
 }

@@ -70,18 +70,19 @@ pub struct MediaLayer {
     handle: Handle,
     runtime: Mutex<Option<Runtime>>,
     assembled: Arc<Deferred<Assembled>>,
+    namespace_headers: Vec<String>,
 }
 
 impl MediaLayer {
-    pub fn from_parts(runtime: Option<Runtime>, handle: Handle, parts: Parts, releaser: Option<Arc<dyn MemoryReleaser>>) -> Arc<MediaLayer> {
-        let layer = MediaLayer::pending(runtime, handle.clone());
+    pub fn from_parts(runtime: Option<Runtime>, handle: Handle, parts: Parts, releaser: Option<Arc<dyn MemoryReleaser>>, namespace_headers: Vec<String>) -> Arc<MediaLayer> {
+        let layer = MediaLayer::pending(runtime, handle.clone(), namespace_headers);
         layer.assembled.install(Arc::new(Assembled::new(&handle, parts, releaser)));
         layer
     }
 
-    pub(crate) fn assembling(runtime: Runtime, assembling: impl Future<Output = Result<Parts, MediaError>> + Send + 'static, releaser: Option<Arc<dyn MemoryReleaser>>) -> Arc<MediaLayer> {
+    pub(crate) fn assembling(runtime: Runtime, assembling: impl Future<Output = Result<Parts, MediaError>> + Send + 'static, releaser: Option<Arc<dyn MemoryReleaser>>, namespace_headers: Vec<String>) -> Arc<MediaLayer> {
         let handle = runtime.handle().clone();
-        let layer = MediaLayer::pending(Some(runtime), handle.clone());
+        let layer = MediaLayer::pending(Some(runtime), handle.clone(), namespace_headers);
         let assembled = layer.assembled.clone();
         handle.clone().spawn(async move {
             match assembling.await {
@@ -92,8 +93,8 @@ impl MediaLayer {
         layer
     }
 
-    fn pending(runtime: Option<Runtime>, handle: Handle) -> Arc<MediaLayer> {
-        Arc::new(MediaLayer { handle, runtime: Mutex::new(runtime), assembled: Deferred::new() })
+    fn pending(runtime: Option<Runtime>, handle: Handle, namespace_headers: Vec<String>) -> Arc<MediaLayer> {
+        Arc::new(MediaLayer { handle, runtime: Mutex::new(runtime), assembled: Deferred::new(), namespace_headers })
     }
 
     fn declare(&self, work: impl FnOnce(&Assembled) + Send + 'static) {
@@ -130,6 +131,7 @@ impl MediaLayer {
             .enable_all()
             .build()
             .map_err(|error| MediaError::Unexpected { detail: error.to_string() })?;
+        let namespace_headers = config.namespace_headers.clone();
         let assembly = Assembly {
             dir: config.dir.into(),
             fetcher: Arc::new(ForeignFetcher::new(config.fetcher, InputLimits::default())),
@@ -149,7 +151,11 @@ impl MediaLayer {
             silent: config.silent,
             watchdog: WatchdogConfig::default(),
         };
-        Ok(MediaLayer::assembling(runtime, assemble(assembly), config.memory_releaser))
+        Ok(MediaLayer::assembling(runtime, assemble(assembly), config.memory_releaser, namespace_headers))
+    }
+
+    pub fn cache_key(&self, url: String, headers: HashMap<String, String>) -> String {
+        crate::identity::namespaced_key(&url, &headers, &self.namespace_headers)
     }
 
     pub async fn limits(&self) -> Limits {

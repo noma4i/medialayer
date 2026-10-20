@@ -4,7 +4,7 @@ MediaLayer reads the colors of a media item once and keeps them with the cached 
 
 | Question | Answer |
 | -------- | ------ |
-| Who analyses the pixels | MediaLayer, from the pixels the platform already decoded. The app passes nothing |
+| Who analyses the pixels | MediaLayer uses decoded image pixels. For video, a separate platform decoder extracts a frame. The app passes nothing |
 | When is a tone ready | After the first load of the source, or at once from the BlurHash of the source |
 | What does a tone hold | An 8 by 12 grid of colors, the average color of the whole frame, the average of a top band, the average of the rest, up to 3 dominant colors |
 | Where is it kept | With the cache entry of the source. It survives a restart and goes away with the entry |

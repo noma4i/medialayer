@@ -15,7 +15,7 @@ struct PlaceholderView: View {
       if let blur { Image(decorative: blur, scale: 1).resizable().scaledToFill() }
       if let cover { Image(platform: cover).resizable().scaledToFill() }
     }
-    .task(id: PlanKey(url: item.url, ready: ready)) {
+    .task(id: PlanKey(url: context.places.cacheKey(url: item.url, headers: item.headers), ready: ready)) {
       plan = await context.places.placeholder(source: item, ready: ready)
       blur = nil
       cover = nil
@@ -33,7 +33,12 @@ struct PlaceholderView: View {
   }
 
   static func loadCover(_ url: String, for item: MediaItem, context: MediaContext) async -> PlatformImage? {
-    guard let address = URL(string: url), let image = try? await context.pipeline.image(for: ImageRequest(url: address)) else { return nil }
+    guard let address = URL(string: url) else { return nil }
+    var urlRequest = URLRequest(url: address)
+    for (name, value) in item.headers { urlRequest.setValue(value, forHTTPHeaderField: name) }
+    var request = ImageRequest(urlRequest: urlRequest)
+    request.imageID = context.places.cacheKey(url: url, headers: item.headers)
+    guard let image = try? await context.pipeline.image(for: request) else { return nil }
 
     ToneFrames.submit(image.toneImage, source: item, places: context.places)
     return image

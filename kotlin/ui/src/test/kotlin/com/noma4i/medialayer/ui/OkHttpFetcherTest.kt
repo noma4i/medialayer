@@ -17,8 +17,47 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.channels.Channel
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody
+import okio.Buffer
+import okio.ForwardingSource
+import okio.buffer
+import java.util.concurrent.atomic.AtomicBoolean
 
 class OkHttpFetcherTest {
+  @Test
+  fun cancellingAfterHeadersBeforeDeliveryClosesTheUndeliveredResponse() = runBlocking {
+    val queued = Channel<Runnable>(Channel.UNLIMITED)
+    val dispatcher = object : CoroutineDispatcher() {
+      override fun dispatch(context: CoroutineContext, block: Runnable) { queued.trySend(block) }
+    }
+    val closed = AtomicBoolean()
+    val body = object : ResponseBody() {
+      private val bytes = object : ForwardingSource(Buffer().writeUtf8("body")) {
+        override fun close() { closed.set(true); super.close() }
+      }.buffer()
+      override fun contentType() = null
+      override fun contentLength() = 4L
+      override fun source() = bytes
+    }
+    val client = OkHttpClient.Builder().addInterceptor { chain ->
+      Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK").body(body).build()
+    }.build()
+    val pending = async(dispatcher, start = CoroutineStart.UNDISPATCHED) {
+      OkHttpFetcher(client).fetch(FetchRequest("https://o.test/body", emptyMap(), null, null))
+    }
+    val delivered = withTimeout(10_000) { queued.receive() }
+    pending.cancel()
+    delivered.run()
+    pending.join()
+    assertTrue(closed.get())
+  }
+
   private suspend fun BodyReader.readAll(): String {
     val out = ByteArrayOutputStream()
     while (true) out.write(nextChunk() ?: break)

@@ -2,7 +2,7 @@ import Foundation
 
 final class FrameCache: @unchecked Sendable {
   struct Key: Hashable {
-    let url: String
+    let identity: String
     let maxPixel: Int
   }
 
@@ -20,22 +20,24 @@ final class FrameCache: @unchecked Sendable {
   }
 
   private let byteLimit: Int
+  private let decode: @Sendable (Data, Int) async -> AnimatedFrames?
   private let lock = NSLock()
   private var entries: [Key: AnimatedFrames] = [:]
   private var recency: [Key] = []
   private var flights: [Key: Flight] = [:]
   private var decodeCount = 0
 
-  init(byteLimit: Int = defaultByteLimit) {
+  init(byteLimit: Int = defaultByteLimit, decode: @escaping @Sendable (Data, Int) async -> AnimatedFrames? = { await AnimatedFrames.load($0, maxPixel: $1) }) {
     self.byteLimit = byteLimit
+    self.decode = decode
   }
 
   var bytes: Int { lock.withLock { entries.values.reduce(0) { $0 + $1.decodedBytes } } }
   var count: Int { lock.withLock { entries.count } }
   var decodes: Int { lock.withLock { decodeCount } }
 
-  func load(url: String, data: Data, maxPixel: Int) async -> AnimatedFrames? {
-    let key = Key(url: url, maxPixel: maxPixel)
+  func load(identity: String, data: Data, maxPixel: Int) async -> AnimatedFrames? {
+    let key = Key(identity: identity, maxPixel: maxPixel)
     switch lock.withLock({ join(key, data: data, maxPixel: maxPixel) }) {
     case let .hit(frames): return frames
     case let .flight(flight): return await withTaskCancellationHandler { await flight.task.value } onCancel: { leave(flight, key) }
@@ -43,10 +45,14 @@ final class FrameCache: @unchecked Sendable {
   }
 
   func removeAll() {
-    lock.withLock {
+    let pending = lock.withLock {
       entries.removeAll()
       recency.removeAll()
+      let pending = Array(flights.values)
+      flights.removeAll()
+      return pending
     }
+    pending.forEach { $0.task.cancel() }
   }
 
   private func join(_ key: Key, data: Data, maxPixel: Int) -> Joined {
@@ -59,12 +65,13 @@ final class FrameCache: @unchecked Sendable {
     decodeCount += 1
     let flight = Flight()
     flight.task = Task {
-      let frames = await AnimatedFrames.load(data, maxPixel: maxPixel)
-      lock.withLock {
-        if flights[key] === flight { flights[key] = nil }
+      let frames = await decode(data, maxPixel)
+      return lock.withLock {
+        guard flights[key] === flight else { return nil }
+        flights[key] = nil
         if let frames { store(frames, for: key) }
+        return frames
       }
-      return frames
     }
     flights[key] = flight
     return .flight(flight)

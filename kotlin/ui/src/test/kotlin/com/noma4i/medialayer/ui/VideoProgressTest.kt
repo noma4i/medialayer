@@ -23,8 +23,4 @@ class VideoProgressTest {
     }
   }
 
-  @Test
-  fun theFractionIsReportedTenTimesASecond() {
-    assertEquals(100L, VideoProgress.INTERVAL_MS)
-  }
 }

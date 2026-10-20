@@ -91,13 +91,13 @@ extension GlobalMedia {
       }
       let duration = try #require(slot.sample().durationMs)
       let audio = try #require(screen.inputs.audio)
-      await slot.player.seek(to: CMTime(value: Int64(duration / 5), timescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero)
+      slot.seek(positionMs: duration / 5)
       await screen.settle()
       #expect(audio.progress > 0)
       NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
       await screen.settle()
       let background = audio.progress
-      await slot.player.seek(to: CMTime(value: Int64(duration * 2 / 5), timescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero)
+      slot.seek(positionMs: duration * 2 / 5)
       await screen.settle(.milliseconds(600))
       #expect(audio.progress == background)
       NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
@@ -106,7 +106,7 @@ extension GlobalMedia {
       screen.scroll.contentOffset = CGPoint(x: 0, y: 500)
       await screen.settle()
       let offscreen = audio.progress
-      await slot.player.seek(to: CMTime(value: Int64(duration * 3 / 5), timescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero)
+      slot.seek(positionMs: duration * 3 / 5)
       await screen.settle(.milliseconds(600))
       #expect(audio.progress == offscreen)
       screen.scroll.contentOffset = .zero

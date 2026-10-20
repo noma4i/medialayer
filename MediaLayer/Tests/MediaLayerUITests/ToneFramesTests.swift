@@ -103,7 +103,7 @@ extension GlobalMedia {
       let media = try openLayer()
       let source = Poster(url: try writePNG(solid(width: 120, height: 80, red: 250, green: 10, blue: 10)))
       let context = MediaContext(places: media)
-      let request = try #require(MediaImagePipeline.request(for: source, points: CGSize(width: 40, height: 40), scale: 2))
+      let request = try #require(MediaImagePipeline.request(places: media, for: source, points: CGSize(width: 40, height: 40), scale: 2))
 
       let container = await MediaImagePipeline.load(source, request: request, places: media, pipeline: context.pipeline)
 

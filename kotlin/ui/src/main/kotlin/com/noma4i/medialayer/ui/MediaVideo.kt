@@ -132,7 +132,7 @@ private fun VideoPlaceholder(source: MediaSource, ready: Boolean, contentScale: 
   val placeholder by produceState<Placeholder>(Placeholder.None, media, source, ready) { value = media.placeholder(source.toItem(), ready) }
   val cover = placeholder as? Placeholder.Cover ?: return
   AsyncImage(
-    model = MediaImageData(cover.url, source.headers),
+    model = MediaImageData(cover.url, source.headers, media.cacheKey(cover.url, source.headers)),
     contentDescription = "cover",
     imageLoader = LocalMediaEnvironment.current.imageLoader,
     contentScale = contentScale,

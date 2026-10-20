@@ -109,7 +109,7 @@ struct AnimatedFramesTests {
     places.imageResult = .success(transparentGif(frames: 3, side: 16))
     ImageMemory.install(ImageCache(), on: places)
     let pipeline = MediaImagePipeline.make(places: places)
-    let request = try #require(MediaImagePipeline.request(for: GifSource(url: "https://o.test/a.gif"), points: CGSize(width: 8, height: 8), scale: 1))
+    let request = try #require(MediaImagePipeline.request(places: places, for: GifSource(url: "https://o.test/a.gif"), points: CGSize(width: 8, height: 8), scale: 1))
 
     let container = try await pipeline.imageTask(with: request).response.container
     let data = try #require(container.data)

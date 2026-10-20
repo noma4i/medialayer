@@ -125,7 +125,7 @@ media.replaceImageWindow("avatar", active = row, pages = rows.map { page -> page
 
 ### Image size and memory
 
-`MediaImage` reads the size of its view and the screen scale and asks the decoder for exactly that many pixels, so a grid never decodes full-size photos. `contentMode` (Swift) and `contentScale` (Kotlin) choose between filling and fitting the view. The decoder keeps decoded images in memory by URL and size. An image that is already there shows in the first frame, without a placeholder. The memory limit is `imageMemoryBytes` of `open` (128 MiB by default). `clear()` and `clear(image)` also empty this memory.
+`MediaImage` reads the size of its view and the screen scale and asks the decoder for exactly that many pixels, so a grid never decodes full-size photos. `contentMode` (Swift) and `contentScale` (Kotlin) choose between filling and fitting the view. The decoder keys memory by the core cache identity, decoded size and content mode. Selected namespace headers separate images, covers and animated frames in memory. An image that is already there shows in the first frame, without a placeholder. The memory limit is `imageMemoryBytes` of `open` (128 MiB by default). `clear()` and `clear(image)` also empty this memory.
 
 ## `audio`
 

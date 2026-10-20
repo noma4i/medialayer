@@ -53,6 +53,7 @@ public enum MediaImagePipeline {
   }
 
   public static func request(
+    places: MediaPlaces,
     for source: some MediaSource,
     url: String? = nil,
     points: CGSize = .zero,
@@ -65,7 +66,9 @@ public enum MediaImagePipeline {
     let processors: [any ImageProcessing] = decodeSize(for: source, points: points, scale: scale).map {
       [ImageProcessors.Resize(size: $0, unit: .pixels, contentMode: contentMode == .fill ? .aspectFill : .aspectFit)]
     } ?? []
-    return ImageRequest(urlRequest: urlRequest, processors: processors)
+    var request = ImageRequest(urlRequest: urlRequest, processors: processors)
+    request.imageID = places.cacheKey(url: address.absoluteString, headers: source.headers)
+    return request
   }
 }
 

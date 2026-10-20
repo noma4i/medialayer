@@ -5,6 +5,7 @@ import Testing
 @testable import MediaLayerUI
 
 private final class PlacesLog: MediaPlaces, @unchecked Sendable {
+  func cacheKey(url: String, headers: [String: String]) -> String { url }
   private let lock = NSLock()
   private var entries: [String] = []
 

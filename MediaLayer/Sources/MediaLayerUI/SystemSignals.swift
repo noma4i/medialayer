@@ -41,7 +41,7 @@ final class SystemSignals {
     self.center = center
     self.onRelease = onRelease
     tokens = [
-      center.addObserver(forName: names.memoryWarning, object: nil, queue: nil) { _ in events.memoryWarning(level: .moderate) },
+      center.addObserver(forName: names.memoryWarning, object: nil, queue: nil) { _ in events.memoryWarning(level: .critical) },
       center.addObserver(forName: names.background, object: nil, queue: nil) { _ in events.background() },
       center.addObserver(forName: names.foreground, object: nil, queue: nil) { _ in events.foreground() }
     ]

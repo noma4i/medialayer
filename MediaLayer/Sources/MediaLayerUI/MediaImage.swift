@@ -3,7 +3,7 @@ import Nuke
 import SwiftUI
 
 struct ImageKey: Equatable {
-  let url: String
+  let identity: String
   let pixels: CGSize?
   let contentMode: ContentMode
 }
@@ -44,30 +44,32 @@ public struct MediaImage<Content: View>: View {
   }
 
   public var body: some View {
-    GeometryReader { geometry in
-      let key = imageKey(points: geometry.size)
-      let shown = shownImage(for: key, points: geometry.size)
-      ZStack {
-        if let context, shown == nil {
-          PlaceholderView(item: source.item, ready: false, context: context)
+    if let context {
+      GeometryReader { geometry in
+        let key = imageKey(points: geometry.size, places: context.places)
+        let shown = shownImage(for: key, points: geometry.size)
+        ZStack {
+          if shown == nil {
+            PlaceholderView(item: source.item, ready: false, context: context)
+          }
+          if let frames = loaded.flatMap({ $0.key == key ? $0.frames : nil }) {
+            AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isPlaying, playbackRate: playbackRate)
+          } else if let shown {
+            Image(platform: shown).resizable().aspectRatio(contentMode: contentMode).transition(.opacity)
+          }
+          content(state)
         }
-        if let frames = loaded.flatMap({ $0.key == key ? $0.frames : nil }) {
-          AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isPlaying, playbackRate: playbackRate)
-        } else if let shown {
-          Image(platform: shown).resizable().aspectRatio(contentMode: contentMode).transition(.opacity)
-        }
-        content(state)
+        .frame(width: geometry.size.width, height: geometry.size.height)
+        .clipped()
+        .task(id: key) { await load(key: key, points: geometry.size) }
+        .task(id: framesJob(for: key)) { [job = framesJob(for: key)] in await decodeFrames(job) }
       }
-      .frame(width: geometry.size.width, height: geometry.size.height)
-      .clipped()
-      .task(id: key) { await load(key: key, points: geometry.size) }
-      .task(id: framesJob(for: key)) { [job = framesJob(for: key)] in await decodeFrames(job) }
+      .background(OnScreenProbe { screen($0) })
+      .task(id: source.url) { await follow() }
+      .onChange(of: source.url) { syncClaim() }
+      .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.background)) { _ in inBackground = true }
+      .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
     }
-    .background(OnScreenProbe { screen($0) })
-    .task(id: source.url) { await follow() }
-    .onChange(of: source.url) { syncClaim() }
-    .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.background)) { _ in inBackground = true }
-    .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
   }
 
   private var isPlaying: Bool { onScreen && !inBackground }
@@ -90,12 +92,13 @@ public struct MediaImage<Content: View>: View {
     }
   }
 
-  private func imageKey(points: CGSize) -> ImageKey {
-    ImageKey(url: source.url, pixels: MediaImagePipeline.decodeSize(for: source, points: points, scale: displayScale), contentMode: contentMode)
+  private func imageKey(points: CGSize, places: MediaPlaces) -> ImageKey {
+    ImageKey(identity: places.cacheKey(url: source.url, headers: source.headers), pixels: MediaImagePipeline.decodeSize(for: source, points: points, scale: displayScale), contentMode: contentMode)
   }
 
   private func request(points: CGSize) -> ImageRequest? {
-    MediaImagePipeline.request(for: source, points: points, scale: displayScale, contentMode: contentMode)
+    guard let context else { return nil }
+    return MediaImagePipeline.request(places: context.places, for: source, points: points, scale: displayScale, contentMode: contentMode)
   }
 
   private func shownImage(for key: ImageKey, points: CGSize) -> PlatformImage? {
@@ -131,7 +134,7 @@ public struct MediaImage<Content: View>: View {
   private func decodeFrames(_ job: FramesJob) async {
     guard job.playing, job.hasGif, let loaded, loaded.key == job.key, loaded.frames == nil, let data = loaded.gif, let pixels = job.key.pixels else { return }
 
-    let frames = await FrameCache.shared.load(url: job.key.url, data: data, maxPixel: Int(max(pixels.width, pixels.height)))
+    let frames = await FrameCache.shared.load(identity: job.key.identity, data: data, maxPixel: Int(max(pixels.width, pixels.height)))
     guard !Task.isCancelled, self.loaded?.key == job.key else { return }
 
     self.loaded?.frames = frames
