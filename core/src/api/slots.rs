@@ -3,7 +3,7 @@ use super::lane::Queue;
 use super::source::PlaybackRoute;
 use crate::pool::Command;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use tokio::runtime::Handle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
@@ -95,7 +95,7 @@ impl SlotCall {
     }
 }
 
-type Player = Arc<Mutex<Option<Arc<dyn PlayerSlot>>>>;
+type Player = Arc<OnceLock<Arc<dyn PlayerSlot>>>;
 
 struct Lane {
     queue: Arc<Queue>,
@@ -120,7 +120,7 @@ impl SlotRunner {
         let mut lanes = self.lanes();
         let lane = lanes.entry(slot).or_insert_with(|| {
             let queue = Arc::new(Queue::default());
-            let player: Player = Arc::new(Mutex::new(None));
+            let player: Player = Arc::new(OnceLock::new());
             let task = self.handle.spawn(run_lane(players, slot, queue.clone(), player.clone()));
             Lane { queue, player, _task: AbortOnDrop::new(task) }
         });
@@ -137,13 +137,13 @@ impl SlotRunner {
 
     pub fn sample_now(&self, slot: usize) -> Option<SlotSample> {
         let player = self.lanes().get(&slot)?.player.clone();
-        let player = player.lock().unwrap_or_else(PoisonError::into_inner).clone()?;
+        let player = player.get()?.clone();
         Some(player.sample())
     }
 
     pub async fn sample(&self, slot: usize) -> Option<SlotSample> {
         let player = self.lanes().get(&slot)?.player.clone();
-        let player = player.lock().unwrap_or_else(PoisonError::into_inner).clone()?;
+        let player = player.get()?.clone();
         tokio::task::spawn_blocking(move || player.sample()).await.ok()
     }
 
@@ -161,9 +161,7 @@ async fn run_lane(players: Arc<dyn PlayerSlotFactory>, slot: usize, queue: Arc<Q
         let players = players.clone();
         let cell = player.clone();
         let _ = tokio::task::spawn_blocking(move || {
-            let mut held = cell.lock().unwrap_or_else(PoisonError::into_inner);
-            let current = held.get_or_insert_with(|| players.create(slot as u32)).clone();
-            drop(held);
+            let current = cell.get_or_init(|| players.create(slot as u32));
             call.apply(current.as_ref());
         })
         .await;

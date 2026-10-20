@@ -88,3 +88,36 @@ async fn inv_api_01_without_a_factory_commands_are_dropped_and_no_sample_exists(
 
     assert_eq!(runner.sample(0).await, None);
 }
+
+#[tokio::test]
+async fn inv_api_33_sample_does_not_wait_for_create() {
+    struct Creating {
+        entered: std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+        release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+    impl PlayerSlotFactory for Creating {
+        fn create(&self, _slot: u32) -> Arc<dyn PlayerSlot> {
+            self.entered.lock().unwrap().take().unwrap().send(()).unwrap();
+            self.release.lock().unwrap().recv().unwrap();
+            MockFactory::default().create(0)
+        }
+    }
+    for asynchronous in [false, true] {
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let factory = Arc::new(Creating { entered: std::sync::Mutex::new(Some(entered)), release: std::sync::Mutex::new(wait) });
+        let runner = Arc::new(SlotRunner::new(Handle::current(), Some(factory)));
+        runner.send(0, SlotCall::Play);
+        started.await.unwrap();
+        let (sampled, answer) = std::sync::mpsc::channel();
+        let handle = Handle::current();
+        let sampling = std::thread::spawn(move || {
+            let sample = if asynchronous { handle.block_on(runner.sample(0)) } else { runner.sample_now(0) };
+            sampled.send(sample).unwrap();
+        });
+        let result = answer.recv_timeout(std::time::Duration::from_secs(1));
+        release.send(()).unwrap();
+        sampling.join().unwrap();
+        assert_eq!(result, Ok(None), "sample waited for create, async={asynchronous}");
+    }
+}

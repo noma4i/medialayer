@@ -66,18 +66,35 @@ class ExoPlayerSlotTest {
   fun releaseEverything() { factories.forEach { it.release() }; idle() }
 
   @Test
-  fun commandsFromAnyThreadRunOnTheMainThreadAfterThePostedWork() {
+  fun inv_api_33_sample_does_not_wait_for_create() {
     var sourceBuiltOnMain: Boolean? = null
-    val factory = factory().also { it.mediaSourceFor = { sourceBuiltOnMain = Looper.myLooper() == Looper.getMainLooper(); FakeMediaSource() } }
-    val slot = factory.create(0u)
-
-    thread { slot.load("k", route); slot.play() }.join()
-
-    assertNull(slot.player)
-    assertNull(sourceBuiltOnMain)
-    idle()
-    assertEquals(true, sourceBuiltOnMain)
-    assertTrue(slot.player!!.playWhenReady)
+    val factory = factory().also {
+      it.mediaSourceFor = {
+        sourceBuiltOnMain = Looper.myLooper() == Looper.getMainLooper()
+        FakeMediaSource()
+      }
+    }
+    val worker = java.util.concurrent.Executors.newSingleThreadExecutor()
+    try {
+      val slot = worker.submit<ExoPlayerSlot> {
+        factory.create(0u).also {
+          it.load("k", route)
+          it.play()
+          assertNull(it.player)
+          assertNull(sourceBuiltOnMain)
+          assertEquals(0uL, it.sample().positionMs)
+        }
+      }.get(3, java.util.concurrent.TimeUnit.SECONDS)
+      idle()
+      assertEquals(true, sourceBuiltOnMain)
+      assertTrue(slot.player!!.playWhenReady)
+      worker.submit {
+        assertEquals(0uL, slot.sample().positionMs)
+        assertTrue(slot.sample().isLooping)
+      }.get(3, java.util.concurrent.TimeUnit.SECONDS)
+    } finally {
+      worker.shutdownNow()
+    }
   }
 
   @Test

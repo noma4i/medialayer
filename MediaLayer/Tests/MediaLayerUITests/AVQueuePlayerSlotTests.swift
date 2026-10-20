@@ -259,6 +259,18 @@ struct AVQueuePlayerSlotTests {
     slot.seek(positionMs: 300)
 
     await eventually("sample() reports the sought position") { slot.sample().positionMs >= 290 }
+    slot.seek(positionMs: 0)
+    await eventually("sample() reports the rewind") { slot.sample().positionMs < 50 }
+    slot.play()
+    await eventually("sample() advances between player events") { slot.sample().positionMs >= 80 }
+    slot.pause()
+    await drainMain()
+    let paused = slot.sample().positionMs
+    try? await Task.sleep(for: .milliseconds(60))
+    #expect(slot.sample().positionMs == paused)
+    slot.setRate(rate: 2)
+    slot.play()
+    await eventually("sample() advances after a rate change") { slot.sample().positionMs > paused + 40 }
   }
 
   @Test(arguments: [

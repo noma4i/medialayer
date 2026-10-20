@@ -17,6 +17,8 @@ UNBUILT: deferred work. Eviction starts right after a write that reaches the bud
 
 Throwing Swift calls and Kotlin suspend calls forward cancellation to Rust. Non-throwing Swift calls finish normally when their task is cancelled.
 
+Native player creation and access run on the main thread. Slot samples use the latest player events and elapsed time without a periodic observer. Sampling never waits for player creation.
+
 ### Swift
 
 ```swift

@@ -39,8 +39,14 @@ public final class AVQueuePlayerSlotFactory: PlayerSlotFactory, @unchecked Senda
 
 public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable {
   public let id: UInt32
-  public let player = AVQueuePlayer()
-  public let layer: AVPlayerLayer
+  public private(set) lazy var player: AVQueuePlayer = {
+    dispatchPrecondition(condition: .onQueue(.main))
+    return AVQueuePlayer()
+  }()
+  public private(set) lazy var layer: AVPlayerLayer = {
+    dispatchPrecondition(condition: .onQueue(.main))
+    return AVPlayerLayer(player: player)
+  }()
 
   private let events: PlayerEventsLink
   private let audio: MediaAudioSession?
@@ -48,6 +54,8 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private let hosts: HostLayers
   private let sampleLock = NSLock()
   private var cachedSample = SlotSample(positionMs: 0, durationMs: nil, isLooping: false, viewAttached: false, frameRendered: false)
+  private var sampledAt: TimeInterval = 0
+  private var sampledRate: Double = 0
 
   private var key: String?
   private var hostKey: String?
@@ -73,24 +81,27 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     self.audio = audio
     self.slots = slots
     self.hosts = hosts
-    layer = AVPlayerLayer(player: player)
     super.init()
-    player.isMuted = startMuted
-    player.automaticallyWaitsToMinimizeStalling = true
-    observeAudibility()
-    layer.videoGravity = .resizeAspectFill
-    traceStart()
+    onMain { [self] in
+      player.isMuted = startMuted
+      player.automaticallyWaitsToMinimizeStalling = true
+      observeAudibility()
+      layer.videoGravity = .resizeAspectFill
+      traceStart()
+    }
   }
 
   deinit {
     audio?.setAudible(slot: id, false)
     let player = player
-    let observations = observations
+    let layer = layer
+    let observations = observations + audibleObservations + traceObservations + [currentItemObservation].compactMap { $0 }
     let tokens = notificationTokens
     DispatchQueue.main.async {
       observations.forEach { $0.invalidate() }
       tokens.forEach { NotificationCenter.default.removeObserver($0) }
       player.removeAllItems()
+      layer.removeFromSuperlayer()
     }
   }
 
@@ -170,14 +181,21 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   }
 
   public func sample() -> SlotSample {
-    var sample = sampleLock.withLock { cachedSample }
-    if player.currentItem != nil { sample.positionMs = positionMs() }
-    return sample
+    sampleLock.withLock {
+      var sample = cachedSample
+      if sampledRate > 0 {
+        sample.positionMs += UInt64(max(0, ProcessInfo.processInfo.systemUptime - sampledAt) * sampledRate * 1000)
+        if let duration = sample.durationMs { sample.positionMs = min(sample.positionMs, duration) }
+      }
+      return sample
+    }
   }
 
   public func seek(positionMs: UInt64) {
     onMain { [self] in
-      player.seek(to: CMTime(value: CMTimeValue(positionMs), timescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero)
+      player.seek(to: CMTime(value: CMTimeValue(positionMs), timescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+        self?.onMain { [weak self] in self?.refreshSample() }
+      }
     }
   }
 
@@ -233,8 +251,8 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
       visualReadySent = false
     }
     observations = [
-      item.observe(\.status, options: [.initial]) { [weak self] item, _ in self?.statusChanged(item) },
-      layer.observe(\.isReadyForDisplay, options: [.initial]) { [weak self] _, _ in self?.displayChanged() }
+      item.observe(\.status, options: [.initial]) { [weak self] item, _ in self?.onMain { [weak self] in self?.statusChanged(item) } },
+      layer.observe(\.isReadyForDisplay, options: [.initial]) { [weak self] _, _ in self?.onMain { [weak self] in self?.displayChanged() } }
     ]
     let center = NotificationCenter.default
     notificationTokens = [
@@ -260,12 +278,15 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
 
   private func observeAudibility() {
     let report: (AVPlayer) -> Void = { [weak self] player in
-      guard let self else { return }
-
-      audio?.setAudible(slot: id, !player.isMuted && player.timeControlStatus != .paused && player.currentItem != nil)
+      self?.onMain { [weak self] in
+        guard let self else { return }
+        refreshSample()
+        audio?.setAudible(slot: id, !player.isMuted && player.timeControlStatus != .paused && player.currentItem != nil)
+      }
     }
     audibleObservations = [
       player.observe(\.isMuted, options: [.new]) { player, _ in report(player) },
+      player.observe(\.rate, options: [.new]) { player, _ in report(player) },
       player.observe(\.timeControlStatus, options: [.new]) { player, _ in report(player) },
       player.observe(\.currentItem, options: [.new]) { player, _ in report(player) }
     ]
@@ -274,6 +295,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private func itemEnded(_ finished: AVPlayerItem) {
     guard finished === item, !looping else { return }
 
+    refreshSample()
     events.with { $0.ended(slot: id) }
   }
 
@@ -283,6 +305,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     item = next
     observe(next, resetState: false)
     queueNextRound()
+    refreshSample()
   }
 
   private func queueNextRound() {
@@ -390,7 +413,12 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
       viewAttached: layer.superlayer != nil,
       frameRendered: item != nil && layer.isReadyForDisplay
     )
-    sampleLock.withLock { cachedSample = sample }
+    let rate = player.timeControlStatus == .playing ? Double(player.rate) : 0
+    sampleLock.withLock {
+      cachedSample = sample
+      sampledAt = ProcessInfo.processInfo.systemUptime
+      sampledRate = rate
+    }
   }
 
   private static func httpStatus(of item: AVPlayerItem) -> Int32 {
