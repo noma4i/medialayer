@@ -185,7 +185,7 @@ async fn fill(args: &Args) {
             files += 1;
         }
     }
-    cache.flush().await;
+    cache.flush().await.unwrap();
     println!("FILL dir={} bytes={total} files={files} video_share={:.2} took={:.1}s", dir.display(), video_bytes as f64 / total as f64, started.elapsed().as_secs_f64());
 }
 
@@ -281,7 +281,7 @@ async fn read_cache(args: &Args) {
             let _ = writer.await;
         }
         let flushed = Instant::now();
-        cache.flush().await;
+        cache.flush().await.unwrap();
         let stats = cache.stats().await;
         let (_, first_median, _) = stats_of(&mut firsts);
         let (_, whole_median, _) = stats_of(&mut wholes);
@@ -336,7 +336,7 @@ async fn touch_all(args: &Args) {
     }
     let touched = started.elapsed();
     let flushed = Instant::now();
-    cache.flush().await;
+    cache.flush().await.unwrap();
     println!(
         "RESULT ready_ms={:.1} entries={total} gone={gone} gib={:.2} touch_all_ms={:.0} touch_ms_per_gib={:.0} flush_ms={:.1}",
         took.as_secs_f64() * 1e3,

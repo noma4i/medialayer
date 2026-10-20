@@ -16,7 +16,7 @@ async fn inv_tone_08_a_stored_tone_survives_a_restart_and_leaves_with_its_entry(
     assert!(cache.set_tone("image-key", tone_of(10)));
     assert!(!cache.set_tone("missing-key", tone_of(10)));
     assert_eq!(cache.tone("image-key"), Some(tone_of(10)));
-    cache.flush().await;
+    cache.flush().await.unwrap();
     drop(cache);
 
     let reopened = Cache::open(dir.path(), Limits::default());

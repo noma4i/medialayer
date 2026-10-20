@@ -25,6 +25,7 @@ struct Held {
 struct Entry {
     stamp: Duration,
     loaded: usize,
+    complete: bool,
     plan: Option<Arc<Plan>>,
     held: Vec<Held>,
     inits: HashSet<String>,
@@ -35,7 +36,7 @@ struct Entry {
 
 impl Entry {
     fn new(now: Duration) -> Entry {
-        Entry { stamp: now, loaded: 0, plan: None, held: Vec::new(), inits: HashSet::new(), played: false, distance: usize::MAX, blocked_at: None }
+        Entry { stamp: now, loaded: 0, complete: false, plan: None, held: Vec::new(), inits: HashSet::new(), played: false, distance: usize::MAX, blocked_at: None }
     }
 
     fn held_bytes(&self) -> u64 {
@@ -97,10 +98,11 @@ impl PrefetchLedger {
 
     pub fn forget_loaded(&mut self) {
         for entry in self.entries.values_mut() {
-            entry.loaded = 0;
-            entry.inits.clear();
-            entry.blocked_at = None;
+            *entry = Entry::new(entry.stamp);
         }
+        self.held_bytes = 0;
+        self.chunk_estimate = 0;
+        self.epoch += 1;
     }
 
     pub fn dedupe_count(&self) -> usize {
@@ -120,10 +122,10 @@ impl PrefetchLedger {
         let epoch = self.epoch;
         let entry = self.entries.entry(key.to_string()).or_insert_with(|| Entry::new(now));
         if entering && now.saturating_sub(entry.stamp) >= window {
-            entry.loaded = 0;
-            entry.blocked_at = None;
+            self.held_bytes -= entry.held_bytes();
+            *entry = Entry::new(now);
         }
-        let complete = entry.plan.as_ref().is_some_and(|plan| plan.chunks.len() <= entry.loaded);
+        let complete = entry.complete || (target != usize::MAX && entry.plan.as_ref().is_some_and(|plan| plan.chunks.len() <= entry.loaded));
         let blocked = entry.blocked_at == Some(epoch);
         let needed = entry.loaded < target && !complete && !blocked;
         if needed {
@@ -136,6 +138,12 @@ impl PrefetchLedger {
     pub(super) fn record_unit(&mut self, key: &str) {
         if let Some(entry) = self.entries.get_mut(key) {
             entry.loaded = entry.loaded.max(1);
+        }
+    }
+
+    pub(super) fn record_complete(&mut self, key: &str) {
+        if let Some(entry) = self.entries.get_mut(key) {
+            entry.complete = true;
         }
     }
 

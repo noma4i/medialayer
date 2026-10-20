@@ -24,6 +24,7 @@ pub trait Loader: Send + Sync {
     ) -> Result<u64, LoadError>;
     async fn keep(&self, _url: &str, _headers: &HashMap<String, String>) {}
     async fn stored(&self, url: &str, headers: &HashMap<String, String>) -> Option<Vec<u8>>;
+    async fn stored_len(&self, url: &str, headers: &HashMap<String, String>) -> Option<u64>;
     async fn evict(&self, url: &str, headers: &HashMap<String, String>);
 }
 
@@ -69,6 +70,10 @@ impl Loader for ProxyLoader {
 
     async fn stored(&self, url: &str, headers: &HashMap<String, String>) -> Option<Vec<u8>> {
         self.proxy.read_stored(url, headers, InputLimits::default().playlist_bytes).await
+    }
+
+    async fn stored_len(&self, url: &str, headers: &HashMap<String, String>) -> Option<u64> {
+        self.proxy.stored_len(url, headers).await
     }
 
     async fn evict(&self, url: &str, headers: &HashMap<String, String>) {

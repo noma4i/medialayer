@@ -10,6 +10,7 @@ pub struct Slot {
     pub entry: Entry,
     pub readers: u32,
     pub verified: bool,
+    pub kept: bool,
 }
 
 pub struct Item {
@@ -28,7 +29,6 @@ pub struct State {
     entries: BTreeMap<String, Slot>,
     per_kind: [KindStats; 3],
     writing: HashMap<String, u32>,
-    kept: HashSet<String>,
 }
 
 impl State {
@@ -42,16 +42,19 @@ impl State {
             entries: BTreeMap::new(),
             per_kind: [KindStats::default(); 3],
             writing: HashMap::new(),
-            kept: HashSet::new(),
         }
     }
 
     pub fn keep(&mut self, key: &str) {
-        self.kept.insert(key.to_string());
+        for slot in self.entries.values_mut() {
+            if slot.key == key || slot.key.strip_prefix(key).is_some_and(|rest| rest.starts_with('#')) {
+                slot.kept = true;
+            }
+        }
     }
 
     pub fn is_kept(&self, key: &str) -> bool {
-        self.kept.iter().any(|base| key == base || key.strip_prefix(base.as_str()).is_some_and(|rest| rest.starts_with('#')))
+        self.entries.get(&super::naming::file_name(key)).is_some_and(|slot| slot.kept)
     }
 
     pub fn contains(&self, name: &str) -> bool {
@@ -74,12 +77,12 @@ impl State {
     }
 
     pub fn insert(&mut self, name: String, key: String, entry: Entry, verified: bool) {
-        let readers = self.take(&name).map_or(0, |slot| slot.readers);
+        let (readers, kept) = self.take(&name).map_or((0, false), |slot| (slot.readers, slot.kept));
         self.used += entry.size;
         let stats = &mut self.per_kind[entry.kind.index()];
         stats.bytes += entry.size;
         stats.files += 1;
-        self.entries.insert(name, Slot { key, entry, readers, verified });
+        self.entries.insert(name, Slot { key, entry, readers, verified, kept });
     }
 
     pub fn take(&mut self, name: &str) -> Option<Slot> {

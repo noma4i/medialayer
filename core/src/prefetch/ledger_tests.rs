@@ -12,8 +12,34 @@ fn ledger() -> PrefetchLedger {
     PrefetchLedger::new(secs(60), 500)
 }
 
+#[test]
+fn inv_strategy_12_reset_and_expiry_discard_the_hls_plan_and_accounting() {
+    for expire in [false, true] {
+        let mut ledger = ledger();
+        assert!(ledger.needed("a", 1, secs(100), true));
+        ledger.set_plan("a", plan(3));
+        ledger.record_chunk("a", 0, vec![("c0".into(), 10)], None, u64::MAX);
+        if expire {
+            assert!(ledger.needed("a", 1, secs(160), true));
+        } else {
+            ledger.forget_loaded();
+        }
+        assert_eq!(ledger.step("a", 1), super::ledger::NextLoad::NeedPlan);
+        assert_eq!(ledger.held_bytes(), 0);
+    }
+}
+
+#[test]
+fn inv_strategy_01_a_finished_leading_plan_does_not_imply_a_whole_source() {
+    let mut ledger = ledger();
+    assert!(ledger.needed("a", 1, secs(100), true));
+    ledger.set_plan("a", plan(1));
+    ledger.record_chunk("a", 0, vec![("c0".into(), 10)], None, u64::MAX);
+    assert!(ledger.needed("a", usize::MAX, secs(101), true), "leading plan suppressed whole");
+}
+
 fn plan(count: usize) -> Plan {
-    Plan { chunks: (0..count).map(|index| Chunk { segment: format!("c{index}"), init: None }).collect(), headers: HashMap::new() }
+    Plan { playlists: Vec::new(), chunks: (0..count).map(|index| Chunk { segment: format!("c{index}"), init: None }).collect(), headers: HashMap::new() }
 }
 
 fn load_unit(ledger: &mut PrefetchLedger, key: &str, now: Duration) -> bool {

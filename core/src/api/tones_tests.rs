@@ -110,7 +110,7 @@ async fn inv_tone_10_the_analysis_runs_once_per_key_however_many_times_the_pixel
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     assert_eq!(rig.tones.analyses(), 2);
-    rig.cache.flush().await;
+    rig.cache.flush().await.unwrap();
     let again = Tones::new(Handle::current(), Arc::new(CacheTones::new(rig.cache.clone(), Arc::new(|url, _| url.to_string()))), 8);
     again.submit(first.clone(), 4, 4, pixels(90));
     tokio::time::sleep(Duration::from_millis(100)).await;

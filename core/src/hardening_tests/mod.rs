@@ -134,6 +134,7 @@ impl Loader for HangingLoader {
         self.load(url, headers, priority).await
     }
     async fn stored(&self, _: &str, _: &HashMap<String,String>) -> Option<Vec<u8>> { None }
+    async fn stored_len(&self, _: &str, _: &HashMap<String,String>) -> Option<u64> { None }
     async fn evict(&self, _: &str, _: &HashMap<String,String>) {}
 }
 

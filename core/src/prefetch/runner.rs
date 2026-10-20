@@ -50,6 +50,10 @@ struct State {
 }
 
 impl State {
+    fn owns(&self, key: &str, id: u64) -> bool {
+        self.running.get(key).is_some_and(|job| job.id == id)
+    }
+
     fn cancel_job(&mut self, key: &str) {
         let Some(job) = self.running.remove(key) else { return };
         self.ledger.cancel(key, job.active.load(Ordering::SeqCst));
@@ -73,6 +77,7 @@ struct Tuning {
     leading: LeadingChunks,
     budget: u64,
     timeout: Duration,
+    max_entries: usize,
 }
 
 impl Tuning {
@@ -82,6 +87,7 @@ impl Tuning {
             leading: limits.leading_chunks,
             budget: u64::from(limits.prefetch_budget_mib) * MIB,
             timeout: Duration::from_secs(limits.timeout_seconds.into()),
+            max_entries: limits.dedupe_max_entries as usize,
         }
     }
 
@@ -216,7 +222,7 @@ impl Prefetcher {
             state.windows.insert(key, wanted.clone());
         }
         for job in &diff.to_cancel {
-            if !state.is_wanted(&job.key) {
+            if !state.is_wanted(&job.key) && !state.running.get(&job.key).is_some_and(|job| job.whole) {
                 state.cancel_job(&job.key);
                 state.ledger.set_distance(&job.key, usize::MAX);
             }
@@ -259,7 +265,12 @@ impl Prefetcher {
     }
 
     pub fn forget_loaded(&self) {
-        self.shared.state().ledger.forget_loaded();
+        let mut state = self.shared.state();
+        let keys: Vec<String> = state.running.keys().cloned().collect();
+        for key in keys {
+            state.cancel_job(&key);
+        }
+        state.ledger.forget_loaded();
     }
 
     pub fn stop_all(&self) {
@@ -286,6 +297,12 @@ impl Prefetcher {
         }
         let now = Duration::from_millis(self.shared.clock.now_ms());
         let mut state = self.shared.state();
+        if !state.wholes.contains_key(&source.url) && state.wholes.len() >= self.shared.tuning().max_entries {
+            state.ledger.counters.requested += 1;
+            state.ledger.counters.failed += 1;
+            let _ = self.shared.events.send(Settled { url: source.url, outcome: Outcome::Failed("whole queue is full".into()) });
+            return;
+        }
         state.wholes.insert(source.url.clone(), source.clone());
         self.start_whole(&mut state, source, now, true);
     }
@@ -294,7 +311,16 @@ impl Prefetcher {
         if entering {
             state.ledger.counters.requested += 1;
         }
-        if state.running.contains_key(&source.url) || !state.ledger.needed(&source.url, 1, now, entering) {
+        if let Some(job) = state.running.get_mut(&source.url) {
+            job.whole = true;
+            job.goal.send_replace(usize::MAX);
+            if entering {
+                state.ledger.counters.deduped += 1;
+            }
+            return;
+        }
+        if !state.ledger.needed(&source.url, usize::MAX, now, entering) {
+            state.wholes.remove(&source.url);
             if entering {
                 state.ledger.counters.deduped += 1;
             }
@@ -347,8 +373,10 @@ impl Prefetcher {
         }
         let target = tuning.target(&source, distance);
         if let Some(job) = state.running.get(&source.url) {
-            job.distance.store(distance, Ordering::SeqCst);
-            job.goal.send_replace(target);
+            if !job.whole {
+                job.distance.store(distance, Ordering::SeqCst);
+                job.goal.send_replace(target);
+            }
             if entering {
                 state.ledger.counters.deduped += 1;
             }
@@ -395,10 +423,8 @@ struct Run {
 
 async fn run_job(live: LiveTask, mut run: Run) {
     let shared = live.0.clone();
-    let flagged = shared.state().ledger.begin(&run.source.url);
-    let outcome = if flagged {
-        Outcome::Cancelled
-    } else {
+    shared.state().ledger.begin(&run.source.url);
+    let mut outcome = {
         let cancel = run.cancel.clone();
         tokio::select! {
             biased;
@@ -406,7 +432,22 @@ async fn run_job(live: LiveTask, mut run: Run) {
             outcome = load(&shared, &mut run) => outcome,
         }
     };
-    settle(&shared, &run.source.url, run.id, &outcome);
+    loop {
+        {
+            let mut state = shared.state();
+            let promoted = state.running.get(&run.source.url).is_some_and(|job| job.id == run.id && job.whole);
+            if run.whole || !promoted || outcome != Outcome::Loaded {
+                settle(&mut state, &run.source.url, run.id, &outcome);
+                break;
+            }
+            run.whole = true;
+        }
+        outcome = tokio::select! {
+            biased;
+            _ = run.cancel.notified() => Outcome::Cancelled,
+            outcome = load_whole_source(&shared, &run) => outcome,
+        };
+    }
     drop(live);
     let _ = shared.events.send(Settled { url: run.source.url, outcome });
 }
@@ -417,7 +458,11 @@ async fn load_whole_source(shared: &Arc<Shared>, run: &Run) -> Outcome {
     mark_started(shared, &run.active);
     let outcome = load_whole(shared.loader.as_ref(), &run.source, run.tuning.timeout).await;
     if outcome == Outcome::Loaded {
-        shared.state().ledger.record_unit(&run.source.url);
+        let mut state = shared.state();
+        if !state.owns(&run.source.url, run.id) {
+            return Outcome::Cancelled;
+        }
+        state.ledger.record_complete(&run.source.url);
     }
     outcome
 }
@@ -433,7 +478,11 @@ async fn load(shared: &Arc<Shared>, run: &mut Run) -> Outcome {
     mark_started(shared, &run.active);
     let outcome = load_unit(shared.loader.as_ref(), &run.source, run.tuning.timeout).await;
     if outcome == Outcome::Loaded {
-        shared.state().ledger.record_unit(&run.source.url);
+        let mut state = shared.state();
+        if !state.owns(&run.source.url, run.id) {
+            return Outcome::Cancelled;
+        }
+        state.ledger.record_unit(&run.source.url);
     }
     outcome
 }
@@ -449,12 +498,7 @@ async fn load_chunks(shared: &Arc<Shared>, run: &mut Run) -> Outcome {
     let mut permit: Option<LoadPermit> = None;
     loop {
         let step = {
-            let mut state = shared.state();
-            let step = state.ledger.step(&source.url, *run.goal.borrow());
-            if step == NextLoad::Done {
-                state.finish_job(&source.url, run.id);
-            }
-            step
+            shared.state().ledger.step(&source.url, *run.goal.borrow())
         };
         match step {
             NextLoad::Done => return Outcome::Loaded,
@@ -462,7 +506,13 @@ async fn load_chunks(shared: &Arc<Shared>, run: &mut Run) -> Outcome {
                 permit = Some(shared.gate.acquire(permit.take(), &run.distance, 0).await);
                 mark_started(shared, &run.active);
                 match read_plan(shared.loader.as_ref(), source, run.tuning.timeout, LeadingChunks::MAX_CHUNKS).await {
-                    Ok(plan) => shared.state().ledger.set_plan(&source.url, plan),
+                    Ok(plan) => {
+                        let mut state = shared.state();
+                        if !state.owns(&source.url, run.id) {
+                            return Outcome::Cancelled;
+                        }
+                        state.ledger.set_plan(&source.url, plan);
+                    }
                     Err(outcome) => return outcome,
                 }
             }
@@ -488,7 +538,13 @@ async fn load_chunks(shared: &Arc<Shared>, run: &mut Run) -> Outcome {
                     Ok(loaded) => loaded,
                     Err(outcome) => return outcome,
                 };
-                let (evicted, itself) = shared.state().ledger.record_chunk(&source.url, index, parts, init, run.tuning.budget);
+                let (evicted, itself) = {
+                    let mut state = shared.state();
+                    if !state.owns(&source.url, run.id) {
+                        return Outcome::Cancelled;
+                    }
+                    state.ledger.record_chunk(&source.url, index, parts, init, run.tuning.budget)
+                };
                 evict(shared, evicted).await;
                 if itself {
                     return Outcome::OverBudget;
@@ -523,8 +579,10 @@ async fn evict(shared: &Shared, evicted: Vec<Evicted>) {
     }
 }
 
-fn settle(shared: &Shared, url: &str, id: u64, outcome: &Outcome) {
-    let mut state = shared.state();
+fn settle(state: &mut State, url: &str, id: u64, outcome: &Outcome) {
+    if !state.owns(url, id) {
+        return;
+    }
     match outcome {
         Outcome::Loaded => {
             state.ledger.counters.completed += 1;

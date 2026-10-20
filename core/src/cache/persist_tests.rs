@@ -56,3 +56,35 @@ fn inv_tone_08_a_line_carries_the_tone_and_a_damaged_tone_field_keeps_the_entry_
     let damaged = line.trim_end_matches('\n').rsplit_once('\t').map(|(head, _)| format!("{head}\tzz")).unwrap();
     assert_eq!(decode_line(&damaged), Some(("tone key".to_string(), Entry { tone: None, ..entry })));
 }
+
+#[tokio::test]
+async fn inv_cache_07_failed_index_save_preserves_dirty_state() {
+    use std::sync::atomic::Ordering;
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::open(dir.path(), crate::limits::Limits::default());
+    cache.ready().await;
+    std::fs::create_dir(dir.path().join(super::naming::INDEX_TMP_FILE)).unwrap();
+    cache.inner.dirty.store(false, Ordering::SeqCst);
+    assert!(cache.flush().await.is_err());
+    assert!(cache.inner.dirty.load(Ordering::SeqCst), "failed flush discarded the retry requirement");
+    std::fs::remove_dir(dir.path().join(super::naming::INDEX_TMP_FILE)).unwrap();
+    super::test_support::wait_until(|| dir.path().join(super::naming::INDEX_FILE).is_file()).await;
+    assert!(!cache.inner.dirty.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn inv_strategy_12_clear_and_purge_remove_keep_history() {
+    for purge in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = Cache::open(dir.path(), crate::limits::Limits::default());
+        cache.ready().await;
+        cache.put("clip#0", Kind::Stream, b"data").await.unwrap();
+        cache.keep("clip");
+        if purge {
+            cache.purge_prefix("clip").await;
+        } else {
+            cache.clear(None).await;
+        }
+        assert!(!cache.inner.state().is_kept("clip#0"), "deleted source retained keep history");
+    }
+}

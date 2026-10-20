@@ -10,7 +10,7 @@ fn roomy() -> crate::limits::Limits {
 async fn inv_cache_07_index_survives_a_reopen() {
     let f = fixture(roomy(), &[]).await;
     f.put("k", Kind::Audio, 25).await;
-    f.cache.flush().await;
+    f.cache.flush().await.unwrap();
     let reopened = Cache::open(f.dir.path(), roomy());
     reopened.ready().await;
     assert_eq!(reopened.get("k").await, Some(payload(25)));
@@ -41,7 +41,7 @@ async fn inv_cache_07_orphan_files_without_an_index_entry_are_removed() {
 async fn inv_cache_07_index_entries_without_a_file_are_dropped() {
     let f = fixture(roomy(), &[]).await;
     f.put("k", Kind::Image, 10).await;
-    f.cache.flush().await;
+    f.cache.flush().await.unwrap();
     std::fs::remove_file(f.dir.path().join(format!("{}.bin", crate::identity::key_file_name("k")))).unwrap();
     let reopened = Cache::open(f.dir.path(), roomy());
     reopened.ready().await;
@@ -68,7 +68,7 @@ async fn inv_cache_07_entries_over_budget_after_load_are_evicted() {
     for key in ["a", "b", "c"] {
         f.put(key, Kind::Image, 30).await;
     }
-    f.cache.flush().await;
+    f.cache.flush().await.unwrap();
     let reopened = Cache::open(f.dir.path(), limits(60, 0.5, EvictionStrategy::Lru));
     reopened.ready().await;
     wait_for_file_count(&reopened, 1).await;
@@ -82,7 +82,7 @@ async fn reopened_after(damage: impl Fn(&mut Vec<u8>)) -> (tempfile::TempDir, Ca
     let f = fixture(roomy(), &[]).await;
     f.put("good", Kind::Stream, 1000).await;
     f.put("bad", Kind::Stream, 1000).await;
-    f.cache.flush().await;
+    f.cache.flush().await.unwrap();
     let path = bin_of(f.dir.path(), "bad");
     let mut bytes = std::fs::read(&path).unwrap();
     damage(&mut bytes);
@@ -125,7 +125,7 @@ async fn inv_cache_17_legacy_entries_are_checked_on_first_touch_and_get_a_checks
     assert!(cache.get("fine").await == Some(vec![b'q'; 100]));
     assert!(!cache.contains("short").await);
     assert_eq!(cache.stats().await.file_count, 2);
-    cache.flush().await;
+    cache.flush().await.unwrap();
 
     let saved = std::fs::read_to_string(dir.path().join("index.tsv")).unwrap();
     let sum_of = |key: &str| {

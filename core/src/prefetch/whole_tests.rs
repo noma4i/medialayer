@@ -25,6 +25,86 @@ fn whole(url: &str, kind: SourceKind) -> Source {
 }
 
 #[tokio::test]
+async fn inv_strategy_01_window_then_whole_loads_the_remaining_bytes() {
+    let rig = super::runner_tests::rig_with(|limits| {
+        limits.prefetch_from = 0;
+        limits.prefetch_to = 0;
+    });
+    let clip = "https://o.test/clip.mp4";
+    let mut events = rig.prefetcher.settled();
+    rig.prefetcher.set_window(0, vec![Some(source(clip, SourceKind::Video, CacheStrategy::Window))]);
+    assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
+    rig.prefetcher.keep_whole(whole(clip, SourceKind::Video));
+    assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
+    assert_eq!(rig.loader.calls().iter().map(|call| call.fetch).collect::<Vec<_>>(), [Fetch::FirstBlock, Fetch::AllBlocks]);
+}
+
+#[tokio::test]
+async fn inv_strategy_06_whole_above_budget_never_reports_complete() {
+    let stack = stack().await;
+    stack.cache.set_limits(Limits { budget: (2 * MIB) as u64, min_budget: 1, ..Limits::default() }).await.unwrap();
+    let url = "https://o.test/large.mp4";
+    stack.fetcher.route(url, Script::ok(vec![7; 4 * MIB]));
+    let result = ProxyLoader::new(stack.proxy.clone()).load_all_blocks(url, &HashMap::new(), Priority::Prefetch).await;
+    assert!(result.is_err(), "incomplete source reported success: {result:?}");
+}
+
+#[tokio::test]
+async fn inv_prefetch_01_whole_admission_is_bounded_by_the_entry_limit() {
+    let rig = super::runner_tests::rig_with(|limits| limits.dedupe_max_entries = 4);
+    rig.loader.hang_all();
+    for index in 0..100 {
+        rig.prefetcher.keep_whole(whole(&format!("https://o.test/{index}.mp4"), SourceKind::Video));
+    }
+    assert!(rig.prefetcher.live_tasks() <= 4, "{} tasks for a limit of 4", rig.prefetcher.live_tasks());
+}
+
+#[tokio::test]
+async fn inv_strategy_06_whole_hls_above_budget_never_reports_complete() {
+    let stack = stack().await;
+    stack.cache.set_limits(Limits { budget: (2 * MIB) as u64, min_budget: 1, ..Limits::default() }).await.unwrap();
+    stack.fetcher.route(MASTER, Script::ok(b"#EXTM3U\n#EXTINF:2,\na.ts\n#EXTINF:2,\nb.ts\n#EXTINF:2,\nc.ts\n#EXT-X-ENDLIST\n".to_vec()));
+    for name in ["a.ts", "b.ts", "c.ts"] {
+        stack.fetcher.route(&format!("https://o.test/hls/{name}"), Script::ok(vec![7; MIB]));
+    }
+    let result = super::whole::load_whole(&ProxyLoader::new(stack.proxy.clone()), &whole(MASTER, SourceKind::Video), Duration::from_secs(5)).await;
+    assert!(matches!(result, Outcome::Failed(_)), "incomplete HLS reported success: {result:?}");
+}
+
+#[tokio::test]
+async fn inv_strategy_02_running_window_promotes_to_whole_and_survives_window_departure() {
+    let rig = super::runner_tests::rig_with(|limits| {
+        limits.prefetch_from = 0;
+        limits.prefetch_to = 0;
+    });
+    let clip = "https://o.test/clip.mp4";
+    rig.loader.hang(clip);
+    let mut events = rig.prefetcher.settled();
+    rig.prefetcher.set_window(0, vec![Some(source(clip, SourceKind::Video, CacheStrategy::Window))]);
+    rig.loader.started().await;
+    rig.prefetcher.keep_whole(whole(clip, SourceKind::Video));
+    rig.prefetcher.set_window(0, vec![]);
+    rig.loader.release(clip);
+    assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
+    assert_eq!(rig.loader.calls().iter().map(|call| call.fetch).collect::<Vec<_>>(), [Fetch::FirstBlock, Fetch::AllBlocks]);
+}
+
+#[tokio::test]
+async fn inv_strategy_12_reset_cancels_work_before_a_new_declaration() {
+    let rig = rig();
+    let clip = "https://o.test/clip.mp4";
+    let mut events = rig.prefetcher.settled();
+    rig.loader.hang(clip);
+    rig.prefetcher.keep_whole(whole(clip, SourceKind::Video));
+    rig.loader.started().await;
+    rig.prefetcher.forget_loaded();
+    assert_eq!(next(&mut events).await.outcome, Outcome::Cancelled);
+    rig.loader.release(clip);
+    rig.prefetcher.keep_whole(whole(clip, SourceKind::Video));
+    assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
+}
+
+#[tokio::test]
 async fn inv_strategy_01_a_whole_source_loads_in_full_without_a_window_by_its_kind() {
     let cases = [
         ("https://o.test/clip.mp4", SourceKind::Video, Fetch::AllBlocks, Priority::Prefetch),
@@ -285,7 +365,7 @@ async fn inv_strategy_07_a_load_cut_by_a_restart_resumes_at_its_first_missing_bl
     assert!(loader.load_all_blocks(url, &HashMap::new(), Priority::Prefetch).await.is_err());
     assert!(first.cache.contains(&format!("{url}#1")).await);
     assert!(!first.cache.contains(&format!("{url}#2")).await);
-    first.cache.flush().await;
+    first.cache.flush().await.unwrap();
     let Stack { dir, cache, proxy, .. } = first;
     proxy.stop().await;
     drop((cache, proxy, loader));

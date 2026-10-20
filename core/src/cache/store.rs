@@ -46,8 +46,12 @@ impl Cache {
         let _ = self.inner.ready.subscribe().wait_for(|ready| *ready).await;
     }
 
-    pub async fn flush(&self) {
-        write_index(&self.inner).await;
+    pub async fn flush(&self) -> Result<(), CacheError> {
+        let result = write_index(&self.inner).await;
+        if result.is_err() {
+            mark_dirty(&self.inner);
+        }
+        result.map_err(CacheError::from)
     }
 
     pub async fn get(&self, key: &str) -> Option<Vec<u8>> {

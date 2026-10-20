@@ -178,7 +178,7 @@ async fn inv_cache_14_url_key_of_5000_chars_round_trips_through_a_reopen() {
     assert_eq!(f.cache.get(&key).await, Some(b"payload".to_vec()));
     assert_eq!(f.cache.purge_prefix("https://cdn.example.com/segment/").await, 1);
     f.cache.put(&key, Kind::Stream, b"payload").await.unwrap();
-    f.cache.flush().await;
+    f.cache.flush().await.unwrap();
     let reopened = Cache::open(f.dir.path(), limits(u64::MAX / 2, 0.9, EvictionStrategy::Lru));
     reopened.ready().await;
     assert_eq!(reopened.get(&key).await, Some(b"payload".to_vec()));
@@ -191,7 +191,7 @@ async fn inv_cache_05_reads_count_hits_for_lfu() {
     f.put("k", Kind::Image, 10).await;
     f.touch("k").await;
     f.touch("k").await;
-    f.cache.flush().await;
+    f.cache.flush().await.unwrap();
     let text = std::fs::read_to_string(f.dir.path().join("index.tsv")).unwrap();
     let line = text.lines().next().unwrap();
     assert_eq!(super::persist::decode_line(line).unwrap().1.hits, 2);

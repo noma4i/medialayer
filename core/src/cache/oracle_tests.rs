@@ -134,7 +134,7 @@ async fn inv_cache_05_the_cache_equals_a_map_model_over_random_operations() {
             11 if dice.percent(8) => {
                 settle(&f.cache).await;
                 quiet_disk(f.dir.path()).await;
-                f.cache.flush().await;
+                f.cache.flush().await.unwrap();
                 f.cache = Cache::open_with(f.dir.path(), roomy, options(f.clock.clone(), &[]));
                 f.cache.ready().await;
             }
@@ -256,7 +256,7 @@ async fn inv_cache_07_a_directory_copied_at_any_moment_opens_to_a_consistent_cac
             4 => {
                 f.cache.remove(&key).await;
             }
-            5 => f.cache.flush().await,
+            5 => f.cache.flush().await.unwrap(),
             _ => tokio::time::sleep(Duration::from_millis(dice.between(0, 25))).await,
         }
         if step % 6 == 0 {
@@ -296,7 +296,7 @@ async fn inv_cache_07_a_rewrite_on_disk_before_its_index_is_not_trusted_and_a_to
     let first = Cache::open_with(dir.path(), roomy, slow_index.clone());
     first.ready().await;
     first.put("https://o.test/k", Kind::Image, &[1u8; 100]).await.unwrap();
-    first.flush().await;
+    first.flush().await.unwrap();
     first.put("https://o.test/k", Kind::Image, &[2u8; 250]).await.unwrap();
     first.put("https://o.test/only-on-disk", Kind::Image, &[3u8; 40]).await.unwrap();
     std::fs::write(dir.path().join("index.tsv.tmp"), b"torn\tline without fields").unwrap();
@@ -309,7 +309,7 @@ async fn inv_cache_07_a_rewrite_on_disk_before_its_index_is_not_trusted_and_a_to
     let stats = reopened.stats().await;
     assert_eq!((stats.file_count, stats.total_bytes), (0, 0));
     reopened.put("https://o.test/k", Kind::Image, &[2u8; 250]).await.unwrap();
-    reopened.flush().await;
+    reopened.flush().await.unwrap();
     let again = Cache::open(dir.path(), roomy);
     again.ready().await;
     assert_eq!(again.get("https://o.test/k").await, Some(vec![2u8; 250]));

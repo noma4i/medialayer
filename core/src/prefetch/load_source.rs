@@ -37,6 +37,7 @@ async fn playlist_text(loader: &dyn Loader, source: &Source, url: &str, timeout:
 
 pub(super) async fn read_plan(loader: &dyn Loader, source: &Source, timeout: Duration, max_chunks: usize) -> Result<Plan, Outcome> {
     let mut playlist_url = source.url.clone();
+    let mut playlists = vec![playlist_url.clone()];
     let mut text = playlist_text(loader, source, &playlist_url, timeout).await?;
     if is_multivariant(&text) {
         let variant = extract_variants(&text)
@@ -44,11 +45,12 @@ pub(super) async fn read_plan(loader: &dyn Loader, source: &Source, timeout: Dur
             .next()
             .ok_or_else(|| Outcome::Failed("master playlist lists no variants".to_string()))?;
         playlist_url = resolve_url(&playlist_url, &variant);
+        playlists.push(playlist_url.clone());
         text = playlist_text(loader, source, &playlist_url, timeout).await?;
     }
     let chunks = extract_leading_chunks(&text, max_chunks)
         .into_iter()
         .map(|chunk| Chunk { segment: resolve_url(&playlist_url, &chunk.segment), init: chunk.init.map(|init| resolve_url(&playlist_url, &init)) })
         .collect();
-    Ok(Plan { chunks, headers: source.headers.clone() })
+    Ok(Plan { playlists, chunks, headers: source.headers.clone() })
 }

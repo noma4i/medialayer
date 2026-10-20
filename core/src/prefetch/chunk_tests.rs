@@ -165,6 +165,7 @@ fn held(ledger: &mut PrefetchLedger, key: &str, distance: usize, chunk: usize, b
     ledger.needed(key, target, std::time::Duration::from_secs(1), true);
     ledger.set_distance(key, distance);
     let plan = super::plan::Plan {
+        playlists: Vec::new(),
         chunks: (0..8).map(|index| crate::hls::Chunk { segment: format!("{key}/{index}"), init: None }).collect(),
         headers: HashMap::new(),
     };

@@ -269,9 +269,18 @@ impl Proxy {
         let Some(total) = self.inner.store.meta(&first).await.and_then(|meta| meta.total_length) else {
             return self.fetch_single_file(url, headers, priority).await;
         };
+        self.inner.store.keep(&first).await;
         for block in 1..total.div_ceil(self.inner.config.chunk_size) {
             let key = route::block_key(&base, block);
             self.download_into_store(&key, || self.inner.get_or_start_block(url, block, Some(total), upstream.clone(), priority)).await?;
+            self.inner.store.keep(&key).await;
+        }
+        for block in 0..total.div_ceil(self.inner.config.chunk_size) {
+            let key = route::block_key(&base, block);
+            let expected = self.inner.config.chunk_size.min(total - block * self.inner.config.chunk_size);
+            if self.inner.store.len(&key).await != Some(expected) {
+                return Err(ProxyError::StoreRefused);
+            }
         }
         Ok(total)
     }

@@ -5,7 +5,7 @@ A strategy says how the library caches and preloads one kind of source. You decl
 | Strategy | Meaning |
 | -------- | ------- |
 | `window` (default) | Loads a few leading chunks of the sources around the visible page (`prefetch from:, to:`). Everything else loads when it is shown |
-| `whole` | Downloads the source from the first to the last byte as soon as the app declares it, whatever the window and the visibility. Caches it completely. The player plays from the local file |
+| `whole` | Downloads every part after declaration, independently of visibility. Playback uses the proxy and its cached parts |
 | `on_demand` | Never part of the prefetch window. Loads only when a place shows or plays the source. The player pool still prepares the neighbours inside its `pool reach:` |
 
 The names are the same in the `.mdl` file, in Swift (`CacheStrategy.window`, `.whole`, `.onDemand`) and in Kotlin (`CacheStrategy.WINDOW`, `.WHOLE`, `.ON_DEMAND`). Both platforms behave the same and are covered by the same cases.
@@ -58,7 +58,10 @@ A source is declared when a place shows it (`visible`) or when it is in a list g
 - **Cancel.** Moving the window, scrolling and hiding the place do not cancel it. `purge(url)` and `clear` make the library forget what it loaded, so the next declaration loads the source again. The library stops all loads when the app goes to the background and starts the unfinished ones again in the foreground. Closing the library cancels all loads.
 - **Restart and resume.** Every finished block is on disk. A block cut by a restart is dropped. The next declaration skips the stored blocks and loads only the missing ones, so a half-loaded file resumes where it stopped.
 - **Errors.** A failed block is tried 3 times, with waits of 0.5 and 1 second between the tries. Then the load stops and keeps what it has. It starts again at the next declaration or when the app returns to the foreground. There is no timer.
-- **Disk.** Evicting entries of a `whole` source is the last choice: eviction removes every other entry first, with the strategy of [limits and eviction](limits-and-eviction.md) inside each group, and takes a `whole` entry only when the budget would not fit otherwise. A source larger than the budget fails with `NotEnoughSpace`. The protection starts when the source is declared in this run.
+- **Disk.** Eviction removes ordinary entries before stored `whole` parts. Each group uses the configured [eviction strategy](limits-and-eviction.md). Completion checks every part. Missing parts fail the load. Protection belongs to stored entries and ends when those entries are removed.
+- **Admission.** Pending whole declarations are limited by `dedupeMaxEntries`. Excess declarations receive a failed completion and can be declared again later.
+- **Promotion.** Declaring a window source as whole downloads its remaining parts, including when its window load is still running.
+- **Reset.** Clear and purge cancel pending work and discard the remembered plan, byte accounting and completion state.
 - **Memory.** A `whole` load writes to disk in chunks and holds the same bounded proxy buffers as any download. The memory ceiling and the pool are unchanged.
 
 ## Platforms

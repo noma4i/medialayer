@@ -38,6 +38,8 @@ pub struct MockLoader {
     active: AtomicUsize,
     peak: AtomicUsize,
     stored_reads: AtomicUsize,
+    started: tokio::sync::Notify,
+    released: tokio::sync::Notify,
 }
 
 struct Active<'a>(&'a MockLoader, String);
@@ -68,6 +70,15 @@ impl MockLoader {
 
     pub fn hang(&self, url: &str) {
         self.script().hanging.insert(url.to_string());
+    }
+
+    pub async fn started(&self) {
+        self.started.notified().await;
+    }
+
+    pub fn release(&self, url: &str) {
+        self.script().hanging.remove(url);
+        self.released.notify_one();
     }
 
     pub fn size(&self, url: &str, bytes: u64) {
@@ -130,9 +141,10 @@ impl MockLoader {
             script.calls.push(Call { url: url.to_string(), fetch, priority });
             (script.failing.contains(url), script.hanging.contains(url), script.sizes.get(url).copied().unwrap_or(1))
         };
+        self.started.notify_one();
         tokio::task::yield_now().await;
         if hanging || self.hang_all.load(Ordering::SeqCst) {
-            std::future::pending::<()>().await;
+            self.released.notified().await;
         }
         if failing {
             return Err(LoadError(format!("{url} refused")));
@@ -172,6 +184,11 @@ impl Loader for MockLoader {
     async fn stored(&self, url: &str, _headers: &HashMap<String, String>) -> Option<Vec<u8>> {
         self.stored_reads.fetch_add(1, Ordering::SeqCst);
         self.script().bodies.get(url).cloned()
+    }
+
+    async fn stored_len(&self, url: &str, _headers: &HashMap<String, String>) -> Option<u64> {
+        let script = self.script();
+        script.calls.iter().any(|call| call.url == url).then(|| script.sizes.get(url).copied().unwrap_or(1))
     }
 
     async fn evict(&self, url: &str, _headers: &HashMap<String, String>) {

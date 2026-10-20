@@ -55,7 +55,7 @@ async fn downloads_finished(proxy: &Proxy) {
 async fn reopen_offline(rig: Rig) -> Rig {
     downloads_finished(&rig.proxy).await;
     rig.proxy.stop().await;
-    rig.cache.flush().await;
+    rig.cache.flush().await.unwrap();
     let cache = Cache::open_with(rig.dir.path(), limits(ROOMY, 0.9, EvictionStrategy::Lru), options(rig_clock(), &[]));
     cache.ready().await;
     let fetcher = Arc::new(MockFetcher::new());
@@ -176,7 +176,7 @@ const BLOCK: usize = 1024 * 1024;
 async fn reopen_online(rig: Rig, route: impl Fn(&MockFetcher)) -> Rig {
     downloads_finished(&rig.proxy).await;
     rig.proxy.stop().await;
-    rig.cache.flush().await;
+    rig.cache.flush().await.unwrap();
     let cache = Cache::open_with(rig.dir.path(), limits(ROOMY, 0.9, EvictionStrategy::Lru), options(rig_clock(), &[]));
     cache.ready().await;
     let fetcher = Arc::new(MockFetcher::new());
