@@ -160,9 +160,11 @@ class NativeViewLifecycleTest {
 
   @Test
   fun inv_native_05_video_progress_stops_when_inactive_and_resumes() {
+    val clock = FakeClock(0)
+    factory.clock = clock
     val slot = factory.create(0u)
     slot.load("first", PlaybackRoute("https://o.test/video", emptyMap(), null, false, true))
-    looper.idle()
+    slot.play()
     var offset by mutableStateOf(0.dp)
     var reports = 0
     rule.setContent {
@@ -170,18 +172,18 @@ class NativeViewLifecycleTest {
         MediaVideo(LifecycleSource("first", Kind.VIDEO), modifier = Modifier.offset(y = offset).size(80.dp), onProgress = { reports++ })
       }
     }
-    rule.waitUntil(5000) { looper.idle(); reports >= 2 }
+    rule.waitUntil(5000) { clock.advanceTime(50); looper.idle(); slot.sample().durationMs != null && reports >= 2 }
     rule.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
     rule.waitForIdle()
     val background = reports
-    repeat(20) { looper.idle(); Thread.sleep(25) }
+    repeat(20) { rule.mainClock.advanceTimeBy(25); looper.idle() }
     assertEquals(background, reports)
     rule.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
     rule.waitUntil(5000) { looper.idle(); reports > background }
     rule.runOnIdle { offset = 10000.dp }
     rule.waitForIdle()
     val offscreen = reports
-    repeat(20) { looper.idle(); Thread.sleep(25) }
+    repeat(20) { rule.mainClock.advanceTimeBy(25); looper.idle() }
     assertEquals(offscreen, reports)
     rule.runOnIdle { offset = 0.dp }
     rule.waitUntil(5000) { looper.idle(); reports > offscreen }

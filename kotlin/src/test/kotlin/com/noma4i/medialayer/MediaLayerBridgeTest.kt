@@ -147,6 +147,8 @@ private fun eventually(what: String, timeoutMs: Long = 5_000, condition: () -> B
 }
 
 class MediaLayerBridgeTest {
+  init { NativeCallbacks.install() }
+
   private fun openWith(fetcher: Fetcher, slots: PlayerSlotFactory, silent: Boolean): MediaLayer =
     MediaLayer.open(
       OpenConfig(

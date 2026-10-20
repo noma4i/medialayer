@@ -10,6 +10,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CancellationTest {
+  init { NativeCallbacks.install() }
+
   @Test
   fun inv_ffi_09_cancelling_outer_call_drops_inner_work() = runBlocking {
     val reading = CompletableDeferred<Unit>()

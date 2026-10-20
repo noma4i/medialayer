@@ -69,6 +69,8 @@ private fun eventuallyStrategy(what: String, timeoutMs: Long = 8_000, condition:
 }
 
 class CacheStrategyTest {
+  init { NativeCallbacks.install() }
+
   private fun open(fetcher: Fetcher, directory: String = Files.createTempDirectory("medialayer").toString()): MediaLayer =
     MediaLayer.open(
       OpenConfig(

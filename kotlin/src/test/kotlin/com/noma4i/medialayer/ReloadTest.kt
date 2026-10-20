@@ -37,6 +37,8 @@ private class ReloadFetcher : Fetcher {
 }
 
 class ReloadTest {
+  init { NativeCallbacks.install() }
+
   @Test
   fun inv_api_06_reload_restores_the_attached_view_before_playing() = runBlocking {
     val slot = ReloadSlot()
@@ -48,7 +50,7 @@ class ReloadTest {
     val key = "file:///clip.mp4"
     val events = media.playerEvents()
     events.attach(key, 42u)
-    media.replaceWindow(0u, listOf(MediaItem(Kind.VIDEO, key, emptyMap(), null, null, CacheStrategy.WINDOW)))
+    media.replaceWindow(0u, listOf(MediaItem(Kind.VIDEO, key, emptyMap(), null, null, strategy = CacheStrategy.WINDOW)))
     media.setPlaying(key, true)
     withTimeout(10_000) {
       assertTrue(slot.plays.receive())

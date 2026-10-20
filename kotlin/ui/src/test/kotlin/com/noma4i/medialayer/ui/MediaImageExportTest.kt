@@ -13,7 +13,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -58,11 +57,10 @@ class MediaImageExportTest {
 
   private fun export(imageLoader: ImageLoader, url: String, cancelled: Boolean = false): Bitmap? {
     val result = CompletableDeferred<Bitmap?>()
-    val job = scope.launch {
-      if (cancelled) while (isActive) Thread.onSpinWait()
+    scope.launch {
+      if (cancelled) coroutineContext[Job]!!.cancel()
       result.complete(layer.image(context, ExportSource(url), 8f, 8f, 1f, imageLoader))
     }
-    if (cancelled) job.cancel()
     return settle(result)
   }
 

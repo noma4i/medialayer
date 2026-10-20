@@ -1,6 +1,7 @@
 package com.noma4i.medialayer.ui
 
 import android.app.Application
+import android.app.ActivityManager
 import androidx.test.core.app.ApplicationProvider
 import com.noma4i.medialayer.BodyReader
 import com.noma4i.medialayer.Fetcher
@@ -11,9 +12,11 @@ import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 
 private class PolicyBody(count: Int) : BodyReader {
   private var bytes: ByteArray? = ByteArray(count) { 7 }
@@ -39,6 +42,13 @@ private class PolicyOrigin : Fetcher {
 class OpenPolicyTest {
   private val application = ApplicationProvider.getApplicationContext<Application>()
 
+  @Before
+  fun setDeviceMemory() {
+    val manager = application.getSystemService(ActivityManager::class.java)
+    shadowOf(manager).setMemoryInfo(ActivityManager.MemoryInfo().apply { totalMem = 4L * 1024 * 1024 * 1024 })
+    shadowOf(manager).setMemoryClass(256)
+  }
+
   private fun open(spec: String, origin: PolicyOrigin): MediaLayer =
     MediaLayer.open(application, spec, origin, SharedPreferencesSettings(application, UUID.randomUUID().toString()))
 
@@ -55,7 +65,7 @@ class OpenPolicyTest {
       try {
         val bytes = media.fetchImage("https://o.test/${UUID.randomUUID()}/small.jpg", mapOf("X-Token" to "selected", "Authorization" to "excluded"))
         assertEquals(2, bytes.size)
-        assertEquals(expected, origin.seen.first().headers)
+        assertEquals(expected + ("Accept-Encoding" to "identity"), origin.seen.first().headers)
       } finally {
         media.release()
       }
