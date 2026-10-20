@@ -46,22 +46,22 @@ class MediaTileTest {
   private fun visibles(url: String) = layer.calls.filter { it == "visible:$url:true" || it == "visible:$url:false" }
 
   @Test
-  fun aTileSubmitsNoToneWhileAFullImageDoes() {
+  fun sizedImagesSubmitTone() {
     var full by mutableStateOf(false)
     rule.setContent {
       MediaLayerProvider(layer, loader, slots.players) {
         Column {
-          MediaImage(Thumb("https://o.test/tile.png"), Modifier.size(50.dp), weight = MediaWeight.Tile)
-          if (full) MediaImage(Thumb("https://o.test/full.png"), Modifier.size(50.dp), weight = MediaWeight.Full)
+          MediaImage(Thumb("https://o.test/tile.png"), Modifier.size(50.dp))
+          if (full) MediaImage(Thumb("https://o.test/full.png"), Modifier.size(50.dp))
         }
       }
     }
     rule.waitUntil(5000) { looper.idle(); ready("https://o.test/tile.png") }
     full = true
 
-    rule.waitUntil(5000) { looper.idle(); layer.tones.any { it.url == "https://o.test/full.png" } }
+    rule.waitUntil(5000) { looper.idle(); layer.tones.size == 2 }
 
-    assertEquals(listOf("https://o.test/full.png"), layer.tones.map { it.url })
+    assertEquals(setOf("https://o.test/tile.png", "https://o.test/full.png"), layer.tones.map { it.url }.toSet())
   }
 
   @Test
@@ -69,7 +69,7 @@ class MediaTileTest {
     val gate = CompletableDeferred<Unit>()
     val gated = mediaImageLoader(context, ImageBytes { _, _ -> gate.await(); pngBytes() })
     val url = "https://o.test/blur.png"
-    rule.setContent { MediaLayerProvider(layer, gated, slots.players) { MediaImage(Thumb(url, HASH), Modifier.size(50.dp), weight = MediaWeight.Tile) } }
+    rule.setContent { MediaLayerProvider(layer, gated, slots.players) { MediaImage(Thumb(url, HASH), Modifier.size(50.dp)) } }
 
     rule.waitUntil(5000) { looper.idle(); rule.onAllNodesWithContentDescription("blurhash").fetchSemanticsNodes().isNotEmpty() }
     gate.complete(Unit)
@@ -85,8 +85,8 @@ class MediaTileTest {
     rule.setContent {
       MediaLayerProvider(layer, loader, slots.players) {
         Column {
-          MediaImage(Thumb("https://o.test/a.png"), Modifier.size(50.dp), weight = MediaWeight.Tile)
-          MediaImage(Thumb("https://o.test/b.png"), Modifier.size(50.dp), weight = MediaWeight.Full)
+          MediaImage(Thumb("https://o.test/a.png"), Modifier.size(50.dp))
+          MediaImage(Thumb("https://o.test/b.png"), Modifier.size(50.dp))
         }
       }
     }
@@ -102,7 +102,7 @@ class MediaTileTest {
     var unrelated by mutableIntStateOf(0)
     rule.setContent {
       MediaLayerProvider(layer, loader, slots.players) {
-        Column { repeat(count) { MediaImage(Thumb(url), Modifier.size((50 + unrelated).dp), weight = MediaWeight.Tile) } }
+        Column { repeat(count) { MediaImage(Thumb(url), Modifier.size((50 + unrelated).dp)) } }
       }
     }
     rule.waitUntil(5000) { looper.idle(); ready(url) }

@@ -23,7 +23,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 
-private data class Page(override val url: String, override val kind: Kind, override val cover: String? = null) : MediaSource {
+private data class Page(override val url: String, override val kind: Kind, override val cover: String? = null, override val size: Pair<Int, Int>? = null) : MediaSource {
   override val headers: Map<String, String> get() = emptyMap()
 }
 
@@ -130,16 +130,16 @@ class MediaPrecomposeTest {
   }
 
   @Test
-  fun aPrecomposedFullImageStartsNoWorkUntilItIsPlaced() {
+  fun aPrecomposedUnsizedImageStartsNoWorkUntilItIsPlaced() {
     val page = Page("https://o.test/full.png", Kind.IMAGE)
     workFor(page, measured = true) { MediaImage(page, Modifier.size(50.dp)) }
     rule.waitUntil(5000) { looper.idle(); fetched.toList() == listOf(page.url) }
   }
 
   @Test
-  fun aPrecomposedTileStartsNoWorkUntilItIsPlaced() {
-    val page = Page("https://o.test/tile.png", Kind.IMAGE)
-    workFor(page, measured = true) { MediaImage(page, Modifier.size(50.dp), weight = MediaWeight.Tile) }
+  fun aPrecomposedSizedImageStartsNoWorkUntilItIsPlaced() {
+    val page = Page("https://o.test/tile.png", Kind.IMAGE, size = 24 to 24)
+    workFor(page, measured = true) { MediaImage(page, Modifier.size(50.dp)) }
     rule.waitUntil(5000) { looper.idle(); fetched.toList() == listOf(page.url) }
   }
 

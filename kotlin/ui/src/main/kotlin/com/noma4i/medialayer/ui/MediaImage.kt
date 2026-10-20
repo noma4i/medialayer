@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.graphics.ImageBitmap
@@ -14,7 +16,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -22,6 +24,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
+import coil.ImageLoader
+import coil.request.ImageResult
 import coil.memory.MemoryCache
 import coil.request.ImageRequest
 import coil.size.Scale
@@ -35,6 +39,11 @@ import com.noma4i.medialayer.toItem
 import java.nio.ByteBuffer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -43,86 +52,83 @@ fun MediaImage(
   source: MediaSource,
   modifier: Modifier = Modifier,
   contentScale: ContentScale = ContentScale.Crop,
-  weight: MediaWeight = MediaWeight.Full,
   content: @Composable (MediaState) -> Unit = {}
 ) {
-  when (weight) {
-    MediaWeight.Full -> FullImage(source, modifier, contentScale, content)
-    MediaWeight.Tile -> TileImage(source, modifier, contentScale, content)
-  }
-}
-
-@Composable
-private fun FullImage(source: MediaSource, modifier: Modifier, contentScale: ContentScale, content: @Composable (MediaState) -> Unit) {
-  val context = LocalContext.current
-  val density = LocalDensity.current.density
-  val environment = LocalMediaEnvironment.current
-  val media = environment.media
   val screen = rememberScreenVisibility()
-  if (screen.visible) declarePlace(source, playing = null, muted = null)
-  val tones = rememberCoroutineScope()
-  BoxWithConstraints(modifier.then(screen.modifier)) {
-    if (!screen.visible) return@BoxWithConstraints
-    val pixels = decodePixels(source, constraints, density)
-    val scale = contentScale.toScale()
-    val request = remember(media, source, pixels, scale) { imageRequest(context, source, pixels, scale, media.cacheKey(source.url, source.headers)) }
-    var state: MediaState by remember(source.url) { mutableStateOf(MediaState.Idle) }
-    val blur by produceState<ImageBitmap?>(null, media, source, state == MediaState.Ready) {
-      val placeholder = media.placeholder(source.toItem(), state == MediaState.Ready)
-      value = (placeholder as? Placeholder.BlurHash)?.let { decodeBlur(it.hash) }
+  claimImage(source, screen)
+  val size = source.size
+  if (size != null) {
+    Box(modifier.then(screen.modifier)) {
+      ImageBody(source, PixelSize(size.first.toUInt(), size.second.toUInt()), screen, contentScale, content)
     }
-    blur?.let { Image(it, "blurhash", Modifier.fillMaxSize(), contentScale = contentScale) }
-    AsyncImage(
-      model = request,
-      contentDescription = null,
-      imageLoader = environment.imageLoader,
-      contentScale = contentScale,
-      onState = { painterState ->
-        val reached = painterState.toMediaState()
-        if (reached != null) {
-          state = reached
-          media.itemState(source.url, reached)
-          if (painterState is AsyncImagePainter.State.Success) tones.launch { ToneFrames.submit(media, source.toItem(), painterState.result.drawable) }
-        }
-      },
-      modifier = Modifier.fillMaxSize()
-    )
-    content(state)
+  } else {
+    val density = LocalDensity.current.density
+    BoxWithConstraints(modifier.then(screen.modifier)) {
+      ImageBody(source, decodePixels(constraints, density), screen, contentScale, content)
+    }
   }
 }
 
 @Composable
-private fun TileImage(source: MediaSource, modifier: Modifier, contentScale: ContentScale, content: @Composable (MediaState) -> Unit) {
+private fun claimImage(source: MediaSource, screen: ScreenVisibility) {
+  val media = LocalMediaEnvironment.current.media
+  LaunchedEffect(media, source, screen) {
+    val owner = Any()
+    val item = source.toItem()
+    snapshotFlow { screen.visible }.collectLatest { visible ->
+      if (visible) {
+        media.claims.visible(owner, item, true)
+        try { awaitCancellation() } finally { media.claims.release(owner, item.url) }
+      }
+    }
+  }
+}
+
+@Composable
+@OptIn(ExperimentalCoroutinesApi::class)
+private fun ImageBody(source: MediaSource, pixels: PixelSize?, screen: ScreenVisibility, contentScale: ContentScale, content: @Composable (MediaState) -> Unit) {
   val context = LocalContext.current
   val environment = LocalMediaEnvironment.current
   val media = environment.media
-  val screen = rememberScreenVisibility()
-  if (screen.visible) claimTile(source)
+  val tones = rememberCoroutineScope()
   val scale = contentScale.toScale()
-  val request = remember(media, source, scale) { imageRequest(context, source, source.size?.let { (width, height) -> PixelSize(width.toUInt(), height.toUInt()) }, scale, media.cacheKey(source.url, source.headers)) }
-  var state: MediaState by remember(source.url) { mutableStateOf(MediaState.Idle) }
-  Box(modifier.then(screen.modifier)) {
-    if (!screen.visible) return@Box
-    if (state != MediaState.Ready) TileBlur(source, contentScale)
-    AsyncImage(
-      model = request,
-      contentDescription = null,
-      imageLoader = environment.imageLoader,
-      contentScale = contentScale,
-      onState = { painterState ->
-        painterState.toMediaState()?.let { reached ->
-          state = reached
-          media.itemState(source.url, reached)
-        }
-      },
-      modifier = Modifier.fillMaxSize()
-    )
-    content(state)
+  val request = remember(media, source, pixels, scale) { imageRequest(context, source, pixels, scale, media.cacheKey(source.url, source.headers)) }
+  val state = remember(source.url) { mutableStateOf<MediaState>(MediaState.Idle) }
+  val loader = remember(environment.imageLoader, screen) {
+    object : ImageLoader by environment.imageLoader {
+      override suspend fun execute(request: ImageRequest): ImageResult =
+        // Visibility cancels in-flight decoding without invalidating the image composition.
+        snapshotFlow { screen.visible }.transformLatest { visible ->
+          if (visible) emit(environment.imageLoader.execute(request))
+        }.first()
+    }
   }
+  ImageBlur(source, screen, state, contentScale)
+  AsyncImage(
+    model = request,
+    contentDescription = null,
+    imageLoader = loader,
+    contentScale = contentScale,
+    onState = { painterState ->
+      painterState.toMediaState()?.let { reached ->
+        state.value = reached
+        media.itemState(source.url, reached)
+        if (painterState is AsyncImagePainter.State.Success) tones.launch { ToneFrames.submit(media, source.toItem(), painterState.result.drawable) }
+      }
+    },
+    modifier = Modifier.fillMaxSize()
+  )
+  ImageContent(screen, state, content)
 }
 
 @Composable
-private fun TileBlur(source: MediaSource, contentScale: ContentScale) {
+private fun ImageContent(screen: ScreenVisibility, state: State<MediaState>, content: @Composable (MediaState) -> Unit) {
+  if (screen.visible) content(state.value)
+}
+
+@Composable
+private fun ImageBlur(source: MediaSource, screen: ScreenVisibility, state: State<MediaState>, contentScale: ContentScale) {
+  if (!screen.visible || state.value == MediaState.Ready) return
   val media = LocalMediaEnvironment.current.media
   val blur by produceState<ImageBitmap?>(null, media, source) {
     value = (media.placeholder(source.toItem(), false) as? Placeholder.BlurHash)?.let { decodeBlur(it.hash) }
@@ -130,9 +136,7 @@ private fun TileBlur(source: MediaSource, contentScale: ContentScale) {
   blur?.let { Image(it, "blurhash", Modifier.fillMaxSize(), contentScale = contentScale) }
 }
 
-private fun decodePixels(source: MediaSource, constraints: Constraints, density: Float): PixelSize? {
-  val declared = source.size?.let { (width, height) -> PixelSize(width.toUInt(), height.toUInt()) }
-  if (declared != null) return declared
+private fun decodePixels(constraints: Constraints, density: Float): PixelSize? {
   if (!constraints.hasBoundedWidth || !constraints.hasBoundedHeight) return null
   return imagePixelSize(constraints.maxWidth / density.toDouble(), constraints.maxHeight / density.toDouble(), density.toDouble(), null)
 }

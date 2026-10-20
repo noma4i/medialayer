@@ -91,29 +91,31 @@ val avatar = media.image(context, Avatar(url = user.avatarUrl), width = 44f, hei
 
 Swift: `MediaContext.image(for:points:scale:)`. Kotlin: `MediaLayer.image(context, source, width, height, density)` is a `suspend` function. Width and height are in points (dp), the call decodes at pixels from `imagePixelSize`, `source.size` wins. The app must not call it for a list of views: use `MediaImage` there.
 
-## Image in a grid of tiles
+## Изображения в списках и сетках
 
-A grid of small images (a profile of moments, a gallery) pays for every tile while it scrolls. Pass `weight = MediaWeight.Tile` (Kotlin) to make a tile light. A tile keeps what a correct place needs: one claim per tile (the key stays alive for the Stage while any view of it is on screen, and leaves with the last view), the state reported to the core, the BlurHash while the image loads, the decode at the declared size.
+Задавай размер декодирования в пикселях через `source.size`.
+При заданном размере Kotlin `MediaImage` использует `Box` без `BoxWithConstraints`.
+Без размера библиотека получает ограничения вида через `BoxWithConstraints` и вычисляет размер через `imagePixelSize`.
 
-A tile leaves out what a grid does not use:
+Все изображения сообщают состояние ядру и передают пиксели для вычисления тона.
+BlurHash загружается только для видимого изображения до `Ready`.
+После `Ready` библиотека убирает BlurHash без повторного запроса заглушки.
 
-| A full image does | A tile does not |
-| ----------------- | --------------- |
-| Reads the view size with `BoxWithConstraints` | Uses `source.size` as the decode size. Without it, Coil takes the size from the layout |
-| Submits the pixels of the image for its tone | Submits nothing. `tone(source, band)` answers from the BlurHash of the source only |
-| Asks the core for a placeholder again when the image is ready | Asks once, and drops the BlurHash when the image is ready |
+Видимость определяет библиотека, приложение не передаёт её параметром.
+До размещения, вне окна и при остановленной Activity запрос Coil не загружает и не декодирует изображение.
+Уход из окна или состояния `STARTED` отменяет текущую загрузку и снимает заявку видимости.
+Вход в окно возобновляет отменённую загрузку.
+Изображения с общим URL сохраняют заявку ядру до ухода последнего видимого изображения.
 
-Give a tile source its pixel size in `source.size`. Do not use a tile where the app reads the tone of the image or draws a placeholder other than the BlurHash.
-
-Kotlin only (the example is an indented block because Swift has no `weight` yet):
+Пример Kotlin:
 
     MediaImage(
       source = MomentThumb(url = moment.thumbUrl, blurHash = moment.blurHash, size = 352 to 352),
-      modifier = Modifier.aspectRatio(1f),
-      weight = MediaWeight.Tile
+      modifier = Modifier.aspectRatio(1f)
     )
 
-Swift has no `weight` yet: the Swift `MediaImage` has no cost measured in a tile grid.
+Swift `MediaLayerUI` не имеет параметра `weight`.
+Стоимость Swift `MediaImage` в сетке требует отдельного измерения.
 
 ## Video output
 

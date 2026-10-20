@@ -6,7 +6,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.collectAsState
@@ -110,16 +109,5 @@ internal fun declarePlace(source: MediaSource, playing: Boolean?, muted: Boolean
       media.claims.setPeeking(owner, item.url, true)
       onDispose { media.claims.setPeeking(owner, item.url, false) }
     }
-  }
-}
-
-@Composable
-internal fun claimTile(source: MediaSource) {
-  val media = LocalMediaEnvironment.current.media
-  val owner = remember { Any() }
-  val latest by rememberUpdatedState(source)
-  DisposableEffect(media, source.url) {
-    media.claims.visible(owner, latest.toItem(), true)
-    onDispose { media.claims.release(owner, source.url) }
   }
 }
