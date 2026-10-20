@@ -22,7 +22,10 @@ fn inv_spec_05_a_spec_json_becomes_the_defaults_the_pool_and_the_namespace_heade
     assert_eq!((parsed.defaults.budget, parsed.defaults.slots, parsed.defaults.prefetch_to, parsed.defaults.evict), (3_000_000_000, 4, 4, Evict::Fifo));
     assert_eq!(parsed.pool, PoolSettings { reach: 2, hold_off_ms: 5_000, trim_delay_ms: 60_000, low_ram_slots: 3, low_ram_reach: 1 });
     assert_eq!(parsed.namespace_headers, vec!["Authorization".to_string()]);
-    assert_eq!(spec_defaults("{}".to_string()).unwrap(), SpecDefaults { defaults: default_limits(), pool: default_pool_settings(), namespace_headers: Vec::new(), image_windows: Vec::new() });
+    assert_eq!(spec_defaults("{}".to_string()).unwrap(), SpecDefaults {
+        defaults: default_limits(), pool: default_pool_settings(), namespace_headers: Vec::new(), image_windows: Vec::new(),
+        forward_headers: None, evict_video: None, evict_image: None, evict_audio: None,
+    });
 }
 
 #[test]

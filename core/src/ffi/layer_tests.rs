@@ -70,6 +70,10 @@ fn config(dir: &std::path::Path, fetcher: Arc<dyn Fetcher>, settings: Arc<FakeSe
         pool: default_pool_settings(),
         namespace_headers: Vec::new(),
         image_windows: Vec::new(),
+        forward_headers: None,
+        evict_video: None,
+        evict_image: None,
+        evict_audio: None,
         memory_releaser: None,
         silent: false,
     }
@@ -77,6 +81,50 @@ fn config(dir: &std::path::Path, fetcher: Arc<dyn Fetcher>, settings: Arc<FakeSe
 
 fn caller() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap()
+}
+
+#[test]
+fn inv_spec_07_open_applies_the_first_video_forward_headers_to_origin() {
+    let dir = tempfile::tempdir().unwrap();
+    let origin = Arc::new(Origin::default());
+    let parsed = spec_defaults(r#"{"videos":[{"name":"first","forward_headers":["X-Token"]},{"name":"second","forward_headers":["Authorization"]}]}"#.to_string()).unwrap();
+    let mut open = config(dir.path(), origin.clone(), shared(), None);
+    open.defaults = parsed.defaults;
+    open.pool = parsed.pool;
+    open.forward_headers = parsed.forward_headers;
+    let layer = MediaLayer::open(open).unwrap();
+    caller().block_on(async {
+        let bytes = layer.fetch_image("https://o.test/p.jpg".to_string(), HashMap::from([
+            ("X-Token".to_string(), "selected".to_string()),
+            ("Authorization".to_string(), "excluded".to_string()),
+        ])).await.unwrap();
+        assert_eq!(bytes, b"origin bytes");
+        assert_eq!(origin.seen.lock().unwrap()[0].headers, HashMap::from([("X-Token".to_string(), "selected".to_string())]));
+    });
+}
+
+#[tokio::test]
+async fn inv_spec_07_assembly_applies_the_first_eviction_override_of_each_kind() {
+    for (section, kind) in [("videos", crate::cache::Kind::Stream), ("images", crate::cache::Kind::Image), ("audios", crate::cache::Kind::Audio)] {
+        let dir = tempfile::tempdir().unwrap();
+        let parsed = spec_defaults(format!(r#"{{"cache":{{"budget":10,"min":1,"evict":"lru"}},"{section}":[{{"name":"first","evict":"largest_first"}},{{"name":"second","evict":"fifo"}}]}}"#)).unwrap();
+        let mut config = assembly(dir.path(), Arc::new(MockFetcher::new()), shared());
+        config.defaults = parsed.defaults.try_into().unwrap();
+        config.pool = parsed.pool.into();
+        config.eviction_overrides = [
+            (crate::cache::Kind::Stream, parsed.evict_video),
+            (crate::cache::Kind::Image, parsed.evict_image),
+            (crate::cache::Kind::Audio, parsed.evict_audio),
+        ].into_iter().filter_map(|(kind, evict)| evict.map(|evict| (kind, evict.into()))).collect();
+        let parts = crate::api::assemble(config).await.unwrap();
+        let cache = &parts.cache;
+        cache.put("small", kind, &[1; 2]).await.unwrap();
+        cache.put("large", kind, &[2; 7]).await.unwrap();
+        cache.put("new", kind, &[3; 4]).await.unwrap();
+        assert!(cache.contains("small").await, "{section} evicted the oldest small entry");
+        assert!(!cache.contains("large").await);
+        assert!(cache.contains("new").await);
+    }
 }
 
 #[tokio::test]

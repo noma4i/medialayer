@@ -110,6 +110,10 @@ internal fun openMediaLayer(
       pool = defaults.pool,
       namespaceHeaders = defaults.namespaceHeaders,
       imageWindows = defaults.imageWindows,
+      forwardHeaders = defaults.forwardHeaders,
+      evictVideo = defaults.evictVideo,
+      evictImage = defaults.evictImage,
+      evictAudio = defaults.evictAudio,
       memoryReleaser = releaser,
       silent = silent
     )

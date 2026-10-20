@@ -9,7 +9,7 @@ use crate::cache::{classify_kind, Cache, CacheStore, Clock, Options as CacheOpti
 use crate::change::Change;
 use crate::fetch::Fetcher;
 use crate::identity::cache_key;
-use crate::limits::{Limits, LimitsError};
+use crate::limits::{EvictionStrategy, Limits, LimitsError};
 use crate::memory::{effective_ceiling, DeviceMemory, Ledger, ShareTuning};
 use crate::pool::{DeviceProfile, PoolConfig, ProfileTuning, Ring};
 use crate::prefetch::{PageWindow, PrefetchLedger, Prefetcher, ProxyLoader};
@@ -17,6 +17,7 @@ use crate::proxy::{ByteStore, Config as ProxyConfig, Proxy};
 use crate::session::WatchdogConfig;
 use crate::spec::PoolSpec;
 use async_trait::async_trait;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -65,6 +66,8 @@ pub struct Assembly {
     pub pool: PoolSettings,
     pub namespace_headers: Vec<String>,
     pub image_windows: Vec<(String, PageWindow)>,
+    pub forward_headers: Option<Vec<String>>,
+    pub eviction_overrides: HashMap<crate::cache::Kind, EvictionStrategy>,
     pub silent: bool,
     pub watchdog: WatchdogConfig,
 }
@@ -150,7 +153,7 @@ impl PrefetchControl for Prefetcher {
 }
 
 pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
-    let Assembly { dir, fetcher, settings, factory, device, defaults, pool, namespace_headers, image_windows, silent, watchdog } = config;
+    let Assembly { dir, fetcher, settings, factory, device, defaults, pool, namespace_headers, image_windows, forward_headers, eviction_overrides, silent, watchdog } = config;
     #[cfg(test)]
     if let Some(delay) = super::test_support::assembly_delay(&dir) {
         tokio::time::sleep(delay).await;
@@ -160,9 +163,13 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let ledger = ledger_for(&defaults, device);
     let change = Change::new();
-    let cache = Cache::open_with(dir, defaults, CacheOptions { change: change.clone(), ..CacheOptions::default() });
+    let cache = Cache::open_with(dir, defaults, CacheOptions { change: change.clone(), overrides: eviction_overrides, ..CacheOptions::default() });
     let store: Arc<dyn ByteStore> = Arc::new(CacheStore::new(cache.clone(), Arc::new(classify_kind)));
-    let proxy = Proxy::start(ProxyConfig { ledger: ledger.clone(), namespace_headers, ..ProxyConfig::from_limits(&defaults) }, fetcher, store)
+    let mut proxy_config = ProxyConfig { ledger: ledger.clone(), namespace_headers, ..ProxyConfig::from_limits(&defaults) };
+    if let Some(headers) = forward_headers {
+        proxy_config.policy.forwarded_headers = headers;
+    }
+    let proxy = Proxy::start(proxy_config, fetcher, store)
         .await
         .map_err(|error| MediaError::Unexpected { detail: error.to_string() })?;
     let dedupe_window = Duration::from_secs(defaults.dedupe_window_seconds.into());

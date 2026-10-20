@@ -21,6 +21,10 @@ The strategy is set once for the cache and can be overridden per media kind (`im
 
 ## Controls
 
+Opening a spec uses `evict` from the first declaration of each kind: video, image and audio.
+If that declaration omits `evict`, the kind uses the cache strategy. Later declarations of that kind do not override it.
+Video overrides also apply to cached stream blocks and HLS objects.
+
 | Call | Result |
 | ---- | ------ |
 | `limits` | Current limits |

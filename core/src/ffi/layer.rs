@@ -3,7 +3,7 @@ use super::deferred::Deferred;
 use super::events::PlayerEvents;
 use super::fetcher::{Fetcher, ForeignFetcher};
 use crate::analysis::{MediaTone, ToneSource};
-use super::limits::{default_limits, DeviceMemory, ImageWindow, Limits, PoolSettings};
+use super::limits::{default_limits, DeviceMemory, Evict, ImageWindow, Limits, PoolSettings};
 use crate::api::{
     assemble, placeholder_for, CacheState, Placeholder, Assembly, Kind, MediaError, MediaItem, MediaState, MediaStats, Parts, PlaybackRoute,
     PlayerSlotFactory, SettingsStore, Subscription,
@@ -30,6 +30,14 @@ pub struct OpenConfig {
     pub namespace_headers: Vec<String>,
     #[uniffi(default = [])]
     pub image_windows: Vec<ImageWindow>,
+    #[uniffi(default = None)]
+    pub forward_headers: Option<Vec<String>>,
+    #[uniffi(default = None)]
+    pub evict_video: Option<Evict>,
+    #[uniffi(default = None)]
+    pub evict_image: Option<Evict>,
+    #[uniffi(default = None)]
+    pub evict_audio: Option<Evict>,
     #[uniffi(default = None)]
     pub memory_releaser: Option<Arc<dyn MemoryReleaser>>,
     #[uniffi(default = false)]
@@ -131,6 +139,12 @@ impl MediaLayer {
             pool: config.pool.into(),
             namespace_headers: config.namespace_headers,
             image_windows: config.image_windows.iter().map(Into::into).collect(),
+            forward_headers: config.forward_headers,
+            eviction_overrides: [
+                (crate::cache::Kind::Stream, config.evict_video),
+                (crate::cache::Kind::Image, config.evict_image),
+                (crate::cache::Kind::Audio, config.evict_audio),
+            ].into_iter().filter_map(|(kind, evict)| evict.map(|evict| (kind, evict.into()))).collect(),
             silent: config.silent,
             watchdog: WatchdogConfig::default(),
         };

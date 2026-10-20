@@ -79,6 +79,10 @@ extension MediaLayer {
       pool: defaults.pool,
       namespaceHeaders: defaults.namespaceHeaders,
       imageWindows: defaults.imageWindows,
+      forwardHeaders: defaults.forwardHeaders,
+      evictVideo: defaults.evictVideo,
+      evictImage: defaults.evictImage,
+      evictAudio: defaults.evictAudio,
       memoryReleaser: ImageMemoryReleaser(cache: imageCache),
       silent: silent
     )

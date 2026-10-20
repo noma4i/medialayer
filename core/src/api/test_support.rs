@@ -405,6 +405,8 @@ pub fn assembly(dir: &Path, fetcher: Arc<MockFetcher>, factory: Arc<MockFactory>
         pool: PoolSettings::default(),
         namespace_headers: Vec::new(),
         image_windows: Vec::new(),
+        forward_headers: None,
+        eviction_overrides: Default::default(),
         silent: false,
         watchdog: fast_watchdog(),
     }

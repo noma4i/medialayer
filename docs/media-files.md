@@ -88,6 +88,10 @@ The cache key is the URL. The cache lives on disk; image memory caches stay with
 | `evict` | the `cache` strategy | Override of the eviction strategy for videos |
 | `strategy` | `:window` | How the library caches and preloads this video: `:window`, `:whole` or `:on_demand`. See [cache strategies](cache-strategies.md) |
 
+Opening a spec uses `forward_headers` from its first video for all origin requests, matching the selection of pool settings and limits.
+An empty list forwards no source headers. Without a video declaration, the default list applies.
+The proxy creates Range itself and never forwards a client's Range unchanged.
+
 The playing video always comes first. Until the playing video shows its first frame, no prefetch request starts and every running one is stopped. When the active page changes, the requests of pages that left the window are cancelled at once. The player has its own reserved connection, so prefetch never makes it wait, and when the player asks for a segment that prefetch is already downloading, it joins that download. After the first frame, prefetch continues and loads only the chunks that are still missing.
 
 ## `image`
