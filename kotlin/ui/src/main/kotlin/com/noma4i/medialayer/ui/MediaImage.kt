@@ -2,6 +2,7 @@ package com.noma4i.medialayer.ui
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.drawable.Animatable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -94,6 +95,13 @@ private fun ImageBody(source: MediaSource, pixels: PixelSize?, screen: ScreenVis
   val scale = contentScale.toScale()
   val request = remember(media, source, pixels, scale) { imageRequest(context, source, pixels, scale, media.cacheKey(source.url, source.headers)) }
   val state = remember(source.url) { mutableStateOf<MediaState>(MediaState.Idle) }
+  val animation = remember { mutableStateOf<Animatable?>(null) }
+  LaunchedEffect(screen) {
+    snapshotFlow { animation.value to screen.visible }.collectLatest { (drawable, visible) ->
+      if (visible) drawable?.start() else drawable?.stop()
+      try { awaitCancellation() } finally { drawable?.stop() }
+    }
+  }
   val loader = remember(environment.imageLoader, screen) {
     object : ImageLoader by environment.imageLoader {
       override suspend fun execute(request: ImageRequest): ImageResult =
@@ -110,6 +118,7 @@ private fun ImageBody(source: MediaSource, pixels: PixelSize?, screen: ScreenVis
     imageLoader = loader,
     contentScale = contentScale,
     onState = { painterState ->
+      animation.value = (painterState as? AsyncImagePainter.State.Success)?.result?.drawable as? Animatable
       painterState.toMediaState()?.let { reached ->
         state.value = reached
         media.itemState(source.url, reached)
