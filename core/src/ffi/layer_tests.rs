@@ -99,7 +99,7 @@ fn inv_spec_07_open_applies_the_first_video_forward_headers_to_origin() {
             ("Authorization".to_string(), "excluded".to_string()),
         ])).await.unwrap();
         assert_eq!(bytes, b"origin bytes");
-        assert_eq!(origin.seen.lock().unwrap()[0].headers, HashMap::from([("X-Token".to_string(), "selected".to_string())]));
+        assert_eq!(origin.seen.lock().unwrap()[0].headers, HashMap::from([("X-Token".to_string(), "selected".to_string()), ("Accept-Encoding".to_string(), "identity".to_string())]));
     });
 }
 
