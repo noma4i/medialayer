@@ -5,8 +5,25 @@ import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaItem
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.lang.ref.WeakReference
+import org.junit.Assert.assertNull
 
 class KeyClaimsTest {
+  @Test
+  fun inv_native_01_claims_do_not_retain_their_layer() {
+    val (reference, retainedClaims) = run {
+      val media = RecordingLayer()
+      WeakReference(media) to media.claims
+    }
+    repeat(20) {
+      System.gc()
+      if (reference.get() == null) return@repeat
+      Thread.sleep(10)
+    }
+    assertNull(reference.get())
+    retainedClaims.release(Any(), "unused")
+  }
+
   private val layer = RecordingLayer()
   private val claims = KeyClaims(layer)
   private val item = MediaItem(kind = Kind.VIDEO, url = "https://o.test/a.mp4", headers = emptyMap(), cover = null, blurHash = null, strategy = CacheStrategy.WINDOW)

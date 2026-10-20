@@ -4,12 +4,14 @@ import com.noma4i.medialayer.MediaItem
 import com.noma4i.medialayer.MediaLayer
 import java.util.Collections
 import java.util.WeakHashMap
+import java.lang.ref.WeakReference
 
 private val claimsByLayer: MutableMap<MediaLayer, KeyClaims> = Collections.synchronizedMap(WeakHashMap())
 
 internal val MediaLayer.claims: KeyClaims get() = synchronized(claimsByLayer) { claimsByLayer.getOrPut(this) { KeyClaims(this) } }
 
-internal class KeyClaims(private val media: MediaLayer) {
+internal class KeyClaims(media: MediaLayer) {
+  private val media = WeakReference(media)
   private class Claim(var visible: Boolean = false, var playing: Boolean = false, var peeking: Boolean = false, var muted: Boolean? = null)
 
   private class Applied(var visible: Boolean = false, var playing: Boolean = false, var peeking: Boolean = false, var muted: Boolean? = null)
@@ -69,6 +71,7 @@ internal class KeyClaims(private val media: MediaLayer) {
   }
 
   private fun forward(change: Change, key: String) {
+    val media = media.get() ?: return
     if (change.visible == true) change.source?.let { media.visible(it, true) }
     change.playing?.let { media.setPlaying(key, it) }
     change.peeking?.let { media.setPeeking(key, it) }

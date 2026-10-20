@@ -26,6 +26,8 @@ import com.noma4i.medialayer.specDefaults
 import java.io.File
 import java.util.Collections
 import java.util.WeakHashMap
+import java.lang.ref.WeakReference
+import kotlinx.coroutines.CancellationException
 import coil.ImageLoader
 import okhttp3.Call
 import okhttp3.OkHttpClient
@@ -87,14 +89,17 @@ internal fun openMediaLayer(
   val audio = MediaAudioSession(app, audioFocus)
   val factory = ExoPlayerSlotFactory(app, callFactory, startMuted = silent, audio = audio)
   val dir = File(app.cacheDir, "medialayer").apply { mkdirs() }
-  lateinit var layer: MediaLayer
-  val imageLoader = mediaImageLoader(app, ImageBytes { url, headers -> layer.fetchImage(url, headers) }, imageMemoryBytes)
+  var reference: WeakReference<MediaLayer>? = null
+  val imageLoader = mediaImageLoader(app, ImageBytes { url, headers ->
+    val media = reference?.get() ?: throw CancellationException("MediaLayer was released")
+    media.fetchImage(url, headers)
+  }, imageMemoryBytes)
   val releaser = object : MemoryReleaser {
     override fun dropMemoryCaches() {
       imageLoader.memoryCache?.clear()
     }
   }
-  layer = open(
+  val layer = open(
     OpenConfig(
       dir = dir.path,
       fetcher = fetcher,
@@ -109,6 +114,7 @@ internal fun openMediaLayer(
       silent = silent
     )
   )
+  reference = WeakReference(layer)
   val events = layer.playerEvents()
   factory.bind(events)
   val signals = SystemSignals(app, events, lifecycle).also { it.register() }

@@ -19,7 +19,7 @@ final class KeyClaims: @unchecked Sendable {
     var muted: Bool?
   }
 
-  private let places: MediaPlaces
+  private weak var places: MediaPlaces?
   private let hosts: HostLayers
   private let lock = NSLock()
   private var claims: [String: [UUID: Claim]] = [:]
@@ -46,7 +46,7 @@ final class KeyClaims: @unchecked Sendable {
 
   func setPlaying(owner: UUID, key: String, playing: Bool) {
     forward(update(owner: owner, key: key) { $0.playing = playing }, key: key)
-    if playing, let token = hosts.prefer(key: key, owner: owner) { places.attachView(key: key, token: token) }
+    if playing, let token = hosts.prefer(key: key, owner: owner) { places?.attachView(key: key, token: token) }
   }
 
   func setPeeking(owner: UUID, key: String, peeking: Bool) {
@@ -104,6 +104,7 @@ final class KeyClaims: @unchecked Sendable {
   }
 
   private func forward(_ change: Change, key: String) {
+    guard let places else { return }
     MediaTrace.emit("claims", "key=\(MediaTrace.tail(key)) visible=\(change.visible.map(String.init) ?? "-") playing=\(change.playing.map(String.init) ?? "-") peeking=\(change.peeking.map(String.init) ?? "-") muted=\(change.muted.map(String.init) ?? "-")")
     if change.visible == true, let source = change.source { places.visible(source: source, visible: true) }
     if let playing = change.playing { places.setPlaying(key: key, playing: playing) }
