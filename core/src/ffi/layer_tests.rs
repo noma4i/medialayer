@@ -565,3 +565,24 @@ fn inv_ffi_04_a_panicking_media_task_is_an_error_not_a_panic_across_the_bridge()
 
     assert!(matches!(outcome, Err(MediaError::Unexpected { .. })));
 }
+
+#[tokio::test]
+async fn inv_ffi_09_cancelling_outer_call_drops_inner_work() {
+    let dir = tempfile::tempdir().unwrap();
+    let parts = crate::api::assemble(assembly(dir.path(), Arc::new(MockFetcher::default()), shared::<MockFactory>())).await.unwrap();
+    let layer = MediaLayer::from_parts(None, Handle::current(), parts, None);
+    let (started, running) = tokio::sync::oneshot::channel();
+    let (resource, released) = tokio::sync::oneshot::channel::<()>();
+    let outer = tokio::spawn(async move {
+        layer.with_assembled(|_| async move {
+            let _resource = resource;
+            started.send(()).unwrap();
+            std::future::pending::<()>().await;
+        }).await
+    });
+    running.await.unwrap();
+    outer.abort();
+    assert!(outer.await.unwrap_err().is_cancelled());
+    let release = tokio::time::timeout(std::time::Duration::from_secs(1), released).await;
+    assert!(matches!(release, Ok(Err(_))), "inner work still owns its resource");
+}

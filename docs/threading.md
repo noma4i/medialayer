@@ -11,9 +11,11 @@ MediaLayer never blocks your threads. Every public call either returns at once o
 | Deferred work | Eviction, checks and far prefetch wait for idle time |
 | Instant open | Opening does not scan the disk |
 | Listeners | Called from library threads with the latest state only; hop to the main thread yourself |
-| Cancel | Stops work at once and releases connections and files |
+| Cancel | Releases the caller's work and subscriptions. A shared download continues while another caller needs it |
 
 UNBUILT: deferred work. Eviction starts right after a write that reaches the budget, the library has no idle signal yet, and the far prefetch window is not delayed.
+
+Throwing Swift calls and Kotlin suspend calls forward cancellation to Rust. Non-throwing Swift calls finish normally when their task is cancelled.
 
 ### Swift
 

@@ -9,6 +9,7 @@ use crate::api::{
     PlayerSlotFactory, SettingsStore, Subscription,
 };
 use crate::memory::InputLimits;
+use crate::api::AbortOnDrop;
 use crate::session::WatchdogConfig;
 use std::collections::HashMap;
 use std::future::Future;
@@ -101,7 +102,7 @@ impl MediaLayer {
 
     pub(crate) async fn with_assembled<T: Send + 'static, Work: Future<Output = T> + Send + 'static>(&self, work: impl FnOnce(Arc<Assembled>) -> Work) -> Result<T, MediaError> {
         let assembled = self.assembled.wait().await?;
-        self.handle.spawn(work(assembled)).await.map_err(|error| MediaError::Unexpected { detail: error.to_string() })
+        AbortOnDrop::new(self.handle.spawn(work(assembled))).join().await.map_err(|error| MediaError::Unexpected { detail: error.to_string() })
     }
 
     async fn on_assembled<T: Send + 'static, Work: Future<Output = T> + Send + 'static>(&self, empty: T, work: impl FnOnce(Arc<Assembled>) -> Work) -> T {

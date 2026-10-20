@@ -27,6 +27,7 @@ mkdir -p "$build/headers/medialayerFFI" "$bridge/Sources/MediaLayer"
 (cd -- "$root/core" && "$root/target/debug/uniffi-bindgen" generate \
   --library "$root/target/debug/libmedialayer.dylib" --language swift --out-dir "$build/swift")
 
+python3 "$root/scripts/swift_cancellation.py" "$build/swift/medialayer.swift"
 cp "$build/swift/medialayerFFI.h" "$build/headers/medialayerFFI/"
 cp "$build/swift/medialayerFFI.modulemap" "$build/headers/medialayerFFI/module.modulemap"
 cp "$build/swift/medialayer.swift" "$bridge/Sources/MediaLayer/medialayer.swift"
