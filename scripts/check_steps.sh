@@ -152,7 +152,7 @@ run_checks() {
     return 0
   fi
   for line in "${selected[@]}"; do
-    case "$line" in *gradle-step* | *gradlew* | */bin/gradle\ * | *build_kotlin.sh*) IFS='|' read -r _ lane_name _ <<< "$line"; refuse_gradle_on_darwin "step $lane_name" || return $? ;; esac
+    case "$line" in *gradle-step* | *gradlew* | */bin/gradle\ *) IFS='|' read -r _ lane_name _ <<< "$line"; refuse_gradle_on_darwin "step $lane_name" || return $? ;; esac
   done
   logdir="$root/target/check-logs"
   mkdir -p "$logdir"

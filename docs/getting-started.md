@@ -14,7 +14,7 @@ export PATH=/opt/homebrew/opt/rustup/bin:$PATH
 bash scripts/check_medialayer.sh
 ```
 
-On macOS the Kotlin lane, `scripts/build_kotlin.sh` and every Gradle step stop at once with `gradle runs only on brick` and a nonzero code. Run them on brick.
+On macOS the Kotlin lane and every Gradle step stop at once with `gradle runs only on brick` and a nonzero code. Run them on brick. `scripts/build_kotlin.sh` starts no Gradle and runs on any host.
 
 ## Build modes
 
