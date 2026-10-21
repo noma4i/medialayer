@@ -4,6 +4,7 @@ use crate::limits::{EvictionStrategy, LeadingChunks, Limits as CoreLimits};
 #[test]
 fn inv_limits_06_every_limit_survives_the_trip_across_the_bridge_types() {
     let core = CoreLimits {
+        free_space_fraction: 0.25,
         budget: 2_000_000_000,
         min_budget: 70_000_000,
         shrink_to: 0.75,

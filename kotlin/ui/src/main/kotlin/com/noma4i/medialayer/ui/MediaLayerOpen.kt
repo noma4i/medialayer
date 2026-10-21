@@ -108,6 +108,7 @@ internal fun openMediaLayer(
     }
     val config = OpenConfig(
       dir = dir.path,
+      availableBytes = android.os.StatFs(dir.path).availableBytes.toULong(),
       fetcher = fetcher ?: OkHttpFetcher(client),
       settings = settings,
       slots = factory,

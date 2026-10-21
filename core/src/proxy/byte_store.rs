@@ -8,6 +8,7 @@ pub struct Meta {
 
 #[async_trait]
 pub trait ByteStore: Send + Sync {
+    async fn open_reader(&self, key: &str) -> Option<Box<dyn StoreReader>>;
     async fn len(&self, key: &str) -> Option<u64>;
     async fn contains(&self, key: &str) -> bool;
     async fn get_range(&self, key: &str, start: u64, len: u64) -> Option<Vec<u8>>;
@@ -15,6 +16,11 @@ pub trait ByteStore: Send + Sync {
     async fn begin_write(&self, key: &str, meta: Meta) -> Option<Box<dyn StoreWriter>>;
     async fn remove(&self, key: &str);
     async fn keep(&self, _key: &str) {}
+}
+
+#[async_trait]
+pub trait StoreReader: Send {
+    async fn get_range(&mut self, start: u64, len: u64) -> Option<Vec<u8>>;
 }
 
 #[async_trait]

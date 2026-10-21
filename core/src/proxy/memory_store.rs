@@ -87,6 +87,9 @@ struct MemoryWriter {
 
 #[async_trait]
 impl ByteStore for MemoryStore {
+    async fn open_reader(&self, key: &str) -> Option<Box<dyn super::StoreReader>> {
+        Some(Box::new(MemoryReader { store: self.clone(), key: key.into() }))
+    }
     async fn len(&self, key: &str) -> Option<u64> {
         self.entries().get(key).filter(|entry| entry.complete).map(|entry| entry.data.len() as u64)
     }
@@ -118,6 +121,18 @@ impl ByteStore for MemoryStore {
 
     async fn remove(&self, key: &str) {
         self.entries().remove(key);
+    }
+}
+
+struct MemoryReader {
+    store: MemoryStore,
+    key: String,
+}
+
+#[async_trait]
+impl super::StoreReader for MemoryReader {
+    async fn get_range(&mut self, start: u64, len: u64) -> Option<Vec<u8>> {
+        self.store.get_range(&self.key, start, len).await
     }
 }
 

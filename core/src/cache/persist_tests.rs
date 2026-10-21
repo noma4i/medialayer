@@ -17,7 +17,8 @@ fn inv_cache_14_line_round_trips_with_and_without_meta() {
         Meta { content_type: Some("image/webp".to_string()), total_length: Some(0) },
     ];
     for meta in metas {
-        let line = encode_line("some key/é", &sample(meta.clone()));
+        let mut line = String::new();
+        encode_line("some key/é", &sample(meta.clone()), &mut line);
         assert_eq!(decode_line(line.trim_end_matches('\n')), Some(("some key/é".to_string(), sample(meta))));
     }
 }
@@ -50,7 +51,8 @@ fn toned(level: u8) -> Entry {
 #[test]
 fn inv_tone_08_a_line_carries_the_tone_and_a_damaged_tone_field_keeps_the_entry_without_it() {
     let entry = toned(33);
-    let line = encode_line("tone key", &entry);
+    let mut line = String::new();
+    encode_line("tone key", &entry, &mut line);
 
     assert_eq!(decode_line(line.trim_end_matches('\n')), Some(("tone key".to_string(), entry.clone())));
     let damaged = line.trim_end_matches('\n').rsplit_once('\t').map(|(head, _)| format!("{head}\tzz")).unwrap();
@@ -61,13 +63,14 @@ fn inv_tone_08_a_line_carries_the_tone_and_a_damaged_tone_field_keeps_the_entry_
 async fn inv_cache_07_failed_index_save_preserves_dirty_state() {
     use std::sync::atomic::Ordering;
     let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::open(dir.path(), crate::limits::Limits::default());
+    let cache = Cache::open(dir.path(), crate::limits::Limits::default(), u64::MAX);
     cache.ready().await;
     std::fs::create_dir(dir.path().join(super::naming::INDEX_TMP_FILE)).unwrap();
     cache.inner.dirty.store(false, Ordering::SeqCst);
     assert!(cache.flush().await.is_err());
     assert!(cache.inner.dirty.load(Ordering::SeqCst), "failed flush discarded the retry requirement");
     std::fs::remove_dir(dir.path().join(super::naming::INDEX_TMP_FILE)).unwrap();
+    cache.flush().await.unwrap();
     super::test_support::wait_until(|| dir.path().join(super::naming::INDEX_FILE).is_file()).await;
     assert!(!cache.inner.dirty.load(Ordering::SeqCst));
 }
@@ -76,7 +79,7 @@ async fn inv_cache_07_failed_index_save_preserves_dirty_state() {
 async fn inv_strategy_12_clear_and_purge_remove_keep_history() {
     for purge in [false, true] {
         let dir = tempfile::tempdir().unwrap();
-        let cache = Cache::open(dir.path(), crate::limits::Limits::default());
+        let cache = Cache::open(dir.path(), crate::limits::Limits::default(), u64::MAX);
         cache.ready().await;
         cache.put("clip#0", Kind::Stream, b"data").await.unwrap();
         cache.keep("clip");

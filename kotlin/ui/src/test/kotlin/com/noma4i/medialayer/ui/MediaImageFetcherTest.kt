@@ -36,7 +36,7 @@ class MediaImageFetcherTest {
 
   @Test
   fun selectedHeadersSeparateDecodedImagesAndUnselectedHeadersReuseThem() {
-    val media = MediaLayer.open(OpenConfig(
+    val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
       dir = Files.createTempDirectory("image-identity").toString(),
       fetcher = object : com.noma4i.medialayer.Fetcher {
         override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("unused origin")

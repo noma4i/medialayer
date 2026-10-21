@@ -1,10 +1,9 @@
-use super::byte_store::read_at;
 use super::entry::{Entry, Kind, CacheStats};
 use super::error::CacheError;
 use super::evict::{evict_if_needed, names_where, remove_names};
 use super::inner::CacheShared;
 use super::load::load;
-use super::naming::{bin_path, file_name};
+use super::naming::file_name;
 use super::options::Options;
 use super::reader::{Pin, Reader};
 use super::save::{mark_dirty, write_index};
@@ -19,7 +18,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const WRITE_CHUNK: usize = 1024 * 1024;
-const READ_ATTEMPTS: usize = 3;
 
 #[derive(Clone)]
 pub struct Cache {
@@ -27,13 +25,13 @@ pub struct Cache {
 }
 
 impl Cache {
-    pub fn open(dir: impl Into<PathBuf>, limits: Limits) -> Cache {
-        Cache::open_with(dir, limits, Options::default())
+    pub fn open(dir: impl Into<PathBuf>, limits: Limits, available_bytes: u64) -> Cache {
+        Cache::open_with(dir, limits, Options::default(), available_bytes)
     }
 
-    pub fn open_with(dir: impl Into<PathBuf>, limits: Limits, options: Options) -> Cache {
+    pub fn open_with(dir: impl Into<PathBuf>, limits: Limits, options: Options, available_bytes: u64) -> Cache {
         let handle = tokio::runtime::Handle::current();
-        let inner = Arc::new(CacheShared::new(dir.into(), limits, options, handle.clone()));
+        let inner = Arc::new(CacheShared::new(dir.into(), limits, options, handle.clone(), available_bytes));
         handle.spawn(load(inner.clone()));
         Cache { inner }
     }
@@ -47,11 +45,7 @@ impl Cache {
     }
 
     pub async fn flush(&self) -> Result<(), CacheError> {
-        let result = write_index(&self.inner).await;
-        if result.is_err() {
-            mark_dirty(&self.inner);
-        }
-        result.map_err(CacheError::from)
+        write_index(&self.inner).await.map_err(CacheError::from)
     }
 
     pub async fn get(&self, key: &str) -> Option<Vec<u8>> {
@@ -59,40 +53,7 @@ impl Cache {
     }
 
     pub async fn get_range(&self, key: &str, start: u64, len: u64) -> Option<Vec<u8>> {
-        for _ in 0..READ_ATTEMPTS {
-            let (pin, size) = self.pinned(key).await?;
-            let path = bin_path(&self.inner.dir, &file_name(key));
-            let wanted = len.min(size.saturating_sub(start));
-            let read = tokio::task::spawn_blocking(move || {
-                let _pin = pin;
-                let file = std::fs::File::open(&path).ok()?;
-                Some(if file.metadata().ok()?.len() == size { read_at(&file, start, wanted) } else { None })
-            })
-            .await;
-            match read {
-                Ok(Some(Some(bytes))) => return Some(bytes),
-                Ok(Some(None)) => continue,
-                _ => break,
-            }
-        }
-        self.forget_missing(key);
-        None
-    }
-
-    async fn pinned(&self, key: &str) -> Option<(Pin, u64)> {
-        if !self.is_ready() {
-            return None;
-        }
-        let name = file_name(key);
-        verified(&self.inner, &name).await?;
-        Pin::acquire(&self.inner, &name)
-    }
-
-    fn forget_missing(&self, key: &str) {
-        let name = file_name(key);
-        if !bin_path(&self.inner.dir, &name).exists() && self.inner.state().take(&name).is_some() {
-            mark_dirty(&self.inner);
-        }
+        self.open_reader(key).await?.get_range(start, len).await
     }
 
     pub async fn open_reader(&self, key: &str) -> Option<Reader> {
@@ -100,17 +61,10 @@ impl Cache {
             return None;
         }
         let name = file_name(key);
-        verified(&self.inner, &name).await?;
+        let _stripe = self.inner.stripe(&name).lock().await;
+        let file = super::verify::opened(&self.inner, &name).await?;
         let (pin, size) = Pin::acquire(&self.inner, &name)?;
-        match tokio::fs::File::open(bin_path(&self.inner.dir, &name)).await {
-            Ok(file) => Some(Reader::new(pin, file, size)),
-            Err(_) => {
-                drop(pin);
-                self.inner.state().take(&name);
-                mark_dirty(&self.inner);
-                None
-            }
-        }
+        Some(Reader::new(pin, file, size))
     }
 
     pub async fn put(&self, key: &str, kind: Kind, data: &[u8]) -> Result<(), CacheError> {
@@ -126,25 +80,25 @@ impl Cache {
     }
 
     pub async fn len(&self, key: &str) -> Option<u64> {
-        self.entry_of(key).await.map(|entry| entry.size)
+        self.entry_of(key, |entry| entry.size).await
     }
 
     pub async fn meta(&self, key: &str) -> Option<Meta> {
-        self.entry_of(key).await.map(|entry| entry.meta)
+        self.entry_of(key, |entry| entry.meta.clone()).await
     }
 
-    async fn entry_of(&self, key: &str) -> Option<Entry> {
+    async fn entry_of<T>(&self, key: &str, select: impl FnOnce(&Entry) -> T) -> Option<T> {
         if !self.is_ready() {
             return None;
         }
-        verified(&self.inner, &file_name(key)).await
+        verified(&self.inner, &file_name(key), select).await
     }
 
     pub fn tone(&self, key: &str) -> Option<ToneData> {
         if !self.is_ready() {
             return None;
         }
-        self.inner.state().entry_state(&file_name(key)).and_then(|(_, entry, _)| entry.tone)
+        self.inner.state().slot(&file_name(key)).and_then(|slot| slot.entry.tone.clone())
     }
 
     pub fn set_tone(&self, key: &str, tone: ToneData) -> bool {
@@ -156,7 +110,7 @@ impl Cache {
     }
 
     pub async fn contains(&self, key: &str) -> bool {
-        self.entry_of(key).await.is_some()
+        self.entry_of(key, |_| ()).await.is_some()
     }
 
     pub async fn remove(&self, key: &str) -> bool {
@@ -185,7 +139,7 @@ impl Cache {
 
     pub async fn set_limits(&self, limits: Limits) -> Result<(), LimitsError> {
         limits.validate()?;
-        self.inner.state().limits = limits;
+        self.inner.state().limits = super::reservation::limits_for_disk(limits, self.inner.available_bytes);
         evict_if_needed(&self.inner).await;
         Ok(())
     }

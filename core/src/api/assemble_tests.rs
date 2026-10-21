@@ -36,7 +36,7 @@ fn inv_api_09_the_default_memory_holds_the_default_pool() {
 async fn inv_api_09_purge_removes_the_entry_of_the_url_and_its_ranged_blocks() {
     let dir = tempfile::tempdir().unwrap();
     let url = "https://cdn.test/a.mp4";
-    let cache = Cache::open(dir.path(), Limits::default());
+    let cache = Cache::open(dir.path(), Limits::default(), u64::MAX);
     for key in [cache_key(url), format!("{}#0", cache_key(url)), format!("{}#1", cache_key(url)), "https://cdn.test/b.mp4".to_string()] {
         cache.put(&key, cache::Kind::Stream, b"bytes").await.unwrap();
     }

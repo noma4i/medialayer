@@ -2,6 +2,12 @@ use std::fs;
 use std::path::PathBuf;
 
 use medialayer::prefetch::CacheStrategy;
+
+#[test]
+fn inv_limits_01_dsl_configures_the_free_space_fraction() {
+    let spec = crate::parse_spec("cache do\n  free_space 25.percent\nend\n").expect("valid disk share");
+    assert!(spec.limits().encode().contains("free_space_fraction=0.25\n"));
+}
 use medialayer::spec::{AudioSpec, CacheSpec, Evict, ImageSpec, MediaSpec, PoolSpec, PrefetchSpec, VideoSpec};
 
 use super::*;

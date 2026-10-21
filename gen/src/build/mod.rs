@@ -176,6 +176,7 @@ fn cache(body: &[Call]) -> CacheSpec {
         budget: argument(body, "budget", size).unwrap_or(base.budget),
         min: keyed(body, "budget", "min", size).unwrap_or(base.min),
         shrink_to: argument(body, "shrink_to", percent).unwrap_or(base.shrink_to),
+        free_space: argument(body, "free_space", percent).unwrap_or(base.free_space),
         evict: argument(body, "evict", evict).unwrap_or(base.evict),
         memory: argument(body, "memory", size).unwrap_or(base.memory),
         timeout: argument(body, "timeout", duration).unwrap_or(base.timeout),

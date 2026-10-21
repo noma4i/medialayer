@@ -17,6 +17,7 @@ pub enum EvictionStrategy {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Limits {
     pub budget: u64,
+    pub free_space_fraction: f64,
     pub min_budget: u64,
     pub shrink_to: f64,
     pub memory_budget: u64,
@@ -39,6 +40,8 @@ pub enum LimitsError {
     BudgetBelowMin { budget: u64, min_budget: u64 },
     #[error("shrink_to must be in (0, 1]")]
     ShrinkToOutOfRange,
+    #[error("free_space_fraction must be in (0, 1]")]
+    FreeSpaceFractionOutOfRange,
     #[error("prefetch window from {from} is above to {to}")]
     PrefetchWindowInverted { from: u32, to: u32 },
     #[error("{field} must not be zero")]
@@ -61,6 +64,7 @@ impl Default for Limits {
     fn default() -> Self {
         Limits {
             budget: 4 * GIB,
+            free_space_fraction: 0.1,
             min_budget: 64 * MIB,
             shrink_to: 0.9,
             memory_budget: 256 * MIB,
@@ -109,6 +113,9 @@ impl Limits {
         if !(self.shrink_to > 0.0 && self.shrink_to <= 1.0) {
             return Err(LimitsError::ShrinkToOutOfRange);
         }
+        if !(self.free_space_fraction > 0.0 && self.free_space_fraction <= 1.0) {
+            return Err(LimitsError::FreeSpaceFractionOutOfRange);
+        }
         if self.prefetch_from > self.prefetch_to {
             return Err(LimitsError::PrefetchWindowInverted { from: self.prefetch_from, to: self.prefetch_to });
         }
@@ -119,7 +126,7 @@ impl Limits {
         format!(
             "budget={}\nmin_budget={}\nshrink_to={}\nmemory_budget={}\nslots={}\nprefetch_from={}\nprefetch_to={}\n\
              leading_chunks={}\nprefetch_budget_mib={}\ntimeout_seconds={}\nmax_concurrent={}\ndedupe_window_seconds={}\ndedupe_max_entries={}\n\
-             playback_chunks_ahead={}\nstrategy={}\n",
+             playback_chunks_ahead={}\nstrategy={}\nfree_space_fraction={}\n",
             self.budget,
             self.min_budget,
             self.shrink_to,
@@ -135,6 +142,7 @@ impl Limits {
             self.dedupe_max_entries,
             self.playback_chunks_ahead,
             self.strategy.encode(),
+            self.free_space_fraction,
         )
     }
 
@@ -154,6 +162,7 @@ impl Limits {
     fn apply(&mut self, key: &str, value: &str) -> Result<(), LimitsError> {
         match key {
             "budget" => self.budget = number("budget", value)?,
+            "free_space_fraction" => self.free_space_fraction = number("free_space_fraction", value)?,
             "min_budget" => self.min_budget = number("min_budget", value)?,
             "shrink_to" => self.shrink_to = number("shrink_to", value)?,
             "memory_budget" => self.memory_budget = number("memory_budget", value)?,

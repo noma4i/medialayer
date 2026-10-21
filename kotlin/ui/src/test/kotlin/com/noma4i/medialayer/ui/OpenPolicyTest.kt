@@ -44,6 +44,7 @@ class OpenPolicyTest {
 
   @Before
   fun setDeviceMemory() {
+    org.robolectric.shadows.ShadowStatFs.registerStats(application.cacheDir, 1_000_000, 1_000_000, 1_000_000)
     val manager = application.getSystemService(ActivityManager::class.java)
     shadowOf(manager).setMemoryInfo(ActivityManager.MemoryInfo().apply { totalMem = 4L * 1024 * 1024 * 1024 })
     shadowOf(manager).setMemoryClass(256)

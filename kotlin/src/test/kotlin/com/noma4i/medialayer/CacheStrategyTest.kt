@@ -73,7 +73,7 @@ class CacheStrategyTest {
 
   private fun open(fetcher: Fetcher, directory: String = Files.createTempDirectory("medialayer").toString()): MediaLayer =
     MediaLayer.open(
-      OpenConfig(
+      OpenConfig(availableBytes = ULong.MAX_VALUE,
         dir = directory,
         fetcher = fetcher,
         settings = StrategySettings(),

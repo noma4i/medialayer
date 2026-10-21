@@ -151,7 +151,7 @@ class MediaLayerBridgeTest {
 
   private fun openWith(fetcher: Fetcher, slots: PlayerSlotFactory, silent: Boolean): MediaLayer =
     MediaLayer.open(
-      OpenConfig(
+      OpenConfig(availableBytes = ULong.MAX_VALUE,
         dir = Files.createTempDirectory("medialayer").toString(),
         fetcher = fetcher,
         settings = MemorySettings(),
@@ -167,7 +167,7 @@ class MediaLayerBridgeTest {
   fun inv_api_17_a_typed_image_window_prefetches_the_remote_images_of_its_pages() {
     val fetcher = UrlFetcher()
     val media = MediaLayer.open(
-      OpenConfig(
+      OpenConfig(availableBytes = ULong.MAX_VALUE,
         dir = Files.createTempDirectory("medialayer").toString(),
         fetcher = fetcher,
         settings = MemorySettings(),
@@ -250,7 +250,7 @@ class MediaLayerBridgeTest {
 
   private fun open(settings: MemorySettings): MediaLayer =
     MediaLayer.open(
-      OpenConfig(
+      OpenConfig(availableBytes = ULong.MAX_VALUE,
         dir = Files.createTempDirectory("medialayer").toString(),
         fetcher = OfflineFetcher(),
         settings = settings,

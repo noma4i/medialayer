@@ -135,7 +135,7 @@ async fn inv_cache_05_the_cache_equals_a_map_model_over_random_operations() {
                 settle(&f.cache).await;
                 quiet_disk(f.dir.path()).await;
                 f.cache.flush().await.unwrap();
-                f.cache = Cache::open_with(f.dir.path(), roomy, options(f.clock.clone(), &[]));
+                f.cache = Cache::open_with(f.dir.path(), roomy, options(f.clock.clone(), &[]), u64::MAX);
                 f.cache.ready().await;
             }
             _ => {
@@ -268,7 +268,7 @@ async fn inv_cache_07_a_directory_copied_at_any_moment_opens_to_a_consistent_cac
     assert!(copies.len() > 20, "too few snapshots: {}", copies.len());
     let big = limits(1 << 40, 0.9, EvictionStrategy::Lru);
     for (number, copy) in copies.iter().enumerate() {
-        let reopened = Cache::open(copy.path(), big);
+        let reopened = Cache::open(copy.path(), big, u64::MAX);
         reopened.ready().await;
         let mut total = 0;
         let mut present = 0;
@@ -293,7 +293,7 @@ async fn inv_cache_07_a_rewrite_on_disk_before_its_index_is_not_trusted_and_a_to
     let dir = tempfile::tempdir().unwrap();
     let slow_index = Options { persist_delay: Duration::from_secs(3600), ..Options::default() };
     let roomy = limits(1 << 30, 0.9, EvictionStrategy::Lru);
-    let first = Cache::open_with(dir.path(), roomy, slow_index.clone());
+    let first = Cache::open_with(dir.path(), roomy, slow_index.clone(), u64::MAX);
     first.ready().await;
     first.put("https://o.test/k", Kind::Image, &[1u8; 100]).await.unwrap();
     first.flush().await.unwrap();
@@ -301,7 +301,7 @@ async fn inv_cache_07_a_rewrite_on_disk_before_its_index_is_not_trusted_and_a_to
     first.put("https://o.test/only-on-disk", Kind::Image, &[3u8; 40]).await.unwrap();
     std::fs::write(dir.path().join("index.tsv.tmp"), b"torn\tline without fields").unwrap();
 
-    let reopened = Cache::open(dir.path(), roomy);
+    let reopened = Cache::open(dir.path(), roomy, u64::MAX);
     reopened.ready().await;
     assert_eq!(reopened.get("https://o.test/k").await, None, "a file that disagrees with its index is dropped and fetched again");
     assert_eq!(reopened.len("https://o.test/k").await, None);
@@ -310,7 +310,7 @@ async fn inv_cache_07_a_rewrite_on_disk_before_its_index_is_not_trusted_and_a_to
     assert_eq!((stats.file_count, stats.total_bytes), (0, 0));
     reopened.put("https://o.test/k", Kind::Image, &[2u8; 250]).await.unwrap();
     reopened.flush().await.unwrap();
-    let again = Cache::open(dir.path(), roomy);
+    let again = Cache::open(dir.path(), roomy, u64::MAX);
     again.ready().await;
     assert_eq!(again.get("https://o.test/k").await, Some(vec![2u8; 250]));
 }

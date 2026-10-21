@@ -80,11 +80,16 @@ Android создаёт общий `OkHttpClient` для стандартного
 
 The calls above fill `OpenConfig` for you. Pass it yourself to change the pool, the device class or the cache key.
 
+`OpenConfig.availableBytes` обязателен. Swift берёт его из `volumeAvailableCapacityForOpportunisticUsage` каталога кэша, Kotlin из `StatFs.availableBytes`.
+Обычные вызовы `open` передают значение сами. `Limits.freeSpaceFraction` задаёт долю, `setLimits` пересчитывает бюджет из снимка при открытии.
+При нехватке места фактический бюджет может быть ниже `minBudget`, включая 0. Опроса диска по таймеру нет.
+
 ### Swift
 
 ```swift
 let media = try MediaLayer.open(config: OpenConfig(
   dir: cacheDirectory.path,
+  availableBytes: availableBytes,
   fetcher: URLSessionFetcher(),
   settings: UserDefaultsSettings(),
   slots: AVQueuePlayerSlotFactory(startMuted: false),
@@ -102,6 +107,7 @@ let media = try MediaLayer.open(config: OpenConfig(
 ```kotlin
 val media = MediaLayer.open(OpenConfig(
   dir = cacheDir.path,
+  availableBytes = android.os.StatFs(cacheDir.path).availableBytes.toULong(),
   fetcher = OkHttpFetcher(okHttpClient),
   settings = SharedPreferencesSettings(this),
   slots = ExoPlayerSlotFactory(this),

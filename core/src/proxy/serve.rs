@@ -261,6 +261,7 @@ async fn stored_response(
     let content_type = content_type_for(target, meta.content_type.as_deref());
     let body = |start: u64, end: u64| {
         let cursor = StoreCursor {
+            reader: None,
             subscription: None,
             store: inner.store.clone(),
             key: key.to_string(),
@@ -312,6 +313,7 @@ async fn flight_response(
     };
     let content_type = content_type_for(target, head.content_type.as_deref());
     let cursor = |position: u64, end: Option<u64>| StoreCursor {
+        reader: None,
         subscription: Some(subscription),
         store: inner.store.clone(),
         key: inner.key(target, headers),
@@ -511,6 +513,7 @@ impl BlockCursor {
         let offset_end = self.block_end - block_start;
         let chunk = self.inner.config.stream_chunk as u64;
         let mut cursor = StoreCursor {
+            reader: None,
             subscription: None,
             store: self.inner.store.clone(),
             key: stored_key.clone(),

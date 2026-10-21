@@ -159,6 +159,7 @@ async fn inv_cache_02_failed_put_does_not_leak_reserved_space() {
     let reader = f.cache.open_reader("a").await.unwrap();
     assert!(f.cache.put("b", Kind::Image, &payload(60)).await.is_err());
     drop(reader);
+    f.clock.advance_ms(10);
     f.cache.put("c", Kind::Image, &payload(40)).await.unwrap();
     assert!(f.cache.contains("c").await);
 }
@@ -243,7 +244,7 @@ async fn inv_cache_08_mixed_strategies_evict_by_kind_priority_then_kind_strategy
     for round in 0..20 {
         let dir = tempfile::tempdir().unwrap();
         let clock = std::sync::Arc::new(super::clock::ManualClock::new(1_000));
-        let cache = Cache::open_with(dir.path(), limits(100, 0.8, EvictionStrategy::Lru), mixed_priority_options(clock.clone()));
+        let cache = Cache::open_with(dir.path(), limits(100, 0.8, EvictionStrategy::Lru), mixed_priority_options(clock.clone()), u64::MAX);
         cache.ready().await;
         for (key, kind, len) in [("i1", Kind::Image, 20), ("i2", Kind::Image, 20), ("a1", Kind::Audio, 10), ("a2", Kind::Audio, 30)] {
             let key = format!("{key}-{round}");
@@ -267,7 +268,7 @@ async fn inv_cache_08_kinds_sharing_a_strategy_are_ranked_together() {
         let dir = tempfile::tempdir().unwrap();
         let clock = std::sync::Arc::new(super::clock::ManualClock::new(1_000));
         let options = Options { kind_priority: [Kind::Audio, Kind::Image, Kind::Stream], ..options(clock.clone(), &[]) };
-        let cache = Cache::open_with(dir.path(), limits(100, 0.8, EvictionStrategy::Lru), options);
+        let cache = Cache::open_with(dir.path(), limits(100, 0.8, EvictionStrategy::Lru), options, u64::MAX);
         cache.ready().await;
         for (key, kind) in [("i1", Kind::Image), ("a1", Kind::Audio), ("s1", Kind::Stream)] {
             clock.advance_ms(10);

@@ -19,7 +19,7 @@ struct Rig {
 
 async fn rig(memo: usize) -> Rig {
     let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::open(dir.path(), Limits::default());
+    let cache = Cache::open(dir.path(), Limits::default(), u64::MAX);
     cache.ready().await;
     let tones = Tones::new(Handle::current(), Arc::new(CacheTones::new(cache.clone(), Arc::new(|url, _| url.to_string()))), memo);
     Rig { cache, tones, _dir: dir }

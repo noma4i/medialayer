@@ -42,7 +42,7 @@ pub fn options(clock: Arc<ManualClock>, overrides: &[(Kind, EvictionStrategy)]) 
 pub async fn fixture(limits: Limits, overrides: &[(Kind, EvictionStrategy)]) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let clock = Arc::new(ManualClock::new(1_000));
-    let cache = Cache::open_with(dir.path(), limits, options(clock.clone(), overrides));
+    let cache = Cache::open_with(dir.path(), limits, options(clock.clone(), overrides), u64::MAX);
     cache.ready().await;
     Fixture { cache, clock, dir }
 }

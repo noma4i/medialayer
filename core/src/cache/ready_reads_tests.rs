@@ -12,7 +12,7 @@ const KEY: &str = "https://o.test/media/abc/200.gif";
 
 fn reopened_over_existing_files(dir: &std::path::Path) -> Cache {
     write_prepared_dir(dir, 3, KEY);
-    let cache = Cache::open(dir, limits(u64::MAX / 2, 0.9, EvictionStrategy::Lru));
+    let cache = Cache::open(dir, limits(u64::MAX / 2, 0.9, EvictionStrategy::Lru), u64::MAX);
     assert!(!cache.is_ready());
     cache
 }

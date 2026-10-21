@@ -91,7 +91,7 @@ struct CacheStrategyTests {
   private func open(_ fetcher: Fetcher, directory: URL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)) throws -> MediaLayer {
     try MediaLayer.open(config: OpenConfig(
       dir: directory.path,
-      fetcher: fetcher,
+      availableBytes: UInt64.max, fetcher: fetcher,
       settings: MemorySettings(),
       slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),

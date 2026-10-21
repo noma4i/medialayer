@@ -1,6 +1,15 @@
 use super::*;
 
 #[test]
+fn inv_limits_01_free_space_fraction_is_validated_and_persisted() {
+    for value in ["0", "-0.1", "1.01", "NaN", "inf"] {
+        assert!(Limits::decode(Limits::default(), &format!("free_space_fraction={value}")).is_err());
+    }
+    let limits = Limits::decode(Limits::default(), "free_space_fraction=0.25").expect("valid fraction");
+    assert!(limits.encode().contains("free_space_fraction=0.25\n"));
+}
+
+#[test]
 fn inv_limits_01_budget_below_min_is_rejected() {
     let limits = Limits { budget: 10, min_budget: 20, ..Limits::default() };
     assert_eq!(limits.validate(), Err(LimitsError::BudgetBelowMin { budget: 10, min_budget: 20 }));

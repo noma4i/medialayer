@@ -18,6 +18,17 @@ const VIDEO: &str = "https://o.test/v.mp4";
 const ROOMY: u64 = 10 * 1024 * 1024;
 const SMALL_BUDGET: u64 = 4000;
 
+#[tokio::test]
+async fn inv_cache_03_one_file_open_serves_a_complete_response() {
+    let rig = rig(ROOMY).await;
+    let data = pattern(1024 * 1024, 7);
+    rig.cache.put(BLOB, Kind::Image, &data).await.unwrap();
+    let reply = fetch(&rig, BLOB, None).await;
+    assert_eq!(reply.status, 200);
+    assert_eq!(reply.body, data);
+    assert_eq!(rig.cache.inner.read_opens.load(std::sync::atomic::Ordering::Relaxed), 1);
+}
+
 struct Rig {
     proxy: Proxy,
     fetcher: Arc<MockFetcher>,
@@ -56,7 +67,7 @@ async fn reopen_offline(rig: Rig) -> Rig {
     downloads_finished(&rig.proxy).await;
     rig.proxy.stop().await;
     rig.cache.flush().await.unwrap();
-    let cache = Cache::open_with(rig.dir.path(), limits(ROOMY, 0.9, EvictionStrategy::Lru), options(rig_clock(), &[]));
+    let cache = Cache::open_with(rig.dir.path(), limits(ROOMY, 0.9, EvictionStrategy::Lru), options(rig_clock(), &[]), u64::MAX);
     cache.ready().await;
     let fetcher = Arc::new(MockFetcher::new());
     fetcher.set_offline(true);
@@ -177,7 +188,7 @@ async fn reopen_online(rig: Rig, route: impl Fn(&MockFetcher)) -> Rig {
     downloads_finished(&rig.proxy).await;
     rig.proxy.stop().await;
     rig.cache.flush().await.unwrap();
-    let cache = Cache::open_with(rig.dir.path(), limits(ROOMY, 0.9, EvictionStrategy::Lru), options(rig_clock(), &[]));
+    let cache = Cache::open_with(rig.dir.path(), limits(ROOMY, 0.9, EvictionStrategy::Lru), options(rig_clock(), &[]), u64::MAX);
     cache.ready().await;
     let fetcher = Arc::new(MockFetcher::new());
     route(&fetcher);

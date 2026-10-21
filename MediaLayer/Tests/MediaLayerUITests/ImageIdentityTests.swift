@@ -41,7 +41,7 @@ struct ImageIdentityTests {
     let origin = IdentityOrigin()
     let media = try MediaLayer.open(config: OpenConfig(
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-      fetcher: origin, settings: IdentitySettings(), slots: nil,
+      availableBytes: UInt64.max, fetcher: origin, settings: IdentitySettings(), slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
       defaults: defaultLimits(), pool: defaultPoolSettings(), namespaceHeaders: ["Authorization"]
     ))

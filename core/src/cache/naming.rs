@@ -1,4 +1,4 @@
-use crate::identity::{hex_lower, key_file_name};
+use crate::identity::key_file_name;
 use std::path::{Path, PathBuf};
 
 pub const INDEX_FILE: &str = "index.tsv";
@@ -6,8 +6,9 @@ pub const INDEX_TMP_FILE: &str = "index.tsv.tmp";
 pub const BIN_SUFFIX: &str = ".bin";
 pub const PART_SUFFIX: &str = ".part";
 
+#[cfg(test)]
 pub fn hex_encode(text: &str) -> String {
-    hex_lower(text.as_bytes())
+    crate::identity::hex_lower(text.as_bytes())
 }
 
 pub fn hex_decode_bytes(hex: &str) -> Option<Vec<u8>> {
@@ -22,7 +23,14 @@ pub fn hex_decode(hex: &str) -> Option<String> {
 }
 
 pub fn file_name(key: &str) -> String {
+    #[cfg(test)]
+    NAME_HASHES.with(|count| count.set(count.get() + 1));
     key_file_name(key)
+}
+
+#[cfg(test)]
+thread_local! {
+    pub static NAME_HASHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 pub fn bin_path(dir: &Path, name: &str) -> PathBuf {

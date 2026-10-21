@@ -131,7 +131,7 @@ async fn inv_cache_12_parallel_puts_of_one_key_leave_one_complete_value() {
 async fn inv_cache_12_streamed_write_is_invisible_until_commit_and_read_in_chunks() {
     let dir = tempfile::tempdir().unwrap();
     let options = Options { chunk_size: CHUNK, ..Options::default() };
-    let cache = Cache::open_with(dir.path(), limits(u64::MAX / 2, 0.9, EvictionStrategy::Lru), options);
+    let cache = Cache::open_with(dir.path(), limits(u64::MAX / 2, 0.9, EvictionStrategy::Lru), options, u64::MAX);
     cache.ready().await;
     let mut writer = cache.begin_write("seg", Kind::Stream).await.unwrap();
     for _ in 0..(STREAM_SIZE / CHUNK) {
@@ -179,7 +179,7 @@ async fn inv_cache_14_url_key_of_5000_chars_round_trips_through_a_reopen() {
     assert_eq!(f.cache.purge_prefix("https://cdn.example.com/segment/").await, 1);
     f.cache.put(&key, Kind::Stream, b"payload").await.unwrap();
     f.cache.flush().await.unwrap();
-    let reopened = Cache::open(f.dir.path(), limits(u64::MAX / 2, 0.9, EvictionStrategy::Lru));
+    let reopened = Cache::open(f.dir.path(), limits(u64::MAX / 2, 0.9, EvictionStrategy::Lru), u64::MAX);
     reopened.ready().await;
     assert_eq!(reopened.get(&key).await, Some(b"payload".to_vec()));
     assert_eq!(files_with_suffix(f.dir.path(), ".bin"), 1);

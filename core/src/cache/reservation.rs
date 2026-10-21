@@ -5,6 +5,11 @@ use super::state::State;
 use crate::limits::eviction_target;
 use std::sync::Arc;
 
+pub fn limits_for_disk(mut limits: crate::limits::Limits, available_bytes: u64) -> crate::limits::Limits {
+    limits.budget = limits.budget.min((available_bytes as f64 * limits.free_space_fraction) as u64);
+    limits
+}
+
 pub struct SpaceReservation {
     inner: Arc<CacheShared>,
     held: u64,
@@ -24,7 +29,7 @@ impl SpaceReservation {
             let limits = {
                 let mut state = self.inner.state();
                 let limits = state.limits;
-                if state.used + state.reserved + len <= limits.budget {
+                if state.used + state.retained_bytes + state.reserved + len <= limits.budget {
                     state.reserved += len;
                     self.held += len;
                     return Ok(());

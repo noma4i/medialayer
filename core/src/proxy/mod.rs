@@ -16,7 +16,7 @@ pub(crate) mod memory_store;
 #[cfg(test)]
 pub(crate) mod test_client;
 
-pub use byte_store::{ByteStore, Meta, StoreWriter};
+pub use byte_store::{ByteStore, Meta, StoreReader, StoreWriter};
 pub use config::Config;
 pub use route::block_key;
 pub use slots::Priority;

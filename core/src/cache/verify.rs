@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 
 const READ_STEP: usize = 256 * 1024;
 use std::io::Read;
-use std::path::Path;
+use std::fs::File;
 use std::sync::Arc;
 
 
@@ -15,8 +15,7 @@ pub fn sum_of(hasher: Sha256) -> u64 {
     u64::from_be_bytes([digest[0], digest[1], digest[2], digest[3], digest[4], digest[5], digest[6], digest[7]])
 }
 
-fn file_sum(path: &Path, length: u64) -> Option<u64> {
-    let mut file = std::fs::File::open(path).ok()?;
+fn file_sum(file: &mut File, length: u64, _inner: &CacheShared) -> Option<u64> {
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; READ_STEP.min(length as usize + 1)];
     let mut total = 0u64;
@@ -26,40 +25,67 @@ fn file_sum(path: &Path, length: u64) -> Option<u64> {
             break;
         }
         hasher.update(&buffer[..read]);
+        #[cfg(test)]
+        _inner.hashed_bytes.fetch_add(read as u64, std::sync::atomic::Ordering::Relaxed);
         total += read as u64;
     }
     (total == length).then(|| sum_of(hasher))
 }
 
-pub async fn verified(inner: &Arc<CacheShared>, name: &str) -> Option<Entry> {
-    let (_, entry, verified) = inner.state().entry_state(name)?;
-    if verified {
-        return Some(entry);
+pub async fn verified<T>(inner: &Arc<CacheShared>, name: &str, select: impl FnOnce(&Entry) -> T) -> Option<T> {
+    {
+        let state = inner.state();
+        let slot = state.slot(name)?;
+        if slot.verified {
+            return Some(select(&slot.entry));
+        }
     }
-    check_file(inner, name).await
+    let _stripe = inner.stripe(name).lock().await;
+    if !inner.state().slot(name)?.verified {
+        opened(inner, name).await?;
+    }
+    inner.state().slot(name).map(|slot| select(&slot.entry))
 }
 
-async fn check_file(inner: &Arc<CacheShared>, name: &str) -> Option<Entry> {
-    let _stripe = inner.stripe(name).lock().await;
-    let (key, entry, verified) = inner.state().entry_state(name)?;
-    if verified {
-        return Some(entry);
-    }
-    let (path, length) = (bin_path(&inner.dir, name), entry.size);
-    let found = tokio::task::spawn_blocking(move || file_sum(&path, length)).await.ok().flatten();
-    let reason = match (found, entry.check) {
-        (None, _) => "length",
-        (Some(found), Check::Sum(recorded)) if found != recorded => "checksum",
-        (Some(found), _) => {
-            inner.state().mark_verified(name, found);
-            if entry.check == Check::Legacy {
-                mark_dirty(inner);
-            }
-            return Some(Entry { check: Check::Sum(found), ..entry });
-        }
+pub async fn opened(inner: &Arc<CacheShared>, name: &str) -> Option<File> {
+    let (length, check, verified) = {
+        let state = inner.state();
+        let slot = state.slot(name)?;
+        (slot.entry.size, slot.entry.check, slot.verified)
     };
-    crate::trace!("cache", "bad block {} {reason} size={length}", crate::trace::tail(&key));
-    inner.state().take(name);
+    let path = bin_path(&inner.dir, name);
+    let checking = inner.clone();
+    let found = tokio::task::spawn_blocking(move || {
+        #[cfg(test)]
+        checking.read_opens.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut file = File::open(path).map_err(|_| "length")?;
+        if file.metadata().map_err(|_| "length")?.len() != length {
+            return Err("length");
+        }
+        let sum = if verified { None } else { Some(file_sum(&mut file, length, &checking).ok_or("length")?) };
+        if let (Some(found), Check::Sum(recorded)) = (sum, check) {
+            if found != recorded {
+                return Err("checksum");
+            }
+        }
+        Ok((file, sum))
+    }).await.ok()?;
+    let reason = match found {
+        Ok((file, sum)) => {
+            if let Some(sum) = sum {
+                inner.state().mark_verified(name, sum);
+                if check == Check::Legacy {
+                    mark_dirty(inner);
+                }
+            }
+            return Some(file);
+        }
+        Err(reason) => reason,
+    };
+    let removed = inner.state().take(name);
+    if let Some(slot) = removed {
+        crate::trace!("cache", "bad block {} {reason} size={length}", crate::trace::tail(&slot.key));
+    }
     let _ = tokio::fs::remove_file(bin_path(&inner.dir, name)).await;
     mark_dirty(inner);
     None

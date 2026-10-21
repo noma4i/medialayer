@@ -42,7 +42,7 @@ struct ReloadTests {
     let slot = ReloadSlot()
     let media = try MediaLayer.open(config: OpenConfig(
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-      fetcher: ReloadFetcher(), settings: ReloadSettings(), slots: slot,
+      availableBytes: UInt64.max, fetcher: ReloadFetcher(), settings: ReloadSettings(), slots: slot,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
       defaults: defaultLimits(), pool: defaultPoolSettings()
     ))

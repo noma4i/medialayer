@@ -37,7 +37,7 @@ struct SlotThreadTests {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     let media = try MediaLayer.open(config: OpenConfig(
       dir: directory.path,
-      fetcher: URLSessionFetcher(),
+      availableBytes: UInt64.max, fetcher: URLSessionFetcher(),
       settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
       slots: factory,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),

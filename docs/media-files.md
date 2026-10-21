@@ -6,6 +6,7 @@ You describe media once in a `.mdl` file. The generator produces typed sources f
 cache do
   budget 4.gib, min: 64.mib
   shrink_to 90.percent
+  free_space 10.percent
   evict :lru
   memory 256.mib
   timeout 30.seconds
@@ -45,6 +46,7 @@ Durations are written `30.seconds`, `5.minutes`, `2.days`. Sizes are written `64
 | `budget` | 4 GiB | Disk size at which eviction starts. When the cache reaches it, entries are removed until it shrinks to `shrink_to` |
 | `min` | 64 MiB | Smallest budget the app or the user may set. A lower value is rejected |
 | `shrink_to` | 90% | Share of the budget the cache shrinks to after it reaches the budget. In (0, 100] |
+| `free_space` | 10% | Доля доступного места при открытии. Ядро выбирает минимум этой доли и `budget`. Диапазон (0, 100] |
 | `evict` | `:lru` | Which entries go first. See the strategies below |
 | `memory` | 256 MiB | One memory limit for players, proxy buffers and image memory. When it is exceeded, the library frees the least needed slots |
 | `timeout` | 30 seconds | Longest wait for a network response before a load fails |

@@ -9,7 +9,7 @@ fn tone_of(level: u8) -> ToneData {
 #[tokio::test]
 async fn inv_tone_08_a_stored_tone_survives_a_restart_and_leaves_with_its_entry() {
     let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::open(dir.path(), Limits::default());
+    let cache = Cache::open(dir.path(), Limits::default(), u64::MAX);
     cache.ready().await;
     cache.put("image-key", Kind::Image, b"first bytes").await.unwrap();
 
@@ -19,7 +19,7 @@ async fn inv_tone_08_a_stored_tone_survives_a_restart_and_leaves_with_its_entry(
     cache.flush().await.unwrap();
     drop(cache);
 
-    let reopened = Cache::open(dir.path(), Limits::default());
+    let reopened = Cache::open(dir.path(), Limits::default(), u64::MAX);
     reopened.ready().await;
     assert_eq!(reopened.tone("image-key"), Some(tone_of(10)));
     assert!(reopened.set_tone("image-key", tone_of(200)));

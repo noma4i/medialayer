@@ -6,6 +6,7 @@ use std::ops::Bound;
 use std::path::PathBuf;
 
 pub struct Slot {
+    pub version: u64,
     pub key: String,
     pub entry: Entry,
     pub readers: u32,
@@ -18,15 +19,22 @@ pub struct Item {
     pub key: String,
     pub entry: Entry,
     pub protected: bool,
+    pub kept: bool,
 }
 
 pub struct State {
+    #[cfg(test)]
+    pub keep_visits: usize,
     pub limits: Limits,
     pub used: u64,
     pub reserved: u64,
+    pub retained_bytes: u64,
     pub evictions: u64,
     pub live_parts: HashSet<PathBuf>,
     entries: BTreeMap<String, Slot>,
+    keys: BTreeMap<String, String>,
+    version: u64,
+    retired: HashMap<u64, (u64, u32)>,
     per_kind: [KindStats; 3],
     writing: HashMap<String, u32>,
 }
@@ -34,25 +42,38 @@ pub struct State {
 impl State {
     pub fn new(limits: Limits) -> State {
         State {
+            #[cfg(test)]
+            keep_visits: 0,
             limits,
             used: 0,
             reserved: 0,
+            retained_bytes: 0,
             evictions: 0,
             live_parts: HashSet::new(),
             entries: BTreeMap::new(),
+            keys: BTreeMap::new(),
+            version: 0,
+            retired: HashMap::new(),
             per_kind: [KindStats::default(); 3],
             writing: HashMap::new(),
         }
     }
 
     pub fn keep(&mut self, key: &str) {
-        for slot in self.entries.values_mut() {
-            if slot.key == key || slot.key.strip_prefix(key).is_some_and(|rest| rest.starts_with('#')) {
+        let prefix = format!("{key}#");
+        let names = self.keys.get(key).into_iter().chain(
+            self.keys.range(prefix.clone()..).take_while(|(key, _)| key.starts_with(&prefix)).map(|(_, name)| name),
+        );
+        for name in names {
+            #[cfg(test)]
+            { self.keep_visits += 1; }
+            if let Some(slot) = self.entries.get_mut(name) {
                 slot.kept = true;
             }
         }
     }
 
+    #[cfg(test)]
     pub fn is_kept(&self, key: &str) -> bool {
         self.entries.get(&super::naming::file_name(key)).is_some_and(|slot| slot.kept)
     }
@@ -61,8 +82,8 @@ impl State {
         self.entries.contains_key(name)
     }
 
-    pub fn entry_state(&self, name: &str) -> Option<(String, Entry, bool)> {
-        self.entries.get(name).map(|slot| (slot.key.clone(), slot.entry.clone(), slot.verified))
+    pub fn slot(&self, name: &str) -> Option<&Slot> {
+        self.entries.get(name)
     }
 
     pub fn mark_verified(&mut self, name: &str, sum: u64) {
@@ -77,16 +98,23 @@ impl State {
     }
 
     pub fn insert(&mut self, name: String, key: String, entry: Entry, verified: bool) {
-        let (readers, kept) = self.take(&name).map_or((0, false), |slot| (slot.readers, slot.kept));
+        let kept = self.take(&name).is_some_and(|slot| slot.kept);
+        self.version += 1;
         self.used += entry.size;
         let stats = &mut self.per_kind[entry.kind.index()];
         stats.bytes += entry.size;
         stats.files += 1;
-        self.entries.insert(name, Slot { key, entry, readers, verified, kept });
+        self.keys.insert(key.clone(), name.clone());
+        self.entries.insert(name, Slot { key, entry, readers: 0, verified, kept, version: self.version });
     }
 
     pub fn take(&mut self, name: &str) -> Option<Slot> {
         let slot = self.entries.remove(name)?;
+        if slot.readers > 0 {
+            self.retained_bytes += slot.entry.size;
+            self.retired.insert(slot.version, (slot.entry.size, slot.readers));
+        }
+        self.keys.remove(&slot.key);
         self.used -= slot.entry.size;
         let stats = &mut self.per_kind[slot.entry.kind.index()];
         stats.bytes -= slot.entry.size;
@@ -94,17 +122,23 @@ impl State {
         Some(slot)
     }
 
-    pub fn pin(&mut self, name: &str, now: u64) -> Option<u64> {
+    pub fn pin(&mut self, name: &str, now: u64) -> Option<(u64, u64)> {
         let slot = self.entries.get_mut(name)?;
         slot.readers += 1;
         slot.entry.last_access = now;
         slot.entry.hits += 1;
-        Some(slot.entry.size)
+        Some((slot.entry.size, slot.version))
     }
 
-    pub fn unpin(&mut self, name: &str) {
-        if let Some(slot) = self.entries.get_mut(name) {
+    pub fn unpin(&mut self, name: &str, version: u64) {
+        if let Some(slot) = self.entries.get_mut(name).filter(|slot| slot.version == version) {
             slot.readers = slot.readers.saturating_sub(1);
+        } else if let Some((size, readers)) = self.retired.get_mut(&version) {
+            *readers -= 1;
+            if *readers == 0 {
+                self.retained_bytes -= *size;
+                self.retired.remove(&version);
+            }
         }
     }
 
@@ -135,6 +169,7 @@ impl State {
                 key: slot.key.clone(),
                 entry: slot.entry.clone(),
                 protected: self.is_protected(name),
+                kept: slot.kept,
             })
             .collect()
     }

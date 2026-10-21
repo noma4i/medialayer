@@ -61,6 +61,7 @@ impl StatsListener for Totals {
 
 fn config(dir: &std::path::Path, fetcher: Arc<dyn Fetcher>, settings: Arc<FakeSettings>, slots: Option<Arc<dyn PlayerSlotFactory>>) -> OpenConfig {
     OpenConfig {
+        available_bytes: u64::MAX,
         dir: dir.to_string_lossy().to_string(),
         fetcher,
         settings,

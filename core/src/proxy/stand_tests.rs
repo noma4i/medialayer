@@ -77,6 +77,9 @@ struct FlakyWriter {
 
 #[async_trait]
 impl ByteStore for Arc<FlakyStore> {
+    async fn open_reader(&self, key: &str) -> Option<Box<dyn super::StoreReader>> {
+        Some(Box::new(FlakyReader { store: self.clone(), key: key.into() }))
+    }
     async fn len(&self, key: &str) -> Option<u64> {
         self.inner.len(key).await
     }
@@ -106,6 +109,18 @@ impl ByteStore for Arc<FlakyStore> {
 
     async fn remove(&self, key: &str) {
         self.inner.remove(key).await;
+    }
+}
+
+struct FlakyReader {
+    store: Arc<FlakyStore>,
+    key: String,
+}
+
+#[async_trait]
+impl super::StoreReader for FlakyReader {
+    async fn get_range(&mut self, start: u64, len: u64) -> Option<Vec<u8>> {
+        self.store.get_range(&self.key, start, len).await
     }
 }
 
@@ -234,7 +249,7 @@ async fn inv_proxy_02_inv_proxy_03_inv_proxy_06_inv_proxy_11_clients_ranges_cuts
 
     let dir = tempfile::tempdir().unwrap();
     let limits = Limits { budget: 120_000, min_budget: 1, shrink_to: 0.5, strategy: EvictionStrategy::Lru, ..Limits::default() };
-    let cache = Cache::open_with(dir.path(), limits, Options { persist_delay: std::time::Duration::from_millis(20), ..Options::default() });
+    let cache = Cache::open_with(dir.path(), limits, Options { persist_delay: std::time::Duration::from_millis(20), ..Options::default() }, u64::MAX);
     cache.ready().await;
     let store = Arc::new(FlakyStore {
         inner: Arc::new(CacheStore::new(cache.clone(), Arc::new(classify_kind))),

@@ -1,35 +1,49 @@
 use super::error::CacheError;
 use super::inner::CacheShared;
 use std::sync::Arc;
-use tokio::io::AsyncReadExt;
+use std::fs::File;
 
 pub struct Pin {
     inner: Arc<CacheShared>,
     name: String,
+    version: u64,
 }
 
 impl Pin {
     pub fn acquire(inner: &Arc<CacheShared>, name: &str) -> Option<(Pin, u64)> {
-        let size = inner.state().pin(name, inner.now())?;
-        Some((Pin { inner: inner.clone(), name: name.to_string() }, size))
+        let (size, version) = inner.state().pin(name, inner.now())?;
+        Some((Pin { inner: inner.clone(), name: name.to_string(), version }, size))
     }
 }
 
 impl Drop for Pin {
     fn drop(&mut self) {
-        self.inner.state().unpin(&self.name);
+        self.inner.state().unpin(&self.name, self.version);
     }
 }
 
 pub struct Reader {
-    pin: Pin,
-    file: tokio::fs::File,
+    _pin: Option<Pin>,
+    file: Arc<File>,
     size: u64,
+    position: u64,
+    chunk_size: usize,
 }
 
 impl Reader {
-    pub(super) fn new(pin: Pin, file: tokio::fs::File, size: u64) -> Reader {
-        Reader { pin, file, size }
+    pub(super) fn new(pin: Pin, file: File, size: u64) -> Reader {
+        let chunk_size = pin.inner.chunk_size;
+        Reader { _pin: Some(pin), file: Arc::new(file), size, position: 0, chunk_size }
+    }
+
+    pub(super) fn writing(file: Arc<File>, chunk_size: usize) -> Reader {
+        Reader { _pin: None, file, size: u64::MAX, position: 0, chunk_size }
+    }
+
+    pub async fn get_range(&self, start: u64, len: u64) -> Option<Vec<u8>> {
+        let file = self.file.clone();
+        let wanted = len.min(self.size.saturating_sub(start));
+        tokio::task::spawn_blocking(move || super::byte_store::read_at(&file, start, wanted)).await.ok()?
     }
 
     pub fn len(&self) -> u64 {
@@ -41,9 +55,15 @@ impl Reader {
     }
 
     pub async fn read_chunk(&mut self) -> Result<Vec<u8>, CacheError> {
-        let mut buffer = vec![0u8; self.pin.inner.chunk_size];
-        let read = self.file.read(&mut buffer).await?;
-        buffer.truncate(read);
+        let buffer = self.get_range(self.position, self.chunk_size as u64).await.ok_or_else(|| CacheError::Io("cache read failed".into()))?;
+        self.position += buffer.len() as u64;
         Ok(buffer)
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::proxy::StoreReader for Reader {
+    async fn get_range(&mut self, start: u64, len: u64) -> Option<Vec<u8>> {
+        Reader::get_range(self, start, len).await
     }
 }

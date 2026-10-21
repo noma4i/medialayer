@@ -21,6 +21,7 @@ const WORKER_THREADS: usize = 2;
 #[derive(uniffi::Record)]
 pub struct OpenConfig {
     pub dir: String,
+    pub available_bytes: u64,
     pub fetcher: Arc<dyn Fetcher>,
     pub settings: Arc<dyn SettingsStore>,
     pub slots: Option<Arc<dyn PlayerSlotFactory>>,
@@ -133,6 +134,7 @@ impl MediaLayer {
             .map_err(|error| MediaError::Unexpected { detail: error.to_string() })?;
         let namespace_headers = config.namespace_headers.clone();
         let assembly = Assembly {
+            available_bytes: config.available_bytes,
             dir: config.dir.into(),
             fetcher: Arc::new(ForeignFetcher::new(config.fetcher, InputLimits::default())),
             settings: config.settings,

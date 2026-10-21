@@ -13,7 +13,7 @@ const YIELD_EVERY: usize = 128;
 pub async fn evict_if_needed(inner: &Arc<CacheShared>) -> usize {
     let target = {
         let state = inner.state();
-        eviction_target(&state.limits, state.used)
+        eviction_target(&state.limits, state.used + state.retained_bytes)
     };
     match target {
         Some(target) => evict_to(inner, target).await,
@@ -24,7 +24,7 @@ pub async fn evict_if_needed(inner: &Arc<CacheShared>) -> usize {
 pub fn trigger_eviction(inner: &Arc<CacheShared>) {
     let needed = {
         let state = inner.state();
-        eviction_target(&state.limits, state.used).is_some()
+        eviction_target(&state.limits, state.used + state.retained_bytes).is_some()
     };
     if !needed || inner.evicting.swap(true, Ordering::SeqCst) {
         return;
@@ -49,7 +49,7 @@ impl Drop for BacklogReset<'_> {
 
 fn over(inner: &CacheShared, target: u64) -> bool {
     let state = inner.state();
-    state.used + state.reserved > target
+    state.used + state.retained_bytes + state.reserved > target
 }
 
 pub async fn evict_to(inner: &Arc<CacheShared>, target: u64) -> usize {
@@ -58,10 +58,7 @@ pub async fn evict_to(inner: &Arc<CacheShared>, target: u64) -> usize {
     }
     let candidates = scan(inner).await;
     let (default, now) = (inner.state().limits.strategy, inner.now());
-    let (kept, others): (Vec<_>, Vec<_>) = {
-        let state = inner.state();
-        candidates.into_iter().filter(|item| !item.protected).partition(|item| state.is_kept(&item.key))
-    };
+    let (kept, others): (Vec<_>, Vec<_>) = candidates.into_iter().filter(|item| !item.protected).partition(|item| item.kept);
     let pairs = |items: Vec<Item>| -> Vec<(String, Entry)> { items.into_iter().map(|item| (item.name, item.entry)).collect() };
     let (others, kept) = (pairs(others), pairs(kept));
     let overrides = inner.overrides.clone();

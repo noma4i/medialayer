@@ -301,7 +301,7 @@ struct Stack {
 }
 
 async fn stack_in(dir: tempfile::TempDir) -> Stack {
-    let cache = Cache::open(dir.path(), Limits::default());
+    let cache = Cache::open(dir.path(), Limits::default(), u64::MAX);
     cache.ready().await;
     let store: Arc<dyn ByteStore> = Arc::new(CacheStore::new(cache.clone(), Arc::new(classify_kind)));
     let fetcher = Arc::new(MockFetcher::new());

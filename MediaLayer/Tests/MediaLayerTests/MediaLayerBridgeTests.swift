@@ -97,7 +97,7 @@ struct MediaLayerBridgeTests {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     return try MediaLayer.open(config: OpenConfig(
       dir: directory.path,
-      fetcher: OfflineFetcher(),
+      availableBytes: UInt64.max, fetcher: OfflineFetcher(),
       settings: settings,
       slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
@@ -111,7 +111,7 @@ struct MediaLayerBridgeTests {
     let fetcher = RecordingFetcher()
     let media = try MediaLayer.open(config: OpenConfig(
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-      fetcher: fetcher,
+      availableBytes: UInt64.max, fetcher: fetcher,
       settings: MemorySettings(),
       slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
@@ -215,7 +215,7 @@ struct MediaLayerBridgeTests {
   func inv_proxy_22_an_origin_that_ignores_range_and_sends_no_length_still_answers_a_player_range_with_206() async throws {
     let media = try MediaLayer.open(config: OpenConfig(
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-      fetcher: RangeIgnoringOrigin(),
+      availableBytes: UInt64.max, fetcher: RangeIgnoringOrigin(),
       settings: MemorySettings(),
       slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
@@ -240,7 +240,7 @@ struct MediaLayerBridgeTests {
   func inv_proxy_23_a_listener_the_system_closed_is_bound_again_when_the_app_returns_to_the_foreground() async throws {
     let media = try MediaLayer.open(config: OpenConfig(
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-      fetcher: RangeIgnoringOrigin(),
+      availableBytes: UInt64.max, fetcher: RangeIgnoringOrigin(),
       settings: MemorySettings(),
       slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),

@@ -24,7 +24,7 @@ class MemoryWarningTest {
     val loader = mediaImageLoader(context, ImageBytes { _, _ -> pngBytes() })
     val cache = checkNotNull(loader.memoryCache)
     val dropped = CompletableDeferred<Unit>()
-    val media = MediaLayer.open(OpenConfig(
+    val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
       dir = Files.createTempDirectory("memory-warning").toString(),
       fetcher = object : Fetcher {
         override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("unused origin")

@@ -63,6 +63,9 @@ struct Slow<S> {
 
 #[async_trait::async_trait]
 impl<S: ByteStore> ByteStore for Slow<S> {
+    async fn open_reader(&self, key: &str) -> Option<Box<dyn medialayer::proxy::StoreReader>> {
+        Some(Box::new(SlowReader { inner: self.inner.open_reader(key).await?, delay: self.delay }))
+    }
     async fn len(&self, key: &str) -> Option<u64> {
         self.inner.len(key).await
     }
@@ -81,6 +84,19 @@ impl<S: ByteStore> ByteStore for Slow<S> {
     }
     async fn remove(&self, key: &str) {
         self.inner.remove(key).await
+    }
+}
+
+struct SlowReader {
+    inner: Box<dyn medialayer::proxy::StoreReader>,
+    delay: Duration,
+}
+
+#[async_trait::async_trait]
+impl medialayer::proxy::StoreReader for SlowReader {
+    async fn get_range(&mut self, start: u64, len: u64) -> Option<Vec<u8>> {
+        tokio::time::sleep(self.delay).await;
+        self.inner.get_range(start, len).await
     }
 }
 
@@ -128,7 +144,7 @@ fn manifest_path(dir: &Path) -> PathBuf {
 async fn open_cache(dir: &Path, budget: u64) -> (Cache, Duration) {
     let limits = Limits { budget, min_budget: MIB, ..Limits::default() };
     let started = Instant::now();
-    let cache = Cache::open_with(dir, limits, Options::default());
+    let cache = Cache::open_with(dir, limits, Options::default(), free_gib() * GIB);
     cache.ready().await;
     (cache, started.elapsed())
 }

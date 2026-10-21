@@ -1,7 +1,7 @@
 use super::entry::Kind;
 use super::store::Cache;
 use super::writer::Writer;
-use crate::proxy::{ByteStore, Meta, StoreWriter};
+use crate::proxy::{ByteStore, Meta, StoreReader, StoreWriter};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::fs::File;
@@ -66,14 +66,21 @@ impl CacheStore {
         CacheStore { cache, classify, open: Arc::new(Mutex::new(HashMap::new())) }
     }
 
-    async fn read_open(&self, key: &str, start: u64, len: u64) -> Option<Vec<u8>> {
-        let file = self.open.lock().unwrap_or_else(PoisonError::into_inner).get(key).cloned()?;
-        tokio::task::spawn_blocking(move || read_at(&file, start, len)).await.ok()?
-    }
 }
 
 #[async_trait]
 impl ByteStore for CacheStore {
+    async fn open_reader(&self, key: &str) -> Option<Box<dyn StoreReader>> {
+        self.cache.ready().await;
+        if let Some(reader) = self.cache.open_reader(key).await {
+            return Some(Box::new(reader));
+        }
+        let file = self.open.lock().unwrap_or_else(PoisonError::into_inner).get(key).cloned();
+        if let Some(file) = file {
+            return Some(Box::new(super::reader::Reader::writing(file, self.cache.inner.chunk_size)));
+        }
+        self.cache.open_reader(key).await.map(|reader| Box::new(reader) as Box<dyn StoreReader>)
+    }
     async fn keep(&self, key: &str) {
         self.cache.keep(key);
     }
@@ -89,14 +96,7 @@ impl ByteStore for CacheStore {
     }
 
     async fn get_range(&self, key: &str, start: u64, len: u64) -> Option<Vec<u8>> {
-        self.cache.ready().await;
-        if let Some(bytes) = self.cache.get_range(key, start, len).await {
-            return Some(bytes);
-        }
-        if let Some(bytes) = self.read_open(key, start, len).await {
-            return Some(bytes);
-        }
-        self.cache.get_range(key, start, len).await
+        self.open_reader(key).await?.get_range(start, len).await
     }
 
     async fn meta(&self, key: &str) -> Option<Meta> {

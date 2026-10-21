@@ -69,8 +69,13 @@ extension MediaLayer {
     imageCache: ImageCache = ImageCache(costLimit: MediaImagePipeline.defaultMemoryLimit)
   ) throws -> (OpenConfig, AVQueuePlayerSlotFactory) {
     let factory = AVQueuePlayerSlotFactory(startMuted: silent, audio: audio)
+    let directory = try directory ?? defaultDirectory()
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let volume = try directory.resourceValues(forKeys: [.volumeAvailableCapacityForOpportunisticUsageKey])
+    guard let available = volume.volumeAvailableCapacityForOpportunisticUsage else { throw CocoaError(.fileReadUnknown) }
     let config = OpenConfig(
-      dir: try (directory ?? defaultDirectory()).path,
+      dir: directory.path,
+      availableBytes: UInt64(clamping: available),
       fetcher: fetcher,
       settings: settings,
       slots: factory,

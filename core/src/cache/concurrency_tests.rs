@@ -27,11 +27,11 @@ pub(super) fn write_prepared_dir(dir: &std::path::Path, files: usize, hot_key: &
         let key = format!("entry-{number}");
         std::fs::write(dir.join(format!("{}.bin", crate::identity::key_file_name(&key))), b"0123456789").unwrap();
         let entry = super::entry::Entry { check: super::entry::Check::Legacy, size: 10, kind: Kind::Image, created: number as u64, last_access: number as u64, hits: 0, meta: Default::default(), tone: None };
-        index.push_str(&super::persist::encode_line(&key, &entry));
+        super::persist::encode_line(&key, &entry, &mut index);
     }
     std::fs::write(dir.join(format!("{}.bin", crate::identity::key_file_name(hot_key))), b"0123456789").unwrap();
     let hot = super::entry::Entry { check: super::entry::Check::Legacy, size: 10, kind: Kind::Image, created: 0, last_access: u64::MAX / 2, hits: 0, meta: Default::default(), tone: None };
-    index.push_str(&super::persist::encode_line(hot_key, &hot));
+    super::persist::encode_line(hot_key, &hot, &mut index);
     std::fs::write(dir.join("index.tsv"), index).unwrap();
 }
 
@@ -53,7 +53,7 @@ async fn inv_cache_11_put_and_get_of_50_mib_do_not_stall_other_tasks() {
 async fn inv_cache_11_open_on_20000_files_returns_fast_and_reads_miss_until_ready() {
     let dir = tempfile::tempdir().unwrap();
     write_prepared_dir(dir.path(), OPEN_FILES, "hot");
-    let cache = Cache::open(dir.path(), limits(u64::MAX / 2, 0.9, EvictionStrategy::Lru));
+    let cache = Cache::open(dir.path(), limits(u64::MAX / 2, 0.9, EvictionStrategy::Lru), u64::MAX);
     assert!(!cache.is_ready());
     assert_eq!(cache.get("hot").await, None);
     assert!(!cache.contains("hot").await);
@@ -66,7 +66,7 @@ async fn inv_cache_11_open_on_20000_files_returns_fast_and_reads_miss_until_read
 async fn inv_cache_11_evicting_10000_entries_gives_other_tasks_a_turn_at_least_every_128_removals() {
     let dir = tempfile::tempdir().unwrap();
     write_prepared_dir(dir.path(), EVICTED_ENTRIES, "hot");
-    let cache = Cache::open(dir.path(), limits(500, 0.5, EvictionStrategy::Lru));
+    let cache = Cache::open(dir.path(), limits(500, 0.5, EvictionStrategy::Lru), u64::MAX);
     cache.ready().await;
     let stop = Arc::new(AtomicBool::new(false));
     let turns = Arc::new(std::sync::atomic::AtomicU64::new(0));

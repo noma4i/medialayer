@@ -75,6 +75,7 @@ impl Resume {
 }
 
 pub(super) struct StoreCursor {
+    pub reader: Option<Box<dyn super::StoreReader>>,
     pub subscription: Option<FlightSubscription>,
     pub store: Arc<dyn ByteStore>,
     pub key: String,
@@ -112,7 +113,14 @@ pub(super) async fn next_store(mut cursor: StoreCursor) -> Option<(ChunkResult, 
                 return Some(fail_memory(cursor));
             };
             let wanted = reservation.bytes().min(wanted);
-            match cursor.store.get_range(&cursor.key, cursor.position, wanted).await {
+            if cursor.reader.is_none() {
+                cursor.reader = cursor.store.open_reader(&cursor.key).await;
+            }
+            let data = match cursor.reader.as_mut() {
+                Some(reader) => reader.get_range(cursor.position, wanted).await,
+                None => None,
+            };
+            match data {
                 Some(data) if !data.is_empty() => {
                     cursor.position += data.len() as u64;
                     return Some((Ok(Buffers::hold(Bytes::from(data), reservation)), cursor));

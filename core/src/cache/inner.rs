@@ -17,7 +17,16 @@ use tokio::sync::watch;
 const STRIPES: usize = 16;
 
 pub struct CacheShared {
+    #[cfg(test)]
+    pub read_opens: AtomicU64,
+    #[cfg(test)]
+    pub persist_attempts: AtomicU64,
+    #[cfg(test)]
+    pub hashed_bytes: AtomicU64,
+    #[cfg(test)]
+    pub save_pause: Mutex<Option<(tokio::sync::oneshot::Sender<()>, tokio::sync::oneshot::Receiver<()>)>>,
     pub dir: PathBuf,
+    pub available_bytes: u64,
     pub clock: Arc<dyn Clock>,
     pub overrides: HashMap<Kind, EvictionStrategy>,
     pub chunk_size: usize,
@@ -32,15 +41,25 @@ pub struct CacheShared {
     pub dirty: AtomicBool,
     pub persisting: AtomicBool,
     pub evicting: AtomicBool,
-    pub persist_lock: tokio::sync::Mutex<()>,
+    pub persist_lock: tokio::sync::Mutex<String>,
+    pub generation: AtomicU64,
     state: Mutex<State>,
     stripes: Vec<Arc<tokio::sync::Mutex<()>>>,
 }
 
 impl CacheShared {
-    pub fn new(dir: PathBuf, limits: Limits, options: super::options::Options, handle: Handle) -> CacheShared {
+    pub fn new(dir: PathBuf, limits: Limits, options: super::options::Options, handle: Handle, available_bytes: u64) -> CacheShared {
         CacheShared {
+            #[cfg(test)]
+            read_opens: AtomicU64::new(0),
+            #[cfg(test)]
+            persist_attempts: AtomicU64::new(0),
+            #[cfg(test)]
+            hashed_bytes: AtomicU64::new(0),
+            #[cfg(test)]
+            save_pause: Mutex::new(None),
             dir,
+            available_bytes,
             clock: options.clock,
             overrides: options.overrides,
             chunk_size: options.chunk_size.max(1),
@@ -55,8 +74,9 @@ impl CacheShared {
             dirty: AtomicBool::new(false),
             persisting: AtomicBool::new(false),
             evicting: AtomicBool::new(false),
-            persist_lock: tokio::sync::Mutex::new(()),
-            state: Mutex::new(State::new(limits)),
+            persist_lock: tokio::sync::Mutex::new(String::new()),
+            generation: AtomicU64::new(0),
+            state: Mutex::new(State::new(super::reservation::limits_for_disk(limits, available_bytes))),
             stripes: (0..STRIPES).map(|_| Arc::new(tokio::sync::Mutex::new(()))).collect(),
         }
     }

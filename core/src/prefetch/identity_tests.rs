@@ -23,7 +23,7 @@ fn source(token: &str) -> Source {
 
 async fn completed_namespaces(mode: &str) -> u64 {
     let directory = tempfile::tempdir().unwrap();
-    let cache = Cache::open(directory.path(), Limits::default());
+    let cache = Cache::open(directory.path(), Limits::default(), u64::MAX);
     cache.ready().await;
     let proxy = Proxy::start(Config { namespace_headers: vec!["authorization".into()], ..Config::default() }, Arc::new(Origin), Arc::new(CacheStore::new(cache, Arc::new(classify_kind)))).await.unwrap();
     let loader = Arc::new(ProxyLoader::new(proxy.clone()));
@@ -142,7 +142,7 @@ impl Fetcher for HlsOrigin {
 #[tokio::test]
 async fn inv_prefetch_12_played_and_evicted_parts_use_their_namespace() {
     let directory = tempfile::tempdir().unwrap();
-    let cache = Cache::open(directory.path(), Limits::default());
+    let cache = Cache::open(directory.path(), Limits::default(), u64::MAX);
     cache.ready().await;
     let proxy = Proxy::start(Config { namespace_headers: vec!["authorization".into()], ..Config::default() }, Arc::new(HlsOrigin), Arc::new(CacheStore::new(cache, Arc::new(classify_kind)))).await.unwrap();
     let loader = Arc::new(ProxyLoader::new(proxy.clone()));

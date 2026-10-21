@@ -69,7 +69,7 @@ impl Fetcher for ResumableOrigin {
 #[tokio::test]
 async fn inv_strategy_07_timeout_keeps_committed_blocks_and_resumes_missing_blocks() {
     let directory = tempfile::tempdir().unwrap();
-    let cache = Cache::open(directory.path(), Limits::default());
+    let cache = Cache::open(directory.path(), Limits::default(), u64::MAX);
     cache.ready().await;
     let origin = Arc::new(ResumableOrigin { fetcher: MockFetcher::new(), stalled: AtomicBool::new(true), started: Notify::new() });
     origin.fetcher.route(URL, Script::ok(vec![7; 8]));
