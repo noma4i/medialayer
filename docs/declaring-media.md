@@ -127,28 +127,45 @@ Swift `MediaLayerUI` не имеет параметра `weight`.
 
 ## Video output
 
-A Kotlin `MediaVideo` draws the player on a `TextureView` by default (`output = MediaOutput.Texture`). A texture copies every video frame on the GPU, follows the alpha, clip and translation of its parent, and costs RenderThread time in a scrolling feed. Pass `output = MediaOutput.Window` to draw on a `SurfaceView`: the decoder writes into its own buffer and the compositor places it, with no copy per frame.
+A Kotlin `MediaVideo` uses `TextureView` by default (`output = MediaOutput.Texture`).
+The experimental opt-in is `output = MediaOutput.Window`, using `SurfaceView` on API 34 and above when `alpha == 1f`.
+Below API 34, or when the explicit `alpha` parameter differs from 1, it selects Texture and records the reason in Trace.
+No second flag or output enum value is required.
+Android and Media3 provide no estimate of saved frames for this application.
 
-A `SurfaceView` does not follow the animations of its parent like a texture does:
+| Behavior | `MediaOutput.Texture` | `MediaOutput.Window` |
+| --- | --- | --- |
+| `cornerRadius = 16.dp` | Compose rounded clip | Public `ViewOutlineProvider` and `clipToOutline`, experimental visibility requires device verification |
+| Explicit `alpha`, fade, cross-fade | Compose opacity | Selects Texture while `alpha != 1f` |
+| Parent clip or alpha | Follows Compose drawing | Not inspected, pass the explicit parameters or retain Texture |
+| Pager translation | Follows the page | Uses platform position updates, fling alignment and stability require device verification |
+| Rotation, shared-element effects | Follows Compose drawing | Not qualified, retain Texture |
+| Overlays and transparent backgrounds | Draws within Compose | Default Z-below ordering, test overlapping pages, controls and dialogs |
+| View bitmap capture | Includes video | Can omit video, use compositor capture or PixelCopy and verify the result |
 
-| Parent does | `MediaOutput.Texture` | `MediaOutput.Window` |
-| ----------- | --------------------- | -------------------- |
-| Rounded clip (`clip` with a shape) | Clips the video | Does not clip the video, the corners stay square |
-| `alpha`, fade, cross-fade between pages | Fades the video | Video stays opaque while the rest fades |
-| Translation, scale, rotation of the pager | Moves the video with the page | Follows the position of the page, can lag one frame during a fling, does not rotate or scale with the parent |
-| Order with other views | Draws inside the Compose tree, overlays work | Draws behind the Compose content: the `content` slot draws over it, a `Dialog` or popup is placed by the compositor and can differ |
-| Screenshot, `drawToBitmap`, window capture | Contains the video | Contains a hole or a black rectangle |
+The prototype retains `ContentFrame` while its player changes or becomes null.
+It uses attachment-based `SurfaceView` lifetime on API 34+, without moving a View between pager parents.
+Different composed pages still own different Views.
+Slots, claims, playback, peeking and the pool window use the same implementation for both outputs.
 
-Do not use `Window` in a pager on Android yet: a measured run on a Pixel 4a (Android 13, 30 swipes of the feed, 5 pairs) gave no gain (median janky frames 53.6 % against 38.6 % with `Texture`, p90 143 ms against 103 ms) and 5 of 10 runs ended with a native crash in `android.view.SurfaceView$SurfaceViewPositionUpdateListener.positionChanged` (libhwui worker thread) while the pager moved the view; the same build with `Texture` did not crash. Keep `Texture` for every pager page. The notes below apply only to a view that is not moved by a pager.
+Rounded Window output is experimental: visible rounding is not proven without a device run.
+Keep Texture in production until the [device procedure](video-output-measurement.md) passes.
+Switching between Window and Texture during a fade changes the output View and requires first-frame and black-rectangle checks.
+For continuous cross-fades, choose Texture for the entire transition, including opaque endpoints.
 
-Use `Window` for a full-width feed page that the app does not clip, fade or rotate. Keep `Texture` where the video sits under a rounded clip, an alpha animation or a shared-element transition. The pool is unchanged: the same players, the same claims, the same window. Only the view that shows a player differs.
+An earlier Pixel 4a Android 13 experiment crashed in `SurfaceViewPositionUpdateListener.positionChanged` during pager motion in 5 of 10 runs.
+Its median janky frames were 53.6% with Window versus 38.6% with Texture across 30 swipes and 5 pairs.
+The API check excludes that Android version. It does not prove that the same native crash is fixed on newer devices.
+Media3 1.11.1 retains its API 34 Compose size synchronization fix for issue #1237.
 
 Kotlin only (the example is an indented block because Swift draws video on an `AVPlayerLayer` and has no such choice):
 
     MediaVideo(
       source = MomentVideo(url = moment.videoUrl, cover = moment.coverUrl),
       playing = isActive,
-      output = MediaOutput.Window
+      output = MediaOutput.Window,
+      cornerRadius = 16.dp,
+      alpha = 1f
     )
 
 ## Audio

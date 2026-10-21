@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -15,8 +16,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.media3.ui.compose.ContentFrame
+import androidx.media3.ui.compose.SURFACE_TYPE_SURFACE_VIEW
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import coil.compose.AsyncImage
@@ -104,6 +111,8 @@ fun MediaVideo(
   contentScale: ContentScale = ContentScale.Crop,
   loop: Boolean = true,
   output: MediaOutput = MediaOutput.Texture,
+  cornerRadius: Dp = 0.dp,
+  alpha: Float = 1f,
   onFirstFrame: () -> Unit = {},
   onEnd: () -> Unit = {},
   onProgress: ((Double) -> Unit)? = null,
@@ -133,8 +142,13 @@ fun MediaVideo(
   var view by remember(environment) { mutableStateOf<ViewHandle?>(null) }
   val player by remember(view) { view?.player ?: flowOf(null) }.collectAsState(null)
   val counters = environment.players?.videoOutputCounters
-  val outputPlayer = remember(player, counters) {
-    player?.let { if (counters == null) it else MeasuredVideoPlayer(it, counters) }
+  val outputType = remember(output, alpha) { output.contentFrameType(alpha) }
+  val cornerRadiusPx = with(LocalDensity.current) { cornerRadius.toPx() }
+  val outputPlayer = remember(player, counters, outputType, cornerRadiusPx) {
+    player?.let {
+      if (counters == null && outputType != SURFACE_TYPE_SURFACE_VIEW) it
+      else VideoOutputPlayer(it, counters, cornerRadiusPx)
+    }
   }
   DisposableEffect(environment, source.url, screen.visible) {
     if (!screen.visible) return@DisposableEffect onDispose { }
@@ -163,8 +177,9 @@ fun MediaVideo(
     }
     onDispose { }
   }
-  Box(modifier.then(screen.modifier)) {
-    outputPlayer?.let { ContentFrame(it, Modifier.fillMaxSize(), output.contentFrameType(), contentScale, true, {}) }
+  val clipped = if (cornerRadius > 0.dp) modifier.clip(RoundedCornerShape(cornerRadius)) else modifier
+  Box(clipped.alpha(alpha).then(screen.modifier)) {
+    ContentFrame(outputPlayer, Modifier.fillMaxSize(), outputType, contentScale, true, {})
     if (screen.visible) VideoPlaceholder(source, state.isReady, contentScale)
     content(state)
   }

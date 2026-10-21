@@ -29,6 +29,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
 
 private data class LifecycleSource(override val url: String, override val kind: Kind) : MediaSource {
   override val headers: Map<String, String> get() = emptyMap()
@@ -46,6 +47,41 @@ class NativeViewLifecycleTest {
   }
   private val loader = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) })
   private val looper = shadowOf(Looper.getMainLooper())
+
+  @Test
+  @Config(sdk = [34])
+  fun inv_output_05_window_keeps_its_view_during_player_handover() {
+    var muted by mutableStateOf(false)
+    val events = layer.playerEvents() as RecordingEvents
+    val slot = factory.create(0u)
+    rule.setContent {
+      MediaLayerProvider(layer, loader, factory.players) {
+        MediaVideo(LifecycleSource("first", Kind.VIDEO), muted = muted,
+          output = MediaOutput.Window, cornerRadius = 16.dp, modifier = Modifier.size(80.dp))
+      }
+    }
+    rule.waitUntil(5000) { looper.idle(); events.calls.any { it.startsWith("attach:first:") } }
+    val token = events.calls.last { it.startsWith("attach:first:") }.substringAfterLast(':').toULong()
+    slot.load("first", PlaybackRoute("file:///bundle/first.mp4", emptyMap(), null, false, false))
+    slot.play()
+    slot.attach(token)
+    rule.waitUntil(5000) { looper.idle(); counters.snapshot()["setVideoSurfaceView"] == 1L }
+    val before = counters.snapshot()
+    rule.runOnIdle { muted = true }
+    rule.waitForIdle()
+    assertEquals(before, counters.snapshot())
+    slot.detach()
+    looper.idle()
+    rule.waitForIdle()
+    slot.attach(token)
+    rule.waitUntil(5000) { looper.idle(); counters.snapshot()["setVideoSurfaceView"] == 2L }
+    val counts = counters.snapshot()
+    assertEquals(1L, counts["surfaceCreate"])
+    assertEquals(1L, counts["liveSurfaces"])
+    assertEquals(1L, counts["create"])
+    assertEquals(1L, counts["prepare"])
+    assertEquals(null, counts["setVideoTextureView"])
+  }
 
   @Test
   fun inv_native_06_ten_page_changes_do_not_rebind_a_stable_player() {
