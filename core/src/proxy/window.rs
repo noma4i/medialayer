@@ -15,9 +15,6 @@ const WARM_CHUNKS_AHEAD: usize = 1;
 const RECHECK_MIN: Duration = Duration::from_millis(100);
 const RECHECK_MAX: Duration = Duration::from_secs(1);
 const FULL_PERCENT: u32 = 100;
-const EXTINF_TAG: &str = "#EXTINF:";
-const TARGET_TAG: &str = "#EXT-X-TARGETDURATION:";
-const ENDLIST_TAG: &str = "#EXT-X-ENDLIST";
 
 pub type PositionProbe = Pin<Box<dyn Future<Output = Option<u64>> + Send>>;
 
@@ -116,8 +113,13 @@ impl Windows {
         table.variants.insert(variant.to_string(), root.to_string());
     }
 
-    pub fn register(&self, playlist: &str, text: &str) {
-        let Some((segments, target_ms)) = parse_vod(text) else { return };
+    pub fn register_plan(&self, playlist: &str, plan: &crate::hls::Playlist) {
+        if !plan.is_vod { return; }
+        let segments = plan.chunks.iter().zip(&plan.durations).map(|(chunk, duration)| (chunk.segment.clone(), *duration)).collect();
+        self.register_segments(playlist, segments, plan.target_ms);
+    }
+
+    fn register_segments(&self, playlist: &str, segments: Vec<(String, u64)>, target_ms: u64) {
         let mut starts_ms = Vec::with_capacity(segments.len());
         let mut elapsed = 0;
         for (_, duration) in &segments {
@@ -209,30 +211,4 @@ impl ProxyShared {
             }
         }
     }
-}
-
-fn parse_vod(text: &str) -> Option<(Vec<(String, u64)>, u64)> {
-    if !text.contains(ENDLIST_TAG) {
-        return None;
-    }
-    let mut segments = Vec::new();
-    let mut pending = None;
-    let mut target_ms = 0;
-    for line in text.split('\n').map(str::trim) {
-        if let Some(value) = line.strip_prefix(TARGET_TAG) {
-            target_ms = value.parse::<u64>().ok()? * 1000;
-        } else if let Some(value) = line.strip_prefix(EXTINF_TAG) {
-            let seconds: f64 = value.split(',').next()?.trim().parse().ok()?;
-            pending = Some((seconds * 1000.0).round() as u64);
-        } else if !line.starts_with('#') && !line.is_empty() {
-            segments.push((line.to_string(), pending.take()?));
-        }
-    }
-    if segments.is_empty() {
-        return None;
-    }
-    if target_ms == 0 {
-        target_ms = segments.iter().map(|(_, duration)| *duration).max()?.div_ceil(1000) * 1000;
-    }
-    Some((segments, target_ms))
 }

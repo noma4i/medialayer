@@ -38,7 +38,7 @@ async fn completed_namespaces(mode: &str) -> u64 {
         }
         assert_eq!(prefetch.counters().deduped, 0, "{mode}: {token}");
         assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
-        assert_eq!(loader.stored(&source.url, &source.headers).await, Some(token.as_bytes().to_vec()));
+        assert_eq!(proxy.read_stored(&source.url, &source.headers, 1024).await, Some(token.as_bytes().to_vec()));
     }
     let mut same = source("B");
     same.strategy = if mode == "whole" { CacheStrategy::Whole } else { CacheStrategy::Window };

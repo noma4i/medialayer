@@ -32,6 +32,7 @@ pub trait PoolControl: Send + Sync {
 
 pub trait TransportControl: Send + Sync {
     fn set_limits(&self, limits: &Limits);
+    fn forget_playlists(&self, url: Option<&str>);
 }
 
 pub trait PrefetchControl: Send + Sync {

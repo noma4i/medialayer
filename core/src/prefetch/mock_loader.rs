@@ -186,9 +186,9 @@ impl Loader for MockLoader {
         self.script().kept.push(url.to_string());
     }
 
-    async fn stored(&self, url: &str, _headers: &HashMap<String, String>) -> Option<Vec<u8>> {
+    async fn playlist(&self, url: &str, _headers: &HashMap<String, String>) -> Option<std::sync::Arc<crate::proxy::StoredPlaylist>> {
         self.stored_reads.fetch_add(1, Ordering::SeqCst);
-        self.script().bodies.get(url).cloned()
+        self.script().bodies.get(url).map(|bytes| crate::proxy::StoredPlaylist::for_test(&String::from_utf8_lossy(bytes), url))
     }
 
     async fn stored_len(&self, url: &str, _headers: &HashMap<String, String>) -> Option<u64> {

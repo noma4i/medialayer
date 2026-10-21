@@ -134,6 +134,10 @@ impl CacheControl for Cache {
 }
 
 impl TransportControl for Proxy {
+    fn forget_playlists(&self, url: Option<&str>) {
+        Proxy::forget_playlists(self, url);
+    }
+
     fn set_limits(&self, limits: &Limits) {
         Proxy::set_limits(self, limits);
     }

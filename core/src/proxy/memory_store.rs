@@ -8,6 +8,7 @@ struct Entry {
     data: Vec<u8>,
     complete: bool,
     meta: Meta,
+    version: u64,
 }
 
 #[derive(Default)]
@@ -18,6 +19,7 @@ struct Shared {
     aborts: AtomicUsize,
     failure: Mutex<Option<Failure>>,
     appends: AtomicUsize,
+    version: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,7 +40,7 @@ impl MemoryStore {
     }
 
     pub fn seed(&self, key: &str, data: &[u8]) {
-        self.entries().insert(key.to_string(), Entry { data: data.to_vec(), complete: true, meta: Meta::default() });
+        self.entries().insert(key.to_string(), Entry { data: data.to_vec(), complete: true, meta: Meta::default(), version: self.shared.version.fetch_add(1, Ordering::Relaxed) });
     }
 
     pub fn bytes(&self, key: &str) -> Option<Vec<u8>> {
@@ -88,7 +90,10 @@ struct MemoryWriter {
 #[async_trait]
 impl ByteStore for MemoryStore {
     async fn open_reader(&self, key: &str) -> Option<Box<dyn super::StoreReader>> {
-        Some(Box::new(MemoryReader { store: self.clone(), key: key.into() }))
+        let entries = self.entries();
+        let entry = entries.get(key)?;
+        let snapshot = entry.complete.then(|| (entry.version, entry.data.clone()));
+        Some(Box::new(MemoryReader { store: self.clone(), key: key.into(), snapshot }))
     }
     async fn len(&self, key: &str) -> Option<u64> {
         self.entries().get(key).filter(|entry| entry.complete).map(|entry| entry.data.len() as u64)
@@ -114,7 +119,7 @@ impl ByteStore for MemoryStore {
         if self.failure() == Some(Failure::Begin) {
             return None;
         }
-        self.entries().insert(key.to_string(), Entry { data: Vec::new(), complete: false, meta });
+        self.entries().insert(key.to_string(), Entry { data: Vec::new(), complete: false, meta, version: self.shared.version.fetch_add(1, Ordering::Relaxed) });
         self.shared.open_writers.fetch_add(1, Ordering::SeqCst);
         Some(Box::new(MemoryWriter { shared: self.shared.clone(), key: key.to_string(), done: false }))
     }
@@ -127,11 +132,21 @@ impl ByteStore for MemoryStore {
 struct MemoryReader {
     store: MemoryStore,
     key: String,
+    snapshot: Option<(u64, Vec<u8>)>,
 }
 
 #[async_trait]
 impl super::StoreReader for MemoryReader {
+    fn version(&self) -> Option<(u64, u64)> {
+        self.snapshot.as_ref().map(|(version, data)| (*version, data.len() as u64))
+    }
+
     async fn get_range(&mut self, start: u64, len: u64) -> Option<Vec<u8>> {
+        if let Some((_, data)) = &self.snapshot {
+            let from = (start as usize).min(data.len());
+            let to = from.saturating_add(len as usize).min(data.len());
+            return Some(data[from..to].to_vec());
+        }
         self.store.get_range(&self.key, start, len).await
     }
 }

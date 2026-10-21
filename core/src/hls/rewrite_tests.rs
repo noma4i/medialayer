@@ -7,12 +7,12 @@ fn inv_hls_03_absolute_lines_get_a_dot_slash_prefix_and_everything_else_is_kept(
         ("relative lines and tags", "#EXTM3U\n#EXTINF:2.0,\na.ts\n#EXTINF:2.0,\nhttp://h/b.ts\n", "#EXTM3U\n#EXTINF:2.0,\na.ts\n#EXTINF:2.0,\n./http://h/b.ts\n"),
         ("no absolute lines", "#EXTM3U\n#EXTINF:2.0,\na.ts\n", "#EXTM3U\n#EXTINF:2.0,\na.ts\n"),
         ("empty playlist", "", ""),
-        ("absolute url on the first line", "http://h/a.ts\n#EXTM3U\n", "http://h/a.ts\n#EXTM3U\n"),
+        ("absolute url on the first line", "http://h/a.ts\n#EXTM3U\n", "./http://h/a.ts\n#EXTM3U\n"),
         ("crlf and blank lines", "#EXTM3U\r\n\r\n#EXTINF:2.0,\r\nhttp://h/a.ts\r\n\r\n", "#EXTM3U\r\n\r\n#EXTINF:2.0,\r\n./http://h/a.ts\r\n\r\n"),
         ("parent paths and queries", "#EXTM3U\n../seg/a.ts?token=1\nhttps://h/b.ts?x=1&y=2\n", "#EXTM3U\n../seg/a.ts?token=1\n./https://h/b.ts?x=1&y=2\n"),
     ];
     for (name, manifest, expected) in cases {
-        assert_eq!(rewrite_playlist(manifest), expected, "{name}");
+        assert_eq!(String::from_utf8(Playlist::parse(manifest, "").body.to_vec()).unwrap(), expected, "{name}");
     }
 }
 
@@ -41,7 +41,7 @@ fn inv_hls_03_absolute_http_uris_inside_tags_get_the_prefix_and_other_tag_uris_a
         ),
     ];
     for (name, manifest, expected) in cases {
-        assert_eq!(rewrite_playlist(manifest), expected, "{name}");
+        assert_eq!(String::from_utf8(Playlist::parse(manifest, "").body.to_vec()).unwrap(), expected, "{name}");
     }
 }
 
@@ -63,6 +63,6 @@ fn inv_hls_03_restore_strips_the_prefix_from_absolute_paths_only() {
 #[test]
 fn inv_hls_03_restore_inverts_rewrite_for_each_line() {
     let manifest = "#EXTM3U\nhttp://h/a.ts\nb.ts\nhttps://h/c.ts?q=1\n";
-    let restored: Vec<String> = rewrite_playlist(manifest).split('\n').map(restore_rewritten).collect();
+    let restored: Vec<String> = String::from_utf8(Playlist::parse(manifest, "").body.to_vec()).unwrap().split('\n').map(restore_rewritten).collect();
     assert_eq!(restored.join("\n"), manifest);
 }

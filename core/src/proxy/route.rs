@@ -1,9 +1,8 @@
-use crate::hls::{resolve_url, restore_rewritten};
+use crate::hls::restore_rewritten;
 use url::{form_urlencoded, Url};
 
 const QUERY_ROUTE_PREFIX: &str = "/request.";
 const QUERY_PARAMETER: &str = "url";
-const TAG_URI_OPEN: &str = "URI=\"";
 const FALLBACK_EXTENSION: &str = "bin";
 const MAX_EXTENSION_LENGTH: usize = 5;
 
@@ -71,67 +70,12 @@ pub fn resolve_range(range: Option<ByteRange>, total: u64) -> RangeOutcome {
     }
 }
 
-pub fn absolutize_playlist(text: &str, base: &str) -> String {
-    text.split('\n')
-        .map(|line| {
-            let content = line.trim_end_matches('\r');
-            if content.starts_with('#') {
-                let tail = &line[content.len()..];
-                return format!("{}{tail}", absolutize_tag_uris(content, base));
-            }
-            if content.trim().is_empty() || is_http(content) {
-                return line.to_string();
-            }
-            let tail = &line[content.len()..];
-            format!("{}{tail}", resolve_url(base, content.trim()))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn absolutize_tag_uris(tag: &str, base: &str) -> String {
-    let mut rest = tag;
-    let mut out = String::with_capacity(tag.len());
-    while let Some(position) = rest.find(TAG_URI_OPEN) {
-        let value_start = position + TAG_URI_OPEN.len();
-        out.push_str(&rest[..value_start]);
-        rest = &rest[value_start..];
-        let Some(close) = rest.find('"') else { break };
-        let value = &rest[..close];
-        if value.is_empty() || Url::parse(value).is_ok() {
-            out.push_str(value);
-        } else {
-            out.push_str(&resolve_url(base, value));
-        }
-        rest = &rest[close..];
-    }
-    out.push_str(rest);
-    out
-}
-
 pub fn block_key(key: &str, block: u64) -> String {
     format!("{key}#{block}")
 }
 
-pub fn playlist_references(text: &str) -> Vec<String> {
-    let mut references = Vec::new();
-    for line in text.split('\n').map(|line| line.trim_end_matches('\r')) {
-        if !line.starts_with('#') {
-            if is_http(line) {
-                references.push(line.to_string());
-            }
-            continue;
-        }
-        let mut rest = line;
-        while let Some((_, after)) = rest.split_once(TAG_URI_OPEN) {
-            let Some((value, tail)) = after.split_once('"') else { break };
-            if is_http(value) {
-                references.push(value.to_string());
-            }
-            rest = tail;
-        }
-    }
-    references
+fn is_http(value: &str) -> bool {
+    value.starts_with("http://") || value.starts_with("https://")
 }
 
 pub fn content_type_for(url: &str, origin: Option<&str>) -> String {
@@ -150,9 +94,6 @@ pub fn content_type_for(url: &str, origin: Option<&str>) -> String {
     origin.or(known).unwrap_or("application/octet-stream").to_string()
 }
 
-fn is_http(value: &str) -> bool {
-    value.starts_with("http://") || value.starts_with("https://")
-}
 
 fn extension_of(original: &str) -> String {
     let extension = Url::parse(original)

@@ -2,12 +2,11 @@ use super::cursor::{next_direct, next_store, DirectCursor, Resume, StoreCursor};
 use super::flight::{collect_limited, FlightOutcome, Rejection, FlightSubscription};
 use super::inner::ProxyShared;
 use super::route::{
-    absolutize_playlist, block_key, playlist_references, content_type_for, parse_range, resolve_range, target_url, ByteRange, RangeOutcome,
+    block_key, content_type_for, parse_range, resolve_range, target_url, ByteRange, RangeOutcome,
 };
 use super::slots::Priority;
 use crate::fetch::{header_value, FetchError, Request};
-use crate::hls::{extract_variants, is_manifest_url, is_multivariant, keep_first_variant, rewrite_playlist};
-use crate::memory::Reservation;
+use crate::hls::{is_manifest_url, Playlist};
 use bytes::Bytes;
 use futures_util::{stream, Stream, StreamExt};
 use http_body_util::combinators::UnsyncBoxBody;
@@ -21,12 +20,14 @@ use std::sync::Arc;
 
 const ATTEMPTS: usize = 3;
 const PLAYLIST_TYPE: &str = "application/vnd.apple.mpegurl";
-const PLAYLIST_END_TAG: &str = "#EXT-X-ENDLIST";
-const SEGMENT_TAG: &str = "#EXTINF";
 
 #[cfg(test)]
 #[path = "probe_tests.rs"]
 mod probe_tests;
+
+#[cfg(test)]
+#[path = "playlist_work_tests.rs"]
+mod playlist_work_tests;
 
 pub(super) type ProxyBody = UnsyncBoxBody<Bytes, io::Error>;
 
@@ -127,20 +128,19 @@ impl Drop for Exchange {
 async fn playlist(inner: &Arc<ProxyShared>, target: &str, headers: Upstream, head_only: bool) -> Response<ProxyBody> {
     let key = inner.key(target, &headers);
     for _ in 0..ATTEMPTS {
-        if let Some(length) = inner.store.len(&key).await {
-            match stored_playlist(inner, &key, length).await {
-                Ok(Some((bytes, held))) => {
-                    let response = playlist_response(inner, target, &bytes, &headers, head_only);
-                    drop(bytes);
-                    drop(held);
-                    return response;
+        if inner.store.contains(&key).await {
+            match inner.stored_plan(target, &key).await {
+                Ok(Some(stored)) => {
+                    register_plan(inner, target, &stored.plan, &headers, head_only);
+                    let body = stored.body();
+                    return respond(200, vec![("content-type", PLAYLIST_TYPE.to_string()), ("content-length", body.len().to_string())], full(body), head_only);
                 }
                 Ok(None) => {
                     inner.store.remove(&key).await;
                     inner.forget_playlist(&key);
                     continue;
                 }
-                Err(failure) => return *failure,
+                Err(message) => return text(502, message),
             }
         }
         let mut subscription = inner.get_or_start(target, headers.clone(), Priority::Playback);
@@ -152,22 +152,6 @@ async fn playlist(inner: &Arc<ProxyShared>, target: &str, headers: Upstream, hea
         }
     }
     text(503, "playlist unavailable")
-}
-
-async fn stored_playlist(inner: &ProxyShared, key: &str, length: u64) -> Result<Option<(Vec<u8>, Reservation)>, Failure> {
-    if length > inner.config.max_playlist_bytes {
-        return Err(Box::new(text(502, "playlist too large")));
-    }
-    let Ok(held) = inner.buffers().reserve_exact(length as usize).await else {
-        return Err(Box::new(text(503, "no memory for the playlist")));
-    };
-    let Some(bytes) = inner.store.get_range(key, 0, length).await else {
-        return Err(Box::new(text(502, "playlist vanished from the store")));
-    };
-    let text = String::from_utf8_lossy(&bytes);
-    let is_static = text.contains(PLAYLIST_END_TAG) || (is_multivariant(&text) && !text.contains(SEGMENT_TAG));
-    drop(text);
-    Ok((is_static || inner.playlist_is_fresh(key)).then_some((bytes, held)))
 }
 
 async fn playlist_direct(inner: &ProxyShared, target: &str, headers: Upstream, head_only: bool) -> Response<ProxyBody> {
@@ -187,18 +171,21 @@ async fn playlist_direct(inner: &ProxyShared, target: &str, headers: Upstream, h
 
 fn playlist_response(inner: &ProxyShared, target: &str, bytes: &[u8], headers: &Upstream, head_only: bool) -> Response<ProxyBody> {
     let source = String::from_utf8_lossy(bytes);
-    let absolute = absolutize_playlist(&source, target);
-    inner.inherit_headers(&playlist_references(&absolute), headers);
-    let kept = keep_first_variant(&absolute);
+    let plan = Playlist::parse(&source, target);
+    register_plan(inner, target, &plan, headers, head_only);
+    let body = plan.body;
+    let headers = vec![("content-type", PLAYLIST_TYPE.to_string()), ("content-length", body.len().to_string())];
+    respond(200, headers, full(body), head_only)
+}
+
+fn register_plan(inner: &ProxyShared, target: &str, plan: &Playlist, headers: &Upstream, head_only: bool) {
+    inner.inherit_headers(&plan.references, headers);
     if !head_only {
-        match extract_variants(&kept).first() {
+        match plan.variant.as_ref() {
             Some(variant) => inner.windows.remember_variant(variant, target),
-            None => inner.windows.register(target, &kept),
+            None => inner.windows.register_plan(target, &plan),
         }
     }
-    let body = rewrite_playlist(&kept);
-    let headers = vec![("content-type", PLAYLIST_TYPE.to_string()), ("content-length", body.len().to_string())];
-    respond(200, headers, full(Bytes::from(body)), head_only)
 }
 
 async fn media(

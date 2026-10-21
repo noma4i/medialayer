@@ -99,6 +99,7 @@ impl Controls {
 
     pub async fn clear(&self, kind: Option<Kind>) {
         self.ports.cache.clear(kind.map(Into::into)).await;
+        self.ports.transport.forget_playlists(None);
         self.ports.prefetch.forget_loaded();
         if matches!(kind, None | Some(Kind::Image)) {
             let release = self.ports.release.clone();
@@ -109,6 +110,7 @@ impl Controls {
 
     pub async fn purge(&self, url: &str) {
         self.ports.cache.purge(url).await;
+        self.ports.transport.forget_playlists(Some(url));
         self.ports.prefetch.forget_loaded();
         self.publish_stats().await;
     }

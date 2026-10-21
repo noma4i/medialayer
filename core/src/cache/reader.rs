@@ -63,6 +63,10 @@ impl Reader {
 
 #[async_trait::async_trait]
 impl crate::proxy::StoreReader for Reader {
+    fn version(&self) -> Option<(u64, u64)> {
+        self._pin.as_ref().map(|pin| (pin.version, self.size))
+    }
+
     async fn get_range(&mut self, start: u64, len: u64) -> Option<Vec<u8>> {
         Reader::get_range(self, start, len).await
     }

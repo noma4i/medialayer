@@ -10,6 +10,8 @@ mod slots;
 mod tasks;
 mod cursor;
 mod window;
+mod playlists;
+pub use playlists::StoredPlaylist;
 
 #[cfg(test)]
 pub(crate) mod memory_store;
@@ -105,6 +107,7 @@ impl Proxy {
     }
 
     pub fn set_limits(&self, limits: &Limits) {
+        self.forget_playlists(None);
         self.inner.set_timeout(Duration::from_secs(limits.timeout_seconds.into()));
         self.inner.slots.set_max(limits.max_concurrent as usize);
         self.inner.image_slots.set_max(limits.max_concurrent as usize);
@@ -154,6 +157,14 @@ impl Proxy {
         self.inner.store.get_range(&key, 0, length).await
     }
 
+    pub async fn playlist_plan(&self, url: &str, headers: &HashMap<String, String>) -> Option<Arc<StoredPlaylist>> {
+        self.inner.stored_plan(url, &self.key_for(url, headers)).await.ok().flatten()
+    }
+
+    pub fn forget_playlists(&self, url: Option<&str>) {
+        self.inner.playlists.forget(url);
+    }
+
     pub async fn ping(&self) -> bool {
         let port = self.port();
         if port == 0 {
@@ -192,6 +203,7 @@ impl Proxy {
     pub async fn stop(&self) {
         let mut listener = self.inner.listener.lock().await;
         self.shut_down(&mut listener).await;
+        self.forget_playlists(None);
     }
 
     pub async fn restart(&self, preferred_port: u16) -> Result<u16, ProxyError> {
@@ -201,6 +213,7 @@ impl Proxy {
 
     async fn rebind(&self, listener: &mut Option<inner::Listener>, preferred_port: u16) -> Result<u16, ProxyError> {
         self.shut_down(listener).await;
+        self.forget_playlists(None);
         let (started, port) = server::spawn_listener(&self.inner, preferred_port).await?;
         *listener = Some(started);
         let previous = self.inner.last_port.swap(port, Ordering::SeqCst);
@@ -219,7 +232,9 @@ impl Proxy {
 
     pub async fn remove_stored(&self, url: &str, headers: &HashMap<String, String>) {
         let upstream = self.inner.upstream_headers(url, headers);
-        self.inner.store.remove(&self.inner.key(url, &upstream)).await;
+        let key = self.inner.key(url, &upstream);
+        self.inner.store.remove(&key).await;
+        self.inner.forget_playlist(&key);
     }
 
     pub async fn fetch_into_store(
@@ -231,6 +246,13 @@ impl Proxy {
     ) -> Result<(), ProxyError> {
         let upstream = self.inner.upstream_headers(url, headers);
         let key = self.inner.key(url, &upstream);
+        if crate::hls::is_manifest_url(url) && self.inner.store.contains(&key).await {
+            let plan = self.inner.stored_plan(url, &key).await.map_err(|message| ProxyError::Fetch(message.into()))?;
+            if plan.is_none() {
+                self.inner.store.remove(&key).await;
+                self.inner.forget_playlist(&key);
+            }
+        }
         self.download_into_store(&key, progress, || self.inner.get_or_start(url, upstream.clone(), priority)).await
     }
 

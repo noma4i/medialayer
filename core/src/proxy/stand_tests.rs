@@ -119,6 +119,7 @@ struct FlakyReader {
 
 #[async_trait]
 impl super::StoreReader for FlakyReader {
+    fn version(&self) -> Option<(u64, u64)> { None }
     async fn get_range(&mut self, start: u64, len: u64) -> Option<Vec<u8>> {
         self.store.get_range(&self.key, start, len).await
     }

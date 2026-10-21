@@ -43,7 +43,7 @@ impl Probe {
 #[async_trait]
 impl ByteStore for Probe {
     async fn open_reader(&self, key: &str) -> Option<Box<dyn super::StoreReader>> {
-        Some(Box::new(ProbeReader { store: self.clone(), key: key.into() }))
+        Some(Box::new(ProbeReader { store: self.clone(), reader: self.store.open_reader(key).await? }))
     }
     async fn len(&self, key: &str) -> Option<u64> {
         self.store.len(key).await
@@ -75,13 +75,16 @@ impl ByteStore for Probe {
 
 struct ProbeReader {
     store: Probe,
-    key: String,
+    reader: Box<dyn super::StoreReader>,
 }
 
 #[async_trait]
 impl super::StoreReader for ProbeReader {
+    fn version(&self) -> Option<(u64, u64)> { self.reader.version() }
     async fn get_range(&mut self, start: u64, len: u64) -> Option<Vec<u8>> {
-        self.store.get_range(&self.key, start, len).await
+        self.store.sample();
+        self.store.counters.largest_read.fetch_max(len, Ordering::SeqCst);
+        self.reader.get_range(start, len).await
     }
 }
 

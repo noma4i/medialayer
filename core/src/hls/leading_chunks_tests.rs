@@ -5,28 +5,28 @@ const MULTIVARIANT: &str =
 
 #[test]
 fn inv_hls_05_detects_multivariant_manifest() {
-    assert!(is_multivariant(MULTIVARIANT));
-    assert!(!is_multivariant("#EXTM3U\n#EXTINF:2.0,\na.ts"));
+    assert!(Playlist::parse(MULTIVARIANT, "").is_master);
+    assert!(!Playlist::parse("#EXTM3U\n#EXTINF:2.0,\na.ts", "").is_master);
 }
 
 #[test]
 fn inv_hls_05_variants_keep_order() {
-    assert_eq!(extract_variants(MULTIVARIANT), vec!["low/index.m3u8", "high/index.m3u8"]);
+    assert_eq!(Playlist::parse(MULTIVARIANT, "").variant, Some("low/index.m3u8".into()));
 }
 
 #[test]
 fn inv_hls_05_variants_skip_comments_after_stream_inf() {
     let manifest = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\n#comment\n#EXT-X-STREAM-INF:BANDWIDTH=2\nhigh.m3u8\n";
-    assert_eq!(extract_variants(manifest), vec!["high.m3u8"]);
+    assert_eq!(Playlist::parse(manifest, "").variant, Some("high.m3u8".into()));
 }
 
 #[test]
 fn inv_hls_05_variants_handle_stream_inf_on_the_last_line() {
-    assert!(extract_variants("#EXT-X-STREAM-INF:BANDWIDTH=1").is_empty());
+    assert!(Playlist::parse("#EXT-X-STREAM-INF:BANDWIDTH=1", "").variant.is_none());
 }
 
 fn segments(manifest: &str, max: usize) -> Vec<String> {
-    extract_leading_chunks(manifest, max).into_iter().map(|chunk| chunk.segment).collect()
+    Playlist::parse(manifest, "").chunks.into_iter().take(max).map(|chunk| chunk.segment).collect()
 }
 
 #[test]
@@ -36,16 +36,16 @@ fn inv_hls_02_takes_the_first_n_segments_and_never_more_than_the_playlist_has() 
     for (max, expected) in cases {
         assert_eq!(segments(manifest, max), expected, "max {max}");
     }
-    assert!(extract_leading_chunks("", 3).is_empty());
+    assert!(Playlist::parse("", "").chunks.is_empty());
 }
 
 #[test]
 fn inv_hls_01_each_chunk_carries_the_map_that_applies_to_it() {
     let playlist = "#EXTM3U\n#EXT-X-MAP:URI=\"init0.mp4\",BYTERANGE=\"0@0\"\r\n#EXTINF:2,\ns0.m4s\n#EXT-X-DISCONTINUITY\n#EXT-X-MAP:URI=\"init1.mp4\"\n#EXTINF:2,\ns1.m4s\n";
-    let chunks = extract_leading_chunks(playlist, 8);
+    let chunks = Playlist::parse(playlist, "").chunks;
     assert_eq!(chunks, vec![Chunk { segment: "s0.m4s".into(), init: Some("init0.mp4".into()) }, Chunk { segment: "s1.m4s".into(), init: Some("init1.mp4".into()) }]);
     let unquoted = "#EXT-X-MAP:URI=init.mp4\n#EXTINF:4.0,\na.m4s\n";
-    assert_eq!(extract_leading_chunks(unquoted, 8)[0].init, None);
+    assert_eq!(Playlist::parse(unquoted, "").chunks[0].init, None);
 }
 
 #[test]
@@ -66,6 +66,6 @@ fn inv_hls_05_resolve_url_joins_relative_parent_absolute_and_root_paths() {
         ("not a url", "seg.ts", "seg.ts"),
     ];
     for (base, relative, expected) in cases {
-        assert_eq!(resolve_url(base, relative), expected, "{base} + {relative}");
+        assert_eq!(Playlist::parse(relative, base).chunks[0].segment, expected, "{base} + {relative}");
     }
 }

@@ -20,6 +20,7 @@ pub trait ByteStore: Send + Sync {
 
 #[async_trait]
 pub trait StoreReader: Send {
+    fn version(&self) -> Option<(u64, u64)>;
     async fn get_range(&mut self, start: u64, len: u64) -> Option<Vec<u8>>;
 }
 

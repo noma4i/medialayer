@@ -94,6 +94,7 @@ struct SlowReader {
 
 #[async_trait::async_trait]
 impl medialayer::proxy::StoreReader for SlowReader {
+    fn version(&self) -> Option<(u64, u64)> { self.inner.version() }
     async fn get_range(&mut self, start: u64, len: u64) -> Option<Vec<u8>> {
         tokio::time::sleep(self.delay).await;
         self.inner.get_range(start, len).await

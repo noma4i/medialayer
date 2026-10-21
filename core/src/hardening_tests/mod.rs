@@ -137,7 +137,7 @@ impl Loader for HangingLoader {
     async fn load_all_blocks(&self, url: &str, headers: &HashMap<String,String>, priority: Priority, progress: &Notify) -> Result<u64, LoadError> {
         self.load(url, headers, priority, progress).await
     }
-    async fn stored(&self, _: &str, _: &HashMap<String,String>) -> Option<Vec<u8>> { None }
+    async fn playlist(&self, _: &str, _: &HashMap<String,String>) -> Option<Arc<crate::proxy::StoredPlaylist>> { None }
     async fn stored_len(&self, _: &str, _: &HashMap<String,String>) -> Option<u64> { None }
     async fn evict(&self, _: &str, _: &HashMap<String,String>) {}
 }

@@ -54,6 +54,7 @@ pub(super) struct ProxyShared {
     pub tasks: Tasks,
     pub windows: Windows,
     pub playlist_stamps: Mutex<HashMap<String, Instant>>,
+    pub playlists: super::playlists::Playlists,
     pub totals: Mutex<HashMap<String, u64>>,
     whole_only: Mutex<HashSet<String>>,
     probe_locks: Mutex<HashMap<String, (Arc<tokio::sync::Mutex<()>>, usize)>>,
@@ -132,6 +133,7 @@ impl ProxyShared {
             tasks,
             windows: Windows::new(chunks_ahead),
             playlist_stamps: Mutex::new(HashMap::new()),
+            playlists: super::playlists::Playlists::default(),
             totals: Mutex::new(HashMap::new()),
             whole_only: Mutex::new(HashSet::new()),
             probe_locks: Mutex::new(HashMap::new()),
@@ -285,6 +287,7 @@ impl ProxyShared {
 
     pub fn forget_playlist(&self, key: &str) {
         locked(&self.playlist_stamps).remove(key);
+        self.playlists.forget(Some(key));
     }
 
     pub fn remember_total(&self, key: &str, total: u64) {

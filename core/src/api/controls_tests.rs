@@ -146,6 +146,7 @@ async fn inv_api_07_clear_purge_and_evict_now_go_to_the_cache() {
 
     assert_eq!(*rig.cache.cleared.lock().unwrap(), vec![Some(cache::Kind::Stream), None]);
     assert_eq!(*rig.cache.purged.lock().unwrap(), vec!["https://cdn.test/a.mp4".to_string()]);
+    assert_eq!(*rig.transport.forgotten_playlists.lock().unwrap(), vec![None, None, Some("https://cdn.test/a.mp4".into())]);
     assert_eq!(rig.cache.evictions.load(Ordering::SeqCst), 1);
 }
 

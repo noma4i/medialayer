@@ -17,6 +17,13 @@ All behavior is in the Rust core (`core/`). Swift (`MediaLayer/`) and Kotlin (`k
 | `image` | Image bytes for image loaders: fetch through the core, store in the one disk cache, decode BlurHash |
 | `controls` | Limits, statistics, clear, purge, eviction on demand |
 
+`Playlist::parse` разбирает base URL и текст 1 раз для ответа и prefetch.
+Proxy хранит до 256 планов по ключу namespace и версии закреплённой записи.
+Память планов учитывает `Ledger`, live использует текущий TTL.
+Замена версии, purge, clear, смена лимитов и перезапуск снимают сохранённые планы.
+Отписка `Hub` удаляет слушателя по id, рассылка не копирует список.
+Очередь слота берёт до 16 готовых команд на один `spawn_blocking`, проверяя очередь перед каждой следующей командой.
+
 ## Stall watchdog
 
 While a place plays, the core samples its player and reloads it when the position stops moving. A looping video that wraps to the start counts as moving, so a loop never reloads the player. A video that does not loop and goes back is a stall.

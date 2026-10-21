@@ -1,4 +1,3 @@
-use crate::memory::InputLimits;
 use crate::proxy::{Priority, Proxy};
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -27,7 +26,7 @@ pub trait Loader: Send + Sync {
         progress: &Notify,
     ) -> Result<u64, LoadError>;
     async fn keep(&self, _url: &str, _headers: &HashMap<String, String>) {}
-    async fn stored(&self, url: &str, headers: &HashMap<String, String>) -> Option<Vec<u8>>;
+    async fn playlist(&self, url: &str, headers: &HashMap<String, String>) -> Option<std::sync::Arc<crate::proxy::StoredPlaylist>>;
     async fn stored_len(&self, url: &str, headers: &HashMap<String, String>) -> Option<u64>;
     async fn evict(&self, url: &str, headers: &HashMap<String, String>);
 }
@@ -77,8 +76,8 @@ impl Loader for ProxyLoader {
         self.proxy.keep(url, headers).await;
     }
 
-    async fn stored(&self, url: &str, headers: &HashMap<String, String>) -> Option<Vec<u8>> {
-        self.proxy.read_stored(url, headers, InputLimits::default().playlist_bytes).await
+    async fn playlist(&self, url: &str, headers: &HashMap<String, String>) -> Option<std::sync::Arc<crate::proxy::StoredPlaylist>> {
+        self.proxy.playlist_plan(url, headers).await
     }
 
     async fn stored_len(&self, url: &str, headers: &HashMap<String, String>) -> Option<u64> {
