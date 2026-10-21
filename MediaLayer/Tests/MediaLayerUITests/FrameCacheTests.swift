@@ -24,6 +24,20 @@ private func gif(frames: Int, side: Int, seed: Int) -> Data {
 
 struct FrameCacheTests {
   @Test
+  func inv_memory_10_frame_cost_is_read_once_per_insert() async throws {
+    let reads = CostReads()
+    let cache = FrameCache(byteLimit: 1024, cost: { reads.read($0) })
+    let data = gif(frames: 2, side: 8, seed: 0)
+    for index in 0 ..< 8 {
+      _ = try #require(await cache.load(identity: "\(index)", data: data, maxPixel: 8))
+      #expect(cache.bytes <= 1024)
+    }
+    #expect(reads.count == 8)
+    cache.removeAll()
+    #expect(cache.bytes == 0)
+  }
+
+  @Test
   func clearingOrCancellingADecodeRejectsItsLateResult() async throws {
     let data = gif(frames: 2, side: 8, seed: 0)
     let frames = try #require(await AnimatedFrames.load(data, maxPixel: 8))
@@ -106,13 +120,18 @@ struct FrameCacheTests {
 
   @Test
   func aWaiterThatLeavesDoesNotCancelTheDecodeOfTheOtherWaiter() async throws {
-    let cache = FrameCache()
+    let latch = Latch()
+    let cache = FrameCache { data, size in
+      await latch.wait()
+      return await AnimatedFrames.load(data, maxPixel: size)
+    }
     let data = gif(frames: 1200, side: 64, seed: 0)
     let leaving = Task { await cache.load(identity: "https://o.test/a.gif", data: data, maxPixel: 64) }
     let staying = Task { await cache.load(identity: "https://o.test/a.gif", data: data, maxPixel: 64) }
-    await eventually("the decode started") { cache.decodes > 0 }
+    await eventually("both waiters joined") { cache.waiters == 2 }
 
     leaving.cancel()
+    latch.open()
 
     #expect(await staying.value?.frameCount == 1200)
     #expect(cache.decodes == 1)
@@ -132,5 +151,15 @@ struct FrameCacheTests {
     #expect(cache.count == 0)
     #expect(await cache.load(identity: "https://o.test/a.gif", data: data, maxPixel: 64) != nil)
     #expect(cache.decodes == 2)
+  }
+}
+
+private final class CostReads: @unchecked Sendable {
+  private let lock = NSLock()
+  private var calls = 0
+  var count: Int { lock.withLock { calls } }
+  func read(_ frames: AnimatedFrames) -> Int {
+    lock.withLock { calls += 1 }
+    return frames.decodedBytes
   }
 }

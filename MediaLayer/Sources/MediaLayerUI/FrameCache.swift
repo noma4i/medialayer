@@ -19,22 +19,31 @@ final class FrameCache: @unchecked Sendable {
     case flight(Flight)
   }
 
+  private struct Entry {
+    let frames: AnimatedFrames
+    let cost: Int
+  }
+
   private let byteLimit: Int
+  private let cost: @Sendable (AnimatedFrames) -> Int
   private let decode: @Sendable (Data, Int) async -> AnimatedFrames?
   private let lock = NSLock()
-  private var entries: [Key: AnimatedFrames] = [:]
+  private var entries: [Key: Entry] = [:]
+  private var totalBytes = 0
   private var recency: [Key] = []
   private var flights: [Key: Flight] = [:]
   private var decodeCount = 0
 
-  init(byteLimit: Int = defaultByteLimit, decode: @escaping @Sendable (Data, Int) async -> AnimatedFrames? = { await AnimatedFrames.load($0, maxPixel: $1) }) {
+  init(byteLimit: Int = defaultByteLimit, cost: @escaping @Sendable (AnimatedFrames) -> Int = { $0.decodedBytes }, decode: @escaping @Sendable (Data, Int) async -> AnimatedFrames? = { await AnimatedFrames.load($0, maxPixel: $1) }) {
     self.byteLimit = byteLimit
+    self.cost = cost
     self.decode = decode
   }
 
-  var bytes: Int { lock.withLock { entries.values.reduce(0) { $0 + $1.decodedBytes } } }
+  var bytes: Int { lock.withLock { totalBytes } }
   var count: Int { lock.withLock { entries.count } }
   var decodes: Int { lock.withLock { decodeCount } }
+  var waiters: Int { lock.withLock { flights.values.reduce(0) { $0 + $1.waiters } } }
 
   func load(identity: String, data: Data, maxPixel: Int) async -> AnimatedFrames? {
     let key = Key(identity: identity, maxPixel: maxPixel)
@@ -47,6 +56,7 @@ final class FrameCache: @unchecked Sendable {
   func removeAll() {
     let pending = lock.withLock {
       entries.removeAll()
+      totalBytes = 0
       recency.removeAll()
       let pending = Array(flights.values)
       flights.removeAll()
@@ -95,18 +105,21 @@ final class FrameCache: @unchecked Sendable {
 
     recency.removeAll { $0 == key }
     recency.append(key)
-    return hit
+    return hit.frames
   }
 
   private func store(_ frames: AnimatedFrames, for key: Key) {
-    guard frames.decodedBytes > 0, frames.decodedBytes <= byteLimit else { return }
+    let bytes = cost(frames)
+    guard bytes > 0, bytes <= byteLimit else { return }
 
-    entries[key] = frames
+    totalBytes -= entries[key]?.cost ?? 0
+    entries[key] = Entry(frames: frames, cost: bytes)
+    totalBytes += bytes
     recency.removeAll { $0 == key }
     recency.append(key)
-    while entries.values.reduce(0, { $0 + $1.decodedBytes }) > byteLimit, let oldest = recency.first {
+    while totalBytes > byteLimit, let oldest = recency.first {
       recency.removeFirst()
-      entries[oldest] = nil
+      if let removed = entries.removeValue(forKey: oldest) { totalBytes -= removed.cost }
     }
   }
 }

@@ -11,6 +11,8 @@ final class FrameStream: @unchecked Sendable {
   private let count: Int
   private let lock = NSLock()
   private var cache: [Int: CGImage] = [:]
+  private var preparationCount = 0
+  private var decodeCount = 0
 
   init(source: CGImageSource, options: CFDictionary, count: Int) {
     self.source = source
@@ -19,10 +21,15 @@ final class FrameStream: @unchecked Sendable {
   }
 
   var cachedCount: Int { lock.withLock { cache.count } }
+  var preparations: Int { lock.withLock { preparationCount } }
+  var decodes: Int { lock.withLock { decodeCount } }
+
+  func preparedTask() { lock.withLock { preparationCount += 1 } }
 
   func image(at index: Int) -> CGImage? {
     lock.withLock {
       if let hit = cache[index] { return hit }
+      decodeCount += 1
       guard let image = CGImageSourceCreateThumbnailAtIndex(source, index, options) else { return nil }
 
       let keep = Set((0 ..< Self.window).map { (index + $0) % count })
@@ -50,11 +57,7 @@ struct AnimatedFrames {
   let firstImage: CGImage
   let duration: TimeInterval
 
-  var decodedBytes: Int {
-    guard case let .decoded(images) = storage else { return 0 }
-
-    return images.reduce(0) { $0 + $1.bytesPerRow * $1.height }
-  }
+  let decodedBytes: Int
 
   func loopDuration(rate: Double) -> TimeInterval { rate > 0 ? duration / rate : duration }
 
@@ -92,19 +95,21 @@ struct AnimatedFrames {
     }
     if first.bytesPerRow * first.height * count > byteBudget {
       let stream = FrameStream(source: source, options: options as CFDictionary, count: count)
-      return AnimatedFrames(storage: .streamed(stream), frameCount: count, firstImage: first, duration: duration)
+      return AnimatedFrames(storage: .streamed(stream), frameCount: count, firstImage: first, duration: duration, decodedBytes: 0)
     }
 
     var images = [first]
+    var bytes = first.bytesPerRow * first.height
     for index in 1 ..< count {
       if isCancelled() { return nil }
       guard let image = CGImageSourceCreateThumbnailAtIndex(source, index, options as CFDictionary) else { continue }
 
       images.append(image)
+      bytes += image.bytesPerRow * image.height
     }
     guard images.count > 1 else { return nil }
 
-    return AnimatedFrames(storage: .decoded(images), frameCount: images.count, firstImage: first, duration: duration)
+    return AnimatedFrames(storage: .decoded(images), frameCount: images.count, firstImage: first, duration: duration, decodedBytes: bytes)
   }
 
   private static func delay(source: CGImageSource, index: Int) -> TimeInterval {
@@ -142,6 +147,8 @@ struct AnimatedFramesView: UIViewRepresentable {
     var animatesImages = false
     private var task: Task<Void, Never>?
     private var runningInterval: TimeInterval = 0
+
+    deinit { task?.cancel() }
 
     func sync(_ view: UIImageView) {
       if animatesImages, view.window != nil {
@@ -219,23 +226,27 @@ struct AnimatedFramesView: UIViewRepresentable {
   }
 
   private static func play(_ plan: StreamPlan, on view: UIImageView) -> Task<Void, Never> {
-    Task { @MainActor [weak view] in
+    plan.stream.preparedTask()
+    return Task.detached { [weak view] in
       let clock = ContinuousClock()
       let start = clock.now
       var shown = -1
-      while !Task.isCancelled, let view {
+      while !Task.isCancelled {
         let parts = (clock.now - start).components
         let tick = plan.frames.frameTick(elapsed: Double(parts.seconds) + Double(parts.attoseconds) * 1e-18, rate: plan.rate)
         let index = tick % plan.frames.frameCount
         if index != shown {
-          let image = await Task.detached(operation: { plan.stream.image(at: index) }).value
+          let image = plan.stream.image(at: index)
           guard !Task.isCancelled else { return }
 
-          if let image { view.image = UIImage(cgImage: image) }
+          await MainActor.run { [weak view] in
+            if !Task.isCancelled, let image { view?.image = UIImage(cgImage: image) }
+          }
           shown = index
         }
         let upcoming = (tick + 1) % plan.frames.frameCount
-        Task.detached { _ = plan.stream.image(at: upcoming) }
+        guard !Task.isCancelled else { return }
+        _ = plan.stream.image(at: upcoming)
         try? await clock.sleep(until: start + .seconds(Double(tick + 1) * plan.interval))
       }
     }
