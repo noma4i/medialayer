@@ -69,6 +69,7 @@ pub struct KindUsage {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, uniffi::Record)]
 pub struct SlotCounts {
     pub hot: u32,
+    pub playing: u32,
     pub warm: u32,
     pub cold: u32,
 }
@@ -102,7 +103,7 @@ impl MediaStats {
             total_bytes: cache.total_bytes,
             file_count: cache.file_count,
             kinds: cache.per_kind.iter().map(|(kind, usage)| KindUsage { kind: (*kind).into(), bytes: usage.bytes, files: usage.files }).collect(),
-            slots: SlotCounts { hot: pool.hot as u32, warm: pool.warm as u32, cold: pool.cold as u32 },
+            slots: SlotCounts { hot: pool.hot as u32, playing: pool.playing as u32, warm: pool.warm as u32, cold: pool.cold as u32 },
             released: ReleaseCounts {
                 timer: released.timer,
                 pressure: released.pressure,

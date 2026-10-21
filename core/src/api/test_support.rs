@@ -135,7 +135,7 @@ impl SettingsStore for FakeSettings {
 }
 
 pub fn pool_stats() -> PoolStats {
-    PoolStats { hot: 1, warm: 2, cold: 3, reuses: 0, released: Released::default(), memory_bytes: 0 }
+    PoolStats { hot: 1, playing: 1, warm: 2, cold: 3, reuses: 0, released: Released::default(), memory_bytes: 0 }
 }
 
 #[derive(Default)]

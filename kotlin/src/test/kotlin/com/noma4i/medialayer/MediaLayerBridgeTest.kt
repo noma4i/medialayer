@@ -107,9 +107,10 @@ private data class Poster(override val url: String) : MediaSource {
 
 private class LoggingSlot(val id: UInt) : PlayerSlot {
   val log = CopyOnWriteArrayList<String>()
+  @Volatile var key: String? = null
   @Volatile var route: PlaybackRoute? = null
 
-  override fun load(key: String, route: PlaybackRoute) { this.route = route; log.add("load") }
+  override fun load(key: String, route: PlaybackRoute) { this.key = key; this.route = route; log.add("load") }
   override fun unload() { log.add("unload") }
   override fun preroll() { log.add("preroll") }
   override fun play() { log.add("play") }
@@ -148,6 +149,35 @@ private fun eventually(what: String, timeoutMs: Long = 5_000, condition: () -> B
 
 class MediaLayerBridgeTest {
   init { NativeCallbacks.install() }
+
+  @Test
+  fun inv_native_06_ten_page_changes_reuse_slots_and_attach_once_per_page() = runBlocking {
+    val slots = LoggingSlots()
+    val media = openWith(OfflineFetcher(), slots, silent = true)
+    val pages = (0..12).map { MediaItem(Kind.VIDEO, "file:///bundle/$it.mp4", emptyMap(), null, null, strategy = CacheStrategy.WINDOW) }
+    try {
+      for (page in 1..11) {
+        if (page > 1) {
+          media.playerEvents().detach(pages[page - 1].url)
+          media.setPlaying(pages[page - 1].url, false)
+        }
+        media.replaceWindow(page.toUInt(), pages)
+        media.setPlaying(pages[page].url, true)
+        eventually("active source loaded") { slots.slots.values.any { it.key == pages[page].url } }
+        media.playerEvents().attach(pages[page].url, page.toULong())
+        eventually("attachment delivered") { slots.slots.values.sumOf { it.log.count { call -> call == "attach" } } >= page }
+        assertEquals(1u, media.stats().slots.playing)
+      }
+      val calls = slots.slots.values.flatMap { it.log }
+      println("video-walk create=${slots.slots.size} load=${calls.count { it == "load" }} attach=${calls.count { it == "attach" }} detach=${calls.count { it == "detach" }} play=${calls.count { it == "play" }} preroll=${calls.count { it == "preroll" }}")
+      assertEquals(3, slots.slots.size)
+      assertEquals(11, calls.count { it == "attach" })
+      assertEquals(10, calls.count { it == "detach" })
+      assertEquals(11, calls.count { it == "play" })
+    } finally {
+      media.close()
+    }
+  }
 
   private fun openWith(fetcher: Fetcher, slots: PlayerSlotFactory, silent: Boolean): MediaLayer =
     MediaLayer.open(

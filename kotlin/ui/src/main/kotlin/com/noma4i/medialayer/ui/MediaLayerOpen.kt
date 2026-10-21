@@ -46,9 +46,10 @@ fun MediaLayer.Companion.open(
   callFactory: Call.Factory? = null,
   silent: Boolean = false,
   audioFocus: MediaAudioFocus = MediaAudioFocus.Mix,
-  imageMemoryBytes: Int? = null
+  imageMemoryBytes: Int? = null,
+  videoOutputCounters: VideoOutputCounters? = null
 ): MediaLayer =
-  openMediaLayer(context, fetcher, settings, callFactory, silent = silent, lifecycle = ProcessLifecycleOwner.get().lifecycle, audioFocus = audioFocus, imageMemoryBytes = imageMemoryBytes) { MediaLayer.open(it) }
+  openMediaLayer(context, fetcher, settings, callFactory, silent = silent, lifecycle = ProcessLifecycleOwner.get().lifecycle, audioFocus = audioFocus, imageMemoryBytes = imageMemoryBytes, videoOutputCounters = videoOutputCounters) { MediaLayer.open(it) }
 
 fun MediaLayer.Companion.open(
   context: Context,
@@ -58,9 +59,10 @@ fun MediaLayer.Companion.open(
   callFactory: Call.Factory? = null,
   silent: Boolean = false,
   audioFocus: MediaAudioFocus = MediaAudioFocus.Mix,
-  imageMemoryBytes: Int? = null
+  imageMemoryBytes: Int? = null,
+  videoOutputCounters: VideoOutputCounters? = null
 ): MediaLayer =
-  openMediaLayer(context, fetcher, settings, callFactory, defaults = { specDefaults(spec) }, silent = silent, lifecycle = ProcessLifecycleOwner.get().lifecycle, audioFocus = audioFocus, imageMemoryBytes = imageMemoryBytes) { MediaLayer.open(it) }
+  openMediaLayer(context, fetcher, settings, callFactory, defaults = { specDefaults(spec) }, silent = silent, lifecycle = ProcessLifecycleOwner.get().lifecycle, audioFocus = audioFocus, imageMemoryBytes = imageMemoryBytes, videoOutputCounters = videoOutputCounters) { MediaLayer.open(it) }
 
 private fun platformDefaults(): SpecDefaults = SpecDefaults(defaultLimits(), defaultPoolSettings(), emptyList())
 
@@ -83,6 +85,7 @@ internal fun openMediaLayer(
   lifecycle: Lifecycle,
   audioFocus: MediaAudioFocus = MediaAudioFocus.Mix,
   imageMemoryBytes: Int? = null,
+  videoOutputCounters: VideoOutputCounters? = null,
   open: (OpenConfig) -> MediaLayer
 ): MediaLayer {
   Trace.beginSection("MediaLayer.open.jna")
@@ -94,7 +97,7 @@ internal fun openMediaLayer(
     val app = context.applicationContext
     val client by lazy(LazyThreadSafetyMode.NONE) { OkHttpClient() }
     val audio = MediaAudioSession(app, audioFocus)
-    val factory = ExoPlayerSlotFactory(app, callFactory ?: client, startMuted = silent, audio = audio)
+    val factory = ExoPlayerSlotFactory(app, callFactory ?: client, startMuted = silent, audio = audio, videoOutputCounters = videoOutputCounters)
     val dir = File(app.cacheDir, "medialayer").apply { mkdirs() }
     var reference: WeakReference<MediaLayer>? = null
     val imageLoader = mediaImageLoader(app, ImageBytes { url, headers ->

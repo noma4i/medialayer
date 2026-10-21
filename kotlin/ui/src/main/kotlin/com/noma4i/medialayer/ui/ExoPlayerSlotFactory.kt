@@ -34,7 +34,7 @@ class ViewHandle internal constructor(val token: ULong) {
   }
 }
 
-class SlotPlayers internal constructor() {
+class SlotPlayers internal constructor(val videoOutputCounters: VideoOutputCounters? = null) {
   private val published = MutableStateFlow<Map<String, ExoPlayer>>(emptyMap())
   private val slots = ConcurrentHashMap<String, ExoPlayerSlot>()
 
@@ -76,7 +76,8 @@ class ExoPlayerSlotFactory(
   callFactory: Call.Factory = OkHttpClient(),
   val startMuted: Boolean = false,
   val loadControl: LoadControlConfig = LoadControlConfig(),
-  val audio: MediaAudioSession = MediaAudioSession(context, MediaAudioFocus.Mix)
+  val audio: MediaAudioSession = MediaAudioSession(context, MediaAudioFocus.Mix),
+  val videoOutputCounters: VideoOutputCounters? = null
 ) : PlayerSlotFactory {
   internal val appContext: Context = context.applicationContext
   internal val allocator = DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE)
@@ -86,7 +87,7 @@ class ExoPlayerSlotFactory(
   @Volatile internal var events: PlayerEventsInterface? = null
   private val created = CopyOnWriteArrayList<ExoPlayerSlot>()
 
-  val players = SlotPlayers()
+  val players = SlotPlayers(videoOutputCounters)
 
   fun bind(events: PlayerEventsInterface) {
     this.events = events

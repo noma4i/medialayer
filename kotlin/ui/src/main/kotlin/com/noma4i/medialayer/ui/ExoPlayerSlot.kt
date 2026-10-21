@@ -2,6 +2,7 @@ package com.noma4i.medialayer.ui
 
 import android.os.Handler
 import android.os.Looper
+import android.os.Trace
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
@@ -50,8 +51,14 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
 
     override fun onRenderedFirstFrame() {
       if (released) return
-      frameRendered = true
-      host.events?.visualReady(id)
+      Trace.beginSection("MediaLayer.firstFrame")
+      try {
+        host.videoOutputCounters?.count("firstFrame")
+        frameRendered = true
+        host.events?.visualReady(id)
+      } finally {
+        Trace.endSection()
+      }
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) = refresh()
@@ -98,12 +105,12 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
 
   override fun preroll() = onMain {
     val exo = player ?: return@onMain
-    if (exo.playbackState == Player.STATE_IDLE) exo.prepare()
+    if (exo.playbackState == Player.STATE_IDLE) prepare(exo)
   }
 
   override fun play() = onMain {
     val exo = player ?: return@onMain
-    if (exo.playbackState == Player.STATE_IDLE) exo.prepare()
+    if (exo.playbackState == Player.STATE_IDLE) prepare(exo)
     exo.playWhenReady = true
   }
 
@@ -116,13 +123,25 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
   override fun setRate(rate: Float) = onMain { player?.setPlaybackSpeed(rate) }
 
   override fun attach(viewToken: ULong) = onMain {
-    this.viewToken = viewToken
-    showInView()
+    Trace.beginSection("MediaLayer.attach")
+    try {
+      host.videoOutputCounters?.attach(id, key, viewToken)
+      this.viewToken = viewToken
+      showInView()
+    } finally {
+      Trace.endSection()
+    }
   }
 
   override fun detach() = onMain {
-    hideFromView()
-    viewToken = null
+    Trace.beginSection("MediaLayer.detach")
+    try {
+      host.videoOutputCounters?.detach(id)
+      hideFromView()
+      viewToken = null
+    } finally {
+      Trace.endSection()
+    }
   }
 
   override fun seek(positionMs: ULong) = onMain { player?.seekTo(positionMs.toLong()) }
@@ -147,7 +166,10 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     host.audio.setAudible(id, false)
     hideFromView()
     player?.removeListener(listener)
-    player?.release()
+    player?.let {
+      it.release()
+      host.videoOutputCounters?.count("release")
+    }
     player = null
     retract()
   }
@@ -156,19 +178,35 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     main.post { if (!released) work() }
   }
 
+  private fun prepare(exo: ExoPlayer) {
+    Trace.beginSection("MediaLayer.prepare")
+    try {
+      host.videoOutputCounters?.count("prepare")
+      exo.prepare()
+    } finally {
+      Trace.endSection()
+    }
+  }
+
   private fun createPlayer(): ExoPlayer {
-    val attributes = AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build()
-    val control = host.loadControl.create(host.allocator)
-    loadControl = control
-    val exo = ExoPlayer.Builder(host.appContext, host.renderersFactory)
-      .setLoadControl(control)
-      .setAudioAttributes(attributes, host.audio.focus == MediaAudioFocus.Exclusive)
-      .setClock(host.clock)
-      .build()
-    exo.volume = if (host.startMuted) 0f else 1f
-    exo.addListener(listener)
-    player = exo
-    return exo
+    Trace.beginSection("MediaLayer.create")
+    try {
+      host.videoOutputCounters?.count("create")
+      val attributes = AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build()
+      val control = host.loadControl.create(host.allocator)
+      loadControl = control
+      val exo = ExoPlayer.Builder(host.appContext, host.renderersFactory)
+        .setLoadControl(control)
+        .setAudioAttributes(attributes, host.audio.focus == MediaAudioFocus.Exclusive)
+        .setClock(host.clock)
+        .build()
+      exo.volume = if (host.startMuted) 0f else 1f
+      exo.addListener(listener)
+      player = exo
+      return exo
+    } finally {
+      Trace.endSection()
+    }
   }
 
   private fun showInView() {

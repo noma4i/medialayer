@@ -39,12 +39,53 @@ class NativeViewLifecycleTest {
   @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val layer = RecordingLayer()
-  private val factory = ExoPlayerSlotFactory(context, startMuted = true).also {
+  private val counters = VideoOutputCounters()
+  private val factory = ExoPlayerSlotFactory(context, startMuted = true, videoOutputCounters = counters).also {
     it.mediaSourceFor = { FakeMediaSource() }
     it.bind(layer.playerEvents())
   }
   private val loader = mediaImageLoader(context, ImageBytes { _, _ -> pngBytes() })
   private val looper = shadowOf(Looper.getMainLooper())
+
+  @Test
+  fun inv_native_06_ten_page_changes_do_not_rebind_a_stable_player() {
+    var page by mutableStateOf(0)
+    var muted by mutableStateOf(false)
+    val slots = (0..2).map { factory.create(it.toUInt()) }
+    val events = layer.playerEvents() as RecordingEvents
+    rule.setContent {
+      MediaLayerProvider(layer, loader, factory.players) {
+        MediaVideo(LifecycleSource("video$page", Kind.VIDEO), muted = muted, modifier = Modifier.size(80.dp))
+      }
+    }
+    for (next in 0..10) {
+      if (next > 0) {
+        slots[(next - 1) % 3].detach()
+        slots[(next - 1) % 3].pause()
+      }
+      rule.runOnIdle { page = next }
+      val key = "video$next"
+      rule.waitUntil(5000) { looper.idle(); events.calls.any { it.startsWith("attach:$key:") } }
+      val token = events.calls.last { it.startsWith("attach:$key:") }.substringAfterLast(':').toULong()
+      val slot = slots[next % 3]
+      slot.load(key, PlaybackRoute("file:///bundle/$next.mp4", emptyMap(), null, false, false))
+      slot.play()
+      slot.attach(token)
+      rule.waitUntil(5000) { looper.idle(); counters.snapshot()["setVideoTextureView"] == (next + 1).toLong() }
+      val before = counters.snapshot()
+      rule.runOnIdle { muted = !muted }
+      rule.waitForIdle()
+      assertEquals(before, counters.snapshot())
+      assertEquals(1L, counters.snapshot()["liveTextures"])
+    }
+    val counts = counters.snapshot()
+    println("video-output $counts")
+    assertEquals(3L, counts["create"])
+    assertEquals(3L, counts["prepare"])
+    assertEquals(11L, counts["attach"])
+    assertEquals(null, counts["repeatAttach"])
+    assertEquals(11L, counts["setVideoTextureView"])
+  }
 
   @After
   fun release() {

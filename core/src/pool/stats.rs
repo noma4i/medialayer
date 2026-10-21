@@ -40,6 +40,7 @@ pub(super) struct PoolCounters {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PoolStats {
     pub hot: usize,
+    pub playing: usize,
     pub warm: usize,
     pub cold: usize,
     pub reuses: u64,
@@ -53,6 +54,7 @@ impl Ring {
         let count = |retention: Retention| states.iter().filter(|state| state.retention == retention).count();
         PoolStats {
             hot: count(Retention::Hot),
+            playing: self.bindings.iter().flatten().filter(|binding| binding.is_playing || binding.is_peeking).count(),
             warm: count(Retention::Warm),
             cold: count(Retention::Cold),
             reuses: self.counters.reuses,

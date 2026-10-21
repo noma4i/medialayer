@@ -2,6 +2,42 @@ use super::test_support::*;
 use super::*;
 
 #[test]
+fn inv_pool_13_hot_next_is_retained_without_playing() {
+    let mut pool = ring_with(3, 1, |config| config.trim_delay_ms = 100);
+    let list = keys(20);
+    for page in 1..=11 {
+        let commands = pool.plan(page as u64, page, Some(page), &list);
+        let active = pool.slot_of(&format!("k{page}")).unwrap();
+        let next = pool.slot_of(&format!("k{}", page + 1)).unwrap();
+        let plays: Vec<_> = commands.iter().filter_map(|command| match command {
+            Command::Play { slot } => Some(*slot),
+            _ => None,
+        }).collect();
+        assert_eq!(plays, vec![active]);
+        assert!(pool.states()[active].is_playing);
+        assert!(!pool.states()[next].is_playing);
+        assert_eq!(pool.states()[next].retention, Retention::Hot);
+        assert_eq!((pool.stats().hot, pool.stats().playing), (2, 1));
+        assert!(pool.plan(page as u64, page, Some(page), &list).is_empty());
+    }
+    pool.set_playing("k11", false);
+    assert_eq!(pool.stats().playing, 0);
+    pool.set_peeking("k11", true);
+    assert_eq!(pool.stats().playing, 1);
+    pool.release_all();
+    assert_eq!(pool.stats().playing, 0);
+
+    let mut pool = ring_with(5, 2, |config| config.trim_delay_ms = 100);
+    pool.plan(0, 11, Some(11), &list);
+    let next = pool.slot_of("k12").unwrap();
+    assert!(pool.tick(100).contains(&Command::Retain { slot: next, level: Retention::Warm }));
+    pool.plan(101, 10, None, &list);
+    let commands = pool.plan(102, 11, Some(11), &list);
+    assert!(commands.contains(&Command::Retain { slot: next, level: Retention::Hot }));
+    assert!(!commands.contains(&Command::Play { slot: next }));
+}
+
+#[test]
 fn inv_pool_13_stats_count_source_change_releases_and_reuses() {
     let mut pool = ring(3, 1);
     let list = keys(20);

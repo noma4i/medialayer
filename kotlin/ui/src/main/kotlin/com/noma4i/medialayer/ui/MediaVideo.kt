@@ -132,6 +132,10 @@ fun MediaVideo(
   }
   var view by remember(environment) { mutableStateOf<ViewHandle?>(null) }
   val player by remember(view) { view?.player ?: flowOf(null) }.collectAsState(null)
+  val counters = environment.players?.videoOutputCounters
+  val outputPlayer = remember(player, counters) {
+    player?.let { if (counters == null) it else MeasuredVideoPlayer(it, counters) }
+  }
   DisposableEffect(environment, source.url, screen.visible) {
     if (!screen.visible) return@DisposableEffect onDispose { }
     val events = environment.media.playerEvents()
@@ -160,7 +164,7 @@ fun MediaVideo(
     onDispose { }
   }
   Box(modifier.then(screen.modifier)) {
-    player?.let { ContentFrame(it, Modifier.fillMaxSize(), output.contentFrameType(), contentScale, true, {}) }
+    outputPlayer?.let { ContentFrame(it, Modifier.fillMaxSize(), output.contentFrameType(), contentScale, true, {}) }
     if (screen.visible) VideoPlaceholder(source, state.isReady, contentScale)
     content(state)
   }
