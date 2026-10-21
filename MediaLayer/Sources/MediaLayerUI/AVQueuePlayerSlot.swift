@@ -419,6 +419,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
       sampledAt = ProcessInfo.processInfo.systemUptime
       sampledRate = rate
     }
+    if let key { Task { @MainActor [slots] in slots.progress.changed(key) } }
   }
 
   private static func httpStatus(of item: AVPlayerItem) -> Int32 {

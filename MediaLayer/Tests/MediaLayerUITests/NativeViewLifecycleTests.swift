@@ -78,6 +78,52 @@ extension GlobalMedia {
   @Suite(.serialized, .timeLimit(.minutes(2)))
   struct NativeViewLifecycleTests {
     @Test
+    func inv_idle_05_two_consumers_share_one_progress_sample_and_release_it() async throws {
+      let slots = LoadedSlots()
+      let slot = AVQueuePlayerSlotFactory(startMuted: true, slots: slots).create(slot: 0) as! AVQueuePlayerSlot
+      let clip = Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!.absoluteString
+      slot.load(key: "shared", route: PlaybackRoute(url: clip, headers: [:], generation: nil, hls: false, looping: false))
+      defer { slot.unload() }
+      await eventually("slot assigned") { slots.slot(for: "shared") === slot }
+      let first = slots.progress.stream(for: "shared")
+      let second = slots.progress.stream(for: "shared")
+      let a = Task { for await _ in first {} }
+      let b = Task { for await _ in second {} }
+      #expect(slots.progress.producerCount == 1)
+      let before = slots.progress.samples
+      slots.progress.changed("shared")
+      #expect(slots.progress.samples - before == 1)
+      a.cancel()
+      b.cancel()
+      await a.value
+      await b.value
+      await Task.yield()
+      #expect(slots.progress.producerCount == 0)
+    }
+
+    @Test
+    func inv_idle_05_paused_video_does_not_repeat_progress_and_seek_resumes_it() async throws {
+      let screen = Screen()
+      defer { screen.close() }
+      let slot = AVQueuePlayerSlotFactory(startMuted: true, slots: screen.slots).create(slot: 0) as! AVQueuePlayerSlot
+      let clip = Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!.absoluteString
+      slot.load(key: "first", route: PlaybackRoute(url: clip, headers: [:], generation: nil, hls: false, looping: false))
+      defer { slot.unload() }
+      for _ in 0..<100 {
+        if screen.inputs.reports > 0 { break }
+        await screen.settle(.milliseconds(50))
+      }
+      #expect(screen.inputs.reports > 0)
+      #expect(screen.slots.progress.periodicObserverCount == 0)
+      let reports = screen.inputs.reports
+      await screen.settle(.milliseconds(450))
+      #expect(screen.inputs.reports == reports)
+      slot.seek(positionMs: 200)
+      await screen.settle()
+      #expect(screen.inputs.reports > reports)
+    }
+
+    @Test
     func inv_native_05_audio_progress_stops_when_inactive_and_resumes() async throws {
       let screen = Screen(audio: true)
       defer { screen.close() }
@@ -163,15 +209,18 @@ extension GlobalMedia {
       let slot = AVQueuePlayerSlotFactory(startMuted: true, slots: screen.slots).create(slot: 0) as! AVQueuePlayerSlot
       let clip = Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!.absoluteString
       slot.load(key: "first", route: PlaybackRoute(url: clip, headers: [:], generation: nil, hls: false, looping: true))
+      slot.play()
       defer { slot.unload() }
       for _ in 0..<100 {
         if screen.inputs.reports >= 2 { break }
         await screen.settle(.milliseconds(50))
       }
       #expect(screen.inputs.reports >= 2)
+      #expect(screen.slots.progress.periodicObserverCount == 1)
       NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
       await screen.settle()
       let background = screen.inputs.reports
+      #expect(screen.slots.progress.periodicObserverCount == 0)
       await screen.settle()
       #expect(screen.inputs.reports == background)
       NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)

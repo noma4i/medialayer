@@ -11,12 +11,9 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.media3.common.C
 import androidx.media3.common.Player
-import androidx.media3.exoplayer.ExoPlayer
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 
 @Stable
@@ -38,10 +35,6 @@ class AudioControl internal constructor(private val seekTo: (Long) -> Unit) {
 
   fun seek(positionMs: Long) = seekTo(positionMs)
 
-  internal fun fractionOf(exo: ExoPlayer): Float {
-    val duration = exo.duration
-    return if (duration == C.TIME_UNSET || duration <= 0) 0f else (exo.currentPosition.toFloat() / duration).coerceIn(0f, 1f)
-  }
 }
 
 @Composable
@@ -54,14 +47,12 @@ fun MediaAudio(source: MediaSource, muted: Boolean = false, rate: Float = 1f, co
     environment.media.setRate(source.url, control.rate)
     onDispose { }
   }
-  control.state = rememberPlace(source, control.isPlaying, muted)
+  val state = rememberPlace(source, control.isPlaying, muted)
+  if (control.state != state) control.state = state
   val player by remember(environment, source.url) { environment.players?.player(source.url) ?: flowOf(null) }.collectAsState(null)
   DisposableEffect(player, control) {
     val exo = player
     val listener = object : Player.Listener {
-      override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-        if (exo != null) control.progress = control.fractionOf(exo)
-      }
       override fun onPlaybackStateChanged(playbackState: Int) {
         if (playbackState == Player.STATE_ENDED) control.pause()
       }
@@ -69,16 +60,14 @@ fun MediaAudio(source: MediaSource, muted: Boolean = false, rate: Float = 1f, co
     exo?.addListener(listener)
     onDispose { exo?.removeListener(listener) }
   }
-  LaunchedEffect(player, control.isPlaying, screen.visible) {
-    if (!screen.visible) return@LaunchedEffect
-    val exo = player ?: return@LaunchedEffect
-    while (control.isPlaying) {
-      control.progress = control.fractionOf(exo)
-      delay(PROGRESS_TICK_MS)
+  DisposableEffect(player, screen.visible, control) {
+    val exo = player
+    if (!screen.visible || exo == null) return@DisposableEffect onDispose { }
+    val release = PlayerProgress.subscribe(exo) {
+      val value = it.toFloat()
+      if (control.progress != value) control.progress = value
     }
-    control.progress = control.fractionOf(exo)
+    onDispose { release() }
   }
   Box(screen.modifier) { content(control) }
 }
-
-private const val PROGRESS_TICK_MS = 250L

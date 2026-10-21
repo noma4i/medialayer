@@ -6,6 +6,7 @@ public final class LoadedSlots: @unchecked Sendable {
 
   private let lock = NSLock()
   private var slots: [String: WeakSlot] = [:]
+  @MainActor lazy var progress = PlaybackProgress(slots: self)
 
   public init() {}
 
@@ -15,6 +16,7 @@ public final class LoadedSlots: @unchecked Sendable {
 
   func assign(_ slot: AVQueuePlayerSlot, key: String) {
     lock.withLock { slots[key] = WeakSlot(slot) }
+    Task { @MainActor in progress.changed(key) }
   }
 
   func release(key: String, slot: AVQueuePlayerSlot) {
@@ -22,6 +24,7 @@ public final class LoadedSlots: @unchecked Sendable {
       guard slots[key]?.value === slot || slots[key]?.value == nil else { return }
       slots[key] = nil
     }
+    Task { @MainActor in progress.changed(key) }
   }
 }
 

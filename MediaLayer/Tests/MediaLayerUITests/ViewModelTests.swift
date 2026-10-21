@@ -103,25 +103,12 @@ struct ViewModelTests {
     let audio = AudioPlayback(key: "note", playing: false, places: places, slots: LoadedSlots())
 
     audio.toggle()
-    audio.refresh(from: SlotSample(positionMs: 500, durationMs: 1000, isLooping: false, viewAttached: false, frameRendered: false))
+    audio.refresh(progress: 0.5)
     #expect(audio.progress == 0.5)
-    audio.refresh(from: SlotSample(positionMs: 1000, durationMs: 1000, isLooping: false, viewAttached: false, frameRendered: false))
+    audio.refresh(progress: 1)
 
     #expect(places.recorded == ["playing true", "playing false"])
     #expect(!audio.isPlaying)
-  }
-
-  @Test
-  func aPausedAudioSamplesFourTimesThenStopsAndAPlayingOneNeverStops() {
-    var pausedLeft = AudioSampling.pausedSamples
-    var samples = 0
-    while let left = AudioSampling.remaining(isPlaying: false, pausedLeft: pausedLeft) {
-      pausedLeft = left
-      samples += 1
-    }
-
-    #expect(samples == AudioSampling.pausedSamples)
-    #expect(AudioSampling.remaining(isPlaying: true, pausedLeft: 0) == 0)
   }
 
   @MainActor

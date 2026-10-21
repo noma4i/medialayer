@@ -22,8 +22,6 @@ struct VideoEdges {
 }
 
 enum VideoProgress {
-  static let interval: Duration = .milliseconds(100)
-
   static func fraction(positionMs: UInt64, durationMs: UInt64?) -> Double? {
     guard let durationMs, durationMs > 0 else { return nil }
 
@@ -82,7 +80,7 @@ public struct MediaVideo<Content: View>: View {
     }
     .clipped()
     .task(id: source.url) { await follow() }
-    .task(id: Sampling(url: source.url, playing: playing, active: onScreen && !inBackground && state != .ended)) { await sample() }
+    .task(id: Sampling(url: source.url, active: onScreen && !inBackground, reports: onProgress != nil)) { await sample() }
     .background(OnScreenProbe { onScreen = $0 })
     .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.background)) { _ in inBackground = true }
     .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
@@ -103,22 +101,13 @@ public struct MediaVideo<Content: View>: View {
 
   private struct Sampling: Equatable {
     let url: String
-    let playing: Bool
     let active: Bool
+    let reports: Bool
   }
 
   private func sample() async {
-    guard onScreen && !inBackground && state != .ended, let onProgress, let slots = context?.slots else { return }
-
-    repeat {
-      if let sample = slots.slot(for: source.url)?.sample(),
-         let fraction = VideoProgress.fraction(positionMs: sample.positionMs, durationMs: sample.durationMs) {
-        onProgress(fraction)
-      }
-      guard playing else { return }
-
-      try? await Task.sleep(for: VideoProgress.interval)
-    } while !Task.isCancelled
+    guard onScreen && !inBackground, let onProgress, let slots = context?.slots else { return }
+    for await value in slots.progress.stream(for: source.url) { onProgress(value) }
   }
 
   private func declare(visible: Bool) {

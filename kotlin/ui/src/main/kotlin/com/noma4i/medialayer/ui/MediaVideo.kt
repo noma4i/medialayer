@@ -1,5 +1,7 @@
 package com.noma4i.medialayer.ui
 
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -16,13 +18,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.media3.ui.compose.ContentFrame
+import androidx.media3.common.C
+import androidx.media3.common.Player
 import coil.compose.AsyncImage
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.Placeholder
 import com.noma4i.medialayer.isReady
 import com.noma4i.medialayer.toItem
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
@@ -44,6 +47,52 @@ internal object VideoProgress {
     if (durationMs == null || durationMs == 0uL) return null
 
     return minOf(positionMs.toDouble() / durationMs.toDouble(), 1.0)
+  }
+}
+
+internal class PlayerProgress private constructor(private val player: Player) : Player.Listener, Runnable {
+  private val main = Handler(Looper.getMainLooper())
+  private val consumers = mutableMapOf<Any, (Double) -> Unit>()
+  private var last: Double? = null
+  private var samples = 0
+
+  override fun onEvents(player: Player, events: Player.Events) = run()
+
+  override fun run() {
+    main.removeCallbacks(this)
+    if (consumers.isEmpty()) return
+    samples++
+    val duration = player.duration
+    if (duration != C.TIME_UNSET && duration > 0) {
+      val value = (player.currentPosition.toDouble() / duration).coerceIn(0.0, 1.0)
+      if (last != value) {
+        last = value
+        consumers.values.toList().forEach { it(value) }
+      }
+    }
+    if (consumers.isNotEmpty() && player.isPlaying) main.postDelayed(this, VideoProgress.INTERVAL_MS)
+  }
+
+  companion object {
+    private val active = mutableMapOf<Player, PlayerProgress>()
+    internal val producerCount: Int get() = active.size
+    internal val sampleCount: Int get() = active.values.sumOf { it.samples }
+
+    fun subscribe(player: Player, report: (Double) -> Unit): () -> Unit {
+      val demand = active.getOrPut(player) { PlayerProgress(player).also(player::addListener) }
+      val token = Any()
+      demand.consumers[token] = report
+      demand.last?.let(report)
+      demand.run()
+      return {
+        demand.consumers.remove(token)
+        if (demand.consumers.isEmpty()) {
+          demand.main.removeCallbacks(demand)
+          player.removeListener(demand)
+          active.remove(player)
+        }
+      }
+    }
   }
 }
 
@@ -71,15 +120,12 @@ fun MediaVideo(
   val firstFrame by rememberUpdatedState(onFirstFrame)
   val end by rememberUpdatedState(onEnd)
   val progress by rememberUpdatedState(onProgress)
-  LaunchedEffect(environment, source.url, playing, screen.visible, state) {
-    if (!screen.visible || state is MediaState.Ended) return@LaunchedEffect
-    do {
-      val report = progress ?: return@LaunchedEffect
-      environment.players?.sample(source.url)?.let { VideoProgress.fraction(it.positionMs, it.durationMs) }?.let(report)
-      if (!playing) return@LaunchedEffect
-
-      delay(VideoProgress.INTERVAL_MS)
-    } while (true)
+  val progressPlayer by remember(environment, source.url) { environment.players?.player(source.url) ?: flowOf(null) }.collectAsState(null)
+  DisposableEffect(progressPlayer, screen.visible, onProgress != null) {
+    val current = progressPlayer
+    if (current == null || !screen.visible || onProgress == null) return@DisposableEffect onDispose { }
+    val release = PlayerProgress.subscribe(current) { progress?.invoke(it) }
+    onDispose { release() }
   }
   LaunchedEffect(edges, state) {
     val (isFirstFrame, isEnd) = edges.advance(state)

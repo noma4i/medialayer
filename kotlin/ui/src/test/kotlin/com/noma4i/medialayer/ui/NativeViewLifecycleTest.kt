@@ -55,6 +55,34 @@ class NativeViewLifecycleTest {
   }
 
   @Test
+  fun inv_idle_05_paused_video_does_not_repeat_progress_and_seek_resumes_it() {
+    var reports = 0
+    val slot = factory.create(0u)
+    slot.load("first", PlaybackRoute("https://o.test/a.mp4", emptyMap(), null, false, false))
+    slot.play()
+    rule.setContent {
+      MediaLayerProvider(layer, loader, factory.players) {
+        Column {
+          repeat(2) { MediaVideo(LifecycleSource("first", Kind.VIDEO), modifier = Modifier.size(80.dp), onProgress = { reports++ }) }
+        }
+      }
+    }
+    rule.waitUntil(5000) { looper.idle(); reports >= 2 }
+    slot.pause()
+    looper.idle()
+    rule.waitForIdle()
+    val paused = reports
+    val samples = PlayerProgress.sampleCount
+    assertEquals(1, PlayerProgress.producerCount)
+    rule.mainClock.advanceTimeBy(500)
+    looper.idleFor(java.time.Duration.ofMillis(500))
+    assertEquals(paused, reports)
+    assertEquals(samples, PlayerProgress.sampleCount)
+    slot.seek(200uL)
+    rule.waitUntil(5000) { looper.idle(); reports > paused }
+  }
+
+  @Test
   fun inv_native_04_the_playing_owner_hands_the_view_back_when_it_leaves() {
     var newer by mutableStateOf(false)
     val events = layer.playerEvents() as RecordingEvents
@@ -139,7 +167,7 @@ class NativeViewLifecycleTest {
     rule.waitUntil(5000) { clock.advanceTime(50); looper.idle(); slot.player?.isPlaying == true && control != null }
     rule.runOnIdle { control!!.play() }
     clock.advanceTime(1000)
-    rule.waitUntil(5000) { looper.idle(); control!!.progress > 0 }
+    rule.waitUntil(5000) { looper.idleFor(java.time.Duration.ofMillis(100)); control!!.progress > 0 }
     rule.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
     rule.waitForIdle()
     val background = control!!.progress
@@ -147,7 +175,7 @@ class NativeViewLifecycleTest {
     repeat(20) { looper.idle(); Thread.sleep(25) }
     assertEquals(background, control!!.progress)
     rule.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
-    rule.waitUntil(5000) { looper.idle(); control!!.progress > background }
+    rule.waitUntil(5000) { looper.idleFor(java.time.Duration.ofMillis(100)); control!!.progress > background }
     rule.runOnIdle { offset = 10000.dp }
     rule.waitForIdle()
     val offscreen = control!!.progress
@@ -155,7 +183,7 @@ class NativeViewLifecycleTest {
     repeat(20) { looper.idle(); Thread.sleep(25) }
     assertEquals(offscreen, control!!.progress)
     rule.runOnIdle { offset = 0.dp }
-    rule.waitUntil(5000) { looper.idle(); control!!.progress > offscreen }
+    rule.waitUntil(5000) { looper.idleFor(java.time.Duration.ofMillis(100)); control!!.progress > offscreen }
   }
 
   @Test
