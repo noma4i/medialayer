@@ -45,7 +45,12 @@ final class Latch: @unchecked Sendable {
 }
 
 final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
-  func cacheKey(url: String, headers: [String: String]) -> String { url }
+  func cacheKey(url: String, headers: [String: String]) -> String {
+    lock.withLock { keyReads += 1 }
+    return url
+  }
+  private var keyReads = 0
+  var cacheKeyReads: Int { lock.withLock { keyReads } }
   private let lock = NSLock()
   private var visibility: [VisibleCall] = []
   var fetchLatch: Latch?
@@ -185,6 +190,7 @@ struct ViewModelTests {
   ])
   func imageLoadReportsItsStateToTheCore(result: Result<Data, Error>, expected: [String]) async {
     let places = RecordingPlaces()
+    ImageMemory.install(ImageCache(), on: places)
     places.imageResult = result
 
     let request = MediaImagePipeline.request(places: places, for: TestImageSource())!

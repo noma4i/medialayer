@@ -60,15 +60,22 @@ public enum MediaImagePipeline {
     scale: CGFloat = 1,
     contentMode: ContentMode = .fill
   ) -> ImageRequest? {
-    guard let address = URL(string: url ?? source.url) else { return nil }
+    prepare(places: places, for: source, url: url, points: points, scale: scale, contentMode: contentMode).request
+  }
+
+  static func prepare(places: MediaPlaces, for source: some MediaSource, url: String? = nil, points: CGSize, scale: CGFloat, contentMode: ContentMode) -> (key: ImageKey, request: ImageRequest?) {
+    let pixels = decodeSize(for: source, points: points, scale: scale)
+    let identity = places.cacheKey(url: url ?? source.url, headers: source.headers)
+    let key = ImageKey(identity: identity, pixels: pixels, contentMode: contentMode)
+    guard let address = URL(string: url ?? source.url) else { return (key, nil) }
     var urlRequest = URLRequest(url: address)
     for (name, value) in source.headers { urlRequest.setValue(value, forHTTPHeaderField: name) }
-    let processors: [any ImageProcessing] = decodeSize(for: source, points: points, scale: scale).map {
+    let processors: [any ImageProcessing] = pixels.map {
       [ImageProcessors.Resize(size: $0, unit: .pixels, contentMode: contentMode == .fill ? .aspectFill : .aspectFit)]
     } ?? []
     var request = ImageRequest(urlRequest: urlRequest, processors: processors)
-    request.imageID = places.cacheKey(url: address.absoluteString, headers: source.headers)
-    return request
+    request.imageID = identity
+    return (key, request)
   }
 }
 

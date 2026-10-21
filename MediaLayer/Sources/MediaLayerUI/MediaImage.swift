@@ -21,6 +21,39 @@ private struct FramesJob: Equatable {
   let playing: Bool
 }
 
+private struct ImageInputs: Hashable {
+  let url: String
+  let headers: [String: String]
+  let width: Int?
+  let height: Int?
+  let pointWidth: CGFloat
+  let pointHeight: CGFloat
+  let scale: CGFloat
+  let contentMode: ContentMode
+  let context: ObjectIdentifier
+}
+
+private final class PreparedImage: ObservableObject {
+  let key: ImageKey
+  let request: ImageRequest?
+
+  init(source: any MediaSource, context: MediaContext, points: CGSize, scale: CGFloat, contentMode: ContentMode) {
+    (key, request) = MediaImagePipeline.prepare(places: context.places, for: source, points: points, scale: scale, contentMode: contentMode)
+  }
+}
+
+private struct ImageRequestView<Content: View>: View {
+  @StateObject private var prepared: PreparedImage
+  private let content: (ImageKey, ImageRequest?) -> Content
+
+  init(source: any MediaSource, context: MediaContext, points: CGSize, scale: CGFloat, contentMode: ContentMode, @ViewBuilder content: @escaping (ImageKey, ImageRequest?) -> Content) {
+    _prepared = StateObject(wrappedValue: PreparedImage(source: source, context: context, points: points, scale: scale, contentMode: contentMode))
+    self.content = content
+  }
+
+  var body: some View { content(prepared.key, prepared.request) }
+}
+
 public struct MediaImage<Content: View>: View {
   @Environment(\.mediaContext) private var context
   @Environment(\.displayScale) private var displayScale
@@ -46,23 +79,25 @@ public struct MediaImage<Content: View>: View {
   public var body: some View {
     if let context {
       GeometryReader { geometry in
-        let key = imageKey(points: geometry.size, places: context.places)
-        let shown = shownImage(for: key, points: geometry.size)
-        ZStack {
-          if shown == nil {
-            PlaceholderView(item: source.item, ready: false, context: context)
+        ImageRequestView(source: source, context: context, points: geometry.size, scale: displayScale, contentMode: contentMode) { key, request in
+          let shown = shownImage(for: key, request: request)
+          ZStack {
+            if shown == nil {
+              PlaceholderView(item: source.item, ready: false, context: context)
+            }
+            if let frames = loaded.flatMap({ $0.key == key ? $0.frames : nil }) {
+              AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isPlaying, playbackRate: playbackRate)
+            } else if let shown {
+              Image(platform: shown).resizable().aspectRatio(contentMode: contentMode).transition(.opacity)
+            }
+            content(state)
           }
-          if let frames = loaded.flatMap({ $0.key == key ? $0.frames : nil }) {
-            AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isPlaying, playbackRate: playbackRate)
-          } else if let shown {
-            Image(platform: shown).resizable().aspectRatio(contentMode: contentMode).transition(.opacity)
-          }
-          content(state)
+          .frame(width: geometry.size.width, height: geometry.size.height)
+          .clipped()
+          .task(id: key) { await load(key: key, request: request) }
+          .task(id: framesJob(for: key)) { [job = framesJob(for: key)] in await decodeFrames(job) }
         }
-        .frame(width: geometry.size.width, height: geometry.size.height)
-        .clipped()
-        .task(id: key) { await load(key: key, points: geometry.size) }
-        .task(id: framesJob(for: key)) { [job = framesJob(for: key)] in await decodeFrames(job) }
+        .id(ImageInputs(url: source.url, headers: source.headers, width: source.size?.width, height: source.size?.height, pointWidth: geometry.size.width, pointHeight: geometry.size.height, scale: displayScale, contentMode: contentMode, context: ObjectIdentifier(context)))
       }
       .background(OnScreenProbe { screen($0) })
       .task(id: source.url) { await follow() }
@@ -92,23 +127,14 @@ public struct MediaImage<Content: View>: View {
     }
   }
 
-  private func imageKey(points: CGSize, places: MediaPlaces) -> ImageKey {
-    ImageKey(identity: places.cacheKey(url: source.url, headers: source.headers), pixels: MediaImagePipeline.decodeSize(for: source, points: points, scale: displayScale), contentMode: contentMode)
-  }
-
-  private func request(points: CGSize) -> ImageRequest? {
-    guard let context else { return nil }
-    return MediaImagePipeline.request(places: context.places, for: source, points: points, scale: displayScale, contentMode: contentMode)
-  }
-
-  private func shownImage(for key: ImageKey, points: CGSize) -> PlatformImage? {
+  private func shownImage(for key: ImageKey, request: ImageRequest?) -> PlatformImage? {
     if let loaded, loaded.key == key { return loaded.image }
-    guard let context, key.pixels != nil, let request = request(points: points) else { return nil }
+    guard let context, key.pixels != nil, let request else { return nil }
     return MediaImagePipeline.cachedImage(for: request, in: context.pipeline)
   }
 
-  private func load(key: ImageKey, points: CGSize) async {
-    guard let context, key.pixels != nil, let request = request(points: points) else { return }
+  private func load(key: ImageKey, request: ImageRequest?) async {
+    guard let context, key.pixels != nil, let request else { return }
     let container: ImageContainer?
     let isCold: Bool
     if let hit = MediaImagePipeline.cachedContainer(for: request, in: context.pipeline) {

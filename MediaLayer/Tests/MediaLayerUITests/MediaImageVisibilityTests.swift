@@ -117,6 +117,22 @@ extension GlobalMedia {
   @Suite(.timeLimit(.minutes(3)))
   struct MediaImageVisibilityTests {
     @Test
+    func inv_image_01_source_prepares_one_identity_despite_load_and_visibility_updates() async {
+      let screen = Screen(gif: animatedGif(frames: 3, side: 64))
+      defer { screen.close() }
+      let before = screen.places.cacheKeyReads
+      let host = screen.mount(newURL(), y: 0)
+      await until("image fetched") { !screen.places.fetchedURLs.isEmpty }
+      await settle()
+      screen.window.isHidden = true
+      await settle()
+      screen.window.isHidden = false
+      await settle()
+      #expect(screen.places.cacheKeyReads - before == 1)
+      withExtendedLifetime(host) {}
+    }
+
+    @Test
     func a_gif_clipped_out_of_its_scroll_view_neither_claims_its_url_nor_decodes_until_it_scrolls_in() async {
       let url = newURL()
       let screen = Screen(gif: animatedGif(frames: 12, side: 64))

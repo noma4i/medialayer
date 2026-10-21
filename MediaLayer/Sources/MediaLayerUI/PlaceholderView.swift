@@ -15,7 +15,7 @@ struct PlaceholderView: View {
       if let blur { Image(decorative: blur, scale: 1).resizable().scaledToFill() }
       if let cover { Image(platform: cover).resizable().scaledToFill() }
     }
-    .task(id: PlanKey(url: context.places.cacheKey(url: item.url, headers: item.headers), ready: ready)) {
+    .task(id: PlanKey(url: item.url, headers: item.headers, ready: ready)) {
       plan = await context.places.placeholder(source: item, ready: ready)
       blur = nil
       cover = nil
@@ -29,6 +29,7 @@ struct PlaceholderView: View {
 
   private struct PlanKey: Hashable {
     let url: String
+    let headers: [String: String]
     let ready: Bool
   }
 
