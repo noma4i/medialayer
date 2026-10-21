@@ -50,6 +50,8 @@ pub struct Writer {
     reservation: SpaceReservation,
     hasher: Sha256,
     renamed: bool,
+    #[cfg(test)]
+    io_calls: Arc<(std::sync::atomic::AtomicUsize, std::sync::atomic::AtomicUsize)>,
 }
 
 impl Writer {
@@ -59,7 +61,7 @@ impl Writer {
         let part = part_path(&inner.dir, &name, inner.part_sequence.fetch_add(1, Ordering::SeqCst));
         let registration = Registration::new(&inner, &name, &part);
         let reservation = SpaceReservation::new(inner.clone());
-        let mut writer = Writer { inner, key: key.to_string(), name, kind, meta: Meta::default(), part, _registration: registration, file: None, reservation, hasher: Sha256::new(), renamed: false };
+        let mut writer = Writer { inner, key: key.to_string(), name, kind, meta: Meta::default(), part, _registration: registration, file: None, reservation, hasher: Sha256::new(), renamed: false, #[cfg(test)] io_calls: Arc::default() };
         writer.file = Some(create_part(&writer.inner.handle, &writer.part).await?);
         Ok(writer)
     }
@@ -76,7 +78,11 @@ impl Writer {
     pub async fn write(&mut self, data: &[u8]) -> Result<(), CacheError> {
         self.reservation.grow(data.len() as u64).await?;
         let file = self.file.as_mut().ok_or_else(|| CacheError::Io("writer is closed".to_string()))?;
+        #[cfg(test)]
+        self.io_calls.0.fetch_add(1, Ordering::Relaxed);
         file.write_all(data).await?;
+        #[cfg(test)]
+        self.io_calls.1.fetch_add(1, Ordering::Relaxed);
         file.flush().await?;
         self.hasher.update(data);
         Ok(())
@@ -97,6 +103,8 @@ impl Writer {
 
     pub async fn commit(mut self) -> Result<(), CacheError> {
         let mut file = self.file.take().ok_or_else(|| CacheError::Io("writer is closed".to_string()))?;
+        #[cfg(test)]
+        self.io_calls.1.fetch_add(1, Ordering::Relaxed);
         file.flush().await?;
         drop(file);
         let stripe = self.inner.stripe(&self.name).clone().lock_owned().await;
@@ -122,6 +130,10 @@ impl Writer {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "writer_work_tests.rs"]
+mod chunk_work_tests;
 
 async fn create_part(handle: &Handle, part: &Path) -> Result<tokio::fs::File, CacheError> {
     let (sender, receiver) = oneshot::channel();
