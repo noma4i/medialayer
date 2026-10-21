@@ -1,5 +1,39 @@
 # Changelog
 
+## 2.0.0 - 2026-10-21
+
+### Added
+- `cache { free_space 25.percent }` limits the disk budget to a share of free space.
+- `Limits.freeSpaceFraction` changes that share at runtime.
+- `MediaLayer.open` on Android needs no fetcher or call factory.
+- `MediaLayer.open` writes Android trace sections for startup measurements.
+- `build_ios.sh --device` and `build_kotlin.sh --release` build only the release targets.
+
+### Changed
+- `MediaImage` has one rendering path and composes once in lists.
+- `subscribeTone` takes a media item instead of a URL.
+- Tone is prepared only on request, from a decode of at most 64 pixels.
+- `imageMemoryBytes` is optional and defaults to a quarter of the Android memory class.
+- `OpenConfig` takes `availableBytes` for the free disk space.
+- Android fetching and playback share one HTTP client.
+- ExoPlayer tries another decoder when the first one fails.
+- Origin requests always ask for identity encoding.
+- Playback progress is read once per key and only for active views.
+- Playlists are parsed once and reused for playback and prefetch.
+- Cache reads reuse the checked file for a response.
+- Release builds use one code generation unit and narrower Android keep rules.
+
+### Fixed
+- HLS playlists arrive unpacked when the origin compresses them.
+- Loaded animations stop outside the viewport.
+- A whole download keeps separate entries for each header namespace.
+- A stalled whole download times out when no bytes arrive.
+- Android release builds include `core-ktx`.
+
+### Removed
+- `MediaWeight` and the `weight` parameter of `MediaImage`.
+- `DEFAULT_IMAGE_MEMORY_BYTES`.
+
 ## 1.0.0 - 2026-10-21
 
 ### Added
