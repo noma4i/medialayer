@@ -6,11 +6,16 @@ import Testing
 @testable import MediaLayerUI
 
 private final class ThreadCalls: @unchecked Sendable {
-  private let lock = NSLock()
-  private var values: [Bool] = []
+  private struct Call {
+    weak var object: AnyObject?
+    let onMain: Bool
+  }
 
-  var all: [Bool] { lock.withLock { values } }
-  func record() { lock.withLock { values.append(Thread.isMainThread) } }
+  private let lock = NSLock()
+  private var values: [Call] = []
+
+  func all(for object: AnyObject) -> [Bool] { lock.withLock { values.filter { $0.object === object }.map(\.onMain) } }
+  func record(_ object: AnyObject) { lock.withLock { values.append(Call(object: object, onMain: Thread.isMainThread)) } }
 }
 
 @Suite(.serialized, .timeLimit(.minutes(1)))
@@ -23,7 +28,7 @@ struct SlotThreadTests {
     let original = method_getImplementation(method)
     typealias Setter = @convention(c) (AnyObject, Selector, NSString) -> Void
     let intercept: @convention(block) (AnyObject, NSString) -> Void = { object, gravity in
-      calls.record()
+      calls.record(object)
       unsafeBitCast(original, to: Setter.self)(object, selector, gravity)
     }
     let replacement = imp_implementationWithBlock(intercept)
@@ -48,9 +53,10 @@ struct SlotThreadTests {
     let url = Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!.absoluteString
     media.visible(source: MediaItem(kind: .video, url: url, headers: [:], cover: nil, blurHash: nil, strategy: .window), visible: true)
     await eventually("the core creates and loads the native slot") { slots.slot(for: url) != nil }
-    #expect(!calls.all.isEmpty)
-    #expect(calls.all.allSatisfy { $0 }, "native initialization ran outside main")
     let slot = try #require(slots.slot(for: url))
+    let layer = await MainActor.run { slot.layer }
+    #expect(!calls.all(for: layer).isEmpty)
+    #expect(calls.all(for: layer).allSatisfy { $0 }, "native initialization ran outside main")
     let sampleCalls = ThreadCalls()
     let itemSelector = NSSelectorFromString("currentItem")
     let itemMethod = try #require(class_getInstanceMethod(AVPlayer.self, itemSelector))
@@ -58,7 +64,7 @@ struct SlotThreadTests {
     typealias Getter = @convention(c) (AnyObject, Selector) -> AnyObject?
     let player = slot.player
     let read: @convention(block) (AnyObject) -> AnyObject? = { object in
-      if object === player { sampleCalls.record() }
+      sampleCalls.record(object)
       return unsafeBitCast(originalItem, to: Getter.self)(object, itemSelector)
     }
     let replacementItem = imp_implementationWithBlock(read)
@@ -67,7 +73,7 @@ struct SlotThreadTests {
     method_setImplementation(itemMethod, originalItem)
     imp_removeBlock(replacementItem)
     #expect(sample.positionMs == 0)
-    #expect(sampleCalls.all.allSatisfy { $0 }, "sample read the native player outside main")
+    #expect(sampleCalls.all(for: player).allSatisfy { $0 }, "sample read the native player outside main")
     media.releaseAll()
     factory.events.bind(nil)
   }

@@ -117,6 +117,7 @@ struct AVQueuePlayerSlotTests {
     slot.unload()
     await drainMain()
 
+    await eventually("the unloaded item is released") { item == nil }
     #expect(item == nil)
     #expect(slot.player.items().isEmpty)
     #expect(slots.slot(for: "clip") == nil)
@@ -135,8 +136,7 @@ struct AVQueuePlayerSlotTests {
       await log.wait(for: "ready")
       item = slot.loadedItem
     }
-    await drainMain()
-    await drainMain()
+    await eventually("the slot and its item are released") { dropped == nil && item == nil }
 
     #expect(dropped == nil)
     #expect(item == nil)

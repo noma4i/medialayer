@@ -3,6 +3,9 @@ import MediaLayer
 import QuartzCore
 import Testing
 @testable import MediaLayerUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 private final class CountingFetcher: Fetcher, @unchecked Sendable {
   private let lock = NSLock()
@@ -49,6 +52,13 @@ extension GlobalMedia {
       )
     }
 
+    private func release(_ media: MediaLayer) async {
+      media.releaseAll()
+      await eventually("the clip leaves the shared slots") { LoadedSlots.shared.slot(for: Self.clip) == nil }
+    }
+
+    #if canImport(UIKit)
+    @MainActor
     @Test
     func aLocalOneShotClipRendersAndEndsWithoutTheNetworkOrTheCache() async throws {
       let fetcher = CountingFetcher()
@@ -56,8 +66,18 @@ extension GlobalMedia {
       let log = StateLog()
       let subscription = media.subscribeState(key: Self.clip, listener: log)
       let item = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: "https://o.test/cover.jpg", blurHash: nil, looping: false, strategy: .window)
-      let host = CALayer()
+      let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 64, height: 64))
+      let controller = UIViewController()
+      window.rootViewController = controller
+      window.isHidden = false
+      let host = controller.view.layer
       let token = HostLayers.shared.register(host)
+      defer {
+        media.releaseAll()
+        HostLayers.shared.unregister(token)
+        window.isHidden = true
+        window.rootViewController = nil
+      }
 
       media.visible(source: item, visible: true)
       media.setPlaying(key: Self.clip, playing: true)
@@ -72,7 +92,9 @@ extension GlobalMedia {
       #expect(await media.stats().fileCount == 0)
       #expect(await media.placeholder(source: item, ready: false) == .none)
       withExtendedLifetime(subscription) {}
+      await release(media)
     }
+    #endif
 
     @Test
     func aSilentLayerKeepsEverySlotMutedWhateverThePlacesAsk() async throws {
@@ -92,6 +114,7 @@ extension GlobalMedia {
 
       try await Task.sleep(for: .milliseconds(300))
       #expect(await MainActor.run { slot.player.isMuted })
+      await release(media)
     }
 
     @Test
@@ -113,6 +136,7 @@ extension GlobalMedia {
         return !slot.player.isMuted
       }
       #expect(unmuted)
+      await release(media)
     }
 
     @Test
@@ -125,6 +149,7 @@ extension GlobalMedia {
 
       let applied = await eventually { LoadedSlots.shared.slot(for: Self.clip)?.player.defaultRate == 1.5 }
       #expect(applied)
+      await release(media)
     }
   }
 }
