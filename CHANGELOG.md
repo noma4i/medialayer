@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.1.0 - 2026-10-21
+
+### Added
+- `media.imageStats().snapshot()` reports image requests, decoded pixels, placement pixels and cache hits.
+- `MediaVideo` takes `output = MediaOutput.Window` for an experimental SurfaceView output on Android.
+- `MediaVideo` takes `cornerRadius` and `alpha` parameters.
+- Android traces show image requests, image decodes and video output attach calls.
+- Video output counters report attach, detach and texture creation work.
+
+### Changed
+- Image decode size follows the placement size and treats `size` as an upper limit.
+- `fetchImage` returns the bytes together with their source, cache or network.
+- Playing slot counts include slots that preroll the next video.
+
 ## 2.0.0 - 2026-10-21
 
 ### Added
