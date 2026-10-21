@@ -30,7 +30,7 @@ class ImagePixelsTest {
           override val headers = emptyMap<String, String>()
           override val size = 1080 to 1920
         }
-        val request = imageRequest(context, source, null, Scale.FILL, source.url).newBuilder().size(352, 352).build()
+        val request = imageRequest(context, source, null, Scale.FILL, source.url, 352L * 352).newBuilder().size(352, 352).build()
         var result: ImageResult? = null
         loader.enqueue(request.newBuilder().listener(onSuccess = { _, value -> result = value }, onError = { _, value -> result = value }).build())
         val deadline = System.nanoTime() + 10_000_000_000L

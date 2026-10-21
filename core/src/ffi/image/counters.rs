@@ -18,7 +18,6 @@ pub struct ImageSnapshot {
 #[derive(uniffi::Enum)]
 pub enum ImageWork {
     Request { placement_pixels: u64 },
-    Placement { pixels: u64 },
     Decode { width: u32, height: u32, bytes: u64 },
     Finish { memory_hit: bool },
     Cancel { key: String },
@@ -42,7 +41,6 @@ impl ImageCounters {
     pub fn record(&self, work: ImageWork) {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         match work {
-            ImageWork::Placement { pixels } => state.placement_pixels += pixels,
             ImageWork::Request { placement_pixels } => {
                 state.requests += 1;
                 state.active_requests += 1;

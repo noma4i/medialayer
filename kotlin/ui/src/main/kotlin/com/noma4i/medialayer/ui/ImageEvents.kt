@@ -31,13 +31,6 @@ internal class ImageEvents(private val stats: ImageCounters) : EventListener {
     if (Build.VERSION.SDK_INT >= 29) Trace.beginAsyncSection("MediaImage.decode", cookie)
   }
 
-  override fun resolveSizeEnd(request: ImageRequest, size: coil.size.Size) {
-    if ((request.data as? MediaImageData)?.declared == null) return
-    val width = (size.width as? coil.size.Dimension.Pixels)?.px ?: 0
-    val height = (size.height as? coil.size.Dimension.Pixels)?.px ?: 0
-    stats.record(ImageWork.Placement(width.toULong() * height.toULong()))
-  }
-
   override fun decodeEnd(request: ImageRequest, decoder: Decoder, options: Options, result: DecodeResult?) {
     endDecode()
     val drawable = result?.drawable ?: return

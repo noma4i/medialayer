@@ -53,6 +53,7 @@ extension GlobalMedia {
       let pipeline = MediaImagePipeline.make(places: places)
       let request = try #require(MediaImagePipeline.request(places: places, for: TestImage(url: "https://o.test/count.png"), points: CGSize(width: 16, height: 16)))
       _ = try await pipeline.image(for: request)
+      #expect(places.imageStats().snapshot().placementPixels == 256)
       #expect(MediaImagePipeline.cachedContainer(for: request, in: pipeline) != nil)
       let stats = places.imageStats().snapshot()
       #expect(stats.requests == 2)
@@ -62,6 +63,7 @@ extension GlobalMedia {
       #expect(stats.decodedPixels == 256)
       #expect(stats.bitmapBytes >= 1024)
       #expect(stats.activeRequests == 0)
+      #expect(stats.placementPixels == 512)
     }
 
     @Test(arguments: [(ContentMode.fill, 352, 626), (ContentMode.fit, 198, 352)])

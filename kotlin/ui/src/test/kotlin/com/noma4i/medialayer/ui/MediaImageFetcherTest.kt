@@ -73,7 +73,7 @@ class MediaImageFetcherTest {
   }
 
   @Test
-  fun imageBytesComeFromTheCoreSourceDecodeAtTheDeclaredSizeAndCoilKeepsNoDisk() {
+  fun inv_image_12_imageBytesComeFromTheCoreSourceDecodeAtTheDeclaredSizeAndCoilKeepsNoDisk() {
     val data = MediaImageData("https://o.test/a.png", mapOf("Authorization" to "token"), "https://o.test/a.png")
 
     val result = load(ImageRequest.Builder(context).data(data).size(16, 16).build())
@@ -87,9 +87,10 @@ class MediaImageFetcherTest {
 
   @Test
   fun inv_image_13_aSecondRequestForTheSameUrlIsServedFromCoilMemoryWithoutTheCore() {
-    val request = ImageRequest.Builder(context).data(MediaImageData("https://o.test/b.png", emptyMap(), "https://o.test/b.png")).size(16, 16).build()
+    val request = ImageRequest.Builder(context).data(MediaImageData("https://o.test/b.png", emptyMap(), "https://o.test/b.png", PixelSize(64u, 64u))).setParameter("placementPixels", 256L, null).size(16, 16).build()
 
     load(request)
+    assertEquals(256uL, stats.snapshot().placementPixels)
     load(request)
 
     assertEquals(1, requested.size)
@@ -98,5 +99,6 @@ class MediaImageFetcherTest {
     assertEquals(1uL, stats.snapshot().diskHits)
     assertEquals(1uL, stats.snapshot().memoryHits)
     assertEquals(0uL, stats.snapshot().activeRequests)
+    assertEquals(512uL, stats.snapshot().placementPixels)
   }
 }
