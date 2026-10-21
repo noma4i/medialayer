@@ -21,6 +21,35 @@ private final class StreamOrder: @unchecked Sendable {
 
 struct StreamingOrderTests {
   @Test
+  func inv_memory_07_read_chunks_release_their_storage_before_compaction() async throws {
+    let released = ReleasedChunks()
+    let body = StreamingBody(limit: 1 << 20, pause: {}, resume: {}, cancel: {})
+    for _ in 0..<128 {
+      let memory = UnsafeMutableRawPointer.allocate(byteCount: 1024, alignment: 16)
+      body.receive(Data(bytesNoCopy: memory, count: 1024, deallocator: .custom { pointer, _ in
+        pointer.deallocate()
+        released.record()
+      }))
+    }
+    for _ in 0..<32 { _ = try await body.nextChunk() }
+    #expect(released.count == 32)
+    body.release()
+    #expect(released.count == 128)
+  }
+
+  @Test
+  func inv_proxy_06_chunk_queue_moves_at_most_linear_elements() async throws {
+    let body = StreamingBody(limit: 8192, pause: {}, resume: {}, cancel: {})
+    for index in 0 ..< 4096 { body.receive(Data([UInt8(index % 256)])) }
+    body.finish(nil)
+    for index in 0 ..< 4096 {
+      #expect(try await body.nextChunk() == Data([UInt8(index % 256)]))
+    }
+    #expect(try await body.nextChunk() == nil)
+    #expect(body.shiftedChunks <= 4096)
+  }
+
+  @Test
   func drainingDuringPauseCompletesResumeAfterPause() async throws {
     let order = StreamOrder()
     let body = StreamingBody(limit: 10, pause: { order.pause() }, resume: { order.resume() }, cancel: {})
@@ -36,4 +65,11 @@ struct StreamingOrderTests {
     await producer.value
     #expect(order.actions == ["pause", "resume"])
   }
+}
+
+private final class ReleasedChunks: @unchecked Sendable {
+  private let lock = NSLock()
+  private var calls = 0
+  var count: Int { lock.withLock { calls } }
+  func record() { lock.withLock { calls += 1 } }
 }

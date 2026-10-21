@@ -7,12 +7,16 @@ final class StreamingBody: BodyReader, @unchecked Sendable {
   private let pause: @Sendable () -> Void
   private let resume: @Sendable () -> Void
   private let cancel: @Sendable () -> Void
-  private var chunks: [Data] = []
+  private var chunks: [Data?] = []
+  private var readIndex = 0
+  private var shifts = 0
   private var buffered = 0
   private var paused = false
   private var finished = false
   private var failure: Error?
   private var waiter: CheckedContinuation<Data?, Error>?
+
+  var shiftedChunks: Int { lock.withLock { shifts } }
 
   init(
     limit: Int,
@@ -33,6 +37,7 @@ final class StreamingBody: BodyReader, @unchecked Sendable {
   func release() {
     lock.lock()
     chunks = []
+    readIndex = 0
     buffered = 0
     finished = true
     let waiter = self.waiter
@@ -83,8 +88,17 @@ final class StreamingBody: BodyReader, @unchecked Sendable {
     try await withTaskCancellationHandler {
       try await withCheckedThrowingContinuation { continuation in
         lock.lock()
-        if !chunks.isEmpty {
-          let chunk = chunks.removeFirst()
+        if readIndex < chunks.count, let chunk = chunks[readIndex] {
+          chunks[readIndex] = nil
+          readIndex += 1
+          if readIndex == chunks.count {
+            chunks.removeAll(keepingCapacity: true)
+            readIndex = 0
+          } else if readIndex >= 64 && readIndex >= chunks.count / 2 {
+            shifts += chunks.count - readIndex
+            chunks.removeFirst(readIndex)
+            readIndex = 0
+          }
           buffered -= chunk.count
           let shouldResume = paused && buffered < limit / 2
           if shouldResume {
