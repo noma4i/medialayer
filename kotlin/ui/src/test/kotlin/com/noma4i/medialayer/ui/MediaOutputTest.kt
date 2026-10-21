@@ -13,10 +13,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(MediaLayerTestRunner::class)
 @Config(sdk = [30, 31, 34])
 class MediaOutputTest {
   @Test

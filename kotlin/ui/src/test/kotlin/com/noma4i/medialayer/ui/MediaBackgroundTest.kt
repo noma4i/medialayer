@@ -17,7 +17,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 
 private data class Backdrop(override val url: String) : MediaSource {
@@ -25,7 +24,7 @@ private data class Backdrop(override val url: String) : MediaSource {
   override val headers: Map<String, String> get() = emptyMap()
 }
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(MediaLayerTestRunner::class)
 class MediaBackgroundTest {
   @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
 

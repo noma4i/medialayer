@@ -31,7 +31,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 
 private data class Poster(override val url: String) : MediaSource {
   override val kind: Kind get() = Kind.IMAGE
@@ -44,7 +43,7 @@ private fun solid(width: Int, height: Int): Bitmap =
 
 private fun item(url: String, cover: String? = null) = MediaItem(Kind.VIDEO, url, emptyMap(), cover, null, strategy = CacheStrategy.WINDOW)
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(MediaLayerTestRunner::class)
 class ToneFramesTest {
   @get:Rule val rule = createComposeRule()
 

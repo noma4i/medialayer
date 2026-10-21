@@ -21,7 +21,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 
 private data class ExportSource(override val url: String) : MediaSource {
@@ -29,7 +28,7 @@ private data class ExportSource(override val url: String) : MediaSource {
   override val headers: Map<String, String> = emptyMap()
 }
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(MediaLayerTestRunner::class)
 class MediaImageExportTest {
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val layer = RecordingLayer().also { it.image = pngBytes() }

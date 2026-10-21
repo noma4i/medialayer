@@ -30,7 +30,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
@@ -38,7 +37,7 @@ private data class LifecycleSource(override val url: String, override val kind: 
   override val headers: Map<String, String> get() = emptyMap()
 }
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(MediaLayerTestRunner::class)
 class NativeViewLifecycleTest {
   @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
   private val context = ApplicationProvider.getApplicationContext<Context>()

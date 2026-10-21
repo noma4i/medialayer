@@ -14,9 +14,8 @@ import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(MediaLayerTestRunner::class)
 class MemoryWarningTest {
   @Test
   fun inv_memory_04_a_system_warning_clears_decoded_images() = runBlocking {

@@ -20,7 +20,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 
 private data class Thumb(override val url: String, override val blurHash: String? = null) : MediaSource {
@@ -31,7 +30,7 @@ private data class Thumb(override val url: String, override val blurHash: String
 
 private const val HASH = "LEHV6nWB2yk8pyo0adR*.7kCMdnj"
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(MediaLayerTestRunner::class)
 class MediaTileTest {
   @get:Rule val rule = createComposeRule()
 

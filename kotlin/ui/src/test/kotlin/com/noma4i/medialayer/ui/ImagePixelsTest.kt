@@ -10,10 +10,9 @@ import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaSource
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(MediaLayerTestRunner::class)
 class ImagePixelsTest {
   @Test
   fun inv_image_11_grid_decoded_pixels_fit_placement() {

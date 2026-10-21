@@ -16,7 +16,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import com.noma4i.medialayer.*
 import coil.size.Scale
@@ -28,7 +27,7 @@ internal fun pngBytes(width: Int = 64, height: Int = 64): ByteArray {
   return out.toByteArray()
 }
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(MediaLayerTestRunner::class)
 class MediaImageFetcherTest {
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val requested = CopyOnWriteArrayList<Pair<String, Map<String, String>>>()

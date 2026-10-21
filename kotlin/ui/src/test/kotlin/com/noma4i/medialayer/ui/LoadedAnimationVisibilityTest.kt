@@ -34,7 +34,6 @@ import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 
 private class CountingAnimation : Drawable(), Animatable {
@@ -51,7 +50,7 @@ private class CountingAnimation : Drawable(), Animatable {
   override fun getIntrinsicHeight() = 24
 }
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(MediaLayerTestRunner::class)
 class LoadedAnimationVisibilityTest {
   @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
 

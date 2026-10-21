@@ -23,7 +23,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 
 private data class Animated(override val url: String) : MediaSource {
@@ -33,7 +32,7 @@ private data class Animated(override val url: String) : MediaSource {
 
 private const val FAR = 5_000
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(MediaLayerTestRunner::class)
 class MediaVisibilityTest {
   @get:Rule val rule = createComposeRule()
 

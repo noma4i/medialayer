@@ -30,7 +30,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 private data class Clip(override val url: String, override val cover: String? = null) : MediaSource {
@@ -60,7 +59,7 @@ private data class Note(override val url: String) : MediaSource {
   override val headers: Map<String, String> get() = emptyMap()
 }
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(MediaLayerTestRunner::class)
 class MediaComposeTest {
   @get:Rule val rule = createComposeRule()
 

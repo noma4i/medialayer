@@ -19,7 +19,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 
 private data class SizedImage(override val url: String) : MediaSource {
@@ -28,7 +27,7 @@ private data class SizedImage(override val url: String) : MediaSource {
   override val size = 24 to 24
 }
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(MediaLayerTestRunner::class)
 class MediaImageCompositionTest {
   @get:Rule val rule = createComposeRule()
 

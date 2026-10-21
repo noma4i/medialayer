@@ -15,7 +15,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 
 private class PolicyBody(count: Int) : BodyReader {
@@ -38,7 +37,7 @@ private class PolicyOrigin : Fetcher {
   }
 }
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(MediaLayerTestRunner::class)
 class OpenPolicyTest {
   private val application = ApplicationProvider.getApplicationContext<Application>()
 

@@ -20,14 +20,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 
 private data class Page(override val url: String, override val kind: Kind, override val cover: String? = null, override val size: Pair<Int, Int>? = null) : MediaSource {
   override val headers: Map<String, String> get() = emptyMap()
 }
 
-@RunWith(RobolectricTestRunner::class)
+@RunWith(MediaLayerTestRunner::class)
 class MediaPrecomposeTest {
   @get:Rule val rule = createComposeRule()
 
