@@ -143,7 +143,9 @@ Android and Media3 provide no estimate of saved frames for this application.
 | Overlays and transparent backgrounds | Draws within Compose | Default Z-below ordering, test overlapping pages, controls and dialogs |
 | View bitmap capture | Includes video | Can omit video, use compositor capture or PixelCopy and verify the result |
 
-The prototype retains `ContentFrame` while its player changes or becomes null.
+Window retains `ContentFrame` while its player changes or becomes null.
+Texture creates `ContentFrame` only while its player is non-null, including fallback from Window.
+Defaults `cornerRadius = 0.dp` and `alpha = 1f` add neither clip nor opacity modifiers.
 It uses attachment-based `SurfaceView` lifetime on API 34+, without moving a View between pager parents.
 Different composed pages still own different Views.
 Slots, claims, playback, peeking and the pool window use the same implementation for both outputs.

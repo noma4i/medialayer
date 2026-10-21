@@ -2,6 +2,8 @@ package com.noma4i.medialayer.ui
 
 import android.content.Context
 import android.os.Looper
+import android.view.TextureView
+import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.unit.dp
+import androidx.core.view.descendants
 import androidx.lifecycle.Lifecycle
 import androidx.media3.test.utils.FakeMediaSource
 import androidx.media3.test.utils.FakeClock
@@ -47,6 +50,31 @@ class NativeViewLifecycleTest {
   }
   private val loader = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) })
   private val looper = shadowOf(Looper.getMainLooper())
+
+  @Test
+  @Config(sdk = [30, 31, 34])
+  fun inv_output_05_texture_requires_a_player_to_create_its_view() {
+    val events = layer.playerEvents() as RecordingEvents
+    val root = rule.activity.findViewById<ViewGroup>(android.R.id.content)
+    rule.setContent {
+      MediaLayerProvider(layer, loader, factory.players) {
+        MediaVideo(LifecycleSource("first", Kind.VIDEO), modifier = Modifier.size(80.dp))
+      }
+    }
+    rule.waitUntil(5000) { looper.idle(); events.calls.any { it.startsWith("attach:first:") } }
+    rule.runOnIdle { assertEquals(0, root.descendants.count { it is TextureView }) }
+    val token = events.calls.last { it.startsWith("attach:first:") }.substringAfterLast(':').toULong()
+    val slot = factory.create(0u)
+    slot.load("first", PlaybackRoute("file:///bundle/first.mp4", emptyMap(), null, false, false))
+    slot.play()
+    slot.attach(token)
+    rule.waitUntil(5000) { looper.idle(); counters.snapshot()["setVideoTextureView"] == 1L }
+    rule.runOnIdle { assertEquals(1, root.descendants.count { it is TextureView }) }
+    slot.detach()
+    looper.idle()
+    rule.waitForIdle()
+    rule.runOnIdle { assertEquals(0, root.descendants.count { it is TextureView }) }
+  }
 
   @Test
   @Config(sdk = [34])

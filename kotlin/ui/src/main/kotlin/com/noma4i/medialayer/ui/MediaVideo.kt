@@ -178,8 +178,11 @@ fun MediaVideo(
     onDispose { }
   }
   val clipped = if (cornerRadius > 0.dp) modifier.clip(RoundedCornerShape(cornerRadius)) else modifier
-  Box(clipped.alpha(alpha).then(screen.modifier)) {
-    ContentFrame(outputPlayer, Modifier.fillMaxSize(), outputType, contentScale, true, {})
+  val faded = if (alpha != 1f) clipped.alpha(alpha) else clipped
+  Box(faded.then(screen.modifier)) {
+    if (outputPlayer != null || outputType == SURFACE_TYPE_SURFACE_VIEW) {
+      ContentFrame(outputPlayer, Modifier.fillMaxSize(), outputType, contentScale, true, {})
+    }
     if (screen.visible) VideoPlaceholder(source, state.isReady, contentScale)
     content(state)
   }

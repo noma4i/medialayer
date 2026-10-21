@@ -19,7 +19,8 @@ Window uses `VideoOutputPlayer` to configure the public outline and attachment l
 
 Missing counters mean zero events. Use a fresh counters instance for each opening.
 Distinct Views do not measure graphic buffers or prove garbage collection of detached objects.
-One stable composition retains its View through a null player. Separate pager compositions have separate Views.
+Window retains its View through a null player. Texture removes its View when its player becomes null.
+Separate pager compositions have separate Views.
 Changing output type can create another View. Changing mute does not rebind a stable player.
 
 `stats().slots.playing` counts playing or peeking slots on both platforms, not audible players or decoded frames.
