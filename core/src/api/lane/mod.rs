@@ -36,6 +36,12 @@ impl Queue {
         self.wake.notify_one();
     }
 
+    pub fn begin_batch(&self) -> bool {
+        let mut state = self.pending();
+        state.in_flight = !state.calls.is_empty();
+        state.in_flight
+    }
+
     pub fn pop(&self) -> Option<SlotCall> {
         let mut state = self.pending();
         let call = state.calls.pop_front();
@@ -45,6 +51,10 @@ impl Queue {
 
     pub fn finish(&self) {
         self.pending().in_flight = false;
+    }
+
+    pub fn discard(&self) {
+        self.pending().calls.clear();
     }
 
     pub fn len(&self) -> usize {

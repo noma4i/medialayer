@@ -9,6 +9,33 @@ fn route(url: &str) -> PlaybackRoute {
 }
 
 #[tokio::test]
+async fn inv_api_01_ready_commands_share_one_blocking_call() {
+    let factory: Arc<MockFactory> = Arc::default();
+    let runner = SlotRunner::new(Handle::current(), Some(factory.clone()));
+    for call in [SlotCall::Load { key: "a".into(), route: route("https://a") }, SlotCall::Mute, SlotCall::Preroll, SlotCall::Play] {
+        runner.send(0, call);
+    }
+    eventually(|| runner.is_idle()).await;
+    assert_eq!(factory.slot(0).calls().len(), 4);
+    assert_eq!(runner.blocking_calls(0), 1);
+}
+
+#[tokio::test]
+async fn inv_api_01_new_load_during_creation_replaces_unstarted_commands() {
+    let factory: Arc<MockFactory> = Arc::default();
+    factory.create_gate.close();
+    let runner = SlotRunner::new(Handle::current(), Some(factory.clone()));
+    runner.send(0, SlotCall::Load { key: "old".into(), route: route("https://old") });
+    runner.send(0, SlotCall::Play);
+    eventually(|| factory.create_gate.entered() == 1).await;
+    runner.send(0, SlotCall::Load { key: "new".into(), route: route("https://new") });
+    runner.send(0, SlotCall::Mute);
+    factory.create_gate.open();
+    eventually(|| runner.is_idle()).await;
+    assert_eq!(factory.slot(0).calls(), vec![SlotCall::Load { key: "new".into(), route: route("https://new") }, SlotCall::Mute]);
+}
+
+#[tokio::test]
 async fn inv_api_01_commands_reach_the_player_in_order_while_the_caller_never_waits_for_it() {
     let factory: Arc<MockFactory> = Arc::default();
     factory.gate.close();
@@ -34,6 +61,7 @@ async fn inv_api_01_a_slow_platform_never_makes_the_queue_grow_and_the_last_sour
     factory.gate.close();
     let runner = SlotRunner::new(Handle::current(), Some(factory.clone()));
     runner.send(0, SlotCall::Load { key: "first".to_string(), route: route("http://127.0.0.1:1/first") });
+    runner.send(0, SlotCall::Play);
     eventually(|| factory.gate.entered() == 1).await;
 
     let mut deepest = 0;
@@ -59,7 +87,23 @@ async fn inv_api_01_a_slow_platform_never_makes_the_queue_grow_and_the_last_sour
         })
         .collect();
     assert_eq!(loaded, vec!["first".to_string(), "k499".to_string()]);
+    assert!(matches!(&factory.slot(0).calls()[1], SlotCall::Load { key, .. } if key == "k499"));
     assert!(deepest <= LANE_CAPACITY, "the queue held {deepest} commands");
+}
+
+#[tokio::test]
+async fn inv_api_01_dropping_a_runner_discards_unstarted_batch_commands() {
+    let factory: Arc<MockFactory> = Arc::default();
+    factory.gate.close();
+    let runner = SlotRunner::new(Handle::current(), Some(factory.clone()));
+    runner.send(0, SlotCall::Load { key: "a".into(), route: route("https://a") });
+    runner.send(0, SlotCall::Play);
+    eventually(|| factory.gate.entered() == 1).await;
+    let slot = factory.slot(0);
+    drop(runner);
+    factory.gate.open();
+    eventually(|| Arc::strong_count(&slot) == 2).await;
+    assert_eq!(slot.calls(), vec![SlotCall::Load { key: "a".into(), route: route("https://a") }]);
 }
 
 #[tokio::test]

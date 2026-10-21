@@ -1,5 +1,5 @@
 use super::guard::AbortOnDrop;
-use super::lane::Queue;
+use super::lane::{Queue, LANE_CAPACITY};
 use super::source::PlaybackRoute;
 use crate::pool::Command;
 use std::collections::HashMap;
@@ -101,6 +101,14 @@ struct Lane {
     queue: Arc<Queue>,
     player: Player,
     _task: AbortOnDrop,
+    #[cfg(test)]
+    blocking_calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl Drop for Lane {
+    fn drop(&mut self) {
+        self.queue.discard();
+    }
 }
 
 pub struct SlotRunner {
@@ -121,8 +129,10 @@ impl SlotRunner {
         let lane = lanes.entry(slot).or_insert_with(|| {
             let queue = Arc::new(Queue::default());
             let player: Player = Arc::new(OnceLock::new());
-            let task = self.handle.spawn(run_lane(players, slot, queue.clone(), player.clone()));
-            Lane { queue, player, _task: AbortOnDrop::new(task) }
+            #[cfg(test)]
+            let blocking_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let task = self.handle.spawn(run_lane(players, slot, queue.clone(), player.clone(), #[cfg(test)] blocking_calls.clone()));
+            Lane { queue, player, _task: AbortOnDrop::new(task), #[cfg(test)] blocking_calls }
         });
         lane.queue.push(call);
     }
@@ -133,6 +143,11 @@ impl SlotRunner {
 
     pub fn queued(&self, slot: usize) -> usize {
         self.lanes().get(&slot).map_or(0, |lane| lane.queue.len())
+    }
+
+    #[cfg(test)]
+    pub fn blocking_calls(&self, slot: usize) -> usize {
+        self.lanes().get(&slot).map_or(0, |lane| lane.blocking_calls.load(std::sync::atomic::Ordering::Relaxed))
     }
 
     pub fn sample_now(&self, slot: usize) -> Option<SlotSample> {
@@ -152,17 +167,23 @@ impl SlotRunner {
     }
 }
 
-async fn run_lane(players: Arc<dyn PlayerSlotFactory>, slot: usize, queue: Arc<Queue>, player: Player) {
+async fn run_lane(players: Arc<dyn PlayerSlotFactory>, slot: usize, queue: Arc<Queue>, player: Player, #[cfg(test)] blocking_calls: Arc<std::sync::atomic::AtomicUsize>) {
     loop {
-        let Some(call) = queue.pop() else {
+        if !queue.begin_batch() {
             queue.wake.notified().await;
             continue;
-        };
+        }
         let players = players.clone();
         let cell = player.clone();
+        let pending = queue.clone();
+        #[cfg(test)]
+        blocking_calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let _ = tokio::task::spawn_blocking(move || {
             let current = cell.get_or_init(|| players.create(slot as u32));
-            call.apply(current.as_ref());
+            for _ in 0..LANE_CAPACITY {
+                let Some(call) = pending.pop() else { break };
+                call.apply(current.as_ref());
+            }
         })
         .await;
         queue.finish();

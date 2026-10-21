@@ -347,6 +347,7 @@ pub struct MockFactory {
     pub slots: Mutex<HashMap<u32, Arc<MockSlot>>>,
     pub created: Mutex<Vec<u32>>,
     pub gate: Arc<LoadGate>,
+    pub create_gate: LoadGate,
     pub advance_ms: Mutex<u64>,
 }
 
@@ -370,6 +371,7 @@ impl MockFactory {
 
 impl PlayerSlotFactory for MockFactory {
     fn create(&self, slot: u32) -> Arc<dyn PlayerSlot> {
+        self.create_gate.pass();
         let idle = SlotSample { position_ms: 0, duration_ms: Some(60_000), is_looping: false, view_attached: false, frame_rendered: false };
         let player = Arc::new(MockSlot {
             calls: Mutex::default(),
