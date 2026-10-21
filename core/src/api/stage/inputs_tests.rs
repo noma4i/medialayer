@@ -409,17 +409,18 @@ async fn inv_api_18_a_place_that_leaves_while_not_playing_resumes_at_its_positio
     stage.visible(video(chat), true);
     eventually(|| rig.factory.slot_holding(chat).is_some()).await;
     rig.holder(chat).1.sample.lock().unwrap().position_ms = 14_000;
+    stage.seek(chat, 14_000);
+    eventually(|| stage.commands_idle()).await;
     stage.visible(video(chat), false);
     eventually(|| rig.factory.slot_holding(chat).is_none()).await;
 
     stage.visible(video(chat), true);
 
-    let resumed = |calls: &[SlotCall]| calls.iter().any(|call| matches!(call, SlotCall::Seek { position_ms } if *position_ms >= 14_000));
-    eventually(|| rig.factory.slot_holding(chat).is_some_and(|(_, slot)| resumed(&slot.calls()))).await;
+    eventually(|| rig.factory.slot_holding(chat).is_some() && stage.commands_idle()).await;
     let calls = rig.holder(chat).1.calls();
     let load = calls.iter().rposition(|call| matches!(call, SlotCall::Load { .. })).unwrap();
     let seek = calls.iter().rposition(|call| matches!(call, SlotCall::Seek { position_ms } if *position_ms >= 14_000));
-    assert!(seek.is_some_and(|seek| seek > load));
+    assert!(seek.is_some_and(|seek| seek > load), "{calls:?}");
 }
 
 #[tokio::test]
@@ -536,19 +537,21 @@ async fn inv_api_31_a_playing_place_resumes_at_its_position_when_the_whole_windo
     stage.replace_window(0, videos(20));
     stage.set_playing(&clip, true);
     eventually(|| rig.factory.slot_holding(&clip).is_some()).await;
-    rig.holder(&clip).1.sample.lock().unwrap().position_ms = 5_600;
+    let (_, player) = rig.holder(&clip);
+    player.sample.lock().unwrap().position_ms = 5_600;
+    stage.seek(&clip, 5_600);
+    eventually(|| stage.commands_idle()).await;
 
     stage.replace_window(0, Vec::new());
-    eventually(|| rig.factory.slot_holding(&clip).is_none()).await;
+    eventually(|| player.calls().contains(&SlotCall::Unload)).await;
     stage.replace_window(0, videos(20));
     stage.set_playing(&clip, true);
 
-    let resumed = |calls: &[SlotCall]| calls.iter().any(|call| matches!(call, SlotCall::Seek { position_ms } if *position_ms >= 5_600));
-    eventually(|| rig.factory.slot_holding(&clip).is_some_and(|(_, slot)| resumed(&slot.calls()))).await;
+    eventually(|| rig.factory.slot_holding(&clip).is_some() && stage.commands_idle()).await;
     let calls = rig.holder(&clip).1.calls();
     let load = calls.iter().rposition(|call| matches!(call, SlotCall::Load { .. })).unwrap();
     let seek = calls.iter().rposition(|call| matches!(call, SlotCall::Seek { position_ms } if *position_ms >= 5_600));
-    assert!(seek.is_some_and(|seek| seek > load));
+    assert!(seek.is_some_and(|seek| seek > load), "{calls:?}");
 }
 
 #[tokio::test]

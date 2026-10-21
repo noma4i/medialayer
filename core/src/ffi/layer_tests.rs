@@ -119,6 +119,7 @@ async fn inv_spec_07_assembly_applies_the_first_eviction_override_of_each_kind()
         ].into_iter().filter_map(|(kind, evict)| evict.map(|evict| (kind, evict.into()))).collect();
         let parts = crate::api::assemble(config).await.unwrap();
         let cache = &parts.cache;
+        cache.ready().await;
         cache.put("small", kind, &[1; 2]).await.unwrap();
         cache.put("large", kind, &[2; 7]).await.unwrap();
         cache.put("new", kind, &[3; 4]).await.unwrap();
@@ -528,17 +529,21 @@ async fn inv_idle_02_stats_are_published_by_change_events_and_only_with_a_subscr
     let sink = totals.clone();
     let _subscription = assembled.controls.subscribe_stats(Arc::new(move |stats: MediaStats| sink.changed(stats)));
     elapse(std::time::Duration::from_secs(1)).await;
+    eventually(|| totals.0.lock().unwrap().last() == Some(&2000)).await;
     let subscribed = assembled.controls.wakes();
     assert_eq!(subscribed, 1, "the subscription delivers the current stats once");
 
     cache.put("https://o.test/one.jpg", crate::cache::Kind::Image, &[1; 10]).await.unwrap();
     elapse(std::time::Duration::from_secs(1)).await;
+    eventually(|| totals.0.lock().unwrap().last() == Some(&2010)).await;
     assert_eq!(assembled.controls.wakes() - subscribed, 1, "one write, one publication");
 
     for index in 0..100 {
         cache.put(&format!("https://o.test/burst{index}.jpg"), crate::cache::Kind::Image, &[1; 10]).await.unwrap();
     }
     elapse(std::time::Duration::from_secs(1)).await;
+    // Virtual time does not complete callbacks on blocking threads.
+    eventually(|| totals.0.lock().unwrap().last() == Some(&3010)).await;
     assert!(assembled.controls.wakes() - subscribed <= 3, "a burst of 100 writes merges: {}", assembled.controls.wakes() - subscribed);
     assert_eq!(totals.0.lock().unwrap().last(), Some(&(301 * 10)));
 }

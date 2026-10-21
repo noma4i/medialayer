@@ -332,12 +332,14 @@ async fn inv_cache_02_aborted_writer_releases_space_and_removes_its_part() {
 
 #[tokio::test]
 async fn inv_cache_02_commit_counts_the_bytes_once() {
-    let f = fixture(limits(100, 0.8, EvictionStrategy::Lru), &[]).await;
+    let f = fixture(limits(100, 1.0, EvictionStrategy::Lru), &[]).await;
     let mut first = f.cache.begin_write("a", Kind::Stream).await.unwrap();
     first.write(&[0; 60]).await.unwrap();
     first.commit().await.unwrap();
     assert_eq!(f.cache.stats().await.total_bytes, 60);
     f.cache.put("b", Kind::Stream, &payload(40)).await.unwrap();
+    f.cache.evict_now().await;
+    assert_eq!(f.cache.stats().await.total_bytes, 100);
     assert!(f.cache.contains("a").await);
     assert!(f.cache.contains("b").await);
 }

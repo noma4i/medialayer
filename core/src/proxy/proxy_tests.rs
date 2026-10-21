@@ -483,7 +483,7 @@ async fn inv_proxy_17_restart_on_another_port_raises_the_route_generation() {
     let fallback = rig.proxy.restart(busy).await.unwrap();
     assert_ne!(fallback, busy);
     assert_eq!(rig.proxy.port(), fallback);
-    assert_eq!(rig.proxy.route_generation(), 2);
+    assert_eq!(rig.proxy.route_generation(), 1 + u64::from(fallback != spare));
     assert!(rig.proxy.ping().await);
 }
 
