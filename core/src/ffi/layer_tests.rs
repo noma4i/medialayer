@@ -485,12 +485,18 @@ async fn idle_wakes(declare: bool) -> (u64, u64, usize) {
     let factory = shared::<MockFactory>();
     let config = assembly(dir.path(), fetcher.clone(), factory.clone());
     let parts = crate::api::assemble(config).await.unwrap();
+    parts.cache.ready().await;
+    let mut settled = parts.prefetcher.settled();
     let assembled = super::assembled::Assembled::new(&Handle::current(), parts, None);
     if declare {
         let url = crate::api::test_support::url_of(0);
         assembled.stage.replace_window(0, crate::api::test_support::videos(3));
         assembled.stage.set_playing(&url, true);
         eventually(|| factory.slot_holding(&url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
+        let mut pending: std::collections::HashSet<_> = (1..3).map(crate::api::test_support::url_of).collect();
+        while !pending.is_empty() {
+            pending.remove(&settled.recv().await.unwrap().url);
+        }
     }
     elapse(std::time::Duration::from_secs(1)).await;
     let (stats, tick, requests) = (assembled.controls.wakes(), assembled.stage.wakes(), fetcher.calls());
