@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::runtime::Handle;
 use tokio::sync::Notify;
@@ -15,9 +16,11 @@ struct Mailbox<T> {
 struct Shared<T> {
     latest: Mutex<Option<T>>,
     wake: Notify,
-    boxes: Mutex<Vec<(u64, Arc<Mailbox<T>>)>>,
+    boxes: Mutex<HashMap<u64, Arc<Mailbox<T>>>>,
     next_id: AtomicU64,
     published: AtomicU64,
+    #[cfg(test)]
+    unsubscribe_visits: AtomicU64,
 }
 
 fn locked<V>(mutex: &Mutex<V>) -> MutexGuard<'_, V> {
@@ -51,7 +54,7 @@ impl Drop for Subscription {
 
 impl<T: Clone + Send + 'static> Hub<T> {
     pub fn new(handle: Handle) -> Hub<T> {
-        let shared = Arc::new(Shared { latest: Mutex::new(None), wake: Notify::new(), boxes: Mutex::new(Vec::new()), next_id: AtomicU64::new(0), published: AtomicU64::new(0) });
+        let shared = Arc::new(Shared { latest: Mutex::new(None), wake: Notify::new(), boxes: Mutex::new(HashMap::new()), next_id: AtomicU64::new(0), published: AtomicU64::new(0), #[cfg(test)] unsubscribe_visits: AtomicU64::new(0) });
         let dispatcher = AbortOnDrop::new(handle.spawn(dispatch(shared.clone())));
         Hub { shared, handle, _dispatcher: dispatcher }
     }
@@ -65,14 +68,16 @@ impl<T: Clone + Send + 'static> Hub<T> {
     pub fn subscribe(&self, deliver: Deliver<T>) -> Subscription {
         let id = self.shared.next_id.fetch_add(1, Ordering::Relaxed);
         let mailbox = Arc::new(Mailbox { slot: Mutex::new(None), wake: Notify::new(), closed: AtomicBool::new(false) });
-        locked(&self.shared.boxes).push((id, mailbox.clone()));
+        locked(&self.shared.boxes).insert(id, mailbox.clone());
         let task = self.handle.spawn(deliver_latest(mailbox, deliver));
         let shared = Arc::downgrade(&self.shared);
         Subscription {
             cancel: Mutex::new(Some(Box::new(move || {
                 task.abort();
                 if let Some(shared) = shared.upgrade() {
-                    locked(&shared.boxes).retain(|(boxed, _)| *boxed != id);
+                    locked(&shared.boxes).remove(&id);
+                    #[cfg(test)]
+                    shared.unsubscribe_visits.fetch_add(1, Ordering::Relaxed);
                 }
             }))),
         }
@@ -85,6 +90,11 @@ impl<T: Clone + Send + 'static> Hub<T> {
 
     pub fn listener_count(&self) -> usize {
         locked(&self.shared.boxes).len()
+    }
+
+    #[cfg(test)]
+    pub fn unsubscribe_visits(&self) -> u64 {
+        self.shared.unsubscribe_visits.load(Ordering::Relaxed)
     }
 }
 
@@ -103,11 +113,27 @@ async fn dispatch<T: Clone + Send + 'static>(shared: Arc<Shared<T>>) {
         let Some(value) = locked(&shared.latest).take() else {
             continue;
         };
-        let mailboxes: Vec<Arc<Mailbox<T>>> = locked(&shared.boxes).iter().map(|(_, mailbox)| mailbox.clone()).collect();
-        for mailbox in mailboxes {
-            *locked(&mailbox.slot) = Some(value.clone());
-            mailbox.wake.notify_one();
-        }
+        distribute(&shared, value);
+    }
+}
+
+fn distribute<T: Clone>(shared: &Shared<T>, value: T) {
+    for mailbox in locked(&shared.boxes).values() {
+        *locked(&mailbox.slot) = Some(value.clone());
+        mailbox.wake.notify_one();
+    }
+}
+
+#[cfg(test)]
+mod allocation_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn inv_api_02_distribution_allocates_no_listener_snapshot() {
+        let hub = Hub::new(Handle::current());
+        let _subscriptions: Vec<_> = (0..64).map(|_| hub.subscribe(Arc::new(|_: u32| {}))).collect();
+        distribute(&hub.shared, 6);
+        assert_eq!(crate::alloc_probe::allocations_of(|| distribute(&hub.shared, 7)), 0);
     }
 }
 

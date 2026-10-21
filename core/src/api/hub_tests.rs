@@ -6,6 +6,17 @@ use tokio::runtime::Handle;
 
 type Log = Arc<Mutex<Vec<u32>>>;
 
+#[tokio::test]
+async fn inv_api_02_unsubscribe_visits_only_the_removed_listener() {
+    for count in [1, 64, 1024] {
+        let hub = Hub::new(Handle::current());
+        let mut subscriptions: Vec<_> = (0..count).map(|_| hub.subscribe(Arc::new(|_: u32| {}))).collect();
+        drop(subscriptions.pop());
+        assert_eq!(hub.listener_count(), count - 1);
+        assert_eq!(hub.unsubscribe_visits(), 1, "listeners={count}");
+    }
+}
+
 fn recorder() -> (Log, Deliver<u32>) {
     let log: Log = Arc::new(Mutex::new(Vec::new()));
     let sink = log.clone();
