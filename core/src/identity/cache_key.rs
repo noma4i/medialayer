@@ -21,13 +21,17 @@ pub fn namespaced_key(url: &str, headers: &HashMap<String, String>, names: &[Str
 }
 
 pub fn hex_lower(bytes: &[u8]) -> String {
-    const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut text = String::with_capacity(bytes.len() * 2);
+    hex_into(bytes, &mut text);
+    text
+}
+
+pub fn hex_into(bytes: &[u8], text: &mut String) {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
     for byte in bytes {
         text.push(DIGITS[usize::from(byte >> 4)] as char);
         text.push(DIGITS[usize::from(byte & 15)] as char);
     }
-    text
 }
 
 pub fn key_file_name(key: &str) -> String {

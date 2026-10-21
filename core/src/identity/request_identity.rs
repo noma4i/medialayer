@@ -8,7 +8,7 @@ pub fn cache_namespace(url: &str, headers: &HashMap<String, String>) -> String {
         append(&mut hasher, &name);
         append(&mut hasher, &value);
     }
-    hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect()
+    super::hex_lower(&hasher.finalize())
 }
 
 fn normalized_headers(headers: &HashMap<String, String>) -> Vec<(String, String)> {

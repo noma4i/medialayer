@@ -3,6 +3,14 @@ use std::collections::HashMap;
 
 const URL: &str = "https://cdn.example.com/v/index.m3u8";
 
+#[test]
+fn inv_proxy_15_namespace_uses_one_digest_allocation() {
+    for headers in [map(&[]), map(&[("Authorization", "a")])] {
+        let allocations = crate::alloc_probe::allocations_of(|| cache_namespace(URL, &headers));
+        assert!(allocations <= 4, "namespace allocated {allocations} times");
+    }
+}
+
 fn map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
 }
