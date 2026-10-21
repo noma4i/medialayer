@@ -16,7 +16,6 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -45,7 +44,6 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.transformLatest
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
@@ -91,7 +89,6 @@ private fun ImageBody(source: MediaSource, pixels: PixelSize?, screen: ScreenVis
   val context = LocalContext.current
   val environment = LocalMediaEnvironment.current
   val media = environment.media
-  val tones = rememberCoroutineScope()
   val scale = contentScale.toScale()
   val request = remember(media, source, pixels, scale) { imageRequest(context, source, pixels, scale, media.cacheKey(source.url, source.headers)) }
   val state = remember(source.url) { mutableStateOf<MediaState>(MediaState.Idle) }
@@ -122,7 +119,6 @@ private fun ImageBody(source: MediaSource, pixels: PixelSize?, screen: ScreenVis
       painterState.toMediaState()?.let { reached ->
         state.value = reached
         media.itemState(source.url, reached)
-        if (painterState is AsyncImagePainter.State.Success) tones.launch { ToneFrames.submit(media, source.toItem(), painterState.result.drawable) }
       }
     },
     modifier = Modifier.fillMaxSize()

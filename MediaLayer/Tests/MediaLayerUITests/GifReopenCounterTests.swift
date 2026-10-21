@@ -49,7 +49,9 @@ private final class CountingPlaces: MediaPlaces, @unchecked Sendable {
     return try await inner.fetchImage(url: url, headers: headers)
   }
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder { await inner.placeholder(source: source, ready: ready) }
-  func submitTonePixels(source: MediaItem, width: UInt32, height: UInt32, rgba: Data) { inner.submitTonePixels(source: source, width: width, height: height, rgba: rgba) }
+  func setTonePreparation(preparation: TonePreparation) { inner.setTonePreparation(preparation: preparation) }
+  func tonePixelsNeeded(source: MediaItem) async -> Bool { await inner.tonePixelsNeeded(source: source) }
+  func playUrl(source: MediaItem) async throws -> PlaybackRoute { try await inner.playUrl(source: source) }
   func stateStream(key: String) -> AsyncStream<MediaState> { inner.stateStream(key: key) }
   func attachView(key: String, token: UInt64) { inner.attachView(key: key, token: token) }
   func detachView(key: String) { inner.detachView(key: key) }

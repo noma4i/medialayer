@@ -129,7 +129,6 @@ public struct MediaVideo<Content: View>: View {
       let reached = edges.advance(to: value)
       if reached.firstFrame {
         onFirstFrame()
-        ToneFrames.submitFirstFrame(of: item, slots: context?.slots, places: places)
       }
       if reached.ended { onEnd() }
     }

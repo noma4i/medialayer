@@ -94,7 +94,6 @@ extension MediaImagePipeline {
     do {
       let container = try await pipeline.imageTask(with: request).response.container
       places.itemState(key: source.url, state: .ready)
-      ToneFrames.submit(container.image.toneImage, source: source.item, places: places)
       return container
     } catch {
       if !Task.isCancelled { places.itemState(key: source.url, state: .failed(detail: error.localizedDescription)) }

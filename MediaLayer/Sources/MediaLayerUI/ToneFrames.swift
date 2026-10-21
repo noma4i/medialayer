@@ -1,10 +1,56 @@
 import AVFoundation
 import CoreGraphics
 import Foundation
+import ImageIO
 import MediaLayer
 
-enum ToneFrames {
+final class ToneFrames: TonePreparation, @unchecked Sendable {
   static let longSide = 64
+  private weak var places: MediaPlaces?
+
+  init(places: MediaPlaces) { self.places = places }
+
+  func prepare(source: MediaItem) async -> TonePixels? {
+    guard let places, await places.tonePixelsNeeded(source: source), !Task.isCancelled else { return nil }
+    let image: CGImage?
+    if source.kind == .image || source.cover != nil {
+      image = await self.image(source: source, places: places)
+    } else {
+      image = await firstFrame(source: source, places: places)
+    }
+    guard !Task.isCancelled, let image, let pixels = Self.rgba(from: image) else { return nil }
+    return TonePixels(width: UInt32(pixels.width), height: UInt32(pixels.height), rgba: pixels.rgba)
+  }
+
+  private func image(source: MediaItem, places: MediaPlaces) async -> CGImage? {
+    guard let url = URL(string: source.cover ?? source.url) else { return nil }
+    let data: Data?
+    if url.isFileURL { data = try? Data(contentsOf: url) }
+    else { data = try? await places.fetchImage(url: url.absoluteString, headers: source.headers) }
+    guard !Task.isCancelled, let data else { return nil }
+    return Self.thumbnail(data)
+  }
+
+  private func firstFrame(source: MediaItem, places: MediaPlaces) async -> CGImage? {
+    guard source.kind == .video, let route = try? await places.playUrl(source: source), let url = URL(string: route.url) else { return nil }
+    let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": route.headers])
+    let generator = AVAssetImageGenerator(asset: asset)
+    generator.appliesPreferredTrackTransform = true
+    generator.maximumSize = CGSize(width: Self.longSide, height: Self.longSide)
+    return await withTaskCancellationHandler {
+      try? await generator.image(at: .zero).image
+    } onCancel: { generator.cancelAllCGImageGeneration() }
+  }
+
+  static func thumbnail(_ data: Data) -> CGImage? {
+    guard let encoded = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+    return CGImageSourceCreateThumbnailAtIndex(encoded, 0, [
+      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceCreateThumbnailWithTransform: true,
+      kCGImageSourceThumbnailMaxPixelSize: longSide,
+      kCGImageSourceShouldCacheImmediately: true
+    ] as CFDictionary)
+  }
 
   static func rgba(from image: CGImage) -> (width: Int, height: Int, rgba: Data)? {
     let long = max(image.width, image.height)
@@ -27,40 +73,4 @@ enum ToneFrames {
     return drawn ? (width, height, bytes) : nil
   }
 
-  static func submit(_ image: CGImage?, source: MediaItem, places: MediaPlaces) {
-    guard let image else { return }
-
-    Task.detached(priority: .utility) {
-      guard let pixels = rgba(from: image) else { return }
-
-      places.submitTonePixels(source: source, width: UInt32(pixels.width), height: UInt32(pixels.height), rgba: pixels.rgba)
-    }
-  }
-
-  static func submitFirstFrame(of source: MediaItem, slots: LoadedSlots?, places: MediaPlaces) {
-    guard source.cover == nil, let asset = slots?.slot(for: source.url)?.loadedItem?.asset else { return }
-
-    submitFirstFrame(of: asset, source: source, places: places)
-  }
-
-  static func submitFirstFrame(of asset: AVAsset, source: MediaItem, places: MediaPlaces) {
-    Task.detached(priority: .utility) {
-      let generator = AVAssetImageGenerator(asset: asset)
-      generator.appliesPreferredTrackTransform = true
-      generator.maximumSize = CGSize(width: longSide, height: longSide)
-      guard let frame = try? await generator.image(at: .zero).image else { return }
-
-      submit(frame, source: source, places: places)
-    }
-  }
-}
-
-extension PlatformImage {
-  var toneImage: CGImage? {
-    #if canImport(UIKit)
-    cgImage
-    #else
-    cgImage(forProposedRect: nil, context: nil, hints: nil)
-    #endif
-  }
 }

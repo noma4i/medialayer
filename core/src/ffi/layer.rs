@@ -3,6 +3,7 @@ use super::deferred::Deferred;
 use super::events::PlayerEvents;
 use super::fetcher::{Fetcher, ForeignFetcher};
 use crate::analysis::{MediaTone, ToneSource};
+use crate::api::TonePreparation;
 use super::limits::{default_limits, DeviceMemory, Evict, ImageWindow, Limits, PoolSettings};
 use crate::api::{
     assemble, placeholder_for, CacheState, Placeholder, Assembly, Kind, MediaError, MediaItem, MediaState, MediaStats, Parts, PlaybackRoute,
@@ -197,8 +198,8 @@ impl MediaLayer {
         Arc::new(self.assembled.hold(move |assembled| assembled.places.subscribe(&key, Arc::new(move |state| listener.changed(state)))))
     }
 
-    pub fn subscribe_tone(&self, url: String, listener: Arc<dyn ToneListener>) -> Arc<Subscription> {
-        Arc::new(self.assembled.hold(move |assembled| assembled.tones.subscribe(&url, Arc::new(move |source| listener.changed(source)))))
+    pub fn subscribe_tone(&self, source: MediaItem, listener: Arc<dyn ToneListener>) -> Arc<Subscription> {
+        Arc::new(self.assembled.hold(move |assembled| assembled.tones.subscribe(&source, Arc::new(move |source| listener.changed(source)))))
     }
 
     pub async fn tone(&self, source: MediaItem, band: f32) -> Result<Option<MediaTone>, MediaError> {
@@ -206,8 +207,12 @@ impl MediaLayer {
         Ok(assembled.tones.tone(&source, band).await?)
     }
 
-    pub fn submit_tone_pixels(&self, source: MediaItem, width: u32, height: u32, rgba: Vec<u8>) {
-        self.declare(move |assembled| assembled.tones.submit(source, width, height, rgba));
+    pub fn set_tone_preparation(&self, preparation: Arc<dyn TonePreparation>) {
+        self.declare(move |assembled| assembled.tones.set_preparation(preparation));
+    }
+
+    pub async fn tone_pixels_needed(&self, source: MediaItem) -> bool {
+        self.on_assembled(false, move |assembled| async move { assembled.tones.pixels_needed(&source).await }).await
     }
 
     pub async fn play_url(&self, source: MediaItem) -> Result<PlaybackRoute, MediaError> {
@@ -234,7 +239,10 @@ impl MediaLayer {
     }
 
     pub fn item_state(&self, key: String, state: MediaState) {
-        self.declare(move |assembled| assembled.places.item_state(&key, state));
+        self.declare(move |assembled| {
+            if state == MediaState::Ready { assembled.tones.refresh(&key); }
+            assembled.places.item_state(&key, state);
+        });
     }
 
     pub fn seek(&self, key: String, position_ms: u64) {

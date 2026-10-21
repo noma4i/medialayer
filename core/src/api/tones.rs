@@ -4,12 +4,31 @@ use crate::analysis::{analyze, analyze_blurhash, valid_band, MediaTone, ToneData
 use crate::cache::Cache;
 use crate::proxy::block_key;
 use async_trait::async_trait;
-use std::collections::{HashMap, HashSet, VecDeque};
+use futures_util::future::{AbortHandle, Abortable};
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::runtime::Handle;
 
 pub const MEMO_ENTRIES: usize = 256;
+
+#[derive(uniffi::Record)]
+pub struct TonePixels {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+#[uniffi::export(with_foreign)]
+#[async_trait]
+pub trait TonePreparation: Send + Sync {
+    async fn prepare(&self, source: MediaItem) -> Option<TonePixels>;
+}
+
+struct Demand {
+    source: MediaItem,
+    queried: bool,
+}
 
 #[async_trait]
 pub trait ToneStore: Send + Sync {
@@ -77,7 +96,9 @@ pub struct Tones {
     handle: Handle,
     store: Arc<dyn ToneStore>,
     memo: Mutex<Memo>,
-    running: Mutex<HashSet<String>>,
+    running: Mutex<HashMap<String, AbortHandle>>,
+    demands: Mutex<HashMap<String, Demand>>,
+    preparation: Mutex<Option<Arc<dyn TonePreparation>>>,
     hubs: Hubs,
     analyses: AtomicU64,
 }
@@ -103,7 +124,9 @@ impl Tones {
             handle,
             store,
             memo: Mutex::new(Memo { capacity: memo_entries.max(1), order: VecDeque::new(), tones: HashMap::new() }),
-            running: Mutex::new(HashSet::new()),
+            running: Mutex::new(HashMap::new()),
+            demands: Mutex::new(HashMap::new()),
+            preparation: Mutex::new(None),
             hubs: Arc::new(Mutex::new(HashMap::new())),
             analyses: AtomicU64::new(0),
         })
@@ -117,30 +140,95 @@ impl Tones {
         locked(&self.hubs).values().map(Hub::listener_count).sum()
     }
 
-    pub async fn tone(&self, source: &MediaItem, band: f32) -> Result<Option<MediaTone>, ToneError> {
+    pub async fn tone(self: &Arc<Self>, source: &MediaItem, band: f32) -> Result<Option<MediaTone>, ToneError> {
         valid_band(band)?;
         let key = self.store.key_for(&source.url, &source.headers);
-        let Some(data) = self.known(&key).await.or_else(|| self.from_blurhash(&key, source)) else {
-            return Ok(None);
-        };
-        data.at(band).map(Some)
+        let data = self.known(&key).await.or_else(|| self.from_blurhash(&key, source));
+        if !data.as_ref().is_some_and(|tone| tone.source == ToneSource::Pixels) {
+            locked(&self.demands).entry(key.clone()).or_insert_with(|| Demand { source: source.clone(), queried: false }).queried = true;
+            self.request(&key);
+        }
+        data.map(|data| data.at(band)).transpose()
     }
 
-    pub fn submit(self: &Arc<Self>, source: MediaItem, width: u32, height: u32, rgba: Vec<u8>) {
-        let tones = self.clone();
-        self.handle.spawn(async move { tones.analyze_pixels(source, width, height, rgba).await });
+    pub fn set_preparation(self: &Arc<Self>, preparation: Arc<dyn TonePreparation>) {
+        *locked(&self.preparation) = Some(preparation);
+        let keys: Vec<_> = locked(&self.demands).keys().cloned().collect();
+        for key in keys { self.request(&key); }
     }
 
-    pub fn subscribe(&self, url: &str, deliver: Deliver<ToneSource>) -> Subscription {
-        let inner = locked(&self.hubs).entry(url.to_string()).or_insert_with(|| Hub::new(self.handle.clone())).subscribe(deliver);
-        let (hubs, url) = (self.hubs.clone(), url.to_string());
+    pub fn subscribe(self: &Arc<Self>, source: &MediaItem, deliver: Deliver<ToneSource>) -> Subscription {
+        let key = self.store.key_for(&source.url, &source.headers);
+        let mut hubs = locked(&self.hubs);
+        let inner = hubs.entry(key.clone()).or_insert_with(|| Hub::new(self.handle.clone())).subscribe(deliver);
+        locked(&self.demands).entry(key.clone()).or_insert_with(|| Demand { source: source.clone(), queried: false });
+        drop(hubs);
+        self.request(&key);
+        let hubs = self.hubs.clone();
+        let tones = Arc::downgrade(self);
         Subscription::cancelling(move || {
             drop(inner);
             let mut hubs = locked(&hubs);
-            if hubs.get(&url).is_some_and(|hub| hub.listener_count() == 0) {
-                hubs.remove(&url);
+            if hubs.get(&key).is_some_and(|hub| hub.listener_count() == 0) {
+                hubs.remove(&key);
             }
+            drop(hubs);
+            if let Some(tones) = tones.upgrade() { tones.cancel_unused(&key); }
         })
+    }
+
+    fn demanded(&self, key: &str) -> bool {
+        let hubs = locked(&self.hubs);
+        hubs.get(key).is_some_and(|hub| hub.listener_count() > 0)
+            || locked(&self.demands).get(key).is_some_and(|demand| demand.queried)
+    }
+
+    pub async fn pixels_needed(&self, source: &MediaItem) -> bool {
+        let key = self.store.key_for(&source.url, &source.headers);
+        self.demanded(&key) && !self.known(&key).await.is_some_and(|tone| tone.source == ToneSource::Pixels)
+    }
+
+    fn cancel_unused(&self, key: &str) {
+        let hubs = locked(&self.hubs);
+        let mut demands = locked(&self.demands);
+        if !hubs.get(key).is_some_and(|hub| hub.listener_count() > 0) && !demands.get(key).is_some_and(|demand| demand.queried) {
+            if let Some(abort) = locked(&self.running).get(key) { abort.abort(); }
+            demands.remove(key);
+        }
+    }
+
+    pub fn refresh(self: &Arc<Self>, url: &str) {
+        let keys: Vec<_> = locked(&self.demands).iter().filter(|(_, demand)| demand.source.url == url).map(|(key, _)| key.clone()).collect();
+        for key in keys { self.request(&key); }
+    }
+
+    fn request(self: &Arc<Self>, key: &str) {
+        let Some(source) = locked(&self.demands).get(key).map(|demand| demand.source.clone()) else { return };
+        let Some(preparation) = locked(&self.preparation).clone() else { return };
+        if !self.demanded(key) { return; }
+        let mut running = locked(&self.running);
+        if running.contains_key(key) { return; }
+        let (abort, registration) = AbortHandle::new_pair();
+        running.insert(key.to_string(), abort);
+        drop(running);
+        let guard = Running { tones: self.clone(), key: key.to_string() };
+        let tones = self.clone();
+        self.handle.spawn(async move {
+            let retry = tones.clone();
+            let key = guard.key.clone();
+            let cancelled = Abortable::new(async move {
+                if !tones.pixels_needed(&source).await { return; }
+                let Some(pixels) = preparation.prepare(source.clone()).await else { return };
+                if pixels.width > 64 || pixels.height > 64 || !tones.pixels_needed(&source).await { return; }
+                tones.analyze_pixels(source, pixels.width, pixels.height, pixels.rgba).await;
+            }, registration).await.is_err();
+            if !cancelled {
+                if let Some(demand) = locked(&retry.demands).get_mut(&key) { demand.queried = false; }
+                retry.cancel_unused(&key);
+            }
+            drop(guard);
+            if cancelled { retry.request(&key); }
+        });
     }
 
     async fn known(&self, key: &str) -> Option<ToneData> {
@@ -158,10 +246,6 @@ impl Tones {
 
     async fn analyze_pixels(self: Arc<Self>, source: MediaItem, width: u32, height: u32, rgba: Vec<u8>) {
         let key = self.store.key_for(&source.url, &source.headers);
-        if !locked(&self.running).insert(key.clone()) {
-            return;
-        }
-        let _running = Running { tones: self.clone(), key: key.clone() };
         if self.known(&key).await.is_some_and(|known| known.source == ToneSource::Pixels) {
             return;
         }
@@ -175,9 +259,9 @@ impl Tones {
         if self.store.set_tone(&key, tone.clone()).await {
             locked(&self.memo).remove(&key);
         } else {
-            locked(&self.memo).insert(key, tone);
+            locked(&self.memo).insert(key.clone(), tone);
         }
-        if let Some(hub) = locked(&self.hubs).get(&source.url) {
+        if let Some(hub) = locked(&self.hubs).get(&key) {
             hub.publish(ToneSource::Pixels);
         }
     }

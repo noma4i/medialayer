@@ -52,6 +52,7 @@ extension MediaLayer {
       defaults: defaults, fetcher: fetcher, settings: settings, directory: directory, silent: silent, audio: audio, imageCache: imageCache
     )
     let media = try MediaLayer.open(config: config)
+    media.setTonePreparation(preparation: ToneFrames(places: media))
     ImageMemory.install(imageCache, on: media)
     media.followSystem(events: media.playerEvents(), link: factory.events, center: .default, names: .system)
     Media.current = media

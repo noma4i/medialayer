@@ -57,10 +57,53 @@ private func pixelsTone(_ media: MediaLayer, _ item: MediaItem) async -> Bool {
   (try? await media.tone(source: item, band: 0.15))?.source == .pixels
 }
 
+private final class ToneChanges: ToneListener, @unchecked Sendable {
+  private let lock = NSLock()
+  private var values: [ToneSource] = []
+  var count: Int { lock.withLock { values.count } }
+  func changed(source: ToneSource) { lock.withLock { values.append(source) } }
+}
+
 extension GlobalMedia {
   struct ToneFramesTests {
     private static var clip: String {
       Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!.absoluteString
+    }
+
+    @Test
+    func inv_tone_13_late_subscription_prepares_pixels_without_a_second_image_load() async throws {
+      let media = try openLayer()
+      let source = Poster(url: try writePNG(solid(width: 1080, height: 1920, red: 20, green: 40, blue: 60)))
+      let context = MediaContext(places: media)
+      let request = try #require(MediaImagePipeline.request(places: media, for: source))
+      #expect(await MediaImagePipeline.load(source, request: request, places: media, pipeline: context.pipeline) != nil)
+      #expect(await media.tonePixelsNeeded(source: source.item) == false)
+      let changes = ToneChanges()
+      let subscription = media.subscribeTone(source: source.item, listener: changes)
+      await eventually("late subscriber receives pixels") { changes.count == 1 }
+      #expect(await pixelsTone(media, source.item))
+      #expect(await media.tonePixelsNeeded(source: source.item) == false)
+      withExtendedLifetime(subscription) {}
+    }
+
+    @Test
+    func inv_tone_13_no_demand_reads_no_bytes_and_thumbnail_decodes_at_most_64() async throws {
+      let places = RecordingPlaces()
+      let item = MediaItem(kind: .image, url: "https://o.test/large.png", headers: [:], cover: nil, blurHash: nil, strategy: .window)
+      let file = try writePNG(solid(width: 1080, height: 1920, red: 20, green: 40, blue: 60))
+      let data = try Data(contentsOf: URL(string: file)!)
+      places.imageResult = .success(data)
+      let preparation = ToneFrames(places: places)
+      #expect(await preparation.prepare(source: item) == nil)
+      #expect(places.fetchedURLs.isEmpty)
+      let thumbnail = try #require(ToneFrames.thumbnail(data))
+      #expect(thumbnail.width <= 64 && thumbnail.height <= 64)
+      #expect(thumbnail.bytesPerRow * thumbnail.height <= 16384)
+      places.needsTone = true
+      let pixels = try #require(await preparation.prepare(source: item))
+      #expect(places.fetchedURLs == [item.url])
+      #expect(pixels.rgba.count <= 16384)
+      print("tone_preparations=1 decoded_bytes=\(thumbnail.bytesPerRow * thumbnail.height) submitted_bytes=\(pixels.rgba.count)")
     }
 
     @Test(arguments: [(200, 100, 64, 32), (100, 300, 21, 64), (30, 20, 30, 20)])
@@ -80,22 +123,23 @@ extension GlobalMedia {
       let places = RecordingPlaces()
       let item = MediaItem(kind: .image, url: "https://o.test/a.png", headers: [:], cover: nil, blurHash: nil, strategy: .window)
 
-      ToneFrames.submit(try solid(width: 300, height: 200, red: 1, green: 2, blue: 3), source: item, places: places)
-
-      await eventually("the core got the pixels") { !places.submittedTones.isEmpty }
-      #expect(places.submittedTones == [TonePixelsCall(url: item.url, width: 64, height: 43, bytes: 64 * 43 * 4, onMain: false)])
+      let file = try writePNG(solid(width: 300, height: 200, red: 1, green: 2, blue: 3))
+      places.imageResult = .success(try Data(contentsOf: URL(string: file)!))
+      places.needsTone = true
+      let preparation = ToneFrames(places: places)
+      let pixels = try #require(await preparation.prepare(source: item))
+      #expect(pixels.width == 64 && pixels.height <= 43)
+      #expect(pixels.rgba.count == Int(pixels.width * pixels.height * 4))
     }
 
     @Test
     func inv_tone_12_a_failed_decode_submits_nothing() async throws {
       let places = RecordingPlaces()
-      let item = MediaItem(kind: .video, url: "https://o.test/v.mp4", headers: [:], cover: nil, blurHash: nil, strategy: .window)
+      let item = MediaItem(kind: .video, url: "file:///nonexistent/clip.mp4", headers: [:], cover: nil, blurHash: nil, strategy: .window)
 
-      ToneFrames.submit(nil, source: item, places: places)
-      ToneFrames.submitFirstFrame(of: AVURLAsset(url: URL(fileURLWithPath: "/nonexistent/clip.mp4")), source: item, places: places)
-
-      try await Task.sleep(for: .milliseconds(400))
-      #expect(places.submittedTones.isEmpty)
+      places.needsTone = true
+      let preparation = ToneFrames(places: places)
+      #expect(await preparation.prepare(source: item) == nil)
     }
 
     @Test
@@ -127,17 +171,14 @@ extension GlobalMedia {
     func inv_tone_12_a_video_without_a_cover_gives_its_first_frame_and_a_covered_one_does_not() async throws {
       let media = try openLayer()
       let bare = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: nil, blurHash: nil, looping: true, strategy: .window)
-      let covered = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: "https://o.test/c.jpg", blurHash: nil, looping: true, strategy: .window)
 
       media.visible(source: bare, visible: true)
       media.setPlaying(key: Self.clip, playing: true)
       await eventually("the clip is loaded") { LoadedSlots.shared.slot(for: Self.clip)?.loadedItem != nil }
 
-      ToneFrames.submitFirstFrame(of: covered, slots: .shared, places: media)
-      try await Task.sleep(for: .milliseconds(500))
+      #expect(await media.tonePixelsNeeded(source: bare) == false)
       #expect(await pixelsTone(media, bare) == false)
 
-      ToneFrames.submitFirstFrame(of: bare, slots: .shared, places: media)
       await eventually("the first frame gives pixels") { await pixelsTone(media, bare) }
     }
   }

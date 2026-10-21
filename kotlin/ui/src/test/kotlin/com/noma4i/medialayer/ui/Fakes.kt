@@ -10,7 +10,9 @@ import com.noma4i.medialayer.Placeholder
 import com.noma4i.medialayer.Pressure
 import com.noma4i.medialayer.StateListener
 import com.noma4i.medialayer.Subscription
-import android.os.Looper
+import com.noma4i.medialayer.TonePreparation
+import com.noma4i.medialayer.PlaybackRoute
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.CopyOnWriteArrayList
 
 internal class RecordingEvents : PlayerEvents(NoHandle) {
@@ -28,15 +30,15 @@ internal class RecordingEvents : PlayerEvents(NoHandle) {
   override fun memoryWarning(level: Pressure) { calls.add("memory:$level") }
 }
 
-internal data class ToneCall(val url: String, val width: Int, val height: Int, val bytes: Int, val onMain: Boolean)
-
 internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents()) : MediaLayer(NoHandle) {
   override fun cacheKey(url: String, headers: Map<String, String>): String = url
   val calls = CopyOnWriteArrayList<String>()
   val listeners = CopyOnWriteArrayList<Pair<String, StateListener>>()
   var closed = false
   var image: ByteArray = ByteArray(0)
-  val tones = CopyOnWriteArrayList<ToneCall>()
+  var preparedTones: TonePreparation? = null
+  val toneChecks = AtomicInteger()
+  var needsTone = false
   val placeholders = CopyOnWriteArrayList<Pair<String, Boolean>>()
 
   override fun playerEvents(): PlayerEvents = events
@@ -68,9 +70,9 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
     }
   }
 
-  override fun submitTonePixels(source: MediaItem, width: UInt, height: UInt, rgba: ByteArray) {
-    tones.add(ToneCall(source.url, width.toInt(), height.toInt(), rgba.size, Looper.getMainLooper().isCurrentThread))
-  }
+  override fun setTonePreparation(preparation: TonePreparation) { preparedTones = preparation }
+  override suspend fun tonePixelsNeeded(source: MediaItem): Boolean { toneChecks.incrementAndGet(); return needsTone }
+  override suspend fun playUrl(source: MediaItem): PlaybackRoute = PlaybackRoute(source.url, source.headers, null, false, false)
 
   override fun close() { closed = true }
 }

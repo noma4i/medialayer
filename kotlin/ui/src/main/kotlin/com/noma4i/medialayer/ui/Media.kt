@@ -56,7 +56,7 @@ internal fun rememberScreenVisibility(): ScreenVisibility {
   return screen
 }
 
-internal class MediaEnvironment(val media: MediaLayer, val players: SlotPlayers?, val imageLoader: ImageLoader, val frames: FrameSource = MetadataFrames)
+internal class MediaEnvironment(val media: MediaLayer, val players: SlotPlayers?, val imageLoader: ImageLoader)
 
 internal val LocalMediaEnvironment = staticCompositionLocalOf<MediaEnvironment> { error("Wrap the screen in MediaLayerProvider") }
 
@@ -65,7 +65,12 @@ fun MediaLayerProvider(media: MediaLayer, imageLoader: ImageLoader? = null, play
   val context = LocalContext.current
   val environment = remember(media, imageLoader, players) {
     val binding = media.binding
-    val loader = imageLoader ?: binding?.imageLoader ?: mediaImageLoader(context, ImageBytes { url, headers -> media.fetchImage(url, headers) })
+    val reference = java.lang.ref.WeakReference(media)
+    val loader = imageLoader ?: binding?.imageLoader ?: mediaImageLoader(context, ImageBytes { url, headers ->
+      val current = reference.get() ?: throw kotlinx.coroutines.CancellationException("MediaLayer was released")
+      current.fetchImage(url, headers)
+    })
+    media.setTonePreparation(ToneFrames(media, context.applicationContext, loader))
     MediaEnvironment(media, players ?: binding?.factory?.players, loader)
   }
   val muted = Media.muted

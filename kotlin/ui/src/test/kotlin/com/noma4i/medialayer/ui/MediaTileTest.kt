@@ -46,7 +46,7 @@ class MediaTileTest {
   private fun visibles(url: String) = layer.calls.filter { it == "visible:$url:true" || it == "visible:$url:false" }
 
   @Test
-  fun sizedImagesSubmitTone() {
+  fun sizedImagesPrepareNoToneWithoutDemand() {
     var full by mutableStateOf(false)
     rule.setContent {
       MediaLayerProvider(layer, loader, slots.players) {
@@ -59,9 +59,9 @@ class MediaTileTest {
     rule.waitUntil(5000) { looper.idle(); ready("https://o.test/tile.png") }
     full = true
 
-    rule.waitUntil(5000) { looper.idle(); layer.tones.size == 2 }
+    rule.waitUntil(5000) { looper.idle(); ready("https://o.test/full.png") }
 
-    assertEquals(setOf("https://o.test/tile.png", "https://o.test/full.png"), layer.tones.map { it.url }.toSet())
+    assertEquals(0, layer.toneChecks.get())
   }
 
   @Test

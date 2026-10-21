@@ -30,7 +30,7 @@ pub use slots::{PlayerSlot, PlayerSlotFactory, SlotCall, SlotRunner, SlotSample}
 pub use source::{MediaItem, PlaybackRoute};
 pub use stage::{Stage, StageParts};
 pub use stats_feed::follow_stats;
-pub use tones::{CacheTones, Keying, ToneStore, Tones, MEMO_ENTRIES};
+pub use tones::{CacheTones, Keying, TonePixels, TonePreparation, ToneStore, Tones, MEMO_ENTRIES};
 pub use types::{Kind, KindUsage, MediaState, MediaStats, Pressure, ReleaseCounts, SlotCounts};
 
 #[cfg(test)]

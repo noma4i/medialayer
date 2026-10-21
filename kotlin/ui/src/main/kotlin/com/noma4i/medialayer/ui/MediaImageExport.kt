@@ -12,7 +12,6 @@ import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.PixelSize
 import com.noma4i.medialayer.imagePixelSize
-import com.noma4i.medialayer.toItem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
@@ -39,7 +38,6 @@ suspend fun MediaLayer.image(
     is SuccessResult -> {
       val bitmap = result.drawable.toBitmap()
       itemState(source.url, MediaState.Ready)
-      ToneFrames.submit(this, source.toItem(), bitmap)
       bitmap
     }
     is ErrorResult -> {

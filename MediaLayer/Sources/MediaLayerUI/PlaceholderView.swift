@@ -41,7 +41,6 @@ struct PlaceholderView: View {
     request.imageID = context.places.cacheKey(url: url, headers: item.headers)
     guard let image = try? await context.pipeline.image(for: request) else { return nil }
 
-    ToneFrames.submit(image.toneImage, source: item, places: context.places)
     return image
   }
 }

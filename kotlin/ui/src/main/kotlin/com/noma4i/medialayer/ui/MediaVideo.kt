@@ -14,7 +14,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.media3.ui.compose.ContentFrame
@@ -27,7 +26,6 @@ import com.noma4i.medialayer.Placeholder
 import com.noma4i.medialayer.isReady
 import com.noma4i.medialayer.toItem
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.launch
 
 internal class VideoEdges {
   private var hasRendered = false
@@ -115,8 +113,6 @@ fun MediaVideo(
   val screen = rememberScreenVisibility()
   val state = rememberPlace(source, playing, muted, loop, peeking, screen.visible)
   val edges = remember(source.url) { VideoEdges() }
-  val tones = rememberCoroutineScope()
-  val item = remember(source) { source.toItem() }
   val firstFrame by rememberUpdatedState(onFirstFrame)
   val end by rememberUpdatedState(onEnd)
   val progress by rememberUpdatedState(onProgress)
@@ -131,7 +127,6 @@ fun MediaVideo(
     val (isFirstFrame, isEnd) = edges.advance(state)
     if (isFirstFrame) {
       firstFrame()
-      tones.launch { ToneFrames.submitFirstFrame(environment.media, item, environment.players?.route(source.url), environment.frames) }
     }
     if (isEnd) end()
   }
@@ -174,7 +169,6 @@ fun MediaVideo(
 @Composable
 private fun VideoPlaceholder(source: MediaSource, ready: Boolean, contentScale: ContentScale) {
   val media = LocalMediaEnvironment.current.media
-  val tones = rememberCoroutineScope()
   val placeholder by produceState<Placeholder>(Placeholder.None, media, source, ready) { value = media.placeholder(source.toItem(), ready) }
   val cover = placeholder as? Placeholder.Cover ?: return
   AsyncImage(
@@ -182,7 +176,6 @@ private fun VideoPlaceholder(source: MediaSource, ready: Boolean, contentScale: 
     contentDescription = "cover",
     imageLoader = LocalMediaEnvironment.current.imageLoader,
     contentScale = contentScale,
-    onSuccess = { success -> tones.launch { ToneFrames.submit(media, source.toItem(), success.result.drawable) } },
     modifier = Modifier.fillMaxSize()
   )
 }

@@ -12,7 +12,19 @@ import com.noma4i.medialayer.CacheStrategy
 import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaItem
 import com.noma4i.medialayer.MediaSource
-import com.noma4i.medialayer.PlaybackRoute
+import com.noma4i.medialayer.MediaLayer
+import com.noma4i.medialayer.OpenConfig
+import com.noma4i.medialayer.Fetcher
+import com.noma4i.medialayer.FetchRequest
+import com.noma4i.medialayer.FetchResponse
+import com.noma4i.medialayer.MediaException
+import com.noma4i.medialayer.DeviceMemory
+import com.noma4i.medialayer.defaultLimits
+import com.noma4i.medialayer.defaultPoolSettings
+import com.noma4i.medialayer.ToneListener
+import com.noma4i.medialayer.ToneSource
+import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -27,17 +39,10 @@ private data class Poster(override val url: String) : MediaSource {
   override val size: Pair<Int, Int> get() = 24 to 24
 }
 
-private data class Covered(override val url: String, override val cover: String?) : MediaSource {
-  override val kind: Kind get() = Kind.VIDEO
-  override val headers: Map<String, String> get() = emptyMap()
-}
-
 private fun solid(width: Int, height: Int): Bitmap =
   Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.rgb(200, 20, 40)) }
 
 private fun item(url: String, cover: String? = null) = MediaItem(Kind.VIDEO, url, emptyMap(), cover, null, strategy = CacheStrategy.WINDOW)
-
-private val route = PlaybackRoute("http://127.0.0.1:1/v.mp4", emptyMap(), null, false, true)
 
 @RunWith(RobolectricTestRunner::class)
 class ToneFramesTest {
@@ -47,6 +52,62 @@ class ToneFramesTest {
   private val layer = RecordingLayer()
   private val loader by lazy { mediaImageLoader(context, ImageBytes { _, _ -> pngBytes() }).newBuilder().allowHardware(false).build() }
   private val slots = ExoPlayerSlotFactory(context, startMuted = true)
+
+  @Test
+  fun inv_tone_13_late_subscription_decodes_a_small_software_image_once() {
+    val reads = AtomicInteger()
+    val changes = AtomicInteger()
+    val decodedBytes = AtomicInteger()
+    val decodes = AtomicInteger()
+    val urls = java.util.concurrent.CopyOnWriteArrayList<String>()
+    val bytes = pngBytes(1080, 1920)
+    val imageLoader = mediaImageLoader(context, ImageBytes { url, _ -> urls.add(url); reads.incrementAndGet(); bytes }).newBuilder()
+      .eventListener(object : coil.EventListener {
+        override fun decodeEnd(request: coil.request.ImageRequest, decoder: coil.decode.Decoder, options: coil.request.Options, result: coil.decode.DecodeResult?) {
+          val bitmap = (result?.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap ?: return
+          assertTrue(!request.allowHardware)
+          assertTrue(bitmap.width <= 64 && bitmap.height <= 64)
+          decodedBytes.addAndGet(bitmap.allocationByteCount)
+          decodes.incrementAndGet()
+        }
+      }).build()
+    val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
+      dir = Files.createTempDirectory("tone-demand").toString(),
+      fetcher = object : Fetcher {
+        override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("unused origin")
+      },
+      settings = SharedPreferencesSettings(context, "tone-demand"), slots = null,
+      device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings()
+    ))
+    val sources = listOf(
+      MediaItem(Kind.IMAGE, "https://o.test/late.png", emptyMap(), null, null, strategy = CacheStrategy.WINDOW),
+      item("https://o.test/video.mp4", "https://o.test/cover.png")
+    )
+    try {
+      media.setTonePreparation(ToneFrames(media, context, imageLoader))
+      assertEquals(0, reads.get())
+      assertEquals(0, decodes.get())
+      assertEquals(0, decodedBytes.get())
+      sources.forEachIndexed { index, source ->
+        assertTrue(!runBlocking { media.tonePixelsNeeded(source) })
+        val subscription = media.subscribeTone(source, object : ToneListener {
+          override fun changed(source: ToneSource) { changes.incrementAndGet() }
+        })
+        try {
+          rule.waitUntil(10_000) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); changes.get() == index + 1 }
+          assertEquals(ToneSource.PIXELS, runBlocking { media.tone(source, 0.15f) }?.source)
+          assertEquals(index + 1, reads.get())
+          assertEquals(index + 1, decodes.get())
+          assertTrue(decodedBytes.get() in 1..(16384 * (index + 1)))
+          println("tone_key=${source.url} preparations=1 decoded_bytes=${decodedBytes.get() / (index + 1)} tone_updates=1")
+          assertTrue(!runBlocking { media.tonePixelsNeeded(source) })
+          media.itemState(source.url, com.noma4i.medialayer.MediaState.Ready)
+          assertEquals(index + 1, reads.get())
+        } finally { subscription.close() }
+      }
+      assertEquals(listOf("https://o.test/late.png", "https://o.test/cover.png"), urls.toList())
+    } finally { imageLoader.shutdown(); media.close() }
+  }
 
   @Test
   fun inv_tone_12_a_decoded_image_is_shrunk_to_64_on_the_long_side_keeping_its_colours() {
@@ -62,48 +123,47 @@ class ToneFramesTest {
 
   @Test
   fun inv_tone_12_the_pixels_reach_the_core_off_the_main_thread() = runBlocking {
-    ToneFrames.submit(layer, item("https://o.test/a.png"), solid(300, 200))
-
-    assertEquals(listOf(ToneCall("https://o.test/a.png", 64, 43, 64 * 43 * 4, false)), layer.tones.toList())
+    val source = item("https://o.test/a.png")
+    var main = true
+    layer.needsTone = true
+    val preparation = ToneFrames(layer, context, loader) {
+      main = android.os.Looper.getMainLooper().isCurrentThread
+      solid(300, 200)
+    }
+    val pixels = preparation.prepare(source)!!
+    assertEquals(64u to 43u, pixels.width to pixels.height)
+    assertEquals(64 * 43 * 4, pixels.rgba.size)
+    assertTrue(!main)
   }
 
   @Test
   fun inv_tone_12_a_failed_decode_submits_nothing() = runBlocking {
-    ToneFrames.submit(layer, item("https://o.test/a.png"), null as Bitmap?)
-    ToneFrames.submitFirstFrame(layer, item("https://o.test/v.mp4"), route) { null }
-
-    assertTrue(layer.tones.isEmpty())
+    layer.needsTone = true
+    val preparation = ToneFrames(layer, context, loader) { null }
+    assertEquals(null, preparation.prepare(item("https://o.test/v.mp4")))
   }
 
   @Test
-  fun inv_tone_12_a_video_without_a_cover_gives_its_first_frame_and_a_covered_one_does_not() = runBlocking {
-    ToneFrames.submitFirstFrame(layer, item("https://o.test/v.mp4", cover = "https://o.test/c.jpg"), route) { solid(90, 160) }
-    ToneFrames.submitFirstFrame(layer, item("https://o.test/v.mp4"), null) { solid(90, 160) }
-    assertTrue(layer.tones.isEmpty())
-
-    ToneFrames.submitFirstFrame(layer, item("https://o.test/v.mp4"), route) { solid(90, 160) }
-
-    assertEquals(listOf(ToneCall("https://o.test/v.mp4", 36, 64, 36 * 64 * 4, false)), layer.tones.toList())
+  fun inv_tone_12_a_video_frame_is_prepared_only_after_demand() = runBlocking {
+    var frames = 0
+    val preparation = ToneFrames(layer, context, loader) { frames++; solid(90, 160) }
+    assertEquals(null, preparation.prepare(item("https://o.test/v.mp4")))
+    assertEquals(0, frames)
+    layer.needsTone = true
+    val pixels = preparation.prepare(item("https://o.test/v.mp4"))!!
+    assertEquals(36u to 64u, pixels.width to pixels.height)
+    assertEquals(1, frames)
   }
 
   @Test
-  fun inv_tone_12_a_loaded_image_reaches_the_core() {
+  fun inv_tone_13_image_loading_installs_preparation_without_requesting_pixels() {
     rule.setContent {
       MediaLayerProvider(layer, loader, slots.players) { MediaImage(Poster("https://o.test/p.png"), Modifier.size(24.dp)) }
     }
 
-    rule.waitUntil(10_000) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); layer.tones.isNotEmpty() }
-    assertEquals("https://o.test/p.png", layer.tones.first().url)
-    assertTrue(layer.tones.all { !it.onMain && it.width <= 64 && it.height <= 64 })
+    rule.waitUntil(10_000) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); layer.calls.contains("itemState:https://o.test/p.png:Ready") }
+    assertTrue(layer.preparedTones != null)
+    assertEquals(0, layer.toneChecks.get())
   }
 
-  @Test
-  fun inv_tone_12_a_video_cover_gives_the_video_its_tone() {
-    rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) { MediaVideo(Covered("https://o.test/v.mp4", "https://o.test/c.jpg"), modifier = Modifier.size(24.dp)) }
-    }
-
-    rule.waitUntil(10_000) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); layer.tones.isNotEmpty() }
-    assertEquals("https://o.test/v.mp4", layer.tones.first().url)
-  }
 }

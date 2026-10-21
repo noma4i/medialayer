@@ -14,7 +14,9 @@ public protocol MediaPlaces: AnyObject, Sendable {
   func itemState(key: String, state: MediaState)
   func fetchImage(url: String, headers: [String: String]) async throws -> Data
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder
-  func submitTonePixels(source: MediaItem, width: UInt32, height: UInt32, rgba: Data)
+  func setTonePreparation(preparation: TonePreparation)
+  func tonePixelsNeeded(source: MediaItem) async -> Bool
+  func playUrl(source: MediaItem) async throws -> PlaybackRoute
   func stateStream(key: String) -> AsyncStream<MediaState>
   func attachView(key: String, token: UInt64)
   func detachView(key: String)
@@ -57,6 +59,7 @@ public final class MediaContext: @unchecked Sendable {
   public init(places: MediaPlaces, slots: LoadedSlots = .shared) {
     self.places = places
     self.slots = slots
+    places.setTonePreparation(preparation: ToneFrames(places: places))
   }
 }
 

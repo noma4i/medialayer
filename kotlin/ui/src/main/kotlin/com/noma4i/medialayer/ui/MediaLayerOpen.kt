@@ -127,6 +127,7 @@ internal fun openMediaLayer(
     Trace.beginSection("MediaLayer.open.ffi")
     val layer = try { open(config) } finally { Trace.endSection() }
     reference = WeakReference(layer)
+    layer.setTonePreparation(ToneFrames(layer, app, imageLoader))
     val events = layer.playerEvents()
     factory.bind(events)
     val signals = SystemSignals(app, events, lifecycle).also { it.register() }

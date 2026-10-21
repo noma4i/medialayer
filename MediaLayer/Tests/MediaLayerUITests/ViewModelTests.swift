@@ -6,14 +6,6 @@ import QuartzCore
 import Testing
 @testable import MediaLayerUI
 
-struct TonePixelsCall: Equatable {
-  let url: String
-  let width: Int
-  let height: Int
-  let bytes: Int
-  let onMain: Bool
-}
-
 struct VisibleCall: Equatable {
   let url: String
   let visible: Bool
@@ -56,9 +48,9 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   var fetchLatch: Latch?
 
   func visibleCalls(of url: String) -> [Bool] { lock.withLock { visibility.filter { $0.url == url }.map(\.visible) } }
-  private var tones: [TonePixelsCall] = []
-
-  var submittedTones: [TonePixelsCall] { lock.withLock { tones } }
+  private var preparation: TonePreparation?
+  var needsTone = false
+  var tonePreparation: TonePreparation? { lock.withLock { preparation } }
 
   private var calls: [String] = []
   var imageResult: Result<Data, Error> = .success(Data())
@@ -87,8 +79,10 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
     return try imageResult.get()
   }
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder { .none }
-  func submitTonePixels(source: MediaItem, width: UInt32, height: UInt32, rgba: Data) {
-    lock.withLock { tones.append(TonePixelsCall(url: source.url, width: Int(width), height: Int(height), bytes: rgba.count, onMain: Thread.isMainThread)) }
+  func setTonePreparation(preparation: TonePreparation) { lock.withLock { self.preparation = preparation } }
+  func tonePixelsNeeded(source: MediaItem) async -> Bool { needsTone }
+  func playUrl(source: MediaItem) async throws -> PlaybackRoute {
+    PlaybackRoute(url: source.url, headers: source.headers, generation: nil, hls: false, looping: false)
   }
   func stateStream(key: String) -> AsyncStream<MediaState> { AsyncStream { $0.finish() } }
   func attachView(key: String, token: UInt64) { record("attach \(key)") }
