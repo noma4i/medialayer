@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.res.Configuration
 import android.os.Handler
 import android.os.Looper
+import android.os.Trace
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -40,26 +41,26 @@ internal val MediaLayer.binding: Binding? get() = bindings[this]
 
 fun MediaLayer.Companion.open(
   context: Context,
-  fetcher: Fetcher,
+  fetcher: Fetcher? = null,
   settings: SettingsStore,
-  callFactory: Call.Factory = OkHttpClient(),
+  callFactory: Call.Factory? = null,
   silent: Boolean = false,
   audioFocus: MediaAudioFocus = MediaAudioFocus.Mix,
-  imageMemoryBytes: Int = DEFAULT_IMAGE_MEMORY_BYTES
+  imageMemoryBytes: Int? = null
 ): MediaLayer =
-  openMediaLayer(context, fetcher, settings, callFactory, platformDefaults(), silent, ProcessLifecycleOwner.get().lifecycle, audioFocus, imageMemoryBytes) { MediaLayer.open(it) }
+  openMediaLayer(context, fetcher, settings, callFactory, silent = silent, lifecycle = ProcessLifecycleOwner.get().lifecycle, audioFocus = audioFocus, imageMemoryBytes = imageMemoryBytes) { MediaLayer.open(it) }
 
 fun MediaLayer.Companion.open(
   context: Context,
   spec: String,
-  fetcher: Fetcher,
+  fetcher: Fetcher? = null,
   settings: SettingsStore,
-  callFactory: Call.Factory = OkHttpClient(),
+  callFactory: Call.Factory? = null,
   silent: Boolean = false,
   audioFocus: MediaAudioFocus = MediaAudioFocus.Mix,
-  imageMemoryBytes: Int = DEFAULT_IMAGE_MEMORY_BYTES
+  imageMemoryBytes: Int? = null
 ): MediaLayer =
-  openMediaLayer(context, fetcher, settings, callFactory, specDefaults(spec), silent, ProcessLifecycleOwner.get().lifecycle, audioFocus, imageMemoryBytes) { MediaLayer.open(it) }
+  openMediaLayer(context, fetcher, settings, callFactory, defaults = { specDefaults(spec) }, silent = silent, lifecycle = ProcessLifecycleOwner.get().lifecycle, audioFocus = audioFocus, imageMemoryBytes = imageMemoryBytes) { MediaLayer.open(it) }
 
 private fun platformDefaults(): SpecDefaults = SpecDefaults(defaultLimits(), defaultPoolSettings(), emptyList())
 
@@ -74,57 +75,64 @@ fun MediaLayer.release() {
 
 internal fun openMediaLayer(
   context: Context,
-  fetcher: Fetcher,
+  fetcher: Fetcher? = null,
   settings: SettingsStore,
-  callFactory: Call.Factory = OkHttpClient(),
-  defaults: SpecDefaults = platformDefaults(),
+  callFactory: Call.Factory? = null,
+  defaults: () -> SpecDefaults = ::platformDefaults,
   silent: Boolean = false,
   lifecycle: Lifecycle,
   audioFocus: MediaAudioFocus = MediaAudioFocus.Mix,
-  imageMemoryBytes: Int = DEFAULT_IMAGE_MEMORY_BYTES,
+  imageMemoryBytes: Int? = null,
   open: (OpenConfig) -> MediaLayer
 ): MediaLayer {
-  NativeCallbacks.install()
-  val app = context.applicationContext
-  val audio = MediaAudioSession(app, audioFocus)
-  val factory = ExoPlayerSlotFactory(app, callFactory, startMuted = silent, audio = audio)
-  val dir = File(app.cacheDir, "medialayer").apply { mkdirs() }
-  var reference: WeakReference<MediaLayer>? = null
-  val imageLoader = mediaImageLoader(app, ImageBytes { url, headers ->
-    val media = reference?.get() ?: throw CancellationException("MediaLayer was released")
-    media.fetchImage(url, headers)
-  }, imageMemoryBytes)
-  val releaser = object : MemoryReleaser {
-    override fun dropMemoryCaches() {
-      imageLoader.memoryCache?.clear()
+  Trace.beginSection("MediaLayer.open.jna")
+  try { NativeCallbacks.install() } finally { Trace.endSection() }
+  Trace.beginSection("MediaLayer.open.defaults")
+  val resolved = try { defaults() } finally { Trace.endSection() }
+  Trace.beginSection("MediaLayer.open.platform")
+  try {
+    val app = context.applicationContext
+    val client by lazy(LazyThreadSafetyMode.NONE) { OkHttpClient() }
+    val audio = MediaAudioSession(app, audioFocus)
+    val factory = ExoPlayerSlotFactory(app, callFactory ?: client, startMuted = silent, audio = audio)
+    val dir = File(app.cacheDir, "medialayer").apply { mkdirs() }
+    var reference: WeakReference<MediaLayer>? = null
+    val imageLoader = mediaImageLoader(app, ImageBytes { url, headers ->
+      val media = reference?.get() ?: throw CancellationException("MediaLayer was released")
+      media.fetchImage(url, headers)
+    }, imageMemoryBytes)
+    val releaser = object : MemoryReleaser {
+      override fun dropMemoryCaches() {
+        imageLoader.memoryCache?.clear()
+      }
     }
-  }
-  val layer = open(
-    OpenConfig(
+    val config = OpenConfig(
       dir = dir.path,
-      fetcher = fetcher,
+      fetcher = fetcher ?: OkHttpFetcher(client),
       settings = settings,
       slots = factory,
       device = deviceMemory(app),
-      defaults = defaults.defaults,
-      pool = defaults.pool,
-      namespaceHeaders = defaults.namespaceHeaders,
-      imageWindows = defaults.imageWindows,
-      forwardHeaders = defaults.forwardHeaders,
-      evictVideo = defaults.evictVideo,
-      evictImage = defaults.evictImage,
-      evictAudio = defaults.evictAudio,
+      defaults = resolved.defaults,
+      pool = resolved.pool,
+      namespaceHeaders = resolved.namespaceHeaders,
+      imageWindows = resolved.imageWindows,
+      forwardHeaders = resolved.forwardHeaders,
+      evictVideo = resolved.evictVideo,
+      evictImage = resolved.evictImage,
+      evictAudio = resolved.evictAudio,
       memoryReleaser = releaser,
       silent = silent
     )
-  )
-  reference = WeakReference(layer)
-  val events = layer.playerEvents()
-  factory.bind(events)
-  val signals = SystemSignals(app, events, lifecycle).also { it.register() }
-  bindings[layer] = Binding(factory, signals, imageLoader)
-  Media.audio = audio
-  return layer
+    Trace.beginSection("MediaLayer.open.ffi")
+    val layer = try { open(config) } finally { Trace.endSection() }
+    reference = WeakReference(layer)
+    val events = layer.playerEvents()
+    factory.bind(events)
+    val signals = SystemSignals(app, events, lifecycle).also { it.register() }
+    bindings[layer] = Binding(factory, signals, imageLoader)
+    Media.audio = audio
+    return layer
+  } finally { Trace.endSection() }
 }
 
 internal fun deviceMemory(context: Context): DeviceMemory {

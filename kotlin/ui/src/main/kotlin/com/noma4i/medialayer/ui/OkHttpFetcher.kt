@@ -85,7 +85,7 @@ class OkHttpFetcher(client: OkHttpClient = OkHttpClient(), timeoutMs: Long = DEF
       val buffer = ByteArray(CHUNK_BYTES)
       val count = try { source.read(buffer) } catch (error: IOException) { fail(error) }
       if (count < 0) { response.close(); return null }
-      return buffer.copyOf(count)
+      return if (count == buffer.size) buffer else buffer.copyOf(count)
     }
   }
 

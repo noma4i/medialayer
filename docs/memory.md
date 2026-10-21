@@ -10,7 +10,7 @@ Memory is managed automatically. You do not call anything: there is no pressure 
 | Everything except the chosen slot is released, prefetch stops | The app goes to the background |
 | Slots return one by one, the local proxy checks its own port and binds it again if the system closed it while the app slept | The app returns to the foreground |
 | Fewer slots (at least 2), fewer chunks ahead of the playing position | The device is low-memory: Android `isLowRamDevice` or little RAM, iOS little physical memory |
-| Everything stays under one limit | The `memory` option (default 256 MiB) covers players and proxy buffers. Image memory has its own limit, `imageMemoryBytes` of `open` (default 128 MiB) |
+| Everything stays under one limit | `memory` учитывает плееры и буферы прокси. Кэш картинок имеет отдельный бюджет: Android `min(128 MiB, 25% memoryClass)`, Swift 128 MiB |
 
 ## It cannot run the device out of memory
 
@@ -38,10 +38,12 @@ let media = try MediaLayer.open(
 ```kotlin
 val media = MediaLayer.open(
   context = applicationContext,
-  fetcher = OkHttpFetcher(okHttpClient),
   settings = SharedPreferencesSettings(applicationContext)
 )
 ```
+
+Android сохраняет `imageMemoryBytes` как явное положительное переопределение. Без него библиотека использует `ActivityManager.memoryClass`, включая устройства с `largeHeap`.
+Бюджет ограничивает сохранённые bitmap в Coil, но не сумму одновременных декодов и памяти ядра.
 
 On Android the context is how the library registers for `onTrimMemory`, `onLowMemory` and the app lifecycle. On iOS it observes the memory warning and the app lifecycle notifications.
 

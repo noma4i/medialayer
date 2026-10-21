@@ -66,14 +66,15 @@ class YupiApp : Application() {
     super.onCreate()
     media = MediaLayer.open(
       context = this,
-      fetcher = OkHttpFetcher(okHttpClient),
       settings = SharedPreferencesSettings(this)
     )
   }
 }
 ```
 
-Opening returns at once. Nothing is read from disk until it is needed. To take the defaults from your `.mdl` file, pass `spec` ([media files](media-files.md)).
+Открытие возвращается без ожидания сборки ядра. Android синхронно загружает JNA, создаёт платформенные объекты и каталог кэша. Передайте `spec` для значений из `.mdl` ([media files](media-files.md)).
+
+Android создаёт общий `OkHttpClient` для стандартного fetcher и плееров. Явные `fetcher` и `callFactory` заменяют соответствующую зависимость.
 
 ## Open with full control
 

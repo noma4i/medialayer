@@ -1,6 +1,10 @@
 # Threading and performance
 
-MediaLayer never blocks your threads. Every public call either returns at once or is `async` (Swift) / `suspend` (Kotlin). Network, disk, parsing and eviction run on library threads, in parallel, and low-priority work is deferred until the app is idle.
+Сеть и сборка ядра работают в потоках библиотеки. Android `open(context, ...)` синхронно загружает JNA, читает defaults, создаёт объекты и каталог кэша.
+Если приложение вызывает `open` на главном потоке, эти действия занимают главный поток. Возврат не ждёт завершения `assemble` ядра.
+
+Android Trace отмечает `MediaLayer.open.jna`, `MediaLayer.open.defaults`, `MediaLayer.open.platform` и вложенный `MediaLayer.open.ffi`.
+Секции закрываются при исключении. Системная трассировка управляет записью, библиотека не включает её самостоятельно.
 
 | Guarantee | Meaning |
 | --------- | ------- |

@@ -31,6 +31,62 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class OkHttpFetcherTest {
   @Test
+  fun inv_proxy_07_truncated_bodies_report_fetch_failure_instead_of_eof() = runBlocking {
+    TestServer { socket ->
+      socket.getOutputStream().apply {
+        write("HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nshort".toByteArray())
+        flush()
+      }
+    }.use { server ->
+      val body = OkHttpFetcher().fetch(FetchRequest(server.url, emptyMap(), null, null)).body
+      try {
+        val failure = runCatching { body.readAll() }.exceptionOrNull()
+        assertTrue(failure.toString(), failure is MediaException.Fetch)
+      } finally { body.release() }
+    }
+  }
+
+  @Test
+  fun inv_proxy_06_full_chunks_transfer_the_read_array_and_short_chunks_keep_their_length() = runBlocking {
+    val inputs = mutableListOf<ByteArray>()
+    val bytes = Buffer().write(ByteArray(64 * 1024) { 1 }).write(ByteArray(7) { 2 })
+    val source = java.lang.reflect.Proxy.newProxyInstance(
+      okio.BufferedSource::class.java.classLoader, arrayOf(okio.BufferedSource::class.java)
+    ) { _, method, args ->
+      if (method.name == "read" && args?.firstOrNull() is ByteArray) {
+        val target = args[0] as ByteArray
+        inputs.add(target)
+        val count = minOf(target.size.toLong(), bytes.size).toInt()
+        if (count == 0) -1 else {
+          var offset = 0
+          while (offset < count) offset += bytes.read(target, offset, count - offset)
+          count
+        }
+      } else method.invoke(bytes, *(args ?: emptyArray()))
+    } as okio.BufferedSource
+    val responseBody = object : ResponseBody() {
+      override fun contentType() = null
+      override fun contentLength() = 65543L
+      override fun source() = source
+    }
+    val client = OkHttpClient.Builder().addInterceptor { chain ->
+      Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK").body(responseBody).build()
+    }.build()
+    val body = OkHttpFetcher(client).fetch(FetchRequest("https://o.test/body", emptyMap(), null, null)).body
+    val full = body.nextChunk()!!
+    val short = body.nextChunk()!!
+    assertNull(body.nextChunk())
+    assertEquals(65536, full.size)
+    assertEquals(7, short.size)
+    assertTrue(full.all { it == 1.toByte() })
+    assertTrue(short.all { it == 2.toByte() })
+    println("full_chunk_extra_arrays=${if (inputs[0] === full) 0 else 1}, reads=${inputs.size}")
+    org.junit.Assert.assertSame(inputs[0], full)
+    org.junit.Assert.assertNotSame(inputs[1], short)
+    body.release()
+  }
+
+  @Test
   fun cancellingAfterHeadersBeforeDeliveryClosesTheUndeliveredResponse() = runBlocking {
     val queued = Channel<Runnable>(Channel.UNLIMITED)
     val dispatcher = object : CoroutineDispatcher() {

@@ -126,7 +126,7 @@ media.replaceImageWindow("avatar", active = row, pages = rows.map { page -> page
 
 ### Image size and memory
 
-`MediaImage` reads the size of its view and the screen scale and asks the decoder for exactly that many pixels, so a grid never decodes full-size photos. `contentMode` (Swift) and `contentScale` (Kotlin) choose between filling and fitting the view. The decoder keys memory by the core cache identity, decoded size and content mode. Selected namespace headers separate images, covers and animated frames in memory. An image that is already there shows in the first frame, without a placeholder. The memory limit is `imageMemoryBytes` of `open` (128 MiB by default). `clear()` and `clear(image)` also empty this memory.
+`MediaImage` reads the size of its view and the screen scale and asks the decoder for exactly that many pixels, so a grid never decodes full-size photos. `contentMode` (Swift) and `contentScale` (Kotlin) choose between filling and fitting the view. The decoder keys memory by the core cache identity, decoded size and content mode. Selected namespace headers separate images, covers and animated frames in memory. An image that is already there shows in the first frame, without a placeholder. `imageMemoryBytes` задаёт явный бюджет. По умолчанию Android использует `min(128 MiB, 25% memoryClass)`, Swift использует 128 MiB. `clear()` and `clear(image)` also empty this memory.
 
 ## `audio`
 
@@ -196,7 +196,6 @@ let media = try MediaLayer.open(
 val media = MediaLayer.open(
   context = this,
   spec = specJson,
-  fetcher = OkHttpFetcher(okHttpClient),
   settings = SharedPreferencesSettings(this),
   silent = false
 )
@@ -206,14 +205,16 @@ val media = MediaLayer.open(
 
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
-| `fetcher` | none | Network access of the core |
+| `fetcher` | Swift: обязательный, Kotlin: `null` | Сеть ядра. Android создаёт `OkHttpFetcher` с общим клиентом плееров |
 | `settings` | none | Local storage for saved limits |
 | `spec` | the defaults of the core | JSON from `medialayer-gen spec`. Gives the default limits, the pool settings and the namespace headers |
 | `directory` (Swift) | `Caches/MediaLayer` | Folder of the disk cache. The cache folder of the app on Kotlin |
-| `callFactory` (Kotlin) | `OkHttpClient()` | HTTP client of the players |
+| `callFactory` (Kotlin) | `null` | Android создаёт общий клиент для стандартного fetcher и плееров. Явное значение заменяет клиент плееров |
 | `silent` | false | All players stay muted until the app quits. No place and no `Media.muted` can unmute them. Use it while you build the app |
 | `audioFocus` | `mix` | What the players do to other apps' music: `exclusive`, `mix` or `duck`. See [audio focus](audio-focus.md) |
-| `imageMemoryBytes` | 128 MiB | Memory limit of the decoder of images (Nuke `ImageCache`, Coil `MemoryCache`). Must be above 0 |
+| `imageMemoryBytes` | Swift: 128 MiB, Kotlin: `null` | Android выбирает `min(128 MiB, 25% memoryClass)`. Явное положительное значение заменяет автоматический бюджет кэша |
+
+Android разрешает ExoPlayer выбрать следующий доступный декодер после ошибки инициализации. Стандартный порядок декодеров сохраняется, программный вариант может увеличить расход CPU.
 
 ## Local files
 

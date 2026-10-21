@@ -80,7 +80,7 @@ class ExoPlayerSlotFactory(
 ) : PlayerSlotFactory {
   internal val appContext: Context = context.applicationContext
   internal val allocator = DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE)
-  internal var renderersFactory: RenderersFactory = DefaultRenderersFactory(appContext)
+  internal var renderersFactory: RenderersFactory = DefaultRenderersFactory(appContext).setEnableDecoderFallback(true)
   internal var clock: Clock = Clock.DEFAULT
   internal var mediaSourceFor: (PlaybackRoute) -> MediaSource = HttpMediaSources(appContext, callFactory)::create
   @Volatile internal var events: PlayerEventsInterface? = null

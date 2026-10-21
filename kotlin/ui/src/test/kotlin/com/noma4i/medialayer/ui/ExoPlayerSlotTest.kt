@@ -36,6 +36,20 @@ import org.robolectric.Shadows.shadowOf
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 class ExoPlayerSlotTest {
+  @Test
+  fun inv_pool_06_default_renderers_allow_the_next_decoder_after_initialization_failure() {
+    val renderers = factory().renderersFactory.createRenderers(
+      android.os.Handler(Looper.getMainLooper()),
+      object : androidx.media3.exoplayer.video.VideoRendererEventListener {},
+      object : androidx.media3.exoplayer.audio.AudioRendererEventListener {},
+      androidx.media3.exoplayer.text.TextOutput {},
+      androidx.media3.exoplayer.metadata.MetadataOutput {}
+    ).filterIsInstance<androidx.media3.exoplayer.mediacodec.MediaCodecRenderer>()
+    assertTrue(renderers.isNotEmpty())
+    val field = androidx.media3.exoplayer.mediacodec.MediaCodecRenderer::class.java.getDeclaredField("enableDecoderFallback").apply { isAccessible = true }
+    assertTrue(renderers.all { field.getBoolean(it) })
+  }
+
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val events = RecordingEvents()
   private val route = PlaybackRoute("http://127.0.0.1:9/a.mp4", emptyMap(), null, false, true)

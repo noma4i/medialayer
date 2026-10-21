@@ -1,5 +1,6 @@
 package com.noma4i.medialayer.ui
 
+import android.app.ActivityManager
 import android.content.Context
 import android.os.Build
 import coil.ImageLoader
@@ -21,12 +22,13 @@ fun interface ImageBytes {
 
 internal data class MediaImageData(val url: String, val headers: Map<String, String>, val cacheKey: String)
 
-const val DEFAULT_IMAGE_MEMORY_BYTES: Int = 128 * 1024 * 1024
+private const val MAX_IMAGE_MEMORY_BYTES: Int = 128 * 1024 * 1024
 
-fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: Int = DEFAULT_IMAGE_MEMORY_BYTES): ImageLoader {
-  require(memoryBytes > 0) { "memoryBytes must be positive" }
+fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: Int? = null): ImageLoader {
+  val budget = memoryBytes ?: minOf(MAX_IMAGE_MEMORY_BYTES.toLong(), context.getSystemService(ActivityManager::class.java).memoryClass * 1024L * 1024L / 4).toInt()
+  require(budget > 0) { "memoryBytes must be positive" }
   return ImageLoader.Builder(context)
-    .memoryCache(MemoryCache.Builder(context).maxSizeBytes(memoryBytes).build())
+    .memoryCache(MemoryCache.Builder(context).maxSizeBytes(budget).build())
     .components {
       if (Build.VERSION.SDK_INT >= 28) add(ImageDecoderDecoder.Factory()) else add(GifDecoder.Factory())
       add(Keyer<MediaImageData> { data, _ -> data.cacheKey })
