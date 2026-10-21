@@ -21,7 +21,7 @@ class MemoryWarningTest {
   @Test
   fun inv_memory_04_a_system_warning_clears_decoded_images() = runBlocking {
     val context = ApplicationProvider.getApplicationContext<Context>()
-    val loader = mediaImageLoader(context, ImageBytes { _, _ -> pngBytes() })
+    val loader = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) })
     val cache = checkNotNull(loader.memoryCache)
     val dropped = CompletableDeferred<Unit>()
     val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,

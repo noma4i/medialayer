@@ -48,6 +48,6 @@ async fn inv_cache_19_an_image_fetch_right_after_reopening_reads_the_disk_and_ne
 
     let bytes = proxy.fetch_bytes(KEY, &HashMap::new(), 1 << 20).await;
 
-    assert_eq!(bytes.ok(), Some(b"0123456789".to_vec()));
+    assert_eq!(bytes.unwrap().bytes, b"0123456789".to_vec());
     assert_eq!(fetcher.calls(), 0);
 }

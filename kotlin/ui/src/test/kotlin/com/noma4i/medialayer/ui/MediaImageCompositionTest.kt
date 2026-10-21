@@ -35,7 +35,7 @@ class MediaImageCompositionTest {
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val layer = RecordingLayer()
   private val pending = CompletableDeferred<Unit>()
-  private val loader by lazy { mediaImageLoader(context, ImageBytes { _, _ -> pending.await(); pngBytes() }) }
+  private val loader by lazy { mediaImageLoader(context, ImageBytes { _, _ -> pending.await(); com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) }) }
   private val looper = shadowOf(android.os.Looper.getMainLooper())
 
   @Test

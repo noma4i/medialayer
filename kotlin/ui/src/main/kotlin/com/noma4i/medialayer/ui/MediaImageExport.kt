@@ -26,9 +26,12 @@ suspend fun MediaLayer.image(
 ): Bitmap? {
   if (!currentCoroutineContext().isActive) return null
   val declared = source.size?.let { (w, h) -> PixelSize(w.toUInt(), h.toUInt()) }
-  val pixels = declared ?: imagePixelSize(width.toDouble(), height.toDouble(), density.toDouble(), null)
-  val request = imageRequest(context, source, pixels, Scale.FILL, cacheKey(source.url, source.headers)).newBuilder().allowHardware(false).build()
+  val pixels = imagePixelSize(width.toDouble(), height.toDouble(), density.toDouble(), declared, true)
+  val placement = (width * density).toLong() * (height * density).toLong()
+  val request = imageRequest(context, source, pixels, Scale.FILL, cacheKey(source.url, source.headers), placement).newBuilder().allowHardware(false).build()
   request.memoryCacheKey?.let { imageLoader.memoryCache?.get(it) }?.let { hit ->
+    imageStats().record(com.noma4i.medialayer.ImageWork.Request(placement.toULong()))
+    imageStats().record(com.noma4i.medialayer.ImageWork.Finish(true))
     itemState(source.url, MediaState.Ready)
     return hit.bitmap.softwareCopy()
   }

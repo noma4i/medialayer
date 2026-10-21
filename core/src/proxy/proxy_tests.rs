@@ -438,6 +438,22 @@ async fn inv_proxy_09_playback_starts_while_prefetch_holds_every_prefetch_slot()
 }
 
 #[tokio::test]
+async fn inv_image_12_fetch_reports_network_then_cache() {
+    let rig = rig().await;
+    let url = "https://o.test/image.png";
+    let bytes = pattern(128, 3);
+    rig.fetcher.route(url, Script::ok(bytes.clone()));
+    let first = rig.proxy.fetch_bytes(url, &HashMap::new(), 1024).await.unwrap();
+    rig.fetcher.set_offline(true);
+    let second = rig.proxy.fetch_bytes(url, &HashMap::new(), 1024).await.unwrap();
+    assert_eq!(first.source, super::ImageOrigin::Network);
+    assert_eq!(second.source, super::ImageOrigin::Cache);
+    assert_eq!(first.bytes, bytes);
+    assert_eq!(second.bytes, bytes);
+    assert_eq!(rig.fetcher.calls(), 1);
+}
+
+#[tokio::test]
 async fn inv_proxy_03_prefetch_fills_the_store_and_later_playback_works_offline() {
     let rig = rig().await;
     rig.fetcher.route("https://o.test/p.mp4", Script::ok(pattern(5000, 6)).chunked(1000));
@@ -801,7 +817,7 @@ async fn inv_proxy_09_a_player_request_promotes_a_waiting_prefetch() {
     let reply = within(2, get(rig.proxy.port(), &target)).await;
     assert_eq!(reply.body, pattern(10, 6));
     assert_eq!(rig.fetcher.calls_for("https://o.test/next.mp4"), 1);
-    assert_eq!(within(2, queued).await.unwrap(), Ok(()));
+    assert_eq!(within(2, queued).await.unwrap(), Ok(super::ImageOrigin::Network));
     hold.abort();
 }
 
@@ -817,7 +833,7 @@ async fn inv_proxy_10_a_hung_origin_frees_its_slot_after_the_timeout() {
     let queued = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/after.mp4", &HashMap::new(), Priority::Prefetch, None).await } });
 
     assert!(matches!(within(2, hung).await.unwrap(), Err(ProxyError::Fetch(_))));
-    assert_eq!(within(2, queued).await.unwrap(), Ok(()));
+    assert_eq!(within(2, queued).await.unwrap(), Ok(super::ImageOrigin::Network));
     assert_eq!(rig.store.bytes("https://o.test/after.mp4"), Some(pattern(10, 2)));
 }
 

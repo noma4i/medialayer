@@ -41,7 +41,7 @@ class MediaBackgroundTest {
     mediaImageLoader(context, ImageBytes { _, _ ->
       started.incrementAndGet()
       try { gate.await() } catch (e: CancellationException) { cancelled.incrementAndGet(); throw e }
-      pngBytes()
+      com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK)
     }).newBuilder().allowHardware(false).build()
   }
 

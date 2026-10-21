@@ -24,11 +24,20 @@ final class ToneFrames: TonePreparation, @unchecked Sendable {
 
   private func image(source: MediaItem, places: MediaPlaces) async -> CGImage? {
     guard let url = URL(string: source.cover ?? source.url) else { return nil }
+    let stats = places.imageStats()
+    stats.record(work: .request(placementPixels: 0))
+    defer { stats.record(work: Task.isCancelled ? .cancel(key: places.cacheKey(url: url.absoluteString, headers: source.headers)) : .finish(memoryHit: false)) }
     let data: Data?
     if url.isFileURL { data = try? Data(contentsOf: url) }
-    else { data = try? await places.fetchImage(url: url.absoluteString, headers: source.headers) }
+    else {
+      let result = try? await places.fetchImage(url: url.absoluteString, headers: source.headers)
+      if result?.source == .cache { stats.record(work: .diskHit) }
+      data = result?.bytes
+    }
     guard !Task.isCancelled, let data else { return nil }
-    return Self.thumbnail(data)
+    let image = Self.thumbnail(data)
+    if let image { stats.record(work: .decode(width: UInt32(image.width), height: UInt32(image.height), bytes: UInt64(image.bytesPerRow * image.height))) }
+    return image
   }
 
   private func firstFrame(source: MediaItem, places: MediaPlaces) async -> CGImage? {

@@ -53,7 +53,7 @@ extension GlobalMedia {
         let media = try open(spec, origin: origin)
         let bytes = try await media.fetchImage(url: "https://o.test/small.jpg", headers: ["X-Token": "selected", "Authorization": "excluded"])
 
-        #expect(bytes.count == 2)
+        #expect(bytes.bytes.count == 2)
         #expect(origin.seen.first?.headers == expected.merging(["Accept-Encoding": "identity"]) { _, value in value })
       }
     }

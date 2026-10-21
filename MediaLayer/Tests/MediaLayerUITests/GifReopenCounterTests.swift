@@ -27,6 +27,7 @@ private struct StickerCell: View {
 }
 
 private final class CountingPlaces: MediaPlaces, @unchecked Sendable {
+  func imageStats() -> ImageCounters { inner.imageStats() }
   func cacheKey(url: String, headers: [String: String]) -> String { url }
   let inner: any MediaPlaces
   private let lock = NSLock()
@@ -44,7 +45,7 @@ private final class CountingPlaces: MediaPlaces, @unchecked Sendable {
   func setMutedAll(muted: Bool) { inner.setMutedAll(muted: muted) }
   func seek(key: String, positionMs: UInt64) { inner.seek(key: key, positionMs: positionMs) }
   func itemState(key: String, state: MediaState) { inner.itemState(key: key, state: state) }
-  func fetchImage(url: String, headers: [String: String]) async throws -> Data {
+  func fetchImage(url: String, headers: [String: String]) async throws -> ImageFetchResult {
     lock.withLock { reads += 1 }
     return try await inner.fetchImage(url: url, headers: headers)
   }
@@ -185,7 +186,7 @@ extension GlobalMedia {
       let reopenedMedia = try #require(media)
       #expect(await reopenedMedia.isCached(source: GiphyLikeGif(url: url).item), "the persisted file must be visible right after open")
       let probe = try await places.fetchImage(url: url, headers: [:])
-      #expect(probe == gif, "the first read after open comes from the disk, the origin is down")
+      #expect(probe.bytes == gif, "the first read after open comes from the disk, the origin is down")
       screen.mount(url, context: context)
       await until("restart decodes again") { FrameCache.shared.decodes == decodes0 + 2 }
       await settle(0.5)

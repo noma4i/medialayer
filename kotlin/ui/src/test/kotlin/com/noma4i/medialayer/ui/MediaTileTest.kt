@@ -37,7 +37,7 @@ class MediaTileTest {
 
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val layer = RecordingLayer()
-  private val loader by lazy { mediaImageLoader(context, ImageBytes { _, _ -> pngBytes() }).newBuilder().allowHardware(false).build() }
+  private val loader by lazy { mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) }).newBuilder().allowHardware(false).build() }
   private val slots = ExoPlayerSlotFactory(context, startMuted = true)
   private val looper = shadowOf(android.os.Looper.getMainLooper())
 
@@ -67,7 +67,7 @@ class MediaTileTest {
   @Test
   fun aTileShowsItsBlurHashUntilReadyAndNeverAsksForAPlaceholderAfterReady() {
     val gate = CompletableDeferred<Unit>()
-    val gated = mediaImageLoader(context, ImageBytes { _, _ -> gate.await(); pngBytes() })
+    val gated = mediaImageLoader(context, ImageBytes { _, _ -> gate.await(); com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) })
     val url = "https://o.test/blur.png"
     rule.setContent { MediaLayerProvider(layer, gated, slots.players) { MediaImage(Thumb(url, HASH), Modifier.size(50.dp)) } }
 

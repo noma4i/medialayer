@@ -43,15 +43,19 @@ internal class ScreenVisibility {
 private const val VISIBLE_FRACTION = 0.01f
 
 @Composable
-internal fun rememberScreenVisibility(): ScreenVisibility {
+internal fun rememberScreenVisibility(stats: com.noma4i.medialayer.ImageCounters? = null): ScreenVisibility {
   val screen = remember { ScreenVisibility() }
   val lifecycle = LocalView.current.findViewTreeLifecycleOwner()?.lifecycle
-  DisposableEffect(screen, lifecycle) {
+  DisposableEffect(screen, lifecycle, stats) {
     if (lifecycle == null) return@DisposableEffect onDispose { }
     val observer = LifecycleEventObserver { _, _ -> screen.started = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }
     screen.started = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
     lifecycle.addObserver(observer)
-    onDispose { lifecycle.removeObserver(observer) }
+    stats?.record(com.noma4i.medialayer.ImageWork.Observe)
+    onDispose {
+      lifecycle.removeObserver(observer)
+      stats?.record(com.noma4i.medialayer.ImageWork.Unobserve)
+    }
   }
   return screen
 }
@@ -69,7 +73,7 @@ fun MediaLayerProvider(media: MediaLayer, imageLoader: ImageLoader? = null, play
     val loader = imageLoader ?: binding?.imageLoader ?: mediaImageLoader(context, ImageBytes { url, headers ->
       val current = reference.get() ?: throw kotlinx.coroutines.CancellationException("MediaLayer was released")
       current.fetchImage(url, headers)
-    })
+    }, stats = { checkNotNull(reference.get()).imageStats() })
     media.setTonePreparation(ToneFrames(media, context.applicationContext, loader))
     MediaEnvironment(media, players ?: binding?.factory?.players, loader)
   }

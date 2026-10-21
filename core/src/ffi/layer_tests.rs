@@ -99,7 +99,7 @@ fn inv_spec_07_open_applies_the_first_video_forward_headers_to_origin() {
             ("X-Token".to_string(), "selected".to_string()),
             ("Authorization".to_string(), "excluded".to_string()),
         ])).await.unwrap();
-        assert_eq!(bytes, b"origin bytes");
+        assert_eq!(bytes.bytes, b"origin bytes");
         assert_eq!(origin.seen.lock().unwrap()[0].headers, HashMap::from([("X-Token".to_string(), "selected".to_string()), ("Accept-Encoding".to_string(), "identity".to_string())]));
     });
 }
@@ -289,8 +289,8 @@ fn inv_ffi_03_an_image_loads_through_the_fetcher_into_the_cache_once_and_repeats
         (first, second, together)
     });
 
-    assert_eq!((first, second), (Ok(b"origin bytes".to_vec()), Ok(b"origin bytes".to_vec())));
-    assert_eq!(together, (Ok(b"origin bytes".to_vec()), Ok(b"origin bytes".to_vec())));
+    assert_eq!((first.unwrap().bytes, second.unwrap().bytes), (b"origin bytes".to_vec(), b"origin bytes".to_vec()));
+    assert_eq!((together.0.unwrap().bytes, together.1.unwrap().bytes), (b"origin bytes".to_vec(), b"origin bytes".to_vec()));
     let seen = origin.seen.lock().unwrap();
     assert_eq!(seen.len(), 2);
     assert_eq!(seen[0].headers.get("Authorization").map(String::as_str), Some("token"));
@@ -426,7 +426,7 @@ fn inv_ffi_06_an_image_prefetched_by_a_window_is_a_cache_hit_for_fetch_image() {
     caller.block_on(eventually(|| !origin.seen.lock().unwrap().is_empty()));
     let fetched = caller.block_on(layer.fetch_image("https://o.test/p0.jpg".to_string(), HashMap::new()));
 
-    assert_eq!(fetched, Ok(b"origin bytes".to_vec()));
+    assert_eq!(fetched.unwrap().bytes, b"origin bytes".to_vec());
     assert_eq!(origin.seen.lock().unwrap().len(), 1);
 }
 

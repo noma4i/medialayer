@@ -5,6 +5,8 @@ import Testing
 @testable import MediaLayerUI
 
 private final class PlacesLog: MediaPlaces, @unchecked Sendable {
+  private let counters = ImageCounters()
+  func imageStats() -> ImageCounters { counters }
   func cacheKey(url: String, headers: [String: String]) -> String { url }
   private let lock = NSLock()
   private var entries: [String] = []
@@ -23,7 +25,7 @@ private final class PlacesLog: MediaPlaces, @unchecked Sendable {
   func setMutedAll(muted: Bool) {}
   func seek(key: String, positionMs: UInt64) {}
   func itemState(key: String, state: MediaState) {}
-  func fetchImage(url: String, headers: [String: String]) async throws -> Data { Data() }
+  func fetchImage(url: String, headers: [String: String]) async throws -> ImageFetchResult { ImageFetchResult(bytes: Data(), source: .network) }
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder { fatalError("unused") }
   func setTonePreparation(preparation: TonePreparation) {}
   func tonePixelsNeeded(source: MediaItem) async -> Bool { false }

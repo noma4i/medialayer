@@ -44,7 +44,7 @@ class NativeViewLifecycleTest {
     it.mediaSourceFor = { FakeMediaSource() }
     it.bind(layer.playerEvents())
   }
-  private val loader = mediaImageLoader(context, ImageBytes { _, _ -> pngBytes() })
+  private val loader = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) })
   private val looper = shadowOf(Looper.getMainLooper())
 
   @Test

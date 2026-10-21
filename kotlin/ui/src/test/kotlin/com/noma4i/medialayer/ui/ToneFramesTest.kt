@@ -50,7 +50,7 @@ class ToneFramesTest {
 
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val layer = RecordingLayer()
-  private val loader by lazy { mediaImageLoader(context, ImageBytes { _, _ -> pngBytes() }).newBuilder().allowHardware(false).build() }
+  private val loader by lazy { mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) }).newBuilder().allowHardware(false).build() }
   private val slots = ExoPlayerSlotFactory(context, startMuted = true)
 
   @Test
@@ -61,7 +61,7 @@ class ToneFramesTest {
     val decodes = AtomicInteger()
     val urls = java.util.concurrent.CopyOnWriteArrayList<String>()
     val bytes = pngBytes(1080, 1920)
-    val imageLoader = mediaImageLoader(context, ImageBytes { url, _ -> urls.add(url); reads.incrementAndGet(); bytes }).newBuilder()
+    val imageLoader = mediaImageLoader(context, ImageBytes { url, _ -> urls.add(url); reads.incrementAndGet(); com.noma4i.medialayer.ImageFetchResult(bytes, com.noma4i.medialayer.ImageOrigin.NETWORK) }).newBuilder()
       .eventListener(object : coil.EventListener {
         override fun decodeEnd(request: coil.request.ImageRequest, decoder: coil.decode.Decoder, options: coil.request.Options, result: coil.decode.DecodeResult?) {
           val bitmap = (result?.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap ?: return

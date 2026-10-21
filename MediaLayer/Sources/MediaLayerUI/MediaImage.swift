@@ -168,6 +168,9 @@ public struct MediaImage<Content: View>: View {
 
   private func follow() async {
     guard let places = context?.places else { return }
+    let stats = places.imageStats()
+    stats.record(work: .observe)
+    defer { stats.record(work: .unobserve) }
     for await value in places.stateStream(key: source.url) { state = value }
   }
 }

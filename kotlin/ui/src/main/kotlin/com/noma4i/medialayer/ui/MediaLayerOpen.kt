@@ -103,7 +103,7 @@ internal fun openMediaLayer(
     val imageLoader = mediaImageLoader(app, ImageBytes { url, headers ->
       val media = reference?.get() ?: throw CancellationException("MediaLayer was released")
       media.fetchImage(url, headers)
-    }, imageMemoryBytes)
+    }, imageMemoryBytes, stats = { checkNotNull(reference?.get()).imageStats() })
     val releaser = object : MemoryReleaser {
       override fun dropMemoryCaches() {
         imageLoader.memoryCache?.clear()

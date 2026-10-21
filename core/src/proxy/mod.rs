@@ -40,6 +40,19 @@ const FETCH_ATTEMPTS: usize = 3;
 const PING_REQUEST: &str = "GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
 const PING_REPLY_LIMIT: u64 = 1024;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ImageOrigin {
+    Cache,
+    Network,
+    Local,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ImageFetchResult {
+    pub bytes: Vec<u8>,
+    pub source: ImageOrigin,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Readiness {
     Stopped,
@@ -138,15 +151,15 @@ impl Proxy {
         self.inner.key(url, &self.inner.upstream_headers(url, headers))
     }
 
-    pub async fn fetch_bytes(&self, url: &str, headers: &HashMap<String, String>, limit: u64) -> Result<Vec<u8>, ProxyError> {
-        self.fetch_into_store(url, headers, Priority::Image, None).await?;
+    pub async fn fetch_bytes(&self, url: &str, headers: &HashMap<String, String>, limit: u64) -> Result<ImageFetchResult, ProxyError> {
+        let source = self.fetch_into_store(url, headers, Priority::Image, None).await?;
         let key = self.key_for(url, headers);
         match self.inner.store.len(&key).await {
             Some(length) if length > limit => {
                 self.inner.store.remove(&key).await;
                 Err(ProxyError::Fetch(format!("response of {length} bytes exceeds the limit of {limit}")))
             }
-            _ => self.read_stored(url, headers, limit).await.ok_or_else(|| ProxyError::Fetch("the response vanished from the cache".to_string())),
+            _ => self.read_stored(url, headers, limit).await.map(|bytes| ImageFetchResult { bytes, source }).ok_or_else(|| ProxyError::Fetch("the response vanished from the cache".to_string())),
         }
     }
 
@@ -243,7 +256,7 @@ impl Proxy {
         headers: &HashMap<String, String>,
         priority: Priority,
         progress: Option<&Notify>,
-    ) -> Result<(), ProxyError> {
+    ) -> Result<ImageOrigin, ProxyError> {
         let upstream = self.inner.upstream_headers(url, headers);
         let key = self.inner.key(url, &upstream);
         if crate::hls::is_manifest_url(url) && self.inner.store.contains(&key).await {
@@ -266,7 +279,7 @@ impl Proxy {
         let upstream = self.inner.upstream_headers(url, headers);
         let key = route::block_key(&self.inner.key(url, &upstream), block_index);
         self.download_into_store(&key, None, || self.inner.get_or_start_block(url, block_index, None, upstream.clone(), priority))
-            .await
+            .await.map(|_| ())
     }
 
     pub async fn keep(&self, url: &str, headers: &HashMap<String, String>) {
@@ -329,16 +342,16 @@ impl Proxy {
         key: &str,
         progress: Option<&Notify>,
         start: impl Fn() -> flight::FlightSubscription,
-    ) -> Result<(), ProxyError> {
+    ) -> Result<ImageOrigin, ProxyError> {
         for _ in 0..FETCH_ATTEMPTS {
             if self.inner.store.contains(key).await {
                 if let Some(progress) = progress { progress.notify_one(); }
-                return Ok(());
+                return Ok(ImageOrigin::Cache);
             }
             match start().wait_finished(progress).await.outcome {
                 FlightOutcome::Complete => {
                     if let Some(progress) = progress { progress.notify_one(); }
-                    return Ok(());
+                    return Ok(ImageOrigin::Network);
                 }
                 FlightOutcome::Rejected(rejection) => return Err(ProxyError::Status(rejection.status)),
                 FlightOutcome::Failed(message) => return Err(ProxyError::Fetch(message)),

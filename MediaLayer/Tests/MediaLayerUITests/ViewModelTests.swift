@@ -37,6 +37,9 @@ final class Latch: @unchecked Sendable {
 }
 
 final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
+  var imageOrigin: ImageOrigin = .network
+  private let counters = ImageCounters()
+  func imageStats() -> ImageCounters { counters }
   func cacheKey(url: String, headers: [String: String]) -> String {
     lock.withLock { keyReads += 1 }
     return url
@@ -73,10 +76,10 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   func setRate(key: String, rate: Float) { record("rate \(rate)") }
   func seek(key: String, positionMs: UInt64) { record("seek \(positionMs)") }
   func itemState(key: String, state: MediaState) { record("state \(state)") }
-  func fetchImage(url: String, headers: [String: String]) async throws -> Data {
+  func fetchImage(url: String, headers: [String: String]) async throws -> ImageFetchResult {
     lock.withLock { fetches.append(url) }
     if let latch = lock.withLock({ fetchLatch }) { await latch.wait() }
-    return try imageResult.get()
+    return ImageFetchResult(bytes: try imageResult.get(), source: imageOrigin)
   }
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder { .none }
   func setTonePreparation(preparation: TonePreparation) { lock.withLock { self.preparation = preparation } }

@@ -32,7 +32,8 @@ internal fun pngBytes(width: Int = 64, height: Int = 64): ByteArray {
 class MediaImageFetcherTest {
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val requested = CopyOnWriteArrayList<Pair<String, Map<String, String>>>()
-  private val loader = mediaImageLoader(context, ImageBytes { url, headers -> requested.add(url to headers); pngBytes() })
+  private val stats = ImageCounters()
+  private val loader = mediaImageLoader(context, ImageBytes { url, headers -> requested.add(url to headers); ImageFetchResult(pngBytes(), ImageOrigin.CACHE) }, stats = { stats })
 
   @Test
   fun selectedHeadersSeparateDecodedImagesAndUnselectedHeadersReuseThem() {
@@ -86,12 +87,17 @@ class MediaImageFetcherTest {
   }
 
   @Test
-  fun aSecondRequestForTheSameUrlIsServedFromCoilMemoryWithoutTheCore() {
+  fun inv_image_13_aSecondRequestForTheSameUrlIsServedFromCoilMemoryWithoutTheCore() {
     val request = ImageRequest.Builder(context).data(MediaImageData("https://o.test/b.png", emptyMap(), "https://o.test/b.png")).size(16, 16).build()
 
     load(request)
     load(request)
 
     assertEquals(1, requested.size)
+    assertEquals(2uL, stats.snapshot().requests)
+    assertEquals(1uL, stats.snapshot().decodes)
+    assertEquals(1uL, stats.snapshot().diskHits)
+    assertEquals(1uL, stats.snapshot().memoryHits)
+    assertEquals(0uL, stats.snapshot().activeRequests)
   }
 }

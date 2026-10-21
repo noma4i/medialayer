@@ -172,13 +172,13 @@ final class LocalHTTPServer: @unchecked Sendable {
   }
 }
 
-func pngData(side: Int) -> Data {
+func pngData(side: Int, height: Int? = nil) -> Data {
   let context = CGContext(
-    data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+    data: nil, width: side, height: height ?? side, bitsPerComponent: 8, bytesPerRow: 0,
     space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
   )!
   context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
-  context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+  context.fill(CGRect(x: 0, y: 0, width: side, height: height ?? side))
   let data = NSMutableData()
   let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)!
   CGImageDestinationAddImage(destination, context.makeImage()!, nil)

@@ -24,7 +24,7 @@ class MediaImageHardwareTest {
   fun inv_image_06_list_requests_select_hardware_at_the_decoder() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     var config: Bitmap.Config? = null
-    val loader = mediaImageLoader(context, ImageBytes { _, _ -> pngBytes() })
+    val loader = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) })
     val source = object : MediaSource {
       override val url = "https://o.test/list.png"
       override val kind = Kind.IMAGE

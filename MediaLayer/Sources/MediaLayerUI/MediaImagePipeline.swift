@@ -20,7 +20,8 @@ struct CoreDataLoader: DataLoading {
     let task = Task {
       do {
         let data = try await places.fetchImage(url: url.absoluteString, headers: headers)
-        didReceiveData(data, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil) ?? URLResponse())
+        if data.source == .cache { places.imageStats().record(work: .diskHit) }
+        didReceiveData(data.bytes, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil) ?? URLResponse())
         completion(nil)
       } catch {
         completion(error)
@@ -43,12 +44,12 @@ public enum MediaImagePipeline {
     var configuration = ImagePipeline.Configuration(dataLoader: CoreDataLoader(places: places))
     configuration.dataCache = nil
     configuration.imageCache = ImageMemory.cache(for: places)
-    return ImagePipeline(configuration: configuration)
+    return ImagePipeline(configuration: configuration, delegate: ImageEvents(stats: places.imageStats()))
   }
 
-  public static func decodeSize(for source: some MediaSource, points: CGSize, scale: CGFloat) -> CGSize? {
+  public static func decodeSize(for source: some MediaSource, points: CGSize, scale: CGFloat, contentMode: ContentMode) -> CGSize? {
     let declared = source.size.map { PixelSize(width: UInt32(clamping: $0.width), height: UInt32(clamping: $0.height)) }
-    return imagePixelSize(width: Double(points.width), height: Double(points.height), scale: Double(scale), declared: declared)
+    return imagePixelSize(width: Double(points.width), height: Double(points.height), scale: Double(scale), declared: declared, crop: contentMode == .fill)
       .map { CGSize(width: Int($0.width), height: Int($0.height)) }
   }
 
@@ -64,7 +65,7 @@ public enum MediaImagePipeline {
   }
 
   static func prepare(places: MediaPlaces, for source: some MediaSource, url: String? = nil, points: CGSize, scale: CGFloat, contentMode: ContentMode) -> (key: ImageKey, request: ImageRequest?) {
-    let pixels = decodeSize(for: source, points: points, scale: scale)
+    let pixels = decodeSize(for: source, points: points, scale: scale, contentMode: contentMode)
     let identity = places.cacheKey(url: url ?? source.url, headers: source.headers)
     let key = ImageKey(identity: identity, pixels: pixels, contentMode: contentMode)
     guard let address = URL(string: url ?? source.url) else { return (key, nil) }
@@ -74,6 +75,9 @@ public enum MediaImagePipeline {
       [ImageProcessors.Resize(size: $0, unit: .pixels, contentMode: contentMode == .fill ? .aspectFill : .aspectFit)]
     } ?? []
     var request = ImageRequest(urlRequest: urlRequest, processors: processors)
+    request.userInfo["placementPixels"] = UInt64(max(0, points.width * scale) * max(0, points.height * scale))
+    request.userInfo["imageStats"] = places.imageStats()
+    request.thumbnail = pixels.map { ImageRequest.ThumbnailOptions(size: $0, unit: .pixels, contentMode: contentMode == .fill ? .aspectFill : .aspectFit) }
     request.imageID = identity
     return (key, request)
   }
@@ -85,7 +89,12 @@ extension MediaImagePipeline {
   }
 
   static func cachedContainer(for request: ImageRequest, in pipeline: ImagePipeline) -> ImageContainer? {
-    pipeline.cache[request]
+    let image = pipeline.cache[request]
+    if image != nil, let stats = request.userInfo["imageStats"] as? ImageCounters {
+      stats.record(work: .request(placementPixels: request.userInfo["placementPixels"] as? UInt64 ?? 0))
+      stats.record(work: .finish(memoryHit: true))
+    }
+    return image
   }
 
   static func load(_ source: some MediaSource, request: ImageRequest, places: MediaPlaces, pipeline: ImagePipeline) async -> ImageContainer? {

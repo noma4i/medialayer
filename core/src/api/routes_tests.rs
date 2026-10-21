@@ -83,7 +83,7 @@ async fn inv_ffi_03_image_bytes_load_through_the_fetcher_into_the_cache_and_refu
     let loaded = routes.image_bytes("https://cdn.test/a.jpg", &HashMap::new(), 200).await.unwrap();
     let again = routes.image_bytes("https://cdn.test/a.jpg", &HashMap::new(), 200).await.unwrap();
 
-    assert_eq!((loaded.len(), again.len()), (100, 100));
+    assert_eq!((loaded.bytes.len(), again.bytes.len()), (100, 100));
     assert_eq!(rig.fetcher.calls(), 2);
 }
 
@@ -136,8 +136,8 @@ async fn inv_image_02_a_file_image_is_read_from_its_path_and_neither_asks_the_fe
     let absent = routes.image_bytes(&missing, &HashMap::new(), 200).await;
     let exact = routes.image_bytes(&url, &HashMap::new(), 100).await;
 
-    assert_eq!(read, Ok(vec![7u8; 100]));
-    assert_eq!(exact, Ok(vec![7u8; 100]));
+    assert_eq!(read.unwrap().bytes, vec![7u8; 100]);
+    assert_eq!(exact.unwrap().bytes, vec![7u8; 100]);
     assert!(matches!(over, Err(MediaError::Fetch { .. })));
     assert!(matches!(absent, Err(MediaError::Fetch { .. })));
     assert_eq!(rig.fetcher.calls(), 0);

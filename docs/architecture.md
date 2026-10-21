@@ -74,18 +74,20 @@ Nuke and Coil keep decoding and memory caching. Their network access goes throug
 ### Swift
 
 ```swift
-let bytes = try await media.fetchImage(url: avatarUrl, headers: [:])
+let result = try await media.fetchImage(url: avatarUrl, headers: [:])
+let bytes = result.bytes
 let pixels = try decodeBlurhash(hash: blurHash, width: 32, height: 32, punch: 1)
 ```
 
 ### Kotlin
 
 ```kotlin
-val bytes = media.fetchImage(avatarUrl, emptyMap())
+val result = media.fetchImage(avatarUrl, emptyMap())
+val bytes = result.bytes
 val pixels = decodeBlurhash(blurHash, 32u, 32u, 1f)
 ```
 
-`fetchImage` loads through the `Fetcher` into the disk cache and reads the cached bytes, with no local HTTP hop. A `file://` URL is read straight from its file and never enters the disk cache. A response above 16 MiB fails. `decodeBlurhash` returns RGBA bytes and throws `MediaError.BlurHash` for a bad string. A loader reports its progress with `media.itemState(key:state:)` so images and audio use the same placeholder chain as video.
+`fetchImage` returns bytes and their source in `ImageFetchResult`. `source` distinguishes a core cache hit, a network fetch, and a local file read. Network fetches use the `Fetcher` and disk cache, with no local HTTP hop. A `file://` URL is read straight from its file and never enters the disk cache. A response above 16 MiB fails. `decodeBlurhash` returns RGBA bytes and throws `MediaError.BlurHash` for a bad string. A loader reports its progress with `media.itemState(key:state:)` so images and audio use the same placeholder chain as video.
 
 ## Repository
 

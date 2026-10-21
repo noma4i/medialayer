@@ -12,7 +12,7 @@ fn inv_placeholder_01_a_blurhash_decodes_to_rgba_bytes_and_a_bad_one_is_an_error
 }
 
 #[test]
-fn inv_image_01_the_decode_size_is_the_view_in_pixels_rounded_up_to_8_and_a_declared_size_wins() {
+fn inv_image_01_the_decode_size_rounds_placement_to_8_and_never_upscales_source() {
     let size = |width, height| PixelSize { width, height };
     let cases = [
         ((50.0, 50.0, 3.0, None), Some(size(152, 152))),
@@ -28,6 +28,14 @@ fn inv_image_01_the_decode_size_is_the_view_in_pixels_rounded_up_to_8_and_a_decl
         ((1.0e9, 50.0, 3.0, None), Some(size(16_384, 152))),
     ];
     for ((width, height, scale, declared), expected) in cases {
-        assert_eq!(image_pixel_size(width, height, scale, declared), expected, "{width}x{height} at {scale} declared {declared:?}");
+        assert_eq!(image_pixel_size(width, height, scale, declared, true), expected, "{width}x{height} at {scale} declared {declared:?}");
+    }
+}
+
+#[test]
+fn inv_image_11_placement_preserves_source_aspect_without_upscaling() {
+    let source = Some(PixelSize { width: 1080, height: 1920 });
+    for (crop, expected) in [(true, PixelSize { width: 352, height: 626 }), (false, PixelSize { width: 198, height: 352 })] {
+        assert_eq!(image_pixel_size(352.0, 352.0, 1.0, source, crop), Some(expected));
     }
 }

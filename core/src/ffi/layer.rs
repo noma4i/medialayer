@@ -73,6 +73,7 @@ pub struct MediaLayer {
     runtime: Mutex<Option<Runtime>>,
     assembled: Arc<Deferred<Assembled>>,
     namespace_headers: Vec<String>,
+    image_stats: Arc<super::image::ImageCounters>,
 }
 
 impl MediaLayer {
@@ -96,7 +97,7 @@ impl MediaLayer {
     }
 
     fn pending(runtime: Option<Runtime>, handle: Handle, namespace_headers: Vec<String>) -> Arc<MediaLayer> {
-        Arc::new(MediaLayer { handle, runtime: Mutex::new(runtime), assembled: Deferred::new(), namespace_headers })
+        Arc::new(MediaLayer { handle, runtime: Mutex::new(runtime), assembled: Deferred::new(), namespace_headers, image_stats: super::image::ImageCounters::new() })
     }
 
     fn declare(&self, work: impl FnOnce(&Assembled) + Send + 'static) {
@@ -225,9 +226,11 @@ impl MediaLayer {
         Ok(assembled.routes.refresh(&source, &route))
     }
 
-    pub async fn fetch_image(&self, url: String, headers: HashMap<String, String>) -> Result<Vec<u8>, MediaError> {
+    pub async fn fetch_image(&self, url: String, headers: HashMap<String, String>) -> Result<crate::proxy::ImageFetchResult, MediaError> {
         self.with_assembled(|assembled| async move { assembled.routes.image_bytes(&url, &headers, InputLimits::default().response_bytes).await }).await?
     }
+
+    pub fn image_stats(&self) -> Arc<super::image::ImageCounters> { self.image_stats.clone() }
 
     pub async fn is_cached(&self, source: MediaItem) -> bool {
         self.on_assembled(false, |assembled| async move { assembled.routes.is_cached(&source.url, &source.headers).await }).await

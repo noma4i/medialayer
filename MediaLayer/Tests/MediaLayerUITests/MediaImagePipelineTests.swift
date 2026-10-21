@@ -45,6 +45,42 @@ extension GlobalMedia {
   @Suite(.timeLimit(.minutes(1)))
   struct MediaImagePipelineTests {
     @Test
+    func inv_image_13_counts_decoding_disk_and_memory_separately() async throws {
+      let places = RecordingPlaces()
+      places.imageResult = .success(pngData(side: 16))
+      places.imageOrigin = .cache
+      ImageMemory.install(ImageCache(), on: places)
+      let pipeline = MediaImagePipeline.make(places: places)
+      let request = try #require(MediaImagePipeline.request(places: places, for: TestImage(url: "https://o.test/count.png"), points: CGSize(width: 16, height: 16)))
+      _ = try await pipeline.image(for: request)
+      #expect(MediaImagePipeline.cachedContainer(for: request, in: pipeline) != nil)
+      let stats = places.imageStats().snapshot()
+      #expect(stats.requests == 2)
+      #expect(stats.decodes == 1)
+      #expect(stats.diskHits == 1)
+      #expect(stats.memoryHits == 1)
+      #expect(stats.decodedPixels == 256)
+      #expect(stats.bitmapBytes >= 1024)
+      #expect(stats.activeRequests == 0)
+    }
+
+    @Test(arguments: [(ContentMode.fill, 352, 626), (ContentMode.fit, 198, 352)])
+    func inv_image_11_placement_caps_decoded_pixels(mode: ContentMode, width: Int, height: Int) async throws {
+      let places = RecordingPlaces()
+      places.imageResult = .success(pngData(side: 1080, height: 1920))
+      ImageMemory.install(ImageCache(), on: places)
+      let pipeline = MediaImagePipeline.make(places: places)
+      let source = TestImage(url: "https://o.test/portrait.png", size: MediaSize(width: 1080, height: 1920))
+      let request = try #require(MediaImagePipeline.request(places: places, for: source, points: CGSize(width: 352, height: 352), contentMode: mode))
+      let image = try await pipeline.image(for: request)
+      #expect(image.cgImage?.width == width)
+      #expect(image.cgImage?.height == height)
+      #expect(places.imageStats().snapshot().decodes == 1)
+      #expect(places.imageStats().snapshot().decodedPixels <= UInt64(width * height))
+      #expect(places.imageStats().snapshot().placementPixels == 352 * 352)
+    }
+
+    @Test
     func inv_memory_04_a_system_warning_clears_decoded_images() async throws {
       let media = try MediaLayer.open(
         fetcher: URLSessionFetcher(),
@@ -77,7 +113,7 @@ extension GlobalMedia {
       (CGSize(width: 50, height: 50), CGFloat(3), MediaSize?.some(MediaSize(width: 16, height: 16)), "(16.0, 16.0)"),
       (CGSize(width: 0, height: 0), CGFloat(3), MediaSize?.some(MediaSize(width: 16, height: 16)), "(16.0, 16.0)")
     ])
-    func inv_image_01_the_request_decodes_at_the_view_size_in_pixels_rounded_up_to_8_and_a_declared_size_wins(
+    func inv_image_01_the_request_decodes_at_the_view_size_in_pixels_rounded_up_to_8_without_upscaling_the_source(
       points: CGSize, scale: CGFloat, declared: MediaSize?, expected: String
     ) throws {
       let request = MediaImagePipeline.request(places: RecordingPlaces(), for: TestImage(url: "https://o.test/a.png", size: declared), points: points, scale: scale)

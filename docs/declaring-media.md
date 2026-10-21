@@ -89,13 +89,21 @@ let avatar = await context.image(for: Avatar(url: user.avatarUrl), points: CGSiz
 val avatar = media.image(context, Avatar(url = user.avatarUrl), width = 44f, height = 44f, density = 3f)
 ```
 
-Swift: `MediaContext.image(for:points:scale:)`. Kotlin: `MediaLayer.image(context, source, width, height, density)` is a `suspend` function. Width and height are in points (dp), the call decodes at pixels from `imagePixelSize`, `source.size` wins. The app must not call it for a list of views: use `MediaImage` there.
+Swift: `MediaContext.image(for:points:scale:)`. Kotlin: `MediaLayer.image(context, source, width, height, density)` is a `suspend` function. Width and height are in points (dp). Shared `imagePixelSize` derives decode dimensions from placement and display scale, with placement rounded up to multiples of 8. `source.size` describes source dimensions and caps decoding without upscaling. Crop preserves the source ratio while covering placement, and Fit preserves it while fitting inside placement. Each dimension is limited to 16384 pixels. A 1080x1920 source in a 352x352 placement decodes at 352x626 for Crop or 198x352 for Fit. The app must not call this export method for a list of views: use `MediaImage` there.
 
 ## Изображения в списках и сетках
 
-Задавай размер декодирования в пикселях через `source.size`.
-При заданном размере Kotlin `MediaImage` использует `Box` без `BoxWithConstraints`.
-Без размера библиотека получает ограничения вида через `BoxWithConstraints` и вычисляет размер через `imagePixelSize`.
+Set `source.size` to the source dimensions in pixels when available.
+With declared dimensions, Kotlin `MediaImage` uses `Box` and Coil's placement size resolver.
+Without declared dimensions, it obtains placement constraints through `BoxWithConstraints` and computes pixels through `imagePixelSize`.
+
+Read image work explicitly with Kotlin `media.imageStats().snapshot()` or Swift `media.imageStats().snapshot()`.
+The snapshot counts requests, decodes, memory hits, disk hits, decoded pixels, placement pixels, bitmap bytes, active requests, active observers, and cancellations by key.
+Bitmap bytes accumulate decoded allocations, rather than retained memory.
+Counters update on image events and perform no work while idle.
+`MediaImage.request` and `MediaImage.decode` identify Android async trace sections and Swift signpost intervals.
+`fetchImage` returns `ImageFetchResult`, containing `bytes` and `source` (`Cache`, `Network`, or `Local`).
+Disk hits count results that the core served from its cache, excluding local files and memory hits.
 
 Все изображения сообщают состояние ядру и передают пиксели для вычисления тона.
 BlurHash загружается только для видимого изображения до `Ready`.

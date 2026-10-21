@@ -71,9 +71,9 @@ impl Routes {
         self.proxy.readiness()
     }
 
-    pub async fn image_bytes(&self, url: &str, headers: &HashMap<String, String>, limit: u64) -> Result<Vec<u8>, MediaError> {
+    pub async fn image_bytes(&self, url: &str, headers: &HashMap<String, String>, limit: u64) -> Result<crate::proxy::ImageFetchResult, MediaError> {
         if is_local_url(url) {
-            return read_local_file(url, limit).await;
+            return read_local_file(url, limit).await.map(|bytes| crate::proxy::ImageFetchResult { bytes, source: crate::proxy::ImageOrigin::Local });
         }
         self.proxy.fetch_bytes(url, headers, limit).await.map_err(|error| MediaError::Fetch { detail: error.to_string() })
     }

@@ -68,7 +68,7 @@ class MediaComposeTest {
   private val events = RecordingEvents()
   private val layer = RecordingLayer(events)
   private val requested = CopyOnWriteArrayList<Pair<String, Map<String, String>>>()
-  private val loader by lazy { mediaImageLoader(context, ImageBytes { url, headers -> requested.add(url to headers); pngBytes() }) }
+  private val loader by lazy { mediaImageLoader(context, ImageBytes { url, headers -> requested.add(url to headers); com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) }) }
   private val slots = ExoPlayerSlotFactory(context, startMuted = true)
 
   @Test
@@ -211,8 +211,8 @@ class MediaComposeTest {
 
   @Test
   @Config(qualifiers = "xxhdpi")
-  fun inv_image_01_a_view_decodes_at_its_size_in_pixels_rounded_up_to_8_and_a_declared_size_wins() {
-    val sized = mediaImageLoader(context, ImageBytes { url, headers -> requested.add(url to headers); pngBytes(400, 400) })
+  fun inv_image_01_a_view_decodes_at_its_size_in_pixels_rounded_up_to_8_without_upscaling_the_source() {
+    val sized = mediaImageLoader(context, ImageBytes { url, headers -> requested.add(url to headers); com.noma4i.medialayer.ImageFetchResult(pngBytes(400, 400), com.noma4i.medialayer.ImageOrigin.NETWORK) })
     rule.setContent {
       MediaLayerProvider(layer, sized, slots.players) {
         Column {
@@ -232,7 +232,7 @@ class MediaComposeTest {
   @Test
   @Config(qualifiers = "xxhdpi")
   fun inv_image_04_the_content_scale_picks_the_decoder_scale_and_keeps_the_decode_size() {
-    val wide = mediaImageLoader(context, ImageBytes { _, _ -> pngBytes(400, 200) })
+    val wide = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(400, 200), com.noma4i.medialayer.ImageOrigin.NETWORK) })
     rule.setContent {
       MediaLayerProvider(layer, wide, slots.players) {
         Column {
@@ -272,7 +272,7 @@ class MediaComposeTest {
   @Test
   fun theBlurHashShowsWhileTheImageLoadsAndGoesAwayWhenItIsReady() {
     val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
-    val gated = mediaImageLoader(context, ImageBytes { _, _ -> gate.await(); pngBytes() })
+    val gated = mediaImageLoader(context, ImageBytes { _, _ -> gate.await(); com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) })
     val looper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
     rule.setContent { MediaLayerProvider(layer, gated, slots.players) { MediaImage(BlurredPhoto("https://o.test/b.png"), Modifier.size(50.dp)) } }
 

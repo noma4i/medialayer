@@ -14,10 +14,6 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
-import coil.EventListener
-import coil.decode.Decoder
-import coil.request.ImageRequest
-import coil.request.Options
 import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaSource
 import java.util.concurrent.atomic.AtomicInteger
@@ -47,7 +43,6 @@ class MediaVisibilityTest {
   private val looper = shadowOf(android.os.Looper.getMainLooper())
   private val started = AtomicInteger()
   private val cancelled = AtomicInteger()
-  private val decodes = AtomicInteger()
   private val gate = CompletableDeferred<Unit>()
   private val url = "https://o.test/anim.gif"
   private val page = Animated(url)
@@ -56,24 +51,23 @@ class MediaVisibilityTest {
     mediaImageLoader(context, ImageBytes { _, _ ->
       started.incrementAndGet()
       try { gate.await() } catch (e: CancellationException) { cancelled.incrementAndGet(); throw e }
-      pngBytes()
-    }).newBuilder().allowHardware(false).eventListener(object : EventListener {
-      override fun decodeStart(request: ImageRequest, decoder: Decoder, options: Options) { decodes.incrementAndGet() }
-    }).build()
+      com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK)
+    }, stats = { layer.imageStats() }).newBuilder().allowHardware(false).build()
   }
 
   private fun claims() = layer.calls.filter { it.startsWith("visible:$url:") }
 
   private fun settle() = repeat(20) { looper.idleFor(java.time.Duration.ofMillis(50)); Thread.sleep(25) }
 
-  private fun counters() = "started=${started.get()} cancelled=${cancelled.get()} decodes=${decodes.get()} claims=${claims()}"
+  private fun counters() = "started=${started.get()} cancelled=${cancelled.get()} decodes=${layer.imageStats().snapshot().decodes} claims=${claims()}"
 
   @Test
-  fun inv_image_09_aPageThatLeavesTheViewportReleasesItsKeyCancelsItsRequestAndNeverDecodes() {
+  fun inv_image_09_inv_image_13_aPageThatLeavesTheViewportReleasesItsKeyCancelsItsRequestAndNeverDecodes() {
     var x by mutableIntStateOf(0)
+    var mounted by androidx.compose.runtime.mutableStateOf(true)
     rule.setContent {
       MediaLayerProvider(layer, loader, slots.players) {
-        Box(Modifier.fillMaxSize()) { Box(Modifier.offset { IntOffset(x, 0) }) { MediaImage(page, Modifier.size(50.dp)) } }
+        if (mounted) Box(Modifier.fillMaxSize()) { Box(Modifier.offset { IntOffset(x, 0) }) { MediaImage(page, Modifier.size(50.dp)) } }
       }
     }
     rule.waitUntil(5000) { looper.idle(); started.get() == 1 && claims() == listOf("visible:$url:true") }
@@ -85,6 +79,12 @@ class MediaVisibilityTest {
     settle()
 
     assertEquals("started=1 cancelled=1 decodes=0 claims=[visible:$url:true, visible:$url:false]", counters())
+    assertEquals(mapOf(url to 1uL), layer.imageStats().snapshot().cancellations)
+    assertEquals(0uL, layer.imageStats().snapshot().activeRequests)
+    org.junit.Assert.assertTrue(layer.imageStats().snapshot().activeObservers > 0uL)
+    mounted = false
+    rule.waitForIdle()
+    assertEquals(0uL, layer.imageStats().snapshot().activeObservers)
   }
 
   @Test

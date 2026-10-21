@@ -1,4 +1,6 @@
 package com.noma4i.medialayer.ui
+import com.noma4i.medialayer.ImageFetchResult
+import com.noma4i.medialayer.ImageOrigin
 
 import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaItem
@@ -36,6 +38,8 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
   val listeners = CopyOnWriteArrayList<Pair<String, StateListener>>()
   var closed = false
   var image: ByteArray = ByteArray(0)
+  private val counters by lazy { com.noma4i.medialayer.ImageCounters() }
+  override fun imageStats(): com.noma4i.medialayer.ImageCounters = counters
   var preparedTones: TonePreparation? = null
   val toneChecks = AtomicInteger()
   var needsTone = false
@@ -60,7 +64,7 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
 
   override fun itemState(key: String, state: MediaState) { calls.add("itemState:$key:${state::class.simpleName}") }
   override fun seek(key: String, positionMs: ULong) { calls.add("seek:$key:$positionMs") }
-  override suspend fun fetchImage(url: String, headers: Map<String, String>): ByteArray { calls.add("fetchImage:$url"); return image }
+  override suspend fun fetchImage(url: String, headers: Map<String, String>): ImageFetchResult { calls.add("fetchImage:$url"); return ImageFetchResult(image, ImageOrigin.NETWORK) }
   override suspend fun placeholder(source: MediaItem, ready: Boolean): Placeholder {
     placeholders.add(source.url to ready)
     return when {

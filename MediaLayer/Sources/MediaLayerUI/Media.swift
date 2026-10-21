@@ -3,6 +3,7 @@ import Observation
 import SwiftUI
 
 public protocol MediaPlaces: AnyObject, Sendable {
+  func imageStats() -> ImageCounters
   func cacheKey(url: String, headers: [String: String]) -> String
   func visible(source: MediaItem, visible: Bool)
   func setPlaying(key: String, playing: Bool)
@@ -12,7 +13,7 @@ public protocol MediaPlaces: AnyObject, Sendable {
   func setMutedAll(muted: Bool)
   func seek(key: String, positionMs: UInt64)
   func itemState(key: String, state: MediaState)
-  func fetchImage(url: String, headers: [String: String]) async throws -> Data
+  func fetchImage(url: String, headers: [String: String]) async throws -> ImageFetchResult
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder
   func setTonePreparation(preparation: TonePreparation)
   func tonePixelsNeeded(source: MediaItem) async -> Bool

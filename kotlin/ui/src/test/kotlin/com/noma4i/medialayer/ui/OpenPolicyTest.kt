@@ -65,7 +65,7 @@ class OpenPolicyTest {
       val media = open(spec, origin)
       try {
         val bytes = media.fetchImage("https://o.test/${UUID.randomUUID()}/small.jpg", mapOf("X-Token" to "selected", "Authorization" to "excluded"))
-        assertEquals(2, bytes.size)
+        assertEquals(2, bytes.bytes.size)
         assertEquals(expected + ("Accept-Encoding" to "identity"), origin.seen.first().headers)
       } finally {
         media.release()
