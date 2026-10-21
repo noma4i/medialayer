@@ -101,13 +101,17 @@ class CacheStrategyTest {
   fun inv_strategy_15_a_whole_source_far_from_the_window_downloads_in_full() {
     val origin = RangeOrigin()
     val media = open(origin)
-    val list: MutableList<MediaItem?> = (0 until 40).map { item("https://o.test/other$it.mp4", Kind.VIDEO, CacheStrategy.WINDOW) }.toMutableList()
-    list[35] = item("https://o.test/clip.mp4", Kind.VIDEO, CacheStrategy.WHOLE)
+    try {
+      val list: MutableList<MediaItem?> = (0 until 40).map { item("https://o.test/other$it.mp4", Kind.VIDEO, CacheStrategy.WINDOW) }.toMutableList()
+      list[35] = item("https://o.test/clip.mp4", Kind.VIDEO, CacheStrategy.WHOLE)
 
-    media.replaceWindow(0u, list)
+      media.replaceWindow(0u, list)
 
-    eventuallyStrategy("3 blocks of the far source were requested") { origin.requests.count { it.url == "https://o.test/clip.mp4" } >= 3 }
-    assertEquals(RangeOrigin.BLOCKS, origin.requests.filter { it.url == "https://o.test/clip.mp4" })
+      eventuallyStrategy("3 blocks of the far source were requested") { origin.requests.count { it.url == "https://o.test/clip.mp4" } >= 3 }
+      assertEquals(RangeOrigin.BLOCKS, origin.requests.filter { it.url == "https://o.test/clip.mp4" })
+    } finally {
+      media.close()
+    }
   }
 
   @Test
@@ -139,11 +143,15 @@ class CacheStrategyTest {
     val origin = RangeOrigin { request, attempt -> request.start == 1_048_576uL && attempt <= 2 }
     val media = open(origin)
 
-    media.visible(item("https://o.test/clip.mp4", Kind.VIDEO, CacheStrategy.WHOLE), true)
+    try {
+      media.visible(item("https://o.test/clip.mp4", Kind.VIDEO, CacheStrategy.WHOLE), true)
 
-    eventuallyStrategy("block 2 was requested", 15_000) { origin.requests.count { it.start == 2_097_152uL } == 1 }
-    assertEquals(3, origin.requests.count { it.start == 1_048_576uL })
-    assertEquals(1, origin.requests.count { it.start == 0uL })
+      eventuallyStrategy("block 2 was requested", 15_000) { origin.requests.count { it.start == 2_097_152uL } == 1 }
+      assertEquals(3, origin.requests.count { it.start == 1_048_576uL })
+      assertEquals(1, origin.requests.count { it.start == 0uL })
+    } finally {
+      media.close()
+    }
   }
 
   @Test
