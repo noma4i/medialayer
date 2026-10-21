@@ -380,39 +380,44 @@ class MediaLayerBridgeTest {
 
   @Test
   fun inv_proxy_22_an_origin_that_ignores_range_and_sends_no_length_still_answers_a_player_range_with_206() = runBlocking {
-    val media = openWith(RangeIgnoringOrigin(), LoggingSlots(), silent = true)
-    val route = media.playUrl(MediaItem(Kind.AUDIO, "https://o.test/voice.m4a", emptyMap(), null, null, strategy = CacheStrategy.WINDOW))
-    val cases = listOf(Triple("bytes=0-1", 0, 1), Triple("bytes=-100", 19_900, 19_999), Triple("bytes=10000-", 10_000, 19_999))
+    openWith(RangeIgnoringOrigin(), LoggingSlots(), silent = true).use { media ->
+      val route = media.playUrl(MediaItem(Kind.AUDIO, "https://o.test/voice.m4a", emptyMap(), null, null, strategy = CacheStrategy.WINDOW))
+      val cases = listOf(Triple("bytes=0-1", 0, 1), Triple("bytes=-100", 19_900, 19_999), Triple("bytes=10000-", 10_000, 19_999))
 
-    for ((range, first, last) in cases) {
-      val connection = java.net.URL(route.url).openConnection() as java.net.HttpURLConnection
-      connection.setRequestProperty("Range", range)
-      val body = withContext(Dispatchers.IO) { connection.inputStream.readBytes() }
+      for ((range, first, last) in cases) {
+        val connection = java.net.URL(route.url).openConnection() as java.net.HttpURLConnection
+        connection.setRequestProperty("Range", range)
+        val body = withContext(Dispatchers.IO) {
+          System.gc()
+          connection.inputStream.readBytes()
+        }
 
-      assertEquals(range, 206, connection.responseCode)
-      assertEquals(range, "bytes $first-$last/20000", connection.getHeaderField("Content-Range"))
-      assertTrue(range, RangeIgnoringOrigin.PAYLOAD.copyOfRange(first, last + 1).contentEquals(body))
+        assertEquals(range, 206, connection.responseCode)
+        assertEquals(range, "bytes $first-$last/20000", connection.getHeaderField("Content-Range"))
+        assertTrue(range, RangeIgnoringOrigin.PAYLOAD.copyOfRange(first, last + 1).contentEquals(body))
+      }
     }
   }
 
   @Test
   fun inv_proxy_23_a_listener_the_system_closed_is_bound_again_when_the_app_returns_to_the_foreground() = runBlocking {
-    val media = openWith(RangeIgnoringOrigin(), LoggingSlots(), silent = true)
-    val route = media.playUrl(MediaItem(Kind.AUDIO, "https://o.test/voice.m4a", emptyMap(), null, null, strategy = CacheStrategy.WINDOW))
-    val url = java.net.URL(route.url)
-    closeListenerSilently(url.port)
-    val refused = runCatching { withContext(Dispatchers.IO) { (url.openConnection() as java.net.HttpURLConnection).responseCode } }
-    assertTrue(refused.isFailure)
+    openWith(RangeIgnoringOrigin(), LoggingSlots(), silent = true).use { media ->
+      val route = media.playUrl(MediaItem(Kind.AUDIO, "https://o.test/voice.m4a", emptyMap(), null, null, strategy = CacheStrategy.WINDOW))
+      val url = java.net.URL(route.url)
+      closeListenerSilently(url.port)
+      val refused = runCatching { withContext(Dispatchers.IO) { (url.openConnection() as java.net.HttpURLConnection).responseCode } }
+      assertTrue(refused.isFailure)
 
-    media.playerEvents().foreground()
+      media.playerEvents().foreground()
 
-    var status = 0
-    repeat(100) {
-      if (status != 200) {
-        status = runCatching { withContext(Dispatchers.IO) { (url.openConnection() as java.net.HttpURLConnection).responseCode } }.getOrDefault(0)
-        delay(50)
+      var status = 0
+      repeat(100) {
+        if (status != 200) {
+          status = runCatching { withContext(Dispatchers.IO) { (url.openConnection() as java.net.HttpURLConnection).responseCode } }.getOrDefault(0)
+          delay(50)
+        }
       }
+      assertEquals(200, status)
     }
-    assertEquals(200, status)
   }
 }
