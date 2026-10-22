@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.4.0 - 2026-10-23
+
+### Changed
+- `MediaLayer.seek` takes a fraction from 0 to 1 instead of milliseconds.
+- Swift `AudioPlayback.seek(to:)` and Kotlin `AudioControl.seek(fraction)` seek by fraction.
+
+### Fixed
+- Audio seek works before the audio loads and applies when the slot is ready.
+
 ## 3.3.2 - 2026-10-22
 
 ### Fixed
