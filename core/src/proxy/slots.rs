@@ -1,6 +1,7 @@
 use crate::fetch::{BodyStream, FetchError};
 use bytes::Bytes;
 use futures_util::Stream;
+use std::cell::Cell;
 use std::collections::VecDeque;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -54,9 +55,17 @@ pub struct Permit {
     state: Option<Arc<Mutex<State>>>,
 }
 
+thread_local! {
+    static CLOSING_INLINE: Cell<bool> = const { Cell::new(false) };
+}
+
+pub(crate) fn closing_inline() -> bool {
+    CLOSING_INLINE.with(Cell::get)
+}
+
 struct HeldBody {
     body: BodyStream,
-    _permit: Permit,
+    permit: Option<Permit>,
 }
 
 impl Stream for HeldBody {
@@ -67,9 +76,28 @@ impl Stream for HeldBody {
     }
 }
 
+impl Drop for HeldBody {
+    fn drop(&mut self) {
+        let body = std::mem::replace(&mut self.body, Box::pin(futures_util::stream::empty()));
+        let permit = self.permit.take();
+        let close = move || {
+            CLOSING_INLINE.with(|inline| inline.set(true));
+            drop(body);
+            CLOSING_INLINE.with(|inline| inline.set(false));
+            drop(permit);
+        };
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                handle.spawn_blocking(close);
+            }
+            Err(_) => close(),
+        }
+    }
+}
+
 impl Permit {
     pub fn hold(self, body: BodyStream) -> BodyStream {
-        Box::pin(HeldBody { body, _permit: self })
+        Box::pin(HeldBody { body, permit: Some(self) })
     }
 }
 
@@ -100,6 +128,13 @@ impl PrioritySlots {
         state.playback.len() + state.prefetch.len()
     }
 
+    #[cfg(test)]
+    pub fn lose_waiters(&self) {
+        let mut state = lock(&self.state);
+        state.playback.clear();
+        state.prefetch.clear();
+    }
+
     pub fn in_use(&self) -> usize {
         lock(&self.state).in_use
     }
@@ -126,7 +161,7 @@ impl PrioritySlots {
         };
         match receiver.await {
             Ok(permit) => Ok(permit),
-            Err(_) => std::future::pending().await,
+            Err(_) => Err(QueueFull),
         }
     }
 }

@@ -1,4 +1,11 @@
 use super::slots::{Priority, PrioritySlots, QueueFull};
+use crate::api::MediaError;
+use crate::fetch::Fetcher as _;
+use crate::ffi::{BodyReader, FetchRequest, FetchResponse, ForeignFetcher};
+use crate::memory::InputLimits;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -219,4 +226,72 @@ async fn inv_proxy_27_queued_player_requests_are_granted_before_a_waiting_prefet
         drop((third, a, b));
         timeout(Duration::from_secs(1), prefetch).await.expect("prefetch starved").unwrap();
     }
+}
+
+#[tokio::test]
+async fn inv_proxy_30_a_waiter_whose_sender_vanished_gets_an_error_not_an_endless_wait() {
+    let slots = PrioritySlots::new(1, 0, 8);
+    let _held = slots.acquire(Priority::Playback).await.unwrap();
+    let waiting = tokio::spawn({
+        let slots = slots.clone();
+        async move { slots.acquire(Priority::Playback).await.map(drop) }
+    });
+    tokio::time::sleep(SHORT).await;
+    slots.lose_waiters();
+
+    let outcome = timeout(Duration::from_secs(1), waiting).await.expect("the waiter hangs after its sender vanished").unwrap();
+
+    assert_eq!(outcome, Err(QueueFull));
+}
+
+struct SlowClose {
+    gate: Mutex<mpsc::Receiver<()>>,
+    closed: Arc<AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl BodyReader for SlowClose {
+    async fn next_chunk(&self) -> Result<Option<Vec<u8>>, MediaError> {
+        Ok(None)
+    }
+
+    fn release(&self) {
+        let _ = self.gate.lock().unwrap().recv();
+        self.closed.store(true, Ordering::SeqCst);
+    }
+}
+
+struct SlowPlatform(Mutex<Option<Arc<SlowClose>>>);
+
+#[async_trait::async_trait]
+impl crate::ffi::Fetcher for SlowPlatform {
+    async fn fetch(&self, _request: FetchRequest) -> Result<FetchResponse, MediaError> {
+        let body = self.0.lock().unwrap().take().unwrap();
+        Ok(FetchResponse { status: 200, headers: HashMap::new(), body })
+    }
+}
+
+#[tokio::test]
+async fn inv_proxy_31_a_permit_is_returned_only_after_the_platform_closed_the_response() {
+    let (open_gate, gate) = mpsc::channel();
+    let closed = Arc::new(AtomicBool::new(false));
+    let platform = Arc::new(SlowPlatform(Mutex::new(Some(Arc::new(SlowClose { gate: Mutex::new(gate), closed: closed.clone() })))));
+    let slots = PrioritySlots::new(1, 0, 8);
+    let permit = slots.acquire(Priority::Playback).await.unwrap();
+    let request = crate::fetch::Request { url: "https://o.test/a".to_string(), ..Default::default() };
+    let response = ForeignFetcher::new(platform, InputLimits::default()).fetch(request).await.unwrap();
+
+    drop(permit.hold(response.body));
+    tokio::time::sleep(SHORT).await;
+
+    assert_eq!(slots.in_use(), 1, "the permit was returned while the platform still held the connection");
+    open_gate.send(()).unwrap();
+    for _ in 0..200 {
+        if slots.in_use() == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    assert!(closed.load(Ordering::SeqCst));
+    assert_eq!(slots.in_use(), 0);
 }

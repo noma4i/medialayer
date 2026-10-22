@@ -3,9 +3,11 @@ use crate::fetch::{self, BodyStream, FetchError};
 use crate::memory::{bounded, InputLimits};
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures_util::stream::{self, StreamExt};
+use futures_util::stream::{self, Stream, StreamExt};
 use std::collections::HashMap;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct FetchRequest {
@@ -65,6 +67,9 @@ struct ClosingReader(Arc<dyn BodyReader>);
 impl Drop for ClosingReader {
     fn drop(&mut self) {
         let reader = self.0.clone();
+        if crate::proxy::closing_inline() {
+            return reader.release();
+        }
         match tokio::runtime::Handle::try_current() {
             Ok(handle) => {
                 handle.spawn_blocking(move || reader.release());
@@ -74,10 +79,24 @@ impl Drop for ClosingReader {
     }
 }
 
+struct ClosingBody {
+    chunks: BodyStream,
+    _release: ClosingReader,
+}
+
+impl Stream for ClosingBody {
+    type Item = Result<Bytes, FetchError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.chunks.as_mut().poll_next(context)
+    }
+}
+
 fn body_stream(reader: Arc<dyn BodyReader>, limits: InputLimits) -> BodyStream {
-    stream::unfold(Some(ClosingReader(reader)), move |state| async move {
+    let release = ClosingReader(reader.clone());
+    let chunks = stream::unfold(Some(reader), move |state| async move {
         let reader = state?;
-        match reader.0.next_chunk().await {
+        match reader.next_chunk().await {
             Ok(Some(chunk)) => match bounded(chunk.len() as u64, limits.response_bytes) {
                 Ok(()) => Some((Ok(Bytes::from(chunk)), Some(reader))),
                 Err(error) => Some((Err(FetchError::Network(error.to_string())), None)),
@@ -86,5 +105,6 @@ fn body_stream(reader: Arc<dyn BodyReader>, limits: InputLimits) -> BodyStream {
             Err(error) => Some((Err(network(error)), None)),
         }
     })
-    .boxed()
+    .boxed();
+    Box::pin(ClosingBody { chunks, _release: release })
 }

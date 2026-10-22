@@ -22,6 +22,7 @@ pub use byte_store::{ByteStore, Meta, StoreReader, StoreWriter};
 pub use config::Config;
 pub use route::block_key;
 pub use slots::Priority;
+pub(crate) use slots::closing_inline;
 pub use window::{Playhead, PositionProbe};
 
 use crate::fetch::Fetcher;
