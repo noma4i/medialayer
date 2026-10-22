@@ -666,3 +666,37 @@ fn inv_ffi_12_shutdown_releases_the_platform_then_the_core_once_whoever_holds_th
     drop((layer, held));
     assert_eq!(releaser.shutdowns.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
+
+#[test]
+fn inv_ffi_13_a_whole_source_shown_and_hidden_before_the_assembly_still_downloads() {
+    let dir = tempfile::tempdir().unwrap();
+    slow_assembly(dir.path(), SLOW);
+    let origin = Arc::new(Origin::default());
+    let layer = MediaLayer::open(config(dir.path(), origin.clone(), shared::<FakeSettings>(), None)).unwrap();
+    let clip = MediaItem { strategy: crate::prefetch::CacheStrategy::Whole, ..MediaItem::bare_video("https://o.test/clip.mp4") };
+
+    layer.visible(clip.clone(), true);
+    layer.visible(clip, false);
+
+    caller().block_on(eventually(|| !origin.seen.lock().unwrap().is_empty()));
+}
+
+#[test]
+fn inv_ffi_13_a_whole_source_of_a_replaced_window_before_the_assembly_still_downloads() {
+    let dir = tempfile::tempdir().unwrap();
+    slow_assembly(dir.path(), SLOW);
+    let origin = Arc::new(Origin::default());
+    let layer = MediaLayer::open(config(dir.path(), origin.clone(), shared::<FakeSettings>(), None)).unwrap();
+    let clip = MediaItem { strategy: crate::prefetch::CacheStrategy::Whole, ..MediaItem::bare_video("https://o.test/clip.mp4") };
+    let photo = MediaItem { strategy: crate::prefetch::CacheStrategy::Whole, ..MediaItem::bare("https://o.test/photo.jpg", crate::api::Kind::Image) };
+
+    layer.replace_window(0, vec![Some(clip)]);
+    layer.replace_window(0, vec![Some(MediaItem::bare_video("https://o.test/other.mp4"))]);
+    layer.replace_image_window("feed".to_string(), 0, vec![vec![photo]]);
+    layer.replace_image_window("feed".to_string(), 0, vec![vec![MediaItem::bare("https://o.test/page.jpg", crate::api::Kind::Image)]]);
+
+    caller().block_on(eventually(|| {
+        let seen = origin.seen.lock().unwrap();
+        ["clip.mp4", "photo.jpg"].iter().all(|name| seen.iter().any(|request| request.url.contains(name)))
+    }));
+}

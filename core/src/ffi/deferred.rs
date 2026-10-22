@@ -130,6 +130,11 @@ impl<T: Send + Sync + 'static> Deferred<T> {
         });
     }
 
+    pub fn is_pending(&self) -> bool {
+        let queue = locked(&self.queue);
+        queue.value.is_none() || queue.draining
+    }
+
     #[cfg(test)]
     pub fn queued(&self) -> usize {
         locked(&self.queue).waiting.len()

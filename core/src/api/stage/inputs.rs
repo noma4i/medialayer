@@ -17,6 +17,10 @@ impl Stage {
         }
     }
 
+    pub fn keep_whole(&self, source: &MediaItem) {
+        self.declare_whole(std::iter::once(source));
+    }
+
     pub fn replace_window(&self, active: usize, sources: Vec<Option<MediaItem>>) {
         self.declare_whole(sources.iter().flatten());
         let mut state = self.state();

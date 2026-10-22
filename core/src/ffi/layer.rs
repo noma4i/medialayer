@@ -111,6 +111,15 @@ impl MediaLayer {
         self.assembled.run(work);
     }
 
+    fn keep_wholes<'a>(&self, items: impl Iterator<Item = &'a MediaItem>) {
+        if !self.assembled.is_pending() {
+            return;
+        }
+        for item in items.filter(|item| item.strategy == crate::prefetch::CacheStrategy::Whole) {
+            self.declare_latest(item.clone(), |item| format!("whole:{}", item.url), |assembled, item| assembled.stage.keep_whole(&item));
+        }
+    }
+
     fn declare_latest<P: Send + 'static>(&self, payload: P, name: fn(&P) -> String, work: impl FnOnce(&Assembled, P) + Send + 'static) {
         self.assembled.run_latest(payload, name, work);
     }
@@ -278,6 +287,7 @@ impl MediaLayer {
     }
 
     pub fn replace_window(&self, active: u32, sources: Vec<Option<MediaItem>>) {
+        self.keep_wholes(sources.iter().flatten());
         self.declare_latest(sources, |_| "window".to_string(), move |assembled, sources| assembled.stage.replace_window(active as usize, sources));
     }
 
@@ -290,6 +300,7 @@ impl MediaLayer {
     }
 
     pub fn replace_image_window(&self, name: String, active: u32, pages: Vec<Vec<MediaItem>>) {
+        self.keep_wholes(pages.iter().flatten());
         self.declare_latest((name, pages), |(name, _)| format!("image:{name}"), move |assembled, (name, pages)| assembled.stage.replace_image_window(&name, active as usize, pages));
     }
 
@@ -315,6 +326,7 @@ impl MediaLayer {
 
     pub fn visible(&self, source: MediaItem, visible: bool) {
         if visible {
+            self.keep_wholes(std::iter::once(&source));
             self.assembled.run_opening(source, |source| source.url.clone(), |assembled, source| assembled.stage.visible(source, true));
         } else {
             self.assembled.run_closing(source, |source| source.url.clone(), |assembled, source| assembled.stage.visible(source, false));
