@@ -52,7 +52,7 @@ class NativeViewLifecycleTest {
   private val looper = shadowOf(Looper.getMainLooper())
 
   @Test
-  @Config(sdk = [30, 31, 34])
+  @Config(sdk = [33, 34])
   fun inv_output_05_texture_requires_a_player_to_create_its_view() {
     val events = layer.playerEvents() as RecordingEvents
     val root = rule.activity.findViewById<ViewGroup>(android.R.id.content)

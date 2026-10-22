@@ -15,7 +15,7 @@ class CallbackClassLoaderTest {
   }
 
   @RunWith(MediaLayerTestRunner::class)
-  @Config(sdk = [30, 31, 34])
+  @Config(sdk = [33, 34])
   class SdkCalls {
     @Test
     fun initializeNativeCallbacks() {

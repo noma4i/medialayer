@@ -1,7 +1,6 @@
 package com.noma4i.medialayer.ui
 
 import android.graphics.drawable.BitmapDrawable
-import android.os.Build
 import android.os.Trace
 import coil.EventListener
 import coil.decode.DataSource
@@ -23,12 +22,12 @@ internal class ImageEvents(private val stats: ImageCounters) : EventListener {
 
   override fun onStart(request: ImageRequest) {
     stats.record(ImageWork.Request((request.parameters.value<Long>("placementPixels") ?: 0L).toULong()))
-    if (Build.VERSION.SDK_INT >= 29) Trace.beginAsyncSection("MediaImage.request", cookie)
+    Trace.beginAsyncSection("MediaImage.request", cookie)
   }
 
   override fun decodeStart(request: ImageRequest, decoder: Decoder, options: Options) {
     decoding = true
-    if (Build.VERSION.SDK_INT >= 29) Trace.beginAsyncSection("MediaImage.decode", cookie)
+    Trace.beginAsyncSection("MediaImage.decode", cookie)
   }
 
   override fun decodeEnd(request: ImageRequest, decoder: Decoder, options: Options, result: DecodeResult?) {
@@ -57,12 +56,12 @@ internal class ImageEvents(private val stats: ImageCounters) : EventListener {
 
   private fun endTrace() {
     endDecode()
-    if (Build.VERSION.SDK_INT >= 29) Trace.endAsyncSection("MediaImage.request", cookie)
+    Trace.endAsyncSection("MediaImage.request", cookie)
   }
 
   private fun endDecode() {
     if (!decoding) return
     decoding = false
-    if (Build.VERSION.SDK_INT >= 29) Trace.endAsyncSection("MediaImage.decode", cookie)
+    Trace.endAsyncSection("MediaImage.decode", cookie)
   }
 }

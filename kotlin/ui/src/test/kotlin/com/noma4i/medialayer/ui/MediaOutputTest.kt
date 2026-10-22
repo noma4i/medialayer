@@ -3,7 +3,6 @@ package com.noma4i.medialayer.ui
 import android.content.Context
 import android.graphics.Outline
 import android.graphics.Rect
-import android.os.Build
 import android.view.SurfaceView
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.compose.SURFACE_TYPE_SURFACE_VIEW
@@ -16,13 +15,12 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 
 @RunWith(MediaLayerTestRunner::class)
-@Config(sdk = [30, 31, 34])
+@Config(sdk = [33, 34])
 class MediaOutputTest {
   @Test
-  fun inv_output_01_window_requires_android_14() {
+  fun inv_output_01_window_uses_surface_view_on_every_supported_api() {
     assertEquals(SURFACE_TYPE_TEXTURE_VIEW, MediaOutput.Texture.contentFrameType())
-    val expected = if (Build.VERSION.SDK_INT >= 34) SURFACE_TYPE_SURFACE_VIEW else SURFACE_TYPE_TEXTURE_VIEW
-    assertEquals(expected, MediaOutput.Window.contentFrameType())
+    assertEquals(SURFACE_TYPE_SURFACE_VIEW, MediaOutput.Window.contentFrameType())
   }
 
   @Test

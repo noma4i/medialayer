@@ -2,11 +2,9 @@ package com.noma4i.medialayer.ui
 
 import android.app.ActivityManager
 import android.content.Context
-import android.os.Build
 import coil.ImageLoader
 import coil.decode.DataSource
 import coil.decode.ImageSource
-import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
 import coil.fetch.Fetcher
 import coil.fetch.SourceResult
@@ -42,7 +40,7 @@ fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: Int? = nu
         val request = chain.request.newBuilder().memoryCacheKey(MemoryCache.Key("${data.cacheKey}|${pixels.width}x${pixels.height}|${chain.request.scale}")).build()
         chain.withSize(coil.size.Size(pixels.width.toInt(), pixels.height.toInt())).proceed(request)
       })
-      if (Build.VERSION.SDK_INT >= 28) add(ImageDecoderDecoder.Factory()) else add(GifDecoder.Factory())
+      add(ImageDecoderDecoder.Factory())
       add(Keyer<MediaImageData> { data, _ -> data.cacheKey })
       add(object : Fetcher.Factory<MediaImageData> {
         override fun create(data: MediaImageData, options: Options, imageLoader: ImageLoader): Fetcher =

@@ -31,8 +31,7 @@ Explicit peeking plays the neighbour muted. Restored trimmed slots receive Retai
 
 The only opt-in is `output = MediaOutput.Window` on `MediaVideo`. The default remains `MediaOutput.Texture`.
 Use `MediaVideo(source, output = MediaOutput.Window, cornerRadius = 16.dp, alpha = 1f)` for the rounded experiment.
-Window is selected only on API 34+ with explicit `alpha == 1f`.
-API 30/31 and every API below 34 select Texture. Non-opaque alpha selects Texture on every API.
+Window is selected on every supported API (minSdk 33) with explicit `alpha == 1f`. Non-opaque alpha selects Texture on every API.
 The parameter `cornerRadius` applies the same requested radius to Compose and the public native outline.
 Rounding is experimental: visible corners are not proven without a device run.
 Parent modifiers are not inspected. Declare radius and opacity explicitly, or retain Texture.
@@ -61,7 +60,7 @@ The observed 26.07% BlitStreamAUX RenderThread self-time cannot be converted int
 7. Place translucent controls, another moving page and a dialog over the video. Check corners and Z-order frame by frame.
 8. Exercise slow drags, rapid flings, reversals, resizing, background/foreground and reopening the page.
 9. Exercise alpha 1 to 0 to 1 and overlapping cross-fades. Check first frame, black rectangles, flashes and sound continuity.
-10. Repeat API 30/31 checks: Window requests must bind TextureView and emit `MediaLayer.output.Texture.api`.
+10. Repeat the checks on API 33: Window requests must bind SurfaceView.
 
 Reject Window for the tested place if corners stay square, fling flickers, positionChanged crashes, or fade produces a black rectangle.
 Also reject missing or stale first frames, double audio, incorrect overlays, increased binding churn or missed frames above the target.

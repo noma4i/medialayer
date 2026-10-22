@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
 import android.media.MediaMetadataRetriever
-import android.os.Build
 import com.noma4i.medialayer.MediaItem
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.Kind
@@ -31,11 +30,7 @@ internal object MetadataFrames : FrameSource {
     val retriever = MediaMetadataRetriever()
     return try {
       retriever.setDataSource(route.url, route.headers)
-      if (Build.VERSION.SDK_INT >= 27) {
-        retriever.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, ToneFrames.LONG_SIDE, ToneFrames.LONG_SIDE)
-      } else {
-        retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-      }
+      retriever.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, ToneFrames.LONG_SIDE, ToneFrames.LONG_SIDE)
     } catch (_: RuntimeException) {
       null
     } finally {

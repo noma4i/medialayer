@@ -128,8 +128,8 @@ Swift `MediaLayerUI` не имеет параметра `weight`.
 ## Video output
 
 A Kotlin `MediaVideo` uses `TextureView` by default (`output = MediaOutput.Texture`).
-The experimental opt-in is `output = MediaOutput.Window`, using `SurfaceView` on API 34 and above when `alpha == 1f`.
-Below API 34, or when the explicit `alpha` parameter differs from 1, it selects Texture and records the reason in Trace.
+The experimental opt-in is `output = MediaOutput.Window`, using `SurfaceView` on every supported API (minSdk 33) when `alpha == 1f`.
+When the explicit `alpha` parameter differs from 1, it selects Texture and records the reason in Trace.
 No second flag or output enum value is required.
 Android and Media3 provide no estimate of saved frames for this application.
 
@@ -146,7 +146,7 @@ Android and Media3 provide no estimate of saved frames for this application.
 Window retains `ContentFrame` while its player changes or becomes null.
 Texture creates `ContentFrame` only while its player is non-null, including fallback from Window.
 Defaults `cornerRadius = 0.dp` and `alpha = 1f` add neither clip nor opacity modifiers.
-It uses attachment-based `SurfaceView` lifetime on API 34+, without moving a View between pager parents.
+It uses attachment-based `SurfaceView` lifetime, without moving a View between pager parents.
 Different composed pages still own different Views.
 Slots, claims, playback, peeking and the pool window use the same implementation for both outputs.
 
@@ -157,7 +157,7 @@ For continuous cross-fades, choose Texture for the entire transition, including 
 
 An earlier Pixel 4a Android 13 experiment crashed in `SurfaceViewPositionUpdateListener.positionChanged` during pager motion in 5 of 10 runs.
 Its median janky frames were 53.6% with Window versus 38.6% with Texture across 30 swipes and 5 pairs.
-The API check excludes that Android version. It does not prove that the same native crash is fixed on newer devices.
+Window on API 33 was checked on a Pixel 4a by the V3 Android coordinator.
 Media3 1.11.1 retains its API 34 Compose size synchronization fix for issue #1237.
 
 Kotlin only (the example is an indented block because Swift draws video on an `AVPlayerLayer` and has no such choice):
