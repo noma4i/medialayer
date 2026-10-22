@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The whole MediaLayer check. Cheap checks run first, then the cargo, swift, kotlin and ship lanes one after another: the check
-# holds one build slot command at a time and the first red lane stops the run.
+# runs one bounded command at a time and the first red lane stops the run.
 # Every step has a time limit and its process group is killed past it. --fast runs the cheap lane plus the lanes of
 # the touched paths. --list prints the steps. --only <lane> runs one lane.
 set -uo pipefail
@@ -9,8 +9,7 @@ root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
 gradle="${GRADLE:-$(ls -d "$HOME"/.gradle/wrapper/dists/gradle-9.*-bin/*/gradle-9.*/bin/gradle 2> /dev/null | sort -V | tail -1)}"
-slot="$HOME/.claude/bin/build-slot -- bash $root/scripts/check_bounded.sh {limit}"
-[ -x "$HOME/.claude/bin/build-slot" ] || slot="bash $root/scripts/check_bounded.sh {limit}"
+slot="bash $root/scripts/check_bounded.sh {limit}"
 
 # shellcheck source=check_steps.sh
 source "$root/scripts/check_steps.sh"

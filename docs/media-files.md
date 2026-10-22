@@ -151,7 +151,6 @@ Source names cannot collide with types referenced or declared by the generated S
 Run Rust checks with `cargo test -p medialayer-gen`.
 The full check compiles `gen/fixtures/Consumer.swift` and `Consumer.kt` against the real library.
 The Rust-only command does not prove compilation in either language.
-Run every command through `~/.claude/bin/build-slot --`.
 
 | Check | Command | Compiled by |
 | --- | --- | --- |

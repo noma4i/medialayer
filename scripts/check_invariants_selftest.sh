@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Self test of the checks themselves: INV-CHECK-01..08. Each function builds a fixture repository, breaks it in
-# one way and expects the matching check to go red. Runs in seconds, takes no build slot.
+# one way and expects the matching check to go red. Runs in seconds.
 set -uo pipefail
 unset SPEC TEST_DIRS DOC_PATHS
 
@@ -144,17 +144,6 @@ inv_check_05_a_step_past_its_limit_leaves_no_process() {
   local code=0
   bash "$here/check_bounded.sh" 2 selftest bash -c 'set -m; sleep 601.7 & wait' 2> /dev/null || code=$?
   expect_red_step_killed "$code"
-}
-
-inv_check_05_the_wait_for_a_build_slot_is_not_test_time() {
-  root="$work/engine"
-  mkdir -p "$root/target"
-  changed_files() { echo "$CHANGED"; }
-  steps=("final|queued|1|-|echo build-slot > /dev/null; sleep 3" "cheap|plain|1|*|sleep 3")
-  (run_checks --only final) > "$work/engine.out" 2>&1 \
-    || { echo "FAIL expected green: a step with a build slot must get the limit plus the queue allowance"; failed=1; }
-  steps=("cheap|plain|1|*|sleep 3")
-  (run_checks) > "$work/engine.out" 2>&1 && { echo "FAIL expected red: a step without a slot must stop at its limit"; failed=1; }
 }
 
 engine() {
@@ -368,31 +357,28 @@ inv_check_11_the_full_check_compiles_the_generated_consumers_on_both_platforms()
 }
 
 swift_test_runs() {
-  local home="$work/swift-home" bin="$work/swift-bin" calls="$work/swift-calls"
-  rm -rf "$home" "$bin" "$calls"
-  mkdir -p "$home" "$bin"
+  local bin="$work/swift-bin" calls="$work/swift-calls"
+  rm -rf "$bin" "$calls"
+  mkdir -p "$bin"
   printf '#!/bin/sh\necho "xcodebuild $*" >> "%s"\n' "$calls" > "$bin/xcodebuild"
   printf '#!/bin/sh\nprintf "    iPhone 17 (11111111-2222-3333-4444-555555555555) (Shutdown)\\n"\n' > "$bin/xcrun"
   chmod +x "$bin"/*
-  [ "${1:-}" != with_sim_run ] || {
-    mkdir -p "$home/.claude/bin"
-    printf '#!/bin/sh\necho "sim-run $*" >> "%s"\n' "$calls" > "$home/.claude/bin/sim-run"
-    chmod +x "$home/.claude/bin/sim-run"
-  }
-  HOME="$home" PATH="$bin:$PATH" bash "$here/check_swift_test.sh" > /dev/null 2>&1
+  PATH="$bin:$PATH" bash "$here/check_swift_test.sh" "$@" > /dev/null 2>&1
 }
 
-swift_test_uses_the_simulator_directly() { swift_test_runs && grep -q 'xcodebuild test .*id=11111111-2222-3333-4444-555555555555' "$work/swift-calls"; }
-swift_test_uses_sim_run_when_present() { swift_test_runs with_sim_run && grep -q '^sim-run swift-test -- xcodebuild test .*id=@UDID@' "$work/swift-calls"; }
+swift_test_picks_a_simulator_without_an_argument() { swift_test_runs && grep -q 'xcodebuild test .*id=11111111-2222-3333-4444-555555555555' "$work/swift-calls"; }
+swift_test_takes_a_udid_argument() { swift_test_runs AAAAAAAA-0000-0000-0000-000000000000 && grep -q 'xcodebuild test .*-destination platform=iOS Simulator,id=AAAAAAAA-0000-0000-0000-000000000000 ' "$work/swift-calls"; }
+swift_test_takes_a_destination_argument() { swift_test_runs "platform=iOS Simulator,name=iPhone 17" && grep -q 'xcodebuild test .*-destination platform=iOS Simulator,name=iPhone 17 ' "$work/swift-calls"; }
 swift_step_names_no_home_file() {
-  HOME="$work/swift-home" listed | grep '^swift|swift-test|' > "$work/swift-step"
-  ! grep -q '\.claude' "$work/swift-step"
+  listed | grep '^swift|swift-test|' > "$work/swift-step"
+  ! grep -q 'HOME\|~/' "$work/swift-step"
 }
 
 inv_check_12_the_swift_test_lane_runs_on_a_machine_without_the_local_tooling() {
   table_repo
-  expect_green_that "the swift-test lane runs the iOS Simulator tests with HOME empty" swift_test_uses_the_simulator_directly
-  expect_green_that "the swift-test lane uses sim-run where it exists" swift_test_uses_sim_run_when_present
+  expect_green_that "the swift-test script picks a simulator without an argument" swift_test_picks_a_simulator_without_an_argument
+  expect_green_that "the swift-test script runs on the simulator UDID it is given" swift_test_takes_a_udid_argument
+  expect_green_that "the swift-test script runs on the destination it is given" swift_test_takes_a_destination_argument
   expect_green_that "the swift-test step command names no file under HOME" swift_step_names_no_home_file
 }
 

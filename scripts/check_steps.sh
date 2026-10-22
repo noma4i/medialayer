@@ -48,10 +48,9 @@ run_bounded() {
   return "$code"
 }
 
-# Step table engine. A step with a build slot gets its limit inside the slot ({limit} in the command, see check_bounded.sh)
-# and the limit plus CHECK_QUEUE_ALLOWANCE (3600 s) outside, so the wait for a slot never counts as test time.
+# Step table engine. A step gets its limit through check_bounded.sh ({limit} in the command) and the same limit outside.
 # The library script defines `steps` (lines "lane|name|limit seconds|paths|command"), then calls
-# run_checks "$@". Lanes run one after another (never 2 build slot commands of one check): cheap first, table order, final last, the first red lane stops the run.
+# run_checks "$@". Lanes run one after another (never 2 build commands of one check): cheap first, table order, final last, the first red lane stops the run.
 # --fast keeps the steps whose paths prefix a changed file ("*" always): the same commands, a subset of the full run.
 # Lane "final" runs last, only when every lane passed (checks of their outputs). --list prints the selected steps. --only <lane> runs one lane.
 
@@ -101,17 +100,14 @@ step_selected() {
 }
 
 run_step() {
-  local lane name limit paths command log start code waited
+  local lane name limit paths command log start code
   IFS='|' read -r lane name limit paths command <<< "$1"
   log="$logdir/$name.log"
   start=$SECONDS
   code=0
   command="${command//\{limit\}/$limit}"
-  outer="$limit"
-  [[ "$command" == *build-slot* ]] && outer=$((limit + ${CHECK_QUEUE_ALLOWANCE:-3600}))
-  run_bounded "$outer" "$name" bash -c 'cd -- "$1" && shift && eval "$1"' _ "$root" "$command" > "$log" 2>&1 || code=$?
-  waited="$(sed -n 's/.*got slot[0-9]* after \([0-9]*\)s.*/\1/p' "$log" | paste -sd+ - | bc 2> /dev/null)"
-  printf '%-8s %-20s %-8s %4ss (queue for a build slot %ss)\n' "$lane" "$name" "$([ "$code" -eq 0 ] && echo ok || echo "FAIL($code)")" "$((SECONDS - start))" "${waited:-0}"
+  run_bounded "$limit" "$name" bash -c 'cd -- "$1" && shift && eval "$1"' _ "$root" "$command" > "$log" 2>&1 || code=$?
+  printf '%-8s %-20s %-8s %4ss\n' "$lane" "$name" "$([ "$code" -eq 0 ] && echo ok || echo "FAIL($code)")" "$((SECONDS - start))"
   if [ "$code" -ne 0 ]; then
     tail -25 "$log" | sed 's/^/    | /'
     echo "    log: $log"
@@ -166,7 +162,7 @@ run_checks() {
   sample_java_cpu "$sampled" &
   sampler=$!
   while IFS= read -r lane; do lanes+=("$lane"); done < <(printf '%s\n' "${selected[@]}" | cut -d'|' -f1 | awk '!seen[$0]++')
-  # One lane at a time: the check never holds more than one build slot command, the first red lane stops the run.
+  # One lane at a time: the check never runs more than one build command, the first red lane stops the run.
   ordered=(cheap)
   for lane in "${lanes[@]}"; do
     [ "$lane" = cheap ] || [ "$lane" = final ] || ordered+=("$lane")
