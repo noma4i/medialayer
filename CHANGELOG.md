@@ -1,5 +1,32 @@
 # Changelog
 
+## 3.1.0 - 2026-10-22
+
+### Added
+- `MediaLayer.close()` on iOS releases system signals, slots, images and the core once.
+
+### Changed
+- `limits()` and `stats()` throw `MediaError` when the library failed to assemble.
+- Saved limits are read once while the library assembles and apply to every part.
+- Prefetch, whole downloads and tone work wait in the background until the app returns.
+- Slot commands of a replaced source are dropped before they reach the player.
+- Audio stops only on the ended state reported by the core.
+- Image exports do not change the state of a place.
+- Video covers decode at their placement size on iOS and Android.
+- Image cancellation statistics are one total instead of a map of URLs.
+- The disk cache verifies each 256 KiB segment once before serving it.
+- Cached responses are read in batches, with one buffer per batch.
+- Held proxy requests wake on playhead events instead of polling the player.
+
+### Fixed
+- Resumed downloads reject a response with another `Content-Range` offset or length.
+- A slow rejected response stops reading when its last consumer leaves.
+- Connection permits return only after the platform closes the response.
+- Header registry and playlist maps evict their oldest entries instead of clearing all.
+- Declarations made before assembly keep the last request per key.
+- A slot sample runs outside the stage lock.
+- Native item states without an owning view leave no place behind.
+
 ## 3.0.0 - 2026-10-22
 
 ### Added
