@@ -94,7 +94,7 @@ if [ "${#files[@]}" -gt 0 ]; then
     opens = gsub(/\{/, "{", code); closes = gsub(/\}/, "}", code)
     if (opens > 0) started = 1
     depth += opens - closes
-    if (code ~ /(^|[^A-Za-z0-9_])(assert[A-Za-z_]*!?\(|debug_assert[a-z_]*!\(|#expect\(|#require\(|XCTAssert[A-Za-z]*\(|XCTFail\(|Issue\.record\(|panic!\(|fail\(|wait_until[A-Za-z_]*\(|eventually\()/ || \
+    if (code ~ /(^|[^A-Za-z0-9_])(assert[A-Za-z_]*!?\(|debug_assert[a-z_]*!\(|#expect\(|#require\(|XCTAssert[A-Za-z]*\(|XCTFail\(|Issue\.record\(|panic!\(|fail\(|wait_until[A-Za-z_]*\(|eventually\()/ || code ~ /(^|[^A-Za-z0-9_.])until\(/ || \
         (sh && code ~ /(^|[^A-Za-z0-9_])expect_(red|green)[a-z_]*([^A-Za-z0-9_]|$)/)) asserted = 1
     if (started && depth <= 0) { print name "\t" (ignored ? 0 : asserted); infn = 0 }
   }' "${files[@]}" | sort -u > "$work/tests.txt"
