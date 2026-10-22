@@ -294,3 +294,20 @@ async fn inv_proxy_38_a_warm_playlist_plan_is_checked_without_opening_the_entry(
     assert!(Arc::ptr_eq(&first, &again));
     assert_eq!(rig.cache.inner.read_opens.load(std::sync::atomic::Ordering::Relaxed), opens, "a warm plan opened the entry file");
 }
+
+#[tokio::test]
+async fn inv_proxy_39_a_cached_response_reads_the_file_once_per_batch_of_chunks_not_once_per_chunk() {
+    let rig = rig(ROOMY).await;
+    let data = pattern(BLOCK, 7);
+    rig.cache.put(BLOB, Kind::Image, &data).await.unwrap();
+    let jobs = |rig: &Rig| rig.cache.inner.read_jobs.load(std::sync::atomic::Ordering::Relaxed);
+    let allocations = |rig: &Rig| rig.cache.inner.read_allocations.load(std::sync::atomic::Ordering::Relaxed);
+    let (jobs_before, allocations_before) = (jobs(&rig), allocations(&rig));
+
+    let reply = fetch(&rig, BLOB, None).await;
+
+    assert!(reply.body == data);
+    eprintln!("cached_response chunks=16 read_jobs={} read_allocations={}", jobs(&rig) - jobs_before, allocations(&rig) - allocations_before);
+    assert!(jobs(&rig) - jobs_before <= 4, "one blocking read per chunk");
+    assert!(allocations(&rig) - allocations_before <= 4, "one new buffer per chunk");
+}

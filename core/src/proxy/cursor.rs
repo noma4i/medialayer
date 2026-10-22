@@ -12,6 +12,8 @@ use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
+const READ_CHUNKS: u64 = 4;
+
 pub(super) type ChunkResult = Result<Bytes, io::Error>;
 
 pub(super) struct DirectCursor {
@@ -98,10 +100,20 @@ pub(super) struct StoreCursor {
     pub finished: bool,
     pub resumed: bool,
     pub resume: Resume,
+    pub pending: Bytes,
+}
+
+impl StoreCursor {
+    fn next_piece(&mut self) -> Option<Bytes> {
+        (!self.pending.is_empty()).then(|| self.pending.split_to(self.pending.len().min(self.chunk as usize)))
+    }
 }
 
 pub(super) async fn next_store(mut cursor: StoreCursor) -> Option<(ChunkResult, StoreCursor)> {
     loop {
+        if let Some(piece) = cursor.next_piece() {
+            return Some((Ok(piece), cursor));
+        }
         if cursor.finished || cursor.end.is_some_and(|end| cursor.position >= end) {
             return None;
         }
@@ -117,7 +129,7 @@ pub(super) async fn next_store(mut cursor: StoreCursor) -> Option<(ChunkResult, 
             None => (cursor.end.unwrap_or(0), FlightOutcome::Complete),
         };
         if cursor.position < written {
-            let mut wanted = cursor.chunk.min(written - cursor.position);
+            let mut wanted = (cursor.chunk * READ_CHUNKS).min(written - cursor.position);
             if let Some(end) = cursor.end {
                 wanted = wanted.min(end - cursor.position);
             }
@@ -136,7 +148,8 @@ pub(super) async fn next_store(mut cursor: StoreCursor) -> Option<(ChunkResult, 
             match data {
                 Some(data) if !data.is_empty() => {
                     cursor.position += data.len() as u64;
-                    return Some((Ok(Buffers::hold(Bytes::from(data), reservation)), cursor));
+                    cursor.pending = Buffers::hold(Bytes::from(data), reservation);
+                    continue;
                 }
                 _ => {
                     cursor.resumed = true;

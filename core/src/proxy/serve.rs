@@ -259,6 +259,7 @@ async fn stored_response(
             finished: false,
             resumed: false,
             resume: Resume::new(inner, target, headers, 0),
+            pending: Bytes::new(),
         };
         streamed(stream::unfold(cursor, next_store))
     };
@@ -311,6 +312,7 @@ async fn flight_response(
         finished: false,
         resumed: false,
         resume: Resume::new(inner, target, headers, 0),
+        pending: Bytes::new(),
     };
     let response = match head.total {
         None => respond(200, vec![("content-type", content_type), ("accept-ranges", "bytes".to_string())], streamed(stream::unfold(cursor(0, None), next_store)), head_only),
@@ -514,6 +516,7 @@ impl BlockCursor {
             finished: false,
             resumed: false,
             resume: Resume::new(&self.inner, &self.target, &self.headers, block_start),
+            pending: Bytes::new(),
         };
         let whole_block = (block_start + size).min(self.total) - block_start;
         for _ in 0..ATTEMPTS {
