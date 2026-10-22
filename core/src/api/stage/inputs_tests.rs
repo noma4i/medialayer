@@ -1,3 +1,4 @@
+use crate::session::WatchdogConfig;
 use crate::api::slots::SlotCall;
 use crate::api::source::MediaItem;
 use crate::api::test_support::{eventually, eventually_async, rig, rig_with, url_of, video, videos};
@@ -647,4 +648,28 @@ async fn inv_api_37_a_fraction_chosen_before_the_duration_is_known_becomes_a_see
     stage.set_playing(&key, true);
 
     eventually(|| rig.holder(&key).1.calls().contains(&SlotCall::Seek { position_ms: 30_000 })).await;
+}
+
+#[tokio::test]
+async fn inv_api_38_a_pending_fraction_becomes_a_seek_when_the_slot_reports_ready() {
+    let rig = rig_with(|config| {
+        config.watchdog = WatchdogConfig { first_window_ms: 60_000, progress_window_ms: 60_000, startup_delay_ms: 60_000, ..crate::api::test_support::fast_watchdog() };
+    })
+    .await;
+    let stage = &rig.parts.stage;
+    let key = url_of(0);
+
+    stage.seek_fraction(&key, 0.5);
+    stage.replace_window(0, videos(1));
+    eventually(|| rig.factory.slot_holding(&key).is_some()).await;
+    let (slot, player) = rig.holder(&key);
+    player.sample.lock().unwrap().duration_ms = None;
+    stage.set_playing(&key, true);
+    eventually(|| player.calls().contains(&SlotCall::Play)).await;
+    assert!(!player.calls().iter().any(|call| matches!(call, SlotCall::Seek { .. })));
+
+    player.sample.lock().unwrap().duration_ms = Some(60_000);
+    stage.ready(slot as usize);
+
+    eventually(|| player.calls().contains(&SlotCall::Seek { position_ms: 30_000 })).await;
 }

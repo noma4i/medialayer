@@ -192,6 +192,8 @@ MediaAudio(VoiceNote(url = message.audioUrl)) { audio ->
 
 While an audio plays, its progress updates 4 times per second. A paused audio updates for 1 second after it appears or after a seek, then stops, so a chat full of voice notes does not wake up every 250 milliseconds.
 
+A seek by fraction chosen before the audio loads is applied when the player reports ready. A stream with no known duration at that moment drops the fraction.
+
 Audio does not depend on the size or position of its view. Progress, seek and the end of the audio work in a 0 x 0 host and in a view that is off screen. Only the app going to the background pauses the progress updates.
 
 ## One-shot video
