@@ -83,6 +83,15 @@ impl Cache {
         self.entry_of(key, |entry| entry.size).await
     }
 
+    pub async fn version(&self, key: &str) -> Option<(u64, u64)> {
+        if !self.is_ready() {
+            return None;
+        }
+        let name = file_name(key);
+        verified(&self.inner, &name, |_| ()).await?;
+        self.inner.state().slot(&name).map(|slot| (slot.version, slot.entry.size))
+    }
+
     pub async fn meta(&self, key: &str) -> Option<Meta> {
         self.entry_of(key, |entry| entry.meta.clone()).await
     }

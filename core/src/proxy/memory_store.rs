@@ -103,6 +103,10 @@ impl ByteStore for MemoryStore {
         self.len(key).await.is_some()
     }
 
+    async fn version(&self, key: &str) -> Option<(u64, u64)> {
+        self.entries().get(key).filter(|entry| entry.complete).map(|entry| (entry.version, entry.data.len() as u64))
+    }
+
     async fn get_range(&self, key: &str, start: u64, len: u64) -> Option<Vec<u8>> {
         let entries = self.entries();
         let entry = entries.get(key)?;

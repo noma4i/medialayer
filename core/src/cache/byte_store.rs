@@ -95,6 +95,11 @@ impl ByteStore for CacheStore {
         self.cache.contains(key).await
     }
 
+    async fn version(&self, key: &str) -> Option<(u64, u64)> {
+        self.cache.ready().await;
+        self.cache.version(key).await
+    }
+
     async fn get_range(&self, key: &str, start: u64, len: u64) -> Option<Vec<u8>> {
         self.open_reader(key).await?.get_range(start, len).await
     }

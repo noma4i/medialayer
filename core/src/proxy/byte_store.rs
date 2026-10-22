@@ -10,6 +10,9 @@ pub struct Meta {
 pub trait ByteStore: Send + Sync {
     async fn open_reader(&self, key: &str) -> Option<Box<dyn StoreReader>>;
     async fn len(&self, key: &str) -> Option<u64>;
+    async fn version(&self, key: &str) -> Option<(u64, u64)> {
+        self.open_reader(key).await?.version()
+    }
     async fn contains(&self, key: &str) -> bool;
     async fn get_range(&self, key: &str, start: u64, len: u64) -> Option<Vec<u8>>;
     async fn meta(&self, key: &str) -> Option<Meta>;

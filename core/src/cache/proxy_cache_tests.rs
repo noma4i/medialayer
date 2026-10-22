@@ -280,3 +280,17 @@ async fn inv_cache_18_an_origin_answering_another_range_is_never_stored_as_the_r
     assert!(reply.is_err());
     assert_eq!(f.cache.stats().await.file_count, 0);
 }
+
+#[tokio::test]
+async fn inv_proxy_38_a_warm_playlist_plan_is_checked_without_opening_the_entry() {
+    let rig = rig(ROOMY).await;
+    hls_origin(&rig.fetcher);
+    assert_eq!(fetch(&rig, MEDIA, None).await.status, 200);
+    let first = rig.proxy.playlist_plan(MEDIA, &HashMap::new()).await.expect("plan");
+    let opens = rig.cache.inner.read_opens.load(std::sync::atomic::Ordering::Relaxed);
+
+    let again = rig.proxy.playlist_plan(MEDIA, &HashMap::new()).await.expect("plan");
+
+    assert!(Arc::ptr_eq(&first, &again));
+    assert_eq!(rig.cache.inner.read_opens.load(std::sync::atomic::Ordering::Relaxed), opens, "a warm plan opened the entry file");
+}

@@ -61,20 +61,24 @@ impl ProxyShared {
         let lock = self.probe_lock(key);
         let _turn = lock.lock.lock().await;
         let epoch = self.playlists.0.lock().unwrap_or_else(PoisonError::into_inner).epoch;
-        let Some(mut reader) = self.store.open_reader(key).await else {
+        let Some((current, _)) = self.store.version(key).await else {
             self.playlists.forget(Some(key));
             return Ok(None);
         };
-        let Some((version, length)) = reader.version() else { return Ok(None) };
         {
             let mut entries = self.playlists.0.lock().unwrap_or_else(PoisonError::into_inner);
             if let Some((stored_version, plan)) = entries.plans.get(key).cloned() {
-                if stored_version == version && (plan.plan.is_static || self.playlist_is_fresh(key)) {
+                if stored_version == current && (plan.plan.is_static || self.playlist_is_fresh(key)) {
                     return Ok(Some(plan));
                 }
                 entries.plans.remove(key);
             }
         }
+        let Some(mut reader) = self.store.open_reader(key).await else {
+            self.playlists.forget(Some(key));
+            return Ok(None);
+        };
+        let Some((version, length)) = reader.version() else { return Ok(None) };
         if length > self.config.max_playlist_bytes { return Err("playlist too large"); }
         while self.config.ledger.used().saturating_add(length) > self.config.ledger.ceiling() {
             if self.playlists.0.lock().unwrap_or_else(PoisonError::into_inner).plans.pop_oldest().is_none() {
