@@ -192,6 +192,7 @@ impl Stage {
         let (state, commands) = {
             let mut state = self.state();
             state.declarations.insert(url.clone(), declaration.clone());
+            self.inner.places.claimed(&url);
             *state.shown.entry(url.clone()).or_insert(0) += 1;
             let is_player = source.kind != Kind::Image;
             state.catalog.insert(url.clone(), source);

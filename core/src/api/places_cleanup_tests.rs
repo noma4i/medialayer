@@ -43,3 +43,22 @@ async fn inv_api_32_last_subscription_releases_idle_place() {
     }
     assert_eq!(remaining, vec![0; 4], "idle places remain: undeclared, drop-first, retire-first, retire-all");
 }
+
+#[tokio::test]
+async fn inv_api_34_a_native_state_without_a_view_leaves_no_place() {
+    let places = Places::new(Handle::current());
+    places.item_state("orphan", MediaState::Ready);
+    assert!(places.entries().is_empty(), "item_state created a place nobody owns");
+
+    let view = places.subscribe("shown", Arc::new(|_| {}));
+    places.item_state("shown", MediaState::Loading);
+    places.item_state("shown", MediaState::Ready);
+    assert_eq!(places.state("shown"), MediaState::Ready);
+    drop(view);
+    assert!(places.entries().is_empty(), "the last view left a ready place behind");
+
+    let view = places.subscribe("late", Arc::new(|_| {}));
+    drop(view);
+    places.item_state("late", MediaState::Ready);
+    assert!(places.entries().is_empty(), "a late finish created a place after the last view left");
+}

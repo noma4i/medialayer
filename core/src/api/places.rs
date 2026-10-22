@@ -30,7 +30,11 @@ impl Place {
     }
 
     fn is_unused(&self) -> bool {
-        !self.is_declared && self.state == MediaState::Idle && self.hub.as_ref().is_none_or(|hub| hub.listener_count() == 0)
+        !self.is_owned() && self.state == MediaState::Idle
+    }
+
+    fn is_owned(&self) -> bool {
+        self.is_declared || self.hub.as_ref().is_some_and(|hub| hub.listener_count() > 0)
     }
 }
 
@@ -59,7 +63,7 @@ impl Places {
             drop(subscription);
             let Some(entries) = entries.upgrade() else { return };
             let mut entries = entries.lock().unwrap_or_else(PoisonError::into_inner);
-            if entries.get(&key).is_some_and(Place::is_unused) {
+            if entries.get(&key).is_some_and(|place| !place.is_owned()) {
                 entries.remove(&key);
             }
         })
@@ -67,6 +71,10 @@ impl Places {
 
     pub fn is_declared(&self, key: &str) -> bool {
         self.entries().get(key).is_some_and(|place| place.is_declared)
+    }
+
+    pub fn claimed(&self, key: &str) {
+        self.with(key, |place| place.is_declared = true);
     }
 
     pub fn declared(&self, key: &str, is_cached: bool) {
@@ -82,6 +90,9 @@ impl Places {
     }
 
     pub fn item_state(&self, key: &str, state: MediaState) {
+        if !self.entries().get(key).is_some_and(Place::is_owned) {
+            return;
+        }
         self.with(key, |place| match (&place.state, state) {
             (current, MediaState::Loading) if current.is_ready() => {}
             (_, state) => place.move_to(state),
