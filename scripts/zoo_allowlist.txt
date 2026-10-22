@@ -16,6 +16,7 @@ spawn cache/save.rs 1 # index persist loop, guarded by the persisting flag, ends
 spawn cache/store.rs 1 # index load on open, ends with the load
 spawn cache/writer.rs 2 # part cleanup after a dropped writer, part creation that deletes its file when abandoned
 spawn ffi/fetcher.rs 1 # closes the platform reader on the blocking pool after the body is dropped
+spawn proxy/slots.rs 1 # closes a dropped origin body on the blocking pool, then returns its permit, ends with both
 spawn ffi/assembled.rs 1 # limits warm-up after assembly, ends with the read
 spawn ffi/layer.rs 1 # assemble on the new runtime, ends with the assembly and hands the result to Deferred
 spawn api/tones.rs 1 # pixel analysis of one key, one run per key through the running set, ends with the analysis and the tone write
