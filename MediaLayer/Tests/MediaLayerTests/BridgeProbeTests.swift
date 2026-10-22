@@ -4,6 +4,6 @@ import Testing
 struct BridgeProbeTests {
   @Test
   func versionComesFromRust() {
-    #expect(version() == "2.1.0")
+    #expect(version() == "3.0.0")
   }
 }

@@ -1,5 +1,36 @@
 # Changelog
 
+## 3.0.0 - 2026-10-22
+
+### Added
+- `LoadedSlots.of(media)` returns the playback slots of one opened media object on iOS.
+
+### Changed
+- `MemoryReleaser` implementations provide `shutdown()`, called once when the media object closes.
+- `mediaImageLoader` takes `ImageCounters` as a value instead of a stats lambda.
+- On iOS, playback slots, view hosts and the image loader belong to one media object.
+- On iOS, offscreen images and videos load and attach only inside the viewport.
+- Animated GIFs on iOS decode as a stream and keep a bounded window of frames.
+- GIF frames on iOS follow the delay of each frame.
+- Image memory cache hits do not count as image requests.
+- The disk cache index has a new format, existing caches are discarded on open.
+- Cache writes flush once per commit, and the index saves only changed records.
+- Saved disk limits apply before the first startup eviction.
+- `purge(url)` cancels prefetch and tone work of that source only.
+
+### Fixed
+- Closing the media object on Android releases players, image memory, callbacks and the UI binding.
+- On Android, a player state change wakes only the subscribers of that key.
+- Readahead set before the Android player exists applies after the player loads.
+- A failed cache file deletion keeps the entry and its disk accounting.
+- Eviction keeps a newer version that replaced the selected entry.
+- `purge` cancels prefetch before deleting files, so late writes do not recreate entries.
+
+### Removed
+- `MediaLayer.release()` on Android, use `close()`.
+- `SlotPlayers.keyed` on Android, use `player(key)`.
+- `LoadedSlots.shared` on iOS, use `LoadedSlots.of(media)`.
+
 ## 2.1.0 - 2026-10-21
 
 ### Added
