@@ -148,12 +148,12 @@ struct ViewModelTests {
     let layer = CALayer()
     var attachment: SurfaceAttachment? = SurfaceAttachment(places: places, key: "clip", layer: layer)
     let token = attachment!.token
-    #expect(HostLayers.shared.layer(for: token) === layer)
+    #expect(HostLayers.of(places).layer(for: token) === layer)
 
     attachment = nil
 
     #expect(places.recorded == ["attach clip", "detach clip"])
-    #expect(HostLayers.shared.layer(for: token) == nil)
+    #expect(HostLayers.of(places).layer(for: token) == nil)
   }
 
   @Test

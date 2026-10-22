@@ -4,7 +4,7 @@ import Nuke
 import SwiftUI
 
 struct CoreDataLoader: DataLoading {
-  let places: MediaPlaces
+  weak var places: MediaPlaces?
 
   func loadData(
     with request: URLRequest,
@@ -15,7 +15,10 @@ struct CoreDataLoader: DataLoading {
       completion(URLError(.badURL))
       return TaskCancellable(task: nil)
     }
-    let places = places
+    guard let places else {
+      completion(CancellationError())
+      return TaskCancellable(task: nil)
+    }
     let headers = request.allHTTPHeaderFields ?? [:]
     let task = Task {
       do {
@@ -76,7 +79,6 @@ public enum MediaImagePipeline {
     } ?? []
     var request = ImageRequest(urlRequest: urlRequest, processors: processors)
     request.userInfo["placementPixels"] = UInt64(max(0, points.width * scale) * max(0, points.height * scale))
-    request.userInfo["imageStats"] = places.imageStats()
     request.thumbnail = pixels.map { ImageRequest.ThumbnailOptions(size: $0, unit: .pixels, contentMode: contentMode == .fill ? .aspectFill : .aspectFit) }
     request.imageID = identity
     return (key, request)
@@ -89,12 +91,7 @@ extension MediaImagePipeline {
   }
 
   static func cachedContainer(for request: ImageRequest, in pipeline: ImagePipeline) -> ImageContainer? {
-    let image = pipeline.cache[request]
-    if image != nil, let stats = request.userInfo["imageStats"] as? ImageCounters {
-      stats.record(work: .request(placementPixels: request.userInfo["placementPixels"] as? UInt64 ?? 0))
-      stats.record(work: .finish(memoryHit: true))
-    }
-    return image
+    pipeline.cache[request]
   }
 
   static func load(_ source: some MediaSource, request: ImageRequest, places: MediaPlaces, pipeline: ImagePipeline) async -> ImageContainer? {

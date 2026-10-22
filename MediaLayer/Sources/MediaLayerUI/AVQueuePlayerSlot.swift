@@ -22,10 +22,10 @@ public final class AVQueuePlayerSlotFactory: PlayerSlotFactory, @unchecked Senda
   public let events = PlayerEventsLink()
   private let startMuted: Bool
   private let audio: MediaAudioSession?
-  private let slots: LoadedSlots
-  private let hosts: HostLayers
+  let slots: LoadedSlots
+  let hosts: HostLayers
 
-  public init(startMuted: Bool = false, audio: MediaAudioSession? = nil, slots: LoadedSlots = .shared, hosts: HostLayers = .shared) {
+  public init(startMuted: Bool = false, audio: MediaAudioSession? = nil, slots: LoadedSlots = LoadedSlots(), hosts: HostLayers = HostLayers()) {
     self.startMuted = startMuted
     self.audio = audio
     self.slots = slots
@@ -73,8 +73,8 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private var readahead: TimeInterval = 0
 
   public init(
-    id: UInt32, events: PlayerEventsLink, startMuted: Bool, audio: MediaAudioSession? = nil, slots: LoadedSlots = .shared,
-    hosts: HostLayers = .shared
+    id: UInt32, events: PlayerEventsLink, startMuted: Bool, audio: MediaAudioSession? = nil, slots: LoadedSlots = LoadedSlots(),
+    hosts: HostLayers = HostLayers()
   ) {
     self.id = id
     self.events = events

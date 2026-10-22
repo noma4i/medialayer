@@ -54,6 +54,8 @@ extension MediaLayer {
     let media = try MediaLayer.open(config: config)
     media.setTonePreparation(preparation: ToneFrames(places: media))
     ImageMemory.install(imageCache, on: media)
+    LoadedSlots.install(factory.slots, on: media)
+    HostLayers.install(factory.hosts, on: media)
     media.followSystem(events: media.playerEvents(), link: factory.events, center: .default, names: .system)
     Media.current = media
     Media.audio = audio

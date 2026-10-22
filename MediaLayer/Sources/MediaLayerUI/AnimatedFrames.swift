@@ -8,19 +8,18 @@ final class FrameStream: @unchecked Sendable {
 
   private let source: CGImageSource
   private let options: CFDictionary
-  private let count: Int
   private let lock = NSLock()
-  private var cache: [Int: CGImage] = [:]
+  private var cachedIndex: Int?
+  private var cachedImage: CGImage?
   private var preparationCount = 0
   private var decodeCount = 0
 
-  init(source: CGImageSource, options: CFDictionary, count: Int) {
+  init(source: CGImageSource, options: CFDictionary) {
     self.source = source
     self.options = options
-    self.count = count
   }
 
-  var cachedCount: Int { lock.withLock { cache.count } }
+  var cachedCount: Int { lock.withLock { cachedImage == nil ? 0 : 1 } }
   var preparations: Int { lock.withLock { preparationCount } }
   var decodes: Int { lock.withLock { decodeCount } }
 
@@ -28,55 +27,61 @@ final class FrameStream: @unchecked Sendable {
 
   func image(at index: Int) -> CGImage? {
     lock.withLock {
-      if let hit = cache[index] { return hit }
+      if cachedIndex == index { return cachedImage }
+      cachedImage = nil
+      cachedIndex = nil
       decodeCount += 1
       guard let image = CGImageSourceCreateThumbnailAtIndex(source, index, options) else { return nil }
 
-      let keep = Set((0 ..< Self.window).map { (index + $0) % count })
-      cache = cache.filter { keep.contains($0.key) }
-      cache[index] = image
+      cachedIndex = index
+      cachedImage = image
       return image
     }
   }
 }
 
 struct AnimatedFrames {
-  enum Storage {
-    case decoded([CGImage])
-    case streamed(FrameStream)
-  }
-
   static let minimumDelay: TimeInterval = 0.02
   static let defaultDelay: TimeInterval = 0.1
   static let maxPixelLimit = 1024
-  static let byteBudget = 32 << 20
 
   let token = UUID()
-  let storage: Storage
+  let stream: FrameStream
   let frameCount: Int
   let firstImage: CGImage
   let duration: TimeInterval
+  let frameEnds: [TimeInterval]
 
   let decodedBytes: Int
 
   func loopDuration(rate: Double) -> TimeInterval { rate > 0 ? duration / rate : duration }
 
   func frameTick(elapsed: TimeInterval, rate: Double) -> Int {
-    Int(elapsed / (loopDuration(rate: rate) / Double(frameCount)))
+    let position = max(0, elapsed) * (rate > 0 ? rate : 1)
+    let round = Int(position / duration)
+    let offset = position - Double(round) * duration
+    var low = 0
+    var high = frameCount
+    while low < high {
+      let middle = (low + high) / 2
+      if offset < frameEnds[middle] { high = middle } else { low = middle + 1 }
+    }
+    return round * frameCount + min(low, frameCount - 1)
+  }
+
+  func frameEnd(tick: Int, rate: Double) -> TimeInterval {
+    (Double(tick / frameCount) * duration + frameEnds[tick % frameCount]) / (rate > 0 ? rate : 1)
   }
 
   func image(at index: Int) -> CGImage? {
-    switch storage {
-    case let .decoded(images): images.indices.contains(index) ? images[index] : nil
-    case let .streamed(stream): stream.image(at: index)
-    }
+    index == 0 ? firstImage : stream.image(at: index)
   }
 
   static func load(_ data: Data, maxPixel: Int) async -> AnimatedFrames? {
     decode(data, maxPixel: maxPixel, isCancelled: { Task.isCancelled })
   }
 
-  static func decode(_ data: Data, maxPixel: Int, byteBudget: Int = byteBudget, isCancelled: () -> Bool = { false }) -> AnimatedFrames? {
+  static func decode(_ data: Data, maxPixel: Int, isCancelled: () -> Bool = { false }) -> AnimatedFrames? {
     guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
 
     let count = CGImageSourceGetCount(source)
@@ -89,27 +94,14 @@ struct AnimatedFrames {
     guard count > 1, let first = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
 
     var duration: TimeInterval = 0
+    var frameEnds: [TimeInterval] = []
     for index in 0 ..< count {
       if isCancelled() { return nil }
       duration += delay(source: source, index: index)
+      frameEnds.append(duration)
     }
-    if first.bytesPerRow * first.height * count > byteBudget {
-      let stream = FrameStream(source: source, options: options as CFDictionary, count: count)
-      return AnimatedFrames(storage: .streamed(stream), frameCount: count, firstImage: first, duration: duration, decodedBytes: 0)
-    }
-
-    var images = [first]
-    var bytes = first.bytesPerRow * first.height
-    for index in 1 ..< count {
-      if isCancelled() { return nil }
-      guard let image = CGImageSourceCreateThumbnailAtIndex(source, index, options as CFDictionary) else { continue }
-
-      images.append(image)
-      bytes += image.bytesPerRow * image.height
-    }
-    guard images.count > 1 else { return nil }
-
-    return AnimatedFrames(storage: .decoded(images), frameCount: images.count, firstImage: first, duration: duration, decodedBytes: bytes)
+    let stream = FrameStream(source: source, options: options as CFDictionary)
+    return AnimatedFrames(stream: stream, frameCount: count, firstImage: first, duration: duration, frameEnds: frameEnds, decodedBytes: first.bytesPerRow * first.height * FrameStream.window)
   }
 
   private static func delay(source: CGImageSource, index: Int) -> TimeInterval {
@@ -144,18 +136,12 @@ struct AnimatedFramesView: UIViewRepresentable {
   final class Playback {
     var token: UUID?
     var plan: StreamPlan?
-    var animatesImages = false
     private var task: Task<Void, Never>?
     private var runningInterval: TimeInterval = 0
 
     deinit { task?.cancel() }
 
     func sync(_ view: UIImageView) {
-      if animatesImages, view.window != nil {
-        if !view.isAnimating { view.startAnimating() }
-      } else if view.isAnimating {
-        view.stopAnimating()
-      }
       guard let plan, view.window != nil else { return stop() }
       guard task == nil || runningInterval != plan.interval else { return }
 
@@ -198,30 +184,14 @@ struct AnimatedFramesView: UIViewRepresentable {
       playback.token = frames.token
       playback.stop()
       view.stopAnimating()
-      switch frames.storage {
-      case let .decoded(images):
-        view.image = UIImage(cgImage: frames.firstImage)
-        view.animationImages = images.map { UIImage(cgImage: $0) }
-      case .streamed:
-        view.animationImages = nil
-        view.image = UIImage(cgImage: frames.firstImage)
-      }
+      view.image = UIImage(cgImage: frames.firstImage)
     }
-    switch frames.storage {
-    case .decoded:
-      playback.plan = nil
-      playback.animatesImages = isPlaying
-      view.animationDuration = frames.loopDuration(rate: playbackRate)
-    case let .streamed(stream):
-      playback.animatesImages = false
-      playback.plan = isPlaying ? StreamPlan(stream: stream, frames: frames, rate: playbackRate) : nil
-    }
+    playback.plan = isPlaying ? StreamPlan(stream: frames.stream, frames: frames, rate: playbackRate) : nil
     playback.sync(view)
   }
 
   static func dismantleUIView(_ view: UIImageView, coordinator: Playback) {
     coordinator.plan = nil
-    coordinator.animatesImages = false
     coordinator.stop()
   }
 
@@ -236,7 +206,7 @@ struct AnimatedFramesView: UIViewRepresentable {
         let tick = plan.frames.frameTick(elapsed: Double(parts.seconds) + Double(parts.attoseconds) * 1e-18, rate: plan.rate)
         let index = tick % plan.frames.frameCount
         if index != shown {
-          let image = plan.stream.image(at: index)
+          let image = plan.frames.image(at: index)
           guard !Task.isCancelled else { return }
 
           await MainActor.run { [weak view] in
@@ -246,8 +216,8 @@ struct AnimatedFramesView: UIViewRepresentable {
         }
         let upcoming = (tick + 1) % plan.frames.frameCount
         guard !Task.isCancelled else { return }
-        _ = plan.stream.image(at: upcoming)
-        try? await clock.sleep(until: start + .seconds(Double(tick + 1) * plan.interval))
+        _ = plan.frames.image(at: upcoming)
+        try? await clock.sleep(until: start + .seconds(plan.frames.frameEnd(tick: tick, rate: plan.rate)))
       }
     }
   }

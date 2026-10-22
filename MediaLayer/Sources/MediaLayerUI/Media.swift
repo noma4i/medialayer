@@ -1,4 +1,5 @@
 import MediaLayer
+import Nuke
 import Observation
 import SwiftUI
 
@@ -55,11 +56,11 @@ public enum Media {
 public final class MediaContext: @unchecked Sendable {
   public let places: MediaPlaces
   public let slots: LoadedSlots
-  private(set) lazy var pipeline = MediaImagePipeline.make(places: places)
+  var pipeline: Nuke.ImagePipeline { ImageMemory.pipeline(for: places) }
 
-  public init(places: MediaPlaces, slots: LoadedSlots = .shared) {
+  public init(places: MediaPlaces, slots: LoadedSlots? = nil) {
     self.places = places
-    self.slots = slots
+    self.slots = slots ?? LoadedSlots.of(places)
     places.setTonePreparation(preparation: ToneFrames(places: places))
   }
 }
@@ -78,7 +79,7 @@ extension EnvironmentValues {
 private struct MediaLayerModifier: ViewModifier {
   @State private var context: MediaContext
 
-  init(media: MediaPlaces, slots: LoadedSlots) {
+  init(media: MediaPlaces, slots: LoadedSlots?) {
     _context = State(initialValue: MediaContext(places: media, slots: slots))
   }
 
@@ -88,7 +89,7 @@ private struct MediaLayerModifier: ViewModifier {
 }
 
 extension View {
-  public func mediaLayer(_ media: MediaPlaces, slots: LoadedSlots = .shared) -> some View {
-    modifier(MediaLayerModifier(media: media, slots: slots))
+  public func mediaLayer(_ media: MediaPlaces, slots: LoadedSlots? = nil) -> some View {
+    modifier(MediaLayerModifier(media: media, slots: slots)).id(ObjectIdentifier(media))
   }
 }

@@ -174,7 +174,7 @@ extension GlobalMedia {
 
       media.visible(source: bare, visible: true)
       media.setPlaying(key: Self.clip, playing: true)
-      await eventually("the clip is loaded") { LoadedSlots.shared.slot(for: Self.clip)?.loadedItem != nil }
+      await eventually("the clip is loaded") { LoadedSlots.of(media).slot(for: Self.clip)?.loadedItem != nil }
 
       #expect(await media.tonePixelsNeeded(source: bare) == false)
       #expect(await pixelsTone(media, bare) == false)

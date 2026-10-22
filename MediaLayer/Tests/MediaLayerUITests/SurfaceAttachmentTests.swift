@@ -35,6 +35,18 @@ private final class PlacesLog: MediaPlaces, @unchecked Sendable {
 
 @Suite
 struct SurfaceAttachmentTests {
+  @Test
+  func inv_native_20_open_objects_do_not_share_host_claims() {
+    let first = PlacesLog()
+    let second = PlacesLog()
+    let key = UUID().uuidString
+    let a = SurfaceAttachment(places: first, key: key, layer: olderLayer)
+    let b = SurfaceAttachment(places: second, key: key, layer: newerLayer)
+    #expect(first.calls.count == 1)
+    #expect(second.calls.count == 1)
+    withExtendedLifetime((a, b)) {}
+  }
+
   private let places = PlacesLog()
   private let hosts = HostLayers()
   private let olderLayer = CALayer()

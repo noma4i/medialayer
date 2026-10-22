@@ -15,6 +15,27 @@ private struct TestImage: MediaSource {
   var size: MediaSize?
 }
 
+private final class ResizeProbe: ImageProcessing, @unchecked Sendable {
+  let processor: any ImageProcessing
+  private let lock = NSLock()
+  private var changed = 0
+  private var called = 0
+  var copies: Int { lock.withLock { changed } }
+  var calls: Int { lock.withLock { called } }
+  var identifier: String { processor.identifier }
+
+  init(_ processor: any ImageProcessing) { self.processor = processor }
+
+  func process(_ image: PlatformImage) -> PlatformImage? {
+    let result = processor.process(image)
+    lock.withLock {
+      called += 1
+      if result?.cgImage !== image.cgImage { changed += 1 }
+    }
+    return result
+  }
+}
+
 private func resizeIdentifier(_ request: ImageRequest?) -> String {
   request?.processors.first?.identifier ?? ""
 }
@@ -44,6 +65,48 @@ private func pixelWidth(_ image: PlatformImage) -> Int? {
 extension GlobalMedia {
   @Suite(.timeLimit(.minutes(1)))
   struct MediaImagePipelineTests {
+    @Test(arguments: [ContentMode.fill, ContentMode.fit])
+    func inv_image_36_thumbnail_does_not_resample_twice(mode: ContentMode) async throws {
+      let places = RecordingPlaces()
+      places.imageResult = .success(pngData(side: 1080, height: 1920))
+      ImageMemory.install(ImageCache(), on: places)
+      let pipeline = MediaImagePipeline.make(places: places)
+      var request = try #require(MediaImagePipeline.request(places: places, for: TestImage(url: "https://o.test/resize.png"), points: CGSize(width: 352, height: 352), contentMode: mode))
+      let probe = ResizeProbe(try #require(request.processors.first))
+      request.processors = [probe]
+      _ = try await pipeline.image(for: request)
+      #expect(probe.calls == 1)
+      #expect(probe.copies == 0)
+    }
+
+    @Test
+    func inv_native_21_contexts_share_only_their_open_object_resources() {
+      let places = RecordingPlaces()
+      let first = MediaContext(places: places)
+      let second = MediaContext(places: places)
+      let other = MediaContext(places: RecordingPlaces())
+      #expect(first.pipeline === second.pipeline)
+      #expect(first.slots === second.slots)
+      #expect(first.slots !== other.slots)
+    }
+
+    @Test
+    func inv_image_30_memory_lookup_does_not_count_a_request() async throws {
+      let places = RecordingPlaces()
+      places.imageResult = .success(pngData(side: 16))
+      ImageMemory.install(ImageCache(), on: places)
+      let pipeline = MediaImagePipeline.make(places: places)
+      let request = try #require(MediaImagePipeline.request(places: places, for: TestImage(url: "https://o.test/lookup.png"), points: CGSize(width: 16, height: 16)))
+      _ = try await pipeline.image(for: request)
+      let before = places.imageStats().snapshot()
+      for _ in 0 ..< 3 {
+        #expect(MediaImagePipeline.cachedContainer(for: request, in: pipeline) != nil)
+      }
+      let after = places.imageStats().snapshot()
+      #expect(after.requests == before.requests)
+      #expect(after.placementPixels == before.placementPixels)
+    }
+
     @Test
     func inv_image_13_counts_decoding_disk_and_memory_separately() async throws {
       let places = RecordingPlaces()
@@ -55,6 +118,7 @@ extension GlobalMedia {
       _ = try await pipeline.image(for: request)
       #expect(places.imageStats().snapshot().placementPixels == 256)
       #expect(MediaImagePipeline.cachedContainer(for: request, in: pipeline) != nil)
+      _ = try await pipeline.image(for: request)
       let stats = places.imageStats().snapshot()
       #expect(stats.requests == 2)
       #expect(stats.decodes == 1)

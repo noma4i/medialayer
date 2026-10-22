@@ -72,19 +72,22 @@ public struct MediaVideo<Content: View>: View {
 
   public var body: some View {
     ZStack {
-      if let context {
+      Color.clear
+      if active, let context {
         PlaceholderView(item: item, ready: state.isReady, context: context)
         VideoSurface(places: context.places, key: source.url, owner: owner, isPlaying: playing, gravity: gravity)
       }
-      content(state)
+      if active { content(state) }
     }
     .clipped()
-    .task(id: source.url) { await follow() }
+    .task(id: Sampling(url: source.url, active: active, reports: false)) {
+      if active { await follow() }
+    }
     .task(id: Sampling(url: source.url, active: onScreen && !inBackground, reports: onProgress != nil)) { await sample() }
     .background(OnScreenProbe { onScreen = $0 })
     .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.background)) { _ in inBackground = true }
     .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
-    .onAppear { declare(visible: true) }
+    .onChange(of: onScreen) { _, value in declare(visible: value) }
     .onDisappear { declare(visible: false) }
     .onChange(of: playing) { _, value in context.map { KeyClaims.of($0.places).setPlaying(owner: owner, key: source.url, playing: value) } }
     .onChange(of: peeking) { _, value in context.map { KeyClaims.of($0.places).setPeeking(owner: owner, key: source.url, peeking: value) } }
@@ -98,6 +101,8 @@ public struct MediaVideo<Content: View>: View {
     item.looping = loop
     return item
   }
+
+  private var active: Bool { onScreen && !inBackground }
 
   private struct Sampling: Equatable {
     let url: String

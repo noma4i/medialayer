@@ -3,37 +3,92 @@ import SwiftUI
 #if canImport(UIKit)
 import UIKit
 
+private final class VisibilityPass: NSObject {
+  static let shared = VisibilityPass()
+  private let pending = NSHashTable<OnScreenView>.weakObjects()
+  private var displayLink: CADisplayLink?
+
+  func schedule(_ view: OnScreenView) {
+    pending.add(view)
+    guard displayLink == nil else { return }
+    let link = CADisplayLink(target: self, selector: #selector(flush))
+    displayLink = link
+    link.add(to: .main, forMode: .common)
+  }
+
+  func cancel(_ view: OnScreenView) { pending.remove(view) }
+
+  @objc private func flush() {
+    displayLink?.invalidate()
+    displayLink = nil
+    let views = pending.allObjects
+    pending.removeAllObjects()
+    var clips: [ObjectIdentifier: CGRect] = [:]
+    func clip(_ view: UIView, window: UIWindow) -> CGRect {
+      let key = ObjectIdentifier(view)
+      if let cached = clips[key] { return cached }
+      let rect: CGRect
+      if view.isHidden { rect = .null }
+      else if let parent = view.superview {
+        let inherited = clip(parent, window: window)
+        rect = view.clipsToBounds || view is UIScrollView ? inherited.intersection(view.convert(view.bounds, to: window)) : inherited
+      } else { rect = window.bounds }
+      clips[key] = rect
+      return rect
+    }
+    for view in views {
+      guard let window = view.window else { view.deliver(false); continue }
+      let visible = clip(view, window: window).intersection(view.convert(view.bounds, to: window))
+      view.deliver(!visible.isNull && !visible.isEmpty)
+    }
+  }
+}
+
+private final class VisibilityObservation {
+  static let entries = NSMapTable<UIView, VisibilityObservation>(keyOptions: .weakMemory, valueOptions: .strongMemory)
+  private let views = NSHashTable<OnScreenView>.weakObjects()
+  private var tokens: [NSKeyValueObservation] = []
+  private weak var ancestor: UIView?
+
+  static func join(_ ancestor: UIView, view: OnScreenView) -> VisibilityObservation {
+    let observation = entries.object(forKey: ancestor) ?? VisibilityObservation()
+    entries.setObject(observation, forKey: ancestor)
+    observation.views.add(view)
+    if observation.tokens.isEmpty {
+      observation.ancestor = ancestor
+      observation.tokens.append(ancestor.observe(\.isHidden) { [weak observation] _, _ in observation?.schedule() })
+      if let scroll = ancestor as? UIScrollView {
+        observation.tokens.append(scroll.observe(\.contentOffset) { [weak observation] _, _ in observation?.schedule() })
+      }
+    }
+    return observation
+  }
+
+  func leave(_ view: OnScreenView) {
+    views.remove(view)
+    if views.allObjects.isEmpty {
+      tokens = []
+      if let ancestor { Self.entries.removeObject(forKey: ancestor) }
+    }
+  }
+
+  private func schedule() {
+    views.allObjects.forEach { VisibilityPass.shared.schedule($0) }
+  }
+}
+
 final class OnScreenView: UIView {
   var onChange: (Bool) -> Void = { _ in }
   private var delivered = false
-  private var scheduled = false
-  private var observations: [NSKeyValueObservation] = []
-
-  var isOnScreen: Bool {
-    guard let window, !window.isHidden else { return false }
-
-    var rect = bounds
-    var view: UIView = self
-    while let parent = view.superview {
-      if parent.isHidden { return false }
-
-      rect = view.convert(rect, to: parent)
-      if parent.clipsToBounds || parent is UIScrollView { rect = rect.intersection(parent.bounds) }
-      if rect.isNull || rect.isEmpty { return false }
-
-      view = parent
-    }
-    return true
-  }
+  private var observations: [VisibilityObservation] = []
 
   override func didMoveToWindow() {
     super.didMoveToWindow()
+    observations.forEach { $0.leave(self) }
     observations = []
-    if let window { observations.append(window.observe(\.isHidden) { [weak self] _, _ in self?.report() }) }
     var ancestor: UIView? = self
     while let view = ancestor {
-      observations.append(view.observe(\.isHidden) { [weak self] _, _ in self?.report() })
-      if let scroll = view as? UIScrollView { observations.append(scroll.observe(\.contentOffset) { [weak self] _, _ in self?.report() }) }
+      observations.append(VisibilityObservation.join(view, view: self))
       ancestor = view.superview
     }
     report()
@@ -45,6 +100,8 @@ final class OnScreenView: UIView {
   }
 
   func finish() {
+    VisibilityPass.shared.cancel(self)
+    observations.forEach { $0.leave(self) }
     observations = []
     guard delivered else { return }
 
@@ -53,19 +110,13 @@ final class OnScreenView: UIView {
   }
 
   private func report() {
-    guard !scheduled else { return }
+    VisibilityPass.shared.schedule(self)
+  }
 
-    scheduled = true
-    DispatchQueue.main.async { [weak self] in
-      guard let self else { return }
-
-      scheduled = false
-      let on = isOnScreen
-      guard on != delivered else { return }
-
-      delivered = on
-      onChange(on)
-    }
+  fileprivate func deliver(_ on: Bool) {
+    guard on != delivered else { return }
+    delivered = on
+    onChange(on)
   }
 }
 

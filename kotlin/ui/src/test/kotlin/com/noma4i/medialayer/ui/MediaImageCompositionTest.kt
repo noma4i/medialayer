@@ -3,10 +3,12 @@ package com.noma4i.medialayer.ui
 import android.content.Context
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composer
 import androidx.compose.runtime.CompositionTracer
 import androidx.compose.runtime.InternalComposeTracingApi
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onRoot
@@ -36,6 +38,25 @@ class MediaImageCompositionTest {
   private val pending = CompletableDeferred<Unit>()
   private val loader by lazy { mediaImageLoader(context, ImageBytes { _, _ -> pending.await(); com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) }) }
   private val looper = shadowOf(android.os.Looper.getMainLooper())
+
+  @Test
+  fun inv_image_35_returningImageDoesNotRepeatReady() {
+    val offset = mutableStateOf(0)
+    val url = "https://o.test/return.png"
+    rule.setContent {
+      MediaLayerProvider(layer, loader) {
+        MediaImage(SizedImage(url), Modifier.offset(y = offset.value.dp).size(50.dp))
+      }
+    }
+    pending.complete(Unit)
+    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("itemState:$url:Ready") }
+    rule.runOnIdle { offset.value = 10000 }
+    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("visible:$url:false") }
+    rule.runOnIdle { offset.value = 0 }
+    rule.waitUntil(5000) { looper.idle(); layer.calls.count { it == "visible:$url:true" } == 2 }
+    rule.waitForIdle()
+    assertEquals(1, layer.calls.count { it == "itemState:$url:Ready" })
+  }
 
   @Test
   @OptIn(InternalComposeTracingApi::class)

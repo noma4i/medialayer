@@ -26,9 +26,9 @@ final class KeyClaims: @unchecked Sendable {
   private var applied: [String: Applied] = [:]
   private var sources: [String: MediaItem] = [:]
 
-  init(places: MediaPlaces, hosts: HostLayers = .shared) {
+  init(places: MediaPlaces, hosts: HostLayers? = nil) {
     self.places = places
-    self.hosts = hosts
+    self.hosts = hosts ?? HostLayers.of(places)
   }
 
   static func of(_ places: MediaPlaces) -> KeyClaims {

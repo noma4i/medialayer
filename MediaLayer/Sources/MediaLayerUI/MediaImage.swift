@@ -26,9 +26,8 @@ private struct ImageInputs: Hashable {
   let headers: [String: String]
   let width: Int?
   let height: Int?
-  let pointWidth: CGFloat
-  let pointHeight: CGFloat
-  let scale: CGFloat
+  let pixelWidth: CGFloat?
+  let pixelHeight: CGFloat?
   let contentMode: ContentMode
   let context: ObjectIdentifier
 }
@@ -79,10 +78,11 @@ public struct MediaImage<Content: View>: View {
   public var body: some View {
     if let context {
       GeometryReader { geometry in
+        let pixels = MediaImagePipeline.decodeSize(for: source, points: geometry.size, scale: displayScale, contentMode: contentMode)
         ImageRequestView(source: source, context: context, points: geometry.size, scale: displayScale, contentMode: contentMode) { key, request in
           let shown = shownImage(for: key, request: request)
           ZStack {
-            if shown == nil {
+            if isPlaying && shown == nil {
               PlaceholderView(item: source.item, ready: false, context: context)
             }
             if let frames = loaded.flatMap({ $0.key == key ? $0.frames : nil }) {
@@ -90,17 +90,21 @@ public struct MediaImage<Content: View>: View {
             } else if let shown {
               Image(platform: shown).resizable().aspectRatio(contentMode: contentMode).transition(.opacity)
             }
-            content(state)
+            if isPlaying { content(state) }
           }
           .frame(width: geometry.size.width, height: geometry.size.height)
           .clipped()
-          .task(id: key) { await load(key: key, request: request) }
+          .task(id: ImageLoad(key: key, active: isPlaying)) {
+            if isPlaying { await load(key: key, request: request) }
+          }
           .task(id: framesJob(for: key)) { [job = framesJob(for: key)] in await decodeFrames(job) }
         }
-        .id(ImageInputs(url: source.url, headers: source.headers, width: source.size?.width, height: source.size?.height, pointWidth: geometry.size.width, pointHeight: geometry.size.height, scale: displayScale, contentMode: contentMode, context: ObjectIdentifier(context)))
+        .id(ImageInputs(url: source.url, headers: source.headers, width: source.size?.width, height: source.size?.height, pixelWidth: pixels?.width, pixelHeight: pixels?.height, contentMode: contentMode, context: ObjectIdentifier(context)))
       }
       .background(OnScreenProbe { screen($0) })
-      .task(id: source.url) { await follow() }
+      .task(id: ImageFollow(url: source.url, active: isPlaying)) {
+        if isPlaying { await follow() }
+      }
       .onChange(of: source.url) { syncClaim() }
       .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.background)) { _ in inBackground = true }
       .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
@@ -108,6 +112,16 @@ public struct MediaImage<Content: View>: View {
   }
 
   private var isPlaying: Bool { onScreen && !inBackground }
+
+  private struct ImageLoad: Equatable {
+    let key: ImageKey
+    let active: Bool
+  }
+
+  private struct ImageFollow: Equatable {
+    let url: String
+    let active: Bool
+  }
 
   private func screen(_ visible: Bool) {
     onScreen = visible
@@ -134,17 +148,9 @@ public struct MediaImage<Content: View>: View {
   }
 
   private func load(key: ImageKey, request: ImageRequest?) async {
-    guard let context, key.pixels != nil, let request else { return }
-    let container: ImageContainer?
-    let isCold: Bool
-    if let hit = MediaImagePipeline.cachedContainer(for: request, in: context.pipeline) {
-      context.places.itemState(key: source.url, state: .ready)
-      container = hit
-      isCold = false
-    } else {
-      container = await MediaImagePipeline.load(source, request: request, places: context.places, pipeline: context.pipeline)
-      isCold = true
-    }
+    guard loaded?.key != key, let context, key.pixels != nil, let request else { return }
+    let isCold = MediaImagePipeline.cachedContainer(for: request, in: context.pipeline) == nil
+    let container = await MediaImagePipeline.load(source, request: request, places: context.places, pipeline: context.pipeline)
     let next = container.map { LoadedImage(key: key, image: $0.image, gif: $0.type == .gif ? $0.data : nil) }
     if isCold {
       withAnimation(.easeOut(duration: Self.coldFadeDuration)) { loaded = next }

@@ -77,16 +77,18 @@ struct FrameCacheTests {
   }
 
   @Test
-  func twentyGifsNeverHoldMoreThanTheByteLimitAndTheOldestGoesFirst() async throws {
+  func gifsNeverHoldMoreThanTheByteLimitAndTheOldestGoesFirst() async throws {
     let limit = 1 << 20
     let cache = FrameCache(byteLimit: limit)
-    for index in 0 ..< 20 {
+    let sample = try #require(AnimatedFrames.decode(gif(frames: 40, side: 64, seed: 0), maxPixel: 64))
+    let count = limit / sample.decodedBytes + 1
+    for index in 0 ..< count {
       _ = await cache.load(identity: "https://o.test/\(index).gif", data: gif(frames: 40, side: 64, seed: index), maxPixel: 64)
       #expect(cache.bytes <= limit)
     }
     let decoded = cache.decodes
 
-    _ = await cache.load(identity: "https://o.test/19.gif", data: gif(frames: 40, side: 64, seed: 19), maxPixel: 64)
+    _ = await cache.load(identity: "https://o.test/\(count - 1).gif", data: gif(frames: 40, side: 64, seed: count - 1), maxPixel: 64)
     #expect(cache.decodes == decoded)
     _ = await cache.load(identity: "https://o.test/0.gif", data: gif(frames: 40, side: 64, seed: 0), maxPixel: 64)
     #expect(cache.decodes == decoded + 1)
@@ -140,12 +142,17 @@ struct FrameCacheTests {
 
   @Test
   func whenTheLastWaiterLeavesTheDecodeStopsAndStoresNothing() async throws {
-    let cache = FrameCache()
+    let latch = Latch()
+    let cache = FrameCache(decode: { data, size in
+      await latch.wait()
+      return await AnimatedFrames.load(data, maxPixel: size)
+    })
     let data = gif(frames: 1200, side: 64, seed: 0)
     let only = Task { await cache.load(identity: "https://o.test/a.gif", data: data, maxPixel: 64) }
     await eventually("the decode started") { cache.decodes > 0 }
 
     only.cancel()
+    latch.open()
 
     #expect(await only.value == nil)
     #expect(cache.count == 0)

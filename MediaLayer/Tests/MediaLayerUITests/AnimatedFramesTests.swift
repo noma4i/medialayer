@@ -15,7 +15,7 @@ private struct GifSource: MediaSource {
   var size: MediaSize?
 }
 
-private func transparentGif(frames: Int, side: Int, delay: Double = 0.1) -> Data {
+private func transparentGif(frames: Int, side: Int, delay: Double = 0.1, delays: [Double]? = nil) -> Data {
   let data = NSMutableData()
   let destination = CGImageDestinationCreateWithData(data, UTType.gif.identifier as CFString, frames, nil)!
   CGImageDestinationSetProperties(destination, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary)
@@ -26,7 +26,7 @@ private func transparentGif(frames: Int, side: Int, delay: Double = 0.1) -> Data
     )!
     context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
     context.fill(CGRect(x: side / 4 + index, y: side / 4, width: side / 2, height: side / 2))
-    CGImageDestinationAddImage(destination, context.makeImage()!, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: delay]] as CFDictionary)
+    CGImageDestinationAddImage(destination, context.makeImage()!, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: delays?[index] ?? delay]] as CFDictionary)
   }
   CGImageDestinationFinalize(destination)
   return data as Data
@@ -91,6 +91,24 @@ private final class FootprintPeak: @unchecked Sendable {
 
 struct AnimatedFramesTests {
   @Test
+  func inv_image_31_gif_uses_each_frame_delay() throws {
+    let frames = try #require(AnimatedFrames.decode(transparentGif(frames: 3, side: 16, delays: [0.1, 0.3, 0.2]), maxPixel: 16))
+    for (elapsed, expected) in [(0.05, 0), (0.15, 1), (0.35, 1), (0.45, 2), (0.65, 3)] {
+      #expect(frames.frameTick(elapsed: elapsed, rate: 1) == expected)
+    }
+  }
+
+  @Test
+  func inv_image_32_small_gif_keeps_a_bounded_decoded_window() throws {
+    let frames = try #require(AnimatedFrames.decode(transparentGif(frames: 40, side: 16), maxPixel: 16))
+    let stream = frames.stream
+    for index in 0 ..< frames.frameCount {
+      #expect(frames.image(at: index) != nil)
+      #expect(stream.cachedCount <= FrameStream.window)
+    }
+  }
+
+  @Test
   func inv_image_06_every_frame_of_a_gif_keeps_its_transparency_and_the_loop_runs_for_the_sum_of_the_delays() throws {
     let frames = try #require(AnimatedFrames.decode(transparentGif(frames: 3, side: 16), maxPixel: 16))
 
@@ -146,15 +164,13 @@ struct AnimatedFramesTests {
   @Test
   func inv_image_06_a_gif_over_the_byte_budget_streams_a_bounded_window_and_keeps_its_loop() throws {
     let data = transparentGif(frames: 40, side: 16, delay: 0.05)
-    let frames = try #require(AnimatedFrames.decode(data, maxPixel: 16, byteBudget: 16 * 16 * 4 * 5))
-    guard case let .streamed(stream) = frames.storage else { Issue.record("expected a streamed source"); return }
+    let frames = try #require(AnimatedFrames.decode(data, maxPixel: 16))
+    let stream = frames.stream
 
     #expect(frames.frameCount == 40)
     #expect(abs(frames.loopDuration(rate: 1) - 2) < 0.001)
     for index in 0 ..< 40 { #expect(frames.image(at: index) != nil) }
     #expect(stream.cachedCount <= FrameStream.window)
-    let inBudget = try #require(AnimatedFrames.decode(data, maxPixel: 16))
-    guard case .decoded = inBudget.storage else { Issue.record("expected decoded frames under the budget"); return }
   }
 
   @Test
@@ -166,9 +182,8 @@ struct AnimatedFramesTests {
     let frames = AnimatedFrames.decode(data, maxPixel: 600)
     let peak = sampler.stop()
 
-    #expect(peak <= AnimatedFrames.byteBudget)
-    let decoded = try #require(frames)
-    guard case .streamed = decoded.storage else { Issue.record("expected a streamed source"); return }
+    #expect(peak <= 32 << 20)
+    #expect(frames != nil)
   }
 
   @Test

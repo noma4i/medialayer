@@ -18,7 +18,8 @@ final class SurfaceAttachment {
   let token: UInt64
   private let hosts: HostLayers
 
-  init(places: MediaPlaces, key: String, layer: CALayer, owner: UUID = UUID(), isPlaying: Bool = false, hosts: HostLayers = .shared) {
+  init(places: MediaPlaces, key: String, layer: CALayer, owner: UUID = UUID(), isPlaying: Bool = false, hosts: HostLayers? = nil) {
+    let hosts = hosts ?? HostLayers.of(places)
     self.places = places
     self.key = key
     self.hosts = hosts

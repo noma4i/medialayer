@@ -1,8 +1,23 @@
 import Foundation
 import QuartzCore
+import ObjectiveC
+
+nonisolated(unsafe) private var slotsKey: UInt8 = 0
+nonisolated(unsafe) private var hostsKey: UInt8 = 0
 
 public final class LoadedSlots: @unchecked Sendable {
-  public static let shared = LoadedSlots()
+  public static func of(_ places: MediaPlaces) -> LoadedSlots {
+    objc_sync_enter(places)
+    defer { objc_sync_exit(places) }
+    if let existing = objc_getAssociatedObject(places, &slotsKey) as? LoadedSlots { return existing }
+    let slots = LoadedSlots()
+    install(slots, on: places)
+    return slots
+  }
+
+  static func install(_ slots: LoadedSlots, on places: MediaPlaces) {
+    objc_setAssociatedObject(places, &slotsKey, slots, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+  }
 
   private let lock = NSLock()
   private var slots: [String: WeakSlot] = [:]
@@ -46,7 +61,18 @@ enum HostRelease: Equatable {
 }
 
 public final class HostLayers: @unchecked Sendable {
-  public static let shared = HostLayers()
+  public static func of(_ places: MediaPlaces) -> HostLayers {
+    objc_sync_enter(places)
+    defer { objc_sync_exit(places) }
+    if let existing = objc_getAssociatedObject(places, &hostsKey) as? HostLayers { return existing }
+    let hosts = HostLayers()
+    install(hosts, on: places)
+    return hosts
+  }
+
+  static func install(_ hosts: HostLayers, on places: MediaPlaces) {
+    objc_setAssociatedObject(places, &hostsKey, hosts, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+  }
 
   private struct WeakLayer {
     weak var value: CALayer?

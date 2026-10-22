@@ -54,7 +54,7 @@ extension GlobalMedia {
 
     private func release(_ media: MediaLayer) async {
       media.releaseAll()
-      await eventually("the clip leaves the shared slots") { LoadedSlots.shared.slot(for: Self.clip) == nil }
+      await eventually("the clip leaves the shared slots") { LoadedSlots.of(media).slot(for: Self.clip) == nil }
     }
 
     #if canImport(UIKit)
@@ -71,10 +71,10 @@ extension GlobalMedia {
       window.rootViewController = controller
       window.isHidden = false
       let host = controller.view.layer
-      let token = HostLayers.shared.register(host)
+      let token = HostLayers.of(media).register(host)
       defer {
         media.releaseAll()
-        HostLayers.shared.unregister(token)
+        HostLayers.of(media).unregister(token)
         window.isHidden = true
         window.rootViewController = nil
       }
@@ -103,9 +103,9 @@ extension GlobalMedia {
 
       media.visible(source: item, visible: true)
       media.setPlaying(key: Self.clip, playing: true)
-      let loaded = await eventually { LoadedSlots.shared.slot(for: Self.clip) != nil }
+      let loaded = await eventually { LoadedSlots.of(media).slot(for: Self.clip) != nil }
       #expect(loaded)
-      let slot = try #require(LoadedSlots.shared.slot(for: Self.clip))
+      let slot = try #require(LoadedSlots.of(media).slot(for: Self.clip))
       await MainActor.run { slot.player.isMuted = false }
 
       media.setMutedAll(muted: true)
@@ -132,7 +132,7 @@ extension GlobalMedia {
       media.setPlaying(key: Self.clip, playing: true)
 
       let unmuted = await eventually {
-        guard let slot = LoadedSlots.shared.slot(for: Self.clip) else { return false }
+        guard let slot = LoadedSlots.of(media).slot(for: Self.clip) else { return false }
         return !slot.player.isMuted
       }
       #expect(unmuted)
@@ -147,7 +147,7 @@ extension GlobalMedia {
       media.setRate(key: Self.clip, rate: 1.5)
       media.visible(source: item, visible: true)
 
-      let applied = await eventually { LoadedSlots.shared.slot(for: Self.clip)?.player.defaultRate == 1.5 }
+      let applied = await eventually { LoadedSlots.of(media).slot(for: Self.clip)?.player.defaultRate == 1.5 }
       #expect(applied)
       await release(media)
     }

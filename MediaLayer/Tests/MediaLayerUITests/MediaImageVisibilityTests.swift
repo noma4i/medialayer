@@ -19,10 +19,17 @@ private struct VisibilityGif: MediaSource {
 private struct GifCell: View {
   let url: String
   let context: MediaContext
+  var side: CGFloat = 50
 
   var body: some View {
-    MediaImage(VisibilityGif(url: url)).environment(\.mediaContext, context).frame(width: 50, height: 50)
+    MediaImage(VisibilityGif(url: url)).environment(\.mediaContext, context).frame(width: side, height: side)
   }
+}
+
+private struct ContextCell: View {
+  let places: RecordingPlaces
+  let url: String
+  var body: some View { MediaImage(VisibilityGif(url: url)).frame(width: 50, height: 50).mediaLayer(places) }
 }
 
 private func animatedGif(frames: Int, side: Int) -> Data {
@@ -116,6 +123,87 @@ extension GlobalMedia {
   @MainActor
   @Suite(.timeLimit(.minutes(3)))
   struct MediaImageVisibilityTests {
+    @Test
+    func inv_native_22_replacing_open_object_changes_the_image_owner() async {
+      let screen = Screen(gif: animatedGif(frames: 3, side: 64))
+      defer { screen.close() }
+      let second = RecordingPlaces()
+      second.imageResult = .success(animatedGif(frames: 3, side: 64))
+      ImageMemory.install(ImageCache(), on: second)
+      let url = newURL()
+      let host = UIHostingController(rootView: ContextCell(places: screen.places, url: url))
+      screen.page.addChild(host)
+      host.view.frame = CGRect(x: 0, y: 0, width: 50, height: 50)
+      screen.scroll.addSubview(host.view)
+      host.didMove(toParent: screen.page)
+      await until("first owner fetched") { screen.places.fetchedURLs.count == 1 }
+      host.rootView = ContextCell(places: second, url: url)
+      await until("second owner fetched") { second.fetchedURLs.count == 1 }
+      await until("first owner released") { screen.places.visibleCalls(of: url) == [true, false] }
+      withExtendedLifetime(host) {}
+    }
+
+    @Test
+    func inv_visibility_02_offscreen_video_does_not_claim_or_attach() async {
+      let screen = Screen(gif: Data())
+      defer { screen.close() }
+      let url = newURL()
+      let host = UIHostingController(rootView: MediaVideo(VisibilityGif(url: url)).environment(\.mediaContext, screen.context).frame(width: 50, height: 50))
+      screen.page.addChild(host)
+      host.view.frame = CGRect(x: 0, y: 1900, width: 50, height: 50)
+      screen.scroll.addSubview(host.view)
+      host.didMove(toParent: screen.page)
+      await settle()
+      #expect(screen.places.visibleCalls(of: url).isEmpty)
+      #expect(!screen.places.recorded.contains("attach \(url)"))
+      screen.scroll.contentOffset = CGPoint(x: 0, y: 1850)
+      await until("video visible") { screen.places.visibleCalls(of: url) == [true] }
+      await until("video attached") { screen.places.recorded.contains("attach \(url)") }
+      withExtendedLifetime(host) {}
+    }
+
+    @Test
+    func inv_image_34_same_pixel_size_keeps_prepared_request() async {
+      let url = newURL()
+      let screen = Screen(gif: animatedGif(frames: 3, side: 64))
+      defer { screen.close() }
+      let host = screen.mount(url, y: 0)
+      await until("image fetched") { !screen.places.fetchedURLs.isEmpty }
+      await settle()
+      let reads = screen.places.cacheKeyReads
+      host.rootView = GifCell(url: url, context: screen.context, side: 51)
+      await settle()
+      #expect(screen.places.cacheKeyReads == reads)
+      withExtendedLifetime(host) {}
+    }
+
+    @Test
+    func inv_image_35_returning_image_does_not_repeat_ready() async {
+      let url = newURL()
+      let screen = Screen(gif: animatedGif(frames: 3, side: 64))
+      defer { screen.close() }
+      let host = screen.mount(url, y: 0)
+      await until("ready") { screen.places.recorded.contains("state ready") }
+      screen.scroll.contentOffset = CGPoint(x: 0, y: 1000)
+      await settle()
+      screen.scroll.contentOffset = .zero
+      await settle()
+      #expect(screen.places.recorded.filter { $0 == "state ready" }.count == 1)
+      withExtendedLifetime(host) {}
+    }
+
+    @Test
+    func inv_image_33_offscreen_image_does_not_fetch() async {
+      let screen = Screen(gif: animatedGif(frames: 3, side: 64))
+      defer { screen.close() }
+      let host = screen.mount(newURL(), y: 1900)
+      await settle()
+      #expect(screen.places.fetchedURLs.isEmpty)
+      screen.scroll.contentOffset = CGPoint(x: 0, y: 1850)
+      await until("visible image fetched") { screen.places.fetchedURLs.count == 1 }
+      withExtendedLifetime(host) {}
+    }
+
     @Test
     func inv_image_01_source_prepares_one_identity_despite_load_and_visibility_updates() async {
       let screen = Screen(gif: animatedGif(frames: 3, side: 64))
@@ -265,20 +353,25 @@ extension GlobalMedia {
     }
 
     @Test
-    func a_decode_in_flight_is_cancelled_when_its_view_scrolls_away_and_starts_again_when_it_returns() async {
+    func an_image_fetch_scrolled_away_does_not_decode_until_it_returns() async {
       let url = newURL()
       let screen = Screen(gif: animatedGif(frames: 1200, side: 64))
       defer { screen.close() }
       await settle(0.3)
       let before = FrameCache.shared.decodes
+      let latch = Latch()
+      screen.places.fetchLatch = latch
       let host = screen.mount(url, y: 0)
-      await until("the decode starts") { FrameCache.shared.decodes == before + 1 }
+      await until("the fetch starts") { screen.places.fetchedURLs.count == 1 }
 
       screen.scroll.contentOffset = CGPoint(x: 0, y: 1000)
-      await settle(1)
+      await until("the view leaves") { screen.places.visibleCalls(of: url) == [true, false] }
+      latch.open()
+      await settle()
+      #expect(FrameCache.shared.decodes == before)
       screen.scroll.contentOffset = .zero
 
-      await until("the cancelled decode is not cached, so the return decodes again") { FrameCache.shared.decodes == before + 2 }
+      await until("the returned view decodes") { FrameCache.shared.decodes == before + 1 }
       withExtendedLifetime(host) {}
     }
 
