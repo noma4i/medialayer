@@ -50,12 +50,17 @@ impl Fetcher for Origin {
         let range = request.range;
         self.requests.lock().unwrap().push(request);
         self.started.notify_one();
+        let (start, end) = range.map_or((0, self.size - 1), |(start, last)| (start as usize, last.map_or(self.size - 1, |last| (last as usize).min(self.size - 1))));
         let body = if self.hang { stream::pending().boxed() } else {
-            stream::iter((0..self.size).step_by(64).map(|i| Ok(Bytes::from(vec![7; 64.min(self.size-i)]))).collect::<Vec<_>>()).boxed()
+            stream::iter((start..=end).step_by(64).map(|i| Ok(Bytes::from(vec![7; 64.min(end + 1 - i)]))).collect::<Vec<_>>()).boxed()
         };
+        let mut headers = HashMap::from([("content-length".to_string(), (end + 1 - start).to_string())]);
+        if range.is_some() {
+            headers.insert("content-range".to_string(), format!("bytes {start}-{end}/{}", self.size));
+        }
         Ok(Response {
             status: if range.is_some() {206} else {200},
-            headers: HashMap::from([("content-length".into(), self.size.to_string()), ("content-range".into(), format!("bytes 0-{}/{}", self.size-1, self.size))]),
+            headers,
             body,
         })
     }

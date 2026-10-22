@@ -64,6 +64,7 @@ async fn inv_readahead_02_the_playhead_comes_from_the_loaded_slot_on_demand_and_
     tokio::time::sleep(Duration::from_millis(250)).await;
     assert!(!held.is_finished());
     slot.sample.lock().unwrap().position_ms = 12_000;
+    rig.parts.proxy.nudge_window(MEDIA);
     let started = Instant::now();
     assert_eq!(tokio::time::timeout(Duration::from_millis(1_400), held).await.expect("released by the sampled position").unwrap().status, 200);
     assert!(started.elapsed() < Duration::from_millis(1_400));
