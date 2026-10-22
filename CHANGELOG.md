@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.6.0 - 2026-10-23
+
+### Changed
+- Kotlin library uses Coil 3 and takes `coil3.ImageLoader` in `MediaLayerProvider` and `MediaLayer.image`.
+- Kotlin `MediaImage` draws through `AsyncImage` without a painter per tile in composition.
+
 ## 3.5.0 - 2026-10-23
 
 ### Changed
