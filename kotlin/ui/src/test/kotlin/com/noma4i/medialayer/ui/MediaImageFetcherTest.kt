@@ -4,11 +4,11 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
-import coil.request.CachePolicy
-import coil.request.ErrorResult
-import coil.request.ImageRequest
-import coil.request.ImageResult
-import coil.request.SuccessResult
+import coil3.request.CachePolicy
+import coil3.request.ErrorResult
+import coil3.request.ImageRequest
+import coil3.request.ImageResult
+import coil3.request.SuccessResult
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.assertEquals
@@ -18,7 +18,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
 import com.noma4i.medialayer.*
-import coil.size.Scale
+import coil3.size.Scale
 import java.nio.file.Files
 
 internal fun pngBytes(width: Int = 64, height: Int = 64): ByteArray {
@@ -81,14 +81,14 @@ class MediaImageFetcherTest {
 
     assertTrue((result as? ErrorResult)?.throwable?.toString() ?: "", result is SuccessResult)
     assertEquals(listOf("https://o.test/a.png" to mapOf("Authorization" to "token")), requested.toList())
-    assertEquals(16, (result as SuccessResult).drawable.intrinsicWidth)
+    assertEquals(16, (result as SuccessResult).image.width)
     assertNull(loader.diskCache)
     assertEquals(CachePolicy.DISABLED, loader.defaults.diskCachePolicy)
   }
 
   @Test
   fun inv_image_13_aSecondRequestForTheSameUrlIsServedFromCoilMemoryWithoutTheCore() {
-    val request = ImageRequest.Builder(context).data(MediaImageData("https://o.test/b.png", emptyMap(), { "https://o.test/b.png" }, PixelSize(64u, 64u))).setParameter("placementPixels", 256L, null).size(16, 16).build()
+    val request = ImageRequest.Builder(context).data(MediaImageData("https://o.test/b.png", emptyMap(), { "https://o.test/b.png" }, PixelSize(64u, 64u))).apply { extras[PLACEMENT_PIXELS] = 256L }.size(16, 16).build()
 
     load(request)
     assertEquals(256uL, stats.snapshot().placementPixels)

@@ -5,7 +5,8 @@ import android.graphics.Bitmap
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.test.core.app.ApplicationProvider
-import coil.memory.MemoryCache
+import coil3.asImage
+import coil3.memory.MemoryCache
 import com.noma4i.medialayer.*
 import java.nio.file.Files
 import kotlinx.coroutines.CompletableDeferred
@@ -38,7 +39,7 @@ class MemoryWarningTest {
     media.stats()
     val owner = object : LifecycleOwner { override val lifecycle = LifecycleRegistry(this) }
     val signals = SystemSignals(context, media.playerEvents(), owner.lifecycle)
-    cache[MemoryCache.Key("image")] = MemoryCache.Value(Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888))
+    cache[MemoryCache.Key("image")] = MemoryCache.Value(Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).asImage())
     assertEquals(1, cache.keys.size)
 
     signals.onLowMemory()

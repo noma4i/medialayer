@@ -4,7 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
-import coil.ImageLoader
+import coil3.ImageLoader
 import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaSource
 import java.util.concurrent.atomic.AtomicInteger

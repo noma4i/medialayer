@@ -22,12 +22,14 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
-import coil.compose.AsyncImage
-import coil.compose.AsyncImagePainter
-import coil.ImageLoader
-import coil.request.ImageResult
-import coil.request.ImageRequest
-import coil.size.Scale
+import coil3.DrawableImage
+import coil3.Extras
+import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
+import coil3.ImageLoader
+import coil3.request.ImageResult
+import coil3.request.ImageRequest
+import coil3.size.Scale
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.ImageWork
 import com.noma4i.medialayer.MediaState
@@ -120,7 +122,7 @@ private fun ImageBody(source: MediaSource, pixels: PixelSize?, placementPixels: 
     imageLoader = loader,
     contentScale = contentScale,
     onState = { painterState ->
-      animation.value = (painterState as? AsyncImagePainter.State.Success)?.result?.drawable as? Animatable
+      animation.value = ((painterState as? AsyncImagePainter.State.Success)?.result?.image as? DrawableImage)?.drawable as? Animatable
       painterState.toMediaState()?.let { reached ->
         state.value = reached
         postFfi { media.itemState(source.url, reached) }
@@ -157,13 +159,15 @@ internal fun imageRequest(context: Context, source: MediaSource, pixels: PixelSi
   ImageRequest.Builder(context)
     .data(MediaImageData(source.url, source.headers, cacheKey, if (pixels == null) source.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) } else null, pixels))
     .scale(scale)
-    .setParameter("placementPixels", placementPixels, null)
     .apply {
+      extras[PLACEMENT_PIXELS] = placementPixels
       pixels?.let {
         size(it.width.toInt(), it.height.toInt())
       }
     }
     .build()
+
+internal val PLACEMENT_PIXELS = Extras.Key(default = 0L)
 
 internal fun ContentScale.toScale(): Scale = when (this) {
   ContentScale.Fit, ContentScale.Inside, ContentScale.FillWidth, ContentScale.FillHeight -> Scale.FIT

@@ -34,7 +34,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
-import coil.ImageLoader
+import coil3.ImageLoader
 import okhttp3.Call
 import okhttp3.OkHttpClient
 

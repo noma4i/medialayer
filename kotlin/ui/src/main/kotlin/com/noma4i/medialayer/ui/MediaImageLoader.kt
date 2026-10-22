@@ -2,16 +2,16 @@ package com.noma4i.medialayer.ui
 
 import android.app.ActivityManager
 import android.content.Context
-import coil.ImageLoader
-import coil.decode.DataSource
-import coil.decode.ImageSource
-import coil.decode.ImageDecoderDecoder
-import coil.fetch.Fetcher
-import coil.fetch.SourceResult
-import coil.key.Keyer
-import coil.memory.MemoryCache
-import coil.request.CachePolicy
-import coil.request.Options
+import coil3.ImageLoader
+import coil3.decode.DataSource
+import coil3.decode.ImageSource
+import coil3.gif.AnimatedImageDecoder
+import coil3.fetch.Fetcher
+import coil3.fetch.SourceFetchResult
+import coil3.key.Keyer
+import coil3.memory.MemoryCache
+import coil3.request.CachePolicy
+import coil3.request.Options
 import okio.Buffer
 
 fun interface ImageBytes {
@@ -22,7 +22,7 @@ internal data class MediaImageData(val url: String, val headers: Map<String, Str
   val cacheKey: String by lazy(keyOf)
 }
 
-internal fun imageMemoryKey(cacheKey: String, pixels: com.noma4i.medialayer.PixelSize, scale: coil.size.Scale): MemoryCache.Key =
+internal fun imageMemoryKey(cacheKey: String, pixels: com.noma4i.medialayer.PixelSize, scale: coil3.size.Scale): MemoryCache.Key =
   MemoryCache.Key("$cacheKey|${pixels.width}x${pixels.height}|$scale")
 
 private const val MAX_IMAGE_MEMORY_BYTES: Int = 128 * 1024 * 1024
@@ -35,21 +35,21 @@ internal fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: 
   require(budget > 0) { "memoryBytes must be positive" }
   return ImageLoader.Builder(context)
     .eventListenerFactory { ImageEvents(stats) }
-    .memoryCache(MemoryCache.Builder(context).maxSizeBytes(budget).build())
+    .memoryCache(MemoryCache.Builder().maxSizeBytes(budget.toLong()).build())
     .components {
-      add(coil.intercept.Interceptor { chain ->
+      add(coil3.intercept.Interceptor { chain ->
         val data = chain.request.data as? MediaImageData
-        if (data == null) return@Interceptor chain.proceed(chain.request)
+        if (data == null) return@Interceptor chain.proceed()
         val declared = data.declared
         val pixels = declared?.let {
-          val width = (chain.size.width as? coil.size.Dimension.Pixels)?.px?.toDouble() ?: 0.0
-          val height = (chain.size.height as? coil.size.Dimension.Pixels)?.px?.toDouble() ?: 0.0
-          pixelSizes.size(width, height, 1.0, it, chain.request.scale == coil.size.Scale.FILL)
-        } ?: data.pixels ?: return@Interceptor chain.proceed(chain.request)
-        val request = chain.request.newBuilder().memoryCacheKey(imageMemoryKey(data.cacheKey, pixels, chain.request.scale)).build()
-        if (declared == null) chain.proceed(request) else chain.withSize(coil.size.Size(pixels.width.toInt(), pixels.height.toInt())).proceed(request)
+          val width = (chain.size.width as? coil3.size.Dimension.Pixels)?.px?.toDouble() ?: 0.0
+          val height = (chain.size.height as? coil3.size.Dimension.Pixels)?.px?.toDouble() ?: 0.0
+          pixelSizes.size(width, height, 1.0, it, chain.request.scale == coil3.size.Scale.FILL)
+        } ?: data.pixels ?: return@Interceptor chain.proceed()
+        val keyed = chain.withRequest(chain.request.newBuilder().memoryCacheKey(imageMemoryKey(data.cacheKey, pixels, chain.request.scale)).build())
+        if (declared == null) keyed.proceed() else keyed.withSize(coil3.size.Size(pixels.width.toInt(), pixels.height.toInt())).proceed()
       })
-      add(ImageDecoderDecoder.Factory())
+      add(AnimatedImageDecoder.Factory())
       add(Keyer<MediaImageData> { data, _ -> data.cacheKey })
       add(object : Fetcher.Factory<MediaImageData> {
         override fun create(data: MediaImageData, options: Options, imageLoader: ImageLoader): Fetcher =
@@ -60,7 +60,7 @@ internal fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: 
               com.noma4i.medialayer.ImageOrigin.CACHE -> DataSource.DISK
               com.noma4i.medialayer.ImageOrigin.LOCAL -> DataSource.MEMORY
             }
-            SourceResult(ImageSource(Buffer().write(result.bytes), options.context), null, source)
+            SourceFetchResult(ImageSource(Buffer().write(result.bytes), options.fileSystem), null, source)
           }
       })
     }

@@ -2,11 +2,13 @@ package com.noma4i.medialayer.ui
 
 import android.content.Context
 import android.graphics.Bitmap
-import androidx.core.graphics.drawable.toBitmap
-import coil.ImageLoader
-import coil.request.ErrorResult
-import coil.request.SuccessResult
-import coil.size.Scale
+import coil3.BitmapImage
+import coil3.toBitmap
+import coil3.ImageLoader
+import coil3.request.ErrorResult
+import coil3.request.SuccessResult
+import coil3.request.allowHardware
+import coil3.size.Scale
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.PixelSize
@@ -31,11 +33,11 @@ suspend fun MediaLayer.image(
   pixels?.let { imageLoader.memoryCache?.get(imageMemoryKey(cacheKey(source.url, source.headers), it, Scale.FILL)) }?.let { hit ->
     imageStats().record(com.noma4i.medialayer.ImageWork.Request(placement.toULong()))
     imageStats().record(com.noma4i.medialayer.ImageWork.Finish(true))
-    return hit.bitmap.softwareCopy()
+    return (hit.image as? BitmapImage)?.bitmap?.softwareCopy()
   }
   val result = try { imageLoader.execute(request) } catch (_: CancellationException) { return null }
   return when (result) {
-    is SuccessResult -> result.drawable.toBitmap()
+    is SuccessResult -> result.image.toBitmap()
     is ErrorResult -> null
   }
 }

@@ -1,5 +1,6 @@
 package com.noma4i.medialayer.ui
 
+import coil3.request.allowHardware
 import kotlinx.coroutines.CompletableDeferred
 import android.content.Context
 import androidx.compose.runtime.Composable

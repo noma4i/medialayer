@@ -1,27 +1,28 @@
 package com.noma4i.medialayer.ui
 
-import android.graphics.drawable.BitmapDrawable
 import android.os.Trace
-import coil.EventListener
-import coil.decode.DataSource
-import coil.decode.DecodeResult
-import coil.decode.Decoder
-import coil.fetch.FetchResult
-import coil.fetch.Fetcher
-import coil.fetch.SourceResult
-import coil.request.ErrorResult
-import coil.request.ImageRequest
-import coil.request.Options
-import coil.request.SuccessResult
+import coil3.BitmapImage
+import coil3.EventListener
+import coil3.getExtra
+import coil3.decode.DataSource
+import coil3.decode.DecodeResult
+import coil3.decode.Decoder
+import coil3.fetch.FetchResult
+import coil3.fetch.Fetcher
+import coil3.fetch.SourceFetchResult
+import coil3.request.ErrorResult
+import coil3.request.ImageRequest
+import coil3.request.Options
+import coil3.request.SuccessResult
 import com.noma4i.medialayer.ImageCounters
 import com.noma4i.medialayer.ImageWork
 
-internal class ImageEvents(private val stats: ImageCounters) : EventListener {
+internal class ImageEvents(private val stats: ImageCounters) : EventListener() {
   private val cookie = System.identityHashCode(this)
   private var decoding = false
 
   override fun onStart(request: ImageRequest) {
-    stats.recordLater(ImageWork.Request((request.parameters.value<Long>("placementPixels") ?: 0L).toULong()))
+    stats.recordLater(ImageWork.Request(request.getExtra(PLACEMENT_PIXELS).toULong()))
     Trace.beginAsyncSection("MediaImage.request", cookie)
   }
 
@@ -32,13 +33,13 @@ internal class ImageEvents(private val stats: ImageCounters) : EventListener {
 
   override fun decodeEnd(request: ImageRequest, decoder: Decoder, options: Options, result: DecodeResult?) {
     endDecode()
-    val drawable = result?.drawable ?: return
-    val bitmap = (drawable as? BitmapDrawable)?.bitmap
-    stats.recordLater(ImageWork.Decode(drawable.intrinsicWidth.coerceAtLeast(0).toUInt(), drawable.intrinsicHeight.coerceAtLeast(0).toUInt(), bitmap?.allocationByteCount?.toULong() ?: 0uL))
+    val image = result?.image ?: return
+    val bitmap = (image as? BitmapImage)?.bitmap
+    stats.recordLater(ImageWork.Decode(image.width.coerceAtLeast(0).toUInt(), image.height.coerceAtLeast(0).toUInt(), bitmap?.allocationByteCount?.toULong() ?: 0uL))
   }
 
   override fun fetchEnd(request: ImageRequest, fetcher: Fetcher, options: Options, result: FetchResult?) {
-    if ((result as? SourceResult)?.dataSource == DataSource.DISK && request.data is MediaImageData) stats.recordLater(ImageWork.DiskHit)
+    if ((result as? SourceFetchResult)?.dataSource == DataSource.DISK && request.data is MediaImageData) stats.recordLater(ImageWork.DiskHit)
   }
 
   override fun onSuccess(request: ImageRequest, result: SuccessResult) = finish(result.dataSource == DataSource.MEMORY_CACHE)

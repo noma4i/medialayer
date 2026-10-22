@@ -2,7 +2,6 @@ package com.noma4i.medialayer.ui
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.drawable.BitmapDrawable
 import android.media.MediaMetadataRetriever
 import com.noma4i.medialayer.MediaItem
 import com.noma4i.medialayer.MediaLayer
@@ -10,12 +9,14 @@ import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.PlaybackRoute
 import com.noma4i.medialayer.TonePixels
 import com.noma4i.medialayer.TonePreparation
-import coil.ImageLoader
-import coil.request.ImageRequest
-import coil.request.SuccessResult
-import coil.size.Scale
-import coil.size.Precision
-import coil.request.CachePolicy
+import coil3.BitmapImage
+import coil3.ImageLoader
+import coil3.request.ImageRequest
+import coil3.request.SuccessResult
+import coil3.size.Scale
+import coil3.size.Precision
+import coil3.request.CachePolicy
+import coil3.request.allowHardware
 import java.lang.ref.WeakReference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -71,7 +72,7 @@ internal class ToneFrames(media: MediaLayer, private val context: Context, priva
       .memoryCachePolicy(CachePolicy.DISABLED)
       .build()
     val result = loader.execute(request) as? SuccessResult ?: return null
-    return (result.drawable as? BitmapDrawable)?.bitmap
+    return (result.image as? BitmapImage)?.bitmap
   }
 
   companion object {

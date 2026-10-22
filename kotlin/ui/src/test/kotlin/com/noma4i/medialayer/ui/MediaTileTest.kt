@@ -1,5 +1,6 @@
 package com.noma4i.medialayer.ui
 
+import coil3.request.allowHardware
 import android.content.Context
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size

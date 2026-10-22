@@ -28,7 +28,7 @@ import androidx.media3.ui.compose.ContentFrame
 import androidx.media3.ui.compose.SURFACE_TYPE_SURFACE_VIEW
 import androidx.media3.common.C
 import androidx.media3.common.Player
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState

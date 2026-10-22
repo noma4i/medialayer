@@ -8,7 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.layout.ContentScale
-import coil.memory.MemoryCache
+import coil3.memory.MemoryCache
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -217,10 +217,10 @@ class MediaComposeTest {
     )
   }
 
-  private fun decodedWidthAndHeight(imageLoader: coil.ImageLoader, key: String): Pair<Int, Int> =
-    imageLoader.memoryCache!!.get(MemoryCache.Key(key))!!.bitmap.let { it.width to it.height }
+  private fun decodedWidthAndHeight(imageLoader: coil3.ImageLoader, key: String): Pair<Int, Int> =
+    imageLoader.memoryCache!!.get(MemoryCache.Key(key))!!.image.let { (it as coil3.BitmapImage).bitmap }.let { it.width to it.height }
 
-  private fun shown(imageLoader: coil.ImageLoader, count: Int) {
+  private fun shown(imageLoader: coil3.ImageLoader, count: Int) {
     val looper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
     rule.waitUntil(5000) { looper.idle(); imageLoader.memoryCache!!.keys.size == count }
   }

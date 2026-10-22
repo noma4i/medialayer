@@ -6,6 +6,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.Composer
+import androidx.compose.runtime.currentComposer
+import androidx.compose.runtime.tooling.CompositionData
+import androidx.compose.runtime.tooling.CompositionGroup
 import androidx.compose.runtime.CompositionTracer
 import androidx.compose.runtime.InternalComposeTracingApi
 import androidx.compose.runtime.mutableStateOf
@@ -107,6 +110,24 @@ class MediaImageCompositionTest {
   }
 
   @Test
+  fun inv_image_41_tilesComposeWithoutRememberingAnImagePainter() {
+    val tiles = 12
+    lateinit var data: CompositionData
+    rule.setContent {
+      data = currentComposer.compositionData
+      MediaLayerProvider(CompletableDeferred(layer), loader) {
+        Column { for (index in 0 until tiles) MediaImage(SizedImage("https://o.test/tile-$index.png"), Modifier.size(10.dp)) }
+      }
+    }
+    rule.waitUntil(5000) { looper.idle(); layer.calls.count { it.startsWith("visible:") && it.endsWith(":true") } == tiles }
+    rule.waitForIdle()
+
+    fun painters(group: CompositionGroup): Int =
+      group.data.count { it?.javaClass?.name?.endsWith(".AsyncImagePainter") == true } + group.compositionGroups.sumOf { painters(it) }
+    assertEquals(0, data.compositionGroups.sumOf { painters(it) })
+  }
+
+  @Test
   fun inv_image_40_imagesCallFfiOnlyForTheCacheKeyOnTheMainThreadAndKeepClaimOrder() {
     val total = 10
     val urls = (0 until total).map { "https://o.test/inv40-$it.png" }
@@ -154,6 +175,7 @@ class MediaImageCompositionTest {
     rule.waitForIdle()
     rule.runOnIdle { shown.value = true }
     rule.waitForIdle()
+    drainFfi()
     assertEquals(2, layer.calls.count { it == "itemState:$url:Ready" })
     assertEquals(1, fetches.get())
   }

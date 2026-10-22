@@ -17,7 +17,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.findViewTreeLifecycleOwner
-import coil.ImageLoader
+import coil3.ImageLoader
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState

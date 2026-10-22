@@ -22,10 +22,11 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import androidx.lifecycle.Lifecycle
-import coil.ImageLoader
-import coil.decode.DataSource
-import coil.fetch.DrawableResult
-import coil.fetch.Fetcher
+import coil3.ImageLoader
+import coil3.decode.DataSource
+import coil3.asImage
+import coil3.fetch.ImageFetchResult
+import coil3.fetch.Fetcher
 import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaSource
 import org.junit.Assert.assertFalse
@@ -62,7 +63,7 @@ class LoadedAnimationVisibilityTest {
     val animation = CountingAnimation()
     val loader = ImageLoader.Builder(context).components {
       add(Fetcher.Factory<MediaImageData> { _, _, _ ->
-        Fetcher { DrawableResult(animation, false, DataSource.NETWORK) }
+        Fetcher { ImageFetchResult(animation.asImage(), false, DataSource.NETWORK) }
       })
     }.build()
     val page = object : MediaSource {
@@ -111,7 +112,7 @@ class LoadedAnimationVisibilityTest {
         Fetcher {
           val animation = CountingAnimation()
           animations.add(animation)
-          DrawableResult(animation, false, DataSource.NETWORK)
+          ImageFetchResult(animation.asImage(), false, DataSource.NETWORK)
         }
       })
     }.build()

@@ -1,11 +1,12 @@
 package com.noma4i.medialayer.ui
 
+import coil3.request.allowHardware
 import android.content.Context
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
-import coil.request.ImageResult
-import coil.request.SuccessResult
-import coil.size.Scale
+import coil3.request.ImageResult
+import coil3.request.SuccessResult
+import coil3.size.Scale
 import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaSource
 import org.junit.Test
@@ -39,8 +40,8 @@ class ImagePixelsTest {
           shadowOf(Looper.getMainLooper()).idle()
           Thread.yield()
         }
-        val drawable = (result as SuccessResult).drawable
-        decodedPixels += drawable.intrinsicWidth.toLong() * drawable.intrinsicHeight
+        val image = (result as SuccessResult).image
+        decodedPixels += image.width.toLong() * image.height
       }
       drainFfi()
       org.junit.Assert.assertEquals("grid_decoded_pixels=$decodedPixels placement_pixels=$placementPixels", 64L * 352 * 626, decodedPixels)

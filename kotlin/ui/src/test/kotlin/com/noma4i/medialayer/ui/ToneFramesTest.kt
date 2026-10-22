@@ -1,5 +1,6 @@
 package com.noma4i.medialayer.ui
 
+import coil3.request.allowHardware
 import kotlinx.coroutines.CompletableDeferred
 import android.content.Context
 import android.graphics.Bitmap
@@ -62,9 +63,9 @@ class ToneFramesTest {
     val urls = java.util.concurrent.CopyOnWriteArrayList<String>()
     val bytes = pngBytes(1080, 1920)
     val imageLoader = mediaImageLoader(context, ImageBytes { url, _ -> urls.add(url); reads.incrementAndGet(); com.noma4i.medialayer.ImageFetchResult(bytes, com.noma4i.medialayer.ImageOrigin.NETWORK) }).newBuilder()
-      .eventListener(object : coil.EventListener {
-        override fun decodeEnd(request: coil.request.ImageRequest, decoder: coil.decode.Decoder, options: coil.request.Options, result: coil.decode.DecodeResult?) {
-          val bitmap = (result?.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap ?: return
+      .eventListener(object : coil3.EventListener() {
+        override fun decodeEnd(request: coil3.request.ImageRequest, decoder: coil3.decode.Decoder, options: coil3.request.Options, result: coil3.decode.DecodeResult?) {
+          val bitmap = (result?.image as? coil3.BitmapImage)?.bitmap ?: return
           assertTrue(!request.allowHardware)
           assertTrue(bitmap.width <= 64 && bitmap.height <= 64)
           decodedBytes.addAndGet(bitmap.allocationByteCount)

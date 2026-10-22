@@ -3,11 +3,13 @@ package com.noma4i.medialayer.ui
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.drawable.ColorDrawable
+import coil3.asImage
+import coil3.request.bitmapConfig
 import androidx.test.core.app.ApplicationProvider
-import coil.decode.DecodeResult
-import coil.decode.Decoder
-import coil.request.SuccessResult
-import coil.size.Scale
+import coil3.decode.DecodeResult
+import coil3.decode.Decoder
+import coil3.request.SuccessResult
+import coil3.size.Scale
 import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.PixelSize
@@ -33,11 +35,11 @@ class MediaImageHardwareTest {
       val request = imageRequest(context, source, PixelSize(64u, 64u), Scale.FILL, { source.url })
         .newBuilder().decoderFactory(Decoder.Factory { _, options, _ ->
           Decoder {
-            config = options.config
-            DecodeResult(ColorDrawable(), false)
+            config = options.bitmapConfig
+            DecodeResult(ColorDrawable().asImage(), false)
           }
         }).build()
-      val completed = AtomicReference<coil.request.ImageResult>()
+      val completed = AtomicReference<coil3.request.ImageResult>()
       loader.enqueue(request.newBuilder().listener(
         onSuccess = { _, result -> completed.set(result) },
         onError = { _, result -> completed.set(result) }
@@ -47,7 +49,7 @@ class MediaImageHardwareTest {
         Thread.yield()
       }
       val result = completed.get()
-      assertTrue((result as? coil.request.ErrorResult)?.throwable.toString(), result is SuccessResult)
+      assertTrue((result as? coil3.request.ErrorResult)?.throwable.toString(), result is SuccessResult)
       println("decoder_bitmap_config=$config")
       assertEquals(Bitmap.Config.HARDWARE, config)
     } finally {

@@ -6,9 +6,10 @@ import android.os.Looper
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.test.core.app.ApplicationProvider
-import coil.memory.MemoryCache
-import coil.request.ImageRequest
-import coil.request.SuccessResult
+import coil3.asImage
+import coil3.memory.MemoryCache
+import coil3.request.ImageRequest
+import coil3.request.SuccessResult
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.PlaybackRoute
 import kotlinx.coroutines.CoroutineScope
@@ -75,7 +76,7 @@ class AndroidShutdownTest {
   fun inv_android_02_close_clears_image_cache() {
     val media = open()
     val loader = media.binding!!.imageLoader
-    loader.memoryCache!![MemoryCache.Key("held")] = MemoryCache.Value(Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888))
+    loader.memoryCache!![MemoryCache.Key("held")] = MemoryCache.Value(Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888).asImage())
     assertTrue(loader.memoryCache!!.size > 0)
     media.close()
     assertEquals(0, loader.memoryCache!!.size)
