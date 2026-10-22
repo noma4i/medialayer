@@ -306,7 +306,7 @@ class NativeViewLifecycleTest {
     rule.waitUntil(5000) { clock.advanceTime(50); looper.idle(); slot.player?.isPlaying == true && control != null }
     rule.runOnIdle { control!!.play() }
 
-    repeat(40) { clock.advanceTime(1000); looper.idle() }
+    rule.waitUntil(30000) { clock.advanceTime(1000); looper.idle(); slot.player!!.playbackState == androidx.media3.common.Player.STATE_ENDED }
     rule.waitForIdle()
 
     assertEquals(androidx.media3.common.Player.STATE_ENDED, slot.player!!.playbackState)
