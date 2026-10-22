@@ -73,6 +73,7 @@ impl LoadGate {
 
 #[derive(Default)]
 pub struct FakeCache {
+    pub before_delete: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
     pub stats: Mutex<cache::CacheStats>,
     pub applied: Mutex<Vec<Limits>>,
     pub cleared: Mutex<Vec<Option<cache::Kind>>>,
@@ -93,10 +94,12 @@ impl CacheControl for FakeCache {
     }
 
     async fn clear(&self, kind: Option<cache::Kind>) {
+        if let Some(check) = &*self.before_delete.lock().unwrap() { check(); }
         self.cleared.lock().unwrap().push(kind);
     }
 
     async fn purge(&self, url: &str) {
+        if let Some(check) = &*self.before_delete.lock().unwrap() { check(); }
         self.purged.lock().unwrap().push(url.to_string());
     }
 
@@ -107,6 +110,13 @@ impl CacheControl for FakeCache {
     async fn contains(&self, key: &str) -> bool {
         self.cached.lock().unwrap().iter().any(|cached| cached == key)
     }
+}
+
+#[async_trait]
+impl super::tones::ToneStore for FakeCache {
+    fn key_for(&self, url: &str, _: &HashMap<String, String>) -> String { url.to_owned() }
+    async fn tone(&self, _: &str) -> Option<crate::analysis::ToneData> { None }
+    async fn set_tone(&self, _: &str, _: crate::analysis::ToneData) -> bool { false }
 }
 
 #[derive(Default)]
@@ -183,7 +193,7 @@ pub struct FakePrefetch {
 }
 
 impl PrefetchControl for FakePrefetch {
-    fn forget_loaded(&self) {
+    fn forget_loaded(&self, _url: Option<&str>) {
         self.forgotten.fetch_add(1, Ordering::SeqCst);
     }
 

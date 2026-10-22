@@ -96,13 +96,17 @@ impl PrefetchLedger {
         self.trim(Duration::ZERO);
     }
 
-    pub fn forget_loaded(&mut self) {
-        for entry in self.entries.values_mut() {
-            *entry = Entry::new(entry.stamp);
+    pub fn forget_loaded(&mut self, url: Option<&str>) {
+        for (key, entry) in &mut self.entries {
+            if url.is_none_or(|url| key == url || key.strip_prefix(url).is_some_and(|suffix| suffix.starts_with('#'))) {
+                self.held_bytes -= entry.held_bytes();
+                *entry = Entry::new(entry.stamp);
+            }
         }
-        self.held_bytes = 0;
-        self.chunk_estimate = 0;
-        self.epoch += 1;
+        if url.is_none() {
+            self.chunk_estimate = 0;
+            self.epoch += 1;
+        }
     }
 
     pub fn dedupe_count(&self) -> usize {

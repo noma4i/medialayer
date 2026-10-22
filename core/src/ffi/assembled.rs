@@ -27,6 +27,7 @@ impl Assembled {
     pub fn new(handle: &Handle, parts: Parts, releaser: Option<Arc<dyn MemoryReleaser>>) -> Assembled {
         let release: Arc<dyn MemoryRelease> = Arc::new(ForeignRelease(releaser));
         let ports = ControlPorts {
+            tones: parts.tones.clone(),
             cache: Arc::new(parts.cache),
             pool: Arc::new(parts.stage.clone()),
             prefetch: Arc::new(parts.prefetcher.clone()),

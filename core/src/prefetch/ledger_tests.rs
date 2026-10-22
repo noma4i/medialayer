@@ -13,6 +13,21 @@ fn ledger() -> PrefetchLedger {
 }
 
 #[test]
+fn inv_cache_28_purge_keeps_other_sources_loaded() {
+    let mut ledger = ledger();
+    for key in ["a", "a#ns:1", "b"] {
+        ledger.needed(key, 1, secs(100), true);
+        ledger.set_plan(key, plan(1));
+        ledger.record_chunk(key, 0, vec![(format!("{key}/chunk"), 10)], None, u64::MAX);
+    }
+    ledger.forget_loaded(Some("a"));
+    assert_eq!(ledger.step("a", 1), super::ledger::NextLoad::NeedPlan);
+    assert_eq!(ledger.step("a#ns:1", 1), super::ledger::NextLoad::NeedPlan);
+    assert_eq!(ledger.step("b", 1), super::ledger::NextLoad::Done);
+    assert_eq!(ledger.held_bytes(), 10);
+}
+
+#[test]
 fn inv_strategy_12_reset_and_expiry_discard_the_hls_plan_and_accounting() {
     for expire in [false, true] {
         let mut ledger = ledger();
@@ -22,7 +37,7 @@ fn inv_strategy_12_reset_and_expiry_discard_the_hls_plan_and_accounting() {
         if expire {
             assert!(ledger.needed("a", 1, secs(160), true));
         } else {
-            ledger.forget_loaded();
+            ledger.forget_loaded(None);
         }
         assert_eq!(ledger.step("a", 1), super::ledger::NextLoad::NeedPlan);
         assert_eq!(ledger.held_bytes(), 0);

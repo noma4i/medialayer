@@ -14,6 +14,7 @@ use tokio::sync::Mutex as AsyncMutex;
 pub const LIMITS_KEY: &str = "medialayer.limits";
 
 pub struct ControlPorts {
+    pub tones: Arc<super::tones::Tones>,
     pub cache: Arc<dyn CacheControl>,
     pub pool: Arc<dyn PoolControl>,
     pub prefetch: Arc<dyn PrefetchControl>,
@@ -98,9 +99,9 @@ impl Controls {
     }
 
     pub async fn clear(&self, kind: Option<Kind>) {
+        self.ports.prefetch.forget_loaded(None);
         self.ports.cache.clear(kind.map(Into::into)).await;
         self.ports.transport.forget_playlists(None);
-        self.ports.prefetch.forget_loaded();
         if matches!(kind, None | Some(Kind::Image)) {
             let release = self.ports.release.clone();
             let _ = tokio::task::spawn_blocking(move || release.drop_caches()).await;
@@ -109,9 +110,10 @@ impl Controls {
     }
 
     pub async fn purge(&self, url: &str) {
+        self.ports.prefetch.forget_loaded(Some(url));
+        self.ports.tones.forget(url);
         self.ports.cache.purge(url).await;
         self.ports.transport.forget_playlists(Some(url));
-        self.ports.prefetch.forget_loaded();
         self.publish_stats().await;
     }
 

@@ -33,7 +33,7 @@ impl Fetcher for Origin {
 }
 
 #[tokio::test]
-async fn inv_proxy_06_chunk_work_counts_identical_bytes() {
+async fn inv_cache_25_chunks_flush_only_at_commit() {
     const BYTES: usize = 256 * 1024;
     for chunk in [1024, 64 * 1024] {
         let directory = tempfile::tempdir().unwrap();
@@ -50,7 +50,9 @@ async fn inv_proxy_06_chunk_work_counts_identical_bytes() {
         let writes = counts.0.load(Ordering::Relaxed);
         let flushes = counts.1.load(Ordering::Relaxed);
         eprintln!("chunk={chunk} bytes={BYTES} ffi_next_chunk={calls} write_all={writes} flush={flushes}");
+        eprintln!("copied_bytes={} reservation_checks={}", cache.inner.copied_bytes.load(Ordering::Relaxed), cache.inner.reservation_checks.load(Ordering::Relaxed));
         assert_eq!(cache.get("video").await.unwrap(), vec![23; BYTES]);
-        assert_eq!((calls, writes, flushes), (BYTES / chunk + 1, BYTES / chunk, BYTES / chunk + 1));
+        assert_eq!((calls, writes, flushes), (BYTES / chunk + 1, BYTES / chunk, 1));
+        assert_eq!(cache.inner.reservation_checks.load(Ordering::Relaxed), 1);
     }
 }

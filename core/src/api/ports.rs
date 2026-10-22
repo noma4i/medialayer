@@ -37,7 +37,7 @@ pub trait TransportControl: Send + Sync {
 
 pub trait PrefetchControl: Send + Sync {
     fn stop(&self);
-    fn forget_loaded(&self);
+    fn forget_loaded(&self, url: Option<&str>);
     fn set_limits(&self, limits: &Limits);
 }
 

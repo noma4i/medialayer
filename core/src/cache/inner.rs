@@ -18,6 +18,20 @@ const STRIPES: usize = 16;
 
 pub struct CacheShared {
     #[cfg(test)]
+    pub copied_bytes: AtomicU64,
+    #[cfg(test)]
+    pub reservation_checks: AtomicU64,
+    #[cfg(test)]
+    pub read_jobs: AtomicU64,
+    #[cfg(test)]
+    pub read_allocations: AtomicU64,
+    #[cfg(test)]
+    pub index_bytes: AtomicU64,
+    #[cfg(test)]
+    pub load_stats: AtomicU64,
+    #[cfg(test)]
+    pub scans: AtomicU64,
+    #[cfg(test)]
     pub read_opens: AtomicU64,
     #[cfg(test)]
     pub persist_attempts: AtomicU64,
@@ -41,7 +55,7 @@ pub struct CacheShared {
     pub dirty: AtomicBool,
     pub persisting: AtomicBool,
     pub evicting: AtomicBool,
-    pub persist_lock: tokio::sync::Mutex<String>,
+    pub persist_lock: tokio::sync::Mutex<super::save::SavedIndex>,
     pub generation: AtomicU64,
     state: Mutex<State>,
     stripes: Vec<Arc<tokio::sync::Mutex<()>>>,
@@ -49,7 +63,23 @@ pub struct CacheShared {
 
 impl CacheShared {
     pub fn new(dir: PathBuf, limits: Limits, options: super::options::Options, handle: Handle, available_bytes: u64) -> CacheShared {
+        let mut state = State::new(super::reservation::limits_for_disk(limits, available_bytes));
+        state.configure_order(&options.overrides);
         CacheShared {
+            #[cfg(test)]
+            copied_bytes: AtomicU64::new(0),
+            #[cfg(test)]
+            reservation_checks: AtomicU64::new(0),
+            #[cfg(test)]
+            read_jobs: AtomicU64::new(0),
+            #[cfg(test)]
+            read_allocations: AtomicU64::new(0),
+            #[cfg(test)]
+            index_bytes: AtomicU64::new(0),
+            #[cfg(test)]
+            load_stats: AtomicU64::new(0),
+            #[cfg(test)]
+            scans: AtomicU64::new(0),
             #[cfg(test)]
             read_opens: AtomicU64::new(0),
             #[cfg(test)]
@@ -74,9 +104,9 @@ impl CacheShared {
             dirty: AtomicBool::new(false),
             persisting: AtomicBool::new(false),
             evicting: AtomicBool::new(false),
-            persist_lock: tokio::sync::Mutex::new(String::new()),
+            persist_lock: tokio::sync::Mutex::new(super::save::SavedIndex::default()),
             generation: AtomicU64::new(0),
-            state: Mutex::new(State::new(super::reservation::limits_for_disk(limits, available_bytes))),
+            state: Mutex::new(state),
             stripes: (0..STRIPES).map(|_| Arc::new(tokio::sync::Mutex::new(()))).collect(),
         }
     }
@@ -130,6 +160,8 @@ impl Drop for StateGuard<'_> {
 const SCAN_CHUNK: usize = 1000;
 
 pub async fn scan(inner: &CacheShared) -> Vec<Item> {
+    #[cfg(test)]
+    inner.scans.fetch_add(1, Ordering::Relaxed);
     let mut items = Vec::new();
     let mut after: Option<String> = None;
     loop {

@@ -18,10 +18,6 @@ pub fn hex_decode_bytes(hex: &str) -> Option<Vec<u8>> {
     (0..hex.len()).step_by(2).map(|at| u8::from_str_radix(&hex[at..at + 2], 16).ok()).collect()
 }
 
-pub fn hex_decode(hex: &str) -> Option<String> {
-    String::from_utf8(hex_decode_bytes(hex)?).ok()
-}
-
 pub fn file_name(key: &str) -> String {
     #[cfg(test)]
     NAME_HASHES.with(|count| count.set(count.get() + 1));

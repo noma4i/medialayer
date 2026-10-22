@@ -1,5 +1,7 @@
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CacheError {
+    #[error("writer was purged")]
+    Purged,
     #[error("not enough space in the cache")]
     NotEnoughSpace,
     #[error("io error: {0}")]

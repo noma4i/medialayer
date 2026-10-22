@@ -193,6 +193,6 @@ async fn inv_cache_05_reads_count_hits_for_lfu() {
     f.touch("k").await;
     f.cache.flush().await.unwrap();
     let text = std::fs::read_to_string(f.dir.path().join("index.tsv")).unwrap();
-    let line = text.lines().next().unwrap();
-    assert_eq!(super::persist::decode_line(line).unwrap().1.hits, 2);
+    let record = text.lines().filter_map(super::persist::decode_line).last().unwrap();
+    assert_eq!(record.1.hits, 2);
 }

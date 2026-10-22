@@ -85,3 +85,20 @@ async fn inv_cache_02_a_begin_write_cancelled_at_any_microsecond_leaves_no_part_
     assert_eq!(f.cache.stats().await.open_writers, 0);
     assert_eq!(files_with_suffix(f.dir.path(), ".part"), 0, "cancelled begin_write calls left part files");
 }
+#[tokio::test]
+async fn inv_cache_27_purge_prevents_late_writer_commit() {
+    for prefix in [false, true] {
+        let f = super::test_support::fixture(crate::limits::Limits::default(), &[]).await;
+        let mut writer = f.cache.begin_write("clip#0", super::Kind::Stream).await.unwrap();
+        writer.write(b"stale").await.unwrap();
+        if prefix {
+            f.cache.purge_prefix("clip#").await;
+        } else {
+            f.cache.clear(None).await;
+        }
+        assert_eq!(writer.commit().await, Err(super::CacheError::Purged));
+        assert!(!f.cache.contains("clip#0").await);
+        f.cache.put("clip#0", super::Kind::Stream, b"fresh").await.unwrap();
+        assert_eq!(f.cache.get("clip#0").await.as_deref(), Some(b"fresh".as_slice()));
+    }
+}

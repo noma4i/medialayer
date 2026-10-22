@@ -1,11 +1,43 @@
-use super::naming::{hex_decode, hex_encode};
+use super::naming::{hex_decode_bytes, hex_encode};
 use super::persist::{decode_line, encode_line};
 use super::*;
 use crate::cache::entry::Entry;
 use crate::proxy::Meta;
 
+#[tokio::test]
+async fn inv_cache_23_incremental_save_writes_only_changed_records() {
+    let f = super::test_support::fixture(crate::limits::Limits::default(), &[]).await;
+    for index in 0..100 {
+        f.cache.put(&format!("https://cache.test/{index}"), Kind::Image, b"x").await.unwrap();
+    }
+    f.cache.flush().await.unwrap();
+    let before = f.cache.inner.index_bytes.load(std::sync::atomic::Ordering::Relaxed);
+    f.cache.put("https://cache.test/0", Kind::Image, b"changed").await.unwrap();
+    let name = super::naming::file_name("https://cache.test/0");
+    let entry = f.cache.inner.state().slot(&name).unwrap().entry.clone();
+    let mut record = String::new();
+    encode_line("https://cache.test/0", &entry, &mut record);
+    f.cache.flush().await.unwrap();
+    let written = f.cache.inner.index_bytes.load(std::sync::atomic::Ordering::Relaxed) - before;
+    eprintln!("changed_record_bytes={} index_written={written}", record.len());
+    assert!(written <= record.len() as u64, "unchanged records were rewritten");
+}
+
+#[tokio::test]
+async fn inv_cache_24_unknown_index_version_discards_entries() {
+    let f = super::test_support::fixture(crate::limits::Limits::default(), &[]).await;
+    f.cache.put("clip", Kind::Stream, b"data").await.unwrap();
+    f.cache.flush().await.unwrap();
+    let path = f.dir.path().join(super::naming::INDEX_FILE);
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, format!("unknown-version\n{text}")).unwrap();
+    let reopened = Cache::open(f.dir.path(), crate::limits::Limits::default(), u64::MAX);
+    reopened.ready().await;
+    assert!(!reopened.contains("clip").await);
+}
+
 fn sample(meta: Meta) -> Entry {
-    Entry { check: super::entry::Check::Legacy, size: 42, kind: Kind::Stream, created: 7, last_access: 9, hits: 3, meta, tone: None }
+    Entry { check: super::entry::Check::Sum(0), size: 42, kind: Kind::Stream, created: 7, last_access: 9, hits: 3, meta, tone: None }
 }
 
 #[test]
@@ -39,8 +71,8 @@ fn inv_cache_14_malformed_lines_are_rejected() {
 
 #[test]
 fn inv_cache_14_hex_names_round_trip() {
-    assert_eq!(hex_decode(&hex_encode("a/b c")), Some("a/b c".to_string()));
-    assert_eq!(hex_decode("abc"), None);
+    assert_eq!(hex_decode_bytes(&hex_encode("a/b c")), Some(b"a/b c".to_vec()));
+    assert_eq!(hex_decode_bytes("abc"), None);
 }
 
 fn toned(level: u8) -> Entry {

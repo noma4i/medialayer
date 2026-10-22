@@ -43,7 +43,16 @@ impl Reader {
     pub async fn get_range(&self, start: u64, len: u64) -> Option<Vec<u8>> {
         let file = self.file.clone();
         let wanted = len.min(self.size.saturating_sub(start));
-        tokio::task::spawn_blocking(move || super::byte_store::read_at(&file, start, wanted)).await.ok()?
+        #[cfg(test)]
+        let counting = self._pin.as_ref().map(|pin| pin.inner.clone());
+        tokio::task::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(inner) = &counting {
+                inner.read_jobs.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                inner.read_allocations.fetch_add(u64::from(wanted > 0), std::sync::atomic::Ordering::Relaxed);
+            }
+            super::byte_store::read_at(&file, start, wanted)
+        }).await.ok()?
     }
 
     pub fn len(&self) -> u64 {

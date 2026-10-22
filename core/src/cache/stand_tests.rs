@@ -45,6 +45,7 @@ async fn lane(cache: Cache, mut dice: Dice, vary_budget: bool, torn: Arc<AtomicU
                 let value = sealed(&mut dice);
                 match cache.put(&key, Kind::Stream, &value).await {
                     Ok(()) => {}
+                    Err(CacheError::Purged) => {}
                     Err(CacheError::NotEnoughSpace) => {
                         refused.fetch_add(1, Ordering::SeqCst);
                     }

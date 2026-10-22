@@ -56,8 +56,10 @@ async fn inv_cache_07_last_owner_drop_saves_changes_after_the_snapshot() {
     drop(f.cache);
     resume.send(()).unwrap();
     wait_until(|| owner.upgrade().is_none()).await;
-    let index = std::fs::read_to_string(f.dir.path().join(super::naming::INDEX_FILE)).unwrap();
-    assert_eq!(index.lines().count(), 2, "the mutation after the snapshot was lost");
+    let reopened = Cache::open(f.dir.path(), Limits::default(), u64::MAX);
+    reopened.ready().await;
+    assert_eq!(reopened.get(keys[1]).await.as_deref(), Some(b"a".as_slice()));
+    assert_eq!(reopened.get(keys[0]).await.as_deref(), Some(b"b".as_slice()));
 }
 
 #[tokio::test]
@@ -112,6 +114,7 @@ async fn inv_cache_17_cold_read_reuses_the_file_opened_for_verification() {
     }
     assert_eq!(cache.inner.hashed_bytes.load(Ordering::Relaxed), 4);
     assert_eq!(cache.inner.read_opens.load(Ordering::Relaxed), 2);
+    eprintln!("cold_then_warm opens={} hash_bytes={} read_jobs={} read_allocations={}", cache.inner.read_opens.load(Ordering::Relaxed), cache.inner.hashed_bytes.load(Ordering::Relaxed), cache.inner.read_jobs.load(Ordering::Relaxed), cache.inner.read_allocations.load(Ordering::Relaxed));
 }
 
 #[test]

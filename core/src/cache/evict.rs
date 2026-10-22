@@ -1,9 +1,7 @@
-use super::entry::{Entry, Kind};
+use super::entry::Kind;
 use super::inner::{scan, CacheShared};
 use super::naming::bin_path;
-use super::policy::victim_order;
 use super::save::mark_dirty;
-use super::state::Item;
 use crate::limits::eviction_target;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -56,34 +54,26 @@ pub async fn evict_to(inner: &Arc<CacheShared>, target: u64) -> usize {
     if !over(inner, target) {
         return 0;
     }
-    let candidates = scan(inner).await;
-    let (default, now) = (inner.state().limits.strategy, inner.now());
-    let (kept, others): (Vec<_>, Vec<_>) = candidates.into_iter().filter(|item| !item.protected).partition(|item| item.kept);
-    let pairs = |items: Vec<Item>| -> Vec<(String, Entry)> { items.into_iter().map(|item| (item.name, item.entry)).collect() };
-    let (others, kept) = (pairs(others), pairs(kept));
-    let overrides = inner.overrides.clone();
-    let priority = inner.kind_priority;
-    let ordered = tokio::task::spawn_blocking(move || {
-        let mut order = victim_order(others, default, &overrides, &priority, now);
-        order.extend(victim_order(kept, default, &overrides, &priority, now));
-        order
-    })
-    .await;
-    let Ok(order) = ordered else { return 0 };
-    inner.eviction_backlog.store(order.len() as u64, Ordering::Relaxed);
     let _backlog = BacklogReset(&inner.eviction_backlog);
     let mut evicted = 0;
-    for (position, name) in order.iter().enumerate() {
-        if !over(inner, target) {
+    let mut excluded = std::collections::HashSet::new();
+    while over(inner, target) {
+        let order = inner.state().order.candidates(&inner.kind_priority, YIELD_EVERY, &excluded);
+        if order.is_empty() {
             break;
         }
-        if evict_one(inner, name).await {
-            evicted += 1;
+        inner.eviction_backlog.store(order.len() as u64, Ordering::Relaxed);
+        for (name, version) in order {
+            if !over(inner, target) {
+                break;
+            }
+            if evict_one(inner, &name, version).await {
+                evicted += 1;
+            } else {
+                excluded.insert((name, version));
+            }
         }
-        inner.eviction_backlog.store((order.len() - position - 1) as u64, Ordering::Relaxed);
-        if (position + 1).is_multiple_of(YIELD_EVERY) {
-            tokio::task::yield_now().await;
-        }
+        tokio::task::yield_now().await;
     }
     if evicted > 0 {
         mark_dirty(inner);
@@ -91,26 +81,37 @@ pub async fn evict_to(inner: &Arc<CacheShared>, target: u64) -> usize {
     evicted
 }
 
-async fn evict_one(inner: &Arc<CacheShared>, name: &str) -> bool {
+async fn evict_one(inner: &Arc<CacheShared>, name: &str, version: u64) -> bool {
     let _stripe = inner.stripe(name).lock().await;
     {
-        let mut state = inner.state();
-        if state.is_protected(name) || state.take(name).is_none() {
+        let state = inner.state();
+        if state.is_protected(name) || !state.slot(name).is_some_and(|slot| slot.version == version) {
             return false;
         }
-        state.evictions += 1;
     }
-    let _ = tokio::fs::remove_file(bin_path(&inner.dir, name)).await;
+    if !unlink(inner, name).await {
+        return false;
+    }
+    let mut state = inner.state();
+    state.take(name);
+    state.evictions += 1;
     true
+}
+
+pub(super) async fn unlink(inner: &CacheShared, name: &str) -> bool {
+    match tokio::fs::remove_file(bin_path(&inner.dir, name)).await {
+        Ok(()) => true,
+        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+    }
 }
 
 pub async fn remove_names(inner: &Arc<CacheShared>, names: Vec<String>) -> usize {
     let mut removed = 0;
     for (position, name) in names.iter().enumerate() {
         let _stripe = inner.stripe(name).lock().await;
-        let taken = inner.state().take(name).is_some();
-        if taken {
-            let _ = tokio::fs::remove_file(bin_path(&inner.dir, name)).await;
+        let present = inner.state().contains(name);
+        if present && unlink(inner, name).await {
+            inner.state().take(name);
             removed += 1;
         }
         if (position + 1).is_multiple_of(YIELD_EVERY) {

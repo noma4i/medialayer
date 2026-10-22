@@ -285,13 +285,13 @@ impl Prefetcher {
         self.resume();
     }
 
-    pub fn forget_loaded(&self) {
+    pub fn forget_loaded(&self, url: Option<&str>) {
         let mut state = self.shared.state();
-        let keys: Vec<String> = state.running.keys().cloned().collect();
+        let keys: Vec<String> = state.running.iter().filter(|(_, job)| url.is_none_or(|url| job.url == url)).map(|(key, _)| key.clone()).collect();
         for key in keys {
             state.cancel_job(&key);
         }
-        state.ledger.forget_loaded();
+        state.ledger.forget_loaded(url);
     }
 
     pub fn stop_all(&self) {

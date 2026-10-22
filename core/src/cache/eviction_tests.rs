@@ -2,6 +2,55 @@ use super::test_support::*;
 use super::*;
 use crate::limits::EvictionStrategy;
 
+#[tokio::test]
+async fn inv_cache_21_eviction_avoids_full_scans() {
+    let f = three_of_thirty(EvictionStrategy::Lru).await;
+    f.cache.inner.scans.store(0, std::sync::atomic::Ordering::Relaxed);
+    super::evict::evict_to(&f.cache.inner, 60).await;
+    assert_eq!(f.cache.inner.scans.load(std::sync::atomic::Ordering::Relaxed), 0);
+}
+
+#[tokio::test]
+async fn inv_cache_30_selected_version_survives_replacement() {
+    let f = three_of_thirty(EvictionStrategy::Lru).await;
+    let name = super::naming::file_name("a");
+    let guard = f.cache.inner.stripe(&name).lock().await;
+    let cache = f.cache.clone();
+    let task = tokio::spawn(async move { super::evict::evict_to(&cache.inner, 60).await });
+    wait_until(|| f.cache.inner.eviction_backlog.load(std::sync::atomic::Ordering::Relaxed) > 0).await;
+    {
+        let mut state = f.cache.inner.state();
+        let mut entry = state.slot(&name).unwrap().entry.clone();
+        entry.last_access += 100;
+        state.insert(name.clone(), "a".into(), entry, true);
+    }
+    drop(guard);
+    task.await.unwrap();
+    assert_eq!(f.cache.get("a").await, Some(payload(30)));
+}
+
+#[tokio::test]
+async fn inv_cache_20_failed_unlink_retains_accounting() {
+    for eviction in [false, true] {
+        let f = fixture(limits(100, 0.8, EvictionStrategy::Lru), &[]).await;
+        f.put("a", Kind::Image, 30).await;
+        let path = super::naming::bin_path(f.dir.path(), &super::naming::file_name("a"));
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        if eviction {
+            super::evict::evict_to(&f.cache.inner, 0).await;
+        } else {
+            assert!(!f.cache.remove("a").await);
+        }
+        assert_eq!(f.cache.stats().await.total_bytes, 30);
+        assert_eq!(f.cache.stats().await.evictions, 0);
+        std::fs::remove_dir(&path).unwrap();
+        std::fs::write(&path, payload(30)).unwrap();
+        assert!(f.cache.remove("a").await);
+        assert_eq!(f.cache.stats().await.total_bytes, 0);
+    }
+}
+
 async fn three_of_thirty(strategy: EvictionStrategy) -> Fixture {
     let f = fixture(limits(100, 0.8, strategy), &[]).await;
     for key in ["a", "b", "c"] {

@@ -202,6 +202,17 @@ impl Tones {
         for key in keys { self.request(&key); }
     }
 
+    pub fn forget(&self, url: &str) {
+        let matches = |key: &str| key == url || key.strip_prefix(url).is_some_and(|suffix| suffix.starts_with('#'));
+        locked(&self.demands).retain(|_, demand| demand.source.url != url);
+        for (key, abort) in locked(&self.running).iter() {
+            if matches(key) { abort.abort(); }
+        }
+        let mut memo = locked(&self.memo);
+        memo.tones.retain(|key, _| !matches(key));
+        memo.order.retain(|key| !matches(key));
+    }
+
     fn request(self: &Arc<Self>, key: &str) {
         let Some(source) = locked(&self.demands).get(key).map(|demand| demand.source.clone()) else { return };
         let Some(preparation) = locked(&self.preparation).clone() else { return };

@@ -11,6 +11,27 @@ use std::sync::Arc;
 
 const MIB: u64 = 1024 * 1024;
 
+#[tokio::test]
+async fn inv_cache_26_saved_budget_applies_before_startup_eviction() {
+    let dir = tempfile::tempdir().unwrap();
+    let saved = Limits { budget: 100, min_budget: 1, ..Limits::default() };
+    let cache = Cache::open(dir.path(), saved, u64::MAX);
+    cache.ready().await;
+    for key in ["a", "b", "c"] {
+        cache.put(key, cache::Kind::Image, &[1; 30]).await.unwrap();
+    }
+    cache.flush().await.unwrap();
+    let settings = shared::<FakeSettings>();
+    settings.values.lock().unwrap().insert(super::controls::LIMITS_KEY.into(), saved.encode());
+    let mut config = assembly(dir.path(), Arc::new(MockFetcher::new()), shared::<MockFactory>());
+    config.settings = settings;
+    config.defaults = Limits { budget: 60, ..saved };
+    let parts = assemble(config).await.unwrap();
+    parts.cache.ready().await;
+    parts.cache.evict_now().await;
+    assert_eq!(parts.cache.stats().await.total_bytes, 90);
+}
+
 #[test]
 fn inv_api_09_ceiling_is_the_smaller_of_the_option_and_the_device_share() {
     let low = DeviceMemory { total_mb: 100, heap_class_mb: None, low_ram: true };

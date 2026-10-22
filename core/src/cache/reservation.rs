@@ -13,32 +13,51 @@ pub fn limits_for_disk(mut limits: crate::limits::Limits, available_bytes: u64) 
 pub struct SpaceReservation {
     inner: Arc<CacheShared>,
     held: u64,
+    written: u64,
+    step: u64,
 }
 
 impl SpaceReservation {
     pub fn new(inner: Arc<CacheShared>) -> SpaceReservation {
-        SpaceReservation { inner, held: 0 }
+        let budget = inner.state().limits.budget;
+        let block = super::store::WRITE_CHUNK as u64;
+        let step = if budget >= block { block } else { 1 };
+        SpaceReservation { inner, held: 0, written: 0, step }
     }
 
-    pub fn held(&self) -> u64 {
-        self.held
+    pub fn written(&self) -> u64 {
+        self.written
     }
 
     pub async fn grow(&mut self, len: u64) -> Result<(), CacheError> {
+        let next = self.written.checked_add(len).ok_or(CacheError::NotEnoughSpace)?;
+        if next <= self.held {
+            self.written = next;
+            return Ok(());
+        }
+        let needed = next - self.held;
+        let desired = needed.max(self.step);
         for attempt in 0..2 {
             let limits = {
+                #[cfg(test)]
+                self.inner.reservation_checks.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let mut state = self.inner.state();
                 let limits = state.limits;
-                if state.used + state.retained_bytes + state.reserved + len <= limits.budget {
-                    state.reserved += len;
-                    self.held += len;
+                let available = limits.budget.saturating_sub(state.used + state.retained_bytes + state.reserved);
+                if available >= needed {
+                    let grant = desired.min(available);
+                    state.reserved += grant;
+                    self.held += grant;
+                    self.written = next;
                     return Ok(());
                 }
                 limits
             };
             if attempt == 0 {
                 let shrunk = eviction_target(&limits, limits.budget).unwrap_or(limits.budget);
-                evict_to(&self.inner, shrunk.min(limits.budget.saturating_sub(len))).await;
+                let target = shrunk.min(limits.budget.saturating_sub(needed));
+                let inner = self.inner.clone();
+                let _ = self.inner.handle.spawn(async move { evict_to(&inner, target).await }).await;
             }
         }
         Err(CacheError::NotEnoughSpace)

@@ -10,9 +10,22 @@ use tokio::runtime::Handle;
 
 const MIB: u64 = 1024 * 1024;
 
+#[tokio::test]
+async fn inv_cache_27_controls_cancel_before_deleting() {
+    for purge in [false, true] {
+        let rig = rig_with_saved(None);
+        let prefetch = rig.prefetch.clone();
+        *rig.cache.before_delete.lock().unwrap() = Some(Box::new(move || {
+            assert_eq!(prefetch.forgotten.load(Ordering::SeqCst), 1);
+        }));
+        if purge { rig.controls.purge("clip").await; } else { rig.controls.clear(None).await; }
+    }
+}
+
 const DEVICE: DeviceMemory = DeviceMemory { total_mb: 8192, heap_class_mb: None, low_ram: false };
 
 struct Rig {
+    tones: Arc<super::tones::Tones>,
     cache: Arc<FakeCache>,
     pool: Arc<FakePool>,
     prefetch: Arc<FakePrefetch>,
@@ -38,7 +51,9 @@ fn rig_on(settings: Arc<FakeSettings>) -> Rig {
     let transport: Arc<FakeTransport> = shared();
     let release: Arc<FakeRelease> = shared();
     let ledger = Ledger::new(effective_ceiling(Limits::default().memory_budget, DEVICE, ShareTuning::default()));
+    let tones = super::tones::Tones::new(Handle::current(), cache.clone(), super::tones::MEMO_ENTRIES);
     let ports = ControlPorts {
+        tones: tones.clone(),
         cache: cache.clone(),
         pool: pool.clone(),
         prefetch: prefetch.clone(),
@@ -50,7 +65,20 @@ fn rig_on(settings: Arc<FakeSettings>) -> Rig {
         release: release.clone(),
     };
     let controls = Controls::new(Handle::current(), ports, Limits::default(), crate::change::Change::new());
-    Rig { cache, pool, prefetch, transport, settings, release, ledger, controls }
+    Rig { tones, cache, pool, prefetch, transport, settings, release, ledger, controls }
+}
+
+#[tokio::test]
+async fn inv_cache_29_purge_forgets_only_the_source_tone() {
+    let rig = rig_with_saved(None);
+    for url in ["https://o.test/a.jpg", "https://o.test/b.jpg"] {
+        let mut source = MediaItem::bare(url, Kind::Image);
+        source.blur_hash = Some("LEHV6nWB2yk8pyo0adR*.7kCMdnj".into());
+        assert!(rig.tones.tone(&source, 0.5).await.unwrap().is_some());
+    }
+    rig.controls.purge("https://o.test/a.jpg").await;
+    assert!(rig.tones.tone(&MediaItem::bare("https://o.test/a.jpg", Kind::Image), 0.5).await.unwrap().is_none());
+    assert!(rig.tones.tone(&MediaItem::bare("https://o.test/b.jpg", Kind::Image), 0.5).await.unwrap().is_some());
 }
 
 fn smaller_budget() -> Limits {

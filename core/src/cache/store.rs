@@ -17,7 +17,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
-const WRITE_CHUNK: usize = 1024 * 1024;
+pub(super) const WRITE_CHUNK: usize = 1024 * 1024;
 
 #[derive(Clone)]
 pub struct Cache {
@@ -115,18 +115,21 @@ impl Cache {
 
     pub async fn remove(&self, key: &str) -> bool {
         self.ready().await;
+        self.inner.state().invalidate_writers(|writing, _| writing == key);
         remove_names(&self.inner, vec![file_name(key)]).await == 1
     }
 
     pub async fn purge_prefix(&self, prefix: &str) -> usize {
         self.ready().await;
-        let names = names_where(&self.inner, |key, _| key.starts_with(prefix)).await;
+        let mut names = self.inner.state().invalidate_writers(|key, _| key.starts_with(prefix));
+        names.extend(names_where(&self.inner, |key, _| key.starts_with(prefix)).await);
         remove_names(&self.inner, names).await
     }
 
     pub async fn clear(&self, kind: Option<Kind>) -> usize {
         self.ready().await;
-        let names = names_where(&self.inner, |_, entry_kind| kind.is_none_or(|wanted| entry_kind == wanted)).await;
+        let mut names = self.inner.state().invalidate_writers(|_, writing_kind| kind.is_none_or(|wanted| wanted == writing_kind));
+        names.extend(names_where(&self.inner, |_, entry_kind| kind.is_none_or(|wanted| entry_kind == wanted)).await);
         remove_names(&self.inner, names).await
     }
 
@@ -139,7 +142,11 @@ impl Cache {
 
     pub async fn set_limits(&self, limits: Limits) -> Result<(), LimitsError> {
         limits.validate()?;
-        self.inner.state().limits = super::reservation::limits_for_disk(limits, self.inner.available_bytes);
+        {
+            let mut state = self.inner.state();
+            state.limits = super::reservation::limits_for_disk(limits, self.inner.available_bytes);
+            state.configure_order(&self.inner.overrides);
+        }
         evict_if_needed(&self.inner).await;
         Ok(())
     }

@@ -31,7 +31,6 @@ impl Kind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Check {
-    Legacy,
     Sum(u64),
 }
 

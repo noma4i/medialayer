@@ -7,6 +7,17 @@ fn roomy() -> crate::limits::Limits {
 }
 
 #[tokio::test]
+async fn inv_cache_22_startup_defers_file_metadata_until_read() {
+    let f = fixture(roomy(), &[]).await;
+    f.put("k", Kind::Stream, 30).await;
+    f.cache.flush().await.unwrap();
+    let cache = Cache::open(f.dir.path(), roomy(), u64::MAX);
+    cache.ready().await;
+    assert_eq!(cache.inner.load_stats.load(std::sync::atomic::Ordering::Relaxed), 0);
+    assert_eq!(cache.get("k").await, Some(payload(30)));
+}
+
+#[tokio::test]
 async fn inv_cache_07_index_survives_a_reopen() {
     let f = fixture(roomy(), &[]).await;
     f.put("k", Kind::Audio, 25).await;
@@ -111,7 +122,7 @@ async fn inv_cache_17_a_damaged_file_is_never_served_and_is_dropped_on_first_tou
 }
 
 #[tokio::test]
-async fn inv_cache_17_legacy_entries_are_checked_on_first_touch_and_get_a_checksum() {
+async fn inv_cache_24_unversioned_entries_are_discarded() {
     let dir = tempfile::tempdir().unwrap();
     let mut index = String::new();
     for (key, indexed, on_disk) in [("fine", 100usize, 100usize), ("short", 100, 40), ("other", 60, 60)] {
@@ -122,17 +133,11 @@ async fn inv_cache_17_legacy_entries_are_checked_on_first_touch_and_get_a_checks
     let cache = Cache::open(dir.path(), roomy(), u64::MAX);
     cache.ready().await;
 
-    assert!(cache.get("fine").await == Some(vec![b'q'; 100]));
+    assert!(cache.get("fine").await.is_none());
     assert!(!cache.contains("short").await);
-    assert_eq!(cache.stats().await.file_count, 2);
+    assert_eq!(cache.stats().await.file_count, 0);
     cache.flush().await.unwrap();
 
     let saved = std::fs::read_to_string(dir.path().join("index.tsv")).unwrap();
-    let sum_of = |key: &str| {
-        let prefix = super::naming::hex_encode(key);
-        saved.lines().find(|line| line.starts_with(&prefix)).map(|line| line.split('\t').nth(8).unwrap_or_default().to_string())
-    };
-    assert!(sum_of("fine").is_some_and(|sum| !sum.is_empty()));
-    assert_eq!(sum_of("other"), Some(String::new()));
-    assert_eq!(sum_of("short"), None);
+    assert_eq!(saved, super::persist::HEADER);
 }

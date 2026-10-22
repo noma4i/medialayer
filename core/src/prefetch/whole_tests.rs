@@ -25,6 +25,18 @@ fn whole(url: &str, kind: SourceKind) -> Source {
 }
 
 #[tokio::test]
+async fn inv_cache_28_purge_cancels_only_the_requested_source() {
+    let rig = rig();
+    rig.loader.hang_all();
+    for url in ["https://o.test/a.jpg", "https://o.test/b.jpg"] {
+        rig.prefetcher.keep_whole(whole(url, SourceKind::Image));
+    }
+    eventually(|| rig.loader.active() == 2).await;
+    rig.prefetcher.forget_loaded(Some("https://o.test/a.jpg"));
+    assert_eq!(rig.prefetcher.counters().cancelled, 1);
+}
+
+#[tokio::test]
 async fn inv_strategy_01_window_then_whole_loads_the_remaining_bytes() {
     let rig = super::runner_tests::rig_with(|limits| {
         limits.prefetch_from = 0;
@@ -97,7 +109,7 @@ async fn inv_strategy_12_reset_cancels_work_before_a_new_declaration() {
     rig.loader.hang(clip);
     rig.prefetcher.keep_whole(whole(clip, SourceKind::Video));
     rig.loader.started().await;
-    rig.prefetcher.forget_loaded();
+    rig.prefetcher.forget_loaded(None);
     assert_eq!(next(&mut events).await.outcome, Outcome::Cancelled);
     rig.loader.release(clip);
     rig.prefetcher.keep_whole(whole(clip, SourceKind::Video));
@@ -249,7 +261,7 @@ async fn inv_strategy_12_a_whole_source_whose_files_were_purged_loads_again_at_t
     rig.prefetcher.keep_whole(whole(clip, SourceKind::Video));
     next(&mut events).await;
 
-    rig.prefetcher.forget_loaded();
+    rig.prefetcher.forget_loaded(None);
     rig.prefetcher.keep_whole(whole(clip, SourceKind::Video));
 
     assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);

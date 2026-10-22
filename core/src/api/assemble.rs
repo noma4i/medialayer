@@ -148,8 +148,8 @@ impl PrefetchControl for Prefetcher {
         self.stop_all();
     }
 
-    fn forget_loaded(&self) {
-        Prefetcher::forget_loaded(self);
+    fn forget_loaded(&self, url: Option<&str>) {
+        Prefetcher::forget_loaded(self, url);
     }
 
     fn set_limits(&self, limits: &Limits) {
@@ -168,7 +168,10 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
     let ledger = ledger_for(&defaults, device);
     let change = Change::new();
-    let cache = Cache::open_with(dir, defaults, CacheOptions { change: change.clone(), overrides: eviction_overrides, ..CacheOptions::default() }, available_bytes);
+    let saved_settings = settings.clone();
+    let saved = tokio::task::spawn_blocking(move || saved_settings.read(super::controls::LIMITS_KEY.to_owned())).await.ok().flatten();
+    let (cache_limits, _) = crate::limits::resolve(defaults, saved.as_deref());
+    let cache = Cache::open_with(dir, cache_limits, CacheOptions { change: change.clone(), overrides: eviction_overrides, ..CacheOptions::default() }, available_bytes);
     let store: Arc<dyn ByteStore> = Arc::new(CacheStore::new(cache.clone(), Arc::new(classify_kind)));
     let mut proxy_config = ProxyConfig { ledger: ledger.clone(), namespace_headers, ..ProxyConfig::from_limits(&defaults) };
     if let Some(headers) = forward_headers {
