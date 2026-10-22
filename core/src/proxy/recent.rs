@@ -12,6 +12,7 @@ impl<V> Recent<V> {
         Recent { limit, tick: 0, items: HashMap::new(), order: BTreeMap::new() }
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.items.len()
     }

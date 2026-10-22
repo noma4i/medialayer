@@ -63,6 +63,21 @@ pub(crate) fn closing_inline() -> bool {
     CLOSING_INLINE.with(Cell::get)
 }
 
+struct InlineClose;
+
+impl InlineClose {
+    fn enter() -> InlineClose {
+        CLOSING_INLINE.with(|inline| inline.set(true));
+        InlineClose
+    }
+}
+
+impl Drop for InlineClose {
+    fn drop(&mut self) {
+        CLOSING_INLINE.with(|inline| inline.set(false));
+    }
+}
+
 struct HeldBody {
     body: BodyStream,
     permit: Option<Permit>,
@@ -81,9 +96,9 @@ impl Drop for HeldBody {
         let body = std::mem::replace(&mut self.body, Box::pin(futures_util::stream::empty()));
         let permit = self.permit.take();
         let close = move || {
-            CLOSING_INLINE.with(|inline| inline.set(true));
+            let _inline = InlineClose::enter();
             drop(body);
-            CLOSING_INLINE.with(|inline| inline.set(false));
+            drop(_inline);
             drop(permit);
         };
         match tokio::runtime::Handle::try_current() {
