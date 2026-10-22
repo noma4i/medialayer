@@ -35,7 +35,7 @@ class MediaPrecomposeTest {
   private val layer = RecordingLayer()
   private val fetched = CopyOnWriteArrayList<String>()
   private val loader by lazy { mediaImageLoader(context, ImageBytes { url, _ -> fetched.add(url); com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) }).newBuilder().allowHardware(false).build() }
-  private val slots = ExoPlayerSlotFactory(context, startMuted = true)
+  private val slots = ExoPlayerSlotFactory(context, startMuted = true).onMainLooper()
   private val looper = shadowOf(android.os.Looper.getMainLooper())
 
   private fun visibles(url: String) = layer.calls.filter { it.startsWith("visible:$url:") }

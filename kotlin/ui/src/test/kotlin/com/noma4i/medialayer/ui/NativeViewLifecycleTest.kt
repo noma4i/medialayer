@@ -44,7 +44,7 @@ class NativeViewLifecycleTest {
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val layer = RecordingLayer()
   private val counters = VideoOutputCounters()
-  private val factory = ExoPlayerSlotFactory(context, startMuted = true, videoOutputCounters = counters).also {
+  private val factory = ExoPlayerSlotFactory(context, startMuted = true, videoOutputCounters = counters).onMainLooper().also {
     it.mediaSourceFor = { FakeMediaSource() }
     it.bind(layer.playerEvents())
   }

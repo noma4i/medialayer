@@ -15,14 +15,16 @@ import com.noma4i.medialayer.PlayerSlot
 import com.noma4i.medialayer.SlotSample
 
 class ExoPlayerSlot internal constructor(private val id: UInt, private val host: ExoPlayerSlotFactory) : PlayerSlot {
-  private val main = Handler(Looper.getMainLooper())
+  private val looper = host.looperFor(id)
+  private val commands = Handler(looper)
   private var key: String? = null
   private var hasBeenReady = false
-  private var released = false
+  @Volatile private var released = false
   private var viewToken: ULong? = null
   private val source = java.util.concurrent.atomic.AtomicLong()
 
   @Volatile internal var player: ExoPlayer? = null
+  @Volatile internal var output: LooperPlayer? = null
   @Volatile internal var route: PlaybackRoute? = null
   private var loadControl: ReadaheadLoadControl? = null
   private var readaheadMs: Long? = null
@@ -86,7 +88,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     exo.repeatMode = if (looping) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
     exo.setMediaSource(host.mediaSourceFor(route))
     exo.playWhenReady = false
-    host.players.publish(key, this, exo)
+    host.players.publish(key, this, output!!)
     showInView()
     refresh()
   }
@@ -164,7 +166,10 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
   }
 
   internal fun release() {
-    main.post { releaseNow() }
+    commands.post {
+      releaseNow()
+      if (looper != Looper.getMainLooper()) looper.quitSafely()
+    }
   }
 
   private fun releaseNow() {
@@ -177,6 +182,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
       host.videoOutputCounters?.count("release")
     }
     player = null
+    output = null
     retract()
   }
 
@@ -184,7 +190,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
 
   private fun onMain(source: Long?, work: () -> Unit) {
     host.videoOutputCounters?.count("mainPost")
-    main.post { if (!released && (source == null || source == this.source.get())) work() }
+    commands.post { if (!released && (source == null || source == this.source.get())) work() }
   }
 
   private fun prepare(exo: ExoPlayer) {
@@ -209,8 +215,10 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
         .setLoadControl(control)
         .setAudioAttributes(attributes, host.audio.focus == MediaAudioFocus.Exclusive)
         .setClock(host.clock)
+        .setLooper(looper)
         .build()
       exo.volume = if (host.startMuted) 0f else 1f
+      output = LooperPlayer(exo)
       exo.addListener(listener)
       player = exo
       return exo
@@ -220,9 +228,9 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
   }
 
   private fun showInView() {
-    val exo = player ?: return
+    val shown = output ?: return
     val view = viewToken?.let { host.players.view(it) } ?: return
-    view.show(exo)
+    view.show(shown)
     viewAttached = true
   }
 

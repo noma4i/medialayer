@@ -69,7 +69,7 @@ class MediaComposeTest {
   private val layer = RecordingLayer(events)
   private val requested = CopyOnWriteArrayList<Pair<String, Map<String, String>>>()
   private val loader by lazy { mediaImageLoader(context, ImageBytes { url, headers -> requested.add(url to headers); com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) }) }
-  private val slots = ExoPlayerSlotFactory(context, startMuted = true)
+  private val slots = ExoPlayerSlotFactory(context, startMuted = true).onMainLooper()
 
   @Test
   fun aDeclaredPlaceTellsTheCoreOnlyWhenSomethingChangesAndWithdrawsOnLeave() {

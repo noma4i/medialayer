@@ -51,7 +51,7 @@ class ExoPlayerSlotTest {
   @Test
   fun inv_android_05_pending_loads_do_not_execute_obsolete_sources() {
     val sources = mutableListOf<String>()
-    val factory = ExoPlayerSlotFactory(context).also {
+    val factory = ExoPlayerSlotFactory(context).onMainLooper().also {
       it.mediaSourceFor = { next -> sources.add(next.url); FakeMediaSource() }
       factories.add(it)
     }
@@ -142,7 +142,7 @@ class ExoPlayerSlotTest {
   }
 
   private fun factory(startMuted: Boolean = true, focus: MediaAudioFocus = MediaAudioFocus.Mix) =
-    ExoPlayerSlotFactory(context, OkHttpClient(), startMuted = startMuted, audio = session(focus)).also {
+    ExoPlayerSlotFactory(context, OkHttpClient(), startMuted = startMuted, audio = session(focus)).onMainLooper().also {
       it.mediaSourceFor = { FakeMediaSource() }
       it.bind(events)
       factories.add(it)
@@ -195,7 +195,7 @@ class ExoPlayerSlotTest {
     assertFalse(player.playWhenReady)
     assertEquals(Player.STATE_IDLE, player.playbackState)
     assertEquals(Player.REPEAT_MODE_ONE, player.repeatMode)
-    assertSame(player, kotlinx.coroutines.runBlocking { factories.single().players.player("k").first() })
+    assertSame(slot.output, kotlinx.coroutines.runBlocking { factories.single().players.player("k").first() })
 
     slot.preroll(); idle()
     org.junit.Assert.assertNotEquals(Player.STATE_IDLE, player.playbackState)
@@ -281,7 +281,7 @@ class ExoPlayerSlotTest {
     slot.load("k", route); idle()
 
     slot.attach(view.token); idle()
-    assertSame(slot.player, view.player.value)
+    assertSame(slot.output, view.player.value)
     assertTrue(slot.sample().viewAttached)
 
     slot.seek(1500u); idle()
@@ -396,7 +396,7 @@ class ExoPlayerSlotTest {
     val player = slot.player!!
 
     assertEquals(1, player.mediaItemCount)
-    assertSame(player, kotlinx.coroutines.runBlocking { factory.players.player("k").first() })
+    assertSame(slot.output, kotlinx.coroutines.runBlocking { factory.players.player("k").first() })
 
     slot.unload(); idle()
     assertEquals(0, player.mediaItemCount)

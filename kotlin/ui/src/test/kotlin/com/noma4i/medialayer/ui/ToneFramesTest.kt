@@ -51,7 +51,7 @@ class ToneFramesTest {
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val layer = RecordingLayer()
   private val loader by lazy { mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) }).newBuilder().allowHardware(false).build() }
-  private val slots = ExoPlayerSlotFactory(context, startMuted = true)
+  private val slots = ExoPlayerSlotFactory(context, startMuted = true).onMainLooper()
 
   @Test
   fun inv_tone_13_late_subscription_decodes_a_small_software_image_once() {

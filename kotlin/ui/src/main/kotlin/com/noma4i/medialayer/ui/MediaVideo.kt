@@ -35,6 +35,7 @@ import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.Placeholder
 import com.noma4i.medialayer.isReady
 import com.noma4i.medialayer.toItem
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.flowOf
 
 internal class VideoEdges {
@@ -60,14 +61,15 @@ internal object VideoProgress {
 
 internal class PlayerProgress private constructor(private val player: Player) : Player.Listener, Runnable {
   private val main = Handler(Looper.getMainLooper())
-  private val consumers = mutableMapOf<Any, (Double) -> Unit>()
-  private var last: Double? = null
-  private var samples = 0
+  private val sampler = Handler(player.applicationLooper)
+  private val consumers = ConcurrentHashMap<Any, (Double) -> Unit>()
+  @Volatile private var last: Double? = null
+  @Volatile private var samples = 0
 
   override fun onEvents(player: Player, events: Player.Events) = run()
 
   override fun run() {
-    main.removeCallbacks(this)
+    sampler.removeCallbacks(this)
     if (consumers.isEmpty()) return
     samples++
     val duration = player.duration
@@ -75,10 +77,10 @@ internal class PlayerProgress private constructor(private val player: Player) : 
       val value = (player.currentPosition.toDouble() / duration).coerceIn(0.0, 1.0)
       if (last != value) {
         last = value
-        consumers.values.toList().forEach { it(value) }
+        main.post { consumers.values.forEach { it(value) } }
       }
     }
-    if (consumers.isNotEmpty() && player.isPlaying) main.postDelayed(this, VideoProgress.INTERVAL_MS)
+    if (consumers.isNotEmpty() && player.isPlaying) sampler.postDelayed(this, VideoProgress.INTERVAL_MS)
   }
 
   companion object {
@@ -91,11 +93,11 @@ internal class PlayerProgress private constructor(private val player: Player) : 
       val token = Any()
       demand.consumers[token] = report
       demand.last?.let(report)
-      demand.run()
+      demand.sampler.post(demand)
       return {
         demand.consumers.remove(token)
         if (demand.consumers.isEmpty()) {
-          demand.main.removeCallbacks(demand)
+          demand.sampler.removeCallbacks(demand)
           player.removeListener(demand)
           active.remove(player)
         }
@@ -149,8 +151,7 @@ fun MediaVideo(
   val cornerRadiusPx = with(LocalDensity.current) { cornerRadius.toPx() }
   val outputPlayer = remember(player, counters, outputType, cornerRadiusPx) {
     player?.let {
-      if (counters == null && outputType != SURFACE_TYPE_SURFACE_VIEW) it
-      else VideoOutputPlayer(it, counters, cornerRadiusPx)
+      VideoOutputPlayer(it, counters, cornerRadiusPx)
     }
   }
   DisposableEffect(environment, source.url, screen.visible) {

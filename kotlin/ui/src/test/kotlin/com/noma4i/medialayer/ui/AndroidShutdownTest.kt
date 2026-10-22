@@ -87,6 +87,7 @@ class AndroidShutdownTest {
     val media = openMediaLayer(app, settings = SharedPreferencesSettings(app), lifecycle = owner.lifecycle, videoOutputCounters = counters) { MediaLayer.open(it) }.blocking()
     val binding = media.binding!!
     binding.factory.mediaSourceFor = { androidx.media3.test.utils.FakeMediaSource() }
+    binding.factory.onMainLooper()
     val slot = binding.factory.create(0u)
     slot.load("held", PlaybackRoute("http://127.0.0.1:9/a.mp4", emptyMap(), null, false, false))
     shadowOf(Looper.getMainLooper()).idle()

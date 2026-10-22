@@ -38,7 +38,7 @@ class MediaVisibilityTest {
 
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val layer = RecordingLayer()
-  private val slots = ExoPlayerSlotFactory(context, startMuted = true)
+  private val slots = ExoPlayerSlotFactory(context, startMuted = true).onMainLooper()
   private val looper = shadowOf(android.os.Looper.getMainLooper())
   private val started = AtomicInteger()
   private val cancelled = AtomicInteger()

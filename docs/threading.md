@@ -21,7 +21,7 @@ UNBUILT: deferred work. Eviction starts right after a write that reaches the bud
 
 Throwing Swift calls and Kotlin suspend calls forward cancellation to Rust. Non-throwing Swift calls finish normally when their task is cancelled.
 
-Native player creation and access run on the main thread. Slot samples use the latest player events and elapsed time without a periodic observer. Sampling never waits for player creation.
+On iOS native player creation and access run on the main thread. On Android every slot runs its ExoPlayer on its own library thread `medialayer-player-<slot>`: slot commands, listeners and video output changes run there, and the main thread never waits for a video output change. `ViewHandle.player` and `SlotPlayers.player` give a `Player` that is safe to call from the main thread: video output calls are posted to the player thread and the state that `ContentFrame` reads is a snapshot taken on that thread. Slot samples use the latest player events and elapsed time without a periodic observer. Sampling never waits for player creation.
 
 ### Swift
 

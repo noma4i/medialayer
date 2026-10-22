@@ -1,11 +1,13 @@
 package com.noma4i.medialayer.ui
 
 import android.content.Context
+import android.os.HandlerThread
+import android.os.Looper
 import androidx.media3.common.C
+import androidx.media3.common.Player
 import androidx.media3.common.util.Clock
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.RenderersFactory
-import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.upstream.DefaultAllocator
 import com.noma4i.medialayer.PlaybackRoute
@@ -24,23 +26,23 @@ import okhttp3.Call
 import okhttp3.OkHttpClient
 
 class ViewHandle internal constructor(val token: ULong) {
-  private val current = MutableStateFlow<ExoPlayer?>(null)
+  private val current = MutableStateFlow<Player?>(null)
 
-  val player: StateFlow<ExoPlayer?> get() = current
+  val player: StateFlow<Player?> get() = current
 
-  internal fun show(player: ExoPlayer?) {
+  internal fun show(player: Player?) {
     current.value = player
   }
 }
 
 class SlotPlayers internal constructor(val videoOutputCounters: VideoOutputCounters? = null) {
-  private class Observed(val state: MutableStateFlow<ExoPlayer?>, var collectors: Int = 0)
+  private class Observed(val state: MutableStateFlow<Player?>, var collectors: Int = 0)
   private val observed = mutableMapOf<String, Observed>()
   private val slots = ConcurrentHashMap<String, ExoPlayerSlot>()
 
-  fun player(key: String): Flow<ExoPlayer?> = flow {
+  fun player(key: String): Flow<Player?> = flow {
     val entry = synchronized(observed) {
-      observed.getOrPut(key) { Observed(MutableStateFlow(slots[key]?.player)) }.also { it.collectors++ }
+      observed.getOrPut(key) { Observed(MutableStateFlow(slots[key]?.output)) }.also { it.collectors++ }
     }
     try { emitAll(entry.state) } finally {
       synchronized(observed) {
@@ -67,7 +69,7 @@ class SlotPlayers internal constructor(val videoOutputCounters: VideoOutputCount
 
   internal fun route(key: String): PlaybackRoute? = slots[key]?.route
 
-  internal fun publish(key: String, slot: ExoPlayerSlot, player: ExoPlayer) = synchronized(observed) {
+  internal fun publish(key: String, slot: ExoPlayerSlot, player: Player) = synchronized(observed) {
     slots[key] = slot
     observed[key]?.state?.value = player
   }
@@ -89,6 +91,7 @@ class ExoPlayerSlotFactory(
   internal val allocator = DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE)
   internal var renderersFactory: RenderersFactory = DefaultRenderersFactory(appContext).setEnableDecoderFallback(true)
   internal var clock: Clock = Clock.DEFAULT
+  internal var looperFor: (UInt) -> Looper = { id -> HandlerThread("medialayer-player-$id").apply { start() }.looper }
   internal var mediaSourceFor: (PlaybackRoute) -> MediaSource = HttpMediaSources(appContext, callFactory)::create
   @Volatile internal var events: PlayerEventsInterface? = null
   private val created = CopyOnWriteArrayList<ExoPlayerSlot>()

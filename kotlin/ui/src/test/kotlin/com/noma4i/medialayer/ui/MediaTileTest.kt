@@ -37,7 +37,7 @@ class MediaTileTest {
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val layer = RecordingLayer()
   private val loader by lazy { mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) }).newBuilder().allowHardware(false).build() }
-  private val slots = ExoPlayerSlotFactory(context, startMuted = true)
+  private val slots = ExoPlayerSlotFactory(context, startMuted = true).onMainLooper()
   private val looper = shadowOf(android.os.Looper.getMainLooper())
 
   private fun ready(url: String) = layer.calls.any { it == "itemState:$url:Ready" }
