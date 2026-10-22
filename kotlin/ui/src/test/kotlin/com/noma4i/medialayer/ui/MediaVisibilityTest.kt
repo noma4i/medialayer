@@ -78,7 +78,7 @@ class MediaVisibilityTest {
     settle()
 
     assertEquals("started=1 cancelled=1 decodes=0 claims=[visible:$url:true, visible:$url:false]", counters())
-    assertEquals(mapOf(url to 1uL), layer.imageStats().snapshot().cancellations)
+    assertEquals(1uL, layer.imageStats().snapshot().cancellations)
     assertEquals(0uL, layer.imageStats().snapshot().activeRequests)
     org.junit.Assert.assertTrue(layer.imageStats().snapshot().activeObservers > 0uL)
     mounted = false

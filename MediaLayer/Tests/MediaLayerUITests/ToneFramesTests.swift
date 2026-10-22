@@ -161,7 +161,7 @@ extension GlobalMedia {
       let cover = try writePNG(solid(width: 90, height: 160, red: 10, green: 10, blue: 240))
       let video = MediaItem(kind: .video, url: "https://o.test/v.mp4", headers: [:], cover: cover, blurHash: nil, strategy: .window)
 
-      let image = await PlaceholderView.loadCover(cover, for: video, context: MediaContext(places: media))
+      let image = await PlaceholderView.loadCover(cover, for: video, context: MediaContext(places: media), points: CGSize(width: 45, height: 80), scale: 2)
 
       #expect(image != nil)
       await eventually("the video tone answers with pixels") { await pixelsTone(media, video) }

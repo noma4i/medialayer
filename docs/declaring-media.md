@@ -98,7 +98,7 @@ With declared dimensions, Kotlin `MediaImage` uses `Box` and Coil's placement si
 Without declared dimensions, it obtains placement constraints through `BoxWithConstraints` and computes pixels through `imagePixelSize`.
 
 Read image work explicitly with Kotlin `media.imageStats().snapshot()` or Swift `media.imageStats().snapshot()`.
-The snapshot counts requests, decodes, memory hits, disk hits, decoded pixels, placement pixels, bitmap bytes, active requests, active observers, and cancellations by key.
+The snapshot counts requests, decodes, memory hits, disk hits, decoded pixels, placement pixels, bitmap bytes, active requests, active observers, and cancellations (one total, not per URL).
 Bitmap bytes accumulate decoded allocations, rather than retained memory.
 Counters update on image events and perform no work while idle.
 `MediaImage.request` and `MediaImage.decode` identify Android async trace sections and Swift signpost intervals.

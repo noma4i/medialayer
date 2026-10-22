@@ -80,6 +80,22 @@ extension GlobalMedia {
     }
 
     @Test
+    func inv_placeholder_05_a_video_cover_decodes_no_more_than_its_placement() async throws {
+      let places = RecordingPlaces()
+      places.imageResult = .success(pngData(side: 2000))
+      ImageMemory.install(ImageCache(), on: places)
+      let video = MediaItem(kind: .video, url: "https://o.test/v.mp4", headers: [:], cover: "https://o.test/cover.png", blurHash: nil, strategy: .window)
+
+      let image = await PlaceholderView.loadCover("https://o.test/cover.png", for: video, context: MediaContext(places: places), points: CGSize(width: 50, height: 50), scale: 2)
+
+      let stats = places.imageStats().snapshot()
+      #expect(image != nil)
+      #expect(stats.decodes == 1)
+      #expect(stats.placementPixels == 100 * 100)
+      #expect(stats.decodedPixels <= 104 * 104)
+    }
+
+    @Test
     func inv_native_21_contexts_share_only_their_open_object_resources() {
       let places = RecordingPlaces()
       let first = MediaContext(places: places)

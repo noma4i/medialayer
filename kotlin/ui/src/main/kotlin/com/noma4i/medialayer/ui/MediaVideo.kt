@@ -3,6 +3,7 @@ package com.noma4i.medialayer.ui
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -19,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -27,6 +29,7 @@ import androidx.media3.ui.compose.SURFACE_TYPE_SURFACE_VIEW
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import coil.compose.AsyncImage
+import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.Placeholder
@@ -193,11 +196,24 @@ private fun VideoPlaceholder(source: MediaSource, ready: Boolean, contentScale: 
   val media = LocalMediaEnvironment.current.media
   val placeholder by produceState<Placeholder>(Placeholder.None, media, source, ready) { value = media.placeholder(source.toItem(), ready) }
   val cover = placeholder as? Placeholder.Cover ?: return
-  AsyncImage(
-    model = MediaImageData(cover.url, source.headers, media.cacheKey(cover.url, source.headers)),
-    contentDescription = "cover",
-    imageLoader = LocalMediaEnvironment.current.imageLoader,
-    contentScale = contentScale,
-    modifier = Modifier.fillMaxSize()
-  )
+  val context = LocalContext.current
+  val density = LocalDensity.current.density
+  val scale = contentScale.toScale()
+  val image = remember(cover.url, source.headers) { CoverSource(cover.url, source.headers) }
+  BoxWithConstraints(Modifier.fillMaxSize()) {
+    val pixels = decodePixels(constraints, density, image, contentScale)
+    val placementPixels = if (constraints.hasBoundedWidth && constraints.hasBoundedHeight) constraints.maxWidth.toLong() * constraints.maxHeight else 0L
+    val request = remember(media, cover.url, pixels, scale, placementPixels) { imageRequest(context, image, pixels, scale, media.cacheKey(cover.url, source.headers), placementPixels) }
+    AsyncImage(
+      model = request,
+      contentDescription = "cover",
+      imageLoader = LocalMediaEnvironment.current.imageLoader,
+      contentScale = contentScale,
+      modifier = Modifier.fillMaxSize()
+    )
+  }
+}
+
+private class CoverSource(override val url: String, override val headers: Map<String, String>) : MediaSource {
+  override val kind: Kind get() = Kind.IMAGE
 }

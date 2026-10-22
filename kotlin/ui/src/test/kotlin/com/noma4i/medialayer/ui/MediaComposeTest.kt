@@ -147,6 +147,22 @@ class MediaComposeTest {
   }
 
   @Test
+  fun inv_placeholder_05_a_video_cover_decodes_no_more_than_its_placement() {
+    val stats = com.noma4i.medialayer.ImageCounters()
+    val cover = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(2000, 2000), com.noma4i.medialayer.ImageOrigin.NETWORK) }, stats = stats)
+    val clip = Clip("https://o.test/a.mp4", cover = "https://o.test/cover.jpg")
+    rule.setContent {
+      MediaLayerProvider(layer, cover, slots.players) { MediaVideo(clip, modifier = Modifier.size(50.dp)) }
+    }
+    rule.waitUntil(10000) { stats.snapshot().decodes == 1uL }
+
+    val side = Math.round(50 * context.resources.displayMetrics.density).toULong()
+    val stepped = (side + 7uL) / 8uL * 8uL
+    assertEquals(side * side, stats.snapshot().placementPixels)
+    org.junit.Assert.assertTrue("decoded=${stats.snapshot().decodedPixels} placement=${stats.snapshot().placementPixels}", stats.snapshot().decodedPixels <= stepped * stepped)
+  }
+
+  @Test
   fun aOneShotVideoDeclaresItselfWithoutLoopAndReportsTheFirstFrameAndEveryEnd() {
     var firstFrames = 0
     var ends = 0

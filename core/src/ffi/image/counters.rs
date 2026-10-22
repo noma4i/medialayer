@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 #[derive(Clone, Default, Debug, PartialEq, Eq, uniffi::Record)]
@@ -12,7 +11,7 @@ pub struct ImageSnapshot {
     pub bitmap_bytes: u64,
     pub active_requests: u64,
     pub active_observers: u64,
-    pub cancellations: HashMap<String, u64>,
+    pub cancellations: u64,
 }
 
 #[derive(uniffi::Enum)]
@@ -55,9 +54,9 @@ impl ImageCounters {
                 state.active_requests -= 1;
                 state.memory_hits += u64::from(memory_hit);
             }
-            ImageWork::Cancel { key } => {
+            ImageWork::Cancel { .. } => {
                 state.active_requests -= 1;
-                *state.cancellations.entry(key).or_default() += 1;
+                state.cancellations += 1;
             }
             ImageWork::DiskHit => state.disk_hits += 1,
             ImageWork::Observe => state.active_observers += 1,

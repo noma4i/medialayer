@@ -39,3 +39,16 @@ fn inv_image_11_placement_preserves_source_aspect_without_upscaling() {
         assert_eq!(image_pixel_size(352.0, 352.0, 1.0, source, crop), Some(expected));
     }
 }
+
+#[test]
+fn inv_image_37_cancellations_are_one_counter_not_a_map_of_every_url() {
+    let counters = ImageCounters::new();
+    for index in 0..1000 {
+        counters.record(ImageWork::Request { placement_pixels: 0 });
+        counters.record(ImageWork::Cancel { key: format!("https://o.test/{index}.png") });
+    }
+    let snapshot = counters.snapshot();
+
+    assert_eq!(snapshot.cancellations, 1000);
+    assert_eq!(snapshot.active_requests, 0);
+}
