@@ -1,6 +1,8 @@
 package com.noma4i.medialayer.ui
 
+import android.graphics.SurfaceTexture
 import android.os.Handler
+import android.os.Looper
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -11,6 +13,7 @@ import androidx.media3.common.Timeline
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.exoplayer.ExoPlayer
+import java.util.concurrent.CountDownLatch
 
 internal class LooperPlayer(private val exo: ExoPlayer) : ForwardingPlayer(exo) {
   private class Snapshot(exo: ExoPlayer) {
@@ -23,9 +26,14 @@ internal class LooperPlayer(private val exo: ExoPlayer) : ForwardingPlayer(exo) 
     val commands: Player.Commands = exo.availableCommands
   }
 
+  private interface Binding {
+    fun close()
+  }
+
   private val handler = Handler(exo.applicationLooper)
 
   @Volatile private var snapshot = Snapshot(exo)
+  private var binding: Binding? = null
 
   init {
     exo.addListener(object : Player.Listener {
@@ -60,10 +68,12 @@ internal class LooperPlayer(private val exo: ExoPlayer) : ForwardingPlayer(exo) 
   }
 
   override fun setVideoSurface(surface: Surface?) {
+    closeBinding()
     handler.post { super.setVideoSurface(surface) }
   }
 
   override fun clearVideoSurface() {
+    closeBinding()
     handler.post { super.clearVideoSurface() }
   }
 
@@ -72,26 +82,121 @@ internal class LooperPlayer(private val exo: ExoPlayer) : ForwardingPlayer(exo) 
   }
 
   override fun setVideoSurfaceHolder(surfaceHolder: SurfaceHolder?) {
-    handler.post { super.setVideoSurfaceHolder(surfaceHolder) }
+    closeBinding()
+    if (surfaceHolder == null) return clearVideoSurface()
+    binding = HolderBinding(surfaceHolder)
   }
 
   override fun clearVideoSurfaceHolder(surfaceHolder: SurfaceHolder?) {
-    handler.post { super.clearVideoSurfaceHolder(surfaceHolder) }
+    if (surfaceHolder == null || (binding as? HolderBinding)?.holder === surfaceHolder) closeBinding()
   }
 
-  override fun setVideoSurfaceView(surfaceView: SurfaceView?) {
-    handler.post { super.setVideoSurfaceView(surfaceView) }
-  }
+  override fun setVideoSurfaceView(surfaceView: SurfaceView?) = setVideoSurfaceHolder(surfaceView?.holder)
 
-  override fun clearVideoSurfaceView(surfaceView: SurfaceView?) {
-    handler.post { super.clearVideoSurfaceView(surfaceView) }
-  }
+  override fun clearVideoSurfaceView(surfaceView: SurfaceView?) = clearVideoSurfaceHolder(surfaceView?.holder)
 
   override fun setVideoTextureView(textureView: TextureView?) {
-    handler.post { super.setVideoTextureView(textureView) }
+    closeBinding()
+    if (textureView == null) return clearVideoSurface()
+    binding = TextureBinding(textureView)
   }
 
   override fun clearVideoTextureView(textureView: TextureView?) {
-    handler.post { super.clearVideoTextureView(textureView) }
+    if (textureView == null || (binding as? TextureBinding)?.view === textureView) closeBinding()
+  }
+
+  private fun closeBinding() {
+    binding?.close()
+    binding = null
+  }
+
+  private fun clearOnPlayer(surface: Surface, release: Boolean, extra: () -> Unit = {}) {
+    val posted = handler.post {
+      try {
+        exo.clearVideoSurface(surface)
+      } finally {
+        if (release) surface.release()
+        extra()
+      }
+    }
+    if (!posted) {
+      if (release) surface.release()
+      extra()
+    }
+  }
+
+  private fun clearOnPlayerAndWait(surface: Surface) {
+    if (Looper.myLooper() == handler.looper) return exo.clearVideoSurface(surface)
+    val cleared = CountDownLatch(1)
+    val posted = handler.post {
+      try {
+        exo.clearVideoSurface(surface)
+      } finally {
+        cleared.countDown()
+      }
+    }
+    if (posted) cleared.await()
+  }
+
+  private inner class HolderBinding(val holder: SurfaceHolder) : Binding, SurfaceHolder.Callback {
+    private var surface: Surface? = null
+
+    init {
+      holder.addCallback(this)
+      holder.surface?.takeIf { it.isValid }?.let { show(it) }
+    }
+
+    private fun show(shown: Surface) {
+      surface = shown
+      handler.post { exo.setVideoSurface(shown) }
+    }
+
+    override fun surfaceCreated(holder: SurfaceHolder) = show(holder.surface)
+
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
+
+    override fun surfaceDestroyed(holder: SurfaceHolder) {
+      val destroyed = surface ?: return
+      surface = null
+      clearOnPlayerAndWait(destroyed)
+    }
+
+    override fun close() {
+      holder.removeCallback(this)
+      surface?.let { clearOnPlayer(it, release = false) }
+      surface = null
+    }
+  }
+
+  private inner class TextureBinding(val view: TextureView) : Binding, TextureView.SurfaceTextureListener {
+    private var surface: Surface? = null
+
+    init {
+      view.surfaceTextureListener = this
+      view.surfaceTexture?.takeIf { view.isAvailable }?.let { onSurfaceTextureAvailable(it, view.width, view.height) }
+    }
+
+    override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
+      val shown = Surface(texture)
+      surface = shown
+      handler.post { exo.setVideoSurface(shown) }
+    }
+
+    override fun onSurfaceTextureSizeChanged(texture: SurfaceTexture, width: Int, height: Int) = Unit
+
+    override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean {
+      val destroyed = surface ?: return true
+      surface = null
+      clearOnPlayer(destroyed, release = true) { texture.release() }
+      return false
+    }
+
+    override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
+
+    override fun close() {
+      if (view.surfaceTextureListener === this) view.surfaceTextureListener = null
+      surface?.let { clearOnPlayer(it, release = true) }
+      surface = null
+    }
   }
 }
