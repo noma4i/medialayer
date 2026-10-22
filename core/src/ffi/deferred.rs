@@ -4,7 +4,7 @@ use tokio::sync::watch;
 
 type Declaration<T> = Box<dyn FnOnce(&T) + Send>;
 
-const EVENT_CAPACITY: usize = 256;
+const WAITING_EVENT_CAPACITY: usize = 256;
 
 enum Rule {
     Event,
@@ -40,7 +40,7 @@ impl<T> Queue<T> {
         self.next_id += 1;
         if matches!(rule, Rule::Event) {
             let events = self.waiting.iter().filter(|waiting| matches!(waiting.rule, Rule::Event)).count();
-            if events >= EVENT_CAPACITY {
+            if events >= WAITING_EVENT_CAPACITY {
                 if let Some(oldest) = self.waiting.iter().position(|waiting| matches!(waiting.rule, Rule::Event)) {
                     self.waiting.remove(oldest);
                 }
