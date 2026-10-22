@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.3.0 - 2026-10-22
+
+### Changed
+- Kotlin library requires Android 13 (API 33) or newer.
+- Kotlin `MediaOutput.Window` draws video on a `SurfaceView` on every supported Android version.
+
+### Fixed
+- Android player switches video output on its own thread, not the main thread.
+
 ## 3.2.0 - 2026-10-22
 
 ### Changed
