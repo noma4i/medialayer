@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.3.2 - 2026-10-22
+
+### Fixed
+- iOS xcframework build packs the static library in every slice.
+
 ## 3.3.1 - 2026-10-22
 
 ### Fixed
