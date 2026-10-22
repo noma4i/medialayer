@@ -11,23 +11,17 @@ import coil.request.ImageRequest
 import coil.request.SuccessResult
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.PlaybackRoute
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.setMain
-import kotlinx.coroutines.test.resetMain
-import org.junit.Before
-import org.junit.After
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
 
 @RunWith(MediaLayerTestRunner::class)
-@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class AndroidShutdownTest {
-  @Before fun mainDispatcher() { Dispatchers.setMain(UnconfinedTestDispatcher()) }
-  @After fun resetDispatcher() { Dispatchers.resetMain() }
   private val app = ApplicationProvider.getApplicationContext<Application>()
   private val owner = object : LifecycleOwner {
     override val lifecycle = LifecycleRegistry.createUnsafe(this)
@@ -55,15 +49,24 @@ class AndroidShutdownTest {
     assertTrue(media.uniffiIsDestroyed)
   }
 
+  private fun <T> onWorker(block: suspend () -> T): T {
+    val result = CoroutineScope(Dispatchers.Default).async { block() }
+    while (!result.isCompleted) {
+      shadowOf(Looper.getMainLooper()).idle()
+      Thread.sleep(1)
+    }
+    return runBlocking { result.await() }
+  }
+
   @Test
-  fun inv_android_01_image_events_survive_closed_owner() = runBlocking {
+  fun inv_android_01_image_events_survive_closed_owner() {
     val media = open()
     val loader = media.binding!!.imageLoader
     val bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
     val request = ImageRequest.Builder(app).data(bitmap).build()
-    val running = loader.execute(request.newBuilder().listener(onStart = { media.close() }).build())
+    val running = onWorker { loader.execute(request.newBuilder().listener(onStart = { media.close() }).build()) }
     assertTrue(running.toString(), running is SuccessResult)
-    val result = loader.execute(request)
+    val result = onWorker { loader.execute(request) }
     assertTrue(result.toString(), result is SuccessResult)
     loader.shutdown()
   }
