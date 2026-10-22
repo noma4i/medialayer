@@ -1,4 +1,5 @@
 use super::inner::ProxyShared;
+use super::route::{answered_length, content_range_total};
 use super::slots::Priority;
 use crate::fetch::{header_value, BodyStream, FetchError, Request};
 use super::buffer::Buffers;
@@ -248,27 +249,25 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
             return FlightOutcome::Failed("origin ignored the range".to_string());
         }
         let content_type = header_value(&fetched.headers, "content-type").map(str::to_string);
-        let body = collect_limited(fetched.body, REJECTION_BODY_LIMIT, timeout, &buffers).await.unwrap_or_default();
+        let Some(collected) = cancellable(inner, flight, collect_limited(fetched.body, REJECTION_BODY_LIMIT, timeout, &buffers)).await else {
+            return FlightOutcome::Cancelled;
+        };
+        let body = collected.unwrap_or_default();
         return FlightOutcome::Rejected(Arc::new(Rejection { status: fetched.status, content_type, body: Bytes::from(body) }));
     }
     let total = header_value(&fetched.headers, "content-length").and_then(|value| value.trim().parse::<u64>().ok());
     let content_type = header_value(&fetched.headers, "content-type").map(str::to_string);
     let object_length = match flight.range {
-        Some(_) => header_value(&fetched.headers, "content-range")
-            .and_then(|value| value.rsplit_once('/'))
-            .and_then(|(_, length)| length.trim().parse::<u64>().ok()),
+        Some(_) => content_range_total(&fetched.headers),
         None => total,
     };
     if let Some(length) = object_length.filter(|_| flight.range.is_some()) {
         inner.remember_total(&flight.base_key, length);
     }
     let expected = match flight.range {
-        Some((start, end)) => match header_value(&fetched.headers, "content-range").and_then(parse_content_range) {
-            Some((first, last)) if first != start || last > end => {
-                return FlightOutcome::Failed(format!("origin answered bytes {first}-{last} for {start}-{end}"));
-            }
-            Some((first, last)) => Some(last - first + 1),
-            None => total,
+        Some((start, end)) => match answered_length(&fetched.headers, start, Some(end)) {
+            Ok(length) => length,
+            Err(message) => return FlightOutcome::Failed(message),
         },
         None => total,
     };
@@ -336,11 +335,4 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
     } else {
         FlightOutcome::Unstorable
     }
-}
-
-fn parse_content_range(value: &str) -> Option<(u64, u64)> {
-    let span = value.trim().strip_prefix("bytes ")?.split_once('/')?.0;
-    let (first, last) = span.split_once('-')?;
-    let (first, last) = (first.trim().parse().ok()?, last.trim().parse().ok()?);
-    (first <= last).then_some((first, last))
 }

@@ -2,6 +2,7 @@ use super::buffer::Buffers;
 use super::byte_store::ByteStore;
 use super::flight::{FlightOutcome, FlightSubscription};
 use super::inner::ProxyShared;
+use super::route::answered_length;
 use super::serve::origin_fetch;
 use crate::fetch::BodyStream;
 use bytes::Bytes;
@@ -52,6 +53,10 @@ impl Resume {
     }
 
     async fn next(&mut self, position: &mut u64, end: Option<u64>) -> Option<ChunkResult> {
+        let left = end.map(|end| end.saturating_sub(*position));
+        if left == Some(0) {
+            return None;
+        }
         if self.direct.is_none() {
             let start = self.origin_offset + *position;
             let range = (start > 0 || end.is_some()).then(|| (start, end.map(|end| self.origin_offset + end - 1)));
@@ -61,11 +66,19 @@ impl Resume {
             if response.status != if range.is_some() { 206 } else { 200 } {
                 return Some(Err(io::Error::other("origin refused the resume")));
             }
+            if let Some((first, last)) = range {
+                if let Err(message) = answered_length(&response.headers, first, last) {
+                    return Some(Err(io::Error::other(message)));
+                }
+            }
             let idle = self.inner.timeout();
             self.direct = Some(DirectCursor { body: response.body, idle, buffers: self.inner.buffers(), done: false });
         }
         let cursor = self.direct.take()?;
-        let (item, cursor) = next_direct(cursor).await?;
+        let Some((item, cursor)) = next_direct(cursor).await else {
+            return left.map(|_| Err(io::Error::other("origin body ended before the remainder")));
+        };
+        let item = item.map(|bytes| bytes.slice(..bytes.len().min(left.map_or(usize::MAX, |left| left as usize))));
         if let Ok(bytes) = &item {
             *position += bytes.len() as u64;
         }
@@ -157,3 +170,7 @@ fn fail(mut cursor: StoreCursor) -> (ChunkResult, StoreCursor) {
     cursor.finished = true;
     (Err(io::Error::other("download failed")), cursor)
 }
+
+#[cfg(test)]
+#[path = "resume_span_tests.rs"]
+mod resume_span_tests;

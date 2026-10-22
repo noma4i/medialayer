@@ -2,7 +2,8 @@ use super::cursor::{next_direct, next_store, DirectCursor, Resume, StoreCursor};
 use super::flight::{collect_limited, FlightOutcome, Rejection, FlightSubscription};
 use super::inner::ProxyShared;
 use super::route::{
-    block_key, content_type_for, parse_range, resolve_range, target_url, ByteRange, RangeOutcome,
+    answered_length, block_key, content_range_total, content_type_for, parse_range, resolve_range, target_url, ByteRange,
+    RangeOutcome,
 };
 use super::slots::Priority;
 use crate::fetch::{header_value, FetchError, Request};
@@ -347,6 +348,11 @@ async fn direct_response(
         Ok(fetched) => fetched,
         Err(failure) => return *failure,
     };
+    if let (Some((start, end)), 206) = (upstream_range, response.status) {
+        if let Err(message) = answered_length(&response.headers, start, end) {
+            return text(502, &message);
+        }
+    }
     let origin_type = header_value(&response.headers, "content-type");
     let mut forwarded: Headers = vec![("content-type", content_type_for(target, origin_type))];
     for name in ["content-length", "content-range", "accept-ranges"] {
@@ -376,9 +382,7 @@ struct Probe {
 
 async fn probe_total(inner: &ProxyShared, target: &str, headers: Upstream) -> Result<Probe, Failure> {
     let response = origin_fetch(inner, target, headers, Some((0, Some(0)))).await?;
-    let total = header_value(&response.headers, "content-range")
-        .and_then(|value| value.rsplit_once('/'))
-        .and_then(|(_, total)| total.trim().parse::<u64>().ok())
+    let total = content_range_total(&response.headers)
         .or_else(|| {
             let whole = response.status == 200;
             header_value(&response.headers, "content-length").filter(|_| whole).and_then(|value| value.trim().parse().ok())

@@ -390,6 +390,8 @@ mod proxy_tests;
 #[cfg(test)]
 mod range_origin_tests;
 #[cfg(test)]
+mod rejection_tests;
+#[cfg(test)]
 mod resume_tests;
 #[cfg(test)]
 mod route_tests;

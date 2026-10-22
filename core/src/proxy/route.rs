@@ -1,4 +1,6 @@
+use crate::fetch::header_value;
 use crate::hls::restore_rewritten;
+use std::collections::HashMap;
 use url::{form_urlencoded, Url};
 
 const QUERY_ROUTE_PREFIX: &str = "/request.";
@@ -17,6 +19,27 @@ pub enum RangeOutcome {
     Full,
     Partial { start: u64, end: u64 },
     Unsatisfiable,
+}
+
+pub fn content_range_total(headers: &HashMap<String, String>) -> Option<u64> {
+    header_value(headers, "content-range").and_then(|value| value.rsplit_once('/')).and_then(|(_, total)| total.trim().parse().ok())
+}
+
+fn answered_span(value: &str) -> Option<(u64, u64)> {
+    let span = value.trim().strip_prefix("bytes ")?.split_once('/')?.0;
+    let (first, last) = span.split_once('-')?;
+    let (first, last) = (first.trim().parse().ok()?, last.trim().parse().ok()?);
+    (first <= last).then_some((first, last))
+}
+
+pub fn answered_length(headers: &HashMap<String, String>, start: u64, end: Option<u64>) -> Result<Option<u64>, String> {
+    match header_value(headers, "content-range").and_then(answered_span) {
+        Some((first, last)) if first != start || end.is_some_and(|end| last > end) => {
+            Err(format!("origin answered bytes {first}-{last} for {start}-{}", end.map_or_else(String::new, |end| end.to_string())))
+        }
+        Some((first, last)) => Ok(Some(last - first + 1)),
+        None => Ok(header_value(headers, "content-length").and_then(|value| value.trim().parse().ok())),
+    }
 }
 
 pub fn proxy_url(port: u16, original: &str) -> String {
