@@ -16,3 +16,5 @@ kotlin/local.properties
 **/build/
 MediaLayer/Package.resolved
 /.orca-artifacts
+
+/kotlin/src/test/kotlin/app/media/

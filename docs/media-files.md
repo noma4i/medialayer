@@ -149,18 +149,17 @@ Source names cannot collide with types referenced or declared by the generated S
 ### Checking generated consumers
 
 Run Rust checks with `cargo test -p medialayer-gen`.
-The full check runs both compiler checks. They compile `gen/fixtures/Consumer.swift` or `Consumer.kt` against the real library.
+The full check compiles `gen/fixtures/Consumer.swift` and `Consumer.kt` against the real library.
 The Rust-only command does not prove compilation in either language.
 Run every command through `~/.claude/bin/build-slot --`.
 
-| Check | Command | Required environment |
+| Check | Command | Compiled by |
 | --- | --- | --- |
-| Swift on macOS | `scripts/check_gen_consumers.sh swift` | The script sets `SWIFTC` and `SWIFT_CHECK_ARGS` for the built MediaLayer module and the FFI headers |
-| Kotlin on Linux | `scripts/check_gen_consumers.sh kotlin` | `KOTLINC`: compiler path. `KOTLIN_CHECK_CLASSPATH`: classpath containing the built MediaLayer classes and their dependencies |
+| Swift on macOS | `scripts/check_gen_consumers.sh swift` | `swiftc -typecheck`, set up by the script |
+| Kotlin on brick | `scripts/check_gen_consumers.sh kotlin` | The `gradle-test` step of the check, which compiles the generated sources placed in `kotlin/src/test/kotlin/app/media` |
 
-A missing compiler, missing configuration, unavailable library or compiler error fails the selected check.
-The Swift check resolves types with `-typecheck`.
-The Kotlin check produces a consumer JAR and refuses execution on macOS.
+An unavailable library or a compiler error fails the check.
+The Kotlin sources are generated files and stay out of git.
 Both checks include all source kinds, explicit cache strategies and the maximum accepted image dimensions.
 
 ### Swift

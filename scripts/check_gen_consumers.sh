@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # check_gen_consumers.sh <swift|kotlin>: compiles gen/fixtures/Consumer.* against the source the generator emits and the built library.
-# Kotlin names KOTLINC and KOTLIN_CHECK_CLASSPATH itself and runs on brick; a missing one fails the step.
+# Kotlin places the generated sources and Consumer.kt in the Gradle test sources; the gradle-test step of the check compiles them on brick.
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"

@@ -27,8 +27,8 @@ steps=(
   "swift|swift-test|900|MediaLayer/ core/ gen/ Cargo.|$slot swift-step swift test --package-path MediaLayer"
   "swift|gen-consumer-swift|600|MediaLayer/ core/ gen/ Cargo.|$slot bash-step bash scripts/check_gen_consumers.sh swift"
   "kotlin|kotlin-bindings|600|kotlin/ core/ gen/ Cargo.|$slot bash-step bash scripts/build_kotlin.sh --host"
-  "kotlin|gradle-test|900|kotlin/ core/ gen/ Cargo.|$slot gradle-step $gradle -p kotlin testDebugUnitTest --console=plain --no-watch-fs -Dorg.gradle.daemon.idletimeout=600000 -Dorg.gradle.jvmargs=\"-Xmx3g -XX:ErrorFile=/tmp/check-owner-\$CHECK_OWNER_ID-%p.log\" -Pkotlin.compiler.execution.strategy=in-process"
   "kotlin|gen-consumer-kotlin|600|kotlin/ core/ gen/ Cargo.|$slot bash-step bash scripts/check_gen_consumers.sh kotlin"
+  "kotlin|gradle-test|900|kotlin/ core/ gen/ Cargo.|$slot gradle-step $gradle -p kotlin testDebugUnitTest --console=plain --no-watch-fs -Dorg.gradle.daemon.idletimeout=600000 -Dorg.gradle.jvmargs=\"-Xmx3g -XX:ErrorFile=/tmp/check-owner-\$CHECK_OWNER_ID-%p.log\" -Pkotlin.compiler.execution.strategy=in-process"
   "ship|android-release|900|-|$slot bash-step bash scripts/build_kotlin.sh --release"
   "ship|ios-device|600|-|$slot bash-step bash scripts/build_ios.sh --device"
 )

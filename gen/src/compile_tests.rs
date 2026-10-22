@@ -54,20 +54,10 @@ fn inv_gen_03_missing_swift_compiler_fails_the_selected_check() {
 
 #[cfg(feature = "compile-kotlin")]
 #[test]
-fn inv_gen_03_generated_kotlin_compiles_with_the_library() {
-    assert!(!cfg!(target_os = "macos"), "Kotlin compilation must run on brick");
-    let directory = tempfile::tempdir().unwrap();
-    let file = directory.path().join("MediaSources.kt");
-    fs::write(&file, crate::kotlin(&spec(), "app.media")).unwrap();
-    let output = compile(Command::new(required("KOTLINC"))
-        .arg("-classpath").arg(required("KOTLIN_CHECK_CLASSPATH"))
-        .arg(&file).arg(fixtures().join("Consumer.kt"))
-        .arg("-d").arg(directory.path().join("consumer.jar")));
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-}
-
-#[cfg(feature = "compile-kotlin")]
-#[test]
-fn inv_gen_03_missing_kotlin_compiler_fails_the_selected_check() {
-    missing_compiler("compile_tests::inv_gen_03_generated_kotlin_compiles_with_the_library", "KOTLINC");
+fn inv_gen_03_generated_kotlin_is_placed_in_the_gradle_test_sources() {
+    let directory = fixtures().join("../../kotlin/src/test/kotlin/app/media");
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("MediaSources.kt"), crate::kotlin(&spec(), "app.media")).unwrap();
+    fs::copy(fixtures().join("Consumer.kt"), directory.join("Consumer.kt")).unwrap();
+    assert!(directory.join("Consumer.kt").is_file() && directory.join("MediaSources.kt").is_file());
 }

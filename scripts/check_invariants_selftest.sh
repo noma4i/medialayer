@@ -357,6 +357,13 @@ inv_check_10_docs_examples_without_generated_bindings_are_not_checked_and_strict
   expect_green_that "no NOT CHECKED with bindings" out_has_no_not_checked
 }
 
+kotlin_consumer_precedes_gradle_test() {
+  local placed compiled
+  placed="$(grep -n 'gen-consumer-kotlin' "$work/list" | head -1 | cut -d: -f1)"
+  compiled="$(grep -n '|gradle-test|' "$work/list" | head -1 | cut -d: -f1)"
+  [ -n "$placed" ] && [ -n "$compiled" ] && [ "$placed" -lt "$compiled" ]
+}
+
 docs_step_is_strict() { grep -q 'DOCS_STRICT=1 bash scripts/check_docs.sh' "$here/check_medialayer.sh"; }
 
 inv_check_11_the_full_check_compiles_the_generated_consumers_on_both_platforms() {
@@ -364,6 +371,7 @@ inv_check_11_the_full_check_compiles_the_generated_consumers_on_both_platforms()
   listed > "$work/list"
   expect_green_that "a swift step that compiles the generated consumer" list_has '^swift\|.*check_gen_consumers.sh swift'
   expect_green_that "a kotlin step that compiles the generated consumer" list_has '^kotlin\|.*check_gen_consumers.sh kotlin'
+  expect_green_that "the generated Kotlin is placed before the gradle-test step compiles it" kotlin_consumer_precedes_gradle_test
   expect_green_that "the docs step runs in strict mode" docs_step_is_strict
 }
 
