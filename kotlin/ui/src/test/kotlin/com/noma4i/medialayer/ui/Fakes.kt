@@ -63,7 +63,7 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
   fun emit(key: String, state: MediaState) = listeners.filter { it.first == key }.forEach { it.second.changed(state) }
 
   override fun itemState(key: String, state: MediaState) { calls.add("itemState:$key:${state::class.simpleName}") }
-  override fun seek(key: String, positionMs: ULong) { calls.add("seek:$key:$positionMs") }
+  override fun seek(key: String, fraction: Double) { calls.add("seek:$key:$fraction") }
   override suspend fun fetchImage(url: String, headers: Map<String, String>): ImageFetchResult { calls.add("fetchImage:$url"); return ImageFetchResult(image, ImageOrigin.NETWORK) }
   override suspend fun placeholder(source: MediaItem, ready: Boolean): Placeholder {
     placeholders.add(source.url to ready)

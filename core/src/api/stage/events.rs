@@ -141,6 +141,10 @@ impl Stage {
         else {
             return;
         };
+        let seek = self.fraction_seek(&mut self.state(), key, duration_ms);
+        if let Some(call) = seek {
+            self.inner.runner.send(slot, call);
+        }
         let sample = Sample { position_ms, duration_ms, is_looping, view_attached, frame_rendered };
         self.feed(key, Event::WatchdogFired(sample));
     }

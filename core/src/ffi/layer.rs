@@ -282,8 +282,8 @@ impl MediaLayer {
         });
     }
 
-    pub fn seek(&self, key: String, position_ms: u64) {
-        self.declare_latest(key, |key| format!("seek:{key}"), move |assembled, key| assembled.stage.seek(&key, position_ms));
+    pub fn seek(&self, key: String, fraction: f64) {
+        self.declare_latest(key, |key| format!("seek:{key}"), move |assembled, key| assembled.stage.seek_fraction(&key, fraction));
     }
 
     pub fn replace_window(&self, active: u32, sources: Vec<Option<MediaItem>>) {

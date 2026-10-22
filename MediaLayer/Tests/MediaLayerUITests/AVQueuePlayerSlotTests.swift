@@ -306,18 +306,13 @@ struct AVQueuePlayerSlotTests {
 
   @MainActor
   @Test
-  func audioSeekSendsAFractionOfTheDurationToTheCore() async throws {
-    let log = PlayerEventLog()
-    let slots = LoadedSlots()
-    let slot = makeSlot(log, slots: slots)
+  func inv_audio_03_seekOnAnUnloadedAudioShowsTheFractionAtOnceAndLeavesTheDurationToTheCore() {
     let places = RecordingPlaces()
-    slot.load(key: "note", route: route(Self.silentClip))
-    await log.wait(for: "ready")
-    let duration = try #require(slot.sample().durationMs)
-    let audio = AudioPlayback(key: "note", playing: false, places: places, slots: slots)
+    let audio = AudioPlayback(key: "note", playing: false, places: places)
 
     audio.seek(to: 0.5)
 
-    #expect(places.recorded == ["seek \(duration / 2)"])
+    #expect(audio.progress == 0.5)
+    #expect(places.recorded == ["seek 0.5"])
   }
 }

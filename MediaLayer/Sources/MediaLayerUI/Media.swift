@@ -12,7 +12,7 @@ public protocol MediaPlaces: AnyObject, Sendable {
   func setMuted(key: String, muted: Bool)
   func setRate(key: String, rate: Float)
   func setMutedAll(muted: Bool)
-  func seek(key: String, positionMs: UInt64)
+  func seek(key: String, fraction: Double)
   func itemState(key: String, state: MediaState)
   func fetchImage(url: String, headers: [String: String]) async throws -> ImageFetchResult
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder

@@ -176,7 +176,7 @@ extension GlobalMedia {
       await screen.settle()
       #expect(audio.progress > 0)
       audio.seek(to: 0.5)
-      #expect(screen.places.recorded.contains("seek \(duration / 2)"))
+      #expect(screen.places.recorded.contains("seek 0.5"))
       screen.places.emit(.ended)
       await screen.settle()
       #expect(audio.state == .ended)

@@ -305,7 +305,7 @@ class MediaComposeTest {
       MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         MediaAudio(Note("https://o.test/n.m4a")) { audio -> androidx.compose.foundation.layout.Column {
           Text(if (audio.isPlaying) "pause" else "play", Modifier.size(40.dp).clickableTap(audio::toggle))
-          Text("seek", Modifier.size(40.dp).clickableTap { audio.seek(1500) })
+          Text("seek", Modifier.size(40.dp).clickableTap { audio.seek(0.5f) })
         } }
       }
     }
@@ -323,7 +323,19 @@ class MediaComposeTest {
       listOf("playing:https://o.test/n.m4a:true", "playing:https://o.test/n.m4a:false"),
       layer.calls.filter { it.startsWith("playing") }.takeLast(2)
     )
-    assertEquals("seek:https://o.test/n.m4a:1500", layer.calls.last { it.startsWith("seek") })
+    assertEquals("seek:https://o.test/n.m4a:0.5", layer.calls.last { it.startsWith("seek") })
+  }
+
+  @Test
+  fun inv_audio_03_seek_on_an_unloaded_audio_shows_the_fraction_at_once_and_leaves_the_duration_to_the_core() {
+    var control: AudioControl? = null
+    rule.setContent { MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { MediaAudio(Note("https://o.test/n.m4a")) { control = it } } }
+    rule.waitForIdle()
+
+    rule.runOnIdle { control!!.seek(0.5f) }
+
+    assertEquals(0.5f, control!!.progress)
+    assertEquals(listOf("seek:https://o.test/n.m4a:0.5"), layer.calls.filter { it.startsWith("seek") })
   }
 }
 

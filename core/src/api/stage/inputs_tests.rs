@@ -618,3 +618,33 @@ async fn inv_api_22_a_place_shown_by_two_views_stays_ready_when_one_view_leaves(
     stage.visible(image(), false);
     assert_eq!(rig.parts.places.state(url), MediaState::Idle, "the last view left");
 }
+
+#[tokio::test]
+async fn inv_api_36_a_seek_before_the_key_loads_reaches_the_slot_after_load() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    let key = url_of(0);
+
+    stage.seek(&key, 700);
+    stage.replace_window(0, videos(1));
+
+    eventually(|| rig.factory.slot_holding(&key).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Seek { position_ms: 700 }))).await;
+    let calls = rig.holder(&key).1.calls();
+    let position = |wanted: &dyn Fn(&SlotCall) -> bool| calls.iter().position(wanted).unwrap();
+    assert!(position(&|call| matches!(call, SlotCall::Load { .. })) < position(&|call| matches!(call, SlotCall::Seek { .. })), "{calls:?}");
+}
+
+#[tokio::test]
+async fn inv_api_37_a_fraction_chosen_before_the_duration_is_known_becomes_a_seek_when_it_is() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    let key = url_of(0);
+
+    stage.seek_fraction(&key, 0.5);
+    stage.replace_window(0, videos(1));
+    eventually(|| rig.factory.slot_holding(&key).is_some()).await;
+    assert!(!rig.holder(&key).1.calls().iter().any(|call| matches!(call, SlotCall::Seek { .. })));
+    stage.set_playing(&key, true);
+
+    eventually(|| rig.holder(&key).1.calls().contains(&SlotCall::Seek { position_ms: 30_000 })).await;
+}

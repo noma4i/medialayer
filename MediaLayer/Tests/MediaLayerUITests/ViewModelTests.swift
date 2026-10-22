@@ -74,7 +74,7 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   func setMuted(key: String, muted: Bool) { record("muted \(muted)") }
   func setMutedAll(muted: Bool) { record("mutedAll \(muted)") }
   func setRate(key: String, rate: Float) { record("rate \(rate)") }
-  func seek(key: String, positionMs: UInt64) { record("seek \(positionMs)") }
+  func seek(key: String, fraction: Double) { record("seek \(fraction)") }
   func itemState(key: String, state: MediaState) { record("state \(state)") }
   func fetchImage(url: String, headers: [String: String]) async throws -> ImageFetchResult {
     lock.withLock { fetches.append(url) }
@@ -103,7 +103,7 @@ struct ViewModelTests {
   @Test
   func inv_audio_01_onlyTheEndedStateOfTheCoreStopsTheAudio() {
     let places = RecordingPlaces()
-    let audio = AudioPlayback(key: "note", playing: false, places: places, slots: LoadedSlots())
+    let audio = AudioPlayback(key: "note", playing: false, places: places)
 
     audio.toggle()
     audio.refresh(progress: 0.5)
@@ -120,7 +120,7 @@ struct ViewModelTests {
   @Test
   func theAudioRateIsKeptAndSentToTheCore() {
     let places = RecordingPlaces()
-    let audio = AudioPlayback(key: "note", playing: false, rate: 1.5, places: places, slots: LoadedSlots())
+    let audio = AudioPlayback(key: "note", playing: false, rate: 1.5, places: places)
     #expect(audio.rate == 1.5)
 
     audio.setRate(2)

@@ -382,11 +382,24 @@ impl Stage {
                     }
                     self.advance(state, &key, event, actions);
                 }
-                calls.extend(SlotCall::from_command(command, None));
+                calls.extend(SlotCall::from_command(command.clone(), None));
+                if let (Command::Play { slot }, Some(key)) = (&command, state.slot_keys.get(slot).cloned()) {
+                    let duration = self.inner.runner.sample_now(*slot).and_then(|sample| sample.duration_ms);
+                    calls.extend(self.fraction_seek(state, &key, duration).map(|call| (*slot, call)));
+                }
             }
             Command::Unmute { slot } if self.inner.silent => calls.push((*slot, SlotCall::Mute)),
             _ => calls.extend(SlotCall::from_command(command, None)),
         }
+    }
+
+    fn fraction_seek(&self, state: &mut State, key: &str, duration_ms: Option<u64>) -> Option<SlotCall> {
+        let duration = duration_ms.filter(|duration| *duration > 0)?;
+        let loaded = state.loaded.get(key)?;
+        let fraction = state.positions.take_fraction(key)?;
+        let position_ms = (duration as f64 * fraction) as u64;
+        self.note_seek(&loaded.source.url, position_ms);
+        Some(SlotCall::Seek { position_ms })
     }
 
     fn remember_parked(&self, parked: Vec<(usize, String)>) {

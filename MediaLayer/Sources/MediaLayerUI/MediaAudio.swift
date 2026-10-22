@@ -11,13 +11,11 @@ public final class AudioPlayback {
   public private(set) var state: MediaState = .idle
   @ObservationIgnored private let key: String
   @ObservationIgnored private let places: MediaPlaces
-  @ObservationIgnored private let slots: LoadedSlots
 
-  init(key: String, playing: Bool, rate: Float = 1, places: MediaPlaces, slots: LoadedSlots) {
+  init(key: String, playing: Bool, rate: Float = 1, places: MediaPlaces) {
     self.key = key
     self.rate = rate
     self.places = places
-    self.slots = slots
     isPlaying = playing
   }
 
@@ -31,8 +29,10 @@ public final class AudioPlayback {
   }
 
   public func seek(to fraction: Double) {
-    guard let duration = slots.slot(for: key)?.sample().durationMs else { return }
-    places.seek(key: key, positionMs: UInt64(Double(duration) * min(max(fraction, 0), 1)))
+    guard fraction.isFinite else { return }
+    let clamped = min(max(fraction, 0), 1)
+    refresh(progress: clamped)
+    places.seek(key: key, fraction: clamped)
   }
 
   func refresh(progress value: Double) {
@@ -104,7 +104,7 @@ public struct MediaAudio<Content: View>: View {
       self.rate = rate
       self.context = context
       self.content = content
-      _audio = State(initialValue: AudioPlayback(key: source.url, playing: playing, rate: rate, places: context.places, slots: context.slots))
+      _audio = State(initialValue: AudioPlayback(key: source.url, playing: playing, rate: rate, places: context.places))
     }
 
     var body: some View {

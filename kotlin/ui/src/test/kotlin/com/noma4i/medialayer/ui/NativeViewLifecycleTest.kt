@@ -305,8 +305,8 @@ class NativeViewLifecycleTest {
     rule.runOnIdle { control!!.play() }
     clock.advanceTime(1000)
     rule.waitUntil(5000) { looper.idleFor(java.time.Duration.ofMillis(100)); control!!.progress > 0 }
-    rule.runOnIdle { control!!.seek(500) }
-    assertTrue(layer.calls.contains("seek:first:500"))
+    rule.runOnIdle { control!!.seek(0.5f) }
+    assertTrue(layer.calls.contains("seek:first:0.5"))
     layer.emit("first", com.noma4i.medialayer.MediaState.Ended)
     rule.waitUntil(5000) { looper.idle(); !control!!.isPlaying }
     assertEquals(com.noma4i.medialayer.MediaState.Ended, control!!.state)

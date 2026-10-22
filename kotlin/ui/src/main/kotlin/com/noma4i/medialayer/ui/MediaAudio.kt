@@ -15,7 +15,7 @@ import com.noma4i.medialayer.MediaState
 import kotlinx.coroutines.flow.flowOf
 
 @Stable
-class AudioControl internal constructor(private val seekTo: (Long) -> Unit) {
+class AudioControl internal constructor(private val seekTo: (Double) -> Unit) {
   var rate: Float by mutableFloatStateOf(1f)
 
   var state: MediaState by mutableStateOf(MediaState.Idle)
@@ -31,7 +31,12 @@ class AudioControl internal constructor(private val seekTo: (Long) -> Unit) {
 
   fun toggle() { isPlaying = !isPlaying }
 
-  fun seek(positionMs: Long) = seekTo(positionMs)
+  fun seek(fraction: Float) {
+    if (!fraction.isFinite()) return
+    val clamped = fraction.coerceIn(0f, 1f)
+    progress = clamped
+    seekTo(clamped.toDouble())
+  }
 
 }
 
@@ -39,7 +44,7 @@ class AudioControl internal constructor(private val seekTo: (Long) -> Unit) {
 fun MediaAudio(source: MediaSource, muted: Boolean = false, rate: Float = 1f, content: @Composable (AudioControl) -> Unit) {
   val environment = LocalMediaEnvironment.current
   val screen = rememberScreenVisibility()
-  val control = remember(environment, source.url) { AudioControl { environment.media.seek(source.url, it.toULong()) }.also { it.rate = rate } }
+  val control = remember(environment, source.url) { AudioControl { environment.media.seek(source.url, it) }.also { it.rate = rate } }
   LaunchedEffect(rate) { control.rate = rate }
   DisposableEffect(environment.media, source.url, control.rate) {
     environment.media.setRate(source.url, control.rate)

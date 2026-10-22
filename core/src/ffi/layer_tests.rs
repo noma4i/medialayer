@@ -350,7 +350,7 @@ fn inv_ffi_03_an_item_state_from_a_native_loader_reaches_the_state_subscribers_a
     let url = "https://o.test/v1.mp4";
     layer.replace_window(0, vec![Some(MediaItem::bare_video(url))]);
     caller.block_on(eventually(|| factory.slot_holding(url).is_some()));
-    layer.seek(url.to_string(), 1_500);
+    layer.seek(url.to_string(), 0.025);
     layer.player_events().attach(url.to_string(), 5);
     let (_, player) = factory.slot_holding(url).unwrap();
     caller.block_on(eventually(|| player.calls().contains(&SlotCall::Seek { position_ms: 1_500 }) && player.calls().contains(&SlotCall::Attach { view_token: 5 })));
@@ -619,7 +619,7 @@ fn inv_ffi_11_declarations_before_the_assembly_keep_the_last_wish_of_the_owner_n
         layer.move_window(round % 3);
         layer.set_playing(url.to_string(), round % 2 == 0);
         layer.set_muted(url.to_string(), round % 2 == 1);
-        layer.seek(url.to_string(), u64::from(round));
+        layer.seek(url.to_string(), f64::from(round) / 2_000.0);
         layer.item_state(url.to_string(), MediaState::Loading);
         layer.visible(MediaItem::bare_video(url), true);
         layer.visible(MediaItem::bare_video(url), false);

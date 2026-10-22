@@ -23,7 +23,7 @@ private final class PlacesLog: MediaPlaces, @unchecked Sendable {
   func setMuted(key: String, muted: Bool) {}
   func setRate(key: String, rate: Float) {}
   func setMutedAll(muted: Bool) {}
-  func seek(key: String, positionMs: UInt64) {}
+  func seek(key: String, fraction: Double) {}
   func itemState(key: String, state: MediaState) {}
   func fetchImage(url: String, headers: [String: String]) async throws -> ImageFetchResult { ImageFetchResult(bytes: Data(), source: .network) }
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder { fatalError("unused") }

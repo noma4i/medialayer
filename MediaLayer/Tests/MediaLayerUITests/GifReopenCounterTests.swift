@@ -43,7 +43,7 @@ private final class CountingPlaces: MediaPlaces, @unchecked Sendable {
   func setMuted(key: String, muted: Bool) { inner.setMuted(key: key, muted: muted) }
   func setRate(key: String, rate: Float) { inner.setRate(key: key, rate: rate) }
   func setMutedAll(muted: Bool) { inner.setMutedAll(muted: muted) }
-  func seek(key: String, positionMs: UInt64) { inner.seek(key: key, positionMs: positionMs) }
+  func seek(key: String, fraction: Double) { inner.seek(key: key, fraction: fraction) }
   func itemState(key: String, state: MediaState) { inner.itemState(key: key, state: state) }
   func fetchImage(url: String, headers: [String: String]) async throws -> ImageFetchResult {
     lock.withLock { reads += 1 }

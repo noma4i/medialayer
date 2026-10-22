@@ -127,10 +127,33 @@ impl Stage {
     }
 
     pub fn seek(&self, key: &str, position_ms: u64) {
-        let state = self.state();
+        let mut state = self.state();
         if let Some(loaded) = state.loaded.get(key) {
             self.note_seek(&loaded.source.url, position_ms);
             self.inner.runner.send(loaded.slot, SlotCall::Seek { position_ms });
+        } else if position_ms > 0 {
+            state.positions.remember(key, position_ms);
+        } else {
+            state.positions.forget(key);
+        }
+    }
+
+    pub fn seek_fraction(&self, key: &str, fraction: f64) {
+        if !fraction.is_finite() {
+            return;
+        }
+        let fraction = fraction.clamp(0.0, 1.0);
+        let mut state = self.state();
+        let slot = state.loaded.get(key).map(|loaded| loaded.slot);
+        let duration = slot.and_then(|slot| self.inner.runner.sample_now(slot)).and_then(|sample| sample.duration_ms).filter(|duration| *duration > 0);
+        match (slot, duration) {
+            (Some(slot), Some(duration)) => {
+                state.positions.forget(key);
+                let position_ms = (duration as f64 * fraction) as u64;
+                self.note_seek(&state.loaded[key].source.url, position_ms);
+                self.inner.runner.send(slot, SlotCall::Seek { position_ms });
+            }
+            _ => state.positions.remember_fraction(key, fraction),
         }
     }
 
