@@ -4,7 +4,7 @@ use super::events::PlayerEvents;
 use super::fetcher::{Fetcher, ForeignFetcher};
 use crate::analysis::{MediaTone, ToneSource};
 use crate::api::TonePreparation;
-use super::limits::{default_limits, DeviceMemory, Evict, ImageWindow, Limits, PoolSettings};
+use super::limits::{DeviceMemory, Evict, ImageWindow, Limits, PoolSettings};
 use crate::api::{
     assemble, placeholder_for, CacheState, Placeholder, Assembly, Kind, MediaError, MediaItem, MediaState, MediaStats, Parts, PlaybackRoute,
     PlayerSlotFactory, SettingsStore, Subscription,
@@ -102,8 +102,17 @@ impl MediaLayer {
         Arc::new(MediaLayer { handle, runtime: Mutex::new(runtime), assembled: Deferred::new(), namespace_headers, image_stats: super::image::ImageCounters::new(), releaser })
     }
 
+    #[cfg(test)]
+    pub(crate) fn queued_declarations(&self) -> usize {
+        self.assembled.queued()
+    }
+
     fn declare(&self, work: impl FnOnce(&Assembled) + Send + 'static) {
         self.assembled.run(work);
+    }
+
+    fn declare_latest<P: Send + 'static>(&self, payload: P, name: fn(&P) -> String, work: impl FnOnce(&Assembled, P) + Send + 'static) {
+        self.assembled.run_latest(payload, name, work);
     }
 
     pub(crate) async fn with_assembled<T: Send + 'static, Work: Future<Output = T> + Send + 'static>(&self, work: impl FnOnce(Arc<Assembled>) -> Work) -> Result<T, MediaError> {
@@ -167,8 +176,8 @@ impl MediaLayer {
         crate::identity::namespaced_key(&url, &headers, &self.namespace_headers)
     }
 
-    pub async fn limits(&self) -> Limits {
-        self.on_assembled(default_limits(), |assembled| async move { assembled.controls.limits().await.into() }).await
+    pub async fn limits(&self) -> Result<Limits, MediaError> {
+        self.with_assembled(|assembled| async move { Limits::from(assembled.controls.limits().await) }).await
     }
 
     pub async fn set_limits(&self, limits: Limits) -> Result<(), MediaError> {
@@ -180,8 +189,8 @@ impl MediaLayer {
         self.with_assembled(|assembled| async move { assembled.controls.reset_limits().await }).await?
     }
 
-    pub async fn stats(&self) -> MediaStats {
-        self.on_assembled(MediaStats::default(), |assembled| async move { assembled.controls.stats().await }).await
+    pub async fn stats(&self) -> Result<MediaStats, MediaError> {
+        self.with_assembled(|assembled| async move { assembled.controls.stats().await }).await
     }
 
     pub async fn clear(&self, kind: Option<Kind>) {
@@ -247,66 +256,70 @@ impl MediaLayer {
     }
 
     pub fn item_state(&self, key: String, state: MediaState) {
-        self.declare(move |assembled| {
+        self.declare_latest(key, |key| format!("state:{key}"), move |assembled, key| {
             if state == MediaState::Ready { assembled.tones.refresh(&key); }
             assembled.places.item_state(&key, state);
         });
     }
 
     pub fn seek(&self, key: String, position_ms: u64) {
-        self.declare(move |assembled| assembled.stage.seek(&key, position_ms));
+        self.declare_latest(key, |key| format!("seek:{key}"), move |assembled, key| assembled.stage.seek(&key, position_ms));
     }
 
     pub fn replace_window(&self, active: u32, sources: Vec<Option<MediaItem>>) {
-        self.declare(move |assembled| assembled.stage.replace_window(active as usize, sources));
+        self.declare_latest(sources, |_| "window".to_string(), move |assembled, sources| assembled.stage.replace_window(active as usize, sources));
     }
 
     pub fn move_window(&self, active: u32) {
-        self.declare(move |assembled| assembled.stage.move_window(active as usize));
+        self.declare_latest((), |_| "window/move".to_string(), move |assembled, ()| assembled.stage.move_window(active as usize));
     }
 
     pub fn move_image_window(&self, name: String, active: u32) {
-        self.declare(move |assembled| assembled.stage.move_image_window(&name, active as usize));
+        self.declare_latest(name, |name| format!("image:{name}/move"), move |assembled, name| assembled.stage.move_image_window(&name, active as usize));
     }
 
     pub fn replace_image_window(&self, name: String, active: u32, pages: Vec<Vec<MediaItem>>) {
-        self.declare(move |assembled| assembled.stage.replace_image_window(&name, active as usize, pages));
+        self.declare_latest((name, pages), |(name, _)| format!("image:{name}"), move |assembled, (name, pages)| assembled.stage.replace_image_window(&name, active as usize, pages));
     }
 
     pub fn set_playing(&self, key: String, playing: bool) {
-        self.declare(move |assembled| assembled.stage.set_playing(&key, playing));
+        self.declare_latest(key, |key| format!("playing:{key}"), move |assembled, key| assembled.stage.set_playing(&key, playing));
     }
 
     pub fn set_peeking(&self, key: String, peeking: bool) {
-        self.declare(move |assembled| assembled.stage.set_peeking(&key, peeking));
+        self.declare_latest(key, |key| format!("peeking:{key}"), move |assembled, key| assembled.stage.set_peeking(&key, peeking));
     }
 
     pub fn set_rate(&self, key: String, rate: f32) {
-        self.declare(move |assembled| assembled.stage.set_rate(&key, rate));
+        self.declare_latest(key, |key| format!("rate:{key}"), move |assembled, key| assembled.stage.set_rate(&key, rate));
     }
 
     pub fn set_muted_all(&self, muted: bool) {
-        self.declare(move |assembled| assembled.stage.set_muted_all(muted));
+        self.declare_latest((), |_| "muted-all".to_string(), move |assembled, ()| assembled.stage.set_muted_all(muted));
     }
 
     pub fn set_muted(&self, key: String, muted: bool) {
-        self.declare(move |assembled| assembled.stage.set_muted(&key, muted));
+        self.declare_latest(key, |key| format!("muted:{key}"), move |assembled, key| assembled.stage.set_muted(&key, muted));
     }
 
     pub fn visible(&self, source: MediaItem, visible: bool) {
-        self.declare(move |assembled| assembled.stage.visible(source, visible));
+        if visible {
+            self.assembled.run_opening(source, |source| source.url.clone(), |assembled, source| assembled.stage.visible(source, true));
+        } else {
+            self.assembled.run_closing(source, |source| source.url.clone(), |assembled, source| assembled.stage.visible(source, false));
+        }
     }
 
     pub fn pin(&self, key: String) {
-        self.declare(move |assembled| assembled.stage.pin(&key));
+        self.declare_latest(key, |key| format!("pin:{key}"), move |assembled, key| assembled.stage.pin(&key));
     }
 
     pub fn unpin(&self, key: String) {
-        self.declare(move |assembled| assembled.stage.unpin(&key));
+        self.declare_latest(key, |key| format!("pin:{key}"), move |assembled, key| assembled.stage.unpin(&key));
     }
 
     pub fn release_all(&self) {
-        self.declare(|assembled| assembled.stage.release_all());
+        self.assembled.run_resetting(|assembled| assembled.stage.release_all());
     }
 
     pub fn player_events(&self) -> Arc<PlayerEvents> {

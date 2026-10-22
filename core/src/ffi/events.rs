@@ -18,6 +18,12 @@ impl PlayerEvents {
             assembled.run(work);
         }
     }
+
+    fn declare_latest<P: Send + 'static>(&self, payload: P, name: fn(&P) -> String, work: impl FnOnce(&Assembled, P) + Send + 'static) {
+        if let Some(assembled) = self.assembled.upgrade() {
+            assembled.run_latest(payload, name, work);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -59,19 +65,19 @@ impl PlayerEvents {
     }
 
     pub fn attach(&self, key: String, view_token: u64) {
-        self.declare(move |assembled| assembled.stage.attach(&key, view_token));
+        self.declare_latest(key, |key| format!("view:{key}"), move |assembled, key| assembled.stage.attach(&key, view_token));
     }
 
     pub fn detach(&self, key: String) {
-        self.declare(move |assembled| assembled.stage.detach(&key));
+        self.declare_latest(key, |key| format!("view:{key}"), move |assembled, key| assembled.stage.detach(&key));
     }
 
     pub fn foreground(&self) {
-        self.declare(|assembled| assembled.signals.foreground());
+        self.declare_latest((), |_| "lifecycle".to_string(), |assembled, ()| assembled.signals.foreground());
     }
 
     pub fn background(&self) {
-        self.declare(|assembled| assembled.signals.background());
+        self.declare_latest((), |_| "lifecycle".to_string(), |assembled, ()| assembled.signals.background());
     }
 
     pub fn memory_warning(&self, level: Pressure) {

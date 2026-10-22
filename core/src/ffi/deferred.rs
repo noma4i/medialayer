@@ -4,11 +4,62 @@ use tokio::sync::watch;
 
 type Declaration<T> = Box<dyn FnOnce(&T) + Send>;
 
+const EVENT_CAPACITY: usize = 256;
+
+enum Rule {
+    Event,
+    Subscription,
+    Latest,
+    Opens,
+    Closes,
+}
+
+enum Plan {
+    Push(String, Rule),
+    Drop,
+}
+
+struct Waiting<T> {
+    id: u64,
+    name: String,
+    rule: Rule,
+    work: Declaration<T>,
+}
+
 struct Queue<T> {
     value: Option<Arc<T>>,
     draining: bool,
     failed: bool,
-    waiting: Vec<Declaration<T>>,
+    waiting: Vec<Waiting<T>>,
+    next_id: u64,
+}
+
+impl<T> Queue<T> {
+    fn push(&mut self, name: String, rule: Rule, work: Declaration<T>) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        if matches!(rule, Rule::Event) {
+            let events = self.waiting.iter().filter(|waiting| matches!(waiting.rule, Rule::Event)).count();
+            if events >= EVENT_CAPACITY {
+                if let Some(oldest) = self.waiting.iter().position(|waiting| matches!(waiting.rule, Rule::Event)) {
+                    self.waiting.remove(oldest);
+                }
+            }
+        }
+        self.waiting.push(Waiting { id, name, rule, work });
+        id
+    }
+
+    fn supersede(&mut self, name: &str) {
+        let group = format!("{name}/");
+        self.waiting.retain(|waiting| !(matches!(waiting.rule, Rule::Latest) && (waiting.name == name || waiting.name.starts_with(&group))));
+    }
+
+    fn cancel_open(&mut self, name: &str) -> bool {
+        let Some(open) = self.waiting.iter().rposition(|waiting| matches!(waiting.rule, Rule::Opens) && waiting.name == name) else { return false };
+        self.waiting.remove(open);
+        true
+    }
 }
 
 pub struct Deferred<T> {
@@ -29,20 +80,59 @@ fn locked<V>(mutex: &Mutex<V>) -> MutexGuard<'_, V> {
 impl<T: Send + Sync + 'static> Deferred<T> {
     pub fn new() -> Arc<Deferred<T>> {
         let (outcome, _) = watch::channel(None);
-        Arc::new(Deferred { queue: Mutex::new(Queue { value: None, draining: false, failed: false, waiting: Vec::new() }), outcome })
+        Arc::new(Deferred { queue: Mutex::new(Queue { value: None, draining: false, failed: false, waiting: Vec::new(), next_id: 0 }), outcome })
     }
 
-    pub fn run(&self, work: impl FnOnce(&T) + Send + 'static) {
+    fn submit<P: Send + 'static>(&self, payload: P, work: impl FnOnce(&T, P) + Send + 'static, plan: impl FnOnce(&mut Queue<T>, &P) -> Plan) -> Option<u64> {
         let mut queue = locked(&self.queue);
         match &queue.value {
             Some(value) if !queue.draining => {
                 let value = value.clone();
                 drop(queue);
-                work(&value);
+                work(&value, payload);
+                None
             }
-            _ if queue.failed => {}
-            _ => queue.waiting.push(Box::new(work)),
+            _ if queue.failed => None,
+            _ => match plan(&mut queue, &payload) {
+                Plan::Push(name, rule) => Some(queue.push(name, rule, Box::new(move |value| work(value, payload)))),
+                Plan::Drop => None,
+            },
         }
+    }
+
+    pub fn run(&self, work: impl FnOnce(&T) + Send + 'static) {
+        self.submit((), move |value, ()| work(value), |_, _| Plan::Push(String::new(), Rule::Event));
+    }
+
+    pub fn run_latest<P: Send + 'static>(&self, payload: P, name: fn(&P) -> String, work: impl FnOnce(&T, P) + Send + 'static) {
+        self.submit(payload, work, |queue, payload| {
+            let name = name(payload);
+            queue.supersede(&name);
+            Plan::Push(name, Rule::Latest)
+        });
+    }
+
+    pub fn run_opening<P: Send + 'static>(&self, payload: P, name: fn(&P) -> String, work: impl FnOnce(&T, P) + Send + 'static) {
+        self.submit(payload, work, |_, payload| Plan::Push(name(payload), Rule::Opens));
+    }
+
+    pub fn run_closing<P: Send + 'static>(&self, payload: P, name: fn(&P) -> String, work: impl FnOnce(&T, P) + Send + 'static) {
+        self.submit(payload, work, |queue, payload| {
+            let name = name(payload);
+            if queue.cancel_open(&name) { Plan::Drop } else { Plan::Push(name, Rule::Closes) }
+        });
+    }
+
+    pub fn run_resetting(&self, work: impl FnOnce(&T) + Send + 'static) {
+        self.submit((), move |value, ()| work(value), |queue, _| {
+            queue.waiting.clear();
+            Plan::Push(String::new(), Rule::Event)
+        });
+    }
+
+    #[cfg(test)]
+    pub fn queued(&self) -> usize {
+        locked(&self.queue).waiting.len()
     }
 
     pub fn install(&self, value: Arc<T>) {
@@ -56,7 +146,7 @@ impl<T: Send + Sync + 'static> Deferred<T> {
                 break;
             }
             drop(queue);
-            waiting.into_iter().for_each(|work| work(&value));
+            waiting.into_iter().for_each(|waiting| (waiting.work)(&value));
             queue = locked(&self.queue);
         }
         drop(queue);
@@ -77,19 +167,28 @@ impl<T: Send + Sync + 'static> Deferred<T> {
         settled.clone().expect("a settled outcome holds a value")
     }
 
-    pub fn hold(&self, subscribe: impl FnOnce(&T) -> Subscription + Send + 'static) -> Subscription {
+    pub fn hold(self: &Arc<Self>, subscribe: impl FnOnce(&T) -> Subscription + Send + 'static) -> Subscription {
         let held = Arc::new(Mutex::new(Held::default()));
         let fill = held.clone();
-        self.run(move |value| {
-            let mut held = locked(&fill);
-            if !held.cancelled {
-                held.subscription = Some(subscribe(value));
-            }
-        });
+        let queued = self.submit(
+            (),
+            move |value, ()| {
+                let mut held = locked(&fill);
+                if !held.cancelled {
+                    held.subscription = Some(subscribe(value));
+                }
+            },
+            |_, _| Plan::Push(String::new(), Rule::Subscription),
+        );
+        let deferred = Arc::downgrade(self);
         Subscription::cancelling(move || {
             let mut held = locked(&held);
             held.cancelled = true;
             held.subscription.take();
+            drop(held);
+            if let (Some(id), Some(deferred)) = (queued, deferred.upgrade()) {
+                locked(&deferred.queue).waiting.retain(|waiting| waiting.id != id);
+            }
         })
     }
 }

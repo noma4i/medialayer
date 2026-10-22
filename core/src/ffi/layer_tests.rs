@@ -136,12 +136,13 @@ async fn inv_ffi_02_opening_reads_nothing_until_the_first_call_awaits() {
     let mut assembled = assembly(dir.path(), Arc::new(MockFetcher::default()), shared::<MockFactory>());
     assembled.settings = settings.clone();
     let parts = crate::api::assemble(assembled).await.unwrap();
+    let assembled_reads = settings.reads.load(std::sync::atomic::Ordering::SeqCst);
 
     let layer = MediaLayer::from_parts(None, Handle::current(), parts, None, Vec::new());
 
-    assert_eq!(settings.reads.load(std::sync::atomic::Ordering::SeqCst), 0);
-    layer.limits().await;
-    assert_eq!(settings.reads.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(settings.reads.load(std::sync::atomic::Ordering::SeqCst), assembled_reads);
+    layer.limits().await.unwrap();
+    assert_eq!(settings.reads.load(std::sync::atomic::Ordering::SeqCst), assembled_reads + 1);
 }
 
 #[test]
@@ -154,7 +155,7 @@ fn inv_ffi_02_open_wires_the_real_parts_so_limits_reach_the_store_and_stats_answ
     let smaller = Limits { budget: 512 * 1024 * 1024, ..default_limits() };
     let (limits, stats) = caller.block_on(async {
         layer.set_limits(smaller.clone()).await.unwrap();
-        (layer.limits().await, layer.stats().await)
+        (layer.limits().await.unwrap(), layer.stats().await.unwrap())
     });
 
     assert_eq!(limits, smaller);
@@ -179,19 +180,19 @@ fn inv_ffi_02_a_play_url_routes_the_platform_fetcher_through_the_proxy_into_the_
     let reply = caller.block_on(test_client::get(port, &format!("{}?{}", parsed.path(), parsed.query().unwrap_or_default())));
     let stored = caller.block_on(async {
         for _ in 0..1_000_000 {
-            if layer.stats().await.file_count > 0 {
+            if layer.stats().await.unwrap().file_count > 0 {
                 break;
             }
             tokio::task::yield_now().await;
         }
-        layer.stats().await.file_count
+        layer.stats().await.unwrap().file_count
     });
     caller.block_on(layer.purge(source.url.clone()));
 
     assert_eq!(reply.body, b"origin bytes");
     assert_eq!(origin.seen.lock().unwrap()[0].headers.get("Authorization").map(String::as_str), Some("token"));
     assert_eq!(stored, 1);
-    assert_eq!(caller.block_on(layer.stats()).file_count, 0);
+    assert_eq!(caller.block_on(layer.stats()).unwrap().file_count, 0);
     assert_eq!(caller.block_on(layer.refresh_route(source, route.clone())).unwrap(), route);
 }
 
@@ -372,7 +373,7 @@ fn inv_ffi_05_open_takes_the_spec_defaults_without_writing_them_and_a_saved_limi
     let first_dir = tempfile::tempdir().unwrap();
 
     let layer = from_spec(first_dir.path());
-    let limits = caller.block_on(layer.limits());
+    let limits = caller.block_on(layer.limits()).unwrap();
 
     assert_eq!((limits.budget, limits.slots), (3_000_000_000, 5));
     assert!(settings.writes.lock().unwrap().is_empty());
@@ -380,7 +381,7 @@ fn inv_ffi_05_open_takes_the_spec_defaults_without_writing_them_and_a_saved_limi
     caller.block_on(layer.set_limits(saved.clone())).unwrap();
     drop(layer);
     let second_dir = tempfile::tempdir().unwrap();
-    assert_eq!(caller.block_on(from_spec(second_dir.path()).limits()), saved);
+    assert_eq!(caller.block_on(from_spec(second_dir.path()).limits()).unwrap(), saved);
 }
 
 #[test]
@@ -463,7 +464,7 @@ fn inv_ffi_07_calls_made_before_the_assembly_ends_run_after_it_in_call_order_and
     layer.set_playing(url.to_string(), true);
     layer.player_events().attach(url.to_string(), 5);
     let declared_in = started.elapsed();
-    let limits = caller.block_on(layer.limits());
+    let limits = caller.block_on(layer.limits()).unwrap();
 
     assert!(declared_in < SLOW / 2, "the declarations waited {declared_in:?} for the assembly");
     assert!(started.elapsed() >= SLOW, "the async call returned before the assembly ended");
@@ -555,13 +556,13 @@ fn failed_layer(runtime: tokio::runtime::Runtime) -> Arc<MediaLayer> {
 }
 
 #[test]
-fn inv_ffi_04_a_layer_that_failed_to_assemble_answers_the_non_throwing_calls_with_empty_values() {
+fn inv_ffi_04_a_layer_that_failed_to_assemble_reports_the_error_to_the_calls_with_a_result() {
     let layer = failed_layer(tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap());
     let item = crate::api::test_support::video("https://o.test/a.mp4");
 
     caller().block_on(async {
-        assert_eq!(layer.stats().await, MediaStats::default());
-        assert_eq!(layer.limits().await, default_limits());
+        assert!(matches!(layer.stats().await, Err(MediaError::Unexpected { .. })));
+        assert!(matches!(layer.limits().await, Err(MediaError::Unexpected { .. })));
         assert!(!layer.is_cached(item.clone()).await);
         layer.clear(None).await;
         layer.purge(item.url.clone()).await;
@@ -599,4 +600,33 @@ async fn inv_ffi_09_cancelling_outer_call_drops_inner_work() {
     assert!(outer.await.unwrap_err().is_cancelled());
     let release = tokio::time::timeout(std::time::Duration::from_secs(1), released).await;
     assert!(matches!(release, Ok(Err(_))), "inner work still owns its resource");
+}
+
+#[test]
+fn inv_ffi_11_declarations_before_the_assembly_keep_the_last_wish_of_the_owner_not_the_history() {
+    let dir = tempfile::tempdir().unwrap();
+    slow_assembly(dir.path(), SLOW);
+    let factory: Arc<MockFactory> = Arc::default();
+    let slots: Arc<dyn PlayerSlotFactory> = factory.clone();
+    let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), Some(slots))).unwrap();
+    let items: Vec<Option<MediaItem>> = (0..3).map(|index| Some(MediaItem::bare_video(&format!("https://o.test/v{index}.mp4")))).collect();
+    let url = "https://o.test/v1.mp4";
+
+    for round in 0..2_000u32 {
+        layer.replace_window(round % 3, items.clone());
+        layer.move_window(round % 3);
+        layer.set_playing(url.to_string(), round % 2 == 0);
+        layer.set_muted(url.to_string(), round % 2 == 1);
+        layer.seek(url.to_string(), u64::from(round));
+        layer.item_state(url.to_string(), MediaState::Loading);
+        layer.visible(MediaItem::bare_video(url), true);
+        layer.visible(MediaItem::bare_video(url), false);
+    }
+
+    let queued = layer.queued_declarations();
+    assert!(queued <= 16, "{queued} declarations wait for an assembly that has not ended");
+    let caller = caller();
+    caller.block_on(eventually(|| factory.slot_holding(url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Mute))));
+    let (_, slot) = factory.slot_holding(url).unwrap();
+    assert!(!slot.calls().contains(&SlotCall::Play), "{:?}", slot.calls());
 }
