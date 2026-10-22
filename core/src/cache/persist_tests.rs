@@ -6,7 +6,7 @@ use crate::proxy::Meta;
 
 #[tokio::test]
 async fn inv_cache_23_incremental_save_writes_only_changed_records() {
-    let f = super::test_support::fixture(crate::limits::Limits::default(), &[]).await;
+    let f = super::test_support::fixture_with_slow_index(crate::limits::Limits::default()).await;
     for index in 0..100 {
         f.cache.put(&format!("https://cache.test/{index}"), Kind::Image, b"x").await.unwrap();
     }

@@ -47,6 +47,15 @@ pub async fn fixture(limits: Limits, overrides: &[(Kind, EvictionStrategy)]) -> 
     Fixture { cache, clock, dir }
 }
 
+pub async fn fixture_with_slow_index(limits: Limits) -> Fixture {
+    let dir = tempfile::tempdir().unwrap();
+    let clock = Arc::new(ManualClock::new(1_000));
+    let slow = Options { persist_delay: Duration::from_secs(3600), ..options(clock.clone(), &[]) };
+    let cache = Cache::open_with(dir.path(), limits, slow, u64::MAX);
+    cache.ready().await;
+    Fixture { cache, clock, dir }
+}
+
 pub fn payload(len: usize) -> Vec<u8> {
     vec![b'x'; len]
 }
