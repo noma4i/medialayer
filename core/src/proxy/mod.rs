@@ -380,6 +380,8 @@ mod bounds_tests;
 #[cfg(test)]
 mod buffer_tests;
 #[cfg(test)]
+mod hold_tests;
+#[cfg(test)]
 mod lanes_tests;
 #[cfg(test)]
 mod limits_tests;

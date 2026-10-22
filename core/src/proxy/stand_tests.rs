@@ -357,6 +357,12 @@ async fn inv_proxy_10_an_origin_body_is_closed_while_its_slot_is_still_held() {
     let target = path_of(&proxy.url_for("https://o.test/probe.mp4", &HashMap::new()).unwrap());
     let head = request(proxy.port(), "HEAD", &target, &[]).await;
     assert_eq!(head.status, 200);
+    for _ in 0..200 {
+        if !held_at_close.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
     let closes = held_at_close.lock().unwrap().clone();
     assert!(!closes.is_empty(), "the origin body was never closed");
     assert!(closes.iter().all(|held| *held == 1), "an origin body outlived its slot: slots held at each close {closes:?}");

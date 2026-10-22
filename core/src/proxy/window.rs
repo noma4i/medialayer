@@ -14,7 +14,6 @@ use tokio::time::Instant;
 const MAX_STREAMS: usize = 16;
 const WARM_CHUNKS_AHEAD: usize = 1;
 const RECHECK_MIN: Duration = Duration::from_millis(100);
-const RECHECK_MAX: Duration = Duration::from_secs(1);
 const FULL_PERCENT: u32 = 100;
 
 pub type PositionProbe = Pin<Box<dyn Future<Output = Option<u64>> + Send>>;
@@ -203,6 +202,7 @@ impl ProxyShared {
     pub(super) async fn hold_for_playhead(&self, target: &str, key: &str) {
         let Some((stream, index)) = self.windows.lookup(target) else { return };
         let deadline = Instant::now() + self.config.hold_ceiling;
+        let mut seen = None;
         loop {
             let nudged = stream.nudge.notified();
             tokio::pin!(nudged);
@@ -221,7 +221,8 @@ impl ProxyShared {
                 return;
             }
             let opens_at = stream.starts_ms[index - ahead];
-            let wait = Duration::from_millis(opens_at.saturating_sub(position)).clamp(RECHECK_MIN, RECHECK_MAX);
+            let wait = if seen == Some(position) { left } else { Duration::from_millis(opens_at.saturating_sub(position)).max(RECHECK_MIN) };
+            seen = Some(position);
             tokio::select! {
                 _ = tokio::time::sleep(wait.min(left)) => {}
                 _ = &mut nudged => {}
