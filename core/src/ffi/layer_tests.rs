@@ -130,19 +130,21 @@ async fn inv_spec_07_assembly_applies_the_first_eviction_override_of_each_kind()
 }
 
 #[tokio::test]
-async fn inv_ffi_02_opening_reads_nothing_until_the_first_call_awaits() {
+async fn inv_ffi_02_saved_limits_are_read_once_by_the_assembly_and_never_again() {
     let settings: Arc<FakeSettings> = shared();
     let dir = tempfile::tempdir().unwrap();
     let mut assembled = assembly(dir.path(), Arc::new(MockFetcher::default()), shared::<MockFactory>());
     assembled.settings = settings.clone();
+    let reads = || settings.reads.load(std::sync::atomic::Ordering::SeqCst);
+
     let parts = crate::api::assemble(assembled).await.unwrap();
-    let assembled_reads = settings.reads.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(reads(), 1);
 
     let layer = MediaLayer::from_parts(None, Handle::current(), parts, None, Vec::new());
-
-    assert_eq!(settings.reads.load(std::sync::atomic::Ordering::SeqCst), assembled_reads);
+    assert_eq!(reads(), 1);
     layer.limits().await.unwrap();
-    assert_eq!(settings.reads.load(std::sync::atomic::Ordering::SeqCst), assembled_reads + 1);
+    layer.stats().await.unwrap();
+    assert_eq!(reads(), 1);
 }
 
 #[test]

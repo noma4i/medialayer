@@ -64,7 +64,10 @@ fn rig_on(settings: Arc<FakeSettings>) -> Rig {
         pool_settings: PoolSettings::default(),
         release: release.clone(),
     };
-    let controls = Controls::new(Handle::current(), ports, Limits::default(), crate::change::Change::new());
+    let saved = settings.read(LIMITS_KEY.to_string());
+    let (limits, rejected) = crate::limits::resolve(Limits::default(), saved.as_deref());
+    let rejected = rejected.map(|error| format!("saved limits rejected: {error}"));
+    let controls = Controls::new(Handle::current(), ports, Limits::default(), limits, rejected, crate::change::Change::new());
     Rig { tones, cache, pool, prefetch, transport, settings, release, ledger, controls }
 }
 
@@ -86,11 +89,10 @@ fn smaller_budget() -> Limits {
 }
 
 #[tokio::test]
-async fn inv_limits_03_saved_limits_win_over_defaults_and_reach_the_cache() {
+async fn inv_limits_03_saved_limits_win_over_defaults() {
     let rig = rig_with_saved(Some("budget=536870912"));
 
     assert_eq!(rig.controls.limits().await.budget, 512 * MIB);
-    assert_eq!(*rig.cache.applied.lock().unwrap(), vec![smaller_budget()]);
 }
 
 #[tokio::test]
@@ -232,21 +234,8 @@ async fn inv_limits_04_new_limits_move_the_memory_ceiling_and_reach_the_prefetch
 }
 
 #[tokio::test]
-async fn inv_limits_03_saved_limits_reach_the_ceiling_and_the_prefetcher_when_they_are_first_read() {
-    let rig = rig_with_saved(Some("memory_budget=33554432"));
-
-    rig.controls.limits().await;
-
-    assert_eq!(rig.ledger.ceiling(), 32 * MIB);
-    assert_eq!(rig.prefetch.limits.lock().unwrap().len(), 1);
-}
-
-#[tokio::test]
 async fn inv_limits_03_an_invalid_saved_value_is_dropped_and_named_in_the_diagnostics() {
     let rig = rig_with_saved(Some("budget=1024"));
-    assert!(rig.controls.stats().await.diagnostics.is_empty());
-
-    rig.controls.limits().await;
 
     let diagnostics = rig.controls.stats().await.diagnostics;
     assert_eq!(diagnostics.len(), 1);

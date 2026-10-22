@@ -85,6 +85,8 @@ pub struct Parts {
     pub ledger: Ledger,
     pub clock: Arc<dyn Clock>,
     pub defaults: Limits,
+    pub limits: Limits,
+    pub rejected: Option<String>,
     pub device: DeviceMemory,
     pub change: Arc<Change>,
     pub pool: PoolSettings,
@@ -176,23 +178,24 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
     defaults.validate()?;
     let handle = Handle::current();
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
-    let ledger = ledger_for(&defaults, device);
     let change = Change::new();
     let saved_settings = settings.clone();
     let saved = tokio::task::spawn_blocking(move || saved_settings.read(super::controls::LIMITS_KEY.to_owned())).await.ok().flatten();
-    let (cache_limits, _) = crate::limits::resolve(defaults, saved.as_deref());
-    let cache = Cache::open_with(dir, cache_limits, CacheOptions { change: change.clone(), overrides: eviction_overrides, ..CacheOptions::default() }, available_bytes);
+    let (limits, rejected) = crate::limits::resolve(defaults, saved.as_deref());
+    let rejected = rejected.map(|error| format!("saved limits rejected: {error}"));
+    let ledger = ledger_for(&limits, device);
+    let cache = Cache::open_with(dir, limits, CacheOptions { change: change.clone(), overrides: eviction_overrides, ..CacheOptions::default() }, available_bytes);
     let store: Arc<dyn ByteStore> = Arc::new(CacheStore::new(cache.clone(), Arc::new(classify_kind)));
-    let mut proxy_config = ProxyConfig { ledger: ledger.clone(), namespace_headers, ..ProxyConfig::from_limits(&defaults) };
+    let mut proxy_config = ProxyConfig { ledger: ledger.clone(), namespace_headers, ..ProxyConfig::from_limits(&limits) };
     if let Some(headers) = forward_headers {
         proxy_config.policy.forwarded_headers = headers;
     }
     let proxy = Proxy::start(proxy_config, fetcher, store)
         .await
         .map_err(|error| MediaError::Unexpected { detail: error.to_string() })?;
-    let dedupe_window = Duration::from_secs(defaults.dedupe_window_seconds.into());
-    let prefetch_ledger = PrefetchLedger::new(dedupe_window, defaults.dedupe_max_entries as usize);
-    let prefetcher = Prefetcher::new(Arc::new(ProxyLoader::new(proxy.clone())), &defaults, prefetch_ledger, clock.clone());
+    let dedupe_window = Duration::from_secs(limits.dedupe_window_seconds.into());
+    let prefetch_ledger = PrefetchLedger::new(dedupe_window, limits.dedupe_max_entries as usize);
+    let prefetcher = Prefetcher::new(Arc::new(ProxyLoader::new(proxy.clone())), &limits, prefetch_ledger, clock.clone());
     prefetcher.set_image_windows(image_windows.into_iter().collect());
     let routes = Arc::new(Routes::new(proxy.clone(), Arc::new(cache.clone())));
     let keying = {
@@ -201,7 +204,7 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
     };
     let tones = Tones::new(handle.clone(), Arc::new(CacheTones::new(cache.clone(), keying)), MEMO_ENTRIES);
     let places = Arc::new(Places::new(handle.clone()));
-    let ring_config = pool_config(&defaults, device, &pool);
+    let ring_config = pool_config(&limits, device, &pool);
     let stage = Stage::new(
         handle.clone(),
         StageParts {
@@ -217,5 +220,5 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
             ledger: ledger.clone(),
         },
     );
-    Ok(Parts { cache, proxy, prefetcher, stage, places, routes, tones, settings, ledger, clock, defaults, device, change, pool })
+    Ok(Parts { cache, proxy, prefetcher, stage, places, routes, tones, settings, ledger, clock, defaults, limits, rejected, device, change, pool })
 }

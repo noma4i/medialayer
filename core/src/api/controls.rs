@@ -4,7 +4,7 @@ use super::assemble::{pool_config, PoolSettings};
 use super::ports::{CacheControl, MemoryRelease, PoolControl, PrefetchControl, SettingsStore, TransportControl};
 use super::types::{Kind, MediaStats};
 use crate::change::Change;
-use crate::limits::{resolve, Limits};
+use crate::limits::Limits;
 use crate::memory::{effective_ceiling, DeviceMemory, Ledger, ShareTuning};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -29,7 +29,7 @@ pub struct ControlPorts {
 pub struct Controls {
     ports: ControlPorts,
     defaults: Limits,
-    current: AsyncMutex<Option<Limits>>,
+    current: AsyncMutex<Limits>,
     diagnostics: Mutex<Vec<String>>,
     published: Mutex<Option<MediaStats>>,
     stats_hub: Hub<MediaStats>,
@@ -42,12 +42,12 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Controls {
-    pub fn new(handle: Handle, ports: ControlPorts, defaults: Limits, change: Arc<Change>) -> Controls {
+    pub fn new(handle: Handle, ports: ControlPorts, defaults: Limits, limits: Limits, rejected: Option<String>, change: Arc<Change>) -> Controls {
         Controls {
             ports,
             defaults,
-            current: AsyncMutex::new(None),
-            diagnostics: Mutex::new(Vec::new()),
+            current: AsyncMutex::new(limits),
+            diagnostics: Mutex::new(rejected.into_iter().collect()),
             published: Mutex::new(None),
             stats_hub: Hub::new(handle),
             change,
@@ -64,19 +64,17 @@ impl Controls {
     }
 
     pub async fn limits(&self) -> Limits {
-        let mut current = self.current.lock().await;
-        self.loaded(&mut current).await
+        *self.current.lock().await
     }
 
     pub async fn set_limits(&self, limits: Limits) -> Result<(), MediaError> {
         limits.validate()?;
         let mut current = self.current.lock().await;
-        self.loaded(&mut current).await;
         self.apply(limits).await?;
         let settings = self.ports.settings.clone();
         let encoded = limits.encode();
         let _ = tokio::task::spawn_blocking(move || settings.write(LIMITS_KEY.to_string(), encoded)).await;
-        *current = Some(limits);
+        *current = limits;
         drop(current);
         self.publish_stats().await;
         Ok(())
@@ -87,7 +85,7 @@ impl Controls {
         self.apply(self.defaults).await?;
         let settings = self.ports.settings.clone();
         let _ = tokio::task::spawn_blocking(move || settings.remove(LIMITS_KEY.to_string())).await;
-        *current = Some(self.defaults);
+        *current = self.defaults;
         drop(current);
         self.publish_stats().await;
         Ok(())
@@ -160,23 +158,5 @@ impl Controls {
         self.ports.pool.set_slots(pool_config(&limits, self.ports.device, &self.ports.pool_settings).slots);
         self.ports.ledger.set_ceiling(effective_ceiling(limits.memory_budget, self.ports.device, ShareTuning::default()));
         Ok(())
-    }
-
-    async fn loaded(&self, current: &mut Option<Limits>) -> Limits {
-        if let Some(limits) = *current {
-            return limits;
-        }
-        let settings = self.ports.settings.clone();
-        let saved = tokio::task::spawn_blocking(move || settings.read(LIMITS_KEY.to_string())).await.ok().flatten();
-        let (limits, rejected) = resolve(self.defaults, saved.as_deref());
-        if let Some(error) = rejected {
-            locked(&self.diagnostics).push(format!("saved limits rejected: {error}"));
-            self.change.mark();
-        }
-        if limits != self.defaults {
-            let _ = self.apply(limits).await;
-        }
-        *current = Some(limits);
-        limits
     }
 }

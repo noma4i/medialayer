@@ -32,6 +32,24 @@ async fn inv_cache_26_saved_budget_applies_before_startup_eviction() {
     assert_eq!(parts.cache.stats().await.total_bytes, 90);
 }
 
+#[tokio::test]
+async fn inv_limits_03_saved_limits_are_resolved_once_and_every_part_is_built_from_them() {
+    for (saved, ceiling, rejected) in [("memory_budget=33554432", Some(32 * MIB), false), ("budget=1024", None, true)] {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = shared::<FakeSettings>();
+        settings.values.lock().unwrap().insert(super::controls::LIMITS_KEY.into(), saved.into());
+        let mut config = assembly(dir.path(), Arc::new(MockFetcher::new()), shared::<MockFactory>());
+        config.settings = settings.clone();
+
+        let parts = assemble(config).await.unwrap();
+
+        assert_eq!(settings.reads.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(parts.rejected.is_some(), rejected);
+        assert_eq!(parts.limits == Limits::default(), rejected);
+        assert_eq!(parts.ledger.ceiling(), ceiling.unwrap_or_else(|| ledger_for(&Limits::default(), parts.device).ceiling()));
+    }
+}
+
 #[test]
 fn inv_api_09_ceiling_is_the_smaller_of_the_option_and_the_device_share() {
     let low = DeviceMemory { total_mb: 100, heap_class_mb: None, low_ram: true };
