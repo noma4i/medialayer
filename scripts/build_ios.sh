@@ -19,7 +19,8 @@ esac
 
 libraries=()
 for target in "${targets[@]}"; do
-  libraries+=("$(cargo build --release --manifest-path "$root/core/Cargo.toml" --target "$target" --message-format=json-render-diagnostics | reported_artifact staticlib medialayer)")
+  library="$(cargo build --release --manifest-path "$root/core/Cargo.toml" --target "$target" --message-format=json-render-diagnostics | reported_artifact staticlib medialayer)"
+  libraries+=("$library")
 done
 
 bindgen="$(cargo build --manifest-path "$root/bindgen/Cargo.toml" --bin uniffi-bindgen --message-format=json-render-diagnostics | reported_artifact bin uniffi-bindgen)"
