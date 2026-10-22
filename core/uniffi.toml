@@ -1,2 +1,6 @@
 [bindings.kotlin]
 package_name = "com.noma4i.medialayer"
+exclude = ["MediaLayer.shutdown"]
+
+[bindings.swift.rename]
+"MediaLayer.shutdown" = "close"

@@ -33,7 +33,7 @@ async fn inv_cache_26_saved_budget_applies_before_startup_eviction() {
 }
 
 #[tokio::test]
-async fn inv_limits_03_saved_limits_are_resolved_once_and_every_part_is_built_from_them() {
+async fn inv_limits_07_saved_limits_are_resolved_once_and_every_part_is_built_from_them() {
     for (saved, ceiling, rejected) in [("memory_budget=33554432", Some(32 * MIB), false), ("budget=1024", None, true)] {
         let dir = tempfile::tempdir().unwrap();
         let settings = shared::<FakeSettings>();

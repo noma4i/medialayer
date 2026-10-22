@@ -40,7 +40,7 @@ extension GlobalMedia {
     }
 
     @Test
-    func inv_image_37_theExportNeverChangesTheStateOfAPlace() async {
+    func inv_image_38_theExportNeverChangesTheStateOfAPlace() async {
       let places = RecordingPlaces()
       places.imageResult = .success(pngData(side: 16))
       let context = makeContext(places)

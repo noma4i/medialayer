@@ -98,10 +98,6 @@ extension MediaLayer {
     return (config, factory)
   }
 
-  public func close() {
-    shutdown()
-  }
-
   fileprivate func stopFollowingSystem() {
     objc_setAssociatedObject(self, &lifetimeKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
   }

@@ -72,7 +72,7 @@ class MediaImageExportTest {
   }
 
   @Test
-  fun inv_image_37_the_export_never_changes_the_state_of_a_place() {
+  fun inv_image_38_the_export_never_changes_the_state_of_a_place() {
     val imageLoader = loader()
 
     export(imageLoader, "https://o.test/a.png")
