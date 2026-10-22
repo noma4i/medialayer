@@ -75,7 +75,7 @@ pub struct MediaLayer {
     assembled: Arc<Deferred<Assembled>>,
     namespace_headers: Vec<String>,
     image_stats: Arc<super::image::ImageCounters>,
-    releaser: Option<Arc<dyn MemoryReleaser>>,
+    releaser: Mutex<Option<Arc<dyn MemoryReleaser>>>,
 }
 
 impl MediaLayer {
@@ -99,7 +99,7 @@ impl MediaLayer {
     }
 
     fn pending(runtime: Option<Runtime>, handle: Handle, namespace_headers: Vec<String>, releaser: Option<Arc<dyn MemoryReleaser>>) -> Arc<MediaLayer> {
-        Arc::new(MediaLayer { handle, runtime: Mutex::new(runtime), assembled: Deferred::new(), namespace_headers, image_stats: super::image::ImageCounters::new(), releaser })
+        Arc::new(MediaLayer { handle, runtime: Mutex::new(runtime), assembled: Deferred::new(), namespace_headers, image_stats: super::image::ImageCounters::new(), releaser: Mutex::new(releaser) })
     }
 
     #[cfg(test)]
@@ -125,14 +125,21 @@ impl MediaLayer {
     }
 }
 
-impl Drop for MediaLayer {
-    fn drop(&mut self) {
-        if let Some(releaser) = self.releaser.take() {
+impl MediaLayer {
+    fn teardown(&self) {
+        let releaser = self.releaser.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+        if let Some(releaser) = releaser {
             releaser.shutdown();
         }
         if let Some(runtime) = self.runtime.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take() {
             runtime.shutdown_background();
         }
+    }
+}
+
+impl Drop for MediaLayer {
+    fn drop(&mut self) {
+        self.teardown();
     }
 }
 
@@ -170,6 +177,10 @@ impl MediaLayer {
             watchdog: WatchdogConfig::default(),
         };
         Ok(MediaLayer::assembling(runtime, assemble(assembly), config.memory_releaser, namespace_headers))
+    }
+
+    pub fn shutdown(&self) {
+        self.teardown();
     }
 
     pub fn cache_key(&self, url: String, headers: HashMap<String, String>) -> String {

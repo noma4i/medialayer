@@ -630,3 +630,37 @@ fn inv_ffi_11_declarations_before_the_assembly_keep_the_last_wish_of_the_owner_n
     let (_, slot) = factory.slot_holding(url).unwrap();
     assert!(!slot.calls().contains(&SlotCall::Play), "{:?}", slot.calls());
 }
+
+#[derive(Default)]
+struct ClosingReleaser {
+    shutdowns: std::sync::atomic::AtomicUsize,
+}
+
+impl MemoryReleaser for ClosingReleaser {
+    fn drop_memory_caches(&self) {}
+
+    fn shutdown(&self) {
+        self.shutdowns.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn inv_ffi_12_shutdown_releases_the_platform_then_the_core_once_whoever_holds_the_object() {
+    let dir = tempfile::tempdir().unwrap();
+    let releaser: Arc<ClosingReleaser> = shared();
+    let mut open = config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), None);
+    open.memory_releaser = Some(releaser.clone());
+    let layer = MediaLayer::open(open).unwrap();
+    let held = layer.clone();
+    let caller = caller();
+    caller.block_on(layer.stats()).unwrap();
+
+    layer.shutdown();
+    layer.shutdown();
+
+    assert_eq!(releaser.shutdowns.load(std::sync::atomic::Ordering::SeqCst), 1);
+    let after = caller.block_on(async { tokio::time::timeout(std::time::Duration::from_secs(5), held.stats()).await });
+    assert!(matches!(after, Ok(Err(MediaError::Unexpected { .. }))), "{after:?}");
+    drop((layer, held));
+    assert_eq!(releaser.shutdowns.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
