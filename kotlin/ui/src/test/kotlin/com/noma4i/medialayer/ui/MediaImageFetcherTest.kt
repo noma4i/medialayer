@@ -69,6 +69,7 @@ class MediaImageFetcherTest {
       shadowOf(Looper.getMainLooper()).idle()
       Thread.yield()
     }
+    drainFfi()
     return result!!
   }
 

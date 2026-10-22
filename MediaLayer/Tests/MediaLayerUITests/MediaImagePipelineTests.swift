@@ -88,6 +88,7 @@ extension GlobalMedia {
 
       let image = await PlaceholderView.loadCover("https://o.test/cover.png", for: video, context: MediaContext(places: places), points: CGSize(width: 50, height: 50), scale: 2)
 
+      await FfiQueue.drain()
       let stats = places.imageStats().snapshot()
       #expect(image != nil)
       #expect(stats.decodes == 1)
@@ -114,6 +115,7 @@ extension GlobalMedia {
       let pipeline = MediaImagePipeline.make(places: places)
       let request = try #require(MediaImagePipeline.request(places: places, for: TestImage(url: "https://o.test/lookup.png"), points: CGSize(width: 16, height: 16)))
       _ = try await pipeline.image(for: request)
+      await FfiQueue.drain()
       let before = places.imageStats().snapshot()
       for _ in 0 ..< 3 {
         #expect(MediaImagePipeline.cachedContainer(for: request, in: pipeline) != nil)
@@ -132,9 +134,11 @@ extension GlobalMedia {
       let pipeline = MediaImagePipeline.make(places: places)
       let request = try #require(MediaImagePipeline.request(places: places, for: TestImage(url: "https://o.test/count.png"), points: CGSize(width: 16, height: 16)))
       _ = try await pipeline.image(for: request)
+      await FfiQueue.drain()
       #expect(places.imageStats().snapshot().placementPixels == 256)
       #expect(MediaImagePipeline.cachedContainer(for: request, in: pipeline) != nil)
       _ = try await pipeline.image(for: request)
+      await FfiQueue.drain()
       let stats = places.imageStats().snapshot()
       #expect(stats.requests == 2)
       #expect(stats.decodes == 1)
@@ -157,6 +161,7 @@ extension GlobalMedia {
       let image = try await pipeline.image(for: request)
       #expect(image.cgImage?.width == width)
       #expect(image.cgImage?.height == height)
+      await FfiQueue.drain()
       #expect(places.imageStats().snapshot().decodes == 1)
       #expect(places.imageStats().snapshot().decodedPixels <= UInt64(width * height))
       #expect(places.imageStats().snapshot().placementPixels == 352 * 352)

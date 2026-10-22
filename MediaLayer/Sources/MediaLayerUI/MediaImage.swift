@@ -78,7 +78,7 @@ public struct MediaImage<Content: View>: View {
   public var body: some View {
     if let context {
       GeometryReader { geometry in
-        let pixels = MediaImagePipeline.decodeSize(for: source, points: geometry.size, scale: displayScale, contentMode: contentMode)
+        let pixels = MediaImagePipeline.decodeSize(places: context.places, for: source, points: geometry.size, scale: displayScale, contentMode: contentMode)
         ImageRequestView(source: source, context: context, points: geometry.size, scale: displayScale, contentMode: contentMode) { key, request in
           let shown = shownImage(for: key, request: request)
           ZStack {
@@ -131,12 +131,14 @@ public struct MediaImage<Content: View>: View {
   private func syncClaim() {
     guard let places = context?.places else { return }
     let claims = KeyClaims.of(places)
+    let owner = owner
     if let claimed = claimedURL, !onScreen || claimed != source.url {
-      claims.release(owner: owner, key: claimed)
+      FfiQueue.post { claims.release(owner: owner, key: claimed) }
       claimedURL = nil
     }
     if onScreen, claimedURL == nil {
-      claims.visible(owner: owner, source: source.item, visible: true)
+      let item = source.item
+      FfiQueue.post { claims.visible(owner: owner, source: item, visible: true) }
       claimedURL = source.url
     }
   }
@@ -175,9 +177,12 @@ public struct MediaImage<Content: View>: View {
   private func follow() async {
     guard let context else { return }
     let places = context.places
-    context.stats.record(work: .observe)
-    defer { context.stats.record(work: .unobserve) }
-    for await value in places.stateStream(key: source.url) { state = value }
+    let stats = context.stats
+    let url = source.url
+    stats.recordLater(work: .observe)
+    defer { stats.recordLater(work: .unobserve) }
+    let stream = await FfiQueue.run { places.stateStream(key: url) }
+    for await value in stream { state = value }
   }
 }
 

@@ -42,6 +42,7 @@ class ImagePixelsTest {
         val drawable = (result as SuccessResult).drawable
         decodedPixels += drawable.intrinsicWidth.toLong() * drawable.intrinsicHeight
       }
+      drainFfi()
       org.junit.Assert.assertEquals("grid_decoded_pixels=$decodedPixels placement_pixels=$placementPixels", 64L * 352 * 626, decodedPixels)
       org.junit.Assert.assertEquals(64uL, stats.snapshot().decodes)
       org.junit.Assert.assertEquals(decodedPixels.toULong(), stats.snapshot().decodedPixels)

@@ -53,16 +53,16 @@ internal fun rememberScreenVisibility(stats: com.noma4i.medialayer.ImageCounters
     val observer = LifecycleEventObserver { _, _ -> screen.started = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }
     screen.started = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
     lifecycle.addObserver(observer)
-    stats?.record(com.noma4i.medialayer.ImageWork.Observe)
+    stats?.recordLater(com.noma4i.medialayer.ImageWork.Observe)
     onDispose {
       lifecycle.removeObserver(observer)
-      stats?.record(com.noma4i.medialayer.ImageWork.Unobserve)
+      stats?.recordLater(com.noma4i.medialayer.ImageWork.Unobserve)
     }
   }
   return screen
 }
 
-internal class MediaEnvironment(val media: MediaLayer, val players: SlotPlayers?, val imageLoader: ImageLoader, val stats: com.noma4i.medialayer.ImageCounters)
+internal class MediaEnvironment(val media: MediaLayer, val players: SlotPlayers?, val imageLoader: ImageLoader, val stats: com.noma4i.medialayer.ImageCounters, val pixelSizes: PixelSizeMemo)
 
 internal val LocalMediaEnvironment = staticCompositionLocalOf<MediaEnvironment> { error("Wrap the screen in MediaLayerProvider") }
 
@@ -79,13 +79,14 @@ private fun MediaLayerEnvironment(media: MediaLayer, imageLoader: ImageLoader?, 
   val context = LocalContext.current
   val environment = remember(media, imageLoader, players) {
     val binding = media.binding
+    val pixelSizes = PixelSizeMemo()
     val reference = java.lang.ref.WeakReference(media)
     val loader = imageLoader ?: binding?.imageLoader ?: mediaImageLoader(context, ImageBytes { url, headers ->
       val current = reference.get() ?: throw kotlinx.coroutines.CancellationException("MediaLayer was released")
       current.fetchImage(url, headers)
-    }, stats = media.imageStats())
+    }, null, media.imageStats(), pixelSizes)
     media.setTonePreparation(ToneFrames(media, context.applicationContext, loader))
-    MediaEnvironment(media, players ?: binding?.factory?.players, loader, media.imageStats())
+    MediaEnvironment(media, players ?: binding?.factory?.players, loader, media.imageStats(), pixelSizes)
   }
   val muted = Media.muted
   DisposableEffect(media, muted) {

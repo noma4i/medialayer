@@ -36,17 +36,27 @@ final class Latch: @unchecked Sendable {
   }
 }
 
+extension FfiQueue {
+  static func drain() async { await run { } }
+}
+
 final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   var imageOrigin: ImageOrigin = .network
   private let counters = ImageCounters()
   func imageStats() -> ImageCounters {
     if Thread.isMainThread { lock.withLock { mainStats += 1 } }
+    noteMain("imageStats")
     return counters
   }
   func cacheKey(url: String, headers: [String: String]) -> String {
     lock.withLock { keyReads += 1 }
+    noteMain("cacheKey")
     return url
   }
+  private var mainCalls: [String] = []
+  var mainThreadCalls: [String] { lock.withLock { mainCalls } }
+  func resetMainThreadCalls() { lock.withLock { mainCalls = [] } }
+  private func noteMain(_ call: String) { if Thread.isMainThread { lock.withLock { mainCalls.append(call) } } }
   private var keyReads = 0
   private var mainStats = 0
   var mainThreadImageStats: Int { lock.withLock { mainStats } }
@@ -72,6 +82,7 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   private func record(_ call: String) { lock.withLock { calls.append(call) } }
 
   func visible(source: MediaItem, visible: Bool) {
+    noteMain("visible")
     lock.withLock { visibility.append(VisibleCall(url: source.url, visible: visible)) }
     record("visible \(visible)")
   }
@@ -81,19 +92,21 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   func setMutedAll(muted: Bool) { record("mutedAll \(muted)") }
   func setRate(key: String, rate: Float) { record("rate \(rate)") }
   func seek(key: String, fraction: Double) { record("seek \(fraction)") }
-  func itemState(key: String, state: MediaState) { record("state \(state)") }
+  func itemState(key: String, state: MediaState) { noteMain("itemState"); record("state \(state)") }
   func fetchImage(url: String, headers: [String: String]) async throws -> ImageFetchResult {
+    noteMain("fetchImage")
     lock.withLock { fetches.append(url) }
     if let latch = lock.withLock({ fetchLatch }) { await latch.wait() }
     return ImageFetchResult(bytes: try imageResult.get(), source: imageOrigin)
   }
-  func placeholder(source: MediaItem, ready: Bool) async -> Placeholder { .none }
+  func placeholder(source: MediaItem, ready: Bool) async -> Placeholder { noteMain("placeholder"); return .none }
   func setTonePreparation(preparation: TonePreparation) { lock.withLock { self.preparation = preparation } }
   func tonePixelsNeeded(source: MediaItem) async -> Bool { needsTone }
   func playUrl(source: MediaItem) async throws -> PlaybackRoute {
     PlaybackRoute(url: source.url, headers: source.headers, generation: nil, hls: false, looping: false)
   }
   func stateStream(key: String) -> AsyncStream<MediaState> {
+    noteMain("stateStream")
     let pair = AsyncStream<MediaState>.makeStream()
     lock.withLock { states.append(pair.continuation) }
     return pair.stream
@@ -195,6 +208,7 @@ struct ViewModelTests {
 
     _ = await MediaImagePipeline.load(TestImageSource(), request: request, places: places, pipeline: MediaImagePipeline.make(places: places))
 
+    await FfiQueue.drain()
     #expect(places.recorded.map { $0.hasPrefix("state failed") ? "state failed" : $0 } == expected)
   }
 
@@ -238,6 +252,7 @@ struct ViewModelTests {
     let pipeline = MediaImagePipeline.make(places: places)
     let warm = await MediaImagePipeline.load(source, request: request, places: places, pipeline: pipeline)
     #expect(warm != nil)
+    await FfiQueue.drain()
     let recorded = places.recorded.count
 
     let image = await Task {
@@ -246,6 +261,7 @@ struct ViewModelTests {
     }.value
 
     #expect(image == nil)
+    await FfiQueue.drain()
     #expect(places.recorded.count == recorded)
   }
 

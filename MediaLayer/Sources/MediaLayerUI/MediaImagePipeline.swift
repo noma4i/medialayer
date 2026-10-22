@@ -23,7 +23,7 @@ struct CoreDataLoader: DataLoading {
     let task = Task {
       do {
         let data = try await places.fetchImage(url: url.absoluteString, headers: headers)
-        if data.source == .cache { places.imageStats().record(work: .diskHit) }
+        if data.source == .cache { places.imageStats().recordLater(work: .diskHit) }
         didReceiveData(data.bytes, HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil) ?? URLResponse())
         completion(nil)
       } catch {
@@ -50,9 +50,9 @@ public enum MediaImagePipeline {
     return ImagePipeline(configuration: configuration, delegate: ImageEvents(stats: places.imageStats()))
   }
 
-  public static func decodeSize(for source: some MediaSource, points: CGSize, scale: CGFloat, contentMode: ContentMode) -> CGSize? {
+  public static func decodeSize(places: MediaPlaces, for source: some MediaSource, points: CGSize, scale: CGFloat, contentMode: ContentMode) -> CGSize? {
     let declared = source.size.map { PixelSize(width: UInt32(clamping: $0.width), height: UInt32(clamping: $0.height)) }
-    return imagePixelSize(width: Double(points.width), height: Double(points.height), scale: Double(scale), declared: declared, crop: contentMode == .fill)
+    return PixelSizeMemo.of(places).size(width: Double(points.width), height: Double(points.height), scale: Double(scale), declared: declared, crop: contentMode == .fill)
       .map { CGSize(width: Int($0.width), height: Int($0.height)) }
   }
 
@@ -68,7 +68,7 @@ public enum MediaImagePipeline {
   }
 
   static func prepare(places: MediaPlaces, for source: some MediaSource, url: String? = nil, points: CGSize, scale: CGFloat, contentMode: ContentMode) -> (key: ImageKey, request: ImageRequest?) {
-    let pixels = decodeSize(for: source, points: points, scale: scale, contentMode: contentMode)
+    let pixels = decodeSize(places: places, for: source, points: points, scale: scale, contentMode: contentMode)
     let identity = places.cacheKey(url: url ?? source.url, headers: source.headers)
     let key = ImageKey(identity: identity, pixels: pixels, contentMode: contentMode)
     guard let address = URL(string: url ?? source.url) else { return (key, nil) }
@@ -96,13 +96,16 @@ extension MediaImagePipeline {
 
   static func load(_ source: some MediaSource, request: ImageRequest, places: MediaPlaces, pipeline: ImagePipeline, reportsState: Bool = true) async -> ImageContainer? {
     guard !Task.isCancelled else { return nil }
-    if reportsState { places.itemState(key: source.url, state: .loading) }
+    if reportsState { FfiQueue.post { places.itemState(key: source.url, state: .loading) } }
     do {
       let container = try await pipeline.imageTask(with: request).response.container
-      if reportsState { places.itemState(key: source.url, state: .ready) }
+      if reportsState { FfiQueue.post { places.itemState(key: source.url, state: .ready) } }
       return container
     } catch {
-      if reportsState, !Task.isCancelled { places.itemState(key: source.url, state: .failed(detail: error.localizedDescription)) }
+      if reportsState, !Task.isCancelled {
+        let detail = error.localizedDescription
+        FfiQueue.post { places.itemState(key: source.url, state: .failed(detail: detail)) }
+      }
       return nil
     }
   }

@@ -32,15 +32,31 @@ internal class RecordingEvents : PlayerEvents(NoHandle) {
   override fun memoryWarning(level: Pressure) { calls.add("memory:$level") }
 }
 
+private fun noteMainThreadFfi(into: MutableList<String>, call: String) {
+  val onMain = runCatching { android.os.Looper.myLooper() == android.os.Looper.getMainLooper() }.getOrDefault(false)
+  if (onMain) into.add(call)
+}
+
+internal class RecordingCounters(private val mainThreadFfi: MutableList<String>, private val observers: MutableList<String>) : com.noma4i.medialayer.ImageCounters() {
+  override fun record(work: com.noma4i.medialayer.ImageWork) {
+    noteMainThreadFfi(mainThreadFfi, "record")
+    if (work is com.noma4i.medialayer.ImageWork.Observe || work is com.noma4i.medialayer.ImageWork.Unobserve) observers.add(work::class.simpleName.orEmpty())
+    super.record(work)
+  }
+}
+
+internal fun drainFfi() = kotlinx.coroutines.runBlocking { kotlinx.coroutines.withContext(ffiQueue) { } }
+
 internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents()) : MediaLayer(NoHandle) {
   val mainThreadFfi = CopyOnWriteArrayList<String>()
-  private fun noteFfi(call: String) { if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) mainThreadFfi.add(call) }
+  private fun noteFfi(call: String) { noteMainThreadFfi(mainThreadFfi, call) }
   override fun cacheKey(url: String, headers: Map<String, String>): String { noteFfi("cacheKey"); return url }
   val calls = CopyOnWriteArrayList<String>()
   val listeners = CopyOnWriteArrayList<Pair<String, StateListener>>()
   var closed = false
   var image: ByteArray = ByteArray(0)
-  private val counters by lazy { com.noma4i.medialayer.ImageCounters() }
+  val counterWork = CopyOnWriteArrayList<String>()
+  private val counters by lazy { RecordingCounters(mainThreadFfi, counterWork) }
   override fun imageStats(): com.noma4i.medialayer.ImageCounters { noteFfi("imageStats"); return counters }
   var preparedTones: TonePreparation? = null
   val toneChecks = AtomicInteger()
@@ -50,7 +66,7 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
   override fun playerEvents(): PlayerEvents = events
   val items = CopyOnWriteArrayList<MediaItem>()
 
-  override fun visible(source: MediaItem, visible: Boolean) { items.add(source); calls.add("visible:${source.url}:$visible") }
+  override fun visible(source: MediaItem, visible: Boolean) { noteFfi("visible"); items.add(source); calls.add("visible:${source.url}:$visible") }
   override fun setPlaying(key: String, playing: Boolean) { calls.add("playing:$key:$playing") }
   override fun setPeeking(key: String, peeking: Boolean) { calls.add("peeking:$key:$peeking") }
   override fun setMuted(key: String, muted: Boolean) { calls.add("muted:$key:$muted") }
@@ -64,10 +80,11 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
 
   fun emit(key: String, state: MediaState) = listeners.filter { it.first == key }.forEach { it.second.changed(state) }
 
-  override fun itemState(key: String, state: MediaState) { calls.add("itemState:$key:${state::class.simpleName}") }
+  override fun itemState(key: String, state: MediaState) { noteFfi("itemState"); calls.add("itemState:$key:${state::class.simpleName}") }
   override fun seek(key: String, fraction: Double) { calls.add("seek:$key:$fraction") }
-  override suspend fun fetchImage(url: String, headers: Map<String, String>): ImageFetchResult { calls.add("fetchImage:$url"); return ImageFetchResult(image, ImageOrigin.NETWORK) }
+  override suspend fun fetchImage(url: String, headers: Map<String, String>): ImageFetchResult { noteFfi("fetchImage"); calls.add("fetchImage:$url"); return ImageFetchResult(image, ImageOrigin.NETWORK) }
   override suspend fun placeholder(source: MediaItem, ready: Boolean): Placeholder {
+    noteFfi("placeholder")
     placeholders.add(source.url to ready)
     return when {
       ready -> Placeholder.None

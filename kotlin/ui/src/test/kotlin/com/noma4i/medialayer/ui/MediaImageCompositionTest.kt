@@ -107,6 +107,38 @@ class MediaImageCompositionTest {
   }
 
   @Test
+  fun inv_image_40_imagesCallFfiOnlyForTheCacheKeyOnTheMainThreadAndKeepClaimOrder() {
+    val total = 10
+    val urls = (0 until total).map { "https://o.test/inv40-$it.png" }
+    val shown = mutableStateOf(0)
+    val counting = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) }, stats = layer.imageStats())
+    rule.setContent {
+      MediaLayerProvider(CompletableDeferred(layer), counting) {
+        Column { for (index in 0 until shown.value) MediaImage(SizedImage(urls[index]), Modifier.size(10.dp)) }
+      }
+    }
+    layer.mainThreadFfi.clear()
+    fun count(call: String) = layer.calls.count { it == call }
+    fun settled(visible: Boolean, round: Int) = urls.all { count("visible:$it:$visible") == round }
+    for (round in 1..2) {
+      rule.runOnIdle { shown.value = total }
+      rule.waitUntil(10000) { looper.idle(); settled(true, round) && urls.all { count("itemState:$it:Ready") == round } }
+      rule.runOnIdle { shown.value = 0 }
+      rule.waitUntil(10000) { looper.idle(); settled(false, round) }
+    }
+    rule.waitUntil(10000) { looper.idle(); layer.counterWork.isNotEmpty() && layer.counterWork.count { it == "Observe" } == layer.counterWork.count { it == "Unobserve" } }
+
+    assertEquals(emptyList<String>(), layer.mainThreadFfi.filter { it != "cacheKey" })
+    assertEquals(true, layer.mainThreadFfi.size <= total * 2)
+    for (url in urls) assertEquals(listOf("visible:$url:true", "visible:$url:false", "visible:$url:true", "visible:$url:false"), layer.calls.filter { it.startsWith("visible:$url:") })
+    var open = 0
+    for (work in layer.counterWork) {
+      open += if (work == "Observe") 1 else -1
+      assertEquals(true, open >= 0)
+    }
+  }
+
+  @Test
   fun inv_image_39_aReturningImageIsServedFromCoilMemoryWithoutLoadingOnTheFirstFrame() {
     val shown = mutableStateOf(true)
     val url = "https://o.test/memory-hit.png"

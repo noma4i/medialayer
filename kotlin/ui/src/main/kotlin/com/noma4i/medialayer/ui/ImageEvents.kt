@@ -21,7 +21,7 @@ internal class ImageEvents(private val stats: ImageCounters) : EventListener {
   private var decoding = false
 
   override fun onStart(request: ImageRequest) {
-    stats.record(ImageWork.Request((request.parameters.value<Long>("placementPixels") ?: 0L).toULong()))
+    stats.recordLater(ImageWork.Request((request.parameters.value<Long>("placementPixels") ?: 0L).toULong()))
     Trace.beginAsyncSection("MediaImage.request", cookie)
   }
 
@@ -34,11 +34,11 @@ internal class ImageEvents(private val stats: ImageCounters) : EventListener {
     endDecode()
     val drawable = result?.drawable ?: return
     val bitmap = (drawable as? BitmapDrawable)?.bitmap
-    stats.record(ImageWork.Decode(drawable.intrinsicWidth.coerceAtLeast(0).toUInt(), drawable.intrinsicHeight.coerceAtLeast(0).toUInt(), bitmap?.allocationByteCount?.toULong() ?: 0uL))
+    stats.recordLater(ImageWork.Decode(drawable.intrinsicWidth.coerceAtLeast(0).toUInt(), drawable.intrinsicHeight.coerceAtLeast(0).toUInt(), bitmap?.allocationByteCount?.toULong() ?: 0uL))
   }
 
   override fun fetchEnd(request: ImageRequest, fetcher: Fetcher, options: Options, result: FetchResult?) {
-    if ((result as? SourceResult)?.dataSource == DataSource.DISK && request.data is MediaImageData) stats.record(ImageWork.DiskHit)
+    if ((result as? SourceResult)?.dataSource == DataSource.DISK && request.data is MediaImageData) stats.recordLater(ImageWork.DiskHit)
   }
 
   override fun onSuccess(request: ImageRequest, result: SuccessResult) = finish(result.dataSource == DataSource.MEMORY_CACHE)
@@ -46,12 +46,12 @@ internal class ImageEvents(private val stats: ImageCounters) : EventListener {
 
   override fun onCancel(request: ImageRequest) {
     endTrace()
-    stats.record(ImageWork.Cancel((request.data as? MediaImageData)?.cacheKey?.invoke() ?: request.data.toString()))
+    postFfi { stats.record(ImageWork.Cancel((request.data as? MediaImageData)?.cacheKey ?: request.data.toString())) }
   }
 
   private fun finish(memoryHit: Boolean) {
     endTrace()
-    stats.record(ImageWork.Finish(memoryHit))
+    stats.recordLater(ImageWork.Finish(memoryHit))
   }
 
   private fun endTrace() {

@@ -34,7 +34,6 @@ import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.Placeholder
 import com.noma4i.medialayer.PixelSize
 import com.noma4i.medialayer.decodeBlurhash
-import com.noma4i.medialayer.imagePixelSize
 import com.noma4i.medialayer.toItem
 import java.nio.ByteBuffer
 import kotlinx.coroutines.CancellationException
@@ -62,9 +61,10 @@ fun MediaImage(
     return
   }
   val density = LocalDensity.current.density
+  val pixelSizes = LocalMediaEnvironment.current.pixelSizes
   BoxWithConstraints(modifier.then(screen.modifier)) {
     val placementPixels = if (constraints.hasBoundedWidth && constraints.hasBoundedHeight) constraints.maxWidth.toLong() * constraints.maxHeight else 0L
-    ImageBody(source, decodePixels(constraints, density, source, contentScale), placementPixels, screen, contentScale, content)
+    ImageBody(source, decodePixels(constraints, density, source, contentScale, pixelSizes), placementPixels, screen, contentScale, content)
   }
 }
 
@@ -74,12 +74,14 @@ private fun claimImage(source: MediaSource, screen: ScreenVisibility) {
   val media = environment.media
   val stats = environment.stats
   LaunchedEffect(media, source, screen) {
-    val owner = Any()
-    val item = source.toItem()
-    snapshotFlow { screen.visible }.onStart { stats.record(ImageWork.Observe) }.onCompletion { stats.record(ImageWork.Unobserve) }.collectLatest { visible ->
-      if (visible) {
-        media.claims.visible(owner, item, true)
-        try { awaitCancellation() } finally { media.claims.release(owner, item.url) }
+    withContext(ffiQueue) {
+      val owner = Any()
+      val item = source.toItem()
+      snapshotFlow { screen.visible }.onStart { stats.record(ImageWork.Observe) }.onCompletion { stats.record(ImageWork.Unobserve) }.collectLatest { visible ->
+        if (visible) {
+          media.claims.visible(owner, item, true)
+          try { awaitCancellation() } finally { media.claims.release(owner, item.url) }
+        }
       }
     }
   }
@@ -97,7 +99,7 @@ private fun ImageBody(source: MediaSource, pixels: PixelSize?, placementPixels: 
   val state = remember(source.url) { mutableStateOf<MediaState>(MediaState.Idle) }
   val animation = remember { mutableStateOf<Animatable?>(null) }
   LaunchedEffect(screen) {
-    snapshotFlow { animation.value to screen.visible }.onStart { stats.record(ImageWork.Observe) }.onCompletion { stats.record(ImageWork.Unobserve) }.collectLatest { (drawable, visible) ->
+    snapshotFlow { animation.value to screen.visible }.onStart { stats.recordLater(ImageWork.Observe) }.onCompletion { stats.recordLater(ImageWork.Unobserve) }.collectLatest { (drawable, visible) ->
       if (visible) drawable?.start() else drawable?.stop()
       try { awaitCancellation() } finally { drawable?.stop() }
     }
@@ -106,7 +108,7 @@ private fun ImageBody(source: MediaSource, pixels: PixelSize?, placementPixels: 
     object : ImageLoader by environment.imageLoader {
       override suspend fun execute(request: ImageRequest): ImageResult =
         // Visibility cancels in-flight decoding without invalidating the image composition.
-        snapshotFlow { screen.visible }.onStart { stats.record(ImageWork.Observe) }.onCompletion { stats.record(ImageWork.Unobserve) }.transformLatest { visible ->
+        snapshotFlow { screen.visible }.onStart { stats.recordLater(ImageWork.Observe) }.onCompletion { stats.recordLater(ImageWork.Unobserve) }.transformLatest { visible ->
           if (visible) emit(environment.imageLoader.execute(request))
         }.first()
     }
@@ -121,7 +123,7 @@ private fun ImageBody(source: MediaSource, pixels: PixelSize?, placementPixels: 
       animation.value = (painterState as? AsyncImagePainter.State.Success)?.result?.drawable as? Animatable
       painterState.toMediaState()?.let { reached ->
         state.value = reached
-        media.itemState(source.url, reached)
+        postFfi { media.itemState(source.url, reached) }
       }
     },
     modifier = Modifier.fillMaxSize()
@@ -139,16 +141,16 @@ private fun ImageBlur(source: MediaSource, screen: ScreenVisibility, state: Stat
   if (!screen.visible || state.value == MediaState.Ready) return
   val media = LocalMediaEnvironment.current.media
   val blur by produceState<ImageBitmap?>(null, media, source) {
-    value = (media.placeholder(source.toItem(), false) as? Placeholder.BlurHash)?.let { decodeBlur(it.hash) }
+    value = withContext(ffiQueue) { media.placeholder(source.toItem(), false) as? Placeholder.BlurHash }?.let { decodeBlur(it.hash) }
   }
   blur?.let { Image(it, "blurhash", Modifier.fillMaxSize(), contentScale = contentScale) }
 }
 
-internal fun decodePixels(constraints: Constraints, density: Float, source: MediaSource, contentScale: ContentScale): PixelSize? {
+internal fun decodePixels(constraints: Constraints, density: Float, source: MediaSource, contentScale: ContentScale, pixelSizes: PixelSizeMemo): PixelSize? {
   val declared = source.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) }
   val width = if (constraints.hasBoundedWidth) constraints.maxWidth / density.toDouble() else 0.0
   val height = if (constraints.hasBoundedHeight) constraints.maxHeight / density.toDouble() else 0.0
-  return imagePixelSize(width, height, density.toDouble(), declared, contentScale.toScale() == Scale.FILL)
+  return pixelSizes.size(width, height, density.toDouble(), declared, contentScale.toScale() == Scale.FILL)
 }
 
 internal fun imageRequest(context: Context, source: MediaSource, pixels: PixelSize?, scale: Scale, cacheKey: () -> String, placementPixels: Long = 0): ImageRequest =
