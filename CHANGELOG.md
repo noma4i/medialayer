@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.5.0 - 2026-10-23
+
+### Changed
+- Swift `MediaImagePipeline.decodeSize` takes the `places` of the layer.
+
+### Fixed
+- `MediaImage` makes at most one core call per image on the main thread.
+
 ## 3.4.1 - 2026-10-23
 
 ### Fixed
