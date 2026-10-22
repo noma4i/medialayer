@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- `MediaLayer.open` loads the native library, parses the spec and builds the core off the calling thread. Swift `open` is `async throws`. Kotlin `open` returns `Deferred<MediaLayer>`, and `MediaLayerProvider` takes that `Deferred`.
+
 ## 3.1.0 - 2026-10-22
 
 ### Added

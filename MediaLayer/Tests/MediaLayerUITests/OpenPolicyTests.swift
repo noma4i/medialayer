@@ -33,8 +33,8 @@ private final class PolicyOrigin: Fetcher, @unchecked Sendable {
 
 extension GlobalMedia {
   struct OpenPolicyTests {
-    private func open(_ spec: String, origin: PolicyOrigin) throws -> MediaLayer {
-      try MediaLayer.open(
+    private func open(_ spec: String, origin: PolicyOrigin) async throws -> MediaLayer {
+      try await MediaLayer.open(
         spec: spec, fetcher: origin,
         settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
         directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -50,7 +50,7 @@ extension GlobalMedia {
       ]
       for (spec, expected) in cases {
         let origin = PolicyOrigin()
-        let media = try open(spec, origin: origin)
+        let media = try await open(spec, origin: origin)
         let bytes = try await media.fetchImage(url: "https://o.test/small.jpg", headers: ["X-Token": "selected", "Authorization": "excluded"])
 
         #expect(bytes.bytes.count == 2)
@@ -62,7 +62,7 @@ extension GlobalMedia {
     func inv_spec_07_open_applies_the_first_eviction_override_of_each_kind() async throws {
       for (section, suffix) in [("videos", "mp4"), ("images", "jpg"), ("audios", "mp3")] {
         let origin = PolicyOrigin()
-        let media = try open(
+        let media = try await open(
           #"{"cache":{"budget":10,"min":1,"evict":"lru"},"\#(section)":[{"name":"first","evict":"largest_first"},{"name":"second","evict":"fifo"}]}"#,
           origin: origin
         )

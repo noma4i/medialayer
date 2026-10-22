@@ -44,7 +44,7 @@ class MediaImageCompositionTest {
     val offset = mutableStateOf(0)
     val url = "https://o.test/return.png"
     rule.setContent {
-      MediaLayerProvider(layer, loader) {
+      MediaLayerProvider(CompletableDeferred(layer), loader) {
         MediaImage(SizedImage(url), Modifier.offset(y = offset.value.dp).size(50.dp))
       }
     }
@@ -72,7 +72,7 @@ class MediaImageCompositionTest {
     })
     try {
       rule.setContent {
-        MediaLayerProvider(layer, loader) {
+        MediaLayerProvider(CompletableDeferred(layer), loader) {
           LazyColumn {
             items(1) { index ->
               MediaImage(SizedImage("https://o.test/$index.png"), Modifier.size(50.dp))
@@ -92,7 +92,7 @@ class MediaImageCompositionTest {
   @Test
   fun inv_image_07_aSizedImageDoesNotCreateASubcomposeLayout() {
     rule.setContent {
-      MediaLayerProvider(layer, loader) {
+      MediaLayerProvider(CompletableDeferred(layer), loader) {
         Column { MediaImage(SizedImage("https://o.test/sized.png"), Modifier.size(50.dp)) }
       }
     }

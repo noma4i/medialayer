@@ -1,5 +1,6 @@
 package com.noma4i.medialayer.ui
 
+import kotlinx.coroutines.CompletableDeferred
 import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -46,7 +47,7 @@ class MediaPrecomposeTest {
     var measuring by mutableStateOf(false)
     var placed by mutableStateOf(false)
     rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         SubcomposeLayout(state, Modifier.size(50.dp)) { constraints ->
           val children = if (placed || measuring) subcompose(page.url, content).map { it.measure(Constraints.fixed(constraints.maxWidth, constraints.maxHeight)) } else emptyList()
           layout(constraints.maxWidth, constraints.maxHeight) { if (placed) children.forEach { it.place(0, 0) } }
@@ -70,7 +71,7 @@ class MediaPrecomposeTest {
     val page = Page("https://o.test/never.mp4", Kind.VIDEO)
     val state = SubcomposeLayoutState()
     rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         SubcomposeLayout(state, Modifier.size(50.dp)) { constraints -> layout(constraints.maxWidth, constraints.maxHeight) {} }
       }
     }
@@ -88,7 +89,7 @@ class MediaPrecomposeTest {
   fun aPlacedVideoReleasesItsViewWhenItLeaves() {
     val page = Page("https://o.test/leaves.mp4", Kind.VIDEO)
     var shown by mutableStateOf(true)
-    rule.setContent { MediaLayerProvider(layer, loader, slots.players) { if (shown) MediaVideo(page, modifier = Modifier.size(50.dp)) } }
+    rule.setContent { MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { if (shown) MediaVideo(page, modifier = Modifier.size(50.dp)) } }
     rule.waitUntil(5000) { looper.idle(); slots.players.liveViews == 1 }
     shown = false
     rule.waitUntil(5000) { looper.idle(); slots.players.liveViews == 0 }
@@ -111,7 +112,7 @@ class MediaPrecomposeTest {
     val page = Page("https://o.test/shared.png", Kind.IMAGE)
     val state = SubcomposeLayoutState()
     rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         SubcomposeLayout(state, Modifier.size(50.dp)) { constraints ->
           val placed = subcompose("placed") { MediaImage(page, Modifier.size(50.dp)) }.map { it.measure(Constraints.fixed(constraints.maxWidth, constraints.maxHeight)) }
           layout(constraints.maxWidth, constraints.maxHeight) { placed.forEach { it.place(0, 0) } }

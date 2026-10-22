@@ -164,7 +164,7 @@ extension GlobalMedia {
 
     @Test
     func inv_memory_04_a_system_warning_clears_decoded_images() async throws {
-      let media = try MediaLayer.open(
+      let media = try await MediaLayer.open(
         fetcher: URLSessionFetcher(),
         settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
         directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -264,23 +264,23 @@ extension GlobalMedia {
     }
 
     @Test
-    func inv_memory_10_the_decoder_memory_is_limited_by_the_open_option_and_a_non_positive_limit_is_refused() throws {
+    func inv_memory_10_the_decoder_memory_is_limited_by_the_open_option_and_a_non_positive_limit_is_refused() async throws {
       let settings = UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!)
       let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
 
-      let limited = try MediaLayer.open(fetcher: URLSessionFetcher(), settings: settings, directory: directory, imageMemoryBytes: 5_000_000)
-      let defaulted = try MediaLayer.open(fetcher: URLSessionFetcher(), settings: settings, directory: directory.appendingPathComponent("b"))
+      let limited = try await MediaLayer.open(fetcher: URLSessionFetcher(), settings: settings, directory: directory, imageMemoryBytes: 5_000_000)
+      let defaulted = try await MediaLayer.open(fetcher: URLSessionFetcher(), settings: settings, directory: directory.appendingPathComponent("b"))
 
       #expect(ImageMemory.cache(for: limited).costLimit == 5_000_000)
       #expect(ImageMemory.cache(for: defaulted).costLimit == 128 * 1024 * 1024)
-      #expect(throws: MediaError.self) {
-        try MediaLayer.open(fetcher: URLSessionFetcher(), settings: settings, directory: directory.appendingPathComponent("c"), imageMemoryBytes: 0)
+      await #expect(throws: MediaError.self) {
+        try await MediaLayer.open(fetcher: URLSessionFetcher(), settings: settings, directory: directory.appendingPathComponent("c"), imageMemoryBytes: 0)
       }
     }
 
     @Test
     func inv_image_03_clearing_the_cache_drops_the_decoder_memory() async throws {
-      let media = try MediaLayer.open(
+      let media = try await MediaLayer.open(
         fetcher: URLSessionFetcher(),
         settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
         directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -302,7 +302,7 @@ extension GlobalMedia {
       let server = try LocalHTTPServer()
       try await server.start()
       server.serve(pngData(side: 16), at: "/image.png")
-      let media = try MediaLayer.open(
+      let media = try await MediaLayer.open(
         fetcher: URLSessionFetcher(),
         settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
         directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

@@ -1,9 +1,9 @@
 # Threading and performance
 
-Сеть и сборка ядра работают в потоках библиотеки. Android `open(context, ...)` синхронно загружает JNA, читает defaults, создаёт объекты и каталог кэша.
-Если приложение вызывает `open` на главном потоке, эти действия занимают главный поток. Возврат не ждёт завершения `assemble` ядра.
+Сеть и сборка ядра работают в потоках библиотеки. Загрузка нативной библиотеки, `NativeCallbacks.install()`, чтение defaults и вызов ядра идут вне потока вызова: Kotlin на `Dispatchers.Default`, Swift в отдельной задаче.
+Android создаёт платформенные объекты и каталог кэша на потоке вызова, подписку на Lifecycle ставит на главный поток. `open` возвращает `Deferred<MediaLayer>` (Swift: `async`), приложение ждёт его через `MediaLayerProvider` или `await`. Порядок объявлений не меняется: они идут после готовности слоя. Возврат не ждёт завершения `assemble` ядра.
 
-Android Trace отмечает `MediaLayer.open.jna`, `MediaLayer.open.defaults`, `MediaLayer.open.platform` и вложенный `MediaLayer.open.ffi`.
+Android Trace отмечает `MediaLayer.open.platform` на потоке вызова, `MediaLayer.open.jna`, `MediaLayer.open.defaults` и вложенный `MediaLayer.open.ffi` на потоке библиотеки.
 Секции закрываются при исключении. Системная трассировка управляет записью, библиотека не включает её самостоятельно.
 
 | Guarantee | Meaning |

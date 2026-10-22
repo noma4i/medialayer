@@ -45,13 +45,13 @@ On Linux, install `cargo-ndk` and the Rust Android targets. Set `ANDROID_NDK_HOM
 ```swift
 @main
 struct ExampleApp: App {
-  let media = try! MediaLayer.open(
-    fetcher: URLSessionFetcher(),
-    settings: UserDefaultsSettings()
-  )
+  @State private var media: MediaLayer?
 
   var body: some Scene {
-    WindowGroup { RootView().mediaLayer(media) }
+    WindowGroup {
+      Group { if let media { RootView().mediaLayer(media) } }
+        .task { media = try? await MediaLayer.open(fetcher: URLSessionFetcher(), settings: UserDefaultsSettings()) }
+    }
   }
 }
 ```
@@ -60,7 +60,7 @@ struct ExampleApp: App {
 
 ```kotlin
 class ExampleApp : Application() {
-  lateinit var media: MediaLayer
+  lateinit var media: Deferred<MediaLayer>
 
   override fun onCreate() {
     super.onCreate()
@@ -72,7 +72,7 @@ class ExampleApp : Application() {
 }
 ```
 
-Открытие возвращается без ожидания сборки ядра. Android синхронно загружает JNA, создаёт платформенные объекты и каталог кэша. Передайте `spec` для значений из `.mdl` ([media files](media-files.md)).
+Открытие возвращается без ожидания сборки ядра. Swift `open` это `async`, Kotlin `open` возвращает `Deferred<MediaLayer>`. Загрузка нативной библиотеки, разбор `spec` и сборка ядра идут вне главного потока. Android создаёт платформенные объекты и каталог кэша на потоке вызова. `MediaLayerProvider` принимает `Deferred` и показывает содержимое, когда слой готов. Передайте `spec` для значений из `.mdl` ([media files](media-files.md)).
 
 Android создаёт общий `OkHttpClient` для стандартного fetcher и плееров. Явные `fetcher` и `callFactory` заменяют соответствующую зависимость.
 

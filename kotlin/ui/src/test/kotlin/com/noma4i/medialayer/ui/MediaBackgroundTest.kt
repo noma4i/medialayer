@@ -50,7 +50,7 @@ class MediaBackgroundTest {
 
   @Test
   fun aStoppedActivityReleasesTheKeyAndCancelsTheRequestAndARestartAsksAgain() {
-    rule.setContent { MediaLayerProvider(layer, loader, slots.players) { MediaImage(Backdrop(url), Modifier.size(50.dp)) } }
+    rule.setContent { MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { MediaImage(Backdrop(url), Modifier.size(50.dp)) } }
     rule.waitUntil(5000) { looper.idle(); started.get() == 1 }
 
     rule.activityRule.scenario.moveToState(Lifecycle.State.CREATED)

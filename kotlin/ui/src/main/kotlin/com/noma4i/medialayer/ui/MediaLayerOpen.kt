@@ -29,6 +29,11 @@ import java.util.Collections
 import java.util.WeakHashMap
 import java.lang.ref.WeakReference
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import coil.ImageLoader
 import okhttp3.Call
 import okhttp3.OkHttpClient
@@ -36,6 +41,8 @@ import okhttp3.OkHttpClient
 internal class Binding(val factory: ExoPlayerSlotFactory, val signals: SystemSignals, val imageLoader: ImageLoader)
 
 private val bindings: MutableMap<MediaLayer, Binding> = Collections.synchronizedMap(WeakHashMap())
+
+private val openScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
 internal val MediaLayer.binding: Binding? get() = bindings[this]
 
@@ -48,7 +55,7 @@ fun MediaLayer.Companion.open(
   audioFocus: MediaAudioFocus = MediaAudioFocus.Mix,
   imageMemoryBytes: Int? = null,
   videoOutputCounters: VideoOutputCounters? = null
-): MediaLayer =
+): Deferred<MediaLayer> =
   openMediaLayer(context, fetcher, settings, callFactory, silent = silent, lifecycle = ProcessLifecycleOwner.get().lifecycle, audioFocus = audioFocus, imageMemoryBytes = imageMemoryBytes, videoOutputCounters = videoOutputCounters) { MediaLayer.open(it) }
 
 fun MediaLayer.Companion.open(
@@ -61,7 +68,7 @@ fun MediaLayer.Companion.open(
   audioFocus: MediaAudioFocus = MediaAudioFocus.Mix,
   imageMemoryBytes: Int? = null,
   videoOutputCounters: VideoOutputCounters? = null
-): MediaLayer =
+): Deferred<MediaLayer> =
   openMediaLayer(context, fetcher, settings, callFactory, defaults = { specDefaults(spec) }, silent = silent, lifecycle = ProcessLifecycleOwner.get().lifecycle, audioFocus = audioFocus, imageMemoryBytes = imageMemoryBytes, videoOutputCounters = videoOutputCounters) { MediaLayer.open(it) }
 
 private fun platformDefaults(): SpecDefaults = SpecDefaults(defaultLimits(), defaultPoolSettings(), emptyList())
@@ -77,72 +84,86 @@ internal fun openMediaLayer(
   audioFocus: MediaAudioFocus = MediaAudioFocus.Mix,
   imageMemoryBytes: Int? = null,
   videoOutputCounters: VideoOutputCounters? = null,
+  install: () -> Unit = NativeCallbacks::install,
   open: (OpenConfig) -> MediaLayer
-): MediaLayer {
-  Trace.beginSection("MediaLayer.open.jna")
-  try { NativeCallbacks.install() } finally { Trace.endSection() }
-  Trace.beginSection("MediaLayer.open.defaults")
-  val resolved = try { defaults() } finally { Trace.endSection() }
+): Deferred<MediaLayer> {
   Trace.beginSection("MediaLayer.open.platform")
+  val app = context.applicationContext
+  val client by lazy(LazyThreadSafetyMode.NONE) { OkHttpClient() }
+  val audio = MediaAudioSession(app, audioFocus)
+  val factory: ExoPlayerSlotFactory
+  val dir: File
+  val availableBytes: ULong
+  val device: DeviceMemory
   try {
-    val app = context.applicationContext
-    val client by lazy(LazyThreadSafetyMode.NONE) { OkHttpClient() }
-    val audio = MediaAudioSession(app, audioFocus)
-    val factory = ExoPlayerSlotFactory(app, callFactory ?: client, startMuted = silent, audio = audio, videoOutputCounters = videoOutputCounters)
-    val dir = File(app.cacheDir, "medialayer").apply { mkdirs() }
-    var reference: WeakReference<MediaLayer>? = null
-    var imageLoader: ImageLoader? = null
-    var signals: SystemSignals? = null
-    val releaser = object : MemoryReleaser {
-      override fun dropMemoryCaches() {
-        imageLoader?.memoryCache?.clear()
-      }
-
-      override fun shutdown() {
-        signals?.unregister()
-        signals = null
-        factory.release()
-        imageLoader?.shutdown()
-        imageLoader = null
-        reference?.get()?.let { bindings.remove(it) }
-        if (Media.audio === factory.audio) Media.audio = null
-      }
-    }
-    val config = OpenConfig(
-      dir = dir.path,
-      availableBytes = android.os.StatFs(dir.path).availableBytes.toULong(),
-      fetcher = fetcher ?: OkHttpFetcher(client),
-      settings = settings,
-      slots = factory,
-      device = deviceMemory(app),
-      defaults = resolved.defaults,
-      pool = resolved.pool,
-      namespaceHeaders = resolved.namespaceHeaders,
-      imageWindows = resolved.imageWindows,
-      forwardHeaders = resolved.forwardHeaders,
-      evictVideo = resolved.evictVideo,
-      evictImage = resolved.evictImage,
-      evictAudio = resolved.evictAudio,
-      memoryReleaser = releaser,
-      silent = silent
-    )
-    Trace.beginSection("MediaLayer.open.ffi")
-    val layer = try { open(config) } finally { Trace.endSection() }
-    reference = WeakReference(layer)
-    val loader = mediaImageLoader(app, ImageBytes { url, headers ->
-      val media = reference?.get() ?: throw CancellationException("MediaLayer was closed")
-      media.fetchImage(url, headers)
-    }, imageMemoryBytes, stats = layer.imageStats())
-    imageLoader = loader
-    layer.setTonePreparation(ToneFrames(layer, app, loader))
-    val events = layer.playerEvents()
-    factory.bind(events)
-    val registered = SystemSignals(app, events, lifecycle).also { it.register() }
-    signals = registered
-    bindings[layer] = Binding(factory, registered, loader)
-    Media.audio = audio
-    return layer
+    factory = ExoPlayerSlotFactory(app, callFactory ?: client, startMuted = silent, audio = audio, videoOutputCounters = videoOutputCounters)
+    dir = File(app.cacheDir, "medialayer").apply { mkdirs() }
+    availableBytes = android.os.StatFs(dir.path).availableBytes.toULong()
+    device = deviceMemory(app)
   } finally { Trace.endSection() }
+  var reference: WeakReference<MediaLayer>? = null
+  var imageLoader: ImageLoader? = null
+  var signals: SystemSignals? = null
+  val releaser = object : MemoryReleaser {
+    override fun dropMemoryCaches() {
+      imageLoader?.memoryCache?.clear()
+    }
+
+    override fun shutdown() {
+      signals?.unregister()
+      signals = null
+      factory.release()
+      imageLoader?.shutdown()
+      imageLoader = null
+      reference?.get()?.let { bindings.remove(it) }
+      if (Media.audio === factory.audio) Media.audio = null
+    }
+  }
+  Media.audio = audio
+  return openScope.async {
+    try {
+      Trace.beginSection("MediaLayer.open.jna")
+      try { install() } finally { Trace.endSection() }
+      Trace.beginSection("MediaLayer.open.defaults")
+      val resolved = try { defaults() } finally { Trace.endSection() }
+      val config = OpenConfig(
+        dir = dir.path,
+        availableBytes = availableBytes,
+        fetcher = fetcher ?: OkHttpFetcher(client),
+        settings = settings,
+        slots = factory,
+        device = device,
+        defaults = resolved.defaults,
+        pool = resolved.pool,
+        namespaceHeaders = resolved.namespaceHeaders,
+        imageWindows = resolved.imageWindows,
+        forwardHeaders = resolved.forwardHeaders,
+        evictVideo = resolved.evictVideo,
+        evictImage = resolved.evictImage,
+        evictAudio = resolved.evictAudio,
+        memoryReleaser = releaser,
+        silent = silent
+      )
+      Trace.beginSection("MediaLayer.open.ffi")
+      val layer = try { open(config) } finally { Trace.endSection() }
+      reference = WeakReference(layer)
+      val loader = mediaImageLoader(app, ImageBytes { url, headers ->
+        val media = reference?.get() ?: throw CancellationException("MediaLayer was closed")
+        media.fetchImage(url, headers)
+      }, imageMemoryBytes, stats = layer.imageStats())
+      imageLoader = loader
+      layer.setTonePreparation(ToneFrames(layer, app, loader))
+      val events = layer.playerEvents()
+      factory.bind(events)
+      val registered = SystemSignals(app, events, lifecycle).also { it.register() }
+      signals = registered
+      bindings[layer] = Binding(factory, registered, loader)
+      layer
+    } catch (failure: Throwable) {
+      releaser.shutdown()
+      throw failure
+    }
+  }
 }
 
 internal fun deviceMemory(context: Context): DeviceMemory {

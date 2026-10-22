@@ -44,8 +44,8 @@ private func writePNG(_ image: CGImage) throws -> String {
   return file.absoluteString
 }
 
-private func openLayer() throws -> MediaLayer {
-  try MediaLayer.open(
+private func openLayer() async throws -> MediaLayer {
+  try await MediaLayer.open(
     fetcher: OfflineFetcher(),
     settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
     directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
@@ -72,7 +72,7 @@ extension GlobalMedia {
 
     @Test
     func inv_tone_13_late_subscription_prepares_pixels_without_a_second_image_load() async throws {
-      let media = try openLayer()
+      let media = try await openLayer()
       let source = Poster(url: try writePNG(solid(width: 1080, height: 1920, red: 20, green: 40, blue: 60)))
       let context = MediaContext(places: media)
       let request = try #require(MediaImagePipeline.request(places: media, for: source))
@@ -144,7 +144,7 @@ extension GlobalMedia {
 
     @Test
     func inv_tone_12_a_loaded_image_makes_the_core_answer_with_pixels() async throws {
-      let media = try openLayer()
+      let media = try await openLayer()
       let source = Poster(url: try writePNG(solid(width: 120, height: 80, red: 250, green: 10, blue: 10)))
       let context = MediaContext(places: media)
       let request = try #require(MediaImagePipeline.request(places: media, for: source, points: CGSize(width: 40, height: 40), scale: 2))
@@ -157,7 +157,7 @@ extension GlobalMedia {
 
     @Test
     func inv_tone_12_a_video_cover_gives_the_video_its_tone() async throws {
-      let media = try openLayer()
+      let media = try await openLayer()
       let cover = try writePNG(solid(width: 90, height: 160, red: 10, green: 10, blue: 240))
       let video = MediaItem(kind: .video, url: "https://o.test/v.mp4", headers: [:], cover: cover, blurHash: nil, strategy: .window)
 
@@ -169,7 +169,7 @@ extension GlobalMedia {
 
     @Test
     func inv_tone_12_a_video_without_a_cover_gives_its_first_frame_and_a_covered_one_does_not() async throws {
-      let media = try openLayer()
+      let media = try await openLayer()
       let bare = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: nil, blurHash: nil, looping: true, strategy: .window)
 
       media.visible(source: bare, visible: true)

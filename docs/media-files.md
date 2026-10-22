@@ -182,7 +182,7 @@ Every value in the file is a default. The generated `MediaSpecJSON` holds all of
 ### Swift
 
 ```swift
-let media = try MediaLayer.open(
+let media = try await MediaLayer.open(
   spec: specJson,
   fetcher: URLSessionFetcher(),
   settings: UserDefaultsSettings(),
@@ -193,7 +193,7 @@ let media = try MediaLayer.open(
 ### Kotlin
 
 ```kotlin
-val media = MediaLayer.open(
+val media: Deferred<MediaLayer> = MediaLayer.open(
   context = this,
   spec = specJson,
   settings = SharedPreferencesSettings(this),

@@ -104,7 +104,7 @@ extension GlobalMedia {
     func aFileSourceLoadsThroughTheCoreWithoutTheProxy() async throws {
       let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).png")
       try pngData(side: 16).write(to: file)
-      let media = try MediaLayer.open(
+      let media = try await MediaLayer.open(
         fetcher: URLSessionFetcher(),
         settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
         directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

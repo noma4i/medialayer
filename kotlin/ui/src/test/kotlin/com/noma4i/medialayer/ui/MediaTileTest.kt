@@ -48,7 +48,7 @@ class MediaTileTest {
   fun sizedImagesPrepareNoToneWithoutDemand() {
     var full by mutableStateOf(false)
     rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         Column {
           MediaImage(Thumb("https://o.test/tile.png"), Modifier.size(50.dp))
           if (full) MediaImage(Thumb("https://o.test/full.png"), Modifier.size(50.dp))
@@ -68,7 +68,7 @@ class MediaTileTest {
     val gate = CompletableDeferred<Unit>()
     val gated = mediaImageLoader(context, ImageBytes { _, _ -> gate.await(); com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) })
     val url = "https://o.test/blur.png"
-    rule.setContent { MediaLayerProvider(layer, gated, slots.players) { MediaImage(Thumb(url, HASH), Modifier.size(50.dp)) } }
+    rule.setContent { MediaLayerProvider(CompletableDeferred(layer), gated, slots.players) { MediaImage(Thumb(url, HASH), Modifier.size(50.dp)) } }
 
     rule.waitUntil(5000) { looper.idle(); rule.onAllNodesWithContentDescription("blurhash").fetchSemanticsNodes().isNotEmpty() }
     gate.complete(Unit)
@@ -82,7 +82,7 @@ class MediaTileTest {
   @Test
   fun anImageFollowsNoCoreStateBecauseItShowsItsOwn() {
     rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         Column {
           MediaImage(Thumb("https://o.test/a.png"), Modifier.size(50.dp))
           MediaImage(Thumb("https://o.test/b.png"), Modifier.size(50.dp))
@@ -100,7 +100,7 @@ class MediaTileTest {
     var count by mutableIntStateOf(3)
     var unrelated by mutableIntStateOf(0)
     rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         Column { repeat(count) { MediaImage(Thumb(url), Modifier.size((50 + unrelated).dp)) } }
       }
     }

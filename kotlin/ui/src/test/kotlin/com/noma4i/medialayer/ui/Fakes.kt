@@ -81,3 +81,5 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
   override fun close() { closed = true }
 }
 
+
+internal fun kotlinx.coroutines.Deferred<MediaLayer>.blocking(): MediaLayer = kotlinx.coroutines.runBlocking { await() }.also { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle() }

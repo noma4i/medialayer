@@ -3,6 +3,7 @@ package com.noma4i.medialayer.ui
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -22,6 +23,7 @@ import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.stateFlow
 import com.noma4i.medialayer.toItem
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.flow.flowOf
 
 object Media {
@@ -64,8 +66,16 @@ internal class MediaEnvironment(val media: MediaLayer, val players: SlotPlayers?
 
 internal val LocalMediaEnvironment = staticCompositionLocalOf<MediaEnvironment> { error("Wrap the screen in MediaLayerProvider") }
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @Composable
-fun MediaLayerProvider(media: MediaLayer, imageLoader: ImageLoader? = null, players: SlotPlayers? = null, content: @Composable () -> Unit) {
+fun MediaLayerProvider(opened: Deferred<MediaLayer>, imageLoader: ImageLoader? = null, players: SlotPlayers? = null, content: @Composable () -> Unit) {
+  var ready by remember(opened) { mutableStateOf(if (opened.isCompleted && !opened.isCancelled) opened.getCompleted() else null) }
+  if (ready == null) LaunchedEffect(opened) { ready = opened.await() }
+  ready?.let { MediaLayerEnvironment(it, imageLoader, players, content) }
+}
+
+@Composable
+private fun MediaLayerEnvironment(media: MediaLayer, imageLoader: ImageLoader?, players: SlotPlayers?, content: @Composable () -> Unit) {
   val context = LocalContext.current
   val environment = remember(media, imageLoader, players) {
     val binding = media.binding

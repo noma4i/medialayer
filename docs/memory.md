@@ -27,7 +27,7 @@ UNBUILT: the steps lower the slot count, the reach, the admission share and the 
 ### Swift
 
 ```swift
-let media = try MediaLayer.open(
+let media = try await MediaLayer.open(
   fetcher: URLSessionFetcher(),
   settings: UserDefaultsSettings()
 )
@@ -36,7 +36,7 @@ let media = try MediaLayer.open(
 ### Kotlin
 
 ```kotlin
-val media = MediaLayer.open(
+val media: Deferred<MediaLayer> = MediaLayer.open(
   context = applicationContext,
   settings = SharedPreferencesSettings(applicationContext)
 )

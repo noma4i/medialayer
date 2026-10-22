@@ -148,7 +148,7 @@ extension GlobalMedia {
       let url = server.url(path)
       let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
       let settings = UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!)
-      var media: MediaLayer? = try MediaLayer.open(fetcher: URLSessionFetcher(), settings: settings, directory: directory)
+      var media: MediaLayer? = try await MediaLayer.open(fetcher: URLSessionFetcher(), settings: settings, directory: directory)
       var places = CountingPlaces(try #require(media))
       ImageMemory.install(ImageCache(), on: places)
       var context = MediaContext(places: places)
@@ -179,7 +179,7 @@ extension GlobalMedia {
       media = nil
       FrameCache.shared.removeAll()
       await settle(0.5)
-      media = try MediaLayer.open(fetcher: URLSessionFetcher(), settings: settings, directory: directory)
+      media = try await MediaLayer.open(fetcher: URLSessionFetcher(), settings: settings, directory: directory)
       places = CountingPlaces(try #require(media))
       ImageMemory.install(ImageCache(), on: places)
       context = MediaContext(places: places)

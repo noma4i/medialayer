@@ -2,6 +2,7 @@
 
 package com.noma4i.medialayer.ui
 
+import kotlinx.coroutines.CompletableDeferred
 import android.content.Context
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -76,7 +77,7 @@ class MediaComposeTest {
     var unrelated by mutableIntStateOf(0)
     var shown by mutableStateOf(true)
     rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         if (shown) MediaVideo(Clip("https://o.test/a.mp4"), playing = playing, muted = true, modifier = Modifier.size((10 + unrelated).dp)) { Text("tick") }
       }
     }
@@ -101,7 +102,7 @@ class MediaComposeTest {
   @Test
   fun theOutputOfAVideoDoesNotChangeWhatItTellsTheCore() {
     rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         Column {
           MediaVideo(Clip("https://o.test/texture.mp4"), playing = true, muted = true, output = MediaOutput.Texture, modifier = Modifier.size(50.dp))
           MediaVideo(Clip("https://o.test/window.mp4"), playing = true, muted = true, output = MediaOutput.Window, modifier = Modifier.size(50.dp))
@@ -117,7 +118,7 @@ class MediaComposeTest {
 
   @Test
   fun theAppWideMuteReachesTheCore() {
-    rule.setContent { MediaLayerProvider(layer, loader, slots.players) { } }
+    rule.setContent { MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { } }
     rule.waitForIdle()
 
     Media.muted = true
@@ -132,7 +133,7 @@ class MediaComposeTest {
   fun theCoreStateReachesTheContentAndTheCoverShowsUntilReady() {
     val clip = Clip("https://o.test/a.mp4", cover = "https://o.test/cover.jpg")
     rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         MediaVideo(clip, modifier = Modifier.size(100.dp)) { state -> Text(if (state is MediaState.Failed) "failed ${state.detail}" else "state") }
       }
     }
@@ -152,7 +153,7 @@ class MediaComposeTest {
     val cover = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(2000, 2000), com.noma4i.medialayer.ImageOrigin.NETWORK) }, stats = stats)
     val clip = Clip("https://o.test/a.mp4", cover = "https://o.test/cover.jpg")
     rule.setContent {
-      MediaLayerProvider(layer, cover, slots.players) { MediaVideo(clip, modifier = Modifier.size(50.dp)) }
+      MediaLayerProvider(CompletableDeferred(layer), cover, slots.players) { MediaVideo(clip, modifier = Modifier.size(50.dp)) }
     }
     rule.waitUntil(10000) { stats.snapshot().decodes == 1uL }
 
@@ -168,7 +169,7 @@ class MediaComposeTest {
     var ends = 0
     val clip = Clip("https://o.test/intro.mp4")
     rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         MediaVideo(clip, loop = false, onFirstFrame = { firstFrames++ }, onEnd = { ends++ }, modifier = Modifier.size(100.dp))
       }
     }
@@ -187,7 +188,7 @@ class MediaComposeTest {
   @Test
   fun anAudioRateGoesToTheCoreAndAChangeOfTheParameterGoesAgain() {
     var rate by androidx.compose.runtime.mutableFloatStateOf(1.5f)
-    rule.setContent { MediaLayerProvider(layer, loader, slots.players) { MediaAudio(Note("https://o.test/n.m4a"), rate = rate) { } } }
+    rule.setContent { MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { MediaAudio(Note("https://o.test/n.m4a"), rate = rate) { } } }
     rule.waitForIdle()
 
     rate = 2f
@@ -199,7 +200,7 @@ class MediaComposeTest {
   @Test
   fun anImageLoadsThroughTheCoreAtTheDeclaredSizeAndReportsItsStateToTheCore() {
     rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         MediaImage(Photo("https://o.test/p.png"), Modifier.size(50.dp))
       }
     }
@@ -229,7 +230,7 @@ class MediaComposeTest {
   fun inv_image_01_a_view_decodes_at_its_size_in_pixels_rounded_up_to_8_without_upscaling_the_source() {
     val sized = mediaImageLoader(context, ImageBytes { url, headers -> requested.add(url to headers); com.noma4i.medialayer.ImageFetchResult(pngBytes(400, 400), com.noma4i.medialayer.ImageOrigin.NETWORK) })
     rule.setContent {
-      MediaLayerProvider(layer, sized, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), sized, slots.players) {
         Column {
           MediaImage(Plain("https://o.test/view.png"), Modifier.size(50.dp))
           MediaImage(Photo("https://o.test/declared.png"), Modifier.size(50.dp))
@@ -249,7 +250,7 @@ class MediaComposeTest {
   fun inv_image_04_the_content_scale_picks_the_decoder_scale_and_keeps_the_decode_size() {
     val wide = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(400, 200), com.noma4i.medialayer.ImageOrigin.NETWORK) })
     rule.setContent {
-      MediaLayerProvider(layer, wide, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), wide, slots.players) {
         Column {
           MediaImage(Plain("https://o.test/crop.png"), Modifier.size(50.dp), contentScale = ContentScale.Crop)
           MediaImage(Plain("https://o.test/fit.png"), Modifier.size(50.dp), contentScale = ContentScale.Fit)
@@ -268,7 +269,7 @@ class MediaComposeTest {
     val seen = CopyOnWriteArrayList<MediaState>()
     var visible by mutableStateOf(true)
     rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         if (visible) MediaImage(Plain("https://o.test/again.png"), Modifier.size(50.dp)) { seen.add(it) }
       }
     }
@@ -289,7 +290,7 @@ class MediaComposeTest {
     val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
     val gated = mediaImageLoader(context, ImageBytes { _, _ -> gate.await(); com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) })
     val looper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
-    rule.setContent { MediaLayerProvider(layer, gated, slots.players) { MediaImage(BlurredPhoto("https://o.test/b.png"), Modifier.size(50.dp)) } }
+    rule.setContent { MediaLayerProvider(CompletableDeferred(layer), gated, slots.players) { MediaImage(BlurredPhoto("https://o.test/b.png"), Modifier.size(50.dp)) } }
 
     rule.waitUntil(5000) { looper.idle(); rule.onAllNodesWithContentDescription("blurhash").fetchSemanticsNodes().isNotEmpty() }
     gate.complete(Unit)
@@ -301,7 +302,7 @@ class MediaComposeTest {
   @Test
   fun anAudioPlaceTogglesPlayingThroughTheCore() {
     rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         MediaAudio(Note("https://o.test/n.m4a")) { audio -> androidx.compose.foundation.layout.Column {
           Text(if (audio.isPlaying) "pause" else "play", Modifier.size(40.dp).clickableTap(audio::toggle))
           Text("seek", Modifier.size(40.dp).clickableTap { audio.seek(1500) })

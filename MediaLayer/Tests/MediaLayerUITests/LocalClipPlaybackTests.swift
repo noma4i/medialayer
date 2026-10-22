@@ -43,8 +43,8 @@ extension GlobalMedia {
       Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!.absoluteString
     }
 
-    private func open(silent: Bool, fetcher: Fetcher) throws -> MediaLayer {
-      try MediaLayer.open(
+    private func open(silent: Bool, fetcher: Fetcher) async throws -> MediaLayer {
+      try await MediaLayer.open(
         fetcher: fetcher,
         settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
         directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
@@ -62,7 +62,7 @@ extension GlobalMedia {
     @Test
     func aLocalOneShotClipRendersAndEndsWithoutTheNetworkOrTheCache() async throws {
       let fetcher = CountingFetcher()
-      let media = try open(silent: false, fetcher: fetcher)
+      let media = try await open(silent: false, fetcher: fetcher)
       let log = StateLog()
       let subscription = media.subscribeState(key: Self.clip, listener: log)
       let item = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: "https://o.test/cover.jpg", blurHash: nil, looping: false, strategy: .window)
@@ -98,7 +98,7 @@ extension GlobalMedia {
 
     @Test
     func aSilentLayerKeepsEverySlotMutedWhateverThePlacesAsk() async throws {
-      let media = try open(silent: true, fetcher: CountingFetcher())
+      let media = try await open(silent: true, fetcher: CountingFetcher())
       let item = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: nil, blurHash: nil, looping: true, strategy: .window)
 
       media.visible(source: item, visible: true)
@@ -119,7 +119,7 @@ extension GlobalMedia {
 
     @Test
     func aClaimToUnmuteReachesASlotOfANonSilentLayer() async throws {
-      let media = try MediaLayer.open(
+      let media = try await MediaLayer.open(
         fetcher: CountingFetcher(),
         settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
         directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
@@ -141,7 +141,7 @@ extension GlobalMedia {
 
     @Test
     func aRateSetOnTheLayerReachesThePlayerOfTheLoadedClip() async throws {
-      let media = try open(silent: true, fetcher: CountingFetcher())
+      let media = try await open(silent: true, fetcher: CountingFetcher())
       let item = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: nil, blurHash: nil, looping: true, strategy: .window)
 
       media.setRate(key: Self.clip, rate: 1.5)

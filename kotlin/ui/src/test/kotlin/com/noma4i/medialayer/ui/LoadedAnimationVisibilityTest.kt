@@ -1,5 +1,6 @@
 package com.noma4i.medialayer.ui
 
+import kotlinx.coroutines.CompletableDeferred
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.ColorFilter
@@ -73,7 +74,7 @@ class LoadedAnimationVisibilityTest {
     val looper = shadowOf(android.os.Looper.getMainLooper())
     var x by mutableIntStateOf(0)
     rule.setContent {
-      MediaLayerProvider(layer, loader) {
+      MediaLayerProvider(CompletableDeferred(layer), loader) {
         Box(Modifier.fillMaxSize()) {
           Box(Modifier.offset { IntOffset(x, 0) }) { MediaImage(page, Modifier.size(50.dp)) }
         }
@@ -124,7 +125,7 @@ class LoadedAnimationVisibilityTest {
     var x by mutableIntStateOf(0)
     var shown by mutableStateOf(true)
     rule.setContent {
-      MediaLayerProvider(layer, loader) {
+      MediaLayerProvider(CompletableDeferred(layer), loader) {
         Box(Modifier.fillMaxSize()) {
           if (shown) {
             Box(Modifier.offset { IntOffset(x, 0) }) { MediaImage(page, Modifier.size(50.dp)) }

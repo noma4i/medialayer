@@ -65,7 +65,7 @@ class MediaVisibilityTest {
     var x by mutableIntStateOf(0)
     var mounted by androidx.compose.runtime.mutableStateOf(true)
     rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         if (mounted) Box(Modifier.fillMaxSize()) { Box(Modifier.offset { IntOffset(x, 0) }) { MediaImage(page, Modifier.size(50.dp)) } }
       }
     }
@@ -90,7 +90,7 @@ class MediaVisibilityTest {
   fun aPageThatExitedAndReturnsAsksAgain() {
     var x by mutableIntStateOf(0)
     rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         Box(Modifier.fillMaxSize()) { Box(Modifier.offset { IntOffset(x, 0) }) { MediaImage(page, Modifier.size(50.dp)) } }
       }
     }
@@ -113,7 +113,7 @@ class MediaVisibilityTest {
   fun aPageThatWasNeverVisibleStartsWorkWhenItScrollsIn() {
     var x by mutableIntStateOf(FAR)
     rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         Box(Modifier.fillMaxSize()) { Box(Modifier.offset { IntOffset(x, 0) }) { MediaImage(page, Modifier.size(50.dp)) } }
       }
     }
@@ -133,7 +133,7 @@ class MediaVisibilityTest {
   fun aLeavingOwnerDoesNotCancelOrReleaseTheKeyOfAnOwnerThatStays() {
     var x by mutableIntStateOf(0)
     rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         Row {
           Box(Modifier.offset { IntOffset(x, 0) }) { MediaImage(page, Modifier.size(50.dp)) }
           MediaImage(page, Modifier.size(50.dp))

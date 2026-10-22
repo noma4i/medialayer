@@ -27,7 +27,7 @@ class AndroidShutdownTest {
     override val lifecycle = LifecycleRegistry.createUnsafe(this)
   }
 
-  private fun open(): MediaLayer = openMediaLayer(app, settings = SharedPreferencesSettings(app), lifecycle = owner.lifecycle) { MediaLayer.open(it) }
+  private fun open(): MediaLayer = openMediaLayer(app, settings = SharedPreferencesSettings(app), lifecycle = owner.lifecycle) { MediaLayer.open(it) }.blocking()
 
   private fun closedResources(): Pair<MediaLayer, List<java.lang.ref.WeakReference<Any>>> {
     val media = open()
@@ -84,7 +84,7 @@ class AndroidShutdownTest {
   @Test
   fun inv_android_03_close_releases_players_callbacks_and_binding() {
     val counters = VideoOutputCounters()
-    val media = openMediaLayer(app, settings = SharedPreferencesSettings(app), lifecycle = owner.lifecycle, videoOutputCounters = counters) { MediaLayer.open(it) }
+    val media = openMediaLayer(app, settings = SharedPreferencesSettings(app), lifecycle = owner.lifecycle, videoOutputCounters = counters) { MediaLayer.open(it) }.blocking()
     val binding = media.binding!!
     binding.factory.mediaSourceFor = { androidx.media3.test.utils.FakeMediaSource() }
     val slot = binding.factory.create(0u)

@@ -1,5 +1,6 @@
 package com.noma4i.medialayer.ui
 
+import kotlinx.coroutines.CompletableDeferred
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -157,7 +158,7 @@ class ToneFramesTest {
   @Test
   fun inv_tone_13_image_loading_installs_preparation_without_requesting_pixels() {
     rule.setContent {
-      MediaLayerProvider(layer, loader, slots.players) { MediaImage(Poster("https://o.test/p.png"), Modifier.size(24.dp)) }
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { MediaImage(Poster("https://o.test/p.png"), Modifier.size(24.dp)) }
     }
 
     rule.waitUntil(10_000) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); layer.calls.contains("itemState:https://o.test/p.png:Ready") }

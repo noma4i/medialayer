@@ -50,7 +50,7 @@ class OpenPolicyTest {
   }
 
   private fun open(spec: String, origin: PolicyOrigin): MediaLayer =
-    MediaLayer.open(application, spec, origin, SharedPreferencesSettings(application, UUID.randomUUID().toString()))
+    MediaLayer.open(application, spec, origin, SharedPreferencesSettings(application, UUID.randomUUID().toString())).blocking()
 
   @Test
   fun inv_spec_07_open_applies_the_first_video_forward_headers_to_origin() = runBlocking {

@@ -37,7 +37,7 @@ When the last heard player stops, MediaLayer ends the session and tells the othe
 ### Swift
 
 ```swift
-let media = try MediaLayer.open(
+let media = try await MediaLayer.open(
     fetcher: fetcher,
     settings: settings,
     audioFocus: .mix
@@ -47,7 +47,7 @@ let media = try MediaLayer.open(
 ### Kotlin
 
 ```kotlin
-val media = MediaLayer.open(
+val media: Deferred<MediaLayer> = MediaLayer.open(
     context, fetcher, settings,
     audioFocus = MediaAudioFocus.Mix
 )

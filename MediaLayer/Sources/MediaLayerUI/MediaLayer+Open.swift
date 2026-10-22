@@ -13,11 +13,10 @@ extension MediaLayer {
     silent: Bool = false,
     audioFocus: MediaAudioFocus = .mix,
     imageMemoryBytes: Int = MediaImagePipeline.defaultMemoryLimit
-  ) throws -> MediaLayer {
-    let defaults = SpecDefaults(defaults: defaultLimits(), pool: defaultPoolSettings(), namespaceHeaders: [])
-    return try open(
-      defaults: defaults, fetcher: fetcher, settings: settings, directory: directory, silent: silent, audioFocus: audioFocus,
-      imageMemoryBytes: imageMemoryBytes
+  ) async throws -> MediaLayer {
+    try await open(
+      defaults: { SpecDefaults(defaults: defaultLimits(), pool: defaultPoolSettings(), namespaceHeaders: []) },
+      fetcher: fetcher, settings: settings, directory: directory, silent: silent, audioFocus: audioFocus, imageMemoryBytes: imageMemoryBytes
     )
   }
 
@@ -29,29 +28,32 @@ extension MediaLayer {
     silent: Bool = false,
     audioFocus: MediaAudioFocus = .mix,
     imageMemoryBytes: Int = MediaImagePipeline.defaultMemoryLimit
-  ) throws -> MediaLayer {
-    try open(
-      defaults: specDefaults(json: spec), fetcher: fetcher, settings: settings, directory: directory, silent: silent,
+  ) async throws -> MediaLayer {
+    try await open(
+      defaults: { try specDefaults(json: spec) }, fetcher: fetcher, settings: settings, directory: directory, silent: silent,
       audioFocus: audioFocus, imageMemoryBytes: imageMemoryBytes
     )
   }
 
-  private static func open(
-    defaults: SpecDefaults,
+  static func open(
+    defaults: @escaping @Sendable () throws -> SpecDefaults,
     fetcher: Fetcher,
     settings: SettingsStore,
     directory: URL?,
     silent: Bool,
     audioFocus: MediaAudioFocus,
-    imageMemoryBytes: Int
-  ) throws -> MediaLayer {
+    imageMemoryBytes: Int,
+    build: @escaping @Sendable (OpenConfig) throws -> MediaLayer = { try MediaLayer.open(config: $0) }
+  ) async throws -> MediaLayer {
     guard imageMemoryBytes > 0 else { throw MediaError.InvalidSpec(detail: "imageMemoryBytes must be positive") }
     let imageCache = ImageCache(costLimit: imageMemoryBytes)
     let audio = MediaAudioSession(focus: audioFocus)
-    let (config, factory) = try makeConfig(
-      defaults: defaults, fetcher: fetcher, settings: settings, directory: directory, silent: silent, audio: audio, imageCache: imageCache
-    )
-    let media = try MediaLayer.open(config: config)
+    let (config, factory, media) = try await Task.detached(priority: .userInitiated) {
+      let (config, factory) = try makeConfig(
+        defaults: try defaults(), fetcher: fetcher, settings: settings, directory: directory, silent: silent, audio: audio, imageCache: imageCache
+      )
+      return (config, factory, try build(config))
+    }.value
     (config.memoryReleaser as? OpenedResources)?.bind(media)
     media.setTonePreparation(preparation: ToneFrames(places: media))
     ImageMemory.install(imageCache, on: media)
