@@ -24,7 +24,7 @@ steps=(
   "cheap|build-modes|120|*|bash scripts/check_build_modes.sh"
   "cargo|cargo-test|900|core/ gen/ Cargo.|$slot cargo-step cargo test --workspace"
   "swift|ios-slices|600|MediaLayer/ core/ gen/ Cargo.|$slot bash-step bash scripts/build_ios.sh --check"
-  "swift|swift-test|900|MediaLayer/ core/ gen/ Cargo.|$slot swift-step swift test --package-path MediaLayer"
+  "swift|swift-test|900|MediaLayer/ core/ gen/ Cargo.|$slot bash-step $HOME/.claude/bin/sim-run swift-test -- xcodebuild test -workspace $root/MediaLayer -scheme MediaLayer-Package -destination \"platform=iOS Simulator,id=@UDID@\" -derivedDataPath $root/.orca-artifacts/DD.noindex"
   "swift|gen-consumer-swift|600|MediaLayer/ core/ gen/ Cargo.|$slot bash-step bash scripts/check_gen_consumers.sh swift"
   "kotlin|kotlin-bindings|600|kotlin/ core/ gen/ Cargo.|$slot bash-step bash scripts/build_kotlin.sh --host"
   "kotlin|gen-consumer-kotlin|600|kotlin/ core/ gen/ Cargo.|$slot bash-step bash scripts/check_gen_consumers.sh kotlin"
