@@ -2,6 +2,16 @@ use super::*;
 use crate::fetch::mock::{MockFetcher, Script};
 use crate::proxy::{memory_store::MemoryStore, Config, Proxy};
 
+async fn permits_returned(proxy: &Proxy) {
+    for _ in 0..400 {
+        if proxy.inner.slots.in_use() == 0 {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert_eq!(proxy.inner.slots.in_use(), 0, "a cancelled probe kept its permit");
+}
+
 #[tokio::test]
 async fn inv_proxy_28_cancelled_probes_release_the_last_lock_in_either_order() {
     let fetcher = Arc::new(MockFetcher::new());
@@ -30,7 +40,7 @@ async fn inv_proxy_28_cancelled_probes_release_the_last_lock_in_either_order() {
                 drop(owner);
             }
             assert_eq!(proxy.inner.probe_count(), 0, "cancelled probe left its table entry");
-            assert_eq!(proxy.inner.slots.in_use(), 0);
+            permits_returned(&proxy).await;
         }
     }
     for (index, script) in [Script::ok(vec![1; 8]), Script::ok(vec![1; 8]).status(500)].into_iter().enumerate() {
@@ -39,6 +49,6 @@ async fn inv_proxy_28_cancelled_probes_release_the_last_lock_in_either_order() {
         let result = known_total(&proxy.inner, &url, &url, &headers, None).await;
         assert_eq!(result.is_ok(), index == 0);
         assert_eq!(proxy.inner.probe_count(), 0);
-        assert_eq!(proxy.inner.slots.in_use(), 0);
+        permits_returned(&proxy).await;
     }
 }

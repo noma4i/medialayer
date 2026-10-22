@@ -11,6 +11,7 @@ mod tasks;
 mod cursor;
 mod window;
 mod playlists;
+mod recent;
 pub use playlists::StoredPlaylist;
 
 #[cfg(test)]
@@ -374,6 +375,8 @@ impl Proxy {
     }
 }
 
+#[cfg(test)]
+mod bounds_tests;
 #[cfg(test)]
 mod buffer_tests;
 #[cfg(test)]

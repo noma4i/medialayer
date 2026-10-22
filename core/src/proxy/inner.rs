@@ -9,13 +9,13 @@ use crate::hls::is_manifest_url;
 use super::slots::{Priority, PrioritySlots};
 use crate::fetch::Fetcher;
 use crate::identity::namespaced_key;
-use std::collections::{HashMap, HashSet};
+use super::recent::Recent;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 use tokio::sync::watch;
 use tokio::time::Instant;
-use std::collections::VecDeque;
 use tokio::sync::oneshot;
 
 const MAX_STAMPS: usize = 256;
@@ -53,10 +53,10 @@ pub(super) struct ProxyShared {
     pub registered_headers: Mutex<Registry>,
     pub tasks: Tasks,
     pub windows: Windows,
-    pub playlist_stamps: Mutex<HashMap<String, Instant>>,
+    pub playlist_stamps: Mutex<Recent<Instant>>,
     pub playlists: super::playlists::Playlists,
-    pub totals: Mutex<HashMap<String, u64>>,
-    whole_only: Mutex<HashSet<String>>,
+    pub totals: Mutex<Recent<u64>>,
+    whole_only: Mutex<Recent<()>>,
     probe_locks: Mutex<HashMap<String, (Arc<tokio::sync::Mutex<()>>, usize)>>,
     pub listener: tokio::sync::Mutex<Option<Listener>>,
     pub running: AtomicBool,
@@ -67,11 +67,7 @@ pub(super) struct ProxyShared {
     timeout_ms: AtomicU64,
 }
 
-#[derive(Default)]
-pub(super) struct Registry {
-    map: HashMap<String, (HashMap<String, String>, bool)>,
-    order: VecDeque<String>,
-}
+pub(super) struct Registry(Recent<(HashMap<String, String>, bool)>);
 
 pub(super) struct ProbeLock<'a> {
     shared: &'a ProxyShared,
@@ -92,24 +88,21 @@ impl Drop for ProbeLock<'_> {
 }
 
 impl Registry {
-    fn get(&self, url: &str) -> Option<&HashMap<String, String>> {
-        self.map.get(url).map(|(headers, _)| headers)
+    fn new() -> Self {
+        Registry(Recent::new(MAX_REGISTERED))
     }
 
-    fn insert(&mut self, url: &str, headers: &HashMap<String, String>, replace: bool) {
-        if let Some(existing) = self.map.get_mut(url) {
-            if replace || !existing.1 {
-                *existing = (headers.clone(), replace);
-            }
-            return;
-        }
-        if self.order.len() >= MAX_REGISTERED {
-            if let Some(oldest) = self.order.pop_front() {
-                self.map.remove(&oldest);
-            }
-        }
-        self.order.push_back(url.to_string());
-        self.map.insert(url.to_string(), (headers.clone(), replace));
+    fn get(&mut self, url: &str) -> Option<&HashMap<String, String>> {
+        self.0.get(url).map(|(headers, _)| headers)
+    }
+
+    fn insert(&mut self, url: &str, headers: &HashMap<String, String>, replace: bool, planned: impl Fn(&str) -> bool) {
+        let kept = match self.0.get(url) {
+            Some((existing, explicit)) if !replace && *explicit => Some((existing.clone(), true)),
+            _ => None,
+        };
+        let entry = kept.unwrap_or_else(|| (headers.clone(), replace));
+        self.0.insert(url, entry, |url, _| planned(url));
     }
 }
 
@@ -129,13 +122,13 @@ impl ProxyShared {
             config,
             live: Arc::new(AtomicUsize::new(0)),
             flights: Mutex::new(HashMap::new()),
-            registered_headers: Mutex::new(Registry::default()),
+            registered_headers: Mutex::new(Registry::new()),
             tasks,
             windows: Windows::new(chunks_ahead),
-            playlist_stamps: Mutex::new(HashMap::new()),
+            playlist_stamps: Mutex::new(Recent::new(MAX_STAMPS)),
             playlists: super::playlists::Playlists::default(),
-            totals: Mutex::new(HashMap::new()),
-            whole_only: Mutex::new(HashSet::new()),
+            totals: Mutex::new(Recent::new(MAX_TOTALS)),
+            whole_only: Mutex::new(Recent::new(MAX_TOTALS)),
             probe_locks: Mutex::new(HashMap::new()),
             listener: tokio::sync::Mutex::new(None),
             running: AtomicBool::new(false),
@@ -164,13 +157,13 @@ impl ProxyShared {
     }
 
     pub fn register_headers(&self, url: &str, headers: &HashMap<String, String>) {
-        locked(&self.registered_headers).insert(url, headers, true);
+        locked(&self.registered_headers).insert(url, headers, true, |url| self.windows.is_planned(url));
     }
 
     pub fn inherit_headers(&self, urls: &[String], headers: &HashMap<String, String>) {
         let mut registry = locked(&self.registered_headers);
         for url in urls {
-            registry.insert(url, headers, false);
+            registry.insert(url, headers, false, |url| self.windows.is_planned(url));
         }
     }
 
@@ -273,12 +266,7 @@ impl ProxyShared {
     }
 
     pub fn stamp_playlist(&self, key: &str) {
-        let mut stamps = locked(&self.playlist_stamps);
-        let ttl = self.config.playlist_ttl;
-        if stamps.len() >= MAX_STAMPS {
-            stamps.retain(|_, stamped| stamped.elapsed() <= ttl);
-        }
-        stamps.insert(key.to_string(), Instant::now());
+        locked(&self.playlist_stamps).insert(key, Instant::now(), |_, _| false);
     }
 
     pub fn playlist_is_fresh(&self, key: &str) -> bool {
@@ -291,23 +279,15 @@ impl ProxyShared {
     }
 
     pub fn remember_total(&self, key: &str, total: u64) {
-        let mut totals = locked(&self.totals);
-        if totals.len() >= MAX_TOTALS {
-            totals.clear();
-        }
-        totals.insert(key.to_string(), total);
+        locked(&self.totals).insert(key, total, |_, _| false);
     }
 
     pub fn mark_ignores_range(&self, key: &str) {
-        let mut keys = locked(&self.whole_only);
-        if keys.len() >= MAX_TOTALS {
-            keys.clear();
-        }
-        keys.insert(key.to_string());
+        locked(&self.whole_only).insert(key, (), |_, _| false);
     }
 
     pub fn ignores_range(&self, key: &str) -> bool {
-        locked(&self.whole_only).contains(key)
+        locked(&self.whole_only).get(key).is_some()
     }
 
     pub fn probe_lock<'a>(&'a self, key: &'a str) -> ProbeLock<'a> {

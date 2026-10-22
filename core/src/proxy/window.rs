@@ -1,4 +1,5 @@
 use super::inner::{locked, ProxyShared};
+use super::recent::Recent;
 use crate::limits::MAX_CHUNKS_AHEAD;
 use crate::pool::Retention;
 use std::collections::{HashMap, VecDeque};
@@ -38,12 +39,17 @@ impl Stream {
     }
 }
 
-#[derive(Default)]
 struct Table {
     by_segment: HashMap<String, (Arc<Stream>, usize)>,
     by_root: HashMap<String, Arc<Stream>>,
     order: VecDeque<String>,
-    variants: HashMap<String, String>,
+    variants: Recent<String>,
+}
+
+impl Table {
+    fn new() -> Self {
+        Table { by_segment: HashMap::new(), by_root: HashMap::new(), order: VecDeque::new(), variants: Recent::new(MAX_STREAMS * 2) }
+    }
 }
 
 pub(super) struct Windows {
@@ -56,7 +62,7 @@ pub(super) struct Windows {
 impl Windows {
     pub fn new(chunks_ahead: u32) -> Self {
         Windows {
-            table: Mutex::new(Table::default()),
+            table: Mutex::new(Table::new()),
             playhead: Mutex::new(None),
             chunks_ahead: AtomicU32::new(chunks_ahead),
             scale_percent: AtomicU32::new(FULL_PERCENT),
@@ -106,11 +112,17 @@ impl Windows {
     }
 
     pub fn remember_variant(&self, variant: &str, root: &str) {
-        let mut table = locked(&self.table);
-        if table.variants.len() >= MAX_STREAMS * 2 {
-            table.variants.clear();
-        }
-        table.variants.insert(variant.to_string(), root.to_string());
+        locked(&self.table).variants.insert(variant, root.to_string(), |_, _| false);
+    }
+
+    #[cfg(test)]
+    pub fn variant_count(&self) -> usize {
+        locked(&self.table).variants.len()
+    }
+
+    #[cfg(test)]
+    pub fn variant_root(&self, variant: &str) -> Option<String> {
+        locked(&self.table).variants.get(variant).cloned()
     }
 
     pub fn register_plan(&self, playlist: &str, plan: &crate::hls::Playlist) {
@@ -154,6 +166,11 @@ impl Windows {
         if let Some(playhead) = self.playhead() {
             playhead.readahead(&stream.root, self.hint_ms(stream));
         }
+    }
+
+    pub fn is_planned(&self, url: &str) -> bool {
+        let table = locked(&self.table);
+        table.by_segment.contains_key(url) || table.by_root.contains_key(url)
     }
 
     fn lookup(&self, target: &str) -> Option<(Arc<Stream>, usize)> {
