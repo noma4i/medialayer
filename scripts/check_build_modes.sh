@@ -44,7 +44,7 @@ elif tool == "cargo":
     else:
         write("target/debug/uniffi-bindgen", p(sys.argv[0]).read_text())
         (root / "target/debug/uniffi-bindgen").chmod(0o755)
-        if "--bin" not in args: write("target/debug/libmedialayer.so")
+        if "--bin" not in args: write("target/debug/libmedialayer." + ("dylib" if os.environ["BUILD_TEST_OS"] == "Darwin" else "so"))
 elif tool == "uniffi-bindgen":
     library = p(args[args.index("--library") + 1])
     if not library.is_file(): sys.exit(8)
@@ -72,10 +72,10 @@ android = {
     "": ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"],
 }
 failed = []
-cases = [("kotlin", {"--release": android["--release"]})] if cleanup else [("ios", ios), ("kotlin", android)]
-for platform, modes in cases:
+cases = [("kotlin", {"--release": android["--release"]}, "Linux")] if cleanup else [("ios", ios, "Darwin"), ("kotlin", android, "Linux"), ("kotlin", {"--host": []}, "Darwin")]
+for platform, modes, host_os in cases:
     for mode, targets in modes.items():
-        label = f"{platform} {mode or 'default'}"
+        label = f"{platform} {mode or 'default'} {host_os}"
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory).resolve()
             shutil.copytree(root / "scripts", work / "scripts")
@@ -94,7 +94,7 @@ for platform, modes in cases:
                     (jni / abi).mkdir(parents=True)
                     (jni / abi / "libmedialayer.so").write_text("stale")
             env = dict(os.environ, PATH=f"{work}/bin:{os.environ['PATH']}",
-                       BUILD_TEST_ROOT=str(work), BUILD_TEST_OS="Darwin" if platform == "ios" else "Linux",
+                       BUILD_TEST_ROOT=str(work), BUILD_TEST_OS=host_os,
                        ANDROID_NDK_HOME=str(work))
             env.pop("CARGO_BUILD_JOBS", None)
             env.pop("RUST_TEST_THREADS", None)
@@ -134,7 +134,7 @@ for platform, modes in cases:
                         assert str(work / "bindgen/Cargo.toml") in host[0], host
                         assert generators[0][generators[0].index("--library") + 1] == str(jni / "arm64-v8a/libmedialayer.so"), generators
                     elif generators:
-                        assert generators[0][generators[0].index("--library") + 1].endswith("/debug/libmedialayer.so"), generators
+                        assert generators[0][generators[0].index("--library") + 1].endswith("/debug/libmedialayer." + ("dylib" if host_os == "Darwin" else "so")), generators
                 print(f"ok {label}")
             except (AssertionError, IndexError) as error:
                 failed.append(label)

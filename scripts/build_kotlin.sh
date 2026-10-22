@@ -25,7 +25,8 @@ fi
 
 if [ "$part" != --abis ]; then
   cargo build --manifest-path "$root/bindgen/Cargo.toml" --bin uniffi-bindgen
-  library="$root/target/debug/libmedialayer.so"
+  case "$(uname -s)" in Darwin) host_extension=dylib ;; *) host_extension=so ;; esac
+  library="$root/target/debug/libmedialayer.$host_extension"
   [ "$part" != --release ] || library="$module/src/main/jniLibs/arm64-v8a/libmedialayer.so"
   (cd -- "$root/core" && "$root/target/debug/uniffi-bindgen" generate \
     --library "$library" --language kotlin --no-format \
