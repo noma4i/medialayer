@@ -156,7 +156,7 @@ Run every command through `~/.claude/bin/build-slot --`.
 | Check | Command | Compiled by |
 | --- | --- | --- |
 | Swift on macOS | `scripts/check_gen_consumers.sh swift` | `swiftc -typecheck`, set up by the script |
-| Kotlin on brick | `scripts/check_gen_consumers.sh kotlin` | The gradle-test step of the check, which compiles the generated sources placed in the ignored Kotlin test sources |
+| Kotlin on brick | `scripts/check_gen_consumers.sh kotlin-run <command>` | The gradle-test step of the check runs through it: it clears and places the generated sources in the ignored Kotlin test sources, runs Gradle on brick and removes them |
 
 An unavailable library or a compiler error fails the check.
 The Kotlin sources are generated files and stay out of git.

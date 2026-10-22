@@ -3,7 +3,9 @@ set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$(sysctl -n hw.ncpu)}" RUST_TEST_THREADS="${RUST_TEST_THREADS:-$(sysctl -n hw.ncpu)}"
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN)}" RUST_TEST_THREADS="${RUST_TEST_THREADS:-$(getconf _NPROCESSORS_ONLN)}"
+# shellcheck source=cargo_artifact.sh
+source "$root/scripts/cargo_artifact.sh"
 bridge="$root/MediaLayer"
 build="$root/target/ios-build"
 targets=(aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim)
@@ -15,16 +17,17 @@ case "${1:-}" in
   *) echo "usage: build_ios.sh [--check|--ios|--device]" >&2; exit 2 ;;
 esac
 
+libraries=()
 for target in "${targets[@]}"; do
-  cargo build --release --manifest-path "$root/core/Cargo.toml" --target "$target"
+  libraries+=("$(cargo build --release --manifest-path "$root/core/Cargo.toml" --target "$target" --message-format=json-render-diagnostics | reported_artifact staticlib medialayer)")
 done
 
-cargo build --manifest-path "$root/bindgen/Cargo.toml" --bin uniffi-bindgen
+bindgen="$(cargo build --manifest-path "$root/bindgen/Cargo.toml" --bin uniffi-bindgen --message-format=json-render-diagnostics | reported_artifact bin uniffi-bindgen)"
 rm -rf "$build" "$bridge/MediaLayerFFI.xcframework"
 mkdir -p "$build/headers/medialayerFFI" "$bridge/Sources/MediaLayer"
 
-(cd -- "$root/core" && "$root/target/debug/uniffi-bindgen" generate \
-  --library "$root/target/${targets[0]}/release/libmedialayer.a" --language swift --out-dir "$build/swift")
+(cd -- "$root/core" && "$bindgen" generate \
+  --library "${libraries[0]}" --language swift --out-dir "$build/swift")
 
 python3 "$root/scripts/swift_cancellation.py" "$build/swift/medialayer.swift"
 cp "$build/swift/medialayerFFI.h" "$build/headers/medialayerFFI/"
@@ -32,8 +35,8 @@ cp "$build/swift/medialayerFFI.modulemap" "$build/headers/medialayerFFI/module.m
 cp "$build/swift/medialayer.swift" "$bridge/Sources/MediaLayer/medialayer.swift"
 
 arguments=()
-for target in "${targets[@]}"; do
-  arguments+=(-library "$root/target/$target/release/libmedialayer.a" -headers "$build/headers")
+for library in "${libraries[@]}"; do
+  arguments+=(-library "$library" -headers "$build/headers")
 done
 xcodebuild -create-xcframework "${arguments[@]}" -output "$bridge/MediaLayerFFI.xcframework"
 echo "xcframework: $bridge/MediaLayerFFI.xcframework"

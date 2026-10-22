@@ -16,12 +16,14 @@ import sys
 import tempfile
 
 root = Path(sys.argv[1])
-cleanup = sys.argv[2] == "cleanup"
+mode_name = sys.argv[2]
+cleanup = mode_name == "cleanup"
 stub = '''#!/usr/bin/env python3
 import json, os, pathlib, sys
 p = pathlib.Path
 root = p(os.environ["BUILD_TEST_ROOT"])
 tool = p(sys.argv[0]).name
+base = p(os.environ.get("CARGO_TARGET_DIR", str(root / "target")))
 args = sys.argv[1:]
 with (root / "calls").open("a") as log:
     log.write(json.dumps([tool, *args]) + "\\n")
@@ -30,24 +32,27 @@ def write(name, data="artifact"):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(data)
 if tool == "uname": print(os.environ["BUILD_TEST_OS"])
-elif tool == "nproc": print(2)
-elif tool == "sysctl":
-    if os.environ["BUILD_TEST_OS"] != "Darwin": sys.exit(9)
-    print(2)
+elif tool in ("nproc", "sysctl"): sys.exit(9)
+elif tool == "getconf": print(2)
 elif tool == "cargo":
+    with (root / "jobs").open("a") as log:
+        log.write(os.environ.get("CARGO_BUILD_JOBS", "") + " " + os.environ.get("RUST_TEST_THREADS", "") + "\\n")
     if args[0] == "ndk":
         output = p(args[args.index("-o") + 1])
         for i, arg in enumerate(args):
             if arg == "-t": write(output / args[i + 1] / "libmedialayer.so")
     elif "--target" in args:
-        write("target/" + args[args.index("--target") + 1] + "/release/libmedialayer.a")
+        artifact = base / args[args.index("--target") + 1] / "release/libmedialayer.a"
+        write(artifact)
+        if "--message-format=json-render-diagnostics" in args:
+            print(json.dumps({"reason": "compiler-artifact", "target": {"name": "other", "kind": ["staticlib"]}, "filenames": [str(base / "other.a")]}))
+            print(json.dumps({"reason": "compiler-artifact", "target": {"name": "medialayer", "kind": ["lib", "cdylib", "staticlib"]}, "filenames": [str(base / "libmedialayer.rlib"), str(artifact)]}))
     else:
-        write("target/debug/uniffi-bindgen", p(sys.argv[0]).read_text())
-        (root / "target/debug/uniffi-bindgen").chmod(0o755)
+        bindgen = (base / "debug") if "CARGO_TARGET_DIR" in os.environ else (root / os.environ["BUILD_TEST_LIB"]).parent
+        bindgen = bindgen / "uniffi-bindgen"
+        write(bindgen, p(sys.argv[0]).read_text())
+        bindgen.chmod(0o755)
         if "--bin" in args and "--message-format=json-render-diagnostics" in args:
-            bindgen = (root / os.environ["BUILD_TEST_LIB"]).parent / "uniffi-bindgen"
-            write(bindgen.relative_to(root), p(sys.argv[0]).read_text())
-            bindgen.chmod(0o755)
             print(json.dumps({"reason": "compiler-artifact", "package_id": "uniffi-bindgen 0.1.0", "target": {"name": "uniffi-bindgen", "kind": ["bin"]}, "executable": str(bindgen)}))
         if "--bin" not in args:
             library = os.environ["BUILD_TEST_LIB"]
@@ -82,17 +87,21 @@ android = {
     "": ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"],
 }
 failed = []
-cases = [("kotlin", {"--release": android["--release"]}, "Linux", None)] if cleanup else [
-    ("ios", ios, "Darwin", None),
-    ("kotlin", android, "Linux", None),
-    ("kotlin", {"--host": []}, "Darwin", None),
-    ("kotlin", {"--host": []}, "Darwin", "target/aarch64-apple-darwin/debug/libmedialayer.dylib"),
-    ("kotlin", {"--host": []}, "MINGW64_NT", "target/x86_64-pc-windows-msvc/debug/medialayer.dll"),
-]
-for platform, modes, host_os, custom_library in cases:
+cases = {
+    "cleanup": [("kotlin", {"--release": android["--release"]}, "Linux", None, None)],
+    "targetdir": [("ios", {"--ios": ios["--ios"]}, "Darwin", "elsewhere", None)],
+    "targets": [
+        ("ios", ios, "Darwin", None, None),
+        ("kotlin", android, "Linux", None, None),
+        ("kotlin", {"--host": []}, "Darwin", None, None),
+        ("kotlin", {"--host": []}, "Darwin", None, "target/aarch64-apple-darwin/debug/libmedialayer.dylib"),
+        ("kotlin", {"--host": []}, "MINGW64_NT", None, "target/x86_64-pc-windows-msvc/debug/medialayer.dll"),
+    ],
+}[mode_name]
+for platform, modes, host_os, target_dir, custom_library in cases:
     for mode, targets in modes.items():
         library = custom_library or "target/debug/libmedialayer." + ("dylib" if host_os == "Darwin" else "so")
-        label = f"{platform} {mode or 'default'} {host_os} {library}"
+        label = f"{platform} {mode or 'default'} {host_os} {library}" + (f" target dir {target_dir}" if target_dir else "")
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory).resolve()
             shutil.copytree(root / "scripts", work / "scripts")
@@ -102,7 +111,7 @@ for platform, modes, host_os, custom_library in cases:
             (work / "core").mkdir()
             (work / "bin").mkdir()
             (work / "kotlin").mkdir()
-            for tool in ["cargo", "uname", "sysctl", "nproc", "xcodebuild"]:
+            for tool in ["cargo", "uname", "sysctl", "nproc", "getconf", "xcodebuild"]:
                 path = work / "bin" / tool
                 path.write_text(stub)
                 path.chmod(0o755)
@@ -114,6 +123,7 @@ for platform, modes, host_os, custom_library in cases:
             env = dict(os.environ, PATH=f"{work}/bin:{os.environ['PATH']}",
                        BUILD_TEST_ROOT=str(work), BUILD_TEST_OS=host_os, BUILD_TEST_LIB=library,
                        ANDROID_NDK_HOME=str(work))
+            if target_dir: env["CARGO_TARGET_DIR"] = str(work / target_dir)
             env.pop("CARGO_BUILD_JOBS", None)
             env.pop("RUST_TEST_THREADS", None)
             result = subprocess.run(["bash", str(script), *([mode] if mode else [])], env=env, capture_output=True, text=True)
@@ -125,6 +135,8 @@ for platform, modes, host_os, custom_library in cases:
                     print("ok release replaces ARM libraries and removes x86 libraries")
                     continue
                 calls = [json.loads(line) for line in (work / "calls").read_text().splitlines()]
+                assert not any(call[0] in ("sysctl", "nproc") for call in calls), calls
+                assert set((work / "jobs").read_text().splitlines()) == {"2 2"}, (work / "jobs").read_text()
                 builds = [call[1:] for call in calls if call[0] == "cargo"]
                 generators = [call for call in calls if call[0] == "uniffi-bindgen"]
                 if platform == "ios":
@@ -137,10 +149,10 @@ for platform, modes, host_os, custom_library in cases:
                     assert len(generators) == 1 and generators[0][generators[0].index("--library") + 1].endswith(f"/{targets[0]}/release/libmedialayer.a"), generators
                     packaging = [call for call in calls if call[0] == "xcodebuild"]
                     libraries = [packaging[0][i + 1] for i, arg in enumerate(packaging[0]) if arg == "-library"]
-                    assert libraries == [str(work / f"target/{target}/release/libmedialayer.a") for target in targets], libraries
+                    built = work / (target_dir or "target")
+                    assert libraries == [str(built / f"{target}/release/libmedialayer.a") for target in targets], libraries
+                    assert generators[0][generators[0].index("--library") + 1] == libraries[0], generators
                 else:
-                    assert not any(call[0] == "sysctl" for call in calls), calls
-                    assert any(call[0] == "nproc" for call in calls), calls
                     ndk = [call for call in builds if call[0] == "ndk"]
                     actual = [call[i + 1] for call in ndk for i, arg in enumerate(call) if arg == "-t"]
                     assert actual == targets, actual
@@ -170,5 +182,29 @@ inv_build_02_release_removes_stale_x86_libraries() {
   expect_green check_modes cleanup
 }
 
+bounded_step_jobs() {
+  local work out
+  work="$(mktemp -d)"
+  mkdir "$work/bin"
+  printf '#!/bin/sh\nexit 9\n' > "$work/bin/sysctl"
+  cp "$work/bin/sysctl" "$work/bin/nproc"
+  printf '#!/bin/sh\n[ "$1" = _NPROCESSORS_ONLN ] && echo 2\n' > "$work/bin/getconf"
+  chmod +x "$work/bin"/*
+  out="$(env -u CARGO_BUILD_JOBS -u RUST_TEST_THREADS PATH="$work/bin:$PATH" bash "$root/scripts/check_bounded.sh" 10 jobs sh -c 'echo "$CARGO_BUILD_JOBS $RUST_TEST_THREADS"')"
+  rm -rf "$work"
+  [ "$out" = "2 2" ] || { echo "FAIL bounded step jobs: [$out]"; return 1; }
+  echo "ok bounded step jobs"
+}
+
+inv_build_03_bounded_step_gets_the_cpu_count_from_one_portable_call() {
+  expect_green bounded_step_jobs
+}
+
+inv_build_04_ios_artifacts_follow_the_cargo_target_dir() {
+  expect_green check_modes targetdir
+}
+
 inv_build_01_selected_targets_and_bindings
 inv_build_02_release_removes_stale_x86_libraries
+inv_build_04_ios_artifacts_follow_the_cargo_target_dir
+inv_build_03_bounded_step_gets_the_cpu_count_from_one_portable_call

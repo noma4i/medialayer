@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# check_gen_consumers.sh <swift|kotlin>: compiles gen/fixtures/Consumer.* against the source the generator emits and the built library.
-# Kotlin places the generated sources and Consumer.kt in the Gradle test sources; the gradle-test step of the check compiles them on brick.
+# check_gen_consumers.sh swift | kotlin-run <command...>: compiles gen/fixtures/Consumer.* against the source the generator emits and the built library.
+# kotlin-run clears the Gradle test sources of the consumer, places the freshly generated ones, runs the command (the gradle-test step on brick)
+# and removes them again, so a Gradle run outside this script never compiles stale generated files.
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -15,6 +16,15 @@ case "${1:-}" in
     export SWIFTC SWIFT_CHECK_ARGS
     cargo test --manifest-path "$root/gen/Cargo.toml" --features compile-swift compile_tests
     ;;
-  kotlin) cargo test --manifest-path "$root/gen/Cargo.toml" --features compile-kotlin compile_tests ;;
-  *) echo "usage: check_gen_consumers.sh <swift|kotlin>" >&2; exit 2 ;;
+  kotlin-run)
+    shift
+    [ "$#" -gt 0 ] || { echo "usage: check_gen_consumers.sh kotlin-run <command...>" >&2; exit 2; }
+    directory="$root/kotlin/src/test/kotlin/app/media"
+    rm -rf "$directory"
+    trap 'rm -rf "$directory"' EXIT
+    trap 'exit 143' TERM INT
+    cargo test --manifest-path "$root/gen/Cargo.toml" --features compile-kotlin compile_tests
+    "$@"
+    ;;
+  *) echo "usage: check_gen_consumers.sh <swift | kotlin-run <command...>>" >&2; exit 2 ;;
 esac

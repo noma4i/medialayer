@@ -357,22 +357,78 @@ inv_check_10_docs_examples_without_generated_bindings_are_not_checked_and_strict
   expect_green_that "no NOT CHECKED with bindings" out_has_no_not_checked
 }
 
-kotlin_consumer_precedes_gradle_test() {
-  local placed compiled
-  placed="$(grep -n 'gen-consumer-kotlin' "$work/list" | head -1 | cut -d: -f1)"
-  compiled="$(grep -n '|gradle-test|' "$work/list" | head -1 | cut -d: -f1)"
-  [ -n "$placed" ] && [ -n "$compiled" ] && [ "$placed" -lt "$compiled" ]
-}
-
 docs_step_is_strict() { grep -q 'DOCS_STRICT=1 bash scripts/check_docs.sh' "$here/check_medialayer.sh"; }
 
 inv_check_11_the_full_check_compiles_the_generated_consumers_on_both_platforms() {
   table_repo
   listed > "$work/list"
   expect_green_that "a swift step that compiles the generated consumer" list_has '^swift\|.*check_gen_consumers.sh swift'
-  expect_green_that "a kotlin step that compiles the generated consumer" list_has '^kotlin\|.*check_gen_consumers.sh kotlin'
-  expect_green_that "the generated Kotlin is placed before the gradle-test step compiles it" kotlin_consumer_precedes_gradle_test
+  expect_green_that "a kotlin step that compiles the generated consumer" list_has '^kotlin\|gradle-test\|.*check_gen_consumers.sh kotlin-run '
   expect_green_that "the docs step runs in strict mode" docs_step_is_strict
+}
+
+swift_test_runs() {
+  local home="$work/swift-home" bin="$work/swift-bin" calls="$work/swift-calls"
+  rm -rf "$home" "$bin" "$calls"
+  mkdir -p "$home" "$bin"
+  printf '#!/bin/sh\necho "xcodebuild $*" >> "%s"\n' "$calls" > "$bin/xcodebuild"
+  printf '#!/bin/sh\nprintf "    iPhone 17 (11111111-2222-3333-4444-555555555555) (Shutdown)\\n"\n' > "$bin/xcrun"
+  chmod +x "$bin"/*
+  [ "${1:-}" != with_sim_run ] || {
+    mkdir -p "$home/.claude/bin"
+    printf '#!/bin/sh\necho "sim-run $*" >> "%s"\n' "$calls" > "$home/.claude/bin/sim-run"
+    chmod +x "$home/.claude/bin/sim-run"
+  }
+  HOME="$home" PATH="$bin:$PATH" bash "$here/check_swift_test.sh" > /dev/null 2>&1
+}
+
+swift_test_uses_the_simulator_directly() { swift_test_runs && grep -q 'xcodebuild test .*id=11111111-2222-3333-4444-555555555555' "$work/swift-calls"; }
+swift_test_uses_sim_run_when_present() { swift_test_runs with_sim_run && grep -q '^sim-run swift-test -- xcodebuild test .*id=@UDID@' "$work/swift-calls"; }
+swift_step_names_no_home_file() {
+  HOME="$work/swift-home" listed | grep '^swift|swift-test|' > "$work/swift-step"
+  ! grep -q '\.claude' "$work/swift-step"
+}
+
+inv_check_12_the_swift_test_lane_runs_on_a_machine_without_the_local_tooling() {
+  table_repo
+  expect_green_that "the swift-test lane runs the iOS Simulator tests with HOME empty" swift_test_uses_the_simulator_directly
+  expect_green_that "the swift-test lane uses sim-run where it exists" swift_test_uses_sim_run_when_present
+  expect_green_that "the swift-test step command names no file under HOME" swift_step_names_no_home_file
+}
+
+kotlin_run_repo() {
+  repo="$work/kotlin-run"
+  rm -rf "$repo"
+  mkdir -p "$repo/scripts" "$repo/bin" "$repo/kotlin/src/test/kotlin/app/media"
+  sed "/opt\/homebrew\/opt\/rustup/d" "$here/check_gen_consumers.sh" > "$repo/scripts/check_gen_consumers.sh"
+  echo "class Stale" > "$repo/kotlin/src/test/kotlin/app/media/Stale.kt"
+  printf '#!/bin/sh\nmkdir -p "%s/kotlin/src/test/kotlin/app/media"\necho "class Fresh" > "%s/kotlin/src/test/kotlin/app/media/Fresh.kt"\n' "$repo" "$repo" > "$repo/bin/cargo"
+  chmod +x "$repo/bin/cargo"
+}
+
+kotlin_run_compiles_only_fresh_sources() {
+  PATH="$repo/bin:$PATH" bash "$repo/scripts/check_gen_consumers.sh" kotlin-run sh -c 'ls "$1" > "$2"' _ "$repo/kotlin/src/test/kotlin/app/media" "$work/seen" > /dev/null 2>&1 &&
+    [ "$(cat "$work/seen")" = Fresh.kt ]
+}
+
+kotlin_run_leaves_no_generated_sources() { ! ls "$repo/kotlin/src/test/kotlin/app/media"/*.kt > /dev/null 2>&1; }
+
+kotlin_run_returns_the_command_code() {
+  PATH="$repo/bin:$PATH" bash "$repo/scripts/check_gen_consumers.sh" kotlin-run sh -c 'exit 7' > /dev/null 2>&1
+  [ "$?" = 7 ] && kotlin_run_leaves_no_generated_sources
+}
+
+gradle_test_step_runs_through_kotlin_run() { grep -Eq '^kotlin\|gradle-test\|.*check_gen_consumers.sh kotlin-run ' "$work/list"; }
+
+inv_check_13_gradle_test_compiles_only_freshly_generated_consumer_sources() {
+  kotlin_run_repo
+  expect_green_that "the sources the command sees are the freshly generated ones, the stale file is gone" kotlin_run_compiles_only_fresh_sources
+  expect_green_that "no generated source is left behind after the run" kotlin_run_leaves_no_generated_sources
+  kotlin_run_repo
+  expect_green_that "the command code is returned and the sources are removed after a red run" kotlin_run_returns_the_command_code
+  table_repo
+  listed > "$work/list"
+  expect_green_that "the gradle-test step generates its consumer sources itself" gradle_test_step_runs_through_kotlin_run
 }
 
 for test_name in $(declare -F | awk '{print $3}' | grep '^inv_check_'); do
