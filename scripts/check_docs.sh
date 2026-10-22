@@ -3,6 +3,7 @@ set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 python3 - "$root" <<'PY'
+import os
 import re
 import sys
 from collections import defaultdict
@@ -100,7 +101,9 @@ def top_level_labels(call_text, language):
     return labels
 
 
-if platform["swift"] and "public enum MediaState" in platform["swift"] and platform["kotlin"] and "sealed class MediaState" in platform["kotlin"]:
+missing_bindings = [language for language, marker in (("swift", "public enum MediaState"), ("kotlin", "sealed class MediaState")) if marker not in platform[language]]
+examples = sum(len(re.findall(r"^```(?:swift|kotlin)\n", document.read_text(), re.M)) for document in documents)
+if not missing_bindings:
     for document in documents:
         text = document.read_text()
         name = document.relative_to(root)
@@ -165,5 +168,8 @@ if problems:
     for problem in problems:
         print(" -", problem)
     sys.exit(1)
+if missing_bindings and examples:
+    print("docs check: clean, but %d example blocks are NOT CHECKED: no generated %s bindings (run scripts/build_ios.sh and scripts/build_kotlin.sh --host)" % (examples, " and ".join(missing_bindings)))
+    sys.exit(3 if os.environ.get("DOCS_STRICT") else 0)
 print("docs check: clean")
 PY

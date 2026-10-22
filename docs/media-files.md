@@ -149,14 +149,14 @@ Source names cannot collide with types referenced or declared by the generated S
 ### Checking generated consumers
 
 Run Rust checks with `cargo test -p medialayer-gen`.
-Compiler checks require separate features and compile `gen/fixtures/Consumer.swift` or `Consumer.kt` against the real library.
+The full check runs both compiler checks. They compile `gen/fixtures/Consumer.swift` or `Consumer.kt` against the real library.
 The Rust-only command does not prove compilation in either language.
 Run every command through `~/.claude/bin/build-slot --`.
 
 | Check | Command | Required environment |
 | --- | --- | --- |
-| Swift for iOS Simulator | `cargo test -p medialayer-gen --features compile-swift` | `SWIFTC`: compiler path. `SWIFT_CHECK_ARGS`: JSON array containing `-target`, `-sdk` and search paths for the built MediaLayer module and FFI headers |
-| Kotlin on Linux | `cargo test -p medialayer-gen --features compile-kotlin` | `KOTLINC`: compiler path. `KOTLIN_CHECK_CLASSPATH`: classpath containing the built MediaLayer classes and their dependencies |
+| Swift on macOS | `scripts/check_gen_consumers.sh swift` | The script sets `SWIFTC` and `SWIFT_CHECK_ARGS` for the built MediaLayer module and the FFI headers |
+| Kotlin on Linux | `scripts/check_gen_consumers.sh kotlin` | `KOTLINC`: compiler path. `KOTLIN_CHECK_CLASSPATH`: classpath containing the built MediaLayer classes and their dependencies |
 
 A missing compiler, missing configuration, unavailable library or compiler error fails the selected check.
 The Swift check resolves types with `-typecheck`.

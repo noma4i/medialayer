@@ -281,6 +281,92 @@ inv_check_07_a_name_without_a_row_is_red() {
   expect_red "doc names a row that does not exist"
 }
 
+table_repo() {
+  repo="$work/table"
+  rm -rf "$repo"
+  mkdir -p "$repo/scripts"
+  cp "$here/check_medialayer.sh" "$here/check_steps.sh" "$here/gradle_host_guard.sh" "$repo/scripts/"
+  git -C "$repo" init -q -b master
+  git -C "$repo" -c user.name=t -c user.email=t@t add -A
+  git -C "$repo" -c user.name=t -c user.email=t@t commit -q -m base
+}
+
+listed() { bash "$repo/scripts/check_medialayer.sh" "$@" --list 2> /dev/null; }
+
+expect_green_that() {
+  local label="$1"
+  shift
+  "$@" || { echo "FAIL expected: $label"; failed=1; }
+}
+
+list_has() { grep -Eq -- "$1" "$work/list"; }
+
+lanes_of_fast_list() { listed --fast | cut -d'|' -f1 | sort -u | paste -sd' ' -; }
+
+fast_selects_all_platform_lanes() {
+  local lanes
+  lanes="$(lanes_of_fast_list)"
+  [[ "$lanes" == *swift* && "$lanes" == *kotlin* && "$lanes" == *cargo* ]] || { echo "lanes: $lanes"; return 1; }
+}
+
+inv_check_09_a_core_or_gen_edit_selects_the_cargo_and_both_platform_lanes_and_the_crate_gen_tests_run() {
+  table_repo
+  listed > "$work/list"
+  expect_green_that "the full cargo-test step runs the tests of the crate gen" list_has '^cargo\|cargo-test\|.*(--workspace|medialayer-gen)'
+  local touched
+  for touched in core/src/a.rs gen/src/a.rs; do
+    mkdir -p "$repo/$(dirname "$touched")"
+    echo x > "$repo/$touched"
+    expect_green_that "fast selects cargo, swift and kotlin for $touched" fast_selects_all_platform_lanes
+    rm -f "$repo/$touched"
+  done
+}
+
+docs_repo() {
+  repo="$work/docs"
+  rm -rf "$repo"
+  mkdir -p "$repo/scripts" "$repo/docs"
+  cp "$here/check_docs.sh" "$repo/scripts/"
+  echo "# comment" > "$repo/scripts/docs_unbuilt.txt"
+  printf 'Intro.\n\n```swift\nlet a = 1\n```\n\n```kotlin\nval a = 1\n```\n' > "$repo/README.md"
+}
+
+docs_code() {
+  local code=0
+  "$@" bash "$repo/scripts/check_docs.sh" > "$work/out" 2>&1 || code=$?
+  echo "$code" > "$work/code"
+}
+
+code_is() { [ "$(cat "$work/code")" = "$1" ]; }
+code_is_not_zero() { [ "$(cat "$work/code")" != 0 ]; }
+out_has_not_checked() { grep -q 'NOT CHECKED' "$work/out"; }
+out_has_no_not_checked() { ! grep -q 'NOT CHECKED' "$work/out"; }
+
+inv_check_10_docs_examples_without_generated_bindings_are_not_checked_and_strict_fails() {
+  docs_repo
+  docs_code env
+  expect_green_that "a NOT CHECKED status without bindings" out_has_not_checked
+  expect_green_that "code 0 outside strict mode" code_is 0
+  docs_code env DOCS_STRICT=1
+  expect_green_that "a nonzero code in strict mode without bindings" code_is_not_zero
+  mkdir -p "$repo/MediaLayer/Sources/MediaLayer" "$repo/kotlin/src/main/kotlin"
+  echo "public enum MediaState {}" > "$repo/MediaLayer/Sources/MediaLayer/medialayer.swift"
+  echo "sealed class MediaState" > "$repo/kotlin/src/main/kotlin/medialayer.kt"
+  docs_code env DOCS_STRICT=1
+  expect_green_that "green in strict mode with bindings" code_is 0
+  expect_green_that "no NOT CHECKED with bindings" out_has_no_not_checked
+}
+
+docs_step_is_strict() { grep -q 'DOCS_STRICT=1 bash scripts/check_docs.sh' "$here/check_medialayer.sh"; }
+
+inv_check_11_the_full_check_compiles_the_generated_consumers_on_both_platforms() {
+  table_repo
+  listed > "$work/list"
+  expect_green_that "a swift step that compiles the generated consumer" list_has '^swift\|.*check_gen_consumers.sh swift'
+  expect_green_that "a kotlin step that compiles the generated consumer" list_has '^kotlin\|.*check_gen_consumers.sh kotlin'
+  expect_green_that "the docs step runs in strict mode" docs_step_is_strict
+}
+
 for test_name in $(declare -F | awk '{print $3}' | grep '^inv_check_'); do
   "$test_name"
   echo "$test_name: $([ "$failed" -eq 0 ] && echo ok || echo FAILED)"
