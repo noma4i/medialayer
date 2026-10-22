@@ -11,6 +11,7 @@ kotlin/src/main/kotlin/com/noma4i/medialayer/medialayer.kt
 kotlin/.gradle/
 kotlin/build/
 kotlin/local.properties
+kotlin/host-library.path
 !docs/
 !docs/*.md
 **/build/

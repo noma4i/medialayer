@@ -8,10 +8,6 @@ module="$root/kotlin"
 part="${1:-all}"
 case "$part" in --host | --abis | --release | all) ;; *) echo "usage: build_kotlin.sh [--host | --abis | --release]" >&2; exit 2 ;; esac
 
-if [ "$part" = --host ] || [ "$part" = all ]; then
-  cargo build --manifest-path "$root/core/Cargo.toml" --lib
-fi
-
 if [ "$part" != --host ]; then
   abis=(-t arm64-v8a -t armeabi-v7a -t x86_64 -t x86)
   if [ "$part" = --release ]; then
@@ -23,12 +19,23 @@ if [ "$part" != --host ]; then
   find "$module/src/main/jniLibs" -name 'libmedialayer.so' | sort
 fi
 
+reported_artifact() {
+  python3 -c 'import json, sys
+kind, name = sys.argv[1:]
+for line in sys.stdin:
+    message = json.loads(line)
+    if message.get("reason") == "compiler-artifact" and message["target"]["name"] == name and kind in message["target"]["kind"]:
+        print(message["executable"] if kind == "bin" else message["filenames"][0])' "$@"
+}
+
 if [ "$part" != --abis ]; then
-  cargo build --manifest-path "$root/bindgen/Cargo.toml" --bin uniffi-bindgen
-  case "$(uname -s)" in Darwin) host_extension=dylib ;; *) host_extension=so ;; esac
-  library="$root/target/debug/libmedialayer.$host_extension"
-  [ "$part" != --release ] || library="$module/src/main/jniLibs/arm64-v8a/libmedialayer.so"
-  (cd -- "$root/core" && "$root/target/debug/uniffi-bindgen" generate \
+  bindgen="$(cargo build --manifest-path "$root/bindgen/Cargo.toml" --bin uniffi-bindgen --message-format=json-render-diagnostics | reported_artifact bin uniffi-bindgen)"
+  library="$module/src/main/jniLibs/arm64-v8a/libmedialayer.so"
+  if [ "$part" != --release ]; then
+    library="$(cargo build --manifest-path "$root/core/Cargo.toml" --lib --message-format=json-render-diagnostics | reported_artifact cdylib medialayer)"
+    dirname -- "$library" > "$module/host-library.path"
+  fi
+  (cd -- "$root/core" && "$bindgen" generate \
     --library "$library" --language kotlin --no-format \
     --out-dir "$module/src/main/kotlin")
 fi

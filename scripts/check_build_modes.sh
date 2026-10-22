@@ -44,7 +44,17 @@ elif tool == "cargo":
     else:
         write("target/debug/uniffi-bindgen", p(sys.argv[0]).read_text())
         (root / "target/debug/uniffi-bindgen").chmod(0o755)
-        if "--bin" not in args: write("target/debug/libmedialayer." + ("dylib" if os.environ["BUILD_TEST_OS"] == "Darwin" else "so"))
+        if "--bin" in args and "--message-format=json-render-diagnostics" in args:
+            bindgen = (root / os.environ["BUILD_TEST_LIB"]).parent / "uniffi-bindgen"
+            write(bindgen.relative_to(root), p(sys.argv[0]).read_text())
+            bindgen.chmod(0o755)
+            print(json.dumps({"reason": "compiler-artifact", "package_id": "uniffi-bindgen 0.1.0", "target": {"name": "uniffi-bindgen", "kind": ["bin"]}, "executable": str(bindgen)}))
+        if "--bin" not in args:
+            library = os.environ["BUILD_TEST_LIB"]
+            write(library)
+            if "--message-format=json-render-diagnostics" in args:
+                print(json.dumps({"reason": "compiler-artifact", "package_id": "other 0.1.0", "target": {"name": "other", "kind": ["lib"]}, "filenames": [str(root / "target/debug/libother.rlib")]}))
+                print(json.dumps({"reason": "compiler-artifact", "package_id": "medialayer 0.1.0", "target": {"name": "medialayer", "kind": ["cdylib", "lib"]}, "filenames": [str(root / library)]}))
 elif tool == "uniffi-bindgen":
     library = p(args[args.index("--library") + 1])
     if not library.is_file(): sys.exit(8)
@@ -72,10 +82,17 @@ android = {
     "": ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"],
 }
 failed = []
-cases = [("kotlin", {"--release": android["--release"]}, "Linux")] if cleanup else [("ios", ios, "Darwin"), ("kotlin", android, "Linux"), ("kotlin", {"--host": []}, "Darwin")]
-for platform, modes, host_os in cases:
+cases = [("kotlin", {"--release": android["--release"]}, "Linux", None)] if cleanup else [
+    ("ios", ios, "Darwin", None),
+    ("kotlin", android, "Linux", None),
+    ("kotlin", {"--host": []}, "Darwin", None),
+    ("kotlin", {"--host": []}, "Darwin", "target/aarch64-apple-darwin/debug/libmedialayer.dylib"),
+    ("kotlin", {"--host": []}, "MINGW64_NT", "target/x86_64-pc-windows-msvc/debug/medialayer.dll"),
+]
+for platform, modes, host_os, custom_library in cases:
     for mode, targets in modes.items():
-        label = f"{platform} {mode or 'default'} {host_os}"
+        library = custom_library or "target/debug/libmedialayer." + ("dylib" if host_os == "Darwin" else "so")
+        label = f"{platform} {mode or 'default'} {host_os} {library}"
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory).resolve()
             shutil.copytree(root / "scripts", work / "scripts")
@@ -84,6 +101,7 @@ for platform, modes, host_os in cases:
             (work / "scripts/swift_cancellation.py").write_text("")
             (work / "core").mkdir()
             (work / "bin").mkdir()
+            (work / "kotlin").mkdir()
             for tool in ["cargo", "uname", "sysctl", "nproc", "xcodebuild"]:
                 path = work / "bin" / tool
                 path.write_text(stub)
@@ -94,7 +112,7 @@ for platform, modes, host_os in cases:
                     (jni / abi).mkdir(parents=True)
                     (jni / abi / "libmedialayer.so").write_text("stale")
             env = dict(os.environ, PATH=f"{work}/bin:{os.environ['PATH']}",
-                       BUILD_TEST_ROOT=str(work), BUILD_TEST_OS=host_os,
+                       BUILD_TEST_ROOT=str(work), BUILD_TEST_OS=host_os, BUILD_TEST_LIB=library,
                        ANDROID_NDK_HOME=str(work))
             env.pop("CARGO_BUILD_JOBS", None)
             env.pop("RUST_TEST_THREADS", None)
@@ -134,7 +152,8 @@ for platform, modes, host_os in cases:
                         assert str(work / "bindgen/Cargo.toml") in host[0], host
                         assert generators[0][generators[0].index("--library") + 1] == str(jni / "arm64-v8a/libmedialayer.so"), generators
                     elif generators:
-                        assert generators[0][generators[0].index("--library") + 1].endswith("/debug/libmedialayer." + ("dylib" if host_os == "Darwin" else "so")), generators
+                        assert (work / "kotlin/host-library.path").read_text().strip() == str(work / library).rsplit("/", 1)[0], (work / "kotlin/host-library.path").read_text()
+                        assert generators[0][generators[0].index("--library") + 1] == str(work / library), generators
                 print(f"ok {label}")
             except (AssertionError, IndexError) as error:
                 failed.append(label)

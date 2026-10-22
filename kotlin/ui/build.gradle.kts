@@ -18,7 +18,7 @@ android {
   testOptions {
     unitTests.isIncludeAndroidResources = true
     unitTests.all {
-      it.systemProperty("jna.library.path", file("../../target/debug").absolutePath)
+      it.systemProperty("jna.library.path", file("../host-library.path").readText().trim())
     }
   }
 }
