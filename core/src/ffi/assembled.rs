@@ -1,5 +1,5 @@
 use super::layer::MemoryReleaser;
-use crate::api::{follow_stats, AbortOnDrop, ControlPorts, Controls, MemoryRelease, Parts, Places, Routes, Signals, Stage, Tones};
+use crate::api::{follow_stats, AbortOnDrop, ControlPorts, Controls, MemoryRelease, Parts, Places, Routes, Signals, Stage, Suspendable, Tones};
 use std::sync::Arc;
 use tokio::runtime::Handle;
 
@@ -39,12 +39,14 @@ impl Assembled {
             release: release.clone(),
         };
         let controls = Arc::new(Controls::new(handle.clone(), ports, parts.defaults, parts.change.clone()));
+        let suspendable: Vec<Arc<dyn Suspendable>> = vec![Arc::new(parts.prefetcher.clone()), Arc::new(parts.tones.clone())];
         let signals = Arc::new(Signals::new(
             handle,
             Arc::new(parts.stage.clone()),
             Arc::new(parts.prefetcher),
             Arc::new(parts.stage.clone()),
             release,
+            suspendable,
             parts.ledger,
             parts.clock,
         ));

@@ -41,6 +41,11 @@ pub trait PrefetchControl: Send + Sync {
     fn set_limits(&self, limits: &Limits);
 }
 
+pub trait Suspendable: Send + Sync {
+    fn suspend(&self);
+    fn resume(&self);
+}
+
 pub trait MemoryRelease: Send + Sync {
     fn drop_caches(&self);
 }

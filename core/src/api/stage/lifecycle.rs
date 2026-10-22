@@ -51,7 +51,6 @@ impl PoolControl for Stage {
             (state, commands, keys)
         };
         self.dispatch(state, commands);
-        self.inner.prefetcher.resume();
         let stage = self.clone();
         self.inner.handle.spawn(async move {
             stage.inner.routes.repair().await;

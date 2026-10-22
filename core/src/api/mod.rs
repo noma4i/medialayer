@@ -23,7 +23,7 @@ pub use guard::AbortOnDrop;
 pub use hub::{Deliver, Hub, Subscription};
 pub use placeholder::{placeholder_for, CacheState, Placeholder};
 pub use places::Places;
-pub use ports::{CacheControl, MemoryRelease, PoolControl, PrefetchControl, SettingsStore, SlotDirectives, TransportControl};
+pub use ports::{CacheControl, MemoryRelease, PoolControl, PrefetchControl, SettingsStore, SlotDirectives, Suspendable, TransportControl};
 pub use routes::Routes;
 pub use signals::Signals;
 pub use slots::{PlayerSlot, PlayerSlotFactory, SlotCall, SlotRunner, SlotSample};

@@ -1,4 +1,5 @@
 use super::hub::{Deliver, Hub, Subscription};
+use super::ports::Suspendable;
 use super::source::MediaItem;
 use crate::analysis::{analyze, analyze_blurhash, valid_band, MediaTone, ToneData, ToneError, ToneSource};
 use crate::cache::Cache;
@@ -6,7 +7,7 @@ use crate::proxy::block_key;
 use async_trait::async_trait;
 use futures_util::future::{AbortHandle, Abortable};
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::runtime::Handle;
 
@@ -101,6 +102,7 @@ pub struct Tones {
     preparation: Mutex<Option<Arc<dyn TonePreparation>>>,
     hubs: Hubs,
     analyses: AtomicU64,
+    suspended: AtomicBool,
 }
 
 struct Running {
@@ -129,6 +131,7 @@ impl Tones {
             preparation: Mutex::new(None),
             hubs: Arc::new(Mutex::new(HashMap::new())),
             analyses: AtomicU64::new(0),
+            suspended: AtomicBool::new(false),
         })
     }
 
@@ -214,6 +217,7 @@ impl Tones {
     }
 
     fn request(self: &Arc<Self>, key: &str) {
+        if self.suspended.load(Ordering::SeqCst) { return; }
         let Some(source) = locked(&self.demands).get(key).map(|demand| demand.source.clone()) else { return };
         let Some(preparation) = locked(&self.preparation).clone() else { return };
         if !self.demanded(key) { return; }
@@ -275,5 +279,18 @@ impl Tones {
         if let Some(hub) = locked(&self.hubs).get(&key) {
             hub.publish(ToneSource::Pixels);
         }
+    }
+}
+
+impl Suspendable for Arc<Tones> {
+    fn suspend(&self) {
+        self.suspended.store(true, Ordering::SeqCst);
+        for abort in locked(&self.running).values() { abort.abort(); }
+    }
+
+    fn resume(&self) {
+        self.suspended.store(false, Ordering::SeqCst);
+        let keys: Vec<_> = locked(&self.demands).keys().cloned().collect();
+        for key in keys { self.request(&key); }
     }
 }

@@ -48,6 +48,7 @@ struct State {
     wholes: HashMap<String, Source>,
     next_id: u64,
     busy: bool,
+    suspended: bool,
 }
 
 impl State {
@@ -162,7 +163,7 @@ impl Prefetcher {
             gate: Gate::new(limits.max_concurrent as usize),
             whole_gates: [Gate::new(WHOLE_MEDIA_PARALLEL), Gate::new(WHOLE_IMAGE_PARALLEL)],
             clock,
-            state: Mutex::new(State { ledger, windows: HashMap::new(), last: HashMap::new(), running: HashMap::new(), wholes: HashMap::new(), next_id: 0, busy: false }),
+            state: Mutex::new(State { ledger, windows: HashMap::new(), last: HashMap::new(), running: HashMap::new(), wholes: HashMap::new(), next_id: 0, busy: false, suspended: false }),
             live: AtomicUsize::new(0),
             events: broadcast::channel(EVENT_CAPACITY).0,
             handle: Handle::current(),
@@ -282,7 +283,7 @@ impl Prefetcher {
                 return;
             }
         }
-        self.resume();
+        self.restart();
     }
 
     pub fn forget_loaded(&self, url: Option<&str>) {
@@ -298,7 +299,17 @@ impl Prefetcher {
         Prefetcher::cancel_everything(&self.shared);
     }
 
+    pub fn suspend(&self) {
+        self.shared.state().suspended = true;
+        Prefetcher::cancel_everything(&self.shared);
+    }
+
     pub fn resume(&self) {
+        self.shared.state().suspended = false;
+        self.restart();
+    }
+
+    fn restart(&self) {
         let windows: Vec<_> =
             self.shared.state().last.iter().map(|(key, (jobs, sources))| (key.clone(), jobs.clone(), sources.clone())).collect();
         for (key, jobs, sources) in windows {
@@ -330,6 +341,9 @@ impl Prefetcher {
     }
 
     fn start_whole(&self, state: &mut State, key: String, source: Source, now: Duration, entering: bool) {
+        if state.suspended {
+            return;
+        }
         if entering {
             state.ledger.counters.requested += 1;
         }
@@ -387,7 +401,7 @@ impl Prefetcher {
     }
 
     fn start(&self, state: &mut State, key: String, source: Source, distance: usize, entering: bool, now: Duration, tuning: &Tuning) {
-        if state.busy {
+        if state.busy || state.suspended {
             return;
         }
         if entering {

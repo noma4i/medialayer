@@ -174,13 +174,8 @@ impl State {
         self.leases.get(key).is_some_and(|lease| self.election.active() == Some(*lease))
     }
 
-    fn remember_playing_positions(&mut self, runner: &SlotRunner) {
-        let playing: Vec<(usize, String)> = self.slot_keys.iter().filter(|(_, key)| self.is_playing(key)).map(|(slot, key)| (*slot, key.clone())).collect();
-        for (slot, key) in playing {
-            if let Some(position) = runner.sample_now(slot).map(|sample| sample.position_ms).filter(|position| *position > 0) {
-                self.positions.remember(&key, position);
-            }
-        }
+    fn playing_slots(&self) -> Vec<(usize, String)> {
+        self.slot_keys.iter().filter(|(_, key)| self.is_playing(key)).map(|(slot, key)| (*slot, key.clone())).collect()
     }
 
     fn playing_page(&self, keys: &impl PageKeys, pages: Range<usize>) -> Option<usize> {
@@ -315,9 +310,10 @@ impl Stage {
         let mut actions = Vec::new();
         let mut unloaded = Vec::new();
         let mut resumed = Vec::new();
+        let mut parked = Vec::new();
         for command in commands {
             crate::trace!("stage", "command {command:?}");
-            self.translate(&mut state, command, &mut calls, &mut actions, &mut unloaded, &mut resumed);
+            self.translate(&mut state, command, &mut calls, &mut actions, &mut unloaded, &mut resumed, &mut parked);
         }
         for (slot, call) in calls {
             self.inner.runner.send(slot, call);
@@ -333,6 +329,7 @@ impl Stage {
             self.inner.places.resumed(&key);
         }
         drop(state);
+        self.remember_parked(parked);
         self.refresh_hints();
         for (key, action) in actions {
             self.perform(key, action);
@@ -347,6 +344,7 @@ impl Stage {
         actions: &mut Vec<(String, Action)>,
         unloaded: &mut Vec<String>,
         resumed: &mut Vec<String>,
+        parked: &mut Vec<(usize, String)>,
     ) {
         match &command {
             Command::Load { slot, key } => {
@@ -363,9 +361,8 @@ impl Stage {
             }
             Command::Unload { slot } => {
                 if let Some(key) = state.slot_keys.remove(slot) {
-                    let position = self.inner.runner.sample_now(*slot).map(|sample| sample.position_ms).filter(|position| *position > 0);
-                    if let Some(position) = position.filter(|_| !state.is_playing(&key)) {
-                        state.positions.remember(&key, position);
+                    if !state.is_playing(&key) {
+                        parked.push((*slot, key.clone()));
                     }
                     state.loaded.remove(&key);
                     state.refresh_pending(&key);
@@ -389,6 +386,23 @@ impl Stage {
             }
             Command::Unmute { slot } if self.inner.silent => calls.push((*slot, SlotCall::Mute)),
             _ => calls.extend(SlotCall::from_command(command, None)),
+        }
+    }
+
+    fn remember_parked(&self, parked: Vec<(usize, String)>) {
+        let positions: Vec<(String, u64)> = parked
+            .into_iter()
+            .filter_map(|(slot, key)| Some((key, self.inner.runner.sample_now(slot)?.position_ms)))
+            .filter(|(_, position)| *position > 0)
+            .collect();
+        if positions.is_empty() {
+            return;
+        }
+        let mut state = self.state_quiet();
+        for (key, position) in positions {
+            if !state.loaded.contains_key(&key) {
+                state.positions.remember(&key, position);
+            }
         }
     }
 
@@ -532,6 +546,8 @@ impl Drop for StateGuard<'_> {
 mod events_tests;
 #[cfg(test)]
 mod inputs_tests;
+#[cfg(test)]
+mod lifetime_tests;
 #[cfg(test)]
 mod playhead_tests;
 #[cfg(test)]

@@ -1,5 +1,5 @@
 use super::guard::AbortOnDrop;
-use super::ports::{MemoryRelease, PoolControl, PrefetchControl, SlotDirectives};
+use super::ports::{MemoryRelease, PoolControl, PrefetchControl, SlotDirectives, Suspendable};
 use super::types::Pressure;
 use crate::cache::Clock;
 use crate::memory::{Degradation, Ledger};
@@ -69,6 +69,7 @@ struct Reaction {
     prefetch: Arc<dyn PrefetchControl>,
     directives: Arc<dyn SlotDirectives>,
     release: Arc<dyn MemoryRelease>,
+    suspendable: Vec<Arc<dyn Suspendable>>,
     ledger: Ledger,
     clock: Arc<dyn Clock>,
     degradation: Mutex<Degradation>,
@@ -86,11 +87,12 @@ impl Signals {
         prefetch: Arc<dyn PrefetchControl>,
         directives: Arc<dyn SlotDirectives>,
         release: Arc<dyn MemoryRelease>,
+        suspendable: Vec<Arc<dyn Suspendable>>,
         ledger: Ledger,
         clock: Arc<dyn Clock>,
     ) -> Signals {
         let queue = Arc::new(Queue { pending: Mutex::new(VecDeque::new()), wake: Notify::new() });
-        let reaction = Reaction { pool, prefetch, directives, release, ledger, clock, degradation: Mutex::new(Degradation::default()) };
+        let reaction = Reaction { pool, prefetch, directives, release, suspendable, ledger, clock, degradation: Mutex::new(Degradation::default()) };
         let inbox = queue.clone();
         let worker = handle.spawn(async move {
             loop {
@@ -124,10 +126,14 @@ impl Reaction {
                 let directives = self.pool.release_under(self.clock.now_ms(), level.into());
                 self.dispatch(directives);
             }
-            Signal::Background => self.dispatch(self.pool.background()),
+            Signal::Background => {
+                self.suspendable.iter().for_each(|work| work.suspend());
+                self.dispatch(self.pool.background());
+            }
             Signal::Foreground => {
                 self.lower_step(None);
                 self.pool.foreground();
+                self.suspendable.iter().for_each(|work| work.resume());
             }
         }
     }

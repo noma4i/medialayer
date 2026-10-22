@@ -1,6 +1,6 @@
 use super::error::MediaError;
 use super::places::Places;
-use super::ports::{CacheControl, PrefetchControl, SettingsStore, TransportControl};
+use super::ports::{CacheControl, PrefetchControl, SettingsStore, Suspendable, TransportControl};
 use super::routes::Routes;
 use super::slots::{PlayerSlotFactory, SlotRunner};
 use super::stage::{Stage, StageParts};
@@ -140,6 +140,16 @@ impl TransportControl for Proxy {
 
     fn set_limits(&self, limits: &Limits) {
         Proxy::set_limits(self, limits);
+    }
+}
+
+impl Suspendable for Prefetcher {
+    fn suspend(&self) {
+        Prefetcher::suspend(self);
+    }
+
+    fn resume(&self) {
+        Prefetcher::resume(self);
     }
 }
 

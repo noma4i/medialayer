@@ -28,7 +28,20 @@ impl Stage {
         self.move_window_from(self.state(), active);
     }
 
-    fn move_window_from(&self, mut state: super::StateGuard<'_>, active: usize) {
+    fn move_window_from<'a>(&'a self, mut state: super::StateGuard<'a>, active: usize) {
+        let playing = if state.window.is_empty() { state.playing_slots() } else { Vec::new() };
+        if !playing.is_empty() {
+            drop(state);
+            let positions: Vec<(String, u64)> = playing
+                .into_iter()
+                .filter_map(|(slot, key)| Some((key, self.inner.runner.sample_now(slot)?.position_ms)))
+                .filter(|(_, position)| *position > 0)
+                .collect();
+            state = self.state();
+            for (key, position) in positions {
+                state.positions.remember(&key, position);
+            }
+        }
         let (count, reach) = (state.window.len(), state.ring.pages(active, state.window.len()));
         crate::trace!("stage", "window active={active} count={count}");
         let wanted = self.inner.prefetcher.window_range(active, count);
@@ -39,9 +52,6 @@ impl Stage {
             for source in sources.present() {
                 state.catalog.insert(source.url.clone(), source.clone());
                 state.refresh_pending(&source.url);
-            }
-            if count == 0 {
-                state.remember_playing_positions(&self.inner.runner);
             }
             let playing = state.playing_page(&keys, reach.start..reach.end);
             let commands = state.ring.plan(now, active, playing, &keys);

@@ -26,6 +26,7 @@ fn rig() -> Rig {
         prefetch.clone(),
         directives.clone(),
         release.clone(),
+        Vec::new(),
         Ledger::new(1 << 30),
         Arc::new(SystemClock),
     );

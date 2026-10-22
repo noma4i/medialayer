@@ -283,6 +283,7 @@ pub struct MockSlot {
     pub gate: Arc<LoadGate>,
     pub sample: Mutex<SlotSample>,
     pub samples: AtomicUsize,
+    pub on_sample: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     pub advance_ms: u64,
     pub seeked: tokio::sync::Notify,
 }
@@ -350,6 +351,10 @@ impl PlayerSlot for MockSlot {
 
     fn sample(&self) -> SlotSample {
         let taken = self.samples.fetch_add(1, Ordering::SeqCst) as u64 + 1;
+        let hook = self.on_sample.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook();
+        }
         let mut sample = *self.sample.lock().unwrap();
         sample.position_ms += self.advance_ms * taken;
         sample
@@ -392,6 +397,7 @@ impl PlayerSlotFactory for MockFactory {
             gate: self.gate.clone(),
             sample: Mutex::new(idle),
             samples: AtomicUsize::new(0),
+            on_sample: Mutex::new(None),
             advance_ms: *self.advance_ms.lock().unwrap(),
             seeked: tokio::sync::Notify::new(),
         });
