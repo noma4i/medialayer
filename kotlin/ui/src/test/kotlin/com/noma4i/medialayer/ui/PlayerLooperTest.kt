@@ -125,7 +125,7 @@ class PlayerLooperTest {
   private enum class Loss { LeaveVideo, TextureDestroyed, HolderDestroyed }
 
   @Test
-  fun video_output_loss_never_calls_the_player_from_the_main_thread() {
+  fun inv_output_07_video_output_loss_never_calls_the_player_from_the_main_thread() {
     val failures = Loss.values().mapNotNull { loss ->
       try {
         checkLoss(loss)
