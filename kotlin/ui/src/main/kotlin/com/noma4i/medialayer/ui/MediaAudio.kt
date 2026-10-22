@@ -1,6 +1,5 @@
 package com.noma4i.medialayer.ui
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -50,14 +49,14 @@ fun MediaAudio(source: MediaSource, muted: Boolean = false, rate: Float = 1f, co
   if (control.state != state) control.state = state
   val player by remember(environment, source.url) { environment.players?.player(source.url) ?: flowOf(null) }.collectAsState(null)
   LaunchedEffect(state, control) { if (state == MediaState.Ended) control.pause() }
-  DisposableEffect(player, screen.visible, control) {
+  DisposableEffect(player, screen.started, control) {
     val exo = player
-    if (!screen.visible || exo == null) return@DisposableEffect onDispose { }
+    if (!screen.started || exo == null) return@DisposableEffect onDispose { }
     val release = PlayerProgress.subscribe(exo) {
       val value = it.toFloat()
       if (control.progress != value) control.progress = value
     }
     onDispose { release() }
   }
-  Box(screen.modifier) { content(control) }
+  content(control)
 }

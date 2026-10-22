@@ -254,7 +254,7 @@ class NativeViewLifecycleTest {
   }
 
   @Test
-  fun inv_native_05_audio_progress_stops_when_inactive_and_resumes() {
+  fun inv_native_05_audio_progress_stops_in_background_and_resumes() {
     val clock = FakeClock(0)
     factory.clock = clock
     val slot = factory.create(0u)
@@ -285,10 +285,31 @@ class NativeViewLifecycleTest {
     rule.waitForIdle()
     val offscreen = control!!.progress
     clock.advanceTime(1000)
-    repeat(20) { looper.idle(); Thread.sleep(25) }
-    assertEquals(offscreen, control!!.progress)
-    rule.runOnIdle { offset = 0.dp }
     rule.waitUntil(5000) { looper.idleFor(java.time.Duration.ofMillis(100)); control!!.progress > offscreen }
+  }
+
+  @Test
+  fun inv_audio_02_progress_seek_and_ended_ignore_the_host_frame() {
+    val clock = FakeClock(0)
+    factory.clock = clock
+    val slot = factory.create(0u)
+    slot.load("first", PlaybackRoute("https://o.test/audio", emptyMap(), null, false, false))
+    slot.play()
+    var control: AudioControl? = null
+    rule.setContent {
+      MediaLayerProvider(CompletableDeferred(layer), loader, factory.players) {
+        MediaAudio(LifecycleSource("first", Kind.AUDIO)) { control = it; Box(Modifier.size(0.dp)) }
+      }
+    }
+    rule.waitUntil(5000) { clock.advanceTime(50); looper.idle(); slot.player?.isPlaying == true && control != null }
+    rule.runOnIdle { control!!.play() }
+    clock.advanceTime(1000)
+    rule.waitUntil(5000) { looper.idleFor(java.time.Duration.ofMillis(100)); control!!.progress > 0 }
+    rule.runOnIdle { control!!.seek(500) }
+    assertTrue(layer.calls.contains("seek:first:500"))
+    layer.emit("first", com.noma4i.medialayer.MediaState.Ended)
+    rule.waitUntil(5000) { looper.idle(); !control!!.isPlaying }
+    assertEquals(com.noma4i.medialayer.MediaState.Ended, control!!.state)
   }
 
   @Test

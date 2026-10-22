@@ -87,7 +87,13 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   func playUrl(source: MediaItem) async throws -> PlaybackRoute {
     PlaybackRoute(url: source.url, headers: source.headers, generation: nil, hls: false, looping: false)
   }
-  func stateStream(key: String) -> AsyncStream<MediaState> { AsyncStream { $0.finish() } }
+  func stateStream(key: String) -> AsyncStream<MediaState> {
+    let pair = AsyncStream<MediaState>.makeStream()
+    lock.withLock { states.append(pair.continuation) }
+    return pair.stream
+  }
+  private var states: [AsyncStream<MediaState>.Continuation] = []
+  func emit(_ state: MediaState) { lock.withLock { states }.forEach { $0.yield(state) } }
   func attachView(key: String, token: UInt64) { record("attach \(key)") }
   func detachView(key: String) { record("detach \(key)") }
 }

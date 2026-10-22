@@ -90,7 +90,6 @@ public struct MediaAudio<Content: View>: View {
     let content: (AudioPlayback) -> Content
     @State private var audio: AudioPlayback
     @State private var owner = UUID()
-    @State private var onScreen = false
     @State private var inBackground = false
 
     private struct Sampling: Equatable {
@@ -113,11 +112,10 @@ public struct MediaAudio<Content: View>: View {
         .task(id: source.url) {
           for await value in context.places.stateStream(key: source.url) { audio.follow(value) }
         }
-        .task(id: Sampling(url: source.url, active: onScreen && !inBackground)) {
-          guard onScreen && !inBackground else { return }
+        .task(id: Sampling(url: source.url, active: !inBackground)) {
+          guard !inBackground else { return }
           for await value in context.slots.progress.stream(for: source.url) { audio.refresh(progress: value) }
         }
-        .background(OnScreenProbe { onScreen = $0 })
         .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.background)) { _ in inBackground = true }
         .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
         .onAppear {

@@ -23,6 +23,7 @@ private struct Cell: View {
   @ObservedObject var inputs: Inputs
   let context: MediaContext
   let audio: Bool
+  let side: CGFloat
 
   var body: some View {
     Group {
@@ -35,7 +36,7 @@ private struct Cell: View {
       }
     }
     .environment(\.mediaContext, context)
-    .frame(width: 80, height: 80)
+    .frame(width: side, height: side)
   }
 }
 
@@ -48,15 +49,15 @@ private final class Screen {
   let scroll = UIScrollView(frame: CGRect(x: 0, y: 0, width: 200, height: 200))
   let host: UIHostingController<Cell>
 
-  init(audio: Bool = false) {
-    host = UIHostingController(rootView: Cell(inputs: inputs, context: MediaContext(places: places, slots: slots), audio: audio))
+  init(audio: Bool = false, side: CGFloat = 80) {
+    host = UIHostingController(rootView: Cell(inputs: inputs, context: MediaContext(places: places, slots: slots), audio: audio, side: side))
     let page = UIViewController()
     window.rootViewController = page
     page.addChild(host)
     scroll.contentSize = CGSize(width: 200, height: 1000)
     scroll.contentInsetAdjustmentBehavior = .never
     page.view.addSubview(scroll)
-    host.view.frame = CGRect(x: 0, y: 0, width: 80, height: 80)
+    host.view.frame = CGRect(x: 0, y: 0, width: side, height: side)
     host.safeAreaRegions = []
     scroll.addSubview(host.view)
     host.didMove(toParent: page)
@@ -124,7 +125,7 @@ extension GlobalMedia {
     }
 
     @Test
-    func inv_native_05_audio_progress_stops_when_inactive_and_resumes() async throws {
+    func inv_native_05_audio_progress_stops_in_background_and_resumes() async throws {
       let screen = Screen(audio: true)
       defer { screen.close() }
       let slot = AVQueuePlayerSlotFactory(startMuted: true, slots: screen.slots).create(slot: 0) as! AVQueuePlayerSlot
@@ -153,11 +154,33 @@ extension GlobalMedia {
       await screen.settle()
       let offscreen = audio.progress
       slot.seek(positionMs: duration * 3 / 5)
-      await screen.settle(.milliseconds(600))
-      #expect(audio.progress == offscreen)
-      screen.scroll.contentOffset = .zero
       await screen.settle()
       #expect(audio.progress > offscreen)
+    }
+
+    @Test
+    func inv_audio_02_progressSeekAndEndedIgnoreTheHostFrame() async throws {
+      let screen = Screen(audio: true, side: 0)
+      defer { screen.close() }
+      let slot = AVQueuePlayerSlotFactory(startMuted: true, slots: screen.slots).create(slot: 0) as! AVQueuePlayerSlot
+      let clip = Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!.absoluteString
+      slot.load(key: "first", route: PlaybackRoute(url: clip, headers: [:], generation: nil, hls: false, looping: false))
+      defer { slot.unload() }
+      for _ in 0..<100 {
+        if slot.sample().durationMs != nil { break }
+        await screen.settle(.milliseconds(50))
+      }
+      let duration = try #require(slot.sample().durationMs)
+      let audio = try #require(screen.inputs.audio)
+      slot.seek(positionMs: duration / 5)
+      await screen.settle()
+      #expect(audio.progress > 0)
+      audio.seek(to: 0.5)
+      #expect(screen.places.recorded.contains("seek \(duration / 2)"))
+      screen.places.emit(.ended)
+      await screen.settle()
+      #expect(audio.state == .ended)
+      #expect(!audio.isPlaying)
     }
 
     @Test
