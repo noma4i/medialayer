@@ -70,7 +70,7 @@ On critical pressure the core also calls your `MemoryReleaser`, so Nuke and Coil
 ### Swift
 
 ```swift
-let stats = await media.stats()
+let stats = try await media.stats()
 print(stats.slots.hot, stats.slots.warm, stats.slots.cold, stats.memoryBytes)
 ```
 

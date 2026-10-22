@@ -89,7 +89,7 @@ extension GlobalMedia {
       #expect(log.all.contains(.rendered))
       #expect(log.all.contains(.loading) == false)
       #expect(fetcher.count == 0)
-      #expect(await media.stats().fileCount == 0)
+      #expect(try await media.stats().fileCount == 0)
       #expect(await media.placeholder(source: item, ready: false) == .none)
       withExtendedLifetime(subscription) {}
       await release(media)

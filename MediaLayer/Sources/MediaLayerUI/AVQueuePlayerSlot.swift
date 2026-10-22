@@ -2,6 +2,15 @@ import AVFoundation
 import Foundation
 import MediaLayer
 
+private final class SourceGeneration: @unchecked Sendable {
+  private let lock = NSLock()
+  private var value = 0
+
+  var current: Int { lock.withLock { value } }
+
+  func next() -> Int { lock.withLock { value += 1; return value } }
+}
+
 public final class PlayerEventsLink: @unchecked Sendable {
   private let lock = NSLock()
   private var target: PlayerEventsProtocol?
@@ -33,7 +42,37 @@ public final class AVQueuePlayerSlotFactory: PlayerSlotFactory, @unchecked Senda
   }
 
   public func create(slot: UInt32) -> PlayerSlot {
-    AVQueuePlayerSlot(id: slot, events: events, startMuted: startMuted, audio: audio, slots: slots, hosts: hosts)
+    let created = AVQueuePlayerSlot(id: slot, events: events, startMuted: startMuted, audio: audio, slots: slots, hosts: hosts)
+    made.add(created)
+    return created
+  }
+
+  func release() {
+    events.bind(nil)
+    made.all.forEach {
+      $0.unload()
+      $0.detach()
+    }
+  }
+
+  private let made = MadeSlots()
+}
+
+private final class MadeSlots: @unchecked Sendable {
+  private struct Weak {
+    weak var value: AVQueuePlayerSlot?
+  }
+
+  private let lock = NSLock()
+  private var slots: [Weak] = []
+
+  var all: [AVQueuePlayerSlot] { lock.withLock { slots.compactMap(\.value) } }
+
+  func add(_ slot: AVQueuePlayerSlot) {
+    lock.withLock {
+      slots.removeAll { $0.value == nil }
+      slots.append(Weak(value: slot))
+    }
   }
 }
 
@@ -71,6 +110,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private var looping = false
   private var wantsPlay = false
   private var readahead: TimeInterval = 0
+  private let source = SourceGeneration()
 
   public init(
     id: UInt32, events: PlayerEventsLink, startMuted: Bool, audio: MediaAudioSession? = nil, slots: LoadedSlots = LoadedSlots(),
@@ -106,7 +146,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   }
 
   public func load(key: String, route: PlaybackRoute) {
-    onMain { [self] in
+    onMain(source: source.next()) { [self] in
       guard let url = URL(string: route.url) else {
         events.with { $0.failed(slot: id, status: 0, detail: "invalid url \(route.url)") }
         return
@@ -133,6 +173,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   }
 
   public func unload() {
+    _ = source.next()
     onMain { [self] in
       let released = key
       MediaTrace.emit("player", "slot=\(id) unload key=\(released.map(MediaTrace.tail) ?? "-")")
@@ -143,14 +184,14 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   }
 
   public func preroll() {
-    onMain { [self] in
+    ofSource { [self] in
       prerollRequested = true
       prerollIfReady()
     }
   }
 
   public func play() {
-    onMain { [self] in
+    ofSource { [self] in
       wantsPlay = true
       MediaTrace.emit("player", "slot=\(id) play key=\(key.map(MediaTrace.tail) ?? "-")")
       player.play()
@@ -158,7 +199,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   }
 
   public func pause() {
-    onMain { [self] in
+    ofSource { [self] in
       wantsPlay = false
       MediaTrace.emit("player", "slot=\(id) pause key=\(key.map(MediaTrace.tail) ?? "-")")
       player.pause()
@@ -192,7 +233,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   }
 
   public func seek(positionMs: UInt64) {
-    onMain { [self] in
+    ofSource { [self] in
       player.seek(to: CMTime(value: CMTimeValue(positionMs), timescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
         self?.onMain { [weak self] in self?.refreshSample() }
       }
@@ -200,14 +241,14 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   }
 
   public func setRate(rate: Float) {
-    onMain { [self] in
+    ofSource { [self] in
       player.defaultRate = rate
       if player.rate != 0 { player.rate = rate }
     }
   }
 
   public func attach(viewToken: UInt64) {
-    onMain { [self] in
+    ofSource { [self] in
       guard let host = hosts.layer(for: viewToken) else { return }
       attach(to: host)
     }
@@ -223,7 +264,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   }
 
   public func detach() {
-    onMain { [self] in
+    ofSource { [self] in
       layer.removeFromSuperlayer()
       hostKey = nil
       refreshSample()
@@ -241,6 +282,17 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
 
   private func onMain(_ work: @escaping () -> Void) {
     DispatchQueue.main.async(execute: work)
+  }
+
+  private func ofSource(_ work: @escaping () -> Void) {
+    onMain(source: source.current, work)
+  }
+
+  private func onMain(source expected: Int, _ work: @escaping () -> Void) {
+    DispatchQueue.main.async { [self] in
+      guard source.current == expected else { return }
+      work()
+    }
   }
 
   private func observe(_ item: AVPlayerItem, resetState: Bool = true) {

@@ -37,7 +37,6 @@ public final class AudioPlayback {
 
   func refresh(progress value: Double) {
     if progress != value { progress = value }
-    if isPlaying && progress >= 1 { setPlaying(false) }
   }
 
   func follow(_ value: MediaState) {

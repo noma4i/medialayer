@@ -11,7 +11,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.media3.common.Player
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
 import kotlinx.coroutines.flow.flowOf
@@ -50,16 +49,7 @@ fun MediaAudio(source: MediaSource, muted: Boolean = false, rate: Float = 1f, co
   val state = rememberPlace(source, control.isPlaying, muted)
   if (control.state != state) control.state = state
   val player by remember(environment, source.url) { environment.players?.player(source.url) ?: flowOf(null) }.collectAsState(null)
-  DisposableEffect(player, control) {
-    val exo = player
-    val listener = object : Player.Listener {
-      override fun onPlaybackStateChanged(playbackState: Int) {
-        if (playbackState == Player.STATE_ENDED) control.pause()
-      }
-    }
-    exo?.addListener(listener)
-    onDispose { exo?.removeListener(listener) }
-  }
+  LaunchedEffect(state, control) { if (state == MediaState.Ended) control.pause() }
   DisposableEffect(player, screen.visible, control) {
     val exo = player
     if (!screen.visible || exo == null) return@DisposableEffect onDispose { }

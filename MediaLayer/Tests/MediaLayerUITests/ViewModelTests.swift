@@ -95,7 +95,7 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
 struct ViewModelTests {
   @MainActor
   @Test
-  func toggleAndReachingTheEndDriveSetPlaying() {
+  func inv_audio_01_onlyTheEndedStateOfTheCoreStopsTheAudio() {
     let places = RecordingPlaces()
     let audio = AudioPlayback(key: "note", playing: false, places: places, slots: LoadedSlots())
 
@@ -103,6 +103,8 @@ struct ViewModelTests {
     audio.refresh(progress: 0.5)
     #expect(audio.progress == 0.5)
     audio.refresh(progress: 1)
+    #expect(audio.isPlaying)
+    audio.follow(.ended)
 
     #expect(places.recorded == ["playing true", "playing false"])
     #expect(!audio.isPlaying)

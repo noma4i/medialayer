@@ -169,7 +169,7 @@ extension GlobalMedia {
         settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
         directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
       )
-      _ = await media.stats()
+      _ = try await media.stats()
       let pipeline = MediaImagePipeline.make(places: media)
       let request = try #require(MediaImagePipeline.request(places: media, for: TestImage(url: "https://o.test/warning.png")))
       pipeline.cache[request] = ImageContainer(image: try ImageDecoders.Default().decode(pngData(side: 4)).image)

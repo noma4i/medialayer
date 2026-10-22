@@ -94,15 +94,15 @@ extension MediaImagePipeline {
     pipeline.cache[request]
   }
 
-  static func load(_ source: some MediaSource, request: ImageRequest, places: MediaPlaces, pipeline: ImagePipeline) async -> ImageContainer? {
+  static func load(_ source: some MediaSource, request: ImageRequest, places: MediaPlaces, pipeline: ImagePipeline, reportsState: Bool = true) async -> ImageContainer? {
     guard !Task.isCancelled else { return nil }
-    places.itemState(key: source.url, state: .loading)
+    if reportsState { places.itemState(key: source.url, state: .loading) }
     do {
       let container = try await pipeline.imageTask(with: request).response.container
-      places.itemState(key: source.url, state: .ready)
+      if reportsState { places.itemState(key: source.url, state: .ready) }
       return container
     } catch {
-      if !Task.isCancelled { places.itemState(key: source.url, state: .failed(detail: error.localizedDescription)) }
+      if reportsState, !Task.isCancelled { places.itemState(key: source.url, state: .failed(detail: error.localizedDescription)) }
       return nil
     }
   }

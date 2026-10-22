@@ -20,6 +20,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
   private var hasBeenReady = false
   private var released = false
   private var viewToken: ULong? = null
+  private val source = java.util.concurrent.atomic.AtomicLong()
 
   @Volatile internal var player: ExoPlayer? = null
   @Volatile internal var route: PlaybackRoute? = null
@@ -74,7 +75,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     }
   }
 
-  override fun load(key: String, route: PlaybackRoute) = onMain {
+  override fun load(key: String, route: PlaybackRoute) = onMain(source.incrementAndGet()) {
     val exo = player ?: createPlayer()
     retract()
     this.key = key
@@ -90,40 +91,43 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     refresh()
   }
 
-  override fun unload() = onMain {
-    player?.setPlaybackSpeed(1f)
-    hideFromView()
-    viewToken = null
-    clear()
-    retract()
-    key = null
-    route = null
-    frameRendered = false
-    anchorMs = 0
-    advancing = false
-    durationMs = null
+  override fun unload() {
+    source.incrementAndGet()
+    onMain(null) {
+      player?.setPlaybackSpeed(1f)
+      hideFromView()
+      viewToken = null
+      clear()
+      retract()
+      key = null
+      route = null
+      frameRendered = false
+      anchorMs = 0
+      advancing = false
+      durationMs = null
+    }
   }
 
-  override fun preroll() = onMain {
-    val exo = player ?: return@onMain
+  override fun preroll() = ofSource {
+    val exo = player ?: return@ofSource
     if (exo.playbackState == Player.STATE_IDLE) prepare(exo)
   }
 
-  override fun play() = onMain {
-    val exo = player ?: return@onMain
+  override fun play() = ofSource {
+    val exo = player ?: return@ofSource
     if (exo.playbackState == Player.STATE_IDLE) prepare(exo)
     exo.playWhenReady = true
   }
 
-  override fun pause() = onMain { player?.playWhenReady = false }
+  override fun pause() = ofSource { player?.playWhenReady = false }
 
-  override fun mute() = onMain { player?.volume = 0f }
+  override fun mute() = onMain(null) { player?.volume = 0f }
 
-  override fun unmute() = onMain { player?.volume = 1f }
+  override fun unmute() = onMain(null) { player?.volume = 1f }
 
-  override fun setRate(rate: Float) = onMain { player?.setPlaybackSpeed(rate) }
+  override fun setRate(rate: Float) = ofSource { player?.setPlaybackSpeed(rate) }
 
-  override fun attach(viewToken: ULong) = onMain {
+  override fun attach(viewToken: ULong) = ofSource {
     Trace.beginSection("MediaLayer.attach")
     try {
       host.videoOutputCounters?.attach(id, key, viewToken)
@@ -134,7 +138,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     }
   }
 
-  override fun detach() = onMain {
+  override fun detach() = ofSource {
     Trace.beginSection("MediaLayer.detach")
     try {
       host.videoOutputCounters?.detach(id)
@@ -145,9 +149,9 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     }
   }
 
-  override fun seek(positionMs: ULong) = onMain { player?.seekTo(positionMs.toLong()) }
+  override fun seek(positionMs: ULong) = ofSource { player?.seekTo(positionMs.toLong()) }
 
-  override fun setReadahead(ms: ULong) = onMain {
+  override fun setReadahead(ms: ULong) = onMain(null) {
     readaheadMs = ms.toLong()
     loadControl?.setReadaheadMs(ms.toLong())
   }
@@ -176,9 +180,11 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     retract()
   }
 
-  private fun onMain(work: () -> Unit) {
+  private fun ofSource(work: () -> Unit) = onMain(source.get(), work)
+
+  private fun onMain(source: Long?, work: () -> Unit) {
     host.videoOutputCounters?.count("mainPost")
-    main.post { if (!released) work() }
+    main.post { if (!released && (source == null || source == this.source.get())) work() }
   }
 
   private fun prepare(exo: ExoPlayer) {

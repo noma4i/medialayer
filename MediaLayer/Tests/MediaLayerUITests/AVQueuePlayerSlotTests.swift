@@ -58,6 +58,25 @@ struct AVQueuePlayerSlotTests {
   }
 
   @Test
+  func inv_ios_02_pendingCommandsOfAReplacedSourceDoNotRun() async {
+    let log = PlayerEventLog()
+    let slots = LoadedSlots()
+    let slot = makeSlot(log, slots: slots)
+
+    slot.load(key: "old", route: route(Self.silentClip))
+    slot.seek(positionMs: 10)
+    slot.play()
+    slot.load(key: "new", route: route(Self.silentClip))
+    slot.seek(positionMs: 20)
+    await drainMain()
+
+    #expect(slots.slot(for: "old") == nil)
+    #expect(slots.slot(for: "new") === slot)
+    let rate = await MainActor.run { slot.player.rate }
+    #expect(rate == 0)
+  }
+
+  @Test
   func reloadingTheSameKeyKeepsTheHost() async {
     let log = PlayerEventLog()
     let slot = makeSlot(log)

@@ -69,7 +69,17 @@ class MediaImageExportTest {
 
     assertNotNull(bitmap)
     assertEquals(8, bitmap!!.width)
-    assertTrue(layer.calls.contains("itemState:https://o.test/a.png:Ready"))
+  }
+
+  @Test
+  fun inv_image_37_the_export_never_changes_the_state_of_a_place() {
+    val imageLoader = loader()
+
+    export(imageLoader, "https://o.test/a.png")
+    export(imageLoader, "https://o.test/a.png")
+    export(loader(failing = true), "https://o.test/bad.png")
+
+    assertEquals(emptyList<String>(), layer.calls.filter { it.startsWith("itemState") })
   }
 
   @Test
@@ -77,7 +87,6 @@ class MediaImageExportTest {
     val bitmap = export(loader(failing = true), "https://o.test/bad.png")
 
     assertNull(bitmap)
-    assertTrue(layer.calls.contains("itemState:https://o.test/bad.png:Failed"))
   }
 
   @Test

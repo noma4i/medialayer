@@ -49,6 +49,26 @@ class ExoPlayerSlotTest {
   }
 
   @Test
+  fun inv_android_05_pending_loads_do_not_execute_obsolete_sources() {
+    val sources = mutableListOf<String>()
+    val factory = ExoPlayerSlotFactory(context).also {
+      it.mediaSourceFor = { next -> sources.add(next.url); FakeMediaSource() }
+      factories.add(it)
+    }
+    val slot = factory.create(0u)
+    slot.load("old", route.copy(url = "http://127.0.0.1:9/old.mp4"))
+    slot.seek(10uL)
+    slot.play()
+    slot.load("new", route)
+    slot.seek(20uL)
+    assertNull(slot.player)
+    idle()
+    assertEquals(listOf(route.url), sources)
+    assertEquals(20L, slot.player!!.currentPosition)
+    assertFalse("a play of the replaced source ran", slot.player!!.playWhenReady)
+  }
+
+  @Test
   fun inv_android_04_publishing_a_does_not_schedule_b() = kotlinx.coroutines.runBlocking {
     var resumes = 0
     val dispatcher = object : kotlinx.coroutines.CoroutineDispatcher() {

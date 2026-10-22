@@ -37,7 +37,20 @@ extension GlobalMedia {
       let image = await context.image(for: ExportSource(url: "https://o.test/a.png"), points: CGSize(width: 8, height: 8), scale: 1)
 
       #expect(pixelWidth(image) == 8)
-      #expect(places.recorded.contains("state ready"))
+    }
+
+    @Test
+    func inv_image_37_theExportNeverChangesTheStateOfAPlace() async {
+      let places = RecordingPlaces()
+      places.imageResult = .success(pngData(side: 16))
+      let context = makeContext(places)
+      let source = ExportSource(url: "https://o.test/e.png")
+      _ = await context.image(for: source, points: CGSize(width: 8, height: 8), scale: 1)
+      _ = await context.image(for: source, points: CGSize(width: 8, height: 8), scale: 1)
+      places.imageResult = .failure(URLError(.notConnectedToInternet))
+      _ = await context.image(for: ExportSource(url: "https://o.test/bad.png"), points: CGSize(width: 8, height: 8), scale: 1)
+
+      #expect(places.recorded.filter { $0.hasPrefix("state") }.isEmpty)
     }
 
     @Test
@@ -49,7 +62,6 @@ extension GlobalMedia {
       let image = await context.image(for: ExportSource(url: "https://o.test/bad.png"), points: CGSize(width: 8, height: 8), scale: 1)
 
       #expect(image == nil)
-      #expect(places.recorded.contains { $0.hasPrefix("state failed") })
     }
 
     @Test(arguments: [false, true])

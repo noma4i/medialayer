@@ -52,6 +52,7 @@ extension MediaLayer {
       defaults: defaults, fetcher: fetcher, settings: settings, directory: directory, silent: silent, audio: audio, imageCache: imageCache
     )
     let media = try MediaLayer.open(config: config)
+    (config.memoryReleaser as? OpenedResources)?.bind(media)
     media.setTonePreparation(preparation: ToneFrames(places: media))
     ImageMemory.install(imageCache, on: media)
     LoadedSlots.install(factory.slots, on: media)
@@ -91,10 +92,18 @@ extension MediaLayer {
       evictVideo: defaults.evictVideo,
       evictImage: defaults.evictImage,
       evictAudio: defaults.evictAudio,
-      memoryReleaser: ImageMemoryReleaser(cache: imageCache),
+      memoryReleaser: OpenedResources(images: ImageMemoryReleaser(cache: imageCache), factory: factory, audio: audio),
       silent: silent
     )
     return (config, factory)
+  }
+
+  public func close() {
+    shutdown()
+  }
+
+  fileprivate func stopFollowingSystem() {
+    objc_setAssociatedObject(self, &lifetimeKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
   }
 
   func followSystem(events: PlayerEventsProtocol, link: PlayerEventsLink, center: NotificationCenter, names: SystemSignalNames) {
@@ -112,5 +121,42 @@ extension MediaLayer {
     let directory = caches.appendingPathComponent("MediaLayer", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     return directory
+  }
+}
+
+final class OpenedResources: MemoryReleaser, @unchecked Sendable {
+  private let images: ImageMemoryReleaser
+  private let factory: AVQueuePlayerSlotFactory
+  private let audio: MediaAudioSession?
+  private let lock = NSLock()
+  private weak var media: MediaLayer?
+  private var isClosed = false
+
+  init(images: ImageMemoryReleaser, factory: AVQueuePlayerSlotFactory, audio: MediaAudioSession?) {
+    self.images = images
+    self.factory = factory
+    self.audio = audio
+  }
+
+  func bind(_ media: MediaLayer) {
+    lock.withLock { self.media = media }
+  }
+
+  func dropMemoryCaches() {
+    images.dropMemoryCaches()
+  }
+
+  func shutdown() {
+    let media: MediaLayer?? = lock.withLock {
+      guard !isClosed else { return nil }
+      isClosed = true
+      return .some(self.media)
+    }
+    guard let media else { return }
+    media?.stopFollowingSystem()
+    factory.release()
+    images.shutdown()
+    if let media, Media.current === media { Media.current = nil }
+    if let audio, Media.audio === audio { Media.audio = nil }
   }
 }

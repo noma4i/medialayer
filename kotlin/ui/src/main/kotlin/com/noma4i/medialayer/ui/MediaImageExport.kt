@@ -9,7 +9,6 @@ import coil.request.SuccessResult
 import coil.size.Scale
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.MediaSource
-import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.PixelSize
 import com.noma4i.medialayer.imagePixelSize
 import kotlinx.coroutines.CancellationException
@@ -32,21 +31,12 @@ suspend fun MediaLayer.image(
   request.memoryCacheKey?.let { imageLoader.memoryCache?.get(it) }?.let { hit ->
     imageStats().record(com.noma4i.medialayer.ImageWork.Request(placement.toULong()))
     imageStats().record(com.noma4i.medialayer.ImageWork.Finish(true))
-    itemState(source.url, MediaState.Ready)
     return hit.bitmap.softwareCopy()
   }
-  itemState(source.url, MediaState.Loading)
   val result = try { imageLoader.execute(request) } catch (_: CancellationException) { return null }
   return when (result) {
-    is SuccessResult -> {
-      val bitmap = result.drawable.toBitmap()
-      itemState(source.url, MediaState.Ready)
-      bitmap
-    }
-    is ErrorResult -> {
-      imageFailure(result.throwable)?.let { itemState(source.url, it) }
-      null
-    }
+    is SuccessResult -> result.drawable.toBitmap()
+    is ErrorResult -> null
   }
 }
 

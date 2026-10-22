@@ -35,7 +35,7 @@ public struct SystemSignalNames {
 final class SystemSignals {
   private let center: NotificationCenter
   private var tokens: [NSObjectProtocol] = []
-  private let onRelease: () -> Void
+  private var onRelease: () -> Void
 
   init(events: PlayerEventsProtocol, center: NotificationCenter, names: SystemSignalNames, onRelease: @escaping () -> Void = {}) {
     self.center = center
@@ -48,7 +48,14 @@ final class SystemSignals {
   }
 
   deinit {
+    stop()
+  }
+
+  func stop() {
     tokens.forEach { center.removeObserver($0) }
-    onRelease()
+    tokens = []
+    let release = onRelease
+    onRelease = {}
+    release()
   }
 }

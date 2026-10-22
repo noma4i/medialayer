@@ -38,12 +38,12 @@ Video overrides also apply to cached stream blocks and HLS objects.
 ### Swift
 
 ```swift
-var limits = await media.limits()
+var limits = try await media.limits()
 limits.budget = 2 * 1024 * 1024 * 1024
 limits.evict = .lfu
 try await media.setLimits(limits: limits)
 
-let stats = await media.stats()
+let stats = try await media.stats()
 print(stats.totalBytes, stats.fileCount)
 
 await media.clear(kind: .video)

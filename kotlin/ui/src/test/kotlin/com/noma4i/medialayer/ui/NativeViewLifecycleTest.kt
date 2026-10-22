@@ -291,6 +291,31 @@ class NativeViewLifecycleTest {
   }
 
   @Test
+  fun inv_audio_01_only_the_ended_state_of_the_core_stops_the_audio() {
+    val clock = FakeClock(0)
+    factory.clock = clock
+    val slot = factory.create(0u)
+    slot.load("first", PlaybackRoute("https://o.test/audio", emptyMap(), null, false, false))
+    slot.play()
+    var control: AudioControl? = null
+    rule.setContent {
+      MediaLayerProvider(layer, loader, factory.players) {
+        MediaAudio(LifecycleSource("first", Kind.AUDIO)) { control = it; Box(Modifier.size(80.dp)) }
+      }
+    }
+    rule.waitUntil(5000) { clock.advanceTime(50); looper.idle(); slot.player?.isPlaying == true && control != null }
+    rule.runOnIdle { control!!.play() }
+
+    repeat(40) { clock.advanceTime(1000); looper.idle() }
+    rule.waitForIdle()
+
+    assertEquals(androidx.media3.common.Player.STATE_ENDED, slot.player!!.playbackState)
+    assertTrue("the player ended and stopped the control without the core", control!!.isPlaying)
+    layer.emit("first", com.noma4i.medialayer.MediaState.Ended)
+    rule.waitUntil(5000) { looper.idle(); !control!!.isPlaying }
+  }
+
+  @Test
   fun inv_native_05_video_progress_stops_when_inactive_and_resumes() {
     val clock = FakeClock(0)
     factory.clock = clock

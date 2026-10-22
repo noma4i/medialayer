@@ -133,14 +133,14 @@ struct MediaLayerBridgeTests {
     let media = try open(settings: settings)
     let recorder = StatsRecorder()
     let subscription = media.subscribeStats(listener: recorder)
-    var limits = await media.limits()
+    var limits = try await media.limits()
     limits.budget = 512 * 1024 * 1024
     limits.evict = .lfu
 
     try await media.setLimits(limits: limits)
 
-    let stats = await media.stats()
-    #expect(await media.limits() == limits)
+    let stats = try await media.stats()
+    #expect(try await media.limits() == limits)
     #expect(settings.keys == ["medialayer.limits"])
     #expect(stats.totalBytes == 0)
     #expect(stats.fileCount == 0)
