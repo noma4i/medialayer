@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.4.1 - 2026-10-23
+
+### Fixed
+- `MediaImage` composition takes image counters once per layer instead of once per image.
+
 ## 3.4.0 - 2026-10-23
 
 ### Changed
