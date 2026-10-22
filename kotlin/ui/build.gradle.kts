@@ -18,7 +18,11 @@ android {
   testOptions {
     unitTests.isIncludeAndroidResources = true
     unitTests.all {
-      it.systemProperty("jna.library.path", file("../host-library.path").readText().trim())
+      it.doFirst {
+        val hostLibrary = file("../host-library.path")
+        if (!hostLibrary.exists()) throw GradleException("host-library.path is missing: run scripts/build_kotlin.sh --host")
+        it.systemProperty("jna.library.path", hostLibrary.readText().trim())
+      }
     }
   }
 }
