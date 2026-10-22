@@ -46,7 +46,7 @@ internal class ImageEvents(private val stats: ImageCounters) : EventListener {
 
   override fun onCancel(request: ImageRequest) {
     endTrace()
-    stats.record(ImageWork.Cancel((request.data as? MediaImageData)?.cacheKey ?: request.data.toString()))
+    stats.record(ImageWork.Cancel((request.data as? MediaImageData)?.cacheKey?.invoke() ?: request.data.toString()))
   }
 
   private fun finish(memoryHit: Boolean) {

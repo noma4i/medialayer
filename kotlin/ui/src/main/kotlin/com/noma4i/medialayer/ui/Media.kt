@@ -62,7 +62,7 @@ internal fun rememberScreenVisibility(stats: com.noma4i.medialayer.ImageCounters
   return screen
 }
 
-internal class MediaEnvironment(val media: MediaLayer, val players: SlotPlayers?, val imageLoader: ImageLoader)
+internal class MediaEnvironment(val media: MediaLayer, val players: SlotPlayers?, val imageLoader: ImageLoader, val stats: com.noma4i.medialayer.ImageCounters)
 
 internal val LocalMediaEnvironment = staticCompositionLocalOf<MediaEnvironment> { error("Wrap the screen in MediaLayerProvider") }
 
@@ -85,7 +85,7 @@ private fun MediaLayerEnvironment(media: MediaLayer, imageLoader: ImageLoader?, 
       current.fetchImage(url, headers)
     }, stats = media.imageStats())
     media.setTonePreparation(ToneFrames(media, context.applicationContext, loader))
-    MediaEnvironment(media, players ?: binding?.factory?.players, loader)
+    MediaEnvironment(media, players ?: binding?.factory?.players, loader, media.imageStats())
   }
   val muted = Media.muted
   DisposableEffect(media, muted) {

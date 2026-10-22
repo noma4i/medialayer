@@ -44,3 +44,5 @@ media.statsFlow().collect { stats ->
 `MediaLayer.open(context, ...)` from the `ui` module calls `NativeCallbacks.install()` for you. Call it yourself once, before the first `MediaLayer.open(OpenConfig)`, only when you use the generated bridge without `ui`.
 
 It keeps library threads attached to the JVM after a native callback. Without it, a suspend call such as `stats()` or `playUrl()` resumed inline on a library thread (`Dispatchers.Unconfined`, a test dispatcher that does not dispatch) detaches that thread under its own frames, and Android aborts with "attempting to detach while still running code".
+
+`MediaImage` makes no `imageStats` call on the main thread: the counters are taken once per environment (Kotlin `MediaEnvironment`, Swift `MediaContext`). The cache key stays a core rule. Kotlin passes it lazily and Coil asks for it once per request on its main-immediate interceptor, Swift asks once per view in `PreparedImage.init`; both keep the synchronous memory hit on the first frame, which needs the key at once.

@@ -90,6 +90,43 @@ class MediaImageCompositionTest {
   }
 
   @Test
+  fun inv_image_39_composingImagesCallsNoStatsAndAtMostOneCacheKeyPerImageOnTheMainThread() {
+    val count = mutableStateOf(1)
+    rule.setContent {
+      MediaLayerProvider(CompletableDeferred(layer), loader) {
+        Column { for (index in 0 until count.value) MediaImage(SizedImage("https://o.test/ffi-$index.png"), Modifier.size(10.dp)) }
+      }
+    }
+    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("visible:https://o.test/ffi-0.png:true") }
+    layer.mainThreadFfi.clear()
+    rule.runOnIdle { count.value = 20 }
+    rule.waitUntil(5000) { looper.idle(); layer.calls.count { it.startsWith("visible:") && it.endsWith(":true") } == 20 }
+    rule.waitForIdle()
+    assertEquals(0, layer.mainThreadFfi.count { it == "imageStats" })
+    assertEquals(true, layer.mainThreadFfi.count { it == "cacheKey" } <= 19)
+  }
+
+  @Test
+  fun inv_image_39_aReturningImageIsServedFromCoilMemoryWithoutLoadingOnTheFirstFrame() {
+    val shown = mutableStateOf(true)
+    val url = "https://o.test/memory-hit.png"
+    val fetches = java.util.concurrent.atomic.AtomicInteger()
+    val counting = mediaImageLoader(context, ImageBytes { _, _ -> fetches.incrementAndGet(); com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) })
+    rule.setContent {
+      MediaLayerProvider(CompletableDeferred(layer), counting) {
+        if (shown.value) MediaImage(SizedImage(url), Modifier.size(50.dp))
+      }
+    }
+    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("itemState:$url:Ready") }
+    rule.runOnIdle { shown.value = false }
+    rule.waitForIdle()
+    rule.runOnIdle { shown.value = true }
+    rule.waitForIdle()
+    assertEquals(2, layer.calls.count { it == "itemState:$url:Ready" })
+    assertEquals(1, fetches.get())
+  }
+
+  @Test
   fun inv_image_07_aSizedImageDoesNotCreateASubcomposeLayout() {
     rule.setContent {
       MediaLayerProvider(CompletableDeferred(layer), loader) {

@@ -56,11 +56,13 @@ public enum Media {
 public final class MediaContext: @unchecked Sendable {
   public let places: MediaPlaces
   public let slots: LoadedSlots
+  let stats: ImageCounters
   var pipeline: Nuke.ImagePipeline { ImageMemory.pipeline(for: places) }
 
   public init(places: MediaPlaces, slots: LoadedSlots? = nil) {
     self.places = places
     self.slots = slots ?? LoadedSlots.of(places)
+    stats = places.imageStats()
     places.setTonePreparation(preparation: ToneFrames(places: places))
   }
 }

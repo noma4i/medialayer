@@ -204,7 +204,7 @@ private fun VideoPlaceholder(source: MediaSource, ready: Boolean, contentScale: 
   BoxWithConstraints(Modifier.fillMaxSize()) {
     val pixels = decodePixels(constraints, density, image, contentScale)
     val placementPixels = if (constraints.hasBoundedWidth && constraints.hasBoundedHeight) constraints.maxWidth.toLong() * constraints.maxHeight else 0L
-    val request = remember(media, cover.url, pixels, scale, placementPixels) { imageRequest(context, image, pixels, scale, media.cacheKey(cover.url, source.headers), placementPixels) }
+    val request = remember(media, cover.url, pixels, scale, placementPixels) { imageRequest(context, image, pixels, scale, { media.cacheKey(cover.url, source.headers) }, placementPixels) }
     AsyncImage(
       model = request,
       contentDescription = "cover",

@@ -33,13 +33,15 @@ internal class RecordingEvents : PlayerEvents(NoHandle) {
 }
 
 internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents()) : MediaLayer(NoHandle) {
-  override fun cacheKey(url: String, headers: Map<String, String>): String = url
+  val mainThreadFfi = CopyOnWriteArrayList<String>()
+  private fun noteFfi(call: String) { if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) mainThreadFfi.add(call) }
+  override fun cacheKey(url: String, headers: Map<String, String>): String { noteFfi("cacheKey"); return url }
   val calls = CopyOnWriteArrayList<String>()
   val listeners = CopyOnWriteArrayList<Pair<String, StateListener>>()
   var closed = false
   var image: ByteArray = ByteArray(0)
   private val counters by lazy { com.noma4i.medialayer.ImageCounters() }
-  override fun imageStats(): com.noma4i.medialayer.ImageCounters = counters
+  override fun imageStats(): com.noma4i.medialayer.ImageCounters { noteFfi("imageStats"); return counters }
   var preparedTones: TonePreparation? = null
   val toneChecks = AtomicInteger()
   var needsTone = false

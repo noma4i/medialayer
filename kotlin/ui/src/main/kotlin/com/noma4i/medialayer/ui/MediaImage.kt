@@ -26,7 +26,6 @@ import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.ImageLoader
 import coil.request.ImageResult
-import coil.memory.MemoryCache
 import coil.request.ImageRequest
 import coil.size.Scale
 import com.noma4i.medialayer.MediaSource
@@ -56,9 +55,7 @@ fun MediaImage(
   contentScale: ContentScale = ContentScale.Crop,
   content: @Composable (MediaState) -> Unit = {}
 ) {
-  val media = LocalMediaEnvironment.current.media
-  val stats = remember(media) { media.imageStats() }
-  val screen = rememberScreenVisibility(stats)
+  val screen = rememberScreenVisibility(LocalMediaEnvironment.current.stats)
   claimImage(source, screen)
   if (source.size != null) {
     Box(modifier.then(screen.modifier)) { ImageBody(source, null, 0L, screen, contentScale, content) }
@@ -73,11 +70,12 @@ fun MediaImage(
 
 @Composable
 private fun claimImage(source: MediaSource, screen: ScreenVisibility) {
-  val media = LocalMediaEnvironment.current.media
+  val environment = LocalMediaEnvironment.current
+  val media = environment.media
+  val stats = environment.stats
   LaunchedEffect(media, source, screen) {
     val owner = Any()
     val item = source.toItem()
-    val stats = media.imageStats()
     snapshotFlow { screen.visible }.onStart { stats.record(ImageWork.Observe) }.onCompletion { stats.record(ImageWork.Unobserve) }.collectLatest { visible ->
       if (visible) {
         media.claims.visible(owner, item, true)
@@ -94,8 +92,8 @@ private fun ImageBody(source: MediaSource, pixels: PixelSize?, placementPixels: 
   val environment = LocalMediaEnvironment.current
   val media = environment.media
   val scale = contentScale.toScale()
-  val stats = remember(media) { media.imageStats() }
-  val request = remember(media, source, pixels, scale, placementPixels) { imageRequest(context, source, pixels, scale, media.cacheKey(source.url, source.headers), placementPixels) }
+  val stats = environment.stats
+  val request = remember(media, source, pixels, scale, placementPixels) { imageRequest(context, source, pixels, scale, { media.cacheKey(source.url, source.headers) }, placementPixels) }
   val state = remember(source.url) { mutableStateOf<MediaState>(MediaState.Idle) }
   val animation = remember { mutableStateOf<Animatable?>(null) }
   LaunchedEffect(screen) {
@@ -153,15 +151,14 @@ internal fun decodePixels(constraints: Constraints, density: Float, source: Medi
   return imagePixelSize(width, height, density.toDouble(), declared, contentScale.toScale() == Scale.FILL)
 }
 
-internal fun imageRequest(context: Context, source: MediaSource, pixels: PixelSize?, scale: Scale, cacheKey: String, placementPixels: Long = 0): ImageRequest =
+internal fun imageRequest(context: Context, source: MediaSource, pixels: PixelSize?, scale: Scale, cacheKey: () -> String, placementPixels: Long = 0): ImageRequest =
   ImageRequest.Builder(context)
-    .data(MediaImageData(source.url, source.headers, cacheKey, if (pixels == null) source.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) } else null))
+    .data(MediaImageData(source.url, source.headers, cacheKey, if (pixels == null) source.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) } else null, pixels))
     .scale(scale)
     .setParameter("placementPixels", placementPixels, null)
     .apply {
       pixels?.let {
         size(it.width.toInt(), it.height.toInt())
-        memoryCacheKey(MemoryCache.Key("$cacheKey|${it.width}x${it.height}|$scale"))
       }
     }
     .build()

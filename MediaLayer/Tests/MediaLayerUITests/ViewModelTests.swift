@@ -39,12 +39,18 @@ final class Latch: @unchecked Sendable {
 final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   var imageOrigin: ImageOrigin = .network
   private let counters = ImageCounters()
-  func imageStats() -> ImageCounters { counters }
+  func imageStats() -> ImageCounters {
+    if Thread.isMainThread { lock.withLock { mainStats += 1 } }
+    return counters
+  }
   func cacheKey(url: String, headers: [String: String]) -> String {
     lock.withLock { keyReads += 1 }
     return url
   }
   private var keyReads = 0
+  private var mainStats = 0
+  var mainThreadImageStats: Int { lock.withLock { mainStats } }
+  func resetMainThreadImageStats() { lock.withLock { mainStats = 0 } }
   var cacheKeyReads: Int { lock.withLock { keyReads } }
   private let lock = NSLock()
   private var visibility: [VisibleCall] = []

@@ -53,7 +53,7 @@ class MediaImageFetcherTest {
           override val kind = Kind.IMAGE
           override val headers = mapOf("Authorization" to account, "X-Ignored" to ignored)
         }
-        val request = imageRequest(context, source, pixels, Scale.FILL, media.cacheKey(url, source.headers))
+        val request = imageRequest(context, source, pixels, Scale.FILL, { media.cacheKey(url, source.headers) })
         assertTrue(load(request) is SuccessResult)
       }
       assertEquals(listOf("A", "B"), requested.filter { it.first == url }.map { it.second["Authorization"] })
@@ -74,7 +74,7 @@ class MediaImageFetcherTest {
 
   @Test
   fun inv_image_12_imageBytesComeFromTheCoreSourceDecodeAtTheDeclaredSizeAndCoilKeepsNoDisk() {
-    val data = MediaImageData("https://o.test/a.png", mapOf("Authorization" to "token"), "https://o.test/a.png")
+    val data = MediaImageData("https://o.test/a.png", mapOf("Authorization" to "token"), { "https://o.test/a.png" })
 
     val result = load(ImageRequest.Builder(context).data(data).size(16, 16).build())
 
@@ -87,7 +87,7 @@ class MediaImageFetcherTest {
 
   @Test
   fun inv_image_13_aSecondRequestForTheSameUrlIsServedFromCoilMemoryWithoutTheCore() {
-    val request = ImageRequest.Builder(context).data(MediaImageData("https://o.test/b.png", emptyMap(), "https://o.test/b.png", PixelSize(64u, 64u))).setParameter("placementPixels", 256L, null).size(16, 16).build()
+    val request = ImageRequest.Builder(context).data(MediaImageData("https://o.test/b.png", emptyMap(), { "https://o.test/b.png" }, PixelSize(64u, 64u))).setParameter("placementPixels", 256L, null).size(16, 16).build()
 
     load(request)
     assertEquals(256uL, stats.snapshot().placementPixels)
