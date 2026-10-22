@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.3.1 - 2026-10-22
+
+### Fixed
+- Audio progress, seek and ended work when the host view has an empty or off-screen frame.
+
 ## 3.3.0 - 2026-10-22
 
 ### Changed
