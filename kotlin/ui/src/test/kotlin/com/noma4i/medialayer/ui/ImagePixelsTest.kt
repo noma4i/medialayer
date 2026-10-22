@@ -19,7 +19,7 @@ class ImagePixelsTest {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val bytes = pngBytes(1080, 1920)
     val stats = com.noma4i.medialayer.ImageCounters()
-    val loader = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(bytes, com.noma4i.medialayer.ImageOrigin.NETWORK) }, stats = { stats }).newBuilder().allowHardware(false).build()
+    val loader = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(bytes, com.noma4i.medialayer.ImageOrigin.NETWORK) }, stats = stats).newBuilder().allowHardware(false).build()
     var decodedPixels = 0L
     val placementPixels = 64L * 352 * 352
     try {

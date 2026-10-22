@@ -31,6 +31,7 @@ class MemoryWarningTest {
       settings = SharedPreferencesSettings(context, "memory-warning"), slots = null,
       device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings(),
       memoryReleaser = object : MemoryReleaser {
+        override fun shutdown() { loader.shutdown() }
         override fun dropMemoryCaches() { cache.clear(); dropped.complete(Unit) }
       }
     ))

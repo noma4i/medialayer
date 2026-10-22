@@ -18,9 +18,8 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import okhttp3.Call
 import okhttp3.OkHttpClient
 
@@ -35,12 +34,20 @@ class ViewHandle internal constructor(val token: ULong) {
 }
 
 class SlotPlayers internal constructor(val videoOutputCounters: VideoOutputCounters? = null) {
-  private val published = MutableStateFlow<Map<String, ExoPlayer>>(emptyMap())
+  private class Observed(val state: MutableStateFlow<ExoPlayer?>, var collectors: Int = 0)
+  private val observed = mutableMapOf<String, Observed>()
   private val slots = ConcurrentHashMap<String, ExoPlayerSlot>()
 
-  val keyed: StateFlow<Map<String, ExoPlayer>> get() = published
-
-  fun player(key: String): Flow<ExoPlayer?> = published.map { it[key] }.distinctUntilChanged()
+  fun player(key: String): Flow<ExoPlayer?> = flow {
+    val entry = synchronized(observed) {
+      observed.getOrPut(key) { Observed(MutableStateFlow(slots[key]?.player)) }.also { it.collectors++ }
+    }
+    try { emitAll(entry.state) } finally {
+      synchronized(observed) {
+        if (--entry.collectors == 0) observed.remove(key)
+      }
+    }
+  }
 
   internal val owners = ViewOwners()
   private val views = ConcurrentHashMap<ULong, ViewHandle>()
@@ -60,14 +67,13 @@ class SlotPlayers internal constructor(val videoOutputCounters: VideoOutputCount
 
   internal fun route(key: String): PlaybackRoute? = slots[key]?.route
 
-  internal fun publish(key: String, slot: ExoPlayerSlot, player: ExoPlayer) {
+  internal fun publish(key: String, slot: ExoPlayerSlot, player: ExoPlayer) = synchronized(observed) {
     slots[key] = slot
-    published.update { it + (key to player) }
+    observed[key]?.state?.value = player
   }
 
-  internal fun retract(key: String, slot: ExoPlayerSlot) {
-    if (!slots.remove(key, slot)) return
-    published.update { it - key }
+  internal fun retract(key: String, slot: ExoPlayerSlot) = synchronized(observed) {
+    if (slots.remove(key, slot)) observed[key]?.state?.value = null
   }
 }
 
@@ -86,16 +92,24 @@ class ExoPlayerSlotFactory(
   internal var mediaSourceFor: (PlaybackRoute) -> MediaSource = HttpMediaSources(appContext, callFactory)::create
   @Volatile internal var events: PlayerEventsInterface? = null
   private val created = CopyOnWriteArrayList<ExoPlayerSlot>()
+  private var closed = false
 
   val players = SlotPlayers(videoOutputCounters)
 
+  @Synchronized
   fun bind(events: PlayerEventsInterface) {
-    this.events = events
+    if (!closed) this.events = events
   }
 
-  override fun create(slot: UInt): ExoPlayerSlot = ExoPlayerSlot(slot, this).also { created.add(it) }
+  @Synchronized
+  override fun create(slot: UInt): ExoPlayerSlot = ExoPlayerSlot(slot, this).also {
+    if (closed) it.release() else created.add(it)
+  }
 
+  @Synchronized
   fun release() {
+    closed = true
+    events = null
     created.forEach { it.release() }
     created.clear()
     audio.close()

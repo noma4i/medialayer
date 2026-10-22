@@ -73,7 +73,7 @@ fun MediaLayerProvider(media: MediaLayer, imageLoader: ImageLoader? = null, play
     val loader = imageLoader ?: binding?.imageLoader ?: mediaImageLoader(context, ImageBytes { url, headers ->
       val current = reference.get() ?: throw kotlinx.coroutines.CancellationException("MediaLayer was released")
       current.fetchImage(url, headers)
-    }, stats = { checkNotNull(reference.get()).imageStats() })
+    }, stats = media.imageStats())
     media.setTonePreparation(ToneFrames(media, context.applicationContext, loader))
     MediaEnvironment(media, players ?: binding?.factory?.players, loader)
   }

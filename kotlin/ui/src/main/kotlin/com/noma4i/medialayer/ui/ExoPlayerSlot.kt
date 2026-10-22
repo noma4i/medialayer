@@ -24,6 +24,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
   @Volatile internal var player: ExoPlayer? = null
   @Volatile internal var route: PlaybackRoute? = null
   private var loadControl: ReadaheadLoadControl? = null
+  private var readaheadMs: Long? = null
   @Volatile internal var viewAttached = false
   @Volatile private var looping = false
   @Volatile private var anchorMs = 0L
@@ -146,7 +147,8 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
 
   override fun seek(positionMs: ULong) = onMain { player?.seekTo(positionMs.toLong()) }
 
-  override fun setReadahead(ms: ULong) {
+  override fun setReadahead(ms: ULong) = onMain {
+    readaheadMs = ms.toLong()
     loadControl?.setReadaheadMs(ms.toLong())
   }
 
@@ -175,6 +177,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
   }
 
   private fun onMain(work: () -> Unit) {
+    host.videoOutputCounters?.count("mainPost")
     main.post { if (!released) work() }
   }
 
@@ -194,6 +197,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
       host.videoOutputCounters?.count("create")
       val attributes = AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build()
       val control = host.loadControl.create(host.allocator)
+      readaheadMs?.let { control.setReadaheadMs(it) }
       loadControl = control
       val exo = ExoPlayer.Builder(host.appContext, host.renderersFactory)
         .setLoadControl(control)

@@ -243,6 +243,8 @@ fn inv_ffi_02_a_cache_write_reaches_a_stats_subscriber_without_any_controls_call
 struct CountingReleaser(std::sync::atomic::AtomicUsize);
 
 impl MemoryReleaser for CountingReleaser {
+    fn shutdown(&self) {}
+
     fn drop_memory_caches(&self) {
         self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }

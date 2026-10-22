@@ -24,11 +24,11 @@ internal data class MediaImageData(val url: String, val headers: Map<String, Str
 
 private const val MAX_IMAGE_MEMORY_BYTES: Int = 128 * 1024 * 1024
 
-fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: Int? = null, stats: () -> com.noma4i.medialayer.ImageCounters = com.noma4i.medialayer.ImageCounters().let { { it } }): ImageLoader {
+fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: Int? = null, stats: com.noma4i.medialayer.ImageCounters = com.noma4i.medialayer.ImageCounters()): ImageLoader {
   val budget = memoryBytes ?: minOf(MAX_IMAGE_MEMORY_BYTES.toLong(), context.getSystemService(ActivityManager::class.java).memoryClass * 1024L * 1024L / 4).toInt()
   require(budget > 0) { "memoryBytes must be positive" }
   return ImageLoader.Builder(context)
-    .eventListenerFactory { ImageEvents(stats()) }
+    .eventListenerFactory { ImageEvents(stats) }
     .memoryCache(MemoryCache.Builder(context).maxSizeBytes(budget).build())
     .components {
       add(coil.intercept.Interceptor { chain ->

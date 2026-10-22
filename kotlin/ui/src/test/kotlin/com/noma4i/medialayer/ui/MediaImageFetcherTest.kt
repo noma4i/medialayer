@@ -32,7 +32,7 @@ class MediaImageFetcherTest {
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val requested = CopyOnWriteArrayList<Pair<String, Map<String, String>>>()
   private val stats = ImageCounters()
-  private val loader = mediaImageLoader(context, ImageBytes { url, headers -> requested.add(url to headers); ImageFetchResult(pngBytes(), ImageOrigin.CACHE) }, stats = { stats })
+  private val loader = mediaImageLoader(context, ImageBytes { url, headers -> requested.add(url to headers); ImageFetchResult(pngBytes(), ImageOrigin.CACHE) }, stats = stats)
 
   @Test
   fun selectedHeadersSeparateDecodedImagesAndUnselectedHeadersReuseThem() {

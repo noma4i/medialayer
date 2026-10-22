@@ -66,15 +66,6 @@ fun MediaLayer.Companion.open(
 
 private fun platformDefaults(): SpecDefaults = SpecDefaults(defaultLimits(), defaultPoolSettings(), emptyList())
 
-fun MediaLayer.release() {
-  bindings.remove(this)?.let {
-    it.signals.unregister()
-    it.factory.release()
-    if (Media.audio === it.factory.audio) Media.audio = null
-  }
-  close()
-}
-
 internal fun openMediaLayer(
   context: Context,
   fetcher: Fetcher? = null,
@@ -100,13 +91,21 @@ internal fun openMediaLayer(
     val factory = ExoPlayerSlotFactory(app, callFactory ?: client, startMuted = silent, audio = audio, videoOutputCounters = videoOutputCounters)
     val dir = File(app.cacheDir, "medialayer").apply { mkdirs() }
     var reference: WeakReference<MediaLayer>? = null
-    val imageLoader = mediaImageLoader(app, ImageBytes { url, headers ->
-      val media = reference?.get() ?: throw CancellationException("MediaLayer was released")
-      media.fetchImage(url, headers)
-    }, imageMemoryBytes, stats = { checkNotNull(reference?.get()).imageStats() })
+    var imageLoader: ImageLoader? = null
+    var signals: SystemSignals? = null
     val releaser = object : MemoryReleaser {
       override fun dropMemoryCaches() {
-        imageLoader.memoryCache?.clear()
+        imageLoader?.memoryCache?.clear()
+      }
+
+      override fun shutdown() {
+        signals?.unregister()
+        signals = null
+        factory.release()
+        imageLoader?.shutdown()
+        imageLoader = null
+        reference?.get()?.let { bindings.remove(it) }
+        if (Media.audio === factory.audio) Media.audio = null
       }
     }
     val config = OpenConfig(
@@ -130,11 +129,17 @@ internal fun openMediaLayer(
     Trace.beginSection("MediaLayer.open.ffi")
     val layer = try { open(config) } finally { Trace.endSection() }
     reference = WeakReference(layer)
-    layer.setTonePreparation(ToneFrames(layer, app, imageLoader))
+    val loader = mediaImageLoader(app, ImageBytes { url, headers ->
+      val media = reference?.get() ?: throw CancellationException("MediaLayer was closed")
+      media.fetchImage(url, headers)
+    }, imageMemoryBytes, stats = layer.imageStats())
+    imageLoader = loader
+    layer.setTonePreparation(ToneFrames(layer, app, loader))
     val events = layer.playerEvents()
     factory.bind(events)
-    val signals = SystemSignals(app, events, lifecycle).also { it.register() }
-    bindings[layer] = Binding(factory, signals, imageLoader)
+    val registered = SystemSignals(app, events, lifecycle).also { it.register() }
+    signals = registered
+    bindings[layer] = Binding(factory, registered, loader)
     Media.audio = audio
     return layer
   } finally { Trace.endSection() }

@@ -16,6 +16,8 @@ import androidx.media3.test.utils.FakeClock
 import androidx.media3.test.utils.FakeMediaSource
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -35,6 +37,59 @@ import org.robolectric.Shadows.shadowOf
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(MediaLayerTestRunner::class)
 class ExoPlayerSlotTest {
+  @Test
+  fun inv_android_08_closed_factory_does_not_create_a_live_player() {
+    val factory = factory()
+    factory.release()
+    val slot = factory.create(0u)
+    slot.load("late", route)
+    idle()
+    assertNull(slot.player)
+    assertNull(factory.events)
+  }
+
+  @Test
+  fun inv_android_04_publishing_a_does_not_schedule_b() = kotlinx.coroutines.runBlocking {
+    var resumes = 0
+    val dispatcher = object : kotlinx.coroutines.CoroutineDispatcher() {
+      override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) {
+        resumes++
+        block.run()
+      }
+    }
+    val factory = factory()
+    val job = kotlinx.coroutines.CoroutineScope(dispatcher).launch {
+      factory.players.player("b").collect { }
+    }
+    resumes = 0
+    try {
+      factory.create(0u).load("a", route)
+      idle()
+      assertEquals(0, resumes)
+    } finally { job.cancel() }
+  }
+
+  @Test
+  fun inv_android_06_readahead_survives_pending_player_creation() {
+    for (beforeLoad in listOf(true, false)) {
+      val slot = factory().create(0u)
+      if (beforeLoad) slot.setReadahead(12_000uL)
+      slot.load("k", route)
+      if (!beforeLoad) slot.setReadahead(12_000uL)
+      idle()
+      val field = ExoPlayerSlot::class.java.getDeclaredField("loadControl").apply { isAccessible = true }
+      val control = field.get(slot) as ReadaheadLoadControl
+      val player = androidx.media3.exoplayer.analytics.PlayerId.UNSET
+      val timeline = androidx.media3.test.utils.FakeTimeline()
+      val period = androidx.media3.exoplayer.source.MediaSource.MediaPeriodId(timeline.getUidOfPeriod(0))
+      val parameters = androidx.media3.exoplayer.LoadControl.Parameters(
+        player, timeline, period, 0, 12_000_000, 1f, true, false, C.TIME_UNSET, C.TIME_UNSET
+      )
+      control.onPrepared(player)
+      try { assertFalse(control.shouldContinueLoading(parameters)) } finally { control.onReleased(player) }
+    }
+  }
+
   @Test
   fun inv_pool_06_default_renderers_allow_the_next_decoder_after_initialization_failure() {
     val renderers = factory().renderersFactory.createRenderers(
@@ -120,7 +175,7 @@ class ExoPlayerSlotTest {
     assertFalse(player.playWhenReady)
     assertEquals(Player.STATE_IDLE, player.playbackState)
     assertEquals(Player.REPEAT_MODE_ONE, player.repeatMode)
-    assertSame(player, factories.single().players.keyed.value["k"])
+    assertSame(player, kotlinx.coroutines.runBlocking { factories.single().players.player("k").first() })
 
     slot.preroll(); idle()
     org.junit.Assert.assertNotEquals(Player.STATE_IDLE, player.playbackState)
@@ -321,12 +376,12 @@ class ExoPlayerSlotTest {
     val player = slot.player!!
 
     assertEquals(1, player.mediaItemCount)
-    assertSame(player, factory.players.keyed.value["k"])
+    assertSame(player, kotlinx.coroutines.runBlocking { factory.players.player("k").first() })
 
     slot.unload(); idle()
     assertEquals(0, player.mediaItemCount)
     assertEquals(Player.STATE_IDLE, player.playbackState)
-    assertTrue(factory.players.keyed.value.isEmpty())
+    assertNull(kotlinx.coroutines.runBlocking { factory.players.player("k").first() })
   }
 
   @Test
@@ -342,8 +397,10 @@ class ExoPlayerSlotTest {
     }
 
     assertEquals(3, created.size)
-    assertEquals(3, factory.players.keyed.value.size)
-    assertEquals(setOf("k9", "k10", "k11"), factory.players.keyed.value.keys)
+    for (index in 0..11) {
+      val published = kotlinx.coroutines.runBlocking { factory.players.player("k$index").first() }
+      assertEquals(index >= 9, published != null)
+    }
   }
 
   @Test
@@ -391,7 +448,7 @@ class ExoPlayerSlotTest {
     factory.release(); idle()
 
     assertTrue(player.isReleased)
-    assertTrue(factory.players.keyed.value.isEmpty())
+    assertNull(kotlinx.coroutines.runBlocking { factory.players.player("k").first() })
     events.calls.clear()
     slot.listener.onRenderedFirstFrame()
     assertEquals(emptyList<String>(), events.calls.toList())

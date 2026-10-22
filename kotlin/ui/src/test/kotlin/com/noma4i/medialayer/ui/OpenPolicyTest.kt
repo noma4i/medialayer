@@ -67,7 +67,7 @@ class OpenPolicyTest {
         assertEquals(2, bytes.bytes.size)
         assertEquals(expected + ("Accept-Encoding" to "identity"), origin.seen.first().headers)
       } finally {
-        media.release()
+        media.close()
       }
     }
   }
@@ -85,7 +85,7 @@ class OpenPolicyTest {
         }
         assertEquals(1, origin.seen.count { it.url.contains("small") })
       } finally {
-        media.release()
+        media.close()
       }
     }
   }

@@ -132,4 +132,8 @@ public final class ImageMemoryReleaser: MemoryReleaser, @unchecked Sendable {
     URLCache.shared.memoryCapacity = 0
     URLCache.shared.memoryCapacity = capacity
   }
+
+  public func shutdown() {
+    dropMemoryCaches()
+  }
 }

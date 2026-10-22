@@ -51,7 +51,7 @@ class MediaVisibilityTest {
       started.incrementAndGet()
       try { gate.await() } catch (e: CancellationException) { cancelled.incrementAndGet(); throw e }
       com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK)
-    }, stats = { layer.imageStats() }).newBuilder().allowHardware(false).build()
+    }, stats = layer.imageStats()).newBuilder().allowHardware(false).build()
   }
 
   private fun claims() = layer.calls.filter { it.startsWith("visible:$url:") }

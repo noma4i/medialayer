@@ -50,6 +50,7 @@ pub struct OpenConfig {
 #[uniffi::export(with_foreign)]
 pub trait MemoryReleaser: Send + Sync {
     fn drop_memory_caches(&self);
+    fn shutdown(&self);
 }
 
 #[uniffi::export(with_foreign)]
@@ -74,18 +75,19 @@ pub struct MediaLayer {
     assembled: Arc<Deferred<Assembled>>,
     namespace_headers: Vec<String>,
     image_stats: Arc<super::image::ImageCounters>,
+    releaser: Option<Arc<dyn MemoryReleaser>>,
 }
 
 impl MediaLayer {
     pub fn from_parts(runtime: Option<Runtime>, handle: Handle, parts: Parts, releaser: Option<Arc<dyn MemoryReleaser>>, namespace_headers: Vec<String>) -> Arc<MediaLayer> {
-        let layer = MediaLayer::pending(runtime, handle.clone(), namespace_headers);
+        let layer = MediaLayer::pending(runtime, handle.clone(), namespace_headers, releaser.clone());
         layer.assembled.install(Arc::new(Assembled::new(&handle, parts, releaser)));
         layer
     }
 
     pub(crate) fn assembling(runtime: Runtime, assembling: impl Future<Output = Result<Parts, MediaError>> + Send + 'static, releaser: Option<Arc<dyn MemoryReleaser>>, namespace_headers: Vec<String>) -> Arc<MediaLayer> {
         let handle = runtime.handle().clone();
-        let layer = MediaLayer::pending(Some(runtime), handle.clone(), namespace_headers);
+        let layer = MediaLayer::pending(Some(runtime), handle.clone(), namespace_headers, releaser.clone());
         let assembled = layer.assembled.clone();
         handle.clone().spawn(async move {
             match assembling.await {
@@ -96,8 +98,8 @@ impl MediaLayer {
         layer
     }
 
-    fn pending(runtime: Option<Runtime>, handle: Handle, namespace_headers: Vec<String>) -> Arc<MediaLayer> {
-        Arc::new(MediaLayer { handle, runtime: Mutex::new(runtime), assembled: Deferred::new(), namespace_headers, image_stats: super::image::ImageCounters::new() })
+    fn pending(runtime: Option<Runtime>, handle: Handle, namespace_headers: Vec<String>, releaser: Option<Arc<dyn MemoryReleaser>>) -> Arc<MediaLayer> {
+        Arc::new(MediaLayer { handle, runtime: Mutex::new(runtime), assembled: Deferred::new(), namespace_headers, image_stats: super::image::ImageCounters::new(), releaser })
     }
 
     fn declare(&self, work: impl FnOnce(&Assembled) + Send + 'static) {
@@ -116,6 +118,9 @@ impl MediaLayer {
 
 impl Drop for MediaLayer {
     fn drop(&mut self) {
+        if let Some(releaser) = self.releaser.take() {
+            releaser.shutdown();
+        }
         if let Some(runtime) = self.runtime.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take() {
             runtime.shutdown_background();
         }
