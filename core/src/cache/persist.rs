@@ -5,7 +5,9 @@ use crate::identity::hex_into;
 use crate::proxy::Meta;
 use std::fmt::Write;
 
-pub const HEADER: &str = "medialayer-cache-v3\n";
+const SUM_DIGITS: usize = 16;
+
+pub const HEADER: &str = "medialayer-cache-v4\n";
 
 pub fn encode_line(key: &str, entry: &Entry, text: &mut String) {
     encode_string(key, text);
@@ -18,8 +20,9 @@ pub fn encode_line(key: &str, entry: &Entry, text: &mut String) {
         let _ = write!(text, "{length}");
     }
     text.push('\t');
-    let Check::Sum(sum) = entry.check;
-    let _ = write!(text, "{sum:016x}");
+    for sum in entry.check.0.iter() {
+        let _ = write!(text, "{sum:016x}");
+    }
     text.push('\t');
     if let Some(tone) = &entry.tone {
         hex_into(&tone.encode(), text);
@@ -37,12 +40,20 @@ pub fn decode_line(line: &str) -> Option<(String, Entry)> {
     let hits = fields.next()?.parse().ok()?;
     let content_type = optional(fields.next()?, |text| serde_json::from_str(text).ok())?;
     let total_length = optional(fields.next()?, |text| text.parse().ok())?;
-    let check = Check::Sum(u64::from_str_radix(fields.next()?, 16).ok()?);
+    let check = decode_sums(fields.next()?, size)?;
     let tone = fields.next().and_then(|field| hex_decode_bytes(field).and_then(|bytes| ToneData::decode(&bytes)));
     if fields.next().is_some() {
         return None;
     }
     Some((key, Entry { size, check, kind, created, last_access, hits, meta: Meta { content_type, total_length }, tone }))
+}
+
+fn decode_sums(field: &str, size: u64) -> Option<Check> {
+    if !field.len().is_multiple_of(SUM_DIGITS) || (field.len() / SUM_DIGITS) as u64 != Check::segments_for(size) {
+        return None;
+    }
+    let sums: Option<Vec<u64>> = field.as_bytes().chunks(SUM_DIGITS).map(|digits| u64::from_str_radix(std::str::from_utf8(digits).ok()?, 16).ok()).collect();
+    Some(Check(sums?.into()))
 }
 
 fn optional<T>(field: &str, parse: impl FnOnce(&str) -> Option<T>) -> Option<Option<T>> {

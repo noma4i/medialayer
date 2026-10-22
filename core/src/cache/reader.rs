@@ -1,18 +1,20 @@
 use super::error::CacheError;
 use super::inner::CacheShared;
+use super::verify::Verified;
 use std::sync::Arc;
 use std::fs::File;
 
 pub struct Pin {
-    inner: Arc<CacheShared>,
-    name: String,
-    version: u64,
+    pub(super) inner: Arc<CacheShared>,
+    pub(super) name: String,
+    pub(super) version: u64,
+    pub(super) verified: Arc<Verified>,
 }
 
 impl Pin {
     pub fn acquire(inner: &Arc<CacheShared>, name: &str) -> Option<(Pin, u64)> {
-        let (size, version) = inner.state().pin(name, inner.now())?;
-        Some((Pin { inner: inner.clone(), name: name.to_string(), version }, size))
+        let (size, version, verified) = inner.state().pin(name, inner.now())?;
+        Some((Pin { inner: inner.clone(), name: name.to_string(), version, verified }, size))
     }
 }
 
@@ -43,6 +45,11 @@ impl Reader {
     pub async fn get_range(&self, start: u64, len: u64) -> Option<Vec<u8>> {
         let file = self.file.clone();
         let wanted = len.min(self.size.saturating_sub(start));
+        if let Some(pin) = &self._pin {
+            if !super::verify::checked(pin, &self.file, self.size, start, wanted).await {
+                return None;
+            }
+        }
         #[cfg(test)]
         let counting = self._pin.as_ref().map(|pin| pin.inner.clone());
         tokio::task::spawn_blocking(move || {

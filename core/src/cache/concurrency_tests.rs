@@ -23,16 +23,16 @@ fn spawn_ticker(stop: Arc<AtomicBool>) -> tokio::task::JoinHandle<u32> {
 
 pub(super) fn write_prepared_dir(dir: &std::path::Path, files: usize, hot_key: &str) {
     use sha2::Digest;
-    let checksum = super::entry::Check::Sum(super::verify::sum_of(sha2::Sha256::new().chain_update(b"0123456789")));
+    let checksum = super::entry::Check(vec![super::verify::sum_of(sha2::Sha256::new().chain_update(b"0123456789"))].into());
     let mut index = super::persist::HEADER.to_owned();
     for number in 0..files {
         let key = format!("entry-{number}");
         std::fs::write(dir.join(format!("{}.bin", crate::identity::key_file_name(&key))), b"0123456789").unwrap();
-        let entry = super::entry::Entry { check: checksum, size: 10, kind: Kind::Image, created: number as u64, last_access: number as u64, hits: 0, meta: Default::default(), tone: None };
+        let entry = super::entry::Entry { check: checksum.clone(), size: 10, kind: Kind::Image, created: number as u64, last_access: number as u64, hits: 0, meta: Default::default(), tone: None };
         super::persist::encode_line(&key, &entry, &mut index);
     }
     std::fs::write(dir.join(format!("{}.bin", crate::identity::key_file_name(hot_key))), b"0123456789").unwrap();
-    let hot = super::entry::Entry { check: checksum, size: 10, kind: Kind::Image, created: 0, last_access: u64::MAX / 2, hits: 0, meta: Default::default(), tone: None };
+    let hot = super::entry::Entry { check: checksum.clone(), size: 10, kind: Kind::Image, created: 0, last_access: u64::MAX / 2, hits: 0, meta: Default::default(), tone: None };
     super::persist::encode_line(hot_key, &hot, &mut index);
     std::fs::write(dir.join("index.tsv"), index).unwrap();
 }

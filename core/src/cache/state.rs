@@ -1,16 +1,18 @@
 use super::entry::{Entry, Kind, KindStats, CacheStats};
+use super::verify::Verified;
 use crate::analysis::ToneData;
 use crate::limits::Limits;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 pub struct Slot {
     pub version: u64,
     pub key: String,
     pub entry: Entry,
     pub readers: u32,
-    pub verified: bool,
+    pub verified: Arc<Verified>,
     pub kept: bool,
 }
 
@@ -101,12 +103,6 @@ impl State {
         self.entries.get(name)
     }
 
-    pub fn mark_verified(&mut self, name: &str, version: u64) {
-        if let Some(slot) = self.entries.get_mut(name).filter(|slot| slot.version == version) {
-            slot.verified = true;
-        }
-    }
-
     pub fn set_tone(&mut self, name: &str, tone: ToneData) -> bool {
         let changed = self.entries.get_mut(name).map(|slot| slot.entry.tone = Some(tone)).is_some();
         if changed {
@@ -120,7 +116,7 @@ impl State {
         self.changes.insert(name.to_owned(), self.revision);
     }
 
-    pub fn insert(&mut self, name: String, key: String, entry: Entry, verified: bool) {
+    pub fn insert(&mut self, name: String, key: String, entry: Entry, written_here: bool) {
         let kept = self.take(&name).is_some_and(|slot| slot.kept);
         self.changed(&name);
         self.version += 1;
@@ -129,6 +125,7 @@ impl State {
         stats.bytes += entry.size;
         stats.files += 1;
         self.keys.insert(key.clone(), name.clone());
+        let verified = if written_here { Verified::written(&entry.check) } else { Verified::loaded(&entry.check) };
         let slot = Slot { key, entry, readers: 0, verified, kept, version: self.version };
         if !self.writing.contains_key(&name) {
             self.order.insert(&name, &slot);
@@ -152,13 +149,13 @@ impl State {
         Some(slot)
     }
 
-    pub fn pin(&mut self, name: &str, now: u64) -> Option<(u64, u64)> {
+    pub fn pin(&mut self, name: &str, now: u64) -> Option<(u64, u64, Arc<Verified>)> {
         let slot = self.entries.get_mut(name)?;
         self.order.remove(name, slot);
         slot.readers += 1;
         slot.entry.last_access = now;
         slot.entry.hits += 1;
-        let result = (slot.entry.size, slot.version);
+        let result = (slot.entry.size, slot.version, slot.verified.clone());
         self.changed(name);
         Some(result)
     }

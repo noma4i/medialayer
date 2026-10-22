@@ -29,9 +29,13 @@ impl Kind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Check {
-    Sum(u64),
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Check(pub std::sync::Arc<[u64]>);
+
+impl Check {
+    pub fn segments_for(size: u64) -> u64 {
+        size.div_ceil(super::verify::SEGMENT as u64)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

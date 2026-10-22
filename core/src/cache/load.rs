@@ -60,7 +60,7 @@ fn merge(inner: &CacheShared, batch: &[(String, Option<Entry>)], bins: &HashSet<
     let hashed: Vec<_> = batch.iter().map(|record| (if record.1.is_some() { file_name(&record.0) } else { record.0.clone() }, record)).collect();
     let mut state = inner.state();
     for (name, (key, entry)) in hashed {
-        if state.slot(&name).is_some_and(|slot| slot.verified) {
+        if state.slot(&name).is_some_and(|slot| slot.verified.is_sized()) {
             continue;
         }
         if let Some(entry) = entry {

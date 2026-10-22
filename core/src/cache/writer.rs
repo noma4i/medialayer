@@ -6,7 +6,7 @@ use crate::proxy::Meta;
 use super::naming::{bin_path, file_name, part_path};
 use super::reservation::SpaceReservation;
 use super::save::mark_dirty;
-use super::verify::sum_of;
+use super::verify::{sum_of, SEGMENT};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -50,6 +50,8 @@ pub struct Writer {
     file: Option<Arc<std::fs::File>>,
     reservation: SpaceReservation,
     hasher: Sha256,
+    filled: usize,
+    sums: Vec<u64>,
     renamed: bool,
     #[cfg(test)]
     io_calls: Arc<(std::sync::atomic::AtomicUsize, std::sync::atomic::AtomicUsize)>,
@@ -62,7 +64,7 @@ impl Writer {
         let part = part_path(&inner.dir, &name, inner.part_sequence.fetch_add(1, Ordering::SeqCst));
         let registration = Registration::new(&inner, &name, key, kind, &part);
         let reservation = SpaceReservation::new(inner.clone());
-        let mut writer = Writer { inner, key: key.to_string(), name, kind, meta: Meta::default(), part, _registration: registration, file: None, reservation, hasher: Sha256::new(), renamed: false, #[cfg(test)] io_calls: Arc::default() };
+        let mut writer = Writer { inner, key: key.to_string(), name, kind, meta: Meta::default(), part, _registration: registration, file: None, reservation, hasher: Sha256::new(), filled: 0, sums: Vec::new(), renamed: false, #[cfg(test)] io_calls: Arc::default() };
         writer.file = Some(create_part(&writer.inner.handle, &writer.part).await?);
         Ok(writer)
     }
@@ -85,8 +87,21 @@ impl Writer {
         #[cfg(test)]
         self.inner.copied_bytes.fetch_add(bytes.len() as u64, Ordering::Relaxed);
         tokio::task::spawn_blocking(move || (&*file).write_all(&bytes)).await.map_err(|error| CacheError::Io(error.to_string()))??;
-        self.hasher.update(data);
+        self.absorb(data);
         Ok(())
+    }
+
+    fn absorb(&mut self, mut data: &[u8]) {
+        while !data.is_empty() {
+            let take = (SEGMENT - self.filled).min(data.len());
+            self.hasher.update(&data[..take]);
+            self.filled += take;
+            data = &data[take..];
+            if self.filled == SEGMENT {
+                self.sums.push(sum_of(std::mem::take(&mut self.hasher)));
+                self.filled = 0;
+            }
+        }
     }
 
     pub async fn abort(mut self) {
@@ -124,7 +139,11 @@ impl Writer {
             let mut state = inner.state();
             let size = self.reservation.written();
             self.reservation.settle(&mut state);
-            let check = Check::Sum(sum_of(self.hasher.clone()));
+            let mut sums = std::mem::take(&mut self.sums);
+            if self.filled > 0 {
+                sums.push(sum_of(std::mem::take(&mut self.hasher)));
+            }
+            let check = Check(sums.into());
             let entry = Entry { size, check, kind: self.kind, created: now, last_access: now, hits: 0, meta: self.meta.clone(), tone: None };
             state.insert(self.name.clone(), self.key.clone(), entry, true);
         }

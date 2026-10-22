@@ -6,7 +6,7 @@ use crate::limits::{EvictionStrategy, Limits};
 use crate::proxy::Meta;
 
 fn entry() -> Entry {
-    Entry { size: 1, check: Check::Sum(0), kind: Kind::Stream, created: 0, last_access: 0, hits: 0, meta: Meta::default(), tone: None }
+    Entry { size: 1, check: Check(vec![0].into()), kind: Kind::Stream, created: 0, last_access: 0, hits: 0, meta: Meta::default(), tone: None }
 }
 
 #[tokio::test]

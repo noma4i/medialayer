@@ -37,7 +37,7 @@ async fn inv_cache_24_unknown_index_version_discards_entries() {
 }
 
 fn sample(meta: Meta) -> Entry {
-    Entry { check: super::entry::Check::Sum(0), size: 42, kind: Kind::Stream, created: 7, last_access: 9, hits: 3, meta, tone: None }
+    Entry { check: super::entry::Check(vec![0; 1].into()), size: 42, kind: Kind::Stream, created: 7, last_access: 9, hits: 3, meta, tone: None }
 }
 
 #[test]

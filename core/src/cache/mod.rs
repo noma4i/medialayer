@@ -56,3 +56,6 @@ mod test_support;
 mod tone_tests;
 #[cfg(test)]
 mod optimization_tests;
+
+#[cfg(test)]
+mod segment_tests;
