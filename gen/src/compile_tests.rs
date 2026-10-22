@@ -9,7 +9,7 @@ fn fixtures() -> PathBuf {
 }
 
 fn spec() -> MediaSpec {
-    parse_files(&[fixtures().join("yupi.mdl"), fixtures().join("compile.mdl")]).unwrap()
+    parse_files(&[fixtures().join("feed.mdl"), fixtures().join("compile.mdl")]).unwrap()
 }
 
 fn required(name: &str) -> String {

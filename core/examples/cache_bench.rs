@@ -179,7 +179,7 @@ async fn fill(args: &Args) {
         let id = rng.next() % 1_000_000_000;
         if (video_bytes as f64) < VIDEO_BYTE_SHARE * (total as f64) + 1.0 {
             let length = rng.sized(VIDEO_SIZES).min(96 * MIB);
-            let url = format!("https://cdn.yupi.social/videos/{id}.mp4");
+            let url = format!("https://cdn.example.com/videos/{id}.mp4");
             let meta = Meta { content_type: Some("video/mp4".to_string()), total_length: Some(length) };
             let mut index = 0;
             while index * BLOCK < length {
@@ -194,7 +194,7 @@ async fn fill(args: &Args) {
             total += length;
         } else {
             let length = rng.sized(IMAGE_SIZES);
-            let key = format!("https://cdn.yupi.social/images/{id}.jpg");
+            let key = format!("https://cdn.example.com/images/{id}.jpg");
             let meta = Meta { content_type: Some("image/jpeg".to_string()), total_length: None };
             write_entry(&store, &key, meta, length, &mut buffer).await;
             writeln!(manifest, "image\t{key}\t0\t{length}\t{length}").unwrap();
@@ -242,7 +242,7 @@ async fn churn(store: CacheStore, stop: Arc<std::sync::atomic::AtomicBool>, rate
     let mut buffer = Vec::new();
     let mut sequence = 0u64;
     while !stop.load(Ordering::SeqCst) {
-        let key = format!("https://cdn.yupi.social/churn/{sequence}.mp4#0");
+        let key = format!("https://cdn.example.com/churn/{sequence}.mp4#0");
         let meta = Meta { content_type: Some("video/mp4".to_string()), total_length: Some(BLOCK) };
         write_entry(&store, &key, meta, BLOCK, &mut buffer).await;
         sequence += 1;

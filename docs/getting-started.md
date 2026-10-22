@@ -44,7 +44,7 @@ On Linux, install `cargo-ndk` and the Rust Android targets. Set `ANDROID_NDK_HOM
 
 ```swift
 @main
-struct YupiApp: App {
+struct ExampleApp: App {
   let media = try! MediaLayer.open(
     fetcher: URLSessionFetcher(),
     settings: UserDefaultsSettings()
@@ -59,7 +59,7 @@ struct YupiApp: App {
 ### Kotlin
 
 ```kotlin
-class YupiApp : Application() {
+class ExampleApp : Application() {
   lateinit var media: MediaLayer
 
   override fun onCreate() {
