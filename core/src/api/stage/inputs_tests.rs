@@ -76,7 +76,7 @@ async fn inv_api_04_the_window_loads_the_neighbours_through_the_proxy_and_the_ac
     let stage = &rig.parts.stage;
 
     stage.replace_window(5, videos(20));
-    stage.set_playing(&url_of(5), true, None);
+    stage.set_playing(&url_of(5), true, &[]);
 
     eventually(|| [4, 5, 6].iter().all(|page| rig.factory.slot_holding(&url_of(*page)).is_some())).await;
     eventually(|| rig.holder(&url_of(5)).1.calls().contains(&SlotCall::Play)).await;
@@ -94,13 +94,13 @@ async fn inv_api_04_declaring_the_same_window_again_sends_no_commands() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
     stage.replace_window(5, videos(20));
-    stage.set_playing(&url_of(5), true, None);
+    stage.set_playing(&url_of(5), true, &[]);
     eventually(|| rig.factory.slot_holding(&url_of(6)).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Preroll))).await;
     eventually(|| stage.commands_idle()).await;
     let settled = total_calls(&rig);
 
     stage.replace_window(5, videos(20));
-    stage.set_playing(&url_of(5), true, None);
+    stage.set_playing(&url_of(5), true, &[]);
     eventually(|| stage.commands_idle()).await;
 
     assert_eq!(total_calls(&rig), settled);
@@ -111,7 +111,7 @@ async fn inv_api_04_a_page_that_still_wants_to_play_gets_a_player_again_after_it
     let rig = rig().await;
     let stage = &rig.parts.stage;
     stage.replace_window(5, videos(20));
-    stage.set_playing(&url_of(5), true, None);
+    stage.set_playing(&url_of(5), true, &[]);
     eventually(|| rig.factory.slot_holding(&url_of(5)).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
 
     stage.replace_window(0, Vec::new());
@@ -133,7 +133,7 @@ async fn inv_pool_01_hundreds_of_window_shifts_never_create_more_players_than_sl
     for step in 0..300usize {
         let active = (step * 7) % 20;
         stage.replace_window(active, videos(20));
-        stage.set_playing(&url_of(active), true, None);
+        stage.set_playing(&url_of(active), true, &[]);
     }
 
     eventually(|| rig.factory.slots.lock().unwrap().len() == stage.slot_count() && stage.commands_idle()).await;
@@ -146,8 +146,8 @@ async fn inv_pool_02_the_latest_playing_intent_wins_and_only_one_slot_plays() {
     let stage = &rig.parts.stage;
     stage.replace_window(5, videos(20));
 
-    stage.set_playing(&url_of(5), true, None);
-    stage.set_playing(&url_of(6), true, None);
+    stage.set_playing(&url_of(5), true, &[]);
+    stage.set_playing(&url_of(6), true, &[]);
 
     eventually(|| [5, 6].iter().all(|page| rig.factory.slot_holding(&url_of(*page)).is_some())).await;
     eventually(|| rig.holder(&url_of(6)).1.calls().contains(&SlotCall::Play)).await;
@@ -249,7 +249,7 @@ async fn inv_prefetch_21_the_window_prefetches_only_after_the_playing_item_has_i
     }
     let stage = &rig.parts.stage;
     stage.visible(video(&url_of(0)), true);
-    stage.set_playing(&url_of(0), true, None);
+    stage.set_playing(&url_of(0), true, &[]);
     eventually(|| rig.parts.places.state(&url_of(0)) == MediaState::Loading).await;
 
     stage.replace_window(0, videos(8));
@@ -375,7 +375,7 @@ async fn inv_api_17_an_image_window_prefetches_remote_images_into_the_cache_and_
     let rig = rig().await;
     let stage = &rig.parts.stage;
     stage.replace_window(5, videos(20));
-    stage.set_playing(&url_of(5), true, None);
+    stage.set_playing(&url_of(5), true, &[]);
     eventually(|| rig.factory.slot_holding(&url_of(6)).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Preroll))).await;
     eventually(|| stage.commands_idle()).await;
     let settled = total_calls(&rig);
@@ -435,17 +435,17 @@ async fn inv_api_19_scrolling_a_feed_keeps_the_active_page_playing_and_its_neigh
         let rendered: Vec<usize> = (active.saturating_sub(2)..(active + 3).min(20)).collect();
         for page in shown.iter().filter(|page| !rendered.contains(page)) {
             stage.visible(all[*page].clone().unwrap(), false);
-            stage.set_playing(&url_of(*page), false, None);
+            stage.set_playing(&url_of(*page), false, &[]);
         }
         for page in rendered.iter().filter(|page| !shown.contains(page)) {
             stage.visible(all[*page].clone().unwrap(), true);
         }
         shown = rendered;
         if active > 0 {
-            stage.set_playing(&url_of(active - 1), false, None);
+            stage.set_playing(&url_of(active - 1), false, &[]);
         }
         stage.replace_window(active, all.clone());
-        stage.set_playing(&url_of(active), true, None);
+        stage.set_playing(&url_of(active), true, &[]);
 
         eventually(|| stage.commands_idle()).await;
         let held = |page: usize| rig.factory.slot_holding(&url_of(page));
@@ -515,7 +515,7 @@ async fn inv_api_30_a_peeked_neighbour_plays_muted_beside_the_active_page_and_is
     let rig = rig().await;
     let stage = &rig.parts.stage;
     stage.replace_window(5, videos(20));
-    stage.set_playing(&url_of(5), true, None);
+    stage.set_playing(&url_of(5), true, &[]);
     eventually(|| rig.factory.slot_holding(&url_of(6)).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Preroll))).await;
 
     stage.set_peeking(&url_of(6), true);
@@ -525,7 +525,7 @@ async fn inv_api_30_a_peeked_neighbour_plays_muted_beside_the_active_page_and_is
     assert!(mute < calls.iter().position(|call| *call == SlotCall::Play).unwrap());
     assert!(!rig.holder(&url_of(5)).1.calls().contains(&SlotCall::Pause));
 
-    stage.set_playing(&url_of(6), true, None);
+    stage.set_playing(&url_of(6), true, &[]);
     eventually(|| rig.holder(&url_of(5)).1.calls().contains(&SlotCall::Pause) && rig.holder(&url_of(6)).1.calls().contains(&SlotCall::Unmute)).await;
     assert_eq!(rig.holder(&url_of(6)).1.calls().iter().filter(|call| **call == SlotCall::Play).count(), 1);
 }
@@ -536,7 +536,7 @@ async fn inv_api_31_a_playing_place_resumes_at_its_position_when_the_whole_windo
     let stage = &rig.parts.stage;
     let clip = url_of(0);
     stage.replace_window(0, videos(20));
-    stage.set_playing(&clip, true, None);
+    stage.set_playing(&clip, true, &[]);
     eventually(|| rig.factory.slot_holding(&clip).is_some()).await;
     let (_, player) = rig.holder(&clip);
     player.sample.lock().unwrap().position_ms = 5_600;
@@ -546,7 +546,7 @@ async fn inv_api_31_a_playing_place_resumes_at_its_position_when_the_whole_windo
     stage.replace_window(0, Vec::new());
     eventually(|| player.calls().contains(&SlotCall::Unload)).await;
     stage.replace_window(0, videos(20));
-    stage.set_playing(&clip, true, None);
+    stage.set_playing(&clip, true, &[]);
 
     eventually(|| rig.factory.slot_holding(&clip).is_some() && stage.commands_idle()).await;
     let calls = rig.holder(&clip).1.calls();
@@ -562,7 +562,7 @@ async fn inv_api_22_moving_the_active_page_reuses_the_declared_list_and_loads_th
     stage.replace_window(2, videos(20));
 
     stage.move_window(10);
-    stage.set_playing(&url_of(10), true, None);
+    stage.set_playing(&url_of(10), true, &[]);
 
     eventually(|| [9, 10, 11].iter().all(|page| rig.factory.slot_holding(&url_of(*page)).is_some())).await;
     eventually(|| rig.holder(&url_of(10)).1.calls().contains(&SlotCall::Play)).await;
@@ -645,7 +645,7 @@ async fn inv_api_37_a_fraction_chosen_before_the_duration_is_known_becomes_a_see
     stage.replace_window(0, videos(1));
     eventually(|| rig.factory.slot_holding(&key).is_some()).await;
     assert!(!rig.holder(&key).1.calls().iter().any(|call| matches!(call, SlotCall::Seek { .. })));
-    stage.set_playing(&key, true, None);
+    stage.set_playing(&key, true, &[]);
 
     eventually(|| rig.holder(&key).1.calls().contains(&SlotCall::Seek { position_ms: 30_000 })).await;
 }
@@ -664,7 +664,7 @@ async fn inv_api_38_a_pending_fraction_becomes_a_seek_when_the_slot_reports_read
     eventually(|| rig.factory.slot_holding(&key).is_some()).await;
     let (slot, player) = rig.holder(&key);
     player.sample.lock().unwrap().duration_ms = None;
-    stage.set_playing(&key, true, None);
+    stage.set_playing(&key, true, &[]);
     eventually(|| player.calls().contains(&SlotCall::Play)).await;
     assert!(!player.calls().iter().any(|call| matches!(call, SlotCall::Seek { .. })));
 
@@ -707,7 +707,7 @@ async fn inv_session_12_players_stay_paused_until_the_last_suspension_is_release
     let rig = rig().await;
     let stage = &rig.parts.stage;
     stage.replace_window(5, videos(20));
-    stage.set_playing(&url_of(5), true, None);
+    stage.set_playing(&url_of(5), true, &[]);
     eventually(|| rig.factory.slot_holding(&url_of(5)).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
 
     stage.suspend(1, &[]);
@@ -727,8 +727,8 @@ async fn inv_session_12_only_a_group_every_suspension_allows_keeps_playing() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
     stage.replace_window(5, videos(20));
-    stage.set_playing(&url_of(5), true, None);
-    stage.set_playing(&url_of(6), true, Some("chat"));
+    stage.set_playing(&url_of(5), true, &[]);
+    stage.set_playing(&url_of(6), true, &["chat".to_string()]);
     eventually(|| transport(&rig, &url_of(6)) == Some(SlotCall::Play)).await;
 
     stage.suspend(1, &["chat".to_string(), "voice".to_string()]);
@@ -741,6 +741,24 @@ async fn inv_session_12_only_a_group_every_suspension_allows_keeps_playing() {
     stage.resume(3);
     eventually(|| transport(&rig, &url_of(6)) == Some(SlotCall::Play)).await;
 
-    stage.set_playing(&url_of(6), true, None);
+    stage.set_playing(&url_of(6), true, &[]);
     eventually(|| transport(&rig, &url_of(6)) == Some(SlotCall::Pause)).await;
+}
+
+#[tokio::test]
+async fn inv_session_14_a_key_with_several_groups_plays_if_one_group_is_allowed_by_every_suspension() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    stage.replace_window(5, videos(20));
+    stage.set_playing(&url_of(5), true, &["ring".to_string(), "system".to_string()]);
+    eventually(|| transport(&rig, &url_of(5)) == Some(SlotCall::Play)).await;
+
+    stage.suspend(1, &["system".to_string()]);
+    eventually(|| stage.commands_idle()).await;
+    assert_eq!(transport(&rig, &url_of(5)), Some(SlotCall::Play), "a group allowed by the only suspension stopped");
+
+    stage.suspend(2, &["ring".to_string()]);
+    eventually(|| transport(&rig, &url_of(5)) == Some(SlotCall::Pause)).await;
+    stage.resume(2);
+    eventually(|| transport(&rig, &url_of(5)) == Some(SlotCall::Play)).await;
 }

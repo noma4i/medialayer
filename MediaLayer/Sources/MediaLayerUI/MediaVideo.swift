@@ -93,6 +93,7 @@ public struct MediaVideo<Content: View>: View {
     .onChange(of: onScreen) { _, value in declare(visible: value) }
     .onDisappear { declare(visible: false) }
     .onChange(of: playing) { _, value in context.map { KeyClaims.of($0.places).setPlaying(owner: owner, key: source.url, playing: value, group: group) } }
+    .onChange(of: group) { _, value in context.map { KeyClaims.of($0.places).setPlaying(owner: owner, key: source.url, playing: playing, group: value) } }
     .onChange(of: peeking) { _, value in context.map { KeyClaims.of($0.places).setPeeking(owner: owner, key: source.url, peeking: value) } }
     .onChange(of: muted) { _, value in context.map { KeyClaims.of($0.places).setMuted(owner: owner, key: source.url, muted: value) } }
     .id(source.url)

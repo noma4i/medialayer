@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.media.AudioManager
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.test.core.app.ApplicationProvider
@@ -58,18 +59,21 @@ class MemoryWarningTest {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val owner = object : LifecycleOwner { override val lifecycle = LifecycleRegistry(this) }
     val signals = SystemSignals(context, RecordingEvents(), owner.lifecycle)
-    Media.muted = false
+    val looper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+    val scratch = Snapshot.takeMutableSnapshot()
     signals.register()
     try {
-      context.sendBroadcast(Intent(Intent.ACTION_HEADSET_PLUG))
-      org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
-      assertFalse(Media.muted)
-      context.sendBroadcast(Intent(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
-      org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
-      assertTrue(Media.muted)
+      scratch.enter {
+        context.sendBroadcast(Intent(Intent.ACTION_HEADSET_PLUG))
+        looper.idle()
+        assertFalse(Media.muted)
+        context.sendBroadcast(Intent(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
+        looper.idle()
+        assertTrue(Media.muted)
+      }
     } finally {
       signals.unregister()
-      Media.muted = false
+      scratch.dispose()
     }
   }
 }

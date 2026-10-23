@@ -1,8 +1,8 @@
 use super::*;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 fn policy(group: &str, priority: u32, resume: ResumeMode) -> Policy {
-    Policy { group: group.into(), priority, resume }
+    Policy { groups: BTreeSet::from([group.to_string()]), priority, resume }
 }
 
 fn play(lease: u64) -> LeaseOrder {
@@ -221,16 +221,31 @@ fn inv_session_02_applying_the_same_inputs_again_is_idempotent() {
     }
 }
 
+fn groups(names: &[&str]) -> BTreeSet<String> {
+    names.iter().map(|name| name.to_string()).collect()
+}
+
 #[test]
 fn inv_session_14_a_group_change_re_elects_under_a_suspension() {
     let (mut election, l) = with(&[("a", Context::Ring)]);
     election.set_intent("a", l[0], Intent::Play);
     election.set_suspension(1, true, Some(&["chat"])).unwrap();
     assert_eq!(election.active(), None);
-    assert_eq!(election.set_group("a", l[0], "chat"), [play(l[0])]);
-    assert!(election.set_group("a", l[0], "chat").is_empty());
-    assert_eq!(election.set_group("a", l[0], "ring"), [pause(l[0])]);
-    assert!(election.set_group("other", l[0], "chat").is_empty());
+    assert_eq!(election.set_groups("a", l[0], groups(&["chat"])), [play(l[0])]);
+    assert!(election.set_groups("a", l[0], groups(&["chat"])).is_empty());
+    assert_eq!(election.set_groups("a", l[0], groups(&["ring"])), [pause(l[0])]);
+    assert!(election.set_groups("other", l[0], groups(&["chat"])).is_empty());
+}
+
+#[test]
+fn inv_session_14_a_key_plays_only_if_one_of_its_groups_is_allowed_by_every_suspension() {
+    let (mut election, l) = with(&[("a", Context::Ring)]);
+    election.set_intent("a", l[0], Intent::Play);
+    election.set_groups("a", l[0], groups(&["ring", "system"]));
+    assert_eq!(election.set_suspension(1, true, Some(&["system"])).unwrap(), []);
+    assert_eq!(election.active(), Some(l[0]));
+    assert_eq!(election.set_suspension(2, true, Some(&["ring"])).unwrap(), [pause(l[0])]);
+    assert_eq!(election.set_suspension(2, false, None).unwrap(), [play(l[0])]);
 }
 
 #[test]

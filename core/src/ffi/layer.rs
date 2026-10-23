@@ -332,9 +332,9 @@ impl MediaLayer {
         self.declare_latest((name, pages), |(name, _)| format!("image:{name}"), move |assembled, (name, pages)| assembled.stage.replace_image_window(&name, active as usize, pages));
     }
 
-    #[uniffi::method(default(group = None))]
-    pub fn set_playing(&self, key: String, playing: bool, group: Option<String>) {
-        self.declare_latest((key, group), |(key, _)| format!("playing:{key}"), move |assembled, (key, group)| assembled.stage.set_playing(&key, playing, group.as_deref()));
+    #[uniffi::method(default(groups = []))]
+    pub fn set_playing(&self, key: String, playing: bool, groups: Vec<String>) {
+        self.declare_latest((key, groups), |(key, _)| format!("playing:{key}"), move |assembled, (key, groups)| assembled.stage.set_playing(&key, playing, &groups));
     }
 
     #[uniffi::method(default(allow_groups = []))]

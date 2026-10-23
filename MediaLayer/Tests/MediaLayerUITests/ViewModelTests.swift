@@ -86,7 +86,7 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
     lock.withLock { visibility.append(VisibleCall(url: source.url, visible: visible)) }
     record("visible \(visible)")
   }
-  func setPlaying(key: String, playing: Bool, group: String?) { record("playing \(playing)" + (group.map { " group=\($0)" } ?? "")) }
+  func setPlaying(key: String, playing: Bool, groups: [String]) { record("playing \(playing)" + (groups.isEmpty ? "" : " groups=\(groups.joined(separator: ","))")) }
   func setPeeking(key: String, peeking: Bool) { record("peeking \(peeking)") }
   func setMuted(key: String, muted: Bool) { record("muted \(muted)") }
   func setMutedAll(muted: Bool) { record("mutedAll \(muted)") }
@@ -311,16 +311,19 @@ struct ViewModelTests {
   }
 
   @Test
-  func inv_session_14_theGroupOfAPlayingViewReachesTheCoreAndAChangeIsForwarded() {
+  func inv_session_14_theGroupsOfThePlayingViewsOfAKeyReachTheCoreAndAChangeIsForwarded() {
     let places = RecordingPlaces()
     let claims = KeyClaims(places: places)
     let owner = UUID()
 
-    claims.setPlaying(owner: owner, key: "k", playing: true, group: "chat")
-    claims.setPlaying(owner: owner, key: "k", playing: true, group: "chat")
-    claims.setPlaying(owner: owner, key: "k", playing: true, group: "voice")
+    let other = UUID()
 
-    #expect(places.recorded == ["playing true group=chat", "playing true group=voice"])
+    claims.setPlaying(owner: owner, key: "k", playing: true, group: "chat")
+    claims.setPlaying(owner: owner, key: "k", playing: true, group: "chat")
+    claims.setPlaying(owner: other, key: "k", playing: true, group: "voice")
+    claims.setPlaying(owner: other, key: "k", playing: false)
+
+    #expect(places.recorded == ["playing true groups=chat", "playing true groups=chat,voice", "playing true groups=chat"])
   }
 
   @Test

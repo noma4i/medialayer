@@ -134,7 +134,7 @@ fn inv_api_35_a_slot_sample_runs_outside_the_stage_lock() {
             let stage = rig.parts.stage.clone();
             let url = url_of(0);
             stage.replace_window(0, videos(3));
-            stage.set_playing(&url, true, None);
+            stage.set_playing(&url, true, &[]);
             eventually(|| rig.factory.slot_holding(&url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
             let (_, slot) = rig.holder(&url);
             slot.sample.lock().unwrap().position_ms = 5_000;

@@ -84,7 +84,7 @@ impl Stage {
         self.inner.prefetcher.set_image_window(name, active, remote);
     }
 
-    pub fn set_playing(&self, key: &str, playing: bool, group: Option<&str>) {
+    pub fn set_playing(&self, key: &str, playing: bool, groups: &[String]) {
         crate::trace!("stage", "set_playing {} {playing}", crate::trace::tail(key));
         let (state, commands) = {
             let mut state = self.state();
@@ -92,8 +92,8 @@ impl Stage {
                 state.forget_lease(key)
             } else {
                 let lease = state.lease_for(key);
-                let group = group.map_or_else(|| Context::Ring.policy().group, str::to_string);
-                let mut orders = state.election.set_group(key, lease, &group);
+                let groups = if groups.is_empty() { Context::Ring.policy().groups } else { groups.iter().map(|group| group.trim().to_string()).collect() };
+                let mut orders = state.election.set_groups(key, lease, groups);
                 orders.extend(state.election.set_intent(key, lease, Intent::Play));
                 state.commands_for(orders)
             };

@@ -315,7 +315,7 @@ When the app loses its audio output (headphones unplugged on iOS, `ACTION_AUDIO_
 
 A dialog, a share sheet or a modal screen stops all players while it is open. Call `suspendPlayback` on the `MediaLayer`. It returns a `PlaybackSuspension`. While at least one suspension is alive, every player is paused, except the places whose `group` is in the `allowGroups` of every live suspension. Places stay mounted and prepared.
 
-`release()` acts once, however often you call it. Swift also releases when the object is freed. In Kotlin `PlaybackSuspension` is `AutoCloseable` and `close()` releases it. You can release from any thread. When the last suspension is released, the places that played before play again. A place with manual resume (a chat voice note that lost the election) stays idle. A blank group in `allowGroups` is an error.
+A place can change its `group` while it is mounted: it starts or stops with the next change. Several places can show the same url with different groups. That url plays when one of their groups is allowed by every live suspension, and the groups of two suspensions never add up (`[system]` and `[ring]` together allow neither). `release()` acts once, however often you call it. Swift also releases when the object is freed. In Kotlin `PlaybackSuspension` is `AutoCloseable` and `close()` releases it. You can release from any thread. When the last suspension is released, the places that played before play again. A place with manual resume (a chat voice note that lost the election) stays idle. A blank group in `allowGroups` is an error.
 
 ### Swift
 

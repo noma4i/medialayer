@@ -38,7 +38,7 @@ private final class CountingPlaces: MediaPlaces, @unchecked Sendable {
   var coreReads: Int { lock.withLock { reads } }
 
   func visible(source: MediaItem, visible: Bool) { inner.visible(source: source, visible: visible) }
-  func setPlaying(key: String, playing: Bool, group: String?) { inner.setPlaying(key: key, playing: playing, group: group) }
+  func setPlaying(key: String, playing: Bool, groups: [String]) { inner.setPlaying(key: key, playing: playing, groups: groups) }
   func setPeeking(key: String, peeking: Bool) { inner.setPeeking(key: key, peeking: peeking) }
   func setMuted(key: String, muted: Bool) { inner.setMuted(key: key, muted: muted) }
   func setRate(key: String, rate: Float) { inner.setRate(key: key, rate: rate) }

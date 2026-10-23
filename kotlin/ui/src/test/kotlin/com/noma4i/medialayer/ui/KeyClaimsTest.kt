@@ -70,14 +70,16 @@ class KeyClaimsTest {
   }
 
   @Test
-  fun inv_session_14_the_group_of_a_playing_view_reaches_the_core_and_a_change_is_forwarded() {
+  fun inv_session_14_the_groups_of_the_playing_views_of_a_key_reach_the_core_and_a_change_is_forwarded() {
     val owner = Any()
+    val other = Any()
 
     claims.setPlaying(owner, "k", true, "chat")
     claims.setPlaying(owner, "k", true, "chat")
-    claims.setPlaying(owner, "k", true, "voice")
+    claims.setPlaying(other, "k", true, "voice")
+    claims.setPlaying(other, "k", false)
 
-    assertEquals(listOf("playing:k:true:chat", "playing:k:true:voice"), layer.calls.toList())
+    assertEquals(listOf("playing:k:true:chat", "playing:k:true:chat,voice", "playing:k:true:chat"), layer.calls.toList())
   }
 
   @Test

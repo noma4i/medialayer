@@ -7,7 +7,7 @@ public protocol MediaPlaces: AnyObject, Sendable {
   func imageStats() -> ImageCounters
   func cacheKey(url: String, headers: [String: String]) -> String
   func visible(source: MediaItem, visible: Bool)
-  func setPlaying(key: String, playing: Bool, group: String?)
+  func setPlaying(key: String, playing: Bool, groups: [String])
   func setPeeking(key: String, peeking: Bool)
   func setMuted(key: String, muted: Bool)
   func setRate(key: String, rate: Float)

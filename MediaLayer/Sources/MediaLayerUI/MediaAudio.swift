@@ -10,7 +10,7 @@ public final class AudioPlayback {
   public private(set) var rate: Float
   public private(set) var state: MediaState = .idle
   @ObservationIgnored private let key: String
-  @ObservationIgnored private let group: String?
+  @ObservationIgnored private(set) var group: String?
   @ObservationIgnored private let places: MediaPlaces
 
   init(key: String, playing: Bool, rate: Float = 1, group: String? = nil, places: MediaPlaces) {
@@ -23,6 +23,10 @@ public final class AudioPlayback {
 
   public func toggle() {
     setPlaying(!isPlaying)
+  }
+
+  func follow(group value: String?) {
+    group = value
   }
 
   public func setRate(_ value: Float) {
@@ -48,7 +52,7 @@ public final class AudioPlayback {
 
   private func setPlaying(_ value: Bool) {
     isPlaying = value
-    places.setPlaying(key: key, playing: value, group: group)
+    places.setPlaying(key: key, playing: value, groups: group.map { [$0] } ?? [])
   }
 }
 
@@ -138,6 +142,10 @@ public struct MediaAudio<Content: View>: View {
         }
         .onChange(of: muted) { _, value in KeyClaims.of(context.places).setMuted(owner: owner, key: source.url, muted: value) }
         .onChange(of: rate) { _, value in audio.setRate(value) }
+        .onChange(of: group) { _, value in
+          audio.follow(group: value)
+          KeyClaims.of(context.places).setPlaying(owner: owner, key: source.url, playing: audio.isPlaying, group: value)
+        }
     }
   }
 }

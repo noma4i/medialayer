@@ -1,4 +1,5 @@
 use super::suspensions::{SuspensionError, Suspensions};
+use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResumeMode {
@@ -14,7 +15,7 @@ pub enum Intent {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Policy {
-    pub group: String,
+    pub groups: BTreeSet<String>,
     pub priority: u32,
     pub resume: ResumeMode,
 }
@@ -39,7 +40,7 @@ impl Context {
             Context::System => ("system", 475, ResumeMode::Automatic),
             Context::Exclusive => ("exclusive", 500, ResumeMode::Automatic),
         };
-        Policy { group: group.to_string(), priority, resume }
+        Policy { groups: BTreeSet::from([group.to_string()]), priority, resume }
     }
 }
 
@@ -126,15 +127,15 @@ impl Election {
         out
     }
 
-    pub fn set_group(&mut self, key: &str, lease: u64, group: &str) -> Vec<LeaseOrder> {
+    pub fn set_groups(&mut self, key: &str, lease: u64, groups: BTreeSet<String>) -> Vec<LeaseOrder> {
         let mut out = Vec::new();
         let Some(session) = self.sessions.iter_mut().find(|session| session.lease == lease && session.key == key) else {
             return out;
         };
-        if session.policy.group == group {
+        if session.policy.groups == groups {
             return out;
         }
-        session.policy.group = group.to_string();
+        session.policy.groups = groups;
         self.resolve(true, &mut out);
         out
     }
@@ -186,7 +187,7 @@ impl Election {
     }
 
     fn is_session_eligible(&self, session: &Session) -> bool {
-        self.is_foreground && session.intent == Intent::Play && self.suspensions.allows(&session.policy.group)
+        self.is_foreground && session.intent == Intent::Play && self.suspensions.allows_any(&session.policy.groups)
     }
 
     fn stop(&mut self, matches: impl Fn(&Session) -> bool) -> Vec<LeaseOrder> {

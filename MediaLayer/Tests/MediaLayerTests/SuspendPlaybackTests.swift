@@ -44,7 +44,7 @@ private func openPlaying(group: String? = nil) async throws -> (MediaLayer, Asyn
     defaults: defaultLimits(), pool: defaultPoolSettings()
   ))
   media.replaceWindow(active: 0, sources: [MediaItem(kind: .video, url: clip, headers: [:], cover: nil, blurHash: nil, strategy: .window)])
-  media.setPlaying(key: clip, playing: true, group: group)
+  media.setPlaying(key: clip, playing: true, groups: group.map { [$0] } ?? [])
   var events = slot.log.stream.makeAsyncIterator()
   #expect(await events.next() == "play")
   return (media, events)

@@ -26,7 +26,7 @@ async fn playing_clip(rig: &Rig) -> (usize, Arc<MockSlot>) {
     playlist.push_str("#EXT-X-ENDLIST\n");
     rig.fetcher.route(MEDIA, Script::ok(playlist.into_bytes()));
     rig.parts.stage.replace_window(0, vec![Some(MediaItem::bare(MEDIA, Kind::Video))]);
-    rig.parts.stage.set_playing(MEDIA, true, None);
+    rig.parts.stage.set_playing(MEDIA, true, &[]);
     eventually(|| rig.factory.slot_holding(MEDIA).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
     let (index, slot) = rig.holder(MEDIA);
     let route = slot.calls().into_iter().find_map(|call| if let SlotCall::Load { route, .. } = call { Some(route.url) } else { None }).unwrap();
@@ -112,7 +112,7 @@ async fn inv_readahead_08_the_slot_of_a_neighbour_gets_one_target_and_the_playin
     let rig = rig().await;
     let items = ["a", "b", "c"].map(|name| Some(MediaItem::bare(&named(name), Kind::Video)));
     rig.parts.stage.replace_window(1, items.to_vec());
-    rig.parts.stage.set_playing(&named("b"), true, None);
+    rig.parts.stage.set_playing(&named("b"), true, &[]);
     let (previous, playing) = (serve_clip(&rig, "a").await, serve_clip(&rig, "b").await);
 
     eventually(|| readaheads(&playing) == vec![8_000] && readaheads(&previous) == vec![4_000]).await;

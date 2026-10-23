@@ -16,7 +16,7 @@ final class KeyClaims: @unchecked Sendable {
   private struct Applied {
     var visible = false
     var playing = false
-    var group: String?
+    var groups: [String] = []
     var peeking = false
     var muted: Bool?
   }
@@ -71,7 +71,7 @@ final class KeyClaims: @unchecked Sendable {
   private struct Change {
     var visible: Bool?
     var playing: Bool?
-    var group: String?
+    var groups: [String] = []
     var peeking: Bool?
     var muted: Bool?
     var source: MediaItem?
@@ -93,8 +93,8 @@ final class KeyClaims: @unchecked Sendable {
     let visible = all.contains { $0.visible }
     if visible != last.visible { change.visible = visible; last.visible = visible }
     let playing = all.contains { $0.playing }
-    let group = all.filter(\.playing).compactMap(\.group).min()
-    if playing != last.playing || (playing && group != last.group) { change.playing = playing; change.group = group; last.playing = playing; last.group = group }
+    let groups = Set(all.filter(\.playing).compactMap(\.group)).sorted()
+    if playing != last.playing || (playing && groups != last.groups) { change.playing = playing; change.groups = groups; last.playing = playing; last.groups = groups }
     let peeking = all.contains { $0.peeking }
     if peeking != last.peeking { change.peeking = peeking; last.peeking = peeking }
     let opinions = all.compactMap(\.muted)
@@ -111,7 +111,7 @@ final class KeyClaims: @unchecked Sendable {
     guard let places else { return }
     MediaTrace.emit("claims", "key=\(MediaTrace.tail(key)) visible=\(change.visible.map(String.init) ?? "-") playing=\(change.playing.map(String.init) ?? "-") peeking=\(change.peeking.map(String.init) ?? "-") muted=\(change.muted.map(String.init) ?? "-")")
     if change.visible == true, let source = change.source { places.visible(source: source, visible: true) }
-    if let playing = change.playing { places.setPlaying(key: key, playing: playing, group: change.group) }
+    if let playing = change.playing { places.setPlaying(key: key, playing: playing, groups: change.groups) }
     if let peeking = change.peeking { places.setPeeking(key: key, peeking: peeking) }
     if let muted = change.muted { places.setMuted(key: key, muted: muted) }
     if change.visible == false, let source = change.source { places.visible(source: source, visible: false) }

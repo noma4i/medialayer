@@ -47,7 +47,7 @@ private fun open(slot: TransportSlot?) = MediaLayer.open(OpenConfig(availableByt
 private suspend fun openPlaying(slot: TransportSlot, group: String? = null): MediaLayer {
   val media = open(slot)
   media.replaceWindow(0u, listOf(MediaItem(Kind.VIDEO, CLIP, emptyMap(), null, null, strategy = CacheStrategy.WINDOW)))
-  media.setPlaying(CLIP, true, group)
+  media.setPlaying(CLIP, true, listOfNotNull(group))
   assertEquals("play", withTimeout(10_000) { slot.log.receive() })
   return media
 }

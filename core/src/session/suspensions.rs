@@ -23,6 +23,10 @@ impl Suspensions {
     pub fn allows(&self, group: &str) -> bool {
         self.entries.values().all(|allowed| allowed.as_ref().is_some_and(|groups| groups.contains(group)))
     }
+
+    pub fn allows_any(&self, groups: &BTreeSet<String>) -> bool {
+        groups.iter().any(|group| self.allows(group))
+    }
 }
 
 pub fn check_groups(groups: &[String]) -> Result<(), SuspensionError> {
