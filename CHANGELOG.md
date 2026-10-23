@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.7.0 - 2026-10-23
+
+### Added
+- `MediaLayer.suspendPlayback(allowGroups:)` pauses every player until its `PlaybackSuspension` is released.
+- `MediaVideo` and `MediaAudio` take a `group` that a suspension can allow to keep playing.
+- Losing the audio output, such as unplugged headphones, turns the global mute on.
+
+### Changed
+- `MediaPlaces.setPlaying` and `MediaLayer.setPlaying` take `groups` with the groups of the playing views.
+- `SystemSignalNames` takes an `outputLost` notification name.
+- A changed `group` of a mounted `MediaVideo` or `MediaAudio` reaches the player choice.
+
 ## 3.6.2 - 2026-10-23
 
 ### Fixed
