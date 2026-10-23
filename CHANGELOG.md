@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.6.2 - 2026-10-23
+
+### Fixed
+- Android first launch with another JNA library in the process cannot deadlock.
+
 ## 3.6.1 - 2026-10-23
 
 ### Fixed
