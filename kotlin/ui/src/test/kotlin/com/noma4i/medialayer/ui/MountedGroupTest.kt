@@ -107,6 +107,42 @@ class MountedGroupTest {
     hold.release()
   }
 
+  private fun mountToggledAudio(group: () -> String): AudioControl {
+    var control: AudioControl? = null
+    rule.setContent {
+      MediaLayerProvider(CompletableDeferred(layer), loader, null) {
+        MediaAudio(ClipSource(CLIP, Kind.AUDIO), group = group()) { control = it; Box(Modifier.size(80.dp)) }
+      }
+    }
+    rule.waitUntil(10_000) { control != null }
+    rule.runOnIdle { control!!.play() }
+    waitFor("play")
+    return control!!
+  }
+
+  @Test
+  fun inv_session_16_a_toggled_audio_keeps_playing_when_its_group_changes_under_a_suspension() {
+    var group by mutableStateOf("ring")
+    mountToggledAudio { group }
+    val hold = layer.suspendPlayback(listOf("system"))
+    waitFor("pause")
+    rule.runOnIdle { group = "system" }
+    waitFor("play")
+    assertEquals("play", slot.transport)
+    hold.release()
+  }
+
+  @Test
+  fun inv_session_16_a_toggled_audio_stays_playing_when_another_view_of_its_key_comes_and_goes() {
+    mountToggledAudio { "ring" }
+    val other = Any()
+    layer.claims.setPlaying(other, CLIP, true, "chat")
+    layer.claims.release(other, CLIP)
+    layer.setRate(CLIP, 2f)
+    rule.waitUntil(10_000) { looper.idle(); slot.log.last() == "rate" }
+    assertEquals("play", slot.transport)
+  }
+
   @Test
   fun inv_session_14_a_key_with_several_playing_owners_is_allowed_by_any_of_their_groups() {
     val claims = layer.claims
