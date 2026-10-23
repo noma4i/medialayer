@@ -97,14 +97,14 @@ private fun MediaLayerEnvironment(media: MediaLayer, imageLoader: ImageLoader?, 
 }
 
 @Composable
-internal fun rememberPlace(source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean = true, peeking: Boolean = false, visible: Boolean = true): MediaState {
-  if (visible) declarePlace(source, playing, muted, loop, peeking)
+internal fun rememberPlace(source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean = true, peeking: Boolean = false, visible: Boolean = true, group: String? = null): MediaState {
+  if (visible) declarePlace(source, playing, muted, loop, peeking, group)
   val media = LocalMediaEnvironment.current.media
   return remember(media, source.url, visible) { if (visible) media.stateFlow(source.url) else flowOf(MediaState.Idle) }.collectAsState(MediaState.Idle).value
 }
 
 @Composable
-internal fun declarePlace(source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean = true, peeking: Boolean = false) {
+internal fun declarePlace(source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean = true, peeking: Boolean = false, group: String? = null) {
   val media = LocalMediaEnvironment.current.media
   val item = remember(source, loop) { source.toItem().copy(looping = loop) }
   val owner = remember { Any() }
@@ -119,8 +119,8 @@ internal fun declarePlace(source: MediaSource, playing: Boolean?, muted: Boolean
     }
   }
   if (playing != null) {
-    DisposableEffect(media, item.url, playing) {
-      media.claims.setPlaying(owner, item.url, playing)
+    DisposableEffect(media, item.url, playing, group) {
+      media.claims.setPlaying(owner, item.url, playing, group)
       onDispose { }
     }
   }

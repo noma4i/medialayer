@@ -17,7 +17,7 @@ fn hls() -> MediaItem {
 async fn playing(rig: &Rig, source: MediaItem) -> (u32, Arc<crate::api::test_support::MockSlot>) {
     let url = source.url.clone();
     rig.parts.stage.replace_window(0, vec![Some(source)]);
-    rig.parts.stage.set_playing(&url, true);
+    rig.parts.stage.set_playing(&url, true, None);
     eventually(|| rig.factory.slot_holding(&url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
     rig.holder(&url)
 }
@@ -110,7 +110,7 @@ async fn inv_api_06_a_stall_arms_the_watchdog_only_for_the_playing_slot() {
     assert_eq!(stage.armed_tasks(), 0);
     assert_eq!(idle.samples.load(std::sync::atomic::Ordering::SeqCst), 0);
 
-    stage.set_playing(&url_of(0), true);
+    stage.set_playing(&url_of(0), true, None);
     eventually(|| rig.factory.slot_holding(&url_of(0)).is_some()).await;
     let (active_slot, active) = rig.holder(&url_of(0));
     stage.stalled(active_slot as usize, 0);
@@ -204,8 +204,8 @@ async fn inv_api_13_a_slot_that_renders_ends_and_plays_again_moves_the_place_thr
     assert_eq!(state(), MediaState::Ended);
     stage.visual_ready(slot as usize);
     assert_eq!(state(), MediaState::Ended);
-    stage.set_playing(&url_of(0), false);
-    stage.set_playing(&url_of(0), true);
+    stage.set_playing(&url_of(0), false, None);
+    stage.set_playing(&url_of(0), true, None);
 
     eventually(|| state() == MediaState::Rendered).await;
 }
@@ -238,7 +238,7 @@ async fn inv_idle_04_a_wanted_key_without_a_slot_wakes_nothing_until_an_event_gi
     let url = url_of(0);
     stage.replace_window(0, vec![Some(video(&url))]);
     stage.visible(video(&url), true);
-    stage.set_playing(&url, true);
+    stage.set_playing(&url, true, None);
     eventually(|| rig.factory.slot_holding(&url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
     let (_, slot) = rig.holder(&url);
 
@@ -312,7 +312,7 @@ async fn inv_idle_04_a_key_refused_by_the_ledger_returns_when_the_ceiling_frees_
     rig.parts.ledger.set_ceiling(rig.parts.ledger.used());
 
     stage.visible(video(&url_of(1)), true);
-    stage.set_playing(&url_of(1), true);
+    stage.set_playing(&url_of(1), true, None);
     settle().await;
     assert!(rig.factory.slot_holding(&url_of(1)).is_none(), "the ledger refused the slot");
     assert_eq!(silence(stage).await, 0, "10 s of silence after the refusal");
@@ -334,7 +334,7 @@ async fn crowded_for_slots(event: impl FnOnce(&crate::api::Stage)) {
     eventually(|| rig.factory.slot_holding(&url_of(0)).is_some() && rig.factory.slot_holding(&url_of(1)).is_some()).await;
 
     stage.visible(video(&url_of(2)), true);
-    stage.set_playing(&url_of(2), true);
+    stage.set_playing(&url_of(2), true, None);
     settle().await;
     assert!(rig.factory.slot_holding(&url_of(2)).is_none(), "every slot is pinned, slots={}", stage.slot_count());
     assert_eq!(silence(stage).await, 0, "10 s of silence after the refusal");
@@ -368,7 +368,7 @@ async fn inv_idle_04_a_trim_tick_between_a_refusal_and_the_freed_room_keeps_the_
     rig.parts.ledger.set_ceiling(rig.parts.ledger.used().saturating_sub(1));
 
     stage.visible(video(&url_of(7)), true);
-    stage.set_playing(&url_of(7), true);
+    stage.set_playing(&url_of(7), true, None);
     let (neighbour, _) = rig.holder(&url_of(0));
     let level = || stage.state().ring.retention_of(neighbour as usize);
     let before = level();
@@ -394,7 +394,7 @@ async fn inv_idle_04_a_ledger_release_that_leaves_the_room_unchanged_does_not_st
     let early = ledger.reserve(crate::memory::Owner::ImageDecode, 4).unwrap();
 
     stage.visible(video(&url_of(1)), true);
-    stage.set_playing(&url_of(1), true);
+    stage.set_playing(&url_of(1), true, None);
     settle().await;
     assert!(rig.factory.slot_holding(&url_of(1)).is_none(), "the ledger refused the slot");
     assert_eq!(silence(stage).await, 0, "10 s of silence after the refusal");

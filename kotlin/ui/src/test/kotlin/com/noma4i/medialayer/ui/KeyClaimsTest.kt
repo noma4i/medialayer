@@ -70,6 +70,17 @@ class KeyClaimsTest {
   }
 
   @Test
+  fun inv_session_14_the_group_of_a_playing_view_reaches_the_core_and_a_change_is_forwarded() {
+    val owner = Any()
+
+    claims.setPlaying(owner, "k", true, "chat")
+    claims.setPlaying(owner, "k", true, "chat")
+    claims.setPlaying(owner, "k", true, "voice")
+
+    assertEquals(listOf("playing:k:true:chat", "playing:k:true:voice"), layer.calls.toList())
+  }
+
+  @Test
   fun aKeyIsMutedOnlyWhileEveryViewOfItAsksForMute() {
     val first = Any()
     val second = Any()

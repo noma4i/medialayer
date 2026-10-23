@@ -265,6 +265,7 @@ MediaAudio(VoiceNote(url = message.audioUrl), rate = 1.5f) { audio ->
 | source | all | A generated type from your `.mdl` file with the URL and optional cover or BlurHash |
 | `playing` | video, audio | True to play, false to stay prepared and paused |
 | `muted` | video, audio | True to silence this place. `Media.muted` silences the whole app. The `silent` option of `open` overrides it |
+| `group` | video, audio | Optional name of the place group, for example `chat`. A playback suspension can allow a group and keep its places playing |
 | `loop` | video | True (default) repeats the video. False plays it once and ends in the `ended` state |
 | `onFirstFrame` | video | Runs when the first frame is on screen. Once per load |
 | `onEnd` | video | Runs each time a one-shot video reaches its end |
@@ -307,6 +308,30 @@ MediaVideo(source, playing = isActive) { state ->
 Every place takes `playing` and `muted`. A player that is not playing stays prepared and paused. `Media.muted` mutes the whole app. Muting changes only the volume of the player; it never touches the audio session, so another app's music is not interrupted by a mute toggle.
 
 A pager declares the neighbour page that the finger is dragging into with `peeking: true`. The player of that page plays muted beside the page that plays, so the drag shows a moving picture. When the page becomes `playing` its player keeps running and gets its sound, with no restart. When `peeking` ends without `playing`, the player pauses. One page peeks at a time, and a page that plays never peeks.
+
+When the app loses its audio output (headphones unplugged on iOS, `ACTION_AUDIO_BECOMING_NOISY` on Android), `open` has already set `Media.muted` to true. The players do not pause, and the app calls nothing. The app turns the sound on again by setting `Media.muted = false`.
+
+## Suspending playback
+
+A dialog, a share sheet or a modal screen stops all players while it is open. Call `suspendPlayback` on the `MediaLayer`. It returns a `PlaybackSuspension`. While at least one suspension is alive, every player is paused, except the places whose `group` is in the `allowGroups` of every live suspension. Places stay mounted and prepared.
+
+`release()` acts once, however often you call it. Swift also releases when the object is freed. In Kotlin `PlaybackSuspension` is `AutoCloseable` and `close()` releases it. You can release from any thread. When the last suspension is released, the places that played before play again. A place with manual resume (a chat voice note that lost the election) stays idle. A blank group in `allowGroups` is an error.
+
+### Swift
+
+```swift
+let suspension = try media.suspendPlayback(allowGroups: ["chat"])
+// ... dialog is open
+suspension.release()
+```
+
+### Kotlin
+
+```kotlin
+media.suspendPlayback(listOf("chat")).use {
+  // ... dialog is open
+}
+```
 
 MediaLayer owns the sound policy of the players: you pass an `audioFocus` policy to `open` (default `mix`), and the app writes no audio session or audio focus code for playback: [audio focus](audio-focus.md).
 

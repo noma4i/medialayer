@@ -1,4 +1,4 @@
-use super::suspensions::{Reason, SuspensionError, Suspensions};
+use super::suspensions::{SuspensionError, Suspensions};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResumeMode {
@@ -126,6 +126,19 @@ impl Election {
         out
     }
 
+    pub fn set_group(&mut self, key: &str, lease: u64, group: &str) -> Vec<LeaseOrder> {
+        let mut out = Vec::new();
+        let Some(session) = self.sessions.iter_mut().find(|session| session.lease == lease && session.key == key) else {
+            return out;
+        };
+        if session.policy.group == group {
+            return out;
+        }
+        session.policy.group = group.to_string();
+        self.resolve(true, &mut out);
+        out
+    }
+
     pub fn set_foreground(&mut self, is_foreground: bool) -> Vec<LeaseOrder> {
         let mut out = Vec::new();
         if self.is_foreground == is_foreground {
@@ -136,9 +149,9 @@ impl Election {
         out
     }
 
-    pub fn set_suspension(&mut self, reason: Reason, is_active: bool, allow_groups: Option<&[&str]>) -> Result<Vec<LeaseOrder>, SuspensionError> {
+    pub fn set_suspension(&mut self, id: u64, is_active: bool, allow_groups: Option<&[&str]>) -> Result<Vec<LeaseOrder>, SuspensionError> {
         let mut out = Vec::new();
-        if self.suspensions.set(reason, is_active, allow_groups)? {
+        if self.suspensions.set(id, is_active, allow_groups)? {
             self.resolve(true, &mut out);
         }
         Ok(out)

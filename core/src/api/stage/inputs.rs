@@ -4,7 +4,7 @@ use crate::api::source::MediaItem;
 use crate::api::types::Kind;
 use crate::pages::Sliced;
 use crate::prefetch::CacheStrategy;
-use crate::session::Intent;
+use crate::session::{Context, Intent};
 use std::collections::HashSet;
 
 const MIN_RATE: f32 = 0.25;
@@ -84,7 +84,7 @@ impl Stage {
         self.inner.prefetcher.set_image_window(name, active, remote);
     }
 
-    pub fn set_playing(&self, key: &str, playing: bool) {
+    pub fn set_playing(&self, key: &str, playing: bool, group: Option<&str>) {
         crate::trace!("stage", "set_playing {} {playing}", crate::trace::tail(key));
         let (state, commands) = {
             let mut state = self.state();
@@ -92,13 +92,31 @@ impl Stage {
                 state.forget_lease(key)
             } else {
                 let lease = state.lease_for(key);
-                let orders = state.election.set_intent(key, lease, Intent::Play);
+                let group = group.map_or_else(|| Context::Ring.policy().group, str::to_string);
+                let mut orders = state.election.set_group(key, lease, &group);
+                orders.extend(state.election.set_intent(key, lease, Intent::Play));
                 state.commands_for(orders)
             };
             (state, commands)
         };
         self.dispatch(state, commands);
         self.sync_foreground();
+    }
+
+    pub fn suspend(&self, id: u64, allow_groups: &[String]) {
+        let groups: Vec<&str> = allow_groups.iter().map(String::as_str).collect();
+        self.set_suspension(id, true, Some(&groups));
+    }
+
+    pub fn resume(&self, id: u64) {
+        self.set_suspension(id, false, None);
+    }
+
+    fn set_suspension(&self, id: u64, is_active: bool, allow_groups: Option<&[&str]>) {
+        let mut state = self.state();
+        let orders = state.election.set_suspension(id, is_active, allow_groups).unwrap_or_default();
+        let commands = state.commands_for(orders);
+        self.dispatch(state, commands);
     }
 
     pub fn set_peeking(&self, key: &str, peeking: bool) {

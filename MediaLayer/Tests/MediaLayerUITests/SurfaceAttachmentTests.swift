@@ -18,7 +18,7 @@ private final class PlacesLog: MediaPlaces, @unchecked Sendable {
   func attachView(key: String, token: UInt64) { record("attach \(key) \(token)") }
   func detachView(key: String) { record("detach \(key)") }
   func visible(source: MediaItem, visible: Bool) {}
-  func setPlaying(key: String, playing: Bool) {}
+  func setPlaying(key: String, playing: Bool, group: String?) {}
   func setPeeking(key: String, peeking: Bool) {}
   func setMuted(key: String, muted: Bool) {}
   func setRate(key: String, rate: Float) {}

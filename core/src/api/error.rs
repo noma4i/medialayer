@@ -12,6 +12,8 @@ pub enum MediaError {
     BlurHash { detail: String },
     #[error("tone: {detail}")]
     Tone { detail: String },
+    #[error("invalid suspension: {detail}")]
+    InvalidSuspension { detail: String },
     #[error("unexpected: {detail}")]
     Unexpected { detail: String },
 }
@@ -19,6 +21,12 @@ pub enum MediaError {
 impl From<LimitsError> for MediaError {
     fn from(error: LimitsError) -> Self {
         MediaError::InvalidLimits { detail: error.to_string() }
+    }
+}
+
+impl From<crate::session::SuspensionError> for MediaError {
+    fn from(error: crate::session::SuspensionError) -> Self {
+        MediaError::InvalidSuspension { detail: error.to_string() }
     }
 }
 

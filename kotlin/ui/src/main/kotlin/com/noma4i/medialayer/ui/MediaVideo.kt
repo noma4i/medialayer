@@ -115,6 +115,7 @@ fun MediaVideo(
   modifier: Modifier = Modifier,
   contentScale: ContentScale = ContentScale.Crop,
   loop: Boolean = true,
+  group: String? = null,
   output: MediaOutput = MediaOutput.Texture,
   cornerRadius: Dp = 0.dp,
   alpha: Float = 1f,
@@ -125,7 +126,7 @@ fun MediaVideo(
 ) {
   val environment = LocalMediaEnvironment.current
   val screen = rememberScreenVisibility()
-  val state = rememberPlace(source, playing, muted, loop, peeking, screen.visible)
+  val state = rememberPlace(source, playing, muted, loop, peeking, screen.visible, group)
   val edges = remember(source.url) { VideoEdges() }
   val firstFrame by rememberUpdatedState(onFirstFrame)
   val end by rememberUpdatedState(onEnd)

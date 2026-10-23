@@ -1,12 +1,17 @@
 package com.noma4i.medialayer.ui
 
 import android.app.ActivityManager
+import android.content.BroadcastReceiver
 import android.content.ComponentCallbacks2
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.res.Configuration
+import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.os.Trace
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -180,13 +185,21 @@ internal class SystemSignals(
   private val events: PlayerEventsInterface,
   private val lifecycle: Lifecycle
 ) : ComponentCallbacks2, DefaultLifecycleObserver {
+  private val outputLost = object : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+      if (intent.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) Media.muted = true
+    }
+  }
+
   fun register() {
     context.registerComponentCallbacks(this)
+    ContextCompat.registerReceiver(context, outputLost, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), ContextCompat.RECEIVER_NOT_EXPORTED)
     onMain { lifecycle.addObserver(this) }
   }
 
   fun unregister() {
     context.unregisterComponentCallbacks(this)
+    context.unregisterReceiver(outputLost)
     onMain { lifecycle.removeObserver(this) }
   }
 

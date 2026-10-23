@@ -40,6 +40,7 @@ public struct MediaVideo<Content: View>: View {
   private let peeking: Bool
   private let muted: Bool
   private let loop: Bool
+  private let group: String?
   private let gravity: AVLayerVideoGravity
   private let onFirstFrame: () -> Void
   private let onEnd: () -> Void
@@ -52,6 +53,7 @@ public struct MediaVideo<Content: View>: View {
     peeking: Bool = false,
     muted: Bool = false,
     loop: Bool = true,
+    group: String? = nil,
     gravity: AVLayerVideoGravity = .resizeAspectFill,
     onFirstFrame: @escaping () -> Void = {},
     onEnd: @escaping () -> Void = {},
@@ -63,6 +65,7 @@ public struct MediaVideo<Content: View>: View {
     self.peeking = peeking
     self.muted = muted
     self.loop = loop
+    self.group = group
     self.gravity = gravity
     self.onFirstFrame = onFirstFrame
     self.onEnd = onEnd
@@ -89,7 +92,7 @@ public struct MediaVideo<Content: View>: View {
     .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
     .onChange(of: onScreen) { _, value in declare(visible: value) }
     .onDisappear { declare(visible: false) }
-    .onChange(of: playing) { _, value in context.map { KeyClaims.of($0.places).setPlaying(owner: owner, key: source.url, playing: value) } }
+    .onChange(of: playing) { _, value in context.map { KeyClaims.of($0.places).setPlaying(owner: owner, key: source.url, playing: value, group: group) } }
     .onChange(of: peeking) { _, value in context.map { KeyClaims.of($0.places).setPeeking(owner: owner, key: source.url, peeking: value) } }
     .onChange(of: muted) { _, value in context.map { KeyClaims.of($0.places).setMuted(owner: owner, key: source.url, muted: value) } }
     .id(source.url)
@@ -121,7 +124,7 @@ public struct MediaVideo<Content: View>: View {
     guard visible else { return claims.release(owner: owner, key: source.url) }
     claims.visible(owner: owner, source: item, visible: true)
     claims.setMuted(owner: owner, key: source.url, muted: muted)
-    claims.setPlaying(owner: owner, key: source.url, playing: playing)
+    claims.setPlaying(owner: owner, key: source.url, playing: playing, group: group)
     claims.setPeeking(owner: owner, key: source.url, peeking: peeking)
   }
 
@@ -147,11 +150,12 @@ extension MediaVideo where Content == EmptyView {
     peeking: Bool = false,
     muted: Bool = false,
     loop: Bool = true,
+    group: String? = nil,
     gravity: AVLayerVideoGravity = .resizeAspectFill,
     onFirstFrame: @escaping () -> Void = {},
     onEnd: @escaping () -> Void = {},
     onProgress: ((Double) -> Void)? = nil
   ) {
-    self.init(source, playing: playing, peeking: peeking, muted: muted, loop: loop, gravity: gravity, onFirstFrame: onFirstFrame, onEnd: onEnd, onProgress: onProgress) { _ in EmptyView() }
+    self.init(source, playing: playing, peeking: peeking, muted: muted, loop: loop, group: group, gravity: gravity, onFirstFrame: onFirstFrame, onEnd: onEnd, onProgress: onProgress) { _ in EmptyView() }
   }
 }

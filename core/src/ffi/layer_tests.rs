@@ -210,7 +210,7 @@ fn inv_ffi_02_declarations_reach_the_platform_slots_and_the_player_events_move_t
     let caller = caller();
 
     layer.replace_window(1, (0..3).map(|index| Some(MediaItem::bare_video(&format!("https://o.test/v{index}.mp4")))).collect());
-    layer.set_playing(url.to_string(), true);
+    layer.set_playing(url.to_string(), true, None);
     layer.set_muted_all(true);
     layer.visible(MediaItem::bare_video(url), true);
     caller.block_on(eventually(|| factory.slot_holding(url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))));
@@ -463,7 +463,7 @@ fn inv_ffi_07_calls_made_before_the_assembly_ends_run_after_it_in_call_order_and
     let caller = caller();
 
     layer.replace_window(0, vec![Some(MediaItem::bare_video(url))]);
-    layer.set_playing(url.to_string(), true);
+    layer.set_playing(url.to_string(), true, None);
     layer.player_events().attach(url.to_string(), 5);
     let declared_in = started.elapsed();
     let limits = caller.block_on(layer.limits()).unwrap();
@@ -498,7 +498,7 @@ async fn idle_wakes(declare: bool) -> (u64, u64, usize) {
     if declare {
         let url = crate::api::test_support::url_of(0);
         assembled.stage.replace_window(0, crate::api::test_support::videos(3));
-        assembled.stage.set_playing(&url, true);
+        assembled.stage.set_playing(&url, true, None);
         eventually(|| factory.slot_holding(&url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
         let mut pending: std::collections::HashSet<_> = (1..3).map(crate::api::test_support::url_of).collect();
         while !pending.is_empty() {
@@ -617,7 +617,7 @@ fn inv_ffi_11_declarations_before_the_assembly_keep_the_last_wish_of_the_owner_n
     for round in 0..2_000u32 {
         layer.replace_window(round % 3, items.clone());
         layer.move_window(round % 3);
-        layer.set_playing(url.to_string(), round % 2 == 0);
+        layer.set_playing(url.to_string(), round % 2 == 0, None);
         layer.set_muted(url.to_string(), round % 2 == 1);
         layer.seek(url.to_string(), f64::from(round) / 2_000.0);
         layer.item_state(url.to_string(), MediaState::Loading);
@@ -699,4 +699,61 @@ fn inv_ffi_13_a_whole_source_of_a_replaced_window_before_the_assembly_still_down
         let seen = origin.seen.lock().unwrap();
         ["clip.mp4", "photo.jpg"].iter().all(|name| seen.iter().any(|request| request.url.contains(name)))
     }));
+}
+
+fn transport(slot: &MockSlot) -> Option<SlotCall> {
+    slot.calls().into_iter().filter(|call| matches!(call, SlotCall::Play | SlotCall::Pause)).last()
+}
+
+#[test]
+fn inv_session_13_a_blank_allow_group_is_rejected_and_suspends_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), None)).unwrap();
+    assert!(matches!(layer.suspend_playback(vec!["chat".to_string(), "  ".to_string()]), Err(MediaError::InvalidSuspension { .. })));
+    assert!(layer.suspend_playback(vec!["chat".to_string()]).is_ok());
+}
+
+#[test]
+fn inv_session_12_release_acts_once_and_dropping_the_handle_releases() {
+    let dir = tempfile::tempdir().unwrap();
+    let factory: Arc<MockFactory> = Arc::default();
+    let slots: Arc<dyn PlayerSlotFactory> = factory.clone();
+    let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), Some(slots))).unwrap();
+    let url = "https://o.test/v1.mp4";
+    let caller = caller();
+    layer.replace_window(0, vec![Some(MediaItem::bare_video(url))]);
+    layer.set_playing(url.to_string(), true, None);
+    caller.block_on(eventually(|| factory.slot_holding(url).is_some_and(|(_, slot)| transport(&slot) == Some(SlotCall::Play))));
+    let (_, slot) = factory.slot_holding(url).unwrap();
+
+    let first = layer.suspend_playback(Vec::new()).unwrap();
+    let second = layer.suspend_playback(Vec::new()).unwrap();
+    caller.block_on(eventually(|| transport(&slot) == Some(SlotCall::Pause)));
+
+    for _ in 0..3 {
+        first.release();
+    }
+    layer.set_rate(url.to_string(), 2.0);
+    caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Rate { rate: 2.0 })));
+    assert_eq!(transport(&slot), Some(SlotCall::Pause), "three releases of one handle released the other");
+
+    drop(second);
+    caller.block_on(eventually(|| transport(&slot) == Some(SlotCall::Play)));
+}
+
+#[test]
+fn inv_session_13_a_suspension_taken_and_released_before_the_assembly_ends_leaves_nothing_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    slow_assembly(dir.path(), SLOW);
+    let factory: Arc<MockFactory> = Arc::default();
+    let slots: Arc<dyn PlayerSlotFactory> = factory.clone();
+    let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), Some(slots))).unwrap();
+    let url = "https://o.test/v1.mp4";
+    let caller = caller();
+    layer.replace_window(0, vec![Some(MediaItem::bare_video(url))]);
+    layer.set_playing(url.to_string(), true, None);
+    layer.suspend_playback(Vec::new()).unwrap().release();
+    let held = layer.suspend_playback(Vec::new()).unwrap();
+    held.release();
+    caller.block_on(eventually(|| factory.slot_holding(url).is_some_and(|(_, slot)| transport(&slot) == Some(SlotCall::Play))));
 }

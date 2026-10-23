@@ -14,6 +14,7 @@ use crate::api::AbortOnDrop;
 use crate::session::WatchdogConfig;
 use std::collections::HashMap;
 use std::future::Future;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::runtime::{Builder, Handle, Runtime};
 
@@ -76,6 +77,33 @@ pub struct MediaLayer {
     namespace_headers: Vec<String>,
     image_stats: Arc<super::image::ImageCounters>,
     releaser: Mutex<Option<Arc<dyn MemoryReleaser>>>,
+    next_suspension: AtomicU64,
+}
+
+#[derive(uniffi::Object)]
+pub struct PlaybackSuspension {
+    assembled: Arc<Deferred<Assembled>>,
+    id: u64,
+    released: AtomicBool,
+}
+
+fn suspension_name(id: u64) -> String {
+    format!("suspension:{id}")
+}
+
+#[uniffi::export]
+impl PlaybackSuspension {
+    pub fn release(&self) {
+        if !self.released.swap(true, Ordering::AcqRel) {
+            self.assembled.run_closing(self.id, |id| suspension_name(*id), |assembled, id| assembled.stage.resume(id));
+        }
+    }
+}
+
+impl Drop for PlaybackSuspension {
+    fn drop(&mut self) {
+        self.release();
+    }
 }
 
 impl MediaLayer {
@@ -99,7 +127,7 @@ impl MediaLayer {
     }
 
     fn pending(runtime: Option<Runtime>, handle: Handle, namespace_headers: Vec<String>, releaser: Option<Arc<dyn MemoryReleaser>>) -> Arc<MediaLayer> {
-        Arc::new(MediaLayer { handle, runtime: Mutex::new(runtime), assembled: Deferred::new(), namespace_headers, image_stats: super::image::ImageCounters::new(), releaser: Mutex::new(releaser) })
+        Arc::new(MediaLayer { handle, runtime: Mutex::new(runtime), assembled: Deferred::new(), namespace_headers, image_stats: super::image::ImageCounters::new(), releaser: Mutex::new(releaser), next_suspension: AtomicU64::new(1) })
     }
 
     #[cfg(test)]
@@ -304,8 +332,17 @@ impl MediaLayer {
         self.declare_latest((name, pages), |(name, _)| format!("image:{name}"), move |assembled, (name, pages)| assembled.stage.replace_image_window(&name, active as usize, pages));
     }
 
-    pub fn set_playing(&self, key: String, playing: bool) {
-        self.declare_latest(key, |key| format!("playing:{key}"), move |assembled, key| assembled.stage.set_playing(&key, playing));
+    #[uniffi::method(default(group = None))]
+    pub fn set_playing(&self, key: String, playing: bool, group: Option<String>) {
+        self.declare_latest((key, group), |(key, _)| format!("playing:{key}"), move |assembled, (key, group)| assembled.stage.set_playing(&key, playing, group.as_deref()));
+    }
+
+    #[uniffi::method(default(allow_groups = []))]
+    pub fn suspend_playback(&self, allow_groups: Vec<String>) -> Result<Arc<PlaybackSuspension>, MediaError> {
+        crate::session::check_groups(&allow_groups)?;
+        let id = self.next_suspension.fetch_add(1, Ordering::Relaxed);
+        self.assembled.run_opening((id, allow_groups), |(id, _)| suspension_name(*id), |assembled, (id, groups)| assembled.stage.suspend(id, &groups));
+        Ok(Arc::new(PlaybackSuspension { assembled: self.assembled.clone(), id, released: AtomicBool::new(false) }))
     }
 
     pub fn set_peeking(&self, key: String, peeking: bool) {

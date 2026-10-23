@@ -122,10 +122,10 @@ fn inv_session_05_set_intent_with_the_wrong_key_or_lease_is_ignored() {
 fn inv_session_03_suspension_blocks_ineligible_groups_and_thaw_resumes() {
     let (mut election, l) = with(&[("ring", Context::Ring)]);
     election.set_intent("ring", l[0], Intent::Play);
-    assert_eq!(election.set_suspension(Reason::Interruption, true, None), Ok(vec![pause(l[0])]));
-    assert_eq!(election.set_suspension(Reason::Interruption, true, None), Ok(vec![]));
-    assert_eq!(election.set_suspension(Reason::Interruption, false, None), Ok(vec![play(l[0])]));
-    assert_eq!(election.set_suspension(Reason::Interruption, false, None), Ok(vec![]));
+    assert_eq!(election.set_suspension(1, true, None), Ok(vec![pause(l[0])]));
+    assert_eq!(election.set_suspension(1, true, None), Ok(vec![]));
+    assert_eq!(election.set_suspension(1, false, None), Ok(vec![play(l[0])]));
+    assert_eq!(election.set_suspension(1, false, None), Ok(vec![]));
 }
 
 #[test]
@@ -133,7 +133,7 @@ fn inv_session_03_suspension_allow_groups_keep_listed_groups_playing() {
     let (mut election, l) = with(&[("ring", Context::Ring), ("sys", Context::System)]);
     election.set_intent("ring", l[0], Intent::Play);
     election.set_intent("sys", l[1], Intent::Play);
-    let directives = election.set_suspension(Reason::AudioFocusTransient, true, Some(&["ring"])).unwrap();
+    let directives = election.set_suspension(2, true, Some(&["ring"])).unwrap();
     assert_eq!(directives, [pause(l[1]), play(l[0])]);
 }
 
@@ -141,8 +141,8 @@ fn inv_session_03_suspension_allow_groups_keep_listed_groups_playing() {
 fn inv_session_04_suspension_of_a_manual_session_drops_its_intent() {
     let (mut election, l) = with(&[("chat", Context::Hero)]);
     election.set_intent("chat", l[0], Intent::Play);
-    assert_eq!(election.set_suspension(Reason::Interruption, true, None), Ok(vec![pause(l[0]), idle(l[0])]));
-    assert_eq!(election.set_suspension(Reason::Interruption, false, None), Ok(vec![]));
+    assert_eq!(election.set_suspension(1, true, None), Ok(vec![pause(l[0]), idle(l[0])]));
+    assert_eq!(election.set_suspension(1, false, None), Ok(vec![]));
 }
 
 #[test]
@@ -190,7 +190,7 @@ fn inv_session_01_at_most_one_session_plays_across_a_random_walk() {
             0..=3 => election.set_intent(&key, leases[index], Intent::Play),
             4 | 5 => election.set_intent(&key, leases[index], Intent::Idle),
             6 => election.set_foreground(state & 8 == 0),
-            7 => election.set_suspension(Reason::Interruption, state & 16 == 0, None).unwrap(),
+            7 => election.set_suspension(1, state & 16 == 0, None).unwrap(),
             _ => election.stop_manual(),
         };
         for directive in directives {
@@ -213,12 +213,24 @@ fn inv_session_02_applying_the_same_inputs_again_is_idempotent() {
     let (mut election, l) = with(&[("ring", Context::Ring), ("sys", Context::System)]);
     election.set_intent("ring", l[0], Intent::Play);
     election.set_intent("sys", l[1], Intent::Play);
-    election.set_suspension(Reason::Manual, true, Some(&["sys"])).unwrap();
+    election.set_suspension(3, true, Some(&["sys"])).unwrap();
     for _ in 0..3 {
         assert!(election.set_intent("sys", l[1], Intent::Play).is_empty());
         assert!(election.set_foreground(true).is_empty());
-        assert!(election.set_suspension(Reason::Manual, true, Some(&["sys"])).unwrap().is_empty());
+        assert!(election.set_suspension(3, true, Some(&["sys"])).unwrap().is_empty());
     }
+}
+
+#[test]
+fn inv_session_14_a_group_change_re_elects_under_a_suspension() {
+    let (mut election, l) = with(&[("a", Context::Ring)]);
+    election.set_intent("a", l[0], Intent::Play);
+    election.set_suspension(1, true, Some(&["chat"])).unwrap();
+    assert_eq!(election.active(), None);
+    assert_eq!(election.set_group("a", l[0], "chat"), [play(l[0])]);
+    assert!(election.set_group("a", l[0], "chat").is_empty());
+    assert_eq!(election.set_group("a", l[0], "ring"), [pause(l[0])]);
+    assert!(election.set_group("other", l[0], "chat").is_empty());
 }
 
 #[test]

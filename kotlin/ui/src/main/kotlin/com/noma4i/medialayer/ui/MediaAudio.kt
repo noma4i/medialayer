@@ -41,7 +41,7 @@ class AudioControl internal constructor(private val seekTo: (Double) -> Unit) {
 }
 
 @Composable
-fun MediaAudio(source: MediaSource, muted: Boolean = false, rate: Float = 1f, content: @Composable (AudioControl) -> Unit) {
+fun MediaAudio(source: MediaSource, muted: Boolean = false, rate: Float = 1f, group: String? = null, content: @Composable (AudioControl) -> Unit) {
   val environment = LocalMediaEnvironment.current
   val screen = rememberScreenVisibility()
   val control = remember(environment, source.url) { AudioControl { environment.media.seek(source.url, it) }.also { it.rate = rate } }
@@ -50,7 +50,7 @@ fun MediaAudio(source: MediaSource, muted: Boolean = false, rate: Float = 1f, co
     environment.media.setRate(source.url, control.rate)
     onDispose { }
   }
-  val state = rememberPlace(source, control.isPlaying, muted)
+  val state = rememberPlace(source, control.isPlaying, muted, group = group)
   if (control.state != state) control.state = state
   val player by remember(environment, source.url) { environment.players?.player(source.url) ?: flowOf(null) }.collectAsState(null)
   LaunchedEffect(state, control) { if (state == MediaState.Ended) control.pause() }
