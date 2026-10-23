@@ -43,9 +43,9 @@ dependencies {
   implementation("com.squareup.okhttp3:okhttp:5.5.0")
   implementation("io.coil-kt.coil3:coil-compose:3.6.3")
   implementation("io.coil-kt.coil3:coil-gif:3.6.3")
-  implementation("net.java.dev.jna:jna:5.17.0@aar")
+  implementation("net.java.dev.jna:jna:5.19.1@aar")
 
-  testImplementation("net.java.dev.jna:jna:5.17.0")
+  testImplementation("net.java.dev.jna:jna:5.19.1")
   testImplementation("junit:junit:4.13.2")
   testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
   testImplementation("org.robolectric:robolectric:4.17")
