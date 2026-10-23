@@ -83,6 +83,18 @@ class KeyClaimsTest {
   }
 
   @Test
+  fun inv_session_17_an_ungrouped_playing_owner_reaches_the_core_as_an_ungrouped_entry_and_leaves_with_its_claim() {
+    val ungrouped = Any()
+    val system = Any()
+
+    claims.setPlaying(ungrouped, "k", true)
+    claims.setPlaying(system, "k", true, "system")
+    claims.release(ungrouped, "k")
+
+    assertEquals(listOf("playing:k:true", "playing:k:true:-,system", "playing:k:true:system"), layer.calls.toList())
+  }
+
+  @Test
   fun aKeyIsMutedOnlyWhileEveryViewOfItAsksForMute() {
     val first = Any()
     val second = Any()

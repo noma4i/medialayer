@@ -333,7 +333,7 @@ impl MediaLayer {
     }
 
     #[uniffi::method(default(groups = []))]
-    pub fn set_playing(&self, key: String, playing: bool, groups: Vec<String>) {
+    pub fn set_playing(&self, key: String, playing: bool, groups: Vec<Option<String>>) {
         self.declare_latest((key, groups), |(key, _)| format!("playing:{key}"), move |assembled, (key, groups)| assembled.stage.set_playing(&key, playing, &groups));
     }
 

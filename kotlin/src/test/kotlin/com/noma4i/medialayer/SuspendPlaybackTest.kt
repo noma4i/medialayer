@@ -44,10 +44,10 @@ private fun open(slot: TransportSlot?) = MediaLayer.open(OpenConfig(availableByt
   device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings()
 ))
 
-private suspend fun openPlaying(slot: TransportSlot, group: String? = null): MediaLayer {
+private suspend fun openPlaying(slot: TransportSlot, groups: List<String?> = listOf(null)): MediaLayer {
   val media = open(slot)
   media.replaceWindow(0u, listOf(MediaItem(Kind.VIDEO, CLIP, emptyMap(), null, null, strategy = CacheStrategy.WINDOW)))
-  media.setPlaying(CLIP, true, listOfNotNull(group))
+  media.setPlaying(CLIP, true, groups)
   assertEquals("play", withTimeout(10_000) { slot.log.receive() })
   return media
 }
@@ -76,7 +76,7 @@ class SuspendPlaybackTest {
   @Test
   fun inv_session_12_a_group_every_suspension_allows_keeps_playing() = runBlocking {
     val slot = TransportSlot()
-    openPlaying(slot, "chat").use { media ->
+    openPlaying(slot, listOf("chat")).use { media ->
       val allowing = media.suspendPlayback(listOf("chat"))
       media.setRate(CLIP, 2f)
       assertEquals("rate", withTimeout(10_000) { slot.log.receive() })
@@ -86,6 +86,36 @@ class SuspendPlaybackTest {
       blocking.release()
       assertEquals("play", withTimeout(10_000) { slot.log.receive() })
       allowing.release()
+    }
+  }
+
+  @Test
+  fun inv_session_17_an_ungrouped_owner_is_in_the_default_group_under_a_suspension() = runBlocking {
+    val slot = TransportSlot()
+    openPlaying(slot, listOf(null, "system")).use { media ->
+      val allowing = media.suspendPlayback(listOf("ring"))
+      media.setRate(CLIP, 2f)
+      assertEquals("rate", withTimeout(10_000) { slot.log.receive() })
+
+      val blocking = media.suspendPlayback(listOf("system"))
+      assertEquals("pause", withTimeout(10_000) { slot.log.receive() })
+      blocking.release()
+      assertEquals("play", withTimeout(10_000) { slot.log.receive() })
+      allowing.release()
+    }
+  }
+
+  @Test
+  fun inv_session_17_the_default_group_leaves_the_set_when_the_ungrouped_owner_leaves() = runBlocking {
+    val slot = TransportSlot()
+    openPlaying(slot, listOf(null, "system")).use { media ->
+      val suspension = media.suspendPlayback(listOf("ring"))
+      media.setRate(CLIP, 2f)
+      assertEquals("rate", withTimeout(10_000) { slot.log.receive() })
+
+      media.setPlaying(CLIP, true, listOf("system"))
+      assertEquals("pause", withTimeout(10_000) { slot.log.receive() })
+      suspension.release()
     }
   }
 

@@ -14,9 +14,9 @@ internal class KeyClaims(media: MediaLayer) {
   private val media = WeakReference(media)
   private class Claim(var visible: Boolean = false, var playing: Boolean = false, var group: String? = null, var peeking: Boolean = false, var muted: Boolean? = null)
 
-  private class Applied(var visible: Boolean = false, var playing: Boolean = false, var groups: List<String> = emptyList(), var peeking: Boolean = false, var muted: Boolean? = null)
+  private class Applied(var visible: Boolean = false, var playing: Boolean = false, var groups: List<String?> = emptyList(), var peeking: Boolean = false, var muted: Boolean? = null)
 
-  private class Change(val visible: Boolean?, val playing: Boolean?, val groups: List<String>, val peeking: Boolean?, val muted: Boolean?, val source: MediaItem?)
+  private class Change(val visible: Boolean?, val playing: Boolean?, val groups: List<String?>, val peeking: Boolean?, val muted: Boolean?, val source: MediaItem?)
 
   private val claims = HashMap<String, HashMap<Any, Claim>>()
   private val applied = HashMap<String, Applied>()
@@ -62,7 +62,7 @@ internal class KeyClaims(media: MediaLayer) {
     val last = applied[key] ?: Applied()
     val visible = all.any { it.visible }.takeIf { it != last.visible }?.also { last.visible = it }
     val isPlaying = all.any { it.playing }
-    val groups = all.filter { it.playing }.mapNotNull { it.group }.distinct().sorted()
+    val groups = all.filter { it.playing }.map { it.group }.distinct().sortedBy { it.orEmpty() }
     val playing = isPlaying.takeIf { it != last.playing || (isPlaying && groups != last.groups) }?.also { last.playing = it; last.groups = groups }
     val peeking = all.any { it.peeking }.takeIf { it != last.peeking }?.also { last.peeking = it }
     val opinions = all.mapNotNull { it.muted }

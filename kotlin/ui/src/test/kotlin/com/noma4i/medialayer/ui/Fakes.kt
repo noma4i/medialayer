@@ -68,7 +68,7 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
   val items = CopyOnWriteArrayList<MediaItem>()
 
   override fun visible(source: MediaItem, visible: Boolean) { noteFfi("visible"); items.add(source); calls.add("visible:${source.url}:$visible") }
-  override fun setPlaying(key: String, playing: Boolean, groups: List<String>) { calls.add("playing:$key:$playing" + (if (groups.isEmpty()) "" else ":" + groups.joinToString(","))) }
+  override fun setPlaying(key: String, playing: Boolean, groups: List<String?>) { calls.add("playing:$key:$playing" + (if (groups.isEmpty() || groups == listOf(null)) "" else ":" + groups.joinToString(",") { it ?: "-" })) }
   override fun setPeeking(key: String, peeking: Boolean) { calls.add("peeking:$key:$peeking") }
   override fun setMuted(key: String, muted: Boolean) { calls.add("muted:$key:$muted") }
   override fun setMutedAll(muted: Boolean) { calls.add("mutedAll:$muted") }

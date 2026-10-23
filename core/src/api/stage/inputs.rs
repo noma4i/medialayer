@@ -5,7 +5,7 @@ use crate::api::types::Kind;
 use crate::pages::Sliced;
 use crate::prefetch::CacheStrategy;
 use crate::session::{Context, Intent};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 const MIN_RATE: f32 = 0.25;
 const MAX_RATE: f32 = 4.0;
@@ -84,7 +84,7 @@ impl Stage {
         self.inner.prefetcher.set_image_window(name, active, remote);
     }
 
-    pub fn set_playing(&self, key: &str, playing: bool, groups: &[String]) {
+    pub fn set_playing(&self, key: &str, playing: bool, groups: &[Option<String>]) {
         crate::trace!("stage", "set_playing {} {playing}", crate::trace::tail(key));
         let (state, commands) = {
             let mut state = self.state();
@@ -92,7 +92,11 @@ impl Stage {
                 state.forget_lease(key)
             } else {
                 let lease = state.lease_for(key);
-                let groups = if groups.is_empty() { Context::Ring.policy().groups } else { groups.iter().map(|group| group.trim().to_string()).collect() };
+                let default = Context::Ring.policy().groups;
+                let mut groups: BTreeSet<String> = groups.iter().flat_map(|group| group.as_deref().map_or_else(|| default.clone(), |group| BTreeSet::from([group.trim().to_string()]))).collect();
+                if groups.is_empty() {
+                    groups = default;
+                }
                 let mut orders = state.election.set_groups(key, lease, groups);
                 orders.extend(state.election.set_intent(key, lease, Intent::Play));
                 state.commands_for(orders)

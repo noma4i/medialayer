@@ -16,7 +16,7 @@ final class KeyClaims: @unchecked Sendable {
   private struct Applied {
     var visible = false
     var playing = false
-    var groups: [String] = []
+    var groups: [String?] = []
     var peeking = false
     var muted: Bool?
   }
@@ -71,7 +71,7 @@ final class KeyClaims: @unchecked Sendable {
   private struct Change {
     var visible: Bool?
     var playing: Bool?
-    var groups: [String] = []
+    var groups: [String?] = []
     var peeking: Bool?
     var muted: Bool?
     var source: MediaItem?
@@ -93,7 +93,7 @@ final class KeyClaims: @unchecked Sendable {
     let visible = all.contains { $0.visible }
     if visible != last.visible { change.visible = visible; last.visible = visible }
     let playing = all.contains { $0.playing }
-    let groups = Set(all.filter(\.playing).compactMap(\.group)).sorted()
+    let groups = Set(all.filter(\.playing).map(\.group)).sorted { ($0 ?? "") < ($1 ?? "") }
     if playing != last.playing || (playing && groups != last.groups) { change.playing = playing; change.groups = groups; last.playing = playing; last.groups = groups }
     let peeking = all.contains { $0.peeking }
     if peeking != last.peeking { change.peeking = peeking; last.peeking = peeking }

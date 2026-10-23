@@ -86,7 +86,7 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
     lock.withLock { visibility.append(VisibleCall(url: source.url, visible: visible)) }
     record("visible \(visible)")
   }
-  func setPlaying(key: String, playing: Bool, groups: [String]) { record("playing \(playing)" + (groups.isEmpty ? "" : " groups=\(groups.joined(separator: ","))")) }
+  func setPlaying(key: String, playing: Bool, groups: [String?]) { record("playing \(playing)" + (groups.isEmpty || groups == [nil] ? "" : " groups=\(groups.map { $0 ?? "-" }.joined(separator: ","))")) }
   func setPeeking(key: String, peeking: Bool) { record("peeking \(peeking)") }
   func setMuted(key: String, muted: Bool) { record("muted \(muted)") }
   func setMutedAll(muted: Bool) { record("mutedAll \(muted)") }
@@ -324,6 +324,19 @@ struct ViewModelTests {
     claims.setPlaying(owner: other, key: "k", playing: false)
 
     #expect(places.recorded == ["playing true groups=chat", "playing true groups=chat,voice", "playing true groups=chat"])
+  }
+
+  @Test
+  func inv_session_17_anUngroupedPlayingOwnerReachesTheCoreAsAnUngroupedEntryAndLeavesWithItsClaim() {
+    let places = RecordingPlaces()
+    let claims = KeyClaims(places: places)
+    let ungrouped = UUID(), system = UUID()
+
+    claims.setPlaying(owner: ungrouped, key: "k", playing: true)
+    claims.setPlaying(owner: system, key: "k", playing: true, group: "system")
+    claims.release(owner: ungrouped, key: "k")
+
+    #expect(places.recorded == ["playing true", "playing true groups=-,system", "playing true groups=system"])
   }
 
   @Test
