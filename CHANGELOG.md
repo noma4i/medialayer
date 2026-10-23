@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.6.1 - 2026-10-23
+
+### Fixed
+- Audio seek before load keeps the fraction until the duration is known.
+
 ## 3.6.0 - 2026-10-23
 
 ### Changed
