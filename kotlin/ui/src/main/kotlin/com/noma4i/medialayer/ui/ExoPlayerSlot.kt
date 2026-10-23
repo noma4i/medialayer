@@ -40,12 +40,12 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
   internal val listener = object : Player.Listener {
     override fun onPlaybackStateChanged(playbackState: Int) {
       if (released) return
+      refresh()
       when (playbackState) {
         Player.STATE_READY -> { hasBeenReady = true; host.events?.ready(id) }
         Player.STATE_BUFFERING -> if (hasBeenReady) host.events?.stalled(id, currentPosition().toULong())
         Player.STATE_ENDED -> if (!looping) host.events?.ended(id)
       }
-      refresh()
       reportAudible()
     }
 

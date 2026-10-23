@@ -19,8 +19,9 @@ import java.util.concurrent.CopyOnWriteArrayList
 
 internal class RecordingEvents : PlayerEvents(NoHandle) {
   val calls = CopyOnWriteArrayList<String>()
+  @Volatile var onReady: (UInt) -> Unit = {}
 
-  override fun ready(slot: UInt) { calls.add("ready:$slot") }
+  override fun ready(slot: UInt) { calls.add("ready:$slot"); onReady(slot) }
   override fun visualReady(slot: UInt) { calls.add("visualReady:$slot") }
   override fun stalled(slot: UInt, positionMs: ULong) { calls.add("stalled:$slot:$positionMs") }
   override fun failed(slot: UInt, status: Int, detail: String) { calls.add("failed:$slot:$status") }

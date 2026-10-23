@@ -27,6 +27,7 @@ import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -456,6 +457,22 @@ class ExoPlayerSlotTest {
     androidx.media3.test.utils.robolectric.TestPlayerRunHelper.runUntilPlaybackState(slot.player!!, Player.STATE_READY)
 
     assertTrue("ready:3" in events.calls)
+  }
+
+  @Test
+  fun inv_audio_04_the_slot_sample_at_the_ready_event_already_carries_the_duration() {
+    val factory = factory()
+    val slot = factory.create(3u)
+    factory.renderersFactory = fakeRenderersFactory()
+    factory.clock = androidx.media3.test.utils.FakeClock(true)
+    var durationAtReady: ULong? = null
+    events.onReady = { durationAtReady = slot.sample().durationMs }
+
+    slot.load("k", route); slot.play(); idle()
+    androidx.media3.test.utils.robolectric.TestPlayerRunHelper.runUntilPlaybackState(slot.player!!, Player.STATE_READY)
+
+    assertTrue("ready:3" in events.calls)
+    assertNotNull("sample() at ready has no duration", durationAtReady)
   }
 
   @Test

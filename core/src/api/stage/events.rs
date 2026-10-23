@@ -28,9 +28,7 @@ impl Stage {
         let duration = self.inner.runner.sample_now(slot).and_then(|sample| sample.duration_ms);
         let seek = {
             let mut state = self.state();
-            let seek = self.fraction_seek(&mut state, key, duration);
-            state.positions.take_fraction(key);
-            seek
+            self.fraction_seek(&mut state, key, duration)
         };
         if let Some(call) = seek {
             self.inner.runner.send(slot, call);
@@ -40,6 +38,7 @@ impl Stage {
     pub fn visual_ready(&self, slot: usize) {
         crate::trace!("event", "visual_ready slot={slot} key={:?}", self.key_at(slot).as_deref().map(crate::trace::tail));
         if let Some(key) = self.key_at(slot) {
+            self.apply_pending_fraction(slot, &key);
             self.inner.places.rendered(&key);
         }
         self.sync_foreground();

@@ -673,3 +673,27 @@ async fn inv_api_38_a_pending_fraction_becomes_a_seek_when_the_slot_reports_read
 
     eventually(|| player.calls().contains(&SlotCall::Seek { position_ms: 30_000 })).await;
 }
+
+#[tokio::test]
+async fn inv_api_39_a_ready_without_duration_keeps_the_fraction_for_the_next_slot_event_with_one() {
+    let rig = rig_with(|config| {
+        config.watchdog = WatchdogConfig { first_window_ms: 60_000, progress_window_ms: 60_000, startup_delay_ms: 60_000, ..crate::api::test_support::fast_watchdog() };
+    })
+    .await;
+    let stage = &rig.parts.stage;
+    let key = url_of(0);
+
+    stage.seek_fraction(&key, 0.6);
+    stage.replace_window(0, videos(1));
+    eventually(|| rig.factory.slot_holding(&key).is_some()).await;
+    let (slot, player) = rig.holder(&key);
+    player.sample.lock().unwrap().duration_ms = None;
+
+    stage.ready(slot as usize);
+    assert!(!player.calls().iter().any(|call| matches!(call, SlotCall::Seek { .. })), "no duration yet");
+
+    player.sample.lock().unwrap().duration_ms = Some(10_000);
+    stage.ready(slot as usize);
+
+    eventually(|| player.calls().contains(&SlotCall::Seek { position_ms: 6_000 })).await;
+}
