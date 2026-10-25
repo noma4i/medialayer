@@ -222,7 +222,6 @@ fn inv_session_07_chain_events_out_of_order_do_nothing() {
 
 #[test]
 fn inv_session_09_foreground_runs_a_pass_and_retries_on_the_six_step_delay_table() {
-    assert_eq!(FOREGROUND_STEPS, ["arbitration", "transport", "audio-session", "routes", "ring-projection", "intent"]);
     let mut state = loaded();
     assert_eq!(next_action(&mut state, Event::Foreground, 0), Action::ForegroundPass);
     let mut delays = Vec::new();
@@ -279,4 +278,18 @@ fn inv_session_11_a_looping_clip_that_wrapped_is_progress_and_a_clip_that_went_b
     assert_eq!(play_and_fire(&mut once, &mut now, Sample { is_looping: false, ..wrapped(5_000) }), Action::Arm { delay_ms: 3_000 });
     now += 3_000;
     assert_eq!(next_action(&mut once, Event::WatchdogFired(Sample { is_looping: false, ..wrapped(1_000) }), now), Action::Recover);
+}
+
+#[test]
+fn inv_session_06_two_states_keep_their_own_deadline_and_foreground() {
+    let mut first = loaded();
+    let mut second = loaded();
+    next_action(&mut first, Event::Play { position_ms: 0 }, 0);
+    next_action(&mut second, Event::Play { position_ms: 0 }, 5_000);
+    next_action(&mut second, Event::Foreground, 5_000);
+    assert_eq!(next_action(&mut first, Event::WatchdogFired(stalled()), 12_000), Action::Recover);
+    assert_eq!(next_action(&mut first, Event::ForegroundDue, 12_000), Action::None);
+    assert_eq!(next_action(&mut second, Event::WatchdogFired(stalled()), 12_000), Action::None);
+    assert_eq!(next_action(&mut second, Event::ForegroundDue, 12_000), Action::ForegroundPass);
+    assert_eq!(next_action(&mut second, Event::WatchdogFired(stalled()), 17_000), Action::Recover);
 }

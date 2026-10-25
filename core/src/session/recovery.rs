@@ -1,7 +1,13 @@
-use super::route_staleness::RouteStaleness;
+mod foreground;
+mod route_chain;
+mod stall_control;
+
+use self::foreground::ForegroundReturn;
+use self::route_chain::RouteChain;
+use self::stall_control::StallControl;
+use super::watchdog_policy::{Sample, WatchdogConfig};
 use crate::proxy::Readiness;
-use super::watchdog_policy::{evaluate, window_delay_ms, Decision, Progress, Sample, WatchdogConfig};
-use crate::hls;
+use statig::blocking::{IntoStateMachineExt, StateMachine};
 
 pub const FOREGROUND_STEPS: [&str; 6] = ["arbitration", "transport", "audio-session", "routes", "ring-projection", "intent"];
 
@@ -38,245 +44,101 @@ pub enum Action {
     ForegroundRetry(u64),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Chain {
-    Idle,
-    Purging,
-    Refreshing { is_startup: bool },
+#[derive(Debug, Clone, Copy)]
+enum Signal {
+    Escalated,
+    Failed,
+}
+
+enum Input<'a> {
+    Event(&'a Event),
+    Signal(Signal),
 }
 
 #[derive(Debug, Clone)]
-pub struct RecoveryState {
+struct Shared {
     config: WatchdogConfig,
     key: String,
     via_proxy_hls: bool,
     has_loaded: bool,
     wants_play: bool,
-    window_start_ms: u64,
-    deadline_ms: Option<u64>,
-    has_progress: bool,
-    is_cooling: bool,
-    attempts: u32,
-    cooldown_cycles: u32,
-    is_escalated: bool,
-    is_terminal: bool,
-    has_used_startup: bool,
-    chain: Chain,
     retry_index: usize,
-    is_foreground_running: bool,
-    foreground_attempt: usize,
 }
 
-impl RecoveryState {
-    pub fn new(config: WatchdogConfig) -> Self {
-        Self {
-            config,
-            key: String::new(),
-            via_proxy_hls: false,
-            has_loaded: false,
-            wants_play: false,
-            window_start_ms: 0,
-            deadline_ms: None,
-            has_progress: false,
-            is_cooling: false,
-            attempts: 0,
-            cooldown_cycles: 0,
-            is_escalated: false,
-            is_terminal: false,
-            has_used_startup: false,
-            chain: Chain::Idle,
-            retry_index: 0,
-            is_foreground_running: false,
-            foreground_attempt: 0,
-        }
-    }
-
-    fn reset_epoch(&mut self) {
-        self.attempts = 0;
-        self.cooldown_cycles = 0;
-        self.is_cooling = false;
-        self.is_escalated = false;
-        self.is_terminal = false;
-        self.has_used_startup = false;
-        self.chain = Chain::Idle;
-        self.retry_index = 0;
-    }
-
-    fn arm(&mut self, position_ms: u64, now: u64) -> Action {
-        let delay_ms = window_delay_ms(&self.config, self.has_progress, self.is_cooling);
-        self.window_start_ms = position_ms;
-        self.deadline_ms = Some(now.saturating_add(delay_ms));
-        Action::Arm { delay_ms }
-    }
-
+impl Shared {
     fn next_retry_delay(&mut self) -> Option<u64> {
         let delay = self.config.retry_delays_ms.get(self.retry_index).copied()?;
         self.retry_index += 1;
         Some(delay)
     }
 
-    fn fail(&mut self, reason: String) -> Action {
-        self.deadline_ms = None;
+    fn fail(&mut self, reason: &str) -> Action {
         if !self.wants_play {
-            return Action::Fail(reason);
+            return Action::Fail(reason.to_string());
         }
-        self.next_retry_delay().map_or(Action::Fail(reason), Action::Retry)
+        self.next_retry_delay().map_or_else(|| Action::Fail(reason.to_string()), Action::Retry)
+    }
+}
+
+struct Ctx<'a> {
+    shared: &'a mut Shared,
+    now: u64,
+    action: Action,
+    signal: Option<Signal>,
+}
+
+#[derive(Clone)]
+pub struct RecoveryState {
+    shared: Shared,
+    stall: StateMachine<StallControl>,
+    chain: StateMachine<RouteChain>,
+    foreground: StateMachine<ForegroundReturn>,
+}
+
+impl RecoveryState {
+    pub fn new(config: WatchdogConfig) -> Self {
+        let shared = Shared { config, key: String::new(), via_proxy_hls: false, has_loaded: false, wants_play: false, retry_index: 0 };
+        Self::with_shared(shared)
     }
 
-    fn on_fired(&mut self, sample: &Sample, now: u64) -> Action {
-        let is_due = self.deadline_ms.is_some_and(|deadline| now >= deadline);
-        if self.is_terminal || !self.wants_play || !is_due {
-            return Action::None;
-        }
-        self.deadline_ms = None;
-        let progress = Progress {
-            has_loaded: self.has_loaded,
-            attempts: self.attempts,
-            is_escalated: self.is_escalated,
-            is_cooldown_elapsed: self.is_cooling,
-            cooldown_cycles: self.cooldown_cycles,
-        };
-        let verdict = evaluate(&self.config, self.window_start_ms, sample, &progress);
-        self.attempts = verdict.attempts;
-        match verdict.decision {
-            Decision::ResetAndRearm => {
-                self.is_cooling = false;
-                self.cooldown_cycles = 0;
-                self.has_progress = true;
-                self.retry_index = 0;
-                self.arm(sample.position_ms, now)
-            }
-            Decision::Rearm => {
-                self.is_cooling = false;
-                self.arm(sample.position_ms, now)
-            }
-            Decision::Recover => {
-                self.is_cooling = false;
-                Action::Recover
-            }
-            Decision::Escalate => {
-                self.is_cooling = false;
-                self.is_escalated = true;
-                self.chain = Chain::Purging;
-                Action::PurgeCache(self.key.clone())
-            }
-            Decision::EnterCooldown => {
-                self.is_cooling = true;
-                self.cooldown_cycles += 1;
-                self.arm(sample.position_ms, now)
-            }
-            Decision::Terminate => {
-                self.is_terminal = true;
-                Action::Fail("watchdog terminal".to_string())
-            }
+    fn with_shared(shared: Shared) -> Self {
+        Self {
+            shared,
+            stall: StallControl::default().state_machine(),
+            chain: RouteChain::default().state_machine(),
+            foreground: ForegroundReturn.state_machine(),
         }
     }
 
-    fn on_http_error(&mut self, status: i32) -> Action {
-        if !hls::is_fatal_startup_http_error(status, self.has_loaded) {
-            return Action::None;
-        }
-        if self.via_proxy_hls && !self.has_used_startup {
-            self.has_used_startup = true;
-            self.chain = Chain::Refreshing { is_startup: true };
-            return Action::RefreshRoute;
-        }
-        self.fail(hls::describe(status, None))
+    fn restart(&mut self, key: String, via_proxy_hls: bool) {
+        let config = std::mem::take(&mut self.shared.config);
+        *self = Self::with_shared(Shared { config, key, via_proxy_hls, has_loaded: false, wants_play: false, retry_index: 0 });
     }
 
-    fn on_route_refreshed(&mut self) -> Action {
-        let Chain::Refreshing { is_startup } = self.chain else {
-            return Action::None;
-        };
-        self.chain = Chain::Idle;
-        if is_startup {
-            return Action::Retry(self.config.startup_delay_ms);
+    fn dispatch(&mut self, event: &Event, now: u64) -> Action {
+        if matches!(event, Event::Loaded) {
+            self.shared.has_loaded = true;
         }
-        self.next_retry_delay().map_or(Action::Fail("retries exhausted".to_string()), Action::Retry)
-    }
-
-    fn on_foreground_pass_done(&mut self, is_ok: bool) -> Action {
-        if !self.is_foreground_running {
-            return Action::None;
+        let mut ctx = Ctx { shared: &mut self.shared, now, action: Action::None, signal: None };
+        let input = Input::Event(event);
+        self.stall.handle_with_context(&input, &mut ctx);
+        self.chain.handle_with_context(&input, &mut ctx);
+        self.foreground.handle_with_context(&input, &mut ctx);
+        while let Some(signal) = ctx.signal.take() {
+            let input = Input::Signal(signal);
+            self.stall.handle_with_context(&input, &mut ctx);
+            self.chain.handle_with_context(&input, &mut ctx);
         }
-        let delay = self.config.foreground_delays_ms.get(self.foreground_attempt).copied();
-        match delay.filter(|_| !is_ok) {
-            Some(delay) => {
-                self.foreground_attempt += 1;
-                Action::ForegroundRetry(delay)
-            }
-            None => {
-                self.is_foreground_running = false;
-                Action::None
-            }
-        }
+        ctx.action
     }
 }
 
 pub fn next_action(state: &mut RecoveryState, event: Event, now: u64) -> Action {
     match event {
         Event::Source { key, via_proxy_hls } => {
-            let config = state.config.clone();
-            let mut fresh = RecoveryState::new(config);
-            fresh.key = key;
-            fresh.via_proxy_hls = via_proxy_hls;
-            *state = fresh;
+            state.restart(key, via_proxy_hls);
             Action::None
         }
-        Event::Loaded => {
-            state.has_loaded = true;
-            Action::None
-        }
-        Event::Play { position_ms } => {
-            if state.is_terminal {
-                return Action::None;
-            }
-            state.wants_play = true;
-            state.arm(position_ms, now)
-        }
-        Event::Pause => {
-            state.wants_play = false;
-            match state.deadline_ms.take() {
-                Some(_) => Action::Disarm,
-                None => Action::None,
-            }
-        }
-        Event::WatchdogFired(sample) => state.on_fired(&sample, now),
-        Event::HttpError { status } => state.on_http_error(status),
-        Event::PlaybackFailed { reason } => state.fail(reason),
-        Event::CachePurged => {
-            if state.chain != Chain::Purging {
-                return Action::None;
-            }
-            state.chain = Chain::Refreshing { is_startup: false };
-            Action::RefreshRoute
-        }
-        Event::RouteRefreshed => state.on_route_refreshed(),
-        Event::RetryDue { resolved_generation, current_generation, readiness } => {
-            if RouteStaleness::is_stale(state.via_proxy_hls, resolved_generation, current_generation, readiness) {
-                state.chain = Chain::Refreshing { is_startup: false };
-                return Action::RefreshRoute;
-            }
-            Action::Replay
-        }
-        Event::Foreground => {
-            state.reset_epoch();
-            state.is_foreground_running = true;
-            state.foreground_attempt = 0;
-            Action::ForegroundPass
-        }
-        Event::ForegroundPassDone { is_ok } => state.on_foreground_pass_done(is_ok),
-        Event::ForegroundDue => {
-            if state.is_foreground_running {
-                Action::ForegroundPass
-            } else {
-                Action::None
-            }
-        }
-        Event::Background => {
-            state.is_foreground_running = false;
-            state.deadline_ms = None;
-            Action::Disarm
-        }
+        event => state.dispatch(&event, now),
     }
 }

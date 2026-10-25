@@ -28,6 +28,10 @@ Proxy хранит до 256 планов по ключу namespace и верси
 
 While a place plays, the core samples its player and reloads it when the position stops moving. A looping video that wraps to the start counts as moving, so a loop never reloads the player. A video that does not loop and goes back is a stall.
 
+### Recovery state machines
+
+`session/recovery` runs three independent `statig` machines for each loaded source: stall control (`Disarmed`, `Watching`, `Cooling`, `Terminal`), the route chain (`Idle`, `Purging`, `Refreshing`) and the foreground return (`Idle`, `Checking`, `Waiting`). `next_action` feeds one event to all three and returns the one `Action` that the executor must run. A transition only computes the state and the action. Purge, refresh, retry timers and the foreground pass run outside the machine and come back as events of their own load. Attempt counters, retry index and the `WatchdogConfig` stay plain data.
+
 ## What the platform provides
 
 | Interface | Purpose |
