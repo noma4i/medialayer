@@ -4,7 +4,9 @@ set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 python3 - "$root" <<'PY'
 import hashlib
+import os
 import re
+import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -243,6 +245,13 @@ for path in sorted((root / "scripts").glob("*.sh")):
     for number, line in enumerate(path.read_text().splitlines(), 1):
         if not line.lstrip().startswith("#") and EARLY_EXIT.search(line):
             findings.append(f"Z9 {path.relative_to(root)}:{number} pipes into an early-exit grep, read from a file: {line.strip()}")
+
+# Z10 every component of a tracked or untracked non-ignored path is [A-Za-z0-9_.-]+.
+PATH_COMPONENT = re.compile(rb"[A-Za-z0-9_.-]+")
+listed = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"], check=True, capture_output=True).stdout
+for raw in sorted(set(listed.split(b"\0"))):
+    if raw and os.path.lexists(os.path.join(bytes(root), raw)) and not all(PATH_COMPONENT.fullmatch(part) for part in raw.split(b"/")):
+        findings.append(f"Z10 path component outside [A-Za-z0-9_.-]: {raw.decode(errors='backslashreplace')}")
 
 if findings:
     print("zoo check found", len(findings), "problem(s):")
