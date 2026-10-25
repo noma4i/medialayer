@@ -392,6 +392,32 @@ kotlin_run_repo() {
   chmod +x "$repo/bin/cargo"
 }
 
+inv_check_06_the_owner_id_does_not_depend_on_shasum() {
+  changed_files() { echo "$CHANGED"; }
+  steps=("a|a1|20|-|printf '%s' \"\$CHECK_OWNER_ID\" > owner")
+  shasum() { echo "shasum: command not found" >&2; return 127; }
+  owner_of() {
+    root="$work/$1"
+    mkdir -p "$root/target"
+    rm -f "$root/owner"
+    (run_checks) > "$work/engine.out" 2>&1
+    cat "$root/owner" 2> /dev/null
+  }
+  local first second other
+  first="$(owner_of engine)"
+  second="$(owner_of engine)"
+  other="$(owner_of engine-other)"
+  [[ "$first" =~ ^[0-9a-f]{12}$ ]] && [ "$first" = "$second" ] && [ "$first" != "$other" ] \
+    || { echo "FAIL expect_green: owner ids '$first' '$second' '$other' are not stable 12 hex per root"; failed=1; }
+  ! grep -q 'command not found' "$work/engine.out" || { echo "FAIL expect_green: the run called a missing tool"; failed=1; }
+  python3() { return 1; }
+  root="$work/engine"
+  rm -f "$root/owner"
+  if (run_checks) > "$work/engine.out" 2>&1; then echo "FAIL expect_red: the run went on without an owner id"; failed=1; fi
+  [ ! -e "$root/owner" ] || { echo "FAIL expect_red: a step ran without an owner id"; failed=1; }
+  unset -f shasum python3 owner_of
+}
+
 kotlin_run_compiles_only_fresh_sources() {
   PATH="$repo/bin:$PATH" bash "$repo/scripts/check_gen_consumers.sh" kotlin-run sh -c 'ls "$1" > "$2"' _ "$repo/kotlin/src/test/kotlin/app/media" "$work/seen" > /dev/null 2>&1 &&
     [ "$(cat "$work/seen")" = Fresh.kt ]

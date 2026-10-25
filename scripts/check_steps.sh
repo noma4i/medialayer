@@ -153,7 +153,7 @@ run_checks() {
   logdir="$root/target/check-logs"
   mkdir -p "$logdir"
   local start=$SECONDS lanes=() ordered=() failed=0 cpu sampled before sampler cpu_children daemon
-  CHECK_OWNER_ID="$(printf '%s' "$root" | shasum | cut -c1-12)"
+  CHECK_OWNER_ID="$(python3 -I -c 'import hashlib, sys; print(hashlib.sha1(sys.argv[1].encode()).hexdigest()[:12])' "$root")" || { echo "check: cannot derive the owner id" >&2; return 1; }
   export CHECK_OWNER_ID
   sampled="$(mktemp)"
   before="$(mktemp)"
