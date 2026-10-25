@@ -3,7 +3,7 @@ use crate::api::source::PlaybackRoute;
 use SlotCall::*;
 
 fn load(key: &str) -> SlotCall {
-    Load { key: key.to_string(), route: PlaybackRoute { url: key.to_string(), headers: Default::default(), generation: None, hls: false, looping: true } }
+    Load { key: key.to_string(), route: PlaybackRoute { url: key.to_string(), headers: Default::default(), generation: None, hls: false, looping: true }, generation: 0 }
 }
 
 fn pending_after(calls: Vec<SlotCall>) -> Vec<SlotCall> {

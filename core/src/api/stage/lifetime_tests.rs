@@ -136,8 +136,8 @@ fn inv_api_35_a_slot_sample_runs_outside_the_stage_lock() {
     let entries: [(&str, bool, Trigger); 6] = [
         ("set_playing", false, |stage, url, _| stage.set_playing(url, true, &[])),
         ("seek_fraction", false, |stage, url, _| stage.seek_fraction(url, 0.5)),
-        ("ready", false, |stage, _, slot| stage.ready(slot as usize)),
-        ("visual_ready", false, |stage, _, slot| stage.visual_ready(slot as usize)),
+        ("ready", false, |stage, _, slot| stage.ready(slot as usize, stage.generation_at(slot as usize))),
+        ("visual_ready", false, |stage, _, slot| stage.visual_ready(slot as usize, stage.generation_at(slot as usize))),
         ("release_under", false, |stage, _, _| drop(stage.release_under(0, Pressure::Critical))),
         ("replace_window", true, |stage, _, _| stage.replace_window(0, Vec::new())),
     ];
@@ -292,7 +292,7 @@ fn claim_trigger_mark(owner: &std::sync::Mutex<Option<std::thread::ThreadId>>) -
 #[test]
 fn inv_api_35_a_sample_that_returns_after_a_reload_of_the_same_key_is_not_applied() {
     let entries: [(&str, Trigger); 2] = [
-        ("ready", |stage, _, slot| stage.ready(slot as usize)),
+        ("ready", |stage, _, slot| stage.ready(slot as usize, stage.generation_at(slot as usize))),
         ("seek_fraction", |stage, url, _| stage.seek_fraction(url, 0.5)),
     ];
     let mut problems = Vec::new();

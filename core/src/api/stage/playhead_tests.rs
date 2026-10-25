@@ -50,7 +50,7 @@ async fn inv_readahead_06_the_slot_gets_the_core_hint_when_the_playlist_is_serve
     let (slot_index, slot) = playing_clip(&rig).await;
     eventually(|| readaheads(&slot) == vec![8_000]).await;
 
-    rig.parts.stage.stalled(slot_index, 1_000);
+    rig.parts.stage.stalled(slot_index, rig.parts.stage.generation_at(slot_index), 1_000);
 
     eventually(|| readaheads(&slot) == vec![8_000, 12_000]).await;
 }

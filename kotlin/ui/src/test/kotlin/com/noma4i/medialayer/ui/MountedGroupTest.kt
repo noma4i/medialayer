@@ -1,5 +1,7 @@
 package com.noma4i.medialayer.ui
 
+import com.noma4i.medialayer.CreatedPlayer
+import com.noma4i.medialayer.SlotCall
 import android.content.Context
 import android.os.Looper
 import androidx.activity.ComponentActivity
@@ -31,19 +33,15 @@ private data class ClipSource(override val url: String, override val kind: Kind)
 private class TransportSlot : PlayerSlot, PlayerSlotFactory {
   val log = CopyOnWriteArrayList<String>()
   val transport: String? get() = log.lastOrNull { it == "play" || it == "pause" }
-  override fun create(slot: UInt): PlayerSlot = this
-  override fun load(key: String, route: PlaybackRoute) {}
-  override fun unload() {}
-  override fun preroll() {}
-  override fun play() { log.add("play") }
-  override fun pause() { log.add("pause") }
-  override fun mute() {}
-  override fun unmute() {}
-  override fun attach(viewToken: ULong) {}
-  override fun detach() {}
-  override fun seek(positionMs: ULong) {}
-  override fun setRate(rate: Float) { log.add("rate") }
-  override fun setReadahead(ms: ULong) {}
+  override suspend fun create(slot: UInt): CreatedPlayer = CreatedPlayer(this)
+  override suspend fun apply(command: SlotCall) {
+    when (command) {
+      SlotCall.Play -> log.add("play")
+      SlotCall.Pause -> log.add("pause")
+      is SlotCall.Rate -> log.add("rate")
+      else -> {}
+    }
+  }
   override fun sample() = SlotSample(0u, null, false, false, false)
 }
 

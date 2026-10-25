@@ -1,5 +1,7 @@
 package com.noma4i.medialayer
 
+import com.noma4i.medialayer.CreatedPlayer
+import com.noma4i.medialayer.SlotCall
 import java.nio.file.Files
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
@@ -110,25 +112,31 @@ private class LoggingSlot(val id: UInt) : PlayerSlot {
   @Volatile var key: String? = null
   @Volatile var route: PlaybackRoute? = null
 
-  override fun load(key: String, route: PlaybackRoute) { this.key = key; this.route = route; log.add("load") }
-  override fun unload() { log.add("unload") }
-  override fun preroll() { log.add("preroll") }
-  override fun play() { log.add("play") }
-  override fun pause() { log.add("pause") }
-  override fun mute() { log.add("mute") }
-  override fun unmute() { log.add("unmute") }
-  override fun setReadahead(ms: ULong) { log.add("readahead $ms") }
-  override fun attach(viewToken: ULong) { log.add("attach") }
-  override fun detach() { log.add("detach") }
-  override fun seek(positionMs: ULong) { log.add("seek") }
-  override fun setRate(rate: Float) { log.add("rate:$rate") }
+  @Volatile var generation: ULong = 0uL
+
+  override suspend fun apply(command: SlotCall) {
+    when (command) {
+      is SlotCall.Load -> { key = command.key; route = command.route; generation = command.generation; log.add("load") }
+      SlotCall.Unload -> log.add("unload")
+      SlotCall.Preroll -> log.add("preroll")
+      SlotCall.Play -> log.add("play")
+      SlotCall.Pause -> log.add("pause")
+      SlotCall.Mute -> log.add("mute")
+      SlotCall.Unmute -> log.add("unmute")
+      is SlotCall.Readahead -> log.add("readahead ${command.ms}")
+      is SlotCall.Attach -> log.add("attach")
+      SlotCall.Detach -> log.add("detach")
+      is SlotCall.Seek -> log.add("seek")
+      is SlotCall.Rate -> log.add("rate:${command.rate}")
+    }
+  }
   override fun sample(): SlotSample = SlotSample(0uL, null, false, false, false)
 }
 
 private class LoggingSlots : PlayerSlotFactory {
   val slots = ConcurrentHashMap<UInt, LoggingSlot>()
 
-  override fun create(slot: UInt): PlayerSlot = LoggingSlot(slot).also { slots[slot] = it }
+  override suspend fun create(slot: UInt): CreatedPlayer = CreatedPlayer(LoggingSlot(slot).also { slots[slot] = it })
 
   fun loaded(): LoggingSlot? = slots.values.firstOrNull { "load" in it.log }
 }
@@ -250,10 +258,10 @@ class MediaLayerBridgeTest {
     media.setPlaying(item.url, true)
     eventually("the slot received play") { slots.loaded()?.log?.contains("play") == true }
     val slot = slots.loaded()!!
-    media.playerEvents().ready(slot.id)
-    media.playerEvents().visualReady(slot.id)
+    media.playerEvents().ready(slot.id, slot.generation)
+    media.playerEvents().visualReady(slot.id, slot.generation)
     eventually("the place state reached Rendered") { states.states.lastOrNull() == MediaState.Rendered }
-    media.playerEvents().ended(slot.id)
+    media.playerEvents().ended(slot.id, slot.generation)
 
     eventually("the place state reached Ended") { states.states.lastOrNull() == MediaState.Ended }
     assertEquals(listOf<Any?>("file:///bundle/intro.mp4", false, null), listOf(slot.route!!.url, slot.route!!.looping, slot.route!!.generation))

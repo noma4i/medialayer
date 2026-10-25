@@ -21,19 +21,15 @@ private final class TransportSlot: PlayerSlot, PlayerSlotFactory, @unchecked Sen
   var transport: String? { all.last { $0 == "play" || $0 == "pause" } }
 
   private func note(_ event: String) { lock.withLock { events.append(event) } }
-  func create(slot: UInt32) -> PlayerSlot { self }
-  func load(key: String, route: PlaybackRoute) {}
-  func unload() {}
-  func preroll() {}
-  func play() { note("play") }
-  func pause() { note("pause") }
-  func mute() {}
-  func unmute() {}
-  func attach(viewToken: UInt64) {}
-  func detach() {}
-  func seek(positionMs: UInt64) {}
-  func setRate(rate: Float) { note("rate") }
-  func setReadahead(ms: UInt64) {}
+  func create(slot: UInt32) async -> CreatedPlayer { CreatedPlayer(player: self) }
+  func apply(command: SlotCall) async {
+    switch command {
+    case .play: note("play")
+    case .pause: note("pause")
+    case .rate: note("rate")
+    default: break
+    }
+  }
   func sample() -> SlotSample { SlotSample(positionMs: 0, durationMs: nil, isLooping: false, viewAttached: false, frameRendered: false) }
 }
 

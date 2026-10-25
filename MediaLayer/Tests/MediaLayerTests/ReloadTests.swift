@@ -6,20 +6,20 @@ private final class ReloadSlot: PlayerSlot, PlayerSlotFactory, @unchecked Sendab
   let plays = AsyncStream<Bool>.makeStream()
   private let lock = NSLock()
   private var attached = false
+  private var loaded: UInt64 = 0
 
-  func create(slot: UInt32) -> PlayerSlot { self }
-  func load(key: String, route: PlaybackRoute) {}
-  func unload() { lock.withLock { attached = false } }
-  func preroll() {}
-  func play() { plays.continuation.yield(lock.withLock { attached }) }
-  func pause() {}
-  func mute() {}
-  func unmute() {}
-  func attach(viewToken: UInt64) { lock.withLock { attached = viewToken == 42 } }
-  func detach() { lock.withLock { attached = false } }
-  func seek(positionMs: UInt64) {}
-  func setRate(rate: Float) {}
-  func setReadahead(ms: UInt64) {}
+  var generation: UInt64 { lock.withLock { loaded } }
+
+  func create(slot: UInt32) async -> CreatedPlayer { CreatedPlayer(player: self) }
+  func apply(command: SlotCall) async {
+    switch command {
+    case let .load(_, _, generation): lock.withLock { loaded = generation }
+    case .unload, .detach: lock.withLock { attached = false }
+    case .play: plays.continuation.yield(lock.withLock { attached })
+    case let .attach(viewToken): lock.withLock { attached = viewToken == 42 }
+    default: break
+    }
+  }
   func sample() -> SlotSample {
     SlotSample(positionMs: 0, durationMs: nil, isLooping: false, viewAttached: lock.withLock { attached }, frameRendered: false)
   }
@@ -53,7 +53,7 @@ struct ReloadTests {
     media.setPlaying(key: key, playing: true)
     var plays = slot.plays.stream.makeAsyncIterator()
     #expect(await plays.next() == true)
-    events.failed(slot: 0, status: 0, detail: "decoder failed")
+    events.failed(slot: 0, generation: slot.generation, status: 0, detail: "decoder failed")
     #expect(await plays.next() == true)
   }
 }

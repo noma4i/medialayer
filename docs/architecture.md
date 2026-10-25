@@ -35,9 +35,9 @@ While a place plays, the core samples its player and reloads it when the positio
 | `Fetcher` | Network access: `fetch(request)` returns the status, the headers and a `BodyReader`. `range_start` and `range_end` follow HTTP: both ends are included. Ready-made: `URLSessionFetcher` on Swift, `OkHttpFetcher` on Kotlin |
 | `BodyReader` | Reads the body in chunks with `nextChunk()`. The core calls `release()` when the body ends or is dropped |
 | `SettingsStore` | Local storage for saved limits (read, write, remove a string by key). Ready-made: `UserDefaultsSettings`, `SharedPreferencesSettings` |
-| `PlayerSlotFactory` | Creates the native player of a slot |
-| `PlayerSlot` | Commands to a native player: `load`, `preroll`, `play`, `pause`, `mute`, `unmute`, `retain`, `unload`, `attach`, `detach`, `seek`, `setRate`, `sample`. `PlaybackRoute` says whether the source is HLS and whether it loops |
-| `PlayerEvents` | Player events to the core: `ready`, `visualReady`, `stalled`, `failed`, `ended`, `attach`, `detach`, `foreground`, `background`, `memoryWarning`. Get it from `media.playerEvents()` |
+| `PlayerSlotFactory` | Creates the native player of a slot. `create` is `async`: it may wait for the native thread |
+| `PlayerSlot` | `apply(command)` is `async` and returns after the native player took the `SlotCall` (`load`, `unload`, `preroll`, `play`, `pause`, `mute`, `unmute`, `attach`, `detach`, `seek`, `rate`, `readahead`). The core sends one command at a time per slot. `sample` returns a ready snapshot. `load` carries the generation of the load. `PlaybackRoute` says whether the source is HLS and whether it loops |
+| `PlayerEvents` | Player events to the core: `ready`, `visualReady`, `stalled`, `failed`, `ended` (each with the slot and the generation of the load that produced it, the core drops an event of an older load), `attach`, `detach`, `foreground`, `background`, `memoryWarning`. Get it from `media.playerEvents()` |
 | `DeviceMemory` | Device class in `OpenConfig`: memory size, heap class and the low-memory flag |
 | `MemoryReleaser` | Called when the system reports critical memory pressure, so Nuke and Coil can drop their memory caches |
 | `StatsListener`, `StateListener` | Core notifications: cache statistics and the `MediaState` of one place. `statsStream()` and `stateStream(key:)` wrap them |

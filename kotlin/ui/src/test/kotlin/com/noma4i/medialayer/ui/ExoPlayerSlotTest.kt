@@ -42,31 +42,11 @@ class ExoPlayerSlotTest {
   fun inv_android_08_closed_factory_does_not_create_a_live_player() {
     val factory = factory()
     factory.release()
-    val slot = factory.create(0u)
+    val slot = factory.createSlot(0u)
     slot.load("late", route)
     idle()
     assertNull(slot.player)
     assertNull(factory.events)
-  }
-
-  @Test
-  fun inv_android_05_pending_loads_do_not_execute_obsolete_sources() {
-    val sources = mutableListOf<String>()
-    val factory = ExoPlayerSlotFactory(context).onMainLooper().also {
-      it.mediaSourceFor = { next -> sources.add(next.url); FakeMediaSource() }
-      factories.add(it)
-    }
-    val slot = factory.create(0u)
-    slot.load("old", route.copy(url = "http://127.0.0.1:9/old.mp4"))
-    slot.seek(10uL)
-    slot.play()
-    slot.load("new", route)
-    slot.seek(20uL)
-    assertNull(slot.player)
-    idle()
-    assertEquals(listOf(route.url), sources)
-    assertEquals(20L, slot.player!!.currentPosition)
-    assertFalse("a play of the replaced source ran", slot.player!!.playWhenReady)
   }
 
   @Test
@@ -84,7 +64,7 @@ class ExoPlayerSlotTest {
     }
     resumes = 0
     try {
-      factory.create(0u).load("a", route)
+      factory.createSlot(0u).load("a", route)
       idle()
       assertEquals(0, resumes)
     } finally { job.cancel() }
@@ -93,7 +73,7 @@ class ExoPlayerSlotTest {
   @Test
   fun inv_android_06_readahead_survives_pending_player_creation() {
     for (beforeLoad in listOf(true, false)) {
-      val slot = factory().create(0u)
+      val slot = factory().createSlot(0u)
       if (beforeLoad) slot.setReadahead(12_000uL)
       slot.load("k", route)
       if (!beforeLoad) slot.setReadahead(12_000uL)
@@ -166,7 +146,7 @@ class ExoPlayerSlotTest {
     val worker = java.util.concurrent.Executors.newSingleThreadExecutor()
     try {
       val slot = worker.submit<ExoPlayerSlot> {
-        factory.create(0u).also {
+        factory.createSlot(0u).also {
           it.load("k", route)
           it.play()
           assertNull(it.player)
@@ -188,7 +168,7 @@ class ExoPlayerSlotTest {
 
   @Test
   fun loadPrerollPlayPauseAndLoopMapToThePlayer() {
-    val slot = factory().create(0u)
+    val slot = factory().createSlot(0u)
 
     slot.load("k", route); idle()
     val player = slot.player!!
@@ -213,9 +193,9 @@ class ExoPlayerSlotTest {
   fun theRouteDecidesLoopingAndAnEndedEventIsSentOnlyWithoutIt() {
     listOf(true to Player.REPEAT_MODE_ONE, false to Player.REPEAT_MODE_OFF).forEach { (looping, mode) ->
       events.calls.clear()
-      val slot = factory().create(5u)
+      val slot = factory().createSlot(5u)
       slot.load("k", route.copy(looping = looping)); idle()
-      slot.listener.onPlaybackStateChanged(Player.STATE_ENDED)
+      slot.loadEvents!!.onPlaybackStateChanged(Player.STATE_ENDED)
 
       assertEquals(mode, slot.player!!.repeatMode)
       assertEquals(looping, slot.sample().isLooping)
@@ -233,7 +213,7 @@ class ExoPlayerSlotTest {
   @Test
   fun inv_idle_05_a_slot_sample_follows_the_playhead_between_events_without_a_tick() {
     val clock = FakeClock(0)
-    val slot = factory().also { it.clock = clock }.create(0u)
+    val slot = factory().also { it.clock = clock }.createSlot(0u)
     slot.load("k", route); idle()
     slot.play(); idle()
     playUntilReady(clock, slot)
@@ -264,7 +244,7 @@ class ExoPlayerSlotTest {
 
   @Test
   fun theRateIsThePlaybackSpeedAndGoesBackToNormalWithUnload() {
-    val slot = factory().create(0u)
+    val slot = factory().createSlot(0u)
     slot.load("k", route); idle()
 
     slot.setRate(1.5f); idle()
@@ -277,7 +257,7 @@ class ExoPlayerSlotTest {
   @Test
   fun attachGivesTheViewHandleThePlayerDetachTakesItAndSeekMovesThePosition() {
     val factory = factory()
-    val slot = factory.create(0u)
+    val slot = factory.createSlot(0u)
     val view = factory.players.newView()
     slot.load("k", route); idle()
 
@@ -295,7 +275,7 @@ class ExoPlayerSlotTest {
 
   @Test
   fun muteAndUnmuteChangeOnlyTheVolumeAndNeverTouchAudioFocus() {
-    val slot = factory(startMuted = false, focus = MediaAudioFocus.Exclusive).create(0u)
+    val slot = factory(startMuted = false, focus = MediaAudioFocus.Exclusive).createSlot(0u)
     val audio = shadowOf(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
     slot.load("k", route); slot.play(); idle()
     untilIdle { audio.lastAudioFocusRequest != null }
@@ -312,7 +292,7 @@ class ExoPlayerSlotTest {
 
   @Test
   fun mixPlaysWithSoundAndNeverRequestsFocusFromThePlayerOrTheLibrary() {
-    val slot = factory(startMuted = false, focus = MediaAudioFocus.Mix).create(0u)
+    val slot = factory(startMuted = false, focus = MediaAudioFocus.Mix).createSlot(0u)
     val audio = shadowOf(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
 
     slot.load("k", route); slot.play(); settleAudioFocus(); advanceFocus(1000)
@@ -324,7 +304,7 @@ class ExoPlayerSlotTest {
 
   @Test
   fun duckAsksTheLibraryForTheFocusOnceAndThePlayerNever() {
-    val slot = factory(startMuted = false, focus = MediaAudioFocus.Duck).create(0u)
+    val slot = factory(startMuted = false, focus = MediaAudioFocus.Duck).createSlot(0u)
     val audio = shadowOf(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
 
     slot.load("k", route); idle(); advanceFocus(1000)
@@ -339,7 +319,7 @@ class ExoPlayerSlotTest {
 
   @Test
   fun duckFollowsMutePauseAndUnloadOfTheSlot() {
-    val slot = factory(startMuted = false, focus = MediaAudioFocus.Duck).create(0u)
+    val slot = factory(startMuted = false, focus = MediaAudioFocus.Duck).createSlot(0u)
     slot.load("k", route); slot.play(); idle()
 
     slot.mute(); idle(); advanceFocus(300)
@@ -361,7 +341,7 @@ class ExoPlayerSlotTest {
 
   @Test
   fun aMutedSlotStartedBySilentNeverTakesTheFocus() {
-    val slot = factory(startMuted = true, focus = MediaAudioFocus.Duck).create(0u)
+    val slot = factory(startMuted = true, focus = MediaAudioFocus.Duck).createSlot(0u)
 
     slot.load("k", route); slot.play(); idle(); advanceFocus(1000)
 
@@ -371,7 +351,7 @@ class ExoPlayerSlotTest {
   @Test
   fun aSlotThatIsReleasedGivesItsFocusBack() {
     val factory = factory(startMuted = false, focus = MediaAudioFocus.Duck)
-    val slot = factory.create(0u)
+    val slot = factory.createSlot(0u)
     slot.load("k", route); slot.play(); idle()
 
     factory.release(); idle(); advanceFocus(300)
@@ -382,7 +362,7 @@ class ExoPlayerSlotTest {
   @Test
   fun aDebugSlotStartsMutedAndAReleaseSlotStartsAtFullVolume() {
     listOf(true to 0f, false to 1f).forEach { (startMuted, volume) ->
-      val slot = factory(startMuted = startMuted).create(0u)
+      val slot = factory(startMuted = startMuted).createSlot(0u)
       slot.load("k", route); idle()
 
       assertEquals(volume, slot.player!!.volume, 0f)
@@ -392,7 +372,7 @@ class ExoPlayerSlotTest {
   @Test
   fun unloadDropsTheMediaAndFreesTheKey() {
     val factory = factory()
-    val slot = factory.create(0u)
+    val slot = factory.createSlot(0u)
     slot.load("k", route); slot.play(); idle()
     val player = slot.player!!
 
@@ -408,7 +388,7 @@ class ExoPlayerSlotTest {
   @Test
   fun aPoolOfThreeSlotsNeverCreatesMoreThanThreePlayersWhateverTheNumberOfKeys() {
     val factory = factory()
-    val slots = (0u..2u).map { factory.create(it) }
+    val slots = (0u..2u).map { factory.createSlot(it) }
 
     val created = mutableSetOf<Player>()
     repeat(12) { page ->
@@ -426,9 +406,9 @@ class ExoPlayerSlotTest {
 
   @Test
   fun playerListenerEventsReachThePlatformEventsWithTheSlotNumber() {
-    val slot = factory().create(7u)
+    val slot = factory().createSlot(7u)
     slot.load("k", route.copy(looping = false)); idle()
-    val listener = slot.listener
+    val listener = slot.loadEvents!!
     val httpError = PlaybackException("x", HttpDataSource.InvalidResponseCodeException(404, "Not Found", null, emptyMap(), DataSpec(android.net.Uri.EMPTY), ByteArray(0)), PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS)
 
     listener.onPlaybackStateChanged(Player.STATE_BUFFERING)
@@ -449,7 +429,7 @@ class ExoPlayerSlotTest {
   @Test
   fun aRealPlayerReachesReadyAndReportsItWithTheSlotNumber() {
     val factory = factory()
-    val slot = factory.create(3u)
+    val slot = factory.createSlot(3u)
     factory.renderersFactory = fakeRenderersFactory()
     factory.clock = androidx.media3.test.utils.FakeClock(true)
 
@@ -462,7 +442,7 @@ class ExoPlayerSlotTest {
   @Test
   fun inv_audio_04_the_slot_sample_at_the_ready_event_already_carries_the_duration() {
     val factory = factory()
-    val slot = factory.create(3u)
+    val slot = factory.createSlot(3u)
     factory.renderersFactory = fakeRenderersFactory()
     factory.clock = androidx.media3.test.utils.FakeClock(true)
     var durationAtReady: ULong? = null
@@ -478,16 +458,17 @@ class ExoPlayerSlotTest {
   @Test
   fun releaseDropsThePlayerThePublishedKeysAndTheListener() {
     val factory = factory()
-    val slot = factory.create(0u)
+    val slot = factory.createSlot(0u)
     slot.load("k", route); idle()
     val player = slot.player!!
+    val loadEvents = slot.loadEvents!!
 
     factory.release(); idle()
 
     assertTrue(player.isReleased)
     assertNull(kotlinx.coroutines.runBlocking { factory.players.player("k").first() })
     events.calls.clear()
-    slot.listener.onRenderedFirstFrame()
+    loadEvents.onRenderedFirstFrame()
     assertEquals(emptyList<String>(), events.calls.toList())
   }
 

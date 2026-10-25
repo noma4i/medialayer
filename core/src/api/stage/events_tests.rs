@@ -31,9 +31,9 @@ async fn inv_api_03_the_ready_events_move_a_declared_place_to_ready() {
     eventually(|| rig.factory.slot_holding(&url_of(0)).is_some()).await;
     let (slot, _) = rig.holder(&url_of(0));
 
-    stage.ready(slot as usize);
+    stage.ready(slot as usize, stage.generation_at(slot as usize));
     assert_eq!(rig.parts.places.state(&url_of(0)), MediaState::Ready);
-    stage.visual_ready(slot as usize);
+    stage.visual_ready(slot as usize, stage.generation_at(slot as usize));
 
     assert_eq!(rig.parts.places.state(&url_of(0)), MediaState::Rendered);
 }
@@ -58,7 +58,7 @@ async fn inv_api_06_a_startup_http_error_on_a_proxied_playlist_refreshes_the_rou
     let (slot, player) = playing(&rig, hls()).await;
     assert_eq!(player.loads(), 1);
 
-    rig.parts.stage.failed(slot as usize, 404, String::new());
+    rig.parts.stage.failed(slot as usize, rig.parts.stage.generation_at(slot as usize), 404, String::new());
 
     eventually(|| player.loads() == 2).await;
     assert_eq!(player.calls().iter().filter(|call| **call == SlotCall::Unload).count(), 1);
@@ -71,7 +71,7 @@ async fn inv_api_06_repeated_playback_failures_reload_the_player_and_then_fail_t
     let (slot, player) = playing(&rig, video(&url_of(0))).await;
 
     for _ in 0..6 {
-        rig.parts.stage.failed(slot as usize, 0, "decoder died".to_string());
+        rig.parts.stage.failed(slot as usize, rig.parts.stage.generation_at(slot as usize), 0, "decoder died".to_string());
     }
 
     assert_eq!(rig.parts.places.state(&url_of(0)), MediaState::Failed { detail: "decoder died".to_string() });
@@ -82,7 +82,7 @@ async fn inv_api_06_repeated_playback_failures_reload_the_player_and_then_fail_t
 async fn inv_api_06_a_silent_player_is_reloaded_by_the_watchdog() {
     let rig = rig().await;
     let (slot, silent) = playing(&rig, video(&url_of(0))).await;
-    rig.parts.stage.ready(slot as usize);
+    rig.parts.stage.ready(slot as usize, rig.parts.stage.generation_at(slot as usize));
 
     eventually(|| silent.loads() >= 2).await;
 }
@@ -92,7 +92,7 @@ async fn inv_api_06_a_player_whose_clock_moves_is_checked_again_and_left_alone()
     let rig = rig_with(|_| {}).await;
     *rig.factory.advance_ms.lock().unwrap() = 1_000;
     let (slot, healthy) = playing(&rig, video(&url_of(0))).await;
-    rig.parts.stage.ready(slot as usize);
+    rig.parts.stage.ready(slot as usize, rig.parts.stage.generation_at(slot as usize));
 
     eventually(|| healthy.samples.load(std::sync::atomic::Ordering::SeqCst) >= 3).await;
 
@@ -106,14 +106,14 @@ async fn inv_api_06_a_stall_arms_the_watchdog_only_for_the_playing_slot() {
     stage.replace_window(0, videos(3));
     eventually(|| rig.factory.slot_holding(&url_of(1)).is_some()).await;
     let (idle_slot, idle) = rig.holder(&url_of(1));
-    stage.stalled(idle_slot as usize, 0);
+    stage.stalled(idle_slot as usize, stage.generation_at(idle_slot as usize), 0);
     assert_eq!(stage.armed_tasks(), 0);
     assert_eq!(idle.samples.load(std::sync::atomic::Ordering::SeqCst), 0);
 
     stage.set_playing(&url_of(0), true, &[]);
     eventually(|| rig.factory.slot_holding(&url_of(0)).is_some()).await;
     let (active_slot, active) = rig.holder(&url_of(0));
-    stage.stalled(active_slot as usize, 0);
+    stage.stalled(active_slot as usize, stage.generation_at(active_slot as usize), 0);
     assert_eq!(stage.armed_tasks(), 1);
 
     eventually(|| active.samples.load(std::sync::atomic::Ordering::SeqCst) >= 1).await;
@@ -138,7 +138,7 @@ async fn inv_api_06_watchdog_escalation_purges_the_cached_source_and_loads_it_ag
     let rig = rig_with(|config| config.watchdog = WatchdogConfig { max_attempts: 2, ..crate::api::test_support::fast_watchdog() }).await;
     rig.parts.cache.put(&cache_key(&url_of(0)), cache::Kind::Stream, b"bytes").await.unwrap();
     let (slot, player) = playing(&rig, video(&url_of(0))).await;
-    rig.parts.stage.ready(slot as usize);
+    rig.parts.stage.ready(slot as usize, rig.parts.stage.generation_at(slot as usize));
 
     eventually(|| player.loads() >= 3).await;
 
@@ -168,7 +168,7 @@ async fn inv_api_06_a_load_refused_by_a_dead_proxy_listener_rebinds_it_before_th
     crate::proxy::test_client::close_listener_silently(rig.parts.proxy.port());
     assert!(!rig.parts.proxy.ping().await);
 
-    rig.parts.stage.failed(slot as usize, 0, "Could not connect to the server".to_string());
+    rig.parts.stage.failed(slot as usize, rig.parts.stage.generation_at(slot as usize), 0, "Could not connect to the server".to_string());
 
     eventually(|| player.loads() >= 2).await;
     assert!(rig.parts.proxy.ping().await);
@@ -196,13 +196,13 @@ async fn inv_api_13_a_slot_that_renders_ends_and_plays_again_moves_the_place_thr
     stage.visible(video(&url_of(0)), true);
     let state = || rig.parts.places.state(&url_of(0));
 
-    stage.ready(slot as usize);
+    stage.ready(slot as usize, stage.generation_at(slot as usize));
     assert_eq!(state(), MediaState::Ready);
-    stage.visual_ready(slot as usize);
+    stage.visual_ready(slot as usize, stage.generation_at(slot as usize));
     assert_eq!(state(), MediaState::Rendered);
-    stage.ended(slot as usize);
+    stage.ended(slot as usize, stage.generation_at(slot as usize));
     assert_eq!(state(), MediaState::Ended);
-    stage.visual_ready(slot as usize);
+    stage.visual_ready(slot as usize, stage.generation_at(slot as usize));
     assert_eq!(state(), MediaState::Ended);
     stage.set_playing(&url_of(0), false, &[]);
     stage.set_playing(&url_of(0), true, &[]);
@@ -406,4 +406,30 @@ async fn inv_idle_04_a_ledger_release_that_leaves_the_room_unchanged_does_not_st
     drop(late);
     ledger.set_ceiling(ledger.used() * 4);
     eventually(|| rig.factory.slot_holding(&url_of(1)).is_some()).await;
+}
+
+#[tokio::test]
+async fn inv_api_37_a_late_event_of_an_older_load_does_not_touch_the_new_load_of_the_slot() {
+    let events: [(&str, fn(&super::Stage, usize, u64)); 3] = [
+        ("ready", |stage, slot, generation| stage.ready(slot, generation)),
+        ("visual_ready", |stage, slot, generation| stage.visual_ready(slot, generation)),
+        ("ended", |stage, slot, generation| stage.ended(slot, generation)),
+    ];
+    for (name, late) in events {
+        let rig = rig().await;
+        let stage = &rig.parts.stage;
+        stage.replace_window(0, videos(3));
+        stage.visible(video(&url_of(0)), true);
+        eventually(|| rig.factory.slot_holding(&url_of(0)).is_some()).await;
+        let (slot, _) = rig.holder(&url_of(0));
+        let slot = slot as usize;
+        let old = stage.generation_at(slot);
+        stage.reload(&url_of(0));
+        assert_ne!(stage.generation_at(slot), old, "{name}: the reload kept the generation");
+        let before = rig.parts.places.state(&url_of(0));
+
+        late(stage, slot, old);
+
+        assert_eq!(rig.parts.places.state(&url_of(0)), before, "{name} of the old load changed the new load");
+    }
 }

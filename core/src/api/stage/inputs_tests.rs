@@ -257,7 +257,7 @@ async fn inv_prefetch_21_the_window_prefetches_only_after_the_playing_item_has_i
     assert_eq!((1..4).map(|page| rig.fetcher.calls_for(&url_of(page))).sum::<usize>(), 0);
 
     eventually(|| rig.factory.slot_holding(&url_of(0)).is_some()).await;
-    stage.ready(rig.holder(&url_of(0)).0 as usize);
+    stage.ready(rig.holder(&url_of(0)).0 as usize, stage.generation_at(rig.holder(&url_of(0)).0 as usize));
 
     eventually_async(|| async { rig.parts.cache.contains(&format!("{}#0", url_of(2))).await }).await;
     assert_eq!(rig.fetcher.calls_for(&url_of(7)), 0);
@@ -669,7 +669,7 @@ async fn inv_api_38_a_pending_fraction_becomes_a_seek_when_the_slot_reports_read
     assert!(!player.calls().iter().any(|call| matches!(call, SlotCall::Seek { .. })));
 
     player.sample.lock().unwrap().duration_ms = Some(60_000);
-    stage.ready(slot as usize);
+    stage.ready(slot as usize, stage.generation_at(slot as usize));
 
     eventually(|| player.calls().contains(&SlotCall::Seek { position_ms: 30_000 })).await;
 }
@@ -689,11 +689,11 @@ async fn inv_api_39_a_ready_without_duration_keeps_the_fraction_for_the_next_slo
     let (slot, player) = rig.holder(&key);
     player.sample.lock().unwrap().duration_ms = None;
 
-    stage.ready(slot as usize);
+    stage.ready(slot as usize, stage.generation_at(slot as usize));
     assert!(!player.calls().iter().any(|call| matches!(call, SlotCall::Seek { .. })), "no duration yet");
 
     player.sample.lock().unwrap().duration_ms = Some(10_000);
-    stage.ready(slot as usize);
+    stage.ready(slot as usize, stage.generation_at(slot as usize));
 
     eventually(|| player.calls().contains(&SlotCall::Seek { position_ms: 6_000 })).await;
 }

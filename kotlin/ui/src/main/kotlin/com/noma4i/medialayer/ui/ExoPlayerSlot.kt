@@ -12,7 +12,10 @@ import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import com.noma4i.medialayer.PlaybackRoute
 import com.noma4i.medialayer.PlayerSlot
+import com.noma4i.medialayer.SlotCall
 import com.noma4i.medialayer.SlotSample
+import kotlin.coroutines.resume
+import kotlinx.coroutines.suspendCancellableCoroutine
 
 class ExoPlayerSlot internal constructor(private val id: UInt, private val host: ExoPlayerSlotFactory) : PlayerSlot {
   private val looper = host.looperFor(id)
@@ -21,7 +24,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
   private var hasBeenReady = false
   @Volatile private var released = false
   private var viewToken: ULong? = null
-  private val source = java.util.concurrent.atomic.AtomicLong()
+  internal var loadEvents: Player.Listener? = null
 
   @Volatile internal var player: ExoPlayer? = null
   @Volatile internal var output: LooperPlayer? = null
@@ -37,15 +40,10 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
   @Volatile private var durationMs: Long? = null
   @Volatile private var frameRendered = false
 
-  internal val listener = object : Player.Listener {
+  private val housekeeping = object : Player.Listener {
     override fun onPlaybackStateChanged(playbackState: Int) {
       if (released) return
       refresh()
-      when (playbackState) {
-        Player.STATE_READY -> { hasBeenReady = true; host.events?.ready(id) }
-        Player.STATE_BUFFERING -> if (hasBeenReady) host.events?.stalled(id, currentPosition().toULong())
-        Player.STATE_ENDED -> if (!looping) host.events?.ended(id)
-      }
       reportAudible()
     }
 
@@ -53,31 +51,71 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
 
     override fun onVolumeChanged(volume: Float) = reportAudible()
 
+    override fun onIsPlayingChanged(isPlaying: Boolean) = refresh()
+
+    override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) = refresh()
+
+    override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) = refresh()
+  }
+
+  private inner class LoadEvents(private val generation: ULong) : Player.Listener {
+    override fun onPlaybackStateChanged(playbackState: Int) {
+      if (released) return
+      when (playbackState) {
+        Player.STATE_READY -> { hasBeenReady = true; host.events?.ready(id, generation) }
+        Player.STATE_BUFFERING -> if (hasBeenReady) host.events?.stalled(id, generation, currentPosition().toULong())
+        Player.STATE_ENDED -> if (!looping) host.events?.ended(id, generation)
+      }
+    }
+
     override fun onRenderedFirstFrame() {
       if (released) return
       Trace.beginSection("MediaLayer.firstFrame")
       try {
         host.videoOutputCounters?.count("firstFrame")
         frameRendered = true
-        host.events?.visualReady(id)
+        host.events?.visualReady(id, generation)
       } finally {
         Trace.endSection()
       }
     }
 
-    override fun onIsPlayingChanged(isPlaying: Boolean) = refresh()
-
-    override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) = refresh()
-
-    override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) = refresh()
-
     override fun onPlayerError(error: PlaybackException) {
       if (released) return
-      host.events?.failed(id, httpStatus(error), error.message ?: error.errorCodeName)
+      host.events?.failed(id, generation, httpStatus(error), error.message ?: error.errorCodeName)
     }
   }
 
-  override fun load(key: String, route: PlaybackRoute) = onMain(source.incrementAndGet()) {
+  override suspend fun apply(command: SlotCall) {
+    host.videoOutputCounters?.count("mainPost")
+    suspendCancellableCoroutine<Unit> { continuation ->
+      val posted = commands.post {
+        try {
+          if (!released && continuation.isActive) perform(command)
+        } finally {
+          if (continuation.isActive) continuation.resume(Unit)
+        }
+      }
+      if (!posted) continuation.resume(Unit)
+    }
+  }
+
+  private fun perform(command: SlotCall) = when (command) {
+    is SlotCall.Load -> doLoad(command.key, command.route, command.generation)
+    SlotCall.Unload -> doUnload()
+    SlotCall.Preroll -> doPreroll()
+    SlotCall.Play -> doPlay()
+    SlotCall.Pause -> doPause()
+    SlotCall.Mute -> { player?.volume = 0f; Unit }
+    SlotCall.Unmute -> { player?.volume = 1f; Unit }
+    is SlotCall.Attach -> doAttach(command.viewToken)
+    SlotCall.Detach -> doDetach()
+    is SlotCall.Seek -> { player?.seekTo(command.positionMs.toLong()); Unit }
+    is SlotCall.Rate -> { player?.setPlaybackSpeed(command.rate); Unit }
+    is SlotCall.Readahead -> doSetReadahead(command.ms)
+  }
+
+  private fun doLoad(key: String, route: PlaybackRoute, generation: ULong) {
     val exo = player ?: createPlayer()
     retract()
     this.key = key
@@ -86,6 +124,8 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     frameRendered = false
     looping = route.looping
     exo.repeatMode = if (looping) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+    loadEvents?.let(exo::removeListener)
+    loadEvents = LoadEvents(generation).also(exo::addListener)
     exo.setMediaSource(host.mediaSourceFor(route))
     exo.playWhenReady = false
     host.players.publish(key, this, output!!)
@@ -93,43 +133,38 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     refresh()
   }
 
-  override fun unload() {
-    source.incrementAndGet()
-    onMain(null) {
-      player?.setPlaybackSpeed(1f)
-      hideFromView()
-      viewToken = null
-      clear()
-      retract()
-      key = null
-      route = null
-      frameRendered = false
-      anchorMs = 0
-      advancing = false
-      durationMs = null
-    }
+  private fun doUnload() {
+    player?.setPlaybackSpeed(1f)
+    player?.let { exo -> loadEvents?.let(exo::removeListener) }
+    loadEvents = null
+    hideFromView()
+    viewToken = null
+    clear()
+    retract()
+    key = null
+    route = null
+    frameRendered = false
+    anchorMs = 0
+    advancing = false
+    durationMs = null
   }
 
-  override fun preroll() = ofSource {
-    val exo = player ?: return@ofSource
+  private fun doPreroll() {
+    val exo = player ?: return
     if (exo.playbackState == Player.STATE_IDLE) prepare(exo)
   }
 
-  override fun play() = ofSource {
-    val exo = player ?: return@ofSource
+  private fun doPlay() {
+    val exo = player ?: return
     if (exo.playbackState == Player.STATE_IDLE) prepare(exo)
     exo.playWhenReady = true
   }
 
-  override fun pause() = ofSource { player?.playWhenReady = false }
+  private fun doPause() {
+    player?.playWhenReady = false
+  }
 
-  override fun mute() = onMain(null) { player?.volume = 0f }
-
-  override fun unmute() = onMain(null) { player?.volume = 1f }
-
-  override fun setRate(rate: Float) = ofSource { player?.setPlaybackSpeed(rate) }
-
-  override fun attach(viewToken: ULong) = ofSource {
+  private fun doAttach(viewToken: ULong) {
     Trace.beginSection("MediaLayer.attach")
     try {
       host.videoOutputCounters?.attach(id, key, viewToken)
@@ -140,7 +175,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     }
   }
 
-  override fun detach() = ofSource {
+  private fun doDetach() {
     Trace.beginSection("MediaLayer.detach")
     try {
       host.videoOutputCounters?.detach(id)
@@ -151,9 +186,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     }
   }
 
-  override fun seek(positionMs: ULong) = ofSource { player?.seekTo(positionMs.toLong()) }
-
-  override fun setReadahead(ms: ULong) = onMain(null) {
+  private fun doSetReadahead(ms: ULong) {
     readaheadMs = ms.toLong()
     loadControl?.setReadaheadMs(ms.toLong())
   }
@@ -176,7 +209,9 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     released = true
     host.audio.setAudible(id, false)
     hideFromView()
-    player?.removeListener(listener)
+    player?.removeListener(housekeeping)
+    player?.let { exo -> loadEvents?.let(exo::removeListener) }
+    loadEvents = null
     player?.let {
       it.release()
       host.videoOutputCounters?.count("release")
@@ -184,13 +219,6 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     player = null
     output = null
     retract()
-  }
-
-  private fun ofSource(work: () -> Unit) = onMain(source.get(), work)
-
-  private fun onMain(source: Long?, work: () -> Unit) {
-    host.videoOutputCounters?.count("mainPost")
-    commands.post { if (!released && (source == null || source == this.source.get())) work() }
   }
 
   private fun prepare(exo: ExoPlayer) {
@@ -219,7 +247,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
         .build()
       exo.volume = if (host.startMuted) 0f else 1f
       output = LooperPlayer(exo)
-      exo.addListener(listener)
+      exo.addListener(housekeeping)
       player = exo
       return exo
     } finally {

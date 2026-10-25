@@ -81,10 +81,10 @@ extension GlobalMedia {
     @Test
     func inv_idle_05_two_consumers_share_one_progress_sample_and_release_it() async throws {
       let slots = LoadedSlots()
-      let slot = AVQueuePlayerSlotFactory(startMuted: true, slots: slots).create(slot: 0) as! AVQueuePlayerSlot
+      let slot = await AVQueuePlayerSlotFactory(startMuted: true, slots: slots).makeSlot(0)
       let clip = Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!.absoluteString
-      slot.load(key: "shared", route: PlaybackRoute(url: clip, headers: [:], generation: nil, hls: false, looping: false))
-      defer { slot.unload() }
+      await slot.load(key: "shared", route: PlaybackRoute(url: clip, headers: [:], generation: nil, hls: false, looping: false))
+      defer { slot.close() }
       await eventually("slot assigned") { slots.slot(for: "shared") === slot }
       let first = slots.progress.stream(for: "shared")
       let second = slots.progress.stream(for: "shared")
@@ -106,10 +106,10 @@ extension GlobalMedia {
     func inv_idle_05_paused_video_does_not_repeat_progress_and_seek_resumes_it() async throws {
       let screen = Screen()
       defer { screen.close() }
-      let slot = AVQueuePlayerSlotFactory(startMuted: true, slots: screen.slots).create(slot: 0) as! AVQueuePlayerSlot
+      let slot = await AVQueuePlayerSlotFactory(startMuted: true, slots: screen.slots).makeSlot(0)
       let clip = Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!.absoluteString
-      slot.load(key: "first", route: PlaybackRoute(url: clip, headers: [:], generation: nil, hls: false, looping: false))
-      defer { slot.unload() }
+      await slot.load(key: "first", route: PlaybackRoute(url: clip, headers: [:], generation: nil, hls: false, looping: false))
+      defer { slot.close() }
       for _ in 0..<100 {
         if screen.inputs.reports > 0 { break }
         await screen.settle(.milliseconds(50))
@@ -119,7 +119,7 @@ extension GlobalMedia {
       let reports = screen.inputs.reports
       await screen.settle(.milliseconds(450))
       #expect(screen.inputs.reports == reports)
-      slot.seek(positionMs: 200)
+      await slot.seek(positionMs: 200)
       await screen.settle()
       #expect(screen.inputs.reports > reports)
     }
@@ -128,23 +128,23 @@ extension GlobalMedia {
     func inv_native_05_audio_progress_stops_in_background_and_resumes() async throws {
       let screen = Screen(audio: true)
       defer { screen.close() }
-      let slot = AVQueuePlayerSlotFactory(startMuted: true, slots: screen.slots).create(slot: 0) as! AVQueuePlayerSlot
+      let slot = await AVQueuePlayerSlotFactory(startMuted: true, slots: screen.slots).makeSlot(0)
       let clip = Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!.absoluteString
-      slot.load(key: "first", route: PlaybackRoute(url: clip, headers: [:], generation: nil, hls: false, looping: false))
-      defer { slot.unload() }
+      await slot.load(key: "first", route: PlaybackRoute(url: clip, headers: [:], generation: nil, hls: false, looping: false))
+      defer { slot.close() }
       for _ in 0..<100 {
         if slot.sample().durationMs != nil { break }
         await screen.settle(.milliseconds(50))
       }
       let duration = try #require(slot.sample().durationMs)
       let audio = try #require(screen.inputs.audio)
-      slot.seek(positionMs: duration / 5)
+      await slot.seek(positionMs: duration / 5)
       await screen.settle()
       #expect(audio.progress > 0)
       NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
       await screen.settle()
       let background = audio.progress
-      slot.seek(positionMs: duration * 2 / 5)
+      await slot.seek(positionMs: duration * 2 / 5)
       await screen.settle(.milliseconds(600))
       #expect(audio.progress == background)
       NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
@@ -153,7 +153,7 @@ extension GlobalMedia {
       screen.scroll.contentOffset = CGPoint(x: 0, y: 500)
       await screen.settle()
       let offscreen = audio.progress
-      slot.seek(positionMs: duration * 3 / 5)
+      await slot.seek(positionMs: duration * 3 / 5)
       await screen.settle()
       #expect(audio.progress > offscreen)
     }
@@ -162,17 +162,17 @@ extension GlobalMedia {
     func inv_audio_02_progressSeekAndEndedIgnoreTheHostFrame() async throws {
       let screen = Screen(audio: true, side: 0)
       defer { screen.close() }
-      let slot = AVQueuePlayerSlotFactory(startMuted: true, slots: screen.slots).create(slot: 0) as! AVQueuePlayerSlot
+      let slot = await AVQueuePlayerSlotFactory(startMuted: true, slots: screen.slots).makeSlot(0)
       let clip = Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!.absoluteString
-      slot.load(key: "first", route: PlaybackRoute(url: clip, headers: [:], generation: nil, hls: false, looping: false))
-      defer { slot.unload() }
+      await slot.load(key: "first", route: PlaybackRoute(url: clip, headers: [:], generation: nil, hls: false, looping: false))
+      defer { slot.close() }
       for _ in 0..<100 {
         if slot.sample().durationMs != nil { break }
         await screen.settle(.milliseconds(50))
       }
       let duration = try #require(slot.sample().durationMs)
       let audio = try #require(screen.inputs.audio)
-      slot.seek(positionMs: duration / 5)
+      await slot.seek(positionMs: duration / 5)
       await screen.settle()
       #expect(audio.progress > 0)
       audio.seek(to: 0.5)
@@ -229,11 +229,11 @@ extension GlobalMedia {
     func inv_native_05_video_progress_stops_when_inactive_and_resumes() async throws {
       let screen = Screen()
       defer { screen.close() }
-      let slot = AVQueuePlayerSlotFactory(startMuted: true, slots: screen.slots).create(slot: 0) as! AVQueuePlayerSlot
+      let slot = await AVQueuePlayerSlotFactory(startMuted: true, slots: screen.slots).makeSlot(0)
       let clip = Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!.absoluteString
-      slot.load(key: "first", route: PlaybackRoute(url: clip, headers: [:], generation: nil, hls: false, looping: true))
-      slot.play()
-      defer { slot.unload() }
+      await slot.load(key: "first", route: PlaybackRoute(url: clip, headers: [:], generation: nil, hls: false, looping: true))
+      await slot.play()
+      defer { slot.close() }
       for _ in 0..<100 {
         if screen.inputs.reports >= 2 { break }
         await screen.settle(.milliseconds(50))

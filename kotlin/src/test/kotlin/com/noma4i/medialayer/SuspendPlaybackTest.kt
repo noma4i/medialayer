@@ -1,5 +1,7 @@
 package com.noma4i.medialayer
 
+import com.noma4i.medialayer.CreatedPlayer
+import com.noma4i.medialayer.SlotCall
 import java.nio.file.Files
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
@@ -10,19 +12,15 @@ import org.junit.Test
 
 private class TransportSlot : PlayerSlot, PlayerSlotFactory {
   val log = Channel<String>(Channel.UNLIMITED)
-  override fun create(slot: UInt): PlayerSlot = this
-  override fun load(key: String, route: PlaybackRoute) {}
-  override fun unload() {}
-  override fun preroll() {}
-  override fun play() { log.trySend("play") }
-  override fun pause() { log.trySend("pause") }
-  override fun mute() {}
-  override fun unmute() {}
-  override fun attach(viewToken: ULong) {}
-  override fun detach() {}
-  override fun seek(positionMs: ULong) {}
-  override fun setRate(rate: Float) { log.trySend("rate") }
-  override fun setReadahead(ms: ULong) {}
+  override suspend fun create(slot: UInt): CreatedPlayer = CreatedPlayer(this)
+  override suspend fun apply(command: SlotCall) {
+    when (command) {
+      SlotCall.Play -> log.trySend("play")
+      SlotCall.Pause -> log.trySend("pause")
+      is SlotCall.Rate -> log.trySend("rate")
+      else -> {}
+    }
+  }
   override fun sample() = SlotSample(0u, null, false, false, false)
 }
 

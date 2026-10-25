@@ -5,19 +5,15 @@ import Testing
 private final class TransportSlot: PlayerSlot, PlayerSlotFactory, @unchecked Sendable {
   let log = AsyncStream<String>.makeStream()
 
-  func create(slot: UInt32) -> PlayerSlot { self }
-  func load(key: String, route: PlaybackRoute) {}
-  func unload() {}
-  func preroll() {}
-  func play() { log.continuation.yield("play") }
-  func pause() { log.continuation.yield("pause") }
-  func mute() {}
-  func unmute() {}
-  func attach(viewToken: UInt64) {}
-  func detach() {}
-  func seek(positionMs: UInt64) {}
-  func setRate(rate: Float) { log.continuation.yield("rate") }
-  func setReadahead(ms: UInt64) {}
+  func create(slot: UInt32) async -> CreatedPlayer { CreatedPlayer(player: self) }
+  func apply(command: SlotCall) async {
+    switch command {
+    case .play: log.continuation.yield("play")
+    case .pause: log.continuation.yield("pause")
+    case .rate: log.continuation.yield("rate")
+    default: break
+    }
+  }
   func sample() -> SlotSample {
     SlotSample(positionMs: 0, durationMs: nil, isLooping: false, viewAttached: false, frameRendered: false)
   }

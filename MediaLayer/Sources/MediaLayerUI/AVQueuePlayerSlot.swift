@@ -2,13 +2,13 @@ import AVFoundation
 import Foundation
 import MediaLayer
 
-private final class SourceGeneration: @unchecked Sendable {
+private final class Latch: @unchecked Sendable {
   private let lock = NSLock()
-  private var value = 0
+  private var value = false
 
-  var current: Int { lock.withLock { value } }
+  var isSet: Bool { lock.withLock { value } }
 
-  func next() -> Int { lock.withLock { value += 1; return value } }
+  func set() { lock.withLock { value = true } }
 }
 
 public final class PlayerEventsLink: @unchecked Sendable {
@@ -31,6 +31,7 @@ public final class AVQueuePlayerSlotFactory: PlayerSlotFactory, @unchecked Senda
   public let events = PlayerEventsLink()
   private let startMuted: Bool
   private let audio: MediaAudioSession?
+  private let closed = Latch()
   let slots: LoadedSlots
   let hosts: HostLayers
 
@@ -41,18 +42,19 @@ public final class AVQueuePlayerSlotFactory: PlayerSlotFactory, @unchecked Senda
     self.hosts = hosts
   }
 
-  public func create(slot: UInt32) -> PlayerSlot {
-    let created = AVQueuePlayerSlot(id: slot, events: events, startMuted: startMuted, audio: audio, slots: slots, hosts: hosts)
+  public func create(slot: UInt32) async -> CreatedPlayer {
+    let created = await MainActor.run {
+      AVQueuePlayerSlot(id: slot, events: events, startMuted: startMuted, audio: audio, slots: slots, hosts: hosts)
+    }
     made.add(created)
-    return created
+    if closed.isSet { created.close() }
+    return CreatedPlayer(player: created)
   }
 
   func release() {
+    closed.set()
     events.bind(nil)
-    made.all.forEach {
-      $0.unload()
-      $0.detach()
-    }
+    made.all.forEach { $0.close() }
   }
 
   private let made = MadeSlots()
@@ -105,12 +107,13 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private var currentItemObservation: NSKeyValueObservation?
   private var notificationTokens: [NSObjectProtocol] = []
   private var prerollRequested = false
+  private var loadGeneration: UInt64 = 0
   private var visualReadySent = false
   private var itemReady = false
   private var looping = false
   private var wantsPlay = false
   private var readahead: TimeInterval = 0
-  private let source = SourceGeneration()
+  private let closed = Latch()
 
   public init(
     id: UInt32, events: PlayerEventsLink, startMuted: Bool, audio: MediaAudioSession? = nil, slots: LoadedSlots = LoadedSlots(),
@@ -122,13 +125,12 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     self.slots = slots
     self.hosts = hosts
     super.init()
-    onMain { [self] in
-      player.isMuted = startMuted
-      player.automaticallyWaitsToMinimizeStalling = true
-      observeAudibility()
-      layer.videoGravity = .resizeAspectFill
-      traceStart()
-    }
+    dispatchPrecondition(condition: .onQueue(.main))
+    player.isMuted = startMuted
+    player.automaticallyWaitsToMinimizeStalling = true
+    observeAudibility()
+    layer.videoGravity = .resizeAspectFill
+    traceStart()
   }
 
   deinit {
@@ -145,80 +147,94 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     }
   }
 
-  public func load(key: String, route: PlaybackRoute) {
-    onMain(source: source.next()) { [self] in
-      guard let url = URL(string: route.url) else {
-        events.with { $0.failed(slot: id, status: 0, detail: "invalid url \(route.url)") }
-        return
-      }
-      MediaTrace.emit("player", "slot=\(id) load key=\(MediaTrace.tail(key)) url=\(MediaTrace.tail(route.url))")
-      tearDownItem()
-      if hostKey != key {
-        layer.removeFromSuperlayer()
-        hostKey = nil
-      }
-      let item = AVPlayerItem(asset: AVURLAsset(url: url, options: Self.assetOptions(for: route)))
-      self.item = item
-      looping = route.looping
-      player.actionAtItemEnd = route.looping ? .advance : .pause
-      self.key = key
-      observe(item)
-      player.insert(item, after: nil)
-      queueNextRound()
-      currentItemObservation = player.observe(\.currentItem) { [weak self] _, _ in
-        DispatchQueue.main.async { self?.currentItemChanged() }
-      }
-      slots.assign(self, key: key)
+  public func apply(command: SlotCall) async {
+    await MainActor.run { [self] in
+      guard !closed.isSet, !Task.isCancelled else { return }
+      perform(command)
     }
   }
 
-  public func unload() {
-    _ = source.next()
-    onMain { [self] in
-      let released = key
-      MediaTrace.emit("player", "slot=\(id) unload key=\(released.map(MediaTrace.tail) ?? "-")")
-      tearDownItem()
-      key = nil
-      if let released { slots.release(key: released, slot: self) }
+  func close() {
+    closed.set()
+    DispatchQueue.main.async { [self] in
+      unload()
+      detach()
     }
   }
 
-  public func preroll() {
-    ofSource { [self] in
-      prerollRequested = true
-      prerollIfReady()
+  private func perform(_ command: SlotCall) {
+    switch command {
+    case let .load(key, route, generation): load(key: key, route: route, generation: generation)
+    case .unload: unload()
+    case .preroll: preroll()
+    case .play: play()
+    case .pause: pause()
+    case .mute: player.isMuted = true
+    case .unmute: player.isMuted = false
+    case let .attach(viewToken): attach(viewToken: viewToken)
+    case .detach: detach()
+    case let .seek(positionMs): seek(positionMs: positionMs)
+    case let .rate(rate): setRate(rate: rate)
+    case let .readahead(ms): setReadahead(ms: ms)
     }
   }
 
-  public func play() {
-    ofSource { [self] in
-      wantsPlay = true
-      MediaTrace.emit("player", "slot=\(id) play key=\(key.map(MediaTrace.tail) ?? "-")")
-      player.play()
+  private func load(key: String, route: PlaybackRoute, generation: UInt64) {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard let url = URL(string: route.url) else {
+      events.with { [id] in $0.failed(slot: id, generation: generation, status: 0, detail: "invalid url \(route.url)") }
+      return
     }
-  }
-
-  public func pause() {
-    ofSource { [self] in
-      wantsPlay = false
-      MediaTrace.emit("player", "slot=\(id) pause key=\(key.map(MediaTrace.tail) ?? "-")")
-      player.pause()
+    MediaTrace.emit("player", "slot=\(id) load key=\(MediaTrace.tail(key)) url=\(MediaTrace.tail(route.url))")
+    tearDownItem()
+    if hostKey != key {
+      layer.removeFromSuperlayer()
+      hostKey = nil
     }
-  }
-
-  public func mute() {
-    onMain { [self] in player.isMuted = true }
-  }
-
-  public func unmute() {
-    onMain { [self] in player.isMuted = false }
-  }
-
-  public func setReadahead(ms: UInt64) {
-    onMain { [self] in
-      readahead = TimeInterval(ms) / 1000
-      player.items().forEach { $0.preferredForwardBufferDuration = readahead }
+    let item = AVPlayerItem(asset: AVURLAsset(url: url, options: Self.assetOptions(for: route)))
+    self.item = item
+    loadGeneration = generation
+    looping = route.looping
+    player.actionAtItemEnd = route.looping ? .advance : .pause
+    self.key = key
+    observe(item, generation: generation)
+    player.insert(item, after: nil)
+    queueNextRound()
+    currentItemObservation = player.observe(\.currentItem) { [weak self] _, _ in
+      DispatchQueue.main.async { self?.currentItemChanged(generation: generation) }
     }
+    slots.assign(self, key: key)
+  }
+
+  private func unload() {
+    dispatchPrecondition(condition: .onQueue(.main))
+    let released = key
+    MediaTrace.emit("player", "slot=\(id) unload key=\(released.map(MediaTrace.tail) ?? "-")")
+    tearDownItem()
+    key = nil
+    if let released { slots.release(key: released, slot: self) }
+  }
+
+  private func preroll() {
+    prerollRequested = true
+    prerollIfReady()
+  }
+
+  private func play() {
+    wantsPlay = true
+    MediaTrace.emit("player", "slot=\(id) play key=\(key.map(MediaTrace.tail) ?? "-")")
+    player.play()
+  }
+
+  private func pause() {
+    wantsPlay = false
+    MediaTrace.emit("player", "slot=\(id) pause key=\(key.map(MediaTrace.tail) ?? "-")")
+    player.pause()
+  }
+
+  private func setReadahead(ms: UInt64) {
+    readahead = TimeInterval(ms) / 1000
+    player.items().forEach { $0.preferredForwardBufferDuration = readahead }
   }
 
   public func sample() -> SlotSample {
@@ -232,43 +248,34 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     }
   }
 
-  public func seek(positionMs: UInt64) {
-    ofSource { [self] in
-      player.seek(to: CMTime(value: CMTimeValue(positionMs), timescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
-        self?.onMain { [weak self] in self?.refreshSample() }
-      }
+  private func seek(positionMs: UInt64) {
+    player.seek(to: CMTime(value: CMTimeValue(positionMs), timescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+      self?.onMain { [weak self] in self?.refreshSample() }
     }
   }
 
-  public func setRate(rate: Float) {
-    ofSource { [self] in
-      player.defaultRate = rate
-      if player.rate != 0 { player.rate = rate }
-    }
+  private func setRate(rate: Float) {
+    player.defaultRate = rate
+    if player.rate != 0 { player.rate = rate }
   }
 
-  public func attach(viewToken: UInt64) {
-    ofSource { [self] in
-      guard let host = hosts.layer(for: viewToken) else { return }
-      attach(to: host)
-    }
+  private func attach(viewToken: UInt64) {
+    guard let host = hosts.layer(for: viewToken) else { return }
+    attach(to: host)
   }
 
   func attach(to host: CALayer) {
-    onMain { [self] in
-      host.addSublayer(layer)
-      hostKey = key
-      layer.frame = host.bounds
-      refreshSample()
-    }
+    dispatchPrecondition(condition: .onQueue(.main))
+    host.addSublayer(layer)
+    hostKey = key
+    layer.frame = host.bounds
+    refreshSample()
   }
 
-  public func detach() {
-    ofSource { [self] in
-      layer.removeFromSuperlayer()
-      hostKey = nil
-      refreshSample()
-    }
+  private func detach() {
+    layer.removeFromSuperlayer()
+    hostKey = nil
+    refreshSample()
   }
 
   static func assetOptions(for route: PlaybackRoute) -> [String: Any]? {
@@ -284,18 +291,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     DispatchQueue.main.async(execute: work)
   }
 
-  private func ofSource(_ work: @escaping () -> Void) {
-    onMain(source: source.current, work)
-  }
-
-  private func onMain(source expected: Int, _ work: @escaping () -> Void) {
-    DispatchQueue.main.async { [self] in
-      guard source.current == expected else { return }
-      work()
-    }
-  }
-
-  private func observe(_ item: AVPlayerItem, resetState: Bool = true) {
+  private func observe(_ item: AVPlayerItem, generation: UInt64, resetState: Bool = true) {
     observations.forEach { $0.invalidate() }
     notificationTokens.forEach { NotificationCenter.default.removeObserver($0) }
     if resetState {
@@ -303,13 +299,13 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
       visualReadySent = false
     }
     observations = [
-      item.observe(\.status, options: [.initial]) { [weak self] item, _ in self?.onMain { [weak self] in self?.statusChanged(item) } },
-      layer.observe(\.isReadyForDisplay, options: [.initial]) { [weak self] _, _ in self?.onMain { [weak self] in self?.displayChanged() } }
+      item.observe(\.status, options: [.initial]) { [weak self] item, _ in self?.onMain { [weak self] in self?.statusChanged(item, generation: generation) } },
+      layer.observe(\.isReadyForDisplay, options: [.initial]) { [weak self] _, _ in self?.onMain { [weak self] in self?.displayChanged(item, generation: generation) } }
     ]
     let center = NotificationCenter.default
     notificationTokens = [
       center.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
-        self?.itemEnded(item)
+        self?.itemEnded(item, generation: generation)
       },
       center.addObserver(forName: .AVPlayerItemNewErrorLogEntry, object: item, queue: .main) { [weak self] _ in
         guard let self, MediaTrace.isOn, let event = item.errorLog()?.events.last else { return }
@@ -320,10 +316,10 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
         MediaTrace.emit("player", "slot=\(id) failed-to-end key=\(key.map(MediaTrace.tail) ?? "-") \(String(describing: note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey]))")
       },
       center.addObserver(forName: .AVPlayerItemPlaybackStalled, object: item, queue: .main) { [weak self] _ in
-        guard let self else { return }
+        guard let self, item === self.item, generation == loadGeneration else { return }
         let position = positionMs()
         MediaTrace.emit("player", "slot=\(id) stalled key=\(key.map(MediaTrace.tail) ?? "-") position=\(position)")
-        events.with { $0.stalled(slot: self.id, positionMs: position) }
+        events.with { $0.stalled(slot: self.id, generation: generation, positionMs: position) }
       }
     ]
   }
@@ -344,18 +340,18 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     ]
   }
 
-  private func itemEnded(_ finished: AVPlayerItem) {
-    guard finished === item, !looping else { return }
+  func itemEnded(_ finished: AVPlayerItem, generation: UInt64) {
+    guard finished === item, generation == loadGeneration, !looping else { return }
 
     refreshSample()
-    events.with { $0.ended(slot: id) }
+    events.with { $0.ended(slot: id, generation: generation) }
   }
 
-  private func currentItemChanged() {
-    guard looping, let next = player.currentItem, next !== item else { return }
+  private func currentItemChanged(generation: UInt64) {
+    guard generation == loadGeneration, looping, let next = player.currentItem, next !== item else { return }
 
     item = next
-    observe(next, resetState: false)
+    observe(next, generation: generation, resetState: false)
     queueNextRound()
     refreshSample()
   }
@@ -367,28 +363,28 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     player.insert(next, after: last)
   }
 
-  private func statusChanged(_ item: AVPlayerItem) {
-    guard item === self.item else { return }
+  func statusChanged(_ item: AVPlayerItem, generation: UInt64) {
+    guard item === self.item, generation == loadGeneration else { return }
     switch item.status {
     case .readyToPlay:
       MediaTrace.emit("player", "slot=\(id) item ready key=\(key.map(MediaTrace.tail) ?? "-")")
       itemReady = true
       refreshSample()
-      events.with { $0.ready(slot: id) }
+      events.with { $0.ready(slot: id, generation: generation) }
       prerollIfReady()
     case .failed:
       MediaTrace.emit("player", "slot=\(id) item failed key=\(key.map(MediaTrace.tail) ?? "-") \(item.error.map { String(describing: $0) } ?? "-")")
-      events.with { $0.failed(slot: id, status: Self.httpStatus(of: item), detail: item.error?.localizedDescription ?? "failed") }
+      events.with { $0.failed(slot: id, generation: generation, status: Self.httpStatus(of: item), detail: item.error?.localizedDescription ?? "failed") }
     default:
       break
     }
   }
 
-  private func displayChanged() {
-    guard item != nil, layer.isReadyForDisplay, !visualReadySent else { return }
+  private func displayChanged(_ shown: AVPlayerItem, generation: UInt64) {
+    guard shown === item, generation == loadGeneration, layer.isReadyForDisplay, !visualReadySent else { return }
     visualReadySent = true
     refreshSample()
-    events.with { $0.visualReady(slot: id) }
+    events.with { $0.visualReady(slot: id, generation: generation) }
   }
 
   private func prerollIfReady() {

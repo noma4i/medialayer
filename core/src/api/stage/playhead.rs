@@ -47,10 +47,6 @@ impl Stage {
         }
     }
 
-    pub(super) fn url_of(&self, key: &str) -> Option<String> {
-        self.state().loaded.get(key).map(|loaded| loaded.source.url.clone())
-    }
-
     async fn position_of(&self, url: &str) -> Option<u64> {
         let slots: Vec<usize> = self.state().loaded.values().filter(|loaded| loaded.source.url == url).map(|loaded| loaded.slot).collect();
         let mut position = None;

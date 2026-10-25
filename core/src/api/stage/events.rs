@@ -15,19 +15,43 @@ enum Wake {
 }
 
 impl Stage {
-    pub fn ready(&self, slot: usize) {
-        crate::trace!("event", "ready slot={slot} key={:?}", self.key_at(slot).as_deref().map(crate::trace::tail));
-        let Some((key, generation)) = self.load_at(slot) else { return };
-        self.feed(&key, Event::Loaded);
+    pub fn ready(&self, slot: usize, generation: u64) {
+        crate::trace!("event", "ready slot={slot} generation={generation}");
+        let Some(key) = self.feed_current(slot, generation, Event::Loaded) else { return };
         self.apply_pending_fraction(slot, &key, generation, false);
-        self.inner.places.ready(&key);
+        self.with_current(slot, generation, |key| self.inner.places.ready(key));
         self.sync_foreground();
     }
 
-    fn load_at(&self, slot: usize) -> Option<(String, u64)> {
+    #[cfg(test)]
+    pub fn generation_at(&self, slot: usize) -> u64 {
         let state = self.state();
+        state.slot_keys.get(&slot).and_then(|key| state.loaded.get(key)).map_or(0, |loaded| loaded.generation)
+    }
+
+    fn current_key(state: &super::State, slot: usize, generation: u64) -> Option<String> {
         let key = state.slot_keys.get(&slot)?;
-        Some((key.clone(), state.loaded.get(key)?.generation))
+        state.is_loaded_as(key, slot, generation).then(|| key.clone())
+    }
+
+    fn with_current<R>(&self, slot: usize, generation: u64, work: impl FnOnce(&str) -> R) -> Option<R> {
+        let state = self.state();
+        let key = Self::current_key(&state, slot, generation)?;
+        Some(work(&key))
+    }
+
+    fn feed_current(&self, slot: usize, generation: u64, event: Event) -> Option<String> {
+        let mut actions = Vec::new();
+        let key = {
+            let mut state = self.state();
+            let key = Self::current_key(&state, slot, generation)?;
+            self.advance(&mut state, &key, event, &mut actions);
+            key
+        };
+        for (key, action) in actions {
+            self.perform(key, action);
+        }
+        Some(key)
     }
 
     pub(super) fn apply_pending_fraction(&self, slot: usize, key: &str, generation: u64, is_quiet: bool) {
@@ -41,36 +65,46 @@ impl Stage {
         }
     }
 
-    pub fn visual_ready(&self, slot: usize) {
-        crate::trace!("event", "visual_ready slot={slot} key={:?}", self.key_at(slot).as_deref().map(crate::trace::tail));
-        if let Some((key, generation)) = self.load_at(slot) {
+    pub fn visual_ready(&self, slot: usize, generation: u64) {
+        crate::trace!("event", "visual_ready slot={slot} generation={generation}");
+        let key = self.with_current(slot, generation, str::to_string);
+        if let Some(key) = key {
             self.apply_pending_fraction(slot, &key, generation, false);
-            self.inner.places.rendered(&key);
+            self.with_current(slot, generation, |key| self.inner.places.rendered(key));
         }
         self.sync_foreground();
     }
 
-    pub fn stalled(&self, slot: usize, position_ms: u64) {
-        crate::trace!("event", "stalled slot={slot} position={position_ms} key={:?}", self.key_at(slot).as_deref().map(crate::trace::tail));
-        let Some(key) = self.key_at(slot).filter(|key| self.state().is_playing(key)) else { return };
-        if let Some(url) = self.url_of(&key) {
-            self.inner.routes.grow_window(&url);
-        }
-        self.feed(&key, Event::Play { position_ms });
+    pub fn stalled(&self, slot: usize, generation: u64, position_ms: u64) {
+        crate::trace!("event", "stalled slot={slot} generation={generation} position={position_ms}");
+        let url = {
+            let state = self.state();
+            Self::current_key(&state, slot, generation).filter(|key| state.is_playing(key)).and_then(|key| state.loaded.get(&key).map(|loaded| loaded.source.url.clone()))
+        };
+        let Some(url) = url else { return };
+        self.inner.routes.grow_window(&url);
+        self.feed_current(slot, generation, Event::Play { position_ms });
     }
 
-    pub fn failed(&self, slot: usize, status: i32, detail: String) {
-        crate::trace!("event", "failed slot={slot} status={status} detail={detail} key={:?}", self.key_at(slot).as_deref().map(crate::trace::tail));
-        let Some(key) = self.key_at(slot) else { return };
+    pub fn failed(&self, slot: usize, generation: u64, status: i32, detail: String) {
+        crate::trace!("event", "failed slot={slot} generation={generation} status={status} detail={detail}");
         let event = if status > 0 { Event::HttpError { status } } else { Event::PlaybackFailed { reason: detail } };
-        self.feed(&key, event);
-        self.sync_foreground();
+        if self.feed_current(slot, generation, event).is_some() {
+            self.sync_foreground();
+        }
     }
 
-    pub fn ended(&self, slot: usize) {
-        if let Some(key) = self.key_at(slot) {
-            self.feed(&key, Event::Pause);
+    pub fn ended(&self, slot: usize, generation: u64) {
+        crate::trace!("event", "ended slot={slot} generation={generation}");
+        let mut actions = Vec::new();
+        {
+            let mut state = self.state();
+            let Some(key) = Self::current_key(&state, slot, generation) else { return };
+            self.advance(&mut state, &key, Event::Pause, &mut actions);
             self.inner.places.ended(&key);
+        }
+        for (key, action) in actions {
+            self.perform(key, action);
         }
     }
 
@@ -127,10 +161,6 @@ impl Stage {
                 self.feed(&key, Event::ForegroundPassDone { is_ok });
             }
         }
-    }
-
-    fn key_at(&self, slot: usize) -> Option<String> {
-        self.state().slot_keys.get(&slot).cloned()
     }
 
     fn cancel_task(&self, key: &str) {

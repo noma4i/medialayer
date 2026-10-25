@@ -37,31 +37,31 @@ mod tests {
         let events = PlayerEvents::new(assembled.clone());
         drop(assembled);
         assert!(weak.upgrade().is_none());
-        events.ready(0);
+        events.ready(0, 0);
         events.foreground();
     }
 }
 
 #[uniffi::export]
 impl PlayerEvents {
-    pub fn ready(&self, slot: u32) {
-        self.declare(move |assembled| assembled.stage.ready(slot as usize));
+    pub fn ready(&self, slot: u32, generation: u64) {
+        self.declare(move |assembled| assembled.stage.ready(slot as usize, generation));
     }
 
-    pub fn visual_ready(&self, slot: u32) {
-        self.declare(move |assembled| assembled.stage.visual_ready(slot as usize));
+    pub fn visual_ready(&self, slot: u32, generation: u64) {
+        self.declare(move |assembled| assembled.stage.visual_ready(slot as usize, generation));
     }
 
-    pub fn stalled(&self, slot: u32, position_ms: u64) {
-        self.declare(move |assembled| assembled.stage.stalled(slot as usize, position_ms));
+    pub fn stalled(&self, slot: u32, generation: u64, position_ms: u64) {
+        self.declare(move |assembled| assembled.stage.stalled(slot as usize, generation, position_ms));
     }
 
-    pub fn failed(&self, slot: u32, status: i32, detail: String) {
-        self.declare(move |assembled| assembled.stage.failed(slot as usize, status, detail));
+    pub fn failed(&self, slot: u32, generation: u64, status: i32, detail: String) {
+        self.declare(move |assembled| assembled.stage.failed(slot as usize, generation, status, detail));
     }
 
-    pub fn ended(&self, slot: u32) {
-        self.declare(move |assembled| assembled.stage.ended(slot as usize));
+    pub fn ended(&self, slot: u32, generation: u64) {
+        self.declare(move |assembled| assembled.stage.ended(slot as usize, generation));
     }
 
     pub fn attach(&self, key: String, view_token: u64) {

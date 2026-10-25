@@ -1,5 +1,7 @@
 package com.noma4i.medialayer
 
+import com.noma4i.medialayer.CreatedPlayer
+import com.noma4i.medialayer.SlotCall
 import java.nio.file.Files
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
@@ -10,19 +12,17 @@ import org.junit.Test
 private class ReloadSlot : PlayerSlot, PlayerSlotFactory {
   val plays = Channel<Boolean>(Channel.UNLIMITED)
   @Volatile private var attached = false
-  override fun create(slot: UInt): PlayerSlot = this
-  override fun load(key: String, route: PlaybackRoute) {}
-  override fun unload() { attached = false }
-  override fun preroll() {}
-  override fun play() { plays.trySend(attached) }
-  override fun pause() {}
-  override fun mute() {}
-  override fun unmute() {}
-  override fun attach(viewToken: ULong) { attached = viewToken == 42uL }
-  override fun detach() { attached = false }
-  override fun seek(positionMs: ULong) {}
-  override fun setRate(rate: Float) {}
-  override fun setReadahead(ms: ULong) {}
+  @Volatile var generation: ULong = 0uL
+  override suspend fun create(slot: UInt): CreatedPlayer = CreatedPlayer(this)
+  override suspend fun apply(command: SlotCall) {
+    when (command) {
+      is SlotCall.Load -> generation = command.generation
+      SlotCall.Unload, SlotCall.Detach -> attached = false
+      SlotCall.Play -> plays.trySend(attached)
+      is SlotCall.Attach -> attached = command.viewToken == 42uL
+      else -> {}
+    }
+  }
   override fun sample() = SlotSample(0u, null, false, attached, false)
 }
 
@@ -54,7 +54,7 @@ class ReloadTest {
     media.setPlaying(key, true)
     withTimeout(10_000) {
       assertTrue(slot.plays.receive())
-      events.failed(0u, 0, "decoder failed")
+      events.failed(0u, slot.generation, 0, "decoder failed")
       assertTrue(slot.plays.receive())
     }
   }

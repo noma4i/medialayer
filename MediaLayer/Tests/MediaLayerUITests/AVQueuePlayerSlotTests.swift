@@ -11,10 +11,10 @@ struct AVQueuePlayerSlotTests {
     Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!.absoluteString
   }
 
-  private func makeSlot(_ log: PlayerEventLog, slots: LoadedSlots = LoadedSlots()) -> AVQueuePlayerSlot {
+  private func makeSlot(_ log: PlayerEventLog, slots: LoadedSlots = LoadedSlots()) async -> AVQueuePlayerSlot {
     let factory = AVQueuePlayerSlotFactory(startMuted: true, slots: slots)
     factory.events.bind(log)
-    return factory.create(slot: 3) as! AVQueuePlayerSlot
+    return await factory.makeSlot(3)
   }
 
   private func route(_ url: String, headers: [String: String] = [:], hls: Bool = false, looping: Bool = false) -> PlaybackRoute {
@@ -29,15 +29,15 @@ struct AVQueuePlayerSlotTests {
   @Test
   func aSlotLoadedForANewKeyLeavesTheHostOfTheOldKey() async {
     let log = PlayerEventLog()
-    let slot = makeSlot(log)
+    let slot = await makeSlot(log)
     let host = CALayer()
-    slot.load(key: "a", route: route(Self.silentClip))
+    await slot.load(key: "a", route: route(Self.silentClip))
     await log.wait(for: "ready")
-    slot.attach(to: host)
+    await MainActor.run { slot.attach(to: host) }
     await drainMain()
     #expect(slot.layer.superlayer === host)
 
-    slot.load(key: "b", route: route(Self.silentClip))
+    await slot.load(key: "b", route: route(Self.silentClip))
     await drainMain()
 
     #expect(slot.layer.superlayer == nil)
@@ -46,11 +46,11 @@ struct AVQueuePlayerSlotTests {
   @Test
   func theReadaheadOfTheCoreReachesEveryItemOfTheSlotAndTheLoopCopy() async {
     let log = PlayerEventLog()
-    let slot = makeSlot(log)
-    slot.load(key: "a", route: route(Self.silentClip, looping: true))
+    let slot = await makeSlot(log)
+    await slot.load(key: "a", route: route(Self.silentClip, looping: true))
     await log.wait(for: "ready")
 
-    slot.setReadahead(ms: 12_000)
+    await slot.setReadahead(ms: 12_000)
     await drainMain()
 
     let durations = await MainActor.run { slot.player.items().map(\.preferredForwardBufferDuration) }
@@ -58,16 +58,17 @@ struct AVQueuePlayerSlotTests {
   }
 
   @Test
-  func inv_ios_02_pendingCommandsOfAReplacedSourceDoNotRun() async {
+  func inv_ios_02_aReplacingLoadReleasesTheOldKeyAndStopsPlayback() async {
     let log = PlayerEventLog()
     let slots = LoadedSlots()
-    let slot = makeSlot(log, slots: slots)
+    let slot = await makeSlot(log, slots: slots)
 
-    slot.load(key: "old", route: route(Self.silentClip))
-    slot.seek(positionMs: 10)
-    slot.play()
-    slot.load(key: "new", route: route(Self.silentClip))
-    slot.seek(positionMs: 20)
+    await slot.load(key: "old", route: route(Self.silentClip), generation: 1)
+    await slot.seek(positionMs: 10)
+    await slot.play()
+    await slot.unload()
+    await slot.load(key: "new", route: route(Self.silentClip), generation: 2)
+    await slot.seek(positionMs: 20)
     await drainMain()
 
     #expect(slots.slot(for: "old") == nil)
@@ -79,14 +80,14 @@ struct AVQueuePlayerSlotTests {
   @Test
   func reloadingTheSameKeyKeepsTheHost() async {
     let log = PlayerEventLog()
-    let slot = makeSlot(log)
+    let slot = await makeSlot(log)
     let host = CALayer()
-    slot.load(key: "a", route: route(Self.silentClip))
-    slot.attach(to: host)
+    await slot.load(key: "a", route: route(Self.silentClip))
+    await MainActor.run { slot.attach(to: host) }
     await drainMain()
 
-    slot.unload()
-    slot.load(key: "a", route: route(Self.silentClip))
+    await slot.unload()
+    await slot.load(key: "a", route: route(Self.silentClip))
     await drainMain()
 
     #expect(slot.layer.superlayer === host)
@@ -95,11 +96,11 @@ struct AVQueuePlayerSlotTests {
   @Test
   func localClipPlaysMutedFromReadyToEnded() async throws {
     let log = PlayerEventLog()
-    let slot = makeSlot(log)
+    let slot = await makeSlot(log)
 
-    slot.load(key: "clip", route: route(Self.silentClip))
+    await slot.load(key: "clip", route: route(Self.silentClip))
     await log.wait(for: "ready")
-    slot.play()
+    await slot.play()
     await log.wait(for: "ended")
 
     #expect(slot.player.isMuted)
@@ -111,13 +112,13 @@ struct AVQueuePlayerSlotTests {
   @Test
   func theRateIsTheDefaultRateOfThePlayerAndGoesBackToNormalWithTheItem() async throws {
     let log = PlayerEventLog()
-    let slot = makeSlot(log)
-    slot.load(key: "clip", route: route(Self.silentClip))
+    let slot = await makeSlot(log)
+    await slot.load(key: "clip", route: route(Self.silentClip))
 
-    slot.setRate(rate: 1.5)
+    await slot.setRate(rate: 1.5)
     await drainMain()
     #expect(slot.player.defaultRate == 1.5)
-    slot.unload()
+    await slot.unload()
     await drainMain()
 
     #expect(slot.player.defaultRate == 1)
@@ -127,13 +128,13 @@ struct AVQueuePlayerSlotTests {
   func unloadFreesTheItemAndTheLoadedKey() async throws {
     let log = PlayerEventLog()
     let slots = LoadedSlots()
-    let slot = makeSlot(log, slots: slots)
-    slot.load(key: "clip", route: route(Self.silentClip))
+    let slot = await makeSlot(log, slots: slots)
+    await slot.load(key: "clip", route: route(Self.silentClip))
     await log.wait(for: "ready")
     weak var item = slot.loadedItem
     #expect(slots.slot(for: "clip") === slot)
 
-    slot.unload()
+    await slot.unload()
     await drainMain()
 
     await eventually("the unloaded item is released") { item == nil }
@@ -149,9 +150,9 @@ struct AVQueuePlayerSlotTests {
     weak var dropped: AVQueuePlayerSlot?
     weak var item: AVPlayerItem?
     do {
-      let slot = makeSlot(log)
+      let slot = await makeSlot(log)
       dropped = slot
-      slot.load(key: "clip", route: route(Self.silentClip))
+      await slot.load(key: "clip", route: route(Self.silentClip))
       await log.wait(for: "ready")
       item = slot.loadedItem
     }
@@ -163,12 +164,12 @@ struct AVQueuePlayerSlotTests {
 
   @Test
   func muteAndUnmuteTouchOnlyThePlayerFlag() async throws {
-    let slot = makeSlot(PlayerEventLog())
+    let slot = await makeSlot(PlayerEventLog())
 
-    slot.unmute()
+    await slot.unmute()
     await drainMain()
     #expect(!slot.player.isMuted)
-    slot.mute()
+    await slot.mute()
     await drainMain()
 
     #expect(slot.player.isMuted)
@@ -181,10 +182,10 @@ struct AVQueuePlayerSlotTests {
     try await server.start()
     defer { server.stop() }
     let log = PlayerEventLog()
-    let slot = makeSlot(log)
+    let slot = await makeSlot(log)
     var requests = server.requests.makeAsyncIterator()
 
-    slot.load(key: "remote", route: route(server.url("/headers"), headers: ["X-Test": "1"]))
+    await slot.load(key: "remote", route: route(server.url("/headers"), headers: ["X-Test": "1"]))
     _ = await requests.next()
 
     #expect(server.headers(of: "/headers")["x-test"] == "1")
@@ -193,9 +194,9 @@ struct AVQueuePlayerSlotTests {
   @Test
   func unplayableSourceReportsFailed() async throws {
     let log = PlayerEventLog()
-    let slot = makeSlot(log)
+    let slot = await makeSlot(log)
 
-    slot.load(key: "missing", route: route("file:///nonexistent/clip.mp4"))
+    await slot.load(key: "missing", route: route("file:///nonexistent/clip.mp4"))
     await log.wait(for: "failed 0")
 
     #expect(log.count("ready") == 0)
@@ -205,15 +206,15 @@ struct AVQueuePlayerSlotTests {
   func coreAttachPutsTheLayerInTheRegisteredViewAndDetachTakesItOut() async throws {
     let hosts = HostLayers()
     let factory = AVQueuePlayerSlotFactory(startMuted: true, slots: LoadedSlots(), hosts: hosts)
-    let slot = factory.create(slot: 3) as! AVQueuePlayerSlot
+    let slot = await factory.makeSlot(3)
     let host = CALayer()
     let token = hosts.register(host)
 
-    slot.attach(viewToken: token)
+    await slot.attach(viewToken: token)
     await drainMain()
     #expect(host.sublayers == [slot.layer])
     #expect(slot.sample().viewAttached)
-    slot.detach()
+    await slot.detach()
     await drainMain()
 
     #expect(host.sublayers == nil)
@@ -223,8 +224,8 @@ struct AVQueuePlayerSlotTests {
   @Test(arguments: [(true, 0), (false, 1)])
   func endOfClipIsReportedOnlyWhenNotLooping(looping: Bool, endedEvents: Int) async throws {
     let log = PlayerEventLog()
-    let slot = makeSlot(log)
-    slot.load(key: "clip", route: route(Self.silentClip, looping: looping))
+    let slot = await makeSlot(log)
+    await slot.load(key: "clip", route: route(Self.silentClip, looping: looping))
     await log.wait(for: "ready")
 
     NotificationCenter.default.post(name: .AVPlayerItemDidPlayToEndTime, object: slot.loadedItem)
@@ -239,8 +240,8 @@ struct AVQueuePlayerSlotTests {
   @Test(arguments: [(true, 2), (false, 1)])
   func aLoopingClipKeepsTheNextRoundQueued(looping: Bool, queued: Int) async throws {
     let log = PlayerEventLog()
-    let slot = makeSlot(log)
-    slot.load(key: "clip", route: route(Self.silentClip, looping: looping))
+    let slot = await makeSlot(log)
+    await slot.load(key: "clip", route: route(Self.silentClip, looping: looping))
     await log.wait(for: "ready")
     await drainMain()
     let first = slot.loadedItem
@@ -259,11 +260,11 @@ struct AVQueuePlayerSlotTests {
   @Test
   func seekMovesThePlayhead() async throws {
     let log = PlayerEventLog()
-    let slot = makeSlot(log)
-    slot.load(key: "clip", route: route(Self.silentClip))
+    let slot = await makeSlot(log)
+    await slot.load(key: "clip", route: route(Self.silentClip))
     await log.wait(for: "ready")
 
-    slot.seek(positionMs: 300)
+    await slot.seek(positionMs: 300)
 
     await eventually("the playhead reached 0.29 s") { await MainActor.run { slot.player.currentTime().seconds >= 0.29 } }
   }
@@ -271,24 +272,24 @@ struct AVQueuePlayerSlotTests {
   @Test
   func inv_idle_05_a_slot_sample_reads_the_live_playhead_without_a_periodic_observer() async {
     let log = PlayerEventLog()
-    let slot = makeSlot(log)
-    slot.load(key: "clip", route: route(Self.silentClip))
+    let slot = await makeSlot(log)
+    await slot.load(key: "clip", route: route(Self.silentClip))
     await log.wait(for: "ready")
 
-    slot.seek(positionMs: 300)
+    await slot.seek(positionMs: 300)
 
     await eventually("sample() reports the sought position") { slot.sample().positionMs >= 290 }
-    slot.seek(positionMs: 0)
+    await slot.seek(positionMs: 0)
     await eventually("sample() reports the rewind") { slot.sample().positionMs < 50 }
-    slot.play()
+    await slot.play()
     await eventually("sample() advances between player events") { slot.sample().positionMs >= 80 }
-    slot.pause()
+    await slot.pause()
     await drainMain()
     let paused = slot.sample().positionMs
     try? await Task.sleep(for: .milliseconds(60))
     #expect(slot.sample().positionMs == paused)
-    slot.setRate(rate: 2)
-    slot.play()
+    await slot.setRate(rate: 2)
+    await slot.play()
     await eventually("sample() advances after a rate change") { slot.sample().positionMs > paused + 40 }
   }
 

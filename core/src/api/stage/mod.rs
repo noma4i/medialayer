@@ -410,7 +410,7 @@ impl Stage {
                     state.tasks.remove(&key);
                     unloaded.push(key);
                 }
-                calls.extend(SlotCall::from_command(command, None));
+                calls.extend(SlotCall::from_command(command));
             }
             Command::Play { slot } | Command::Pause { slot } => {
                 let event = if matches!(command, Command::Play { .. }) { Event::Play { position_ms: 0 } } else { Event::Pause };
@@ -421,10 +421,10 @@ impl Stage {
                     }
                     self.advance(state, &key, event, actions);
                 }
-                calls.extend(SlotCall::from_command(command.clone(), None));
+                calls.extend(SlotCall::from_command(command.clone()));
             }
             Command::Unmute { slot } if self.inner.silent => calls.push((*slot, SlotCall::Mute)),
-            _ => calls.extend(SlotCall::from_command(command, None)),
+            _ => calls.extend(SlotCall::from_command(command)),
         }
     }
 
@@ -457,7 +457,7 @@ impl Stage {
     fn load_calls(&self, state: &State, key: &str, resume: Option<u64>) -> Vec<(usize, SlotCall)> {
         let loaded = &state.loaded[key];
         let slot = loaded.slot;
-        let mut calls = vec![(slot, SlotCall::Load { key: key.to_string(), route: loaded.route.clone() })];
+        let mut calls = vec![(slot, SlotCall::Load { key: key.to_string(), route: loaded.route.clone(), generation: loaded.generation })];
         self.inner.hints.lock().unwrap_or_else(PoisonError::into_inner).remove(&slot);
         if self.inner.silent {
             calls.push((slot, SlotCall::Mute));

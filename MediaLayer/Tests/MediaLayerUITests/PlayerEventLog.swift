@@ -6,10 +6,12 @@ final class PlayerEventLog: PlayerEventsProtocol, @unchecked Sendable {
   private let lock = NSLock()
   private var recorded: [String] = []
   private var memory: [Pressure] = []
+  private var stamped: [(name: String, generation: UInt64)] = []
   private var waiters: [(id: UUID, name: String, continuation: CheckedContinuation<Void, Never>)] = []
 
   var all: [String] { lock.withLock { recorded } }
   var pressures: [Pressure] { lock.withLock { memory } }
+  func generations(_ name: String) -> [UInt64] { lock.withLock { stamped.filter { $0.name == name }.map(\.generation) } }
 
   func count(_ name: String) -> Int { all.filter { $0 == name }.count }
 
@@ -44,11 +46,13 @@ final class PlayerEventLog: PlayerEventsProtocol, @unchecked Sendable {
   }
   func attach(key: String, viewToken: UInt64) { record("attach \(key)") }
   func detach(key: String) { record("detach \(key)") }
-  func ready(slot: UInt32) { record("ready") }
-  func visualReady(slot: UInt32) { record("visualReady") }
-  func stalled(slot: UInt32, positionMs: UInt64) { record("stalled") }
-  func failed(slot: UInt32, status: Int32, detail: String) { record("failed \(status)") }
-  func ended(slot: UInt32) { record("ended") }
+  func ready(slot: UInt32, generation: UInt64) { stamp("ready", generation); record("ready") }
+  func visualReady(slot: UInt32, generation: UInt64) { stamp("visualReady", generation); record("visualReady") }
+  func stalled(slot: UInt32, generation: UInt64, positionMs: UInt64) { record("stalled") }
+  func failed(slot: UInt32, generation: UInt64, status: Int32, detail: String) { stamp("failed", generation); record("failed \(status)") }
+  func ended(slot: UInt32, generation: UInt64) { stamp("ended", generation); record("ended") }
+
+  private func stamp(_ name: String, _ generation: UInt64) { lock.withLock { stamped.append((name, generation)) } }
 
   private func record(_ name: String) {
     let matched = lock.withLock { () -> [CheckedContinuation<Void, Never>] in

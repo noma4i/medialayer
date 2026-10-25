@@ -64,7 +64,7 @@ class NativeViewLifecycleTest {
     rule.waitUntil(5000) { looper.idle(); events.calls.any { it.startsWith("attach:first:") } }
     rule.runOnIdle { assertEquals(0, root.descendants.count { it is TextureView }) }
     val token = events.calls.last { it.startsWith("attach:first:") }.substringAfterLast(':').toULong()
-    val slot = factory.create(0u)
+    val slot = factory.createSlot(0u)
     slot.load("first", PlaybackRoute("file:///bundle/first.mp4", emptyMap(), null, false, false))
     slot.play()
     slot.attach(token)
@@ -81,7 +81,7 @@ class NativeViewLifecycleTest {
   fun inv_output_05_window_keeps_its_view_during_player_handover() {
     var muted by mutableStateOf(false)
     val events = layer.playerEvents() as RecordingEvents
-    val slot = factory.create(0u)
+    val slot = factory.createSlot(0u)
     rule.setContent {
       MediaLayerProvider(CompletableDeferred(layer), loader, factory.players) {
         MediaVideo(LifecycleSource("first", Kind.VIDEO), muted = muted,
@@ -115,7 +115,7 @@ class NativeViewLifecycleTest {
   fun inv_native_06_ten_page_changes_do_not_rebind_a_stable_player() {
     var page by mutableStateOf(0)
     var muted by mutableStateOf(false)
-    val slots = (0..2).map { factory.create(it.toUInt()) }
+    val slots = (0..2).map { factory.createSlot(it.toUInt()) }
     val events = layer.playerEvents() as RecordingEvents
     rule.setContent {
       MediaLayerProvider(CompletableDeferred(layer), loader, factory.players) {
@@ -162,7 +162,7 @@ class NativeViewLifecycleTest {
   @Test
   fun inv_idle_05_paused_video_does_not_repeat_progress_and_seek_resumes_it() {
     var reports = 0
-    val slot = factory.create(0u)
+    val slot = factory.createSlot(0u)
     slot.load("first", PlaybackRoute("https://o.test/a.mp4", emptyMap(), null, false, false))
     slot.play()
     rule.setContent {
@@ -257,7 +257,7 @@ class NativeViewLifecycleTest {
   fun inv_native_05_audio_progress_stops_in_background_and_resumes() {
     val clock = FakeClock(0)
     factory.clock = clock
-    val slot = factory.create(0u)
+    val slot = factory.createSlot(0u)
     slot.load("first", PlaybackRoute("https://o.test/audio", emptyMap(), null, false, false))
     slot.play()
     var control: AudioControl? = null
@@ -292,7 +292,7 @@ class NativeViewLifecycleTest {
   fun inv_audio_02_progress_seek_and_ended_ignore_the_host_frame() {
     val clock = FakeClock(0)
     factory.clock = clock
-    val slot = factory.create(0u)
+    val slot = factory.createSlot(0u)
     slot.load("first", PlaybackRoute("https://o.test/audio", emptyMap(), null, false, false))
     slot.play()
     var control: AudioControl? = null
@@ -316,7 +316,7 @@ class NativeViewLifecycleTest {
   fun inv_audio_01_only_the_ended_state_of_the_core_stops_the_audio() {
     val clock = FakeClock(0)
     factory.clock = clock
-    val slot = factory.create(0u)
+    val slot = factory.createSlot(0u)
     slot.load("first", PlaybackRoute("https://o.test/audio", emptyMap(), null, false, false))
     slot.play()
     var control: AudioControl? = null
@@ -341,7 +341,7 @@ class NativeViewLifecycleTest {
   fun inv_native_05_video_progress_stops_when_inactive_and_resumes() {
     val clock = FakeClock(0)
     factory.clock = clock
-    val slot = factory.create(0u)
+    val slot = factory.createSlot(0u)
     slot.load("first", PlaybackRoute("https://o.test/video", emptyMap(), null, false, true))
     slot.play()
     var offset by mutableStateOf(0.dp)

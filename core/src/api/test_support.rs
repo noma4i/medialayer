@@ -27,8 +27,8 @@ pub async fn eventually(mut condition: impl FnMut() -> bool) {
 
 use super::assemble::{Assembly, PoolSettings};
 use super::ports::{CacheControl, MemoryRelease, PoolControl, PrefetchControl, SettingsStore, SlotDirectives, TransportControl};
-use super::slots::{PlayerSlot, PlayerSlotFactory, SlotCall, SlotSample};
-use super::source::{MediaItem, PlaybackRoute};
+use super::slots::{CreatedPlayer, PlayerSlot, PlayerSlotFactory, SlotCall, SlotSample};
+use super::source::MediaItem;
 use super::types::Kind;
 use crate::cache::{self, classify_kind, Cache, CacheStore};
 use crate::fetch::mock::MockFetcher;
@@ -41,33 +41,49 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 
-#[derive(Default)]
 pub struct LoadGate {
-    closed: Mutex<bool>,
-    opened: Condvar,
+    closed: tokio::sync::watch::Sender<bool>,
     entered: AtomicUsize,
+}
+
+impl Default for LoadGate {
+    fn default() -> LoadGate {
+        LoadGate { closed: tokio::sync::watch::channel(false).0, entered: AtomicUsize::new(0) }
+    }
+}
+
+pub struct HeldGate(Arc<LoadGate>);
+
+impl Drop for HeldGate {
+    fn drop(&mut self) {
+        self.0.open();
+    }
 }
 
 impl LoadGate {
     pub fn close(&self) {
-        *self.closed.lock().unwrap() = true;
+        self.closed.send_replace(true);
     }
 
     pub fn open(&self) {
-        *self.closed.lock().unwrap() = false;
-        self.opened.notify_all();
+        self.closed.send_replace(false);
+    }
+
+    pub fn hold(self: &Arc<Self>) -> HeldGate {
+        self.close();
+        HeldGate(self.clone())
     }
 
     pub fn entered(&self) -> usize {
         self.entered.load(Ordering::SeqCst)
     }
 
-    fn pass(&self) {
+    async fn pass(&self) {
         self.entered.fetch_add(1, Ordering::SeqCst);
-        let closed = self.closed.lock().unwrap();
-        let _ = self.opened.wait_timeout_while(closed, Duration::from_secs(10), |closed| *closed).unwrap();
+        let mut closed = self.closed.subscribe();
+        let _ = tokio::time::timeout(Duration::from_secs(10), closed.wait_for(|closed| !*closed)).await;
     }
 }
 
@@ -286,6 +302,21 @@ pub struct MockSlot {
     pub on_sample: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     pub advance_ms: u64,
     pub seeked: tokio::sync::Notify,
+    pub started: AtomicUsize,
+    pub in_flight: AtomicUsize,
+    pub peak: AtomicUsize,
+    pub cancelled: AtomicUsize,
+}
+
+struct InFlight<'a>(&'a MockSlot, bool);
+
+impl Drop for InFlight<'_> {
+    fn drop(&mut self) {
+        self.0.in_flight.fetch_sub(1, Ordering::SeqCst);
+        if !self.1 {
+            self.0.cancelled.fetch_add(1, Ordering::SeqCst);
+        }
+    }
 }
 
 impl MockSlot {
@@ -296,57 +327,40 @@ impl MockSlot {
     pub fn loads(&self) -> usize {
         self.calls().iter().filter(|call| matches!(call, SlotCall::Load { .. })).count()
     }
+
+    pub fn applies_started(&self) -> usize {
+        self.started.load(Ordering::SeqCst)
+    }
+
+    pub fn peak_applies(&self) -> usize {
+        self.peak.load(Ordering::SeqCst)
+    }
+
+    pub fn cancelled_applies(&self) -> usize {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.calls().iter().rev().find_map(|call| if let SlotCall::Load { generation, .. } = call { Some(*generation) } else { None }).unwrap_or(0)
+    }
 }
 
+#[async_trait]
 impl PlayerSlot for MockSlot {
-    fn load(&self, key: String, route: PlaybackRoute) {
-        self.gate.pass();
-        self.calls.lock().unwrap().push(SlotCall::Load { key, route });
-    }
-
-    fn unload(&self) {
-        self.calls.lock().unwrap().push(SlotCall::Unload);
-    }
-
-    fn preroll(&self) {
-        self.calls.lock().unwrap().push(SlotCall::Preroll);
-    }
-
-    fn play(&self) {
-        self.calls.lock().unwrap().push(SlotCall::Play);
-    }
-
-    fn pause(&self) {
-        self.calls.lock().unwrap().push(SlotCall::Pause);
-    }
-
-    fn mute(&self) {
-        self.calls.lock().unwrap().push(SlotCall::Mute);
-    }
-
-    fn unmute(&self) {
-        self.calls.lock().unwrap().push(SlotCall::Unmute);
-    }
-
-    fn attach(&self, view_token: u64) {
-        self.calls.lock().unwrap().push(SlotCall::Attach { view_token });
-    }
-
-    fn detach(&self) {
-        self.calls.lock().unwrap().push(SlotCall::Detach);
-    }
-
-    fn seek(&self, position_ms: u64) {
-        self.calls.lock().unwrap().push(SlotCall::Seek { position_ms });
-        self.seeked.notify_one();
-    }
-
-    fn set_rate(&self, rate: f32) {
-        self.calls.lock().unwrap().push(SlotCall::Rate { rate });
-    }
-
-    fn set_readahead(&self, ms: u64) {
-        self.calls.lock().unwrap().push(SlotCall::Readahead { ms });
+    async fn apply(&self, command: SlotCall) {
+        self.started.fetch_add(1, Ordering::SeqCst);
+        let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::SeqCst);
+        let mut flight = InFlight(self, false);
+        if matches!(command, SlotCall::Load { .. }) {
+            self.gate.pass().await;
+        }
+        flight.1 = true;
+        let is_seek = matches!(command, SlotCall::Seek { .. });
+        self.calls.lock().unwrap().push(command);
+        if is_seek {
+            self.seeked.notify_one();
+        }
     }
 
     fn sample(&self) -> SlotSample {
@@ -366,7 +380,7 @@ pub struct MockFactory {
     pub slots: Mutex<HashMap<u32, Arc<MockSlot>>>,
     pub created: Mutex<Vec<u32>>,
     pub gate: Arc<LoadGate>,
-    pub create_gate: LoadGate,
+    pub create_gate: Arc<LoadGate>,
     pub advance_ms: Mutex<u64>,
 }
 
@@ -388,9 +402,10 @@ impl MockFactory {
     }
 }
 
+#[async_trait]
 impl PlayerSlotFactory for MockFactory {
-    fn create(&self, slot: u32) -> Arc<dyn PlayerSlot> {
-        self.create_gate.pass();
+    async fn create(&self, slot: u32) -> CreatedPlayer {
+        self.create_gate.pass().await;
         let idle = SlotSample { position_ms: 0, duration_ms: Some(60_000), is_looping: false, view_attached: false, frame_rendered: false };
         let player = Arc::new(MockSlot {
             calls: Mutex::default(),
@@ -400,10 +415,14 @@ impl PlayerSlotFactory for MockFactory {
             on_sample: Mutex::new(None),
             advance_ms: *self.advance_ms.lock().unwrap(),
             seeked: tokio::sync::Notify::new(),
+            started: AtomicUsize::new(0),
+            in_flight: AtomicUsize::new(0),
+            peak: AtomicUsize::new(0),
+            cancelled: AtomicUsize::new(0),
         });
         self.created.lock().unwrap().push(slot);
         self.slots.lock().unwrap().insert(slot, player.clone());
-        player
+        CreatedPlayer { player }
     }
 }
 

@@ -80,7 +80,7 @@ class PlayerLooperTest {
     }
     val surface = Surface(SurfaceTexture(0))
     try {
-      val slot = factory.create(0u)
+      val slot = factory.createSlot(0u)
       val view = factory.players.newView()
       slot.load("k", PlaybackRoute("http://127.0.0.1:9/a.mp4", emptyMap(), null, false, true))
       slot.attach(view.token)
@@ -169,7 +169,7 @@ class PlayerLooperTest {
       }
     }
     try {
-      val slot = factory.create(0u)
+      val slot = factory.createSlot(0u)
       val view = factory.players.newView()
       slot.load("k", PlaybackRoute("http://127.0.0.1:9/a.mp4", emptyMap(), null, false, true))
       slot.attach(view.token)

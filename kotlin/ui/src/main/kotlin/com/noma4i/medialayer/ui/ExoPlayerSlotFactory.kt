@@ -10,6 +10,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.RenderersFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.upstream.DefaultAllocator
+import com.noma4i.medialayer.CreatedPlayer
 import com.noma4i.medialayer.PlaybackRoute
 import com.noma4i.medialayer.PlayerEventsInterface
 import com.noma4i.medialayer.PlayerSlotFactory
@@ -104,8 +105,10 @@ class ExoPlayerSlotFactory(
     if (!closed) this.events = events
   }
 
+  override suspend fun create(slot: UInt): CreatedPlayer = CreatedPlayer(createSlot(slot))
+
   @Synchronized
-  override fun create(slot: UInt): ExoPlayerSlot = ExoPlayerSlot(slot, this).also {
+  internal fun createSlot(slot: UInt): ExoPlayerSlot = ExoPlayerSlot(slot, this).also {
     if (closed) it.release() else created.add(it)
   }
 

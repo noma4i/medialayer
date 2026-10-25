@@ -215,7 +215,7 @@ fn inv_ffi_02_declarations_reach_the_platform_slots_and_the_player_events_move_t
     layer.visible(MediaItem::bare_video(url), true);
     caller.block_on(eventually(|| factory.slot_holding(url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))));
     let (index, slot): (u32, Arc<MockSlot>) = factory.slot_holding(url).unwrap();
-    layer.player_events().ready(index);
+    layer.player_events().ready(index, slot.generation());
 
     caller.block_on(eventually(|| seen.0.lock().unwrap().last() == Some(&MediaState::Ready)));
     caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Mute)));
@@ -472,8 +472,8 @@ fn inv_ffi_07_calls_made_before_the_assembly_ends_run_after_it_in_call_order_and
     assert!(started.elapsed() >= SLOW, "the async call returned before the assembly ended");
     assert_eq!(limits, default_limits());
     caller.block_on(eventually(|| factory.slot_holding(url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play) && slot.calls().contains(&SlotCall::Attach { view_token: 5 }))));
-    let (index, _) = factory.slot_holding(url).unwrap();
-    layer.player_events().ready(index);
+    let (index, slot) = factory.slot_holding(url).unwrap();
+    layer.player_events().ready(index, slot.generation());
     caller.block_on(eventually(|| seen.0.lock().unwrap().last() == Some(&MediaState::Ready)));
 }
 
@@ -681,7 +681,7 @@ fn inv_ffi_12_shutdown_releases_the_assembled_value_whoever_still_holds_the_laye
 
     assert_eq!(assembled.strong_count(), 0, "the closed layer, its suspension or its events still own the assembled value");
     suspension.release();
-    events.ready(0);
+    events.ready(0, 0);
     layer.set_muted_all(true);
     layer.visible(MediaItem::bare_video("https://o.test/late.mp4"), true);
     assert_eq!(assembled.strong_count(), 0, "a call after the close revived the assembled value");
