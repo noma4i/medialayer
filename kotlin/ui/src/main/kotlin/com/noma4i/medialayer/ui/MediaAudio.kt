@@ -15,12 +15,12 @@ import com.noma4i.medialayer.MediaState
 import kotlinx.coroutines.flow.flowOf
 
 @Stable
-class AudioControl internal constructor(private val seekTo: (Double) -> Unit) {
+class AudioControl internal constructor(playing: Boolean, private val seekTo: (Double) -> Unit) {
   var rate: Float by mutableFloatStateOf(1f)
 
   var state: MediaState by mutableStateOf(MediaState.Idle)
     internal set
-  var isPlaying: Boolean by mutableStateOf(false)
+  var isPlaying: Boolean by mutableStateOf(playing)
     private set
   var progress: Float by mutableFloatStateOf(0f)
     internal set
@@ -41,11 +41,12 @@ class AudioControl internal constructor(private val seekTo: (Double) -> Unit) {
 }
 
 @Composable
-fun MediaAudio(source: MediaSource, muted: Boolean = false, rate: Float = 1f, group: String? = null, content: @Composable (AudioControl) -> Unit) {
+fun MediaAudio(source: MediaSource, playing: Boolean = false, muted: Boolean = false, rate: Float = 1f, group: String? = null, content: @Composable (AudioControl) -> Unit) {
   val environment = LocalMediaEnvironment.current
   val screen = rememberScreenVisibility()
-  val control = remember(environment, source.url) { AudioControl { environment.media.seek(source.url, it) }.also { it.rate = rate } }
+  val control = remember(environment, source.url) { AudioControl(playing) { environment.media.seek(source.url, it) }.also { it.rate = rate } }
   LaunchedEffect(rate) { control.rate = rate }
+  LaunchedEffect(control, playing) { if (playing) control.play() else control.pause() }
   DisposableEffect(environment.media, source.url, control.rate) {
     environment.media.setRate(source.url, control.rate)
     onDispose { }

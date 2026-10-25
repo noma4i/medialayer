@@ -26,6 +26,10 @@ public final class AudioPlayback {
     setPlaying(!isPlaying)
   }
 
+  func follow(playing value: Bool) {
+    setPlaying(value)
+  }
+
   func follow(group value: String?) {
     group = value
   }
@@ -140,6 +144,7 @@ public struct MediaAudio<Content: View>: View {
           let claims = KeyClaims.of(context.places)
           claims.release(owner: audio.owner, key: source.url)
         }
+        .onChange(of: playing) { _, value in audio.follow(playing: value) }
         .onChange(of: muted) { _, value in KeyClaims.of(context.places).setMuted(owner: audio.owner, key: source.url, muted: value) }
         .onChange(of: rate) { _, value in audio.setRate(value) }
         .onChange(of: group) { _, value in
