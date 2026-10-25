@@ -26,6 +26,8 @@ private final class StateLog: StateListener, @unchecked Sendable {
   var all: [MediaState] { lock.withLock { states } }
 
   func changed(state: MediaState) { lock.withLock { states.append(state) } }
+
+  func failed(error: MediaError) {}
 }
 
 private func eventually(_ condition: () -> Bool) async -> Bool {
@@ -53,7 +55,7 @@ extension GlobalMedia {
     }
 
     private func release(_ media: MediaLayer) async {
-      media.releaseAll()
+      media.releaseOwned()
       await eventually("the clip leaves the shared slots") { LoadedSlots.of(media).slot(for: Self.clip) == nil }
     }
 
@@ -64,7 +66,7 @@ extension GlobalMedia {
       let fetcher = CountingFetcher()
       let media = try await open(silent: false, fetcher: fetcher)
       let log = StateLog()
-      let subscription = media.subscribeState(key: Self.clip, listener: log)
+      let subscription = try media.subscribeState(key: Self.clip, listener: log)
       let item = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: "https://o.test/cover.jpg", blurHash: nil, looping: false, strategy: .window)
       let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 64, height: 64))
       let controller = UIViewController()
@@ -73,7 +75,7 @@ extension GlobalMedia {
       let host = controller.view.layer
       let token = HostLayers.of(media).register(host)
       defer {
-        media.releaseAll()
+        media.releaseOwned()
         HostLayers.of(media).unregister(token)
         window.isHidden = true
         window.rootViewController = nil
@@ -106,14 +108,21 @@ extension GlobalMedia {
       let loaded = await eventually { LoadedSlots.of(media).slot(for: Self.clip) != nil }
       #expect(loaded)
       let slot = try #require(LoadedSlots.of(media).slot(for: Self.clip))
-      await MainActor.run { slot.player.isMuted = false }
 
-      media.setMutedAll(muted: true)
-      media.setMutedAll(muted: false)
-      media.setMuted(key: Self.clip, muted: false)
+      func unmuteOutsideThenAsk(_ ask: () -> Void) async -> Bool {
+        await MainActor.run { slot.player.isMuted = false }
+        ask()
+        for _ in 0..<400 {
+          if await MainActor.run(body: { slot.player.isMuted }) { return true }
+          try? await Task.sleep(for: .milliseconds(25))
+        }
+        return false
+      }
 
-      try await Task.sleep(for: .milliseconds(300))
-      #expect(await MainActor.run { slot.player.isMuted })
+      #expect(await unmuteOutsideThenAsk { try! media.setMutedAll(muted: true) })
+      #expect(await unmuteOutsideThenAsk { try! media.setMutedAll(muted: false) })
+      #expect(await unmuteOutsideThenAsk { media.setMuted(key: Self.clip, muted: true) })
+      #expect(await unmuteOutsideThenAsk { media.setMuted(key: Self.clip, muted: false) })
       await release(media)
     }
 

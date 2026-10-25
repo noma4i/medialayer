@@ -72,6 +72,8 @@ private final class StatsRecorder: StatsListener, @unchecked Sendable {
   var totals: [UInt64] { lock.withLock { seen } }
 
   func changed(stats: MediaStats) { lock.withLock { seen.append(stats.totalBytes) } }
+
+  func failed(error: MediaError) {}
 }
 
 struct MediaLayerBridgeTests {
@@ -114,7 +116,7 @@ struct MediaLayerBridgeTests {
     let settings = MemorySettings()
     let media = try open(settings: settings)
     let recorder = StatsRecorder()
-    let subscription = media.subscribeStats(listener: recorder)
+    let subscription = try media.subscribeStats(listener: recorder)
     var limits = try await media.limits()
     limits.budget = 512 * 1024 * 1024
     limits.evict = .lfu
@@ -166,7 +168,7 @@ struct MediaLayerBridgeTests {
     let media = try open(settings: MemorySettings())
     var iterator = media.statsStream().makeAsyncIterator()
 
-    await media.evictNow()
+    try! await media.evictNow()
 
     let first = await iterator.next()
     #expect(first?.totalBytes == 0)

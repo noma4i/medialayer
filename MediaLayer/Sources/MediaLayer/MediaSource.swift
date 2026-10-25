@@ -28,9 +28,3 @@ extension MediaSource {
     MediaItem(kind: kind, url: url, headers: headers, cover: cover, blurHash: blurHash, strategy: strategy)
   }
 }
-
-extension MediaLayer {
-  public func replaceImageWindow<Source: MediaSource>(_ name: String, active: Int, pages: [[Source]]) {
-    replaceImageWindow(name: name, active: UInt32(clamping: max(active, 0)), pages: pages.map { $0.map(\.item) })
-  }
-}

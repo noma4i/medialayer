@@ -72,7 +72,7 @@ extension MediaLayer {
       media.close()
       throw CancellationError()
     }
-    media.setTonePreparation(preparation: ToneFrames(places: media))
+    try media.setTonePreparation(preparation: ToneFrames(places: media))
     ImageMemory.install(imageCache, on: media)
     LoadedSlots.install(factory.slots, on: media)
     HostLayers.install(factory.hosts, on: media)

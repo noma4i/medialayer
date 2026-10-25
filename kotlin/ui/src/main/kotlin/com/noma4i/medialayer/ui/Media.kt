@@ -5,8 +5,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.collectAsState
@@ -18,6 +20,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.findViewTreeLifecycleOwner
 import coil3.ImageLoader
+import com.noma4i.medialayer.MediaException
+import com.noma4i.medialayer.MediaItem
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
@@ -28,6 +32,10 @@ import kotlinx.coroutines.flow.flowOf
 
 object Media {
   var muted: Boolean by mutableStateOf(false)
+
+  /** The last refusal of the core to take the global mute or the tone preparation, or null after a success. */
+  var failure: MediaException? by mutableStateOf(null)
+    internal set
 
   var audio: MediaAudioSession? = null
     internal set
@@ -85,49 +93,57 @@ private fun MediaLayerEnvironment(media: MediaLayer, imageLoader: ImageLoader?, 
       val current = reference.get() ?: throw kotlinx.coroutines.CancellationException("MediaLayer was released")
       current.fetchImage(url, headers)
     }, null, media.imageStats(), pixelSizes)
-    media.setTonePreparation(ToneFrames(media, context.applicationContext, loader))
+    try {
+      media.setTonePreparation(ToneFrames(media, context.applicationContext, loader))
+    } catch (error: MediaException) {
+      Media.failure = error
+    }
     MediaEnvironment(media, players ?: binding?.factory?.players, loader, media.imageStats(), pixelSizes)
   }
   val muted = Media.muted
   DisposableEffect(media, muted) {
-    media.setMutedAll(muted)
+    try {
+      media.setMutedAll(muted)
+      Media.failure = null
+    } catch (error: MediaException) {
+      Media.failure = error
+    }
     onDispose { }
   }
   CompositionLocalProvider(LocalMediaEnvironment provides environment, content = content)
 }
 
 @Composable
-internal fun rememberPlace(source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean = true, peeking: Boolean = false, visible: Boolean = true, group: String? = null): MediaState {
-  if (visible) declarePlace(source, playing, muted, loop, peeking, group)
+internal fun rememberPlace(
+  source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean = true, peeking: Boolean = false, visible: Boolean = true,
+  group: String? = null, rate: Float? = null, viewToken: ULong? = null, mounted: MutableState<PlaceMount?>? = null
+): MediaState {
+  val item = source.toItem().copy(looping = loop)
+  val failure = remember { mutableStateOf<ScopedFailure?>(null) }
+  if (visible) declarePlace(item, playing, muted, peeking, group, rate, viewToken, mounted) { failure.value = ScopedFailure(item, MediaState.Failed(it.toString())) }
   val media = LocalMediaEnvironment.current.media
-  return remember(media, source.url, visible) { if (visible) media.stateFlow(source.url) else flowOf(MediaState.Idle) }.collectAsState(MediaState.Idle).value
+  val followed = remember(media, source.url, visible) { if (visible) media.stateFlow(source.url) else flowOf(MediaState.Idle) }.collectAsState(MediaState.Idle).value
+  return failure.value.of(item) ?: followed
 }
 
 @Composable
-internal fun declarePlace(source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean = true, peeking: Boolean = false, group: String? = null) {
+internal fun declarePlace(
+  item: MediaItem, playing: Boolean?, muted: Boolean?, peeking: Boolean = false, group: String? = null,
+  rate: Float? = null, viewToken: ULong? = null, mounted: MutableState<PlaceMount?>? = null, onFailed: (MediaException) -> Unit = {}
+) {
   val media = LocalMediaEnvironment.current.media
-  val item = remember(source, loop) { source.toItem().copy(looping = loop) }
-  val owner = remember { Any() }
-  DisposableEffect(media, item) {
-    media.claims.visible(owner, item, true)
-    onDispose { media.claims.release(owner, item.url) }
-  }
-  if (muted != null) {
-    DisposableEffect(media, item.url, muted) {
-      media.claims.setMuted(owner, item.url, muted)
-      onDispose { }
+  val failed by rememberUpdatedState(onFailed)
+  val mount = remember(media, item) { PlaceMount(media, item) { failed(it) } }
+  DisposableEffect(mount) {
+    mounted?.value = mount
+    onDispose {
+      mounted?.value = null
+      mount.close()
     }
   }
-  if (playing != null) {
-    DisposableEffect(media, item.url, playing, group) {
-      media.claims.setPlaying(owner, item.url, playing, group)
-      onDispose { }
-    }
-  }
-  if (peeking) {
-    DisposableEffect(media, item.url) {
-      media.claims.setPeeking(owner, item.url, true)
-      onDispose { media.claims.setPeeking(owner, item.url, false) }
-    }
+  val input = placeInput(visible = true, playing = playing ?: false, group = group, peeking = peeking, muted = muted, rate = rate, viewToken = viewToken)
+  DisposableEffect(mount, input) {
+    mount.update(input)
+    onDispose { }
   }
 }

@@ -1,11 +1,13 @@
 use super::assembled::Assembled;
-use super::deferred::{Deferred, Retired};
-use super::layer_life::LayerLife;
 use super::events::PlayerEvents;
 use super::fetcher::{Fetcher, ForeignFetcher};
+use super::ingress::{run, Answer, Declared, Admitted, IngressLimits, Finished, OwnerKind, Pause, InputQueue, Query, Subscribing, WindowKind};
+use super::layer_life::LayerLife;
+use super::limits::{DeviceMemory, Evict, ImageWindow, Limits, PoolSettings};
+use super::owned::{MediaPlace, MediaWindow, PlaybackSuspension};
+use super::ready::Ready;
 use crate::analysis::{MediaTone, ToneSource};
 use crate::api::TonePreparation;
-use super::limits::{DeviceMemory, Evict, ImageWindow, Limits, PoolSettings};
 use crate::api::{
     assemble, placeholder_for, CacheState, Placeholder, Assembly, Kind, MediaError, MediaItem, MediaState, MediaStats, Parts, PlaybackRoute,
     PlayerSlotFactory, SettingsStore, Subscription,
@@ -15,7 +17,7 @@ use crate::api::AbortOnDrop;
 use crate::session::WatchdogConfig;
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use tokio::runtime::{Builder, Handle, Runtime};
 use tokio::sync::watch;
@@ -48,6 +50,8 @@ pub struct OpenConfig {
     pub memory_releaser: Option<Arc<dyn MemoryReleaser>>,
     #[uniffi(default = false)]
     pub silent: bool,
+    #[uniffi(default = None)]
+    pub ingress: Option<IngressLimits>,
 }
 
 #[uniffi::export(with_foreign)]
@@ -60,22 +64,28 @@ pub trait MemoryReleaser: Send + Sync {
 #[uniffi::export(with_foreign)]
 pub trait StatsListener: Send + Sync {
     fn changed(&self, stats: MediaStats);
+    fn failed(&self, error: MediaError);
 }
 
 #[uniffi::export(with_foreign)]
 pub trait ToneListener: Send + Sync {
     fn changed(&self, source: ToneSource);
+    fn failed(&self, error: MediaError);
 }
 
 #[uniffi::export(with_foreign)]
 pub trait StateListener: Send + Sync {
     fn changed(&self, state: MediaState);
+    fn failed(&self, error: MediaError);
 }
 
-struct Closing {
+
+pub(super) struct Closing {
     handle: Handle,
     life: Mutex<LayerLife>,
-    assembled: Arc<Deferred<Assembled>>,
+    pub(super) ready: Arc<Ready<Assembled>>,
+    pub(super) queue: Arc<InputQueue>,
+    executor: Mutex<Option<AbortOnDrop>>,
     runtime: Mutex<Option<Runtime>>,
     releaser: Mutex<Option<Arc<dyn MemoryReleaser>>>,
     assembling: Mutex<Option<AbortOnDrop>>,
@@ -88,26 +98,36 @@ impl Closing {
         self.life.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn shutdown(self: &Arc<Closing>) {
+    pub(super) fn shutdown(self: &Arc<Closing>) {
         if !self.life().shutdown() {
             return;
         }
-        let retired = self.assembled.close();
+        let retired = self.ready.close();
+        self.queue.end(MediaError::Closed);
         let closing = self.clone();
         self.handle.spawn(async move { closing.clean(retired).await });
     }
 
-    async fn clean(&self, mut retired: Retired<Assembled>) {
+    /// An overflow of native events cannot be dropped silently: observers get the error and the layer closes.
+    pub(super) fn overflowed(self: &Arc<Closing>, error: MediaError) {
+        self.queue.end(error);
+        self.shutdown();
+    }
+
+    async fn clean(&self, retired: Option<Arc<Assembled>>) {
         let assembling = self.assembling.lock().unwrap_or_else(PoisonError::into_inner).take();
         if let Some(mut assembling) = assembling {
             assembling.abort();
             let _ = assembling.join().await;
         }
+        let executor = self.executor.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if let Some(mut executor) = executor {
+            let _ = executor.join().await;
+        }
         let late = self.late.lock().unwrap_or_else(PoisonError::into_inner).take();
-        for assembled in retired.take_value().into_iter().chain(late) {
+        for assembled in retired.into_iter().chain(late) {
             assembled.close().await;
         }
-        drop(retired);
         let releaser = self.releaser.lock().unwrap_or_else(PoisonError::into_inner).take();
         if let Some(releaser) = releaser {
             releaser.shutdown().await;
@@ -125,65 +145,39 @@ impl Closing {
 pub struct MediaLayer {
     handle: Handle,
     closing: Arc<Closing>,
-    assembled: Arc<Deferred<Assembled>>,
     namespace_headers: Vec<String>,
     image_stats: Arc<super::image::ImageCounters>,
-    next_suspension: AtomicU64,
-}
-
-#[derive(uniffi::Object)]
-pub struct PlaybackSuspension {
-    assembled: Arc<Deferred<Assembled>>,
-    id: u64,
-    released: AtomicBool,
-}
-
-fn suspension_name(id: u64) -> String {
-    format!("suspension:{id}")
-}
-
-#[uniffi::export]
-impl PlaybackSuspension {
-    pub fn release(&self) {
-        if !self.released.swap(true, Ordering::AcqRel) {
-            self.assembled.run_closing(self.id, |id| suspension_name(*id), |assembled, id| assembled.stage.resume(id));
-        }
-    }
-}
-
-impl Drop for PlaybackSuspension {
-    fn drop(&mut self) {
-        self.release();
-    }
+    next_owner: AtomicU64,
+    controls: tokio::sync::Mutex<()>,
 }
 
 impl MediaLayer {
     /// With an external `Handle` the caller keeps the runtime alive until `await_closed` returns.
     pub fn from_parts(runtime: Option<Runtime>, handle: Handle, parts: Parts, releaser: Option<Arc<dyn MemoryReleaser>>, namespace_headers: Vec<String>) -> Arc<MediaLayer> {
-        let layer = MediaLayer::pending(runtime, handle.clone(), namespace_headers, releaser.clone());
+        let layer = MediaLayer::pending(runtime, handle.clone(), namespace_headers, releaser.clone(), IngressLimits::default(), Pause::new());
         if layer.closing.life().installed() {
-            let _ = layer.assembled.install(Arc::new(Assembled::new(&handle, parts, releaser)));
+            let _ = layer.closing.ready.install(Arc::new(Assembled::new(&handle, parts, releaser)));
         }
         layer
     }
 
-    pub(crate) fn assembling(runtime: Runtime, assembling: impl Future<Output = Result<Parts, MediaError>> + Send + 'static, releaser: Option<Arc<dyn MemoryReleaser>>, namespace_headers: Vec<String>) -> Arc<MediaLayer> {
+    pub(crate) fn assembling(runtime: Runtime, assembling: impl Future<Output = Result<Parts, MediaError>> + Send + 'static, releaser: Option<Arc<dyn MemoryReleaser>>, namespace_headers: Vec<String>, limits: IngressLimits, pause: Pause) -> Arc<MediaLayer> {
         let handle = runtime.handle().clone();
-        let layer = MediaLayer::pending(Some(runtime), handle.clone(), namespace_headers, releaser.clone());
-        let (closing, assembled) = (layer.closing.clone(), layer.assembled.clone());
+        let layer = MediaLayer::pending(Some(runtime), handle.clone(), namespace_headers, releaser.clone(), limits, pause);
+        let (closing, ready) = (layer.closing.clone(), layer.closing.ready.clone());
         let mut slot = layer.closing.assembling.lock().unwrap_or_else(PoisonError::into_inner);
         let task = handle.clone().spawn(async move {
             match assembling.await {
                 Ok(parts) => {
                     let is_installed = closing.life().installed();
                     if is_installed {
-                        let rejected = assembled.install(Arc::new(Assembled::new(&handle, parts, releaser)));
+                        let rejected = ready.install(Arc::new(Assembled::new(&handle, parts, releaser)));
                         *closing.late.lock().unwrap_or_else(PoisonError::into_inner) = rejected;
                     }
                 }
                 Err(error) => {
                     if closing.life().failed() {
-                        assembled.fail(error);
+                        ready.fail(error);
                     }
                 }
             }
@@ -195,19 +189,23 @@ impl MediaLayer {
         layer
     }
 
-    fn pending(runtime: Option<Runtime>, handle: Handle, namespace_headers: Vec<String>, releaser: Option<Arc<dyn MemoryReleaser>>) -> Arc<MediaLayer> {
-        let assembled = Deferred::new();
+    fn pending(runtime: Option<Runtime>, handle: Handle, namespace_headers: Vec<String>, releaser: Option<Arc<dyn MemoryReleaser>>, limits: IngressLimits, pause: Pause) -> Arc<MediaLayer> {
+        let ready = Ready::new();
+        let queue = InputQueue::new(limits);
+        let executor = AbortOnDrop::new(handle.spawn(run(queue.clone(), ready.clone(), pause)));
         let closing = Arc::new(Closing {
             handle: handle.clone(),
             life: Mutex::new(LayerLife::new()),
-            assembled: assembled.clone(),
+            ready,
+            queue,
+            executor: Mutex::new(Some(executor)),
             runtime: Mutex::new(runtime),
             releaser: Mutex::new(releaser),
             assembling: Mutex::new(None),
             late: Mutex::new(None),
             closed: watch::channel(false).0,
         });
-        Arc::new(MediaLayer { handle, closing, assembled, namespace_headers, image_stats: super::image::ImageCounters::new(), next_suspension: AtomicU64::new(1) })
+        Arc::new(MediaLayer { handle, closing, namespace_headers, image_stats: super::image::ImageCounters::new(), next_owner: AtomicU64::new(1), controls: tokio::sync::Mutex::new(()) })
     }
 
     #[cfg(test)]
@@ -216,49 +214,20 @@ impl MediaLayer {
     }
 
     #[cfg(test)]
-    pub(crate) fn queued_declarations(&self) -> usize {
-        self.assembled.queued()
+    pub(crate) fn queue(&self) -> &Arc<InputQueue> {
+        &self.closing.queue
     }
 
-    fn declare(&self, work: impl FnOnce(&Assembled) + Send + 'static) {
-        self.assembled.run(work);
+    #[cfg(test)]
+    pub(super) fn closing_ref(&self) -> std::sync::Weak<Closing> {
+        Arc::downgrade(&self.closing)
     }
 
-    fn keep_wholes<'a>(&self, items: impl Iterator<Item = &'a MediaItem>) {
-        if !self.assembled.is_pending() {
-            return;
-        }
-        for item in items.filter(|item| item.strategy == crate::prefetch::CacheStrategy::Whole) {
-            self.declare_latest(item.clone(), |item| format!("whole:{}", item.url), |assembled, item| assembled.stage.keep_whole(&item));
-        }
-    }
-
-    fn declare_latest<P: Send + 'static>(&self, payload: P, name: fn(&P) -> String, work: impl FnOnce(&Assembled, P) + Send + 'static) {
-        self.assembled.run_latest(payload, name, work);
-    }
-
-    pub(crate) async fn with_assembled<T: Send + 'static, Work: Future<Output = T> + Send + 'static>(&self, work: impl FnOnce(Arc<Assembled>) -> Work) -> Result<T, MediaError> {
-        let assembled = self.assembled.wait().await?;
-        AbortOnDrop::new(self.handle.spawn(work(assembled))).join().await.map_err(|error| MediaError::Unexpected { detail: error.to_string() })
-    }
-
-    async fn on_assembled<T: Send + 'static, Work: Future<Output = T> + Send + 'static>(&self, empty: T, work: impl FnOnce(Arc<Assembled>) -> Work) -> T {
-        self.with_assembled(work).await.unwrap_or(empty)
-    }
-}
-
-impl Drop for MediaLayer {
-    fn drop(&mut self) {
-        self.closing.shutdown();
-    }
-}
-
-#[uniffi::export]
-impl MediaLayer {
-    #[uniffi::constructor]
-    pub fn open(config: OpenConfig) -> Result<Arc<MediaLayer>, MediaError> {
+    pub(crate) fn build(config: OpenConfig, pause: Pause) -> Result<Arc<MediaLayer>, MediaError> {
         let defaults = crate::limits::Limits::try_from(config.defaults)?;
         defaults.validate()?;
+        let ingress = config.ingress.unwrap_or_default();
+        ingress.validate()?;
         let runtime = Builder::new_multi_thread()
             .worker_threads(WORKER_THREADS)
             .thread_name("medialayer")
@@ -286,7 +255,98 @@ impl MediaLayer {
             silent: config.silent,
             watchdog: WatchdogConfig::default(),
         };
-        Ok(MediaLayer::assembling(runtime, assemble(assembly), config.memory_releaser, namespace_headers))
+        Ok(MediaLayer::assembling(runtime, assemble(assembly), config.memory_releaser, namespace_headers, ingress, pause))
+    }
+
+    fn open_window(&self, kind: WindowKind) -> Result<Arc<MediaWindow>, MediaError> {
+        let owner = self.owner();
+        self.closing.queue.open(owner, OwnerKind::Window, Declared::WindowOpen { owner, kind: kind.clone() })?;
+        Ok(Arc::new(MediaWindow::new(self.closing.queue.clone(), owner, kind)))
+    }
+
+    fn owner(&self) -> u64 {
+        self.next_owner.fetch_add(1, Ordering::Relaxed)
+    }
+
+    fn subscription(&self, owner: u64) -> Arc<Subscription> {
+        let queue = self.closing.queue.clone();
+        Arc::new(Subscription::cancelling(move || queue.release(owner)))
+    }
+
+    fn subscribe(&self, subscribing: Subscribing) -> Result<Arc<Subscription>, MediaError> {
+        let owner = self.owner();
+        self.closing.queue.open(owner, OwnerKind::Subscription, Declared::Subscribe { owner, subscribing })?;
+        Ok(self.subscription(owner))
+    }
+
+    fn submit(&self, command: Declared) -> Result<(), MediaError> {
+        self.closing.queue.submit(command)
+    }
+
+    async fn until_closed<T>(&self, work: impl Future<Output = T>) -> Result<T, MediaError> {
+        let mut ended = self.closing.queue.ended();
+        tokio::select! {
+            output = work => Ok(output),
+            _ = ended.wait_for(|ended| *ended) => Err(self.closing.queue.end_error().unwrap_or(MediaError::Closed)),
+        }
+    }
+
+    /// A request ordered behind every accepted declaration. The executor fixes its logical result at that point.
+    async fn ask(&self, query: Query) -> Result<(Admitted, Answer), MediaError> {
+        let (held, answer) = self.closing.queue.query(query)?;
+        let answer = self.until_closed(answer).await?.map_err(|_| MediaError::Closed)?;
+        Ok((held, answer))
+    }
+
+    async fn route(&self, query: Query) -> Result<PlaybackRoute, MediaError> {
+        match self.ask(query).await?.1 {
+            Answer::Route(route) => Ok(route),
+            Answer::Failed(error) => Err(error),
+            _ => Err(MediaError::Unexpected { detail: "the executor answered with another result".to_string() }),
+        }
+    }
+
+    /// IO that the executor started from its snapshot. The work stays counted until it ends or the caller cancels it.
+    async fn outcome(&self, query: Query) -> Result<Finished, MediaError> {
+        let (held, answer) = self.ask(query).await?;
+        match answer {
+            Answer::Running(mut task) => {
+                let output = self.until_closed(task.join()).await?;
+                drop(held);
+                output.map_err(|error| MediaError::Unexpected { detail: error.to_string() })
+            }
+            Answer::Failed(error) => Err(error),
+            _ => Err(MediaError::Unexpected { detail: "the executor answered with another result".to_string() }),
+        }
+    }
+
+    /// Controls keep their own bounded order and never wait for media events.
+    pub(crate) async fn controlled<T: Send + 'static, Work: Future<Output = T> + Send + 'static>(&self, work: impl FnOnce(Arc<Assembled>) -> Work) -> Result<T, MediaError> {
+        let held = self.closing.queue.hold()?;
+        let assembled = self.until_closed(self.closing.ready.wait()).await??;
+        let _turn = self.until_closed(self.controls.lock()).await?;
+        self.run_held(held, assembled, work).await
+    }
+
+    async fn run_held<T: Send + 'static, Work: Future<Output = T> + Send + 'static>(&self, held: Admitted, assembled: Arc<Assembled>, work: impl FnOnce(Arc<Assembled>) -> Work) -> Result<T, MediaError> {
+        let mut task = AbortOnDrop::new(self.handle.spawn(work(assembled)));
+        let output = self.until_closed(task.join()).await?;
+        drop(held);
+        output.map_err(|error| MediaError::Unexpected { detail: error.to_string() })
+    }
+}
+
+impl Drop for MediaLayer {
+    fn drop(&mut self) {
+        self.closing.shutdown();
+    }
+}
+
+#[uniffi::export]
+impl MediaLayer {
+    #[uniffi::constructor]
+    pub fn open(config: OpenConfig) -> Result<Arc<MediaLayer>, MediaError> {
+        MediaLayer::build(config, Pause::new())
     }
 
     pub fn shutdown(&self) {
@@ -304,164 +364,137 @@ impl MediaLayer {
     }
 
     pub async fn limits(&self) -> Result<Limits, MediaError> {
-        self.with_assembled(|assembled| async move { Limits::from(assembled.controls.limits().await) }).await
+        self.controlled(|assembled| async move { Limits::from(assembled.controls.limits().await) }).await
     }
 
     pub async fn set_limits(&self, limits: Limits) -> Result<(), MediaError> {
         let limits = crate::limits::Limits::try_from(limits)?;
-        self.with_assembled(|assembled| async move { assembled.controls.set_limits(limits).await }).await?
+        self.controlled(|assembled| async move { assembled.controls.set_limits(limits).await }).await?
     }
 
     pub async fn reset_limits(&self) -> Result<(), MediaError> {
-        self.with_assembled(|assembled| async move { assembled.controls.reset_limits().await }).await?
+        self.controlled(|assembled| async move { assembled.controls.reset_limits().await }).await?
     }
 
     pub async fn stats(&self) -> Result<MediaStats, MediaError> {
-        self.with_assembled(|assembled| async move { assembled.controls.stats().await }).await
+        let held = self.closing.queue.hold()?;
+        let assembled = self.until_closed(self.closing.ready.wait()).await??;
+        let _turn = self.until_closed(self.controls.lock()).await?;
+        let pool = match self.ask(Query::Pool).await?.1 {
+            Answer::Pool(pool) => pool,
+            Answer::Failed(error) => return Err(error),
+            _ => return Err(MediaError::Unexpected { detail: "the executor answered with another result".to_string() }),
+        };
+        self.run_held(held, assembled, move |assembled| async move { assembled.controls.stats_with(pool).await }).await
     }
 
-    pub async fn clear(&self, kind: Option<Kind>) {
-        self.on_assembled((), |assembled| async move { assembled.controls.clear(kind).await }).await
+    pub async fn clear(&self, kind: Option<Kind>) -> Result<(), MediaError> {
+        self.controlled(|assembled| async move { assembled.controls.clear(kind).await }).await
     }
 
-    pub async fn purge(&self, url: String) {
-        self.on_assembled((), |assembled| async move { assembled.controls.purge(&url).await }).await
+    pub async fn purge(&self, url: String) -> Result<(), MediaError> {
+        self.controlled(|assembled| async move { assembled.controls.purge(&url).await }).await
     }
 
-    pub async fn evict_now(&self) {
-        self.on_assembled((), |assembled| async move { assembled.controls.evict_now().await }).await
+    pub async fn evict_now(&self) -> Result<(), MediaError> {
+        self.controlled(|assembled| async move { assembled.controls.evict_now().await }).await
     }
 
-    pub fn subscribe_stats(&self, listener: Arc<dyn StatsListener>) -> Arc<Subscription> {
-        Arc::new(self.assembled.hold(move |assembled| assembled.controls.subscribe_stats(Arc::new(move |stats| listener.changed(stats)))))
+    pub fn subscribe_stats(&self, listener: Arc<dyn StatsListener>) -> Result<Arc<Subscription>, MediaError> {
+        self.subscribe(Subscribing::Stats { listener })
     }
 
-    pub fn subscribe_state(&self, key: String, listener: Arc<dyn StateListener>) -> Arc<Subscription> {
-        Arc::new(self.assembled.hold(move |assembled| assembled.places.subscribe(&key, Arc::new(move |state| listener.changed(state)))))
+    pub fn subscribe_state(&self, key: String, listener: Arc<dyn StateListener>) -> Result<Arc<Subscription>, MediaError> {
+        self.subscribe(Subscribing::State { key, listener })
     }
 
-    pub fn subscribe_tone(&self, source: MediaItem, listener: Arc<dyn ToneListener>) -> Arc<Subscription> {
-        Arc::new(self.assembled.hold(move |assembled| assembled.tones.subscribe(&source, Arc::new(move |source| listener.changed(source)))))
+    pub fn subscribe_tone(&self, source: MediaItem, listener: Arc<dyn ToneListener>) -> Result<Arc<Subscription>, MediaError> {
+        self.subscribe(Subscribing::Tone { item: source, listener })
     }
 
     pub async fn tone(&self, source: MediaItem, band: f32) -> Result<Option<MediaTone>, MediaError> {
-        let assembled = self.assembled.wait().await?;
-        Ok(assembled.tones.tone(&source, band).await?)
+        match self.outcome(Query::Tone(source, band)).await? {
+            Finished::Tone(tone) => Ok(tone?),
+            _ => Err(MediaError::Unexpected { detail: "the executor answered with another result".to_string() }),
+        }
     }
 
-    pub fn set_tone_preparation(&self, preparation: Arc<dyn TonePreparation>) {
-        self.declare(move |assembled| assembled.tones.set_preparation(preparation));
+    pub fn set_tone_preparation(&self, preparation: Arc<dyn TonePreparation>) -> Result<(), MediaError> {
+        self.submit(Declared::Preparation(preparation))
     }
 
     pub async fn tone_pixels_needed(&self, source: MediaItem) -> bool {
-        self.on_assembled(false, move |assembled| async move { assembled.tones.pixels_needed(&source).await }).await
+        matches!(self.outcome(Query::Pixels(source)).await, Ok(Finished::Pixels(true)))
     }
 
     pub async fn play_url(&self, source: MediaItem) -> Result<PlaybackRoute, MediaError> {
-        let assembled = self.assembled.wait().await?;
-        Ok(assembled.routes.play_url(&source))
+        self.route(Query::PlayUrl(source)).await
     }
 
     pub async fn refresh_route(&self, source: MediaItem, route: PlaybackRoute) -> Result<PlaybackRoute, MediaError> {
-        let assembled = self.assembled.wait().await?;
-        Ok(assembled.routes.refresh(&source, &route))
+        self.route(Query::Refresh(source, route)).await
     }
 
     pub async fn fetch_image(&self, url: String, headers: HashMap<String, String>) -> Result<crate::proxy::ImageFetchResult, MediaError> {
-        self.with_assembled(|assembled| async move { assembled.routes.image_bytes(&url, &headers, InputLimits::default().response_bytes).await }).await?
+        match self.outcome(Query::Image { url, headers }).await? {
+            Finished::Image(result) => result,
+            _ => Err(MediaError::Unexpected { detail: "the executor answered with another result".to_string() }),
+        }
     }
 
     pub fn image_stats(&self) -> Arc<super::image::ImageCounters> { self.image_stats.clone() }
 
     pub async fn is_cached(&self, source: MediaItem) -> bool {
-        self.on_assembled(false, |assembled| async move { assembled.routes.is_cached(&source.url, &source.headers).await }).await
+        matches!(self.outcome(Query::Cached(source)).await, Ok(Finished::Cached(true)))
     }
 
     pub async fn placeholder(&self, source: MediaItem, ready: bool) -> Placeholder {
-        let cache = if self.is_cached(source.clone()).await { CacheState::Cached } else { CacheState::Missing };
-        placeholder_for(source, cache, ready)
+        let fallback = || placeholder_for(source.clone(), CacheState::Missing, ready);
+        let Ok((held, answer)) = self.ask(Query::Placeholder(source.clone(), ready)).await else { return fallback() };
+        match answer {
+            Answer::Placeholder(placeholder) => placeholder,
+            Answer::Running(mut task) => match self.until_closed(task.join()).await {
+                Ok(Ok(Finished::Placeholder(placeholder))) => {
+                    drop(held);
+                    placeholder
+                }
+                _ => fallback(),
+            },
+            _ => fallback(),
+        }
     }
 
-    pub fn item_state(&self, key: String, state: MediaState) {
-        self.declare_latest(key, |key| format!("state:{key}"), move |assembled, key| {
-            if state == MediaState::Ready { assembled.tones.refresh(&key); }
-            assembled.places.item_state(&key, state);
-        });
+    pub fn open_place(&self, item: MediaItem) -> Result<Arc<MediaPlace>, MediaError> {
+        let owner = self.owner();
+        self.closing.queue.open(owner, OwnerKind::Place, Declared::PlaceOpen { owner, item })?;
+        Ok(Arc::new(MediaPlace::new(self.closing.queue.clone(), owner)))
     }
 
-    pub fn seek(&self, key: String, fraction: f64) {
-        self.declare_latest(key, |key| format!("seek:{key}"), move |assembled, key| assembled.stage.seek_fraction(&key, fraction));
+    pub fn open_video_window(&self) -> Result<Arc<MediaWindow>, MediaError> {
+        self.open_window(WindowKind::Video)
     }
 
-    pub fn replace_window(&self, active: u32, sources: Vec<Option<MediaItem>>) {
-        self.keep_wholes(sources.iter().flatten());
-        self.declare_latest(sources, |_| "window".to_string(), move |assembled, sources| assembled.stage.replace_window(active as usize, sources));
-    }
-
-    pub fn move_window(&self, active: u32) {
-        self.declare_latest((), |_| "window/move".to_string(), move |assembled, ()| assembled.stage.move_window(active as usize));
-    }
-
-    pub fn move_image_window(&self, name: String, active: u32) {
-        self.declare_latest(name, |name| format!("image:{name}/move"), move |assembled, name| assembled.stage.move_image_window(&name, active as usize));
-    }
-
-    pub fn replace_image_window(&self, name: String, active: u32, pages: Vec<Vec<MediaItem>>) {
-        self.keep_wholes(pages.iter().flatten());
-        self.declare_latest((name, pages), |(name, _)| format!("image:{name}"), move |assembled, (name, pages)| assembled.stage.replace_image_window(&name, active as usize, pages));
-    }
-
-    #[uniffi::method(default(groups = []))]
-    pub fn set_playing(&self, key: String, playing: bool, groups: Vec<Option<String>>) {
-        self.declare_latest((key, groups), |(key, _)| format!("playing:{key}"), move |assembled, (key, groups)| assembled.stage.set_playing(&key, playing, &groups));
+    pub fn open_image_window(&self, name: String) -> Result<Arc<MediaWindow>, MediaError> {
+        self.open_window(WindowKind::Image(name))
     }
 
     #[uniffi::method(default(allow_groups = []))]
     pub fn suspend_playback(&self, allow_groups: Vec<String>) -> Result<Arc<PlaybackSuspension>, MediaError> {
         crate::session::check_groups(&allow_groups)?;
-        let id = self.next_suspension.fetch_add(1, Ordering::Relaxed);
-        self.assembled.run_opening((id, allow_groups), |(id, _)| suspension_name(*id), |assembled, (id, groups)| assembled.stage.suspend(id, &groups));
-        Ok(Arc::new(PlaybackSuspension { assembled: self.assembled.clone(), id, released: AtomicBool::new(false) }))
+        let owner = self.owner();
+        self.closing.queue.open(owner, OwnerKind::Suspension, Declared::Suspend { owner, groups: allow_groups })?;
+        Ok(Arc::new(PlaybackSuspension::new(self.closing.queue.clone(), owner)))
     }
 
-    pub fn set_peeking(&self, key: String, peeking: bool) {
-        self.declare_latest(key, |key| format!("peeking:{key}"), move |assembled, key| assembled.stage.set_peeking(&key, peeking));
+    pub fn set_muted_all(&self, muted: bool) -> Result<(), MediaError> {
+        self.submit(Declared::MutedAll(muted))
     }
 
-    pub fn set_rate(&self, key: String, rate: f32) {
-        self.declare_latest(key, |key| format!("rate:{key}"), move |assembled, key| assembled.stage.set_rate(&key, rate));
-    }
-
-    pub fn set_muted_all(&self, muted: bool) {
-        self.declare_latest((), |_| "muted-all".to_string(), move |assembled, ()| assembled.stage.set_muted_all(muted));
-    }
-
-    pub fn set_muted(&self, key: String, muted: bool) {
-        self.declare_latest(key, |key| format!("muted:{key}"), move |assembled, key| assembled.stage.set_muted(&key, muted));
-    }
-
-    pub fn visible(&self, source: MediaItem, visible: bool) {
-        if visible {
-            self.keep_wholes(std::iter::once(&source));
-            self.assembled.run_opening(source, |source| source.url.clone(), |assembled, source| assembled.stage.visible(source, true));
-        } else {
-            self.assembled.run_closing(source, |source| source.url.clone(), |assembled, source| assembled.stage.visible(source, false));
-        }
-    }
-
-    pub fn pin(&self, key: String) {
-        self.declare_latest(key, |key| format!("pin:{key}"), move |assembled, key| assembled.stage.pin(&key));
-    }
-
-    pub fn unpin(&self, key: String) {
-        self.declare_latest(key, |key| format!("pin:{key}"), move |assembled, key| assembled.stage.unpin(&key));
-    }
-
-    pub fn release_all(&self) {
-        self.assembled.run_resetting(|assembled| assembled.stage.release_all());
+    pub fn release_all(&self) -> Result<(), MediaError> {
+        self.submit(Declared::ReleaseAll)
     }
 
     pub fn player_events(&self) -> Arc<PlayerEvents> {
-        PlayerEvents::new(self.assembled.clone())
+        PlayerEvents::new(&self.closing)
     }
 }

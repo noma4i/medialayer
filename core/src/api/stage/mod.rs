@@ -337,6 +337,11 @@ impl Stage {
     }
 
     #[cfg(test)]
+    pub fn shown_count(&self, key: &str) -> usize {
+        self.state().shown.get(key).copied().unwrap_or(0)
+    }
+
+    #[cfg(test)]
     pub fn holders(&self) -> usize {
         Arc::strong_count(&self.inner)
     }

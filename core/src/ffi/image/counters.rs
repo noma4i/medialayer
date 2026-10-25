@@ -25,6 +25,21 @@ pub enum ImageWork {
     Unobserve,
 }
 
+/// Coalesced deltas of many `ImageWork` records, applied under one lock.
+#[derive(Clone, Default, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct ImageTotals {
+    pub requests: u64,
+    pub placement_pixels: u64,
+    pub decodes: u64,
+    pub decoded_pixels: u64,
+    pub bitmap_bytes: u64,
+    pub finished: u64,
+    pub memory_hits: u64,
+    pub cancellations: u64,
+    pub disk_hits: u64,
+    pub observed: i64,
+}
+
 #[derive(Default, uniffi::Object)]
 pub struct ImageCounters {
     state: Mutex<ImageSnapshot>,
@@ -36,6 +51,20 @@ impl ImageCounters {
     pub fn new() -> Arc<Self> { Arc::new(Self::default()) }
 
     pub fn snapshot(&self) -> ImageSnapshot { self.state.lock().unwrap_or_else(PoisonError::into_inner).clone() }
+
+    pub fn add(&self, totals: ImageTotals) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.requests += totals.requests;
+        state.placement_pixels += totals.placement_pixels;
+        state.decodes += totals.decodes;
+        state.decoded_pixels += totals.decoded_pixels;
+        state.bitmap_bytes += totals.bitmap_bytes;
+        state.memory_hits += totals.memory_hits;
+        state.disk_hits += totals.disk_hits;
+        state.cancellations += totals.cancellations;
+        state.active_requests = (state.active_requests + totals.requests).saturating_sub(totals.finished + totals.cancellations);
+        state.active_observers = state.active_observers.saturating_add_signed(totals.observed);
+    }
 
     pub fn record(&self, work: ImageWork) {
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);

@@ -64,7 +64,7 @@ declaration = {
 }
 function_declaration = {
     "swift": re.compile(r"\b(?:func|var|let|case)\s+`?(\w+)"),
-    "kotlin": re.compile(r"\b(?:fun\s+(?:[\w<>?.]+\.)?|val\s+|var\s+)`?(\w+)"),
+    "kotlin": re.compile(r"\b(?:fun\s+(?:<[^>]*>\s+)?(?:[\w<>?.]+\.)?|val\s+|var\s+)`?(\w+)"),
 }
 family = re.compile(r"\b(Media[A-Z]\w*|OpenConfig|DeviceMemory|\w+Fetcher|\w+SlotFactory|PlayerEvents|MemoryReleaser|Placeholder|PlaybackRoute)\b")
 free_functions = ["defaultLimits", "defaultPoolSettings", "decodeBlurhash"]

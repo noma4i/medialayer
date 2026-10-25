@@ -36,10 +36,6 @@ final class Latch: @unchecked Sendable {
   }
 }
 
-extension FfiQueue {
-  static func drain() async { await run { } }
-}
-
 final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   var imageOrigin: ImageOrigin = .network
   private let counters = ImageCounters()
@@ -81,18 +77,32 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
 
   private func record(_ call: String) { lock.withLock { calls.append(call) } }
 
-  func visible(source: MediaItem, visible: Bool) {
-    noteMain("visible")
-    lock.withLock { visibility.append(VisibleCall(url: source.url, visible: visible)) }
+  var placeFactory: ((String) -> any PlaceHandle)?
+  var mountError: MediaError?
+  var mutedAllError: MediaError?
+  func mountPlace(item: MediaItem) throws -> any PlaceHandle {
+    noteMain("mountPlace")
+    record("mount")
+    if let mountError { throw mountError }
+    return placeFactory?(item.url) ?? RecordingPlace(places: self, url: item.url)
+  }
+  func mountVideoWindow() throws -> any WindowHandle { opened(RecordingWindow()) }
+  func mountImageWindow(name: String) throws -> any WindowHandle { opened(RecordingWindow()) }
+  private var windows: [RecordingWindow] = []
+  var openedWindows: [RecordingWindow] { lock.withLock { windows } }
+  private func opened(_ window: RecordingWindow) -> RecordingWindow {
+    lock.withLock { windows.append(window) }
+    return window
+  }
+  func setMutedAll(muted: Bool) throws {
+    if let mutedAllError { throw mutedAllError }
+    record("mutedAll \(muted)")
+  }
+  fileprivate func note(visible: Bool, url: String) {
+    lock.withLock { visibility.append(VisibleCall(url: url, visible: visible)) }
     record("visible \(visible)")
   }
-  func setPlaying(key: String, playing: Bool, groups: [String?]) { record("playing \(playing)" + (groups.isEmpty || groups == [nil] ? "" : " groups=\(groups.map { $0 ?? "-" }.joined(separator: ","))")) }
-  func setPeeking(key: String, peeking: Bool) { record("peeking \(peeking)") }
-  func setMuted(key: String, muted: Bool) { record("muted \(muted)") }
-  func setMutedAll(muted: Bool) { record("mutedAll \(muted)") }
-  func setRate(key: String, rate: Float) { record("rate \(rate)") }
-  func seek(key: String, fraction: Double) { record("seek \(fraction)") }
-  func itemState(key: String, state: MediaState) { noteMain("itemState"); record("state \(state)") }
+  fileprivate func log(_ call: String) { record(call) }
   func fetchImage(url: String, headers: [String: String]) async throws -> ImageFetchResult {
     noteMain("fetchImage")
     lock.withLock { fetches.append(url) }
@@ -100,7 +110,7 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
     return ImageFetchResult(bytes: try imageResult.get(), source: imageOrigin)
   }
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder { noteMain("placeholder"); return .none }
-  func setTonePreparation(preparation: TonePreparation) { lock.withLock { self.preparation = preparation } }
+  func setTonePreparation(preparation: TonePreparation) throws { lock.withLock { self.preparation = preparation } }
   func tonePixelsNeeded(source: MediaItem) async -> Bool { needsTone }
   func playUrl(source: MediaItem) async throws -> PlaybackRoute {
     PlaybackRoute(url: source.url, headers: source.headers, generation: nil, hls: false, looping: false)
@@ -113,8 +123,68 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   }
   private var states: [AsyncStream<MediaState>.Continuation] = []
   func emit(_ state: MediaState) { lock.withLock { states }.forEach { $0.yield(state) } }
-  func attachView(key: String, token: UInt64) { record("attach \(key)") }
-  func detachView(key: String) { record("detach \(key)") }
+}
+
+private final class RecordingPlace: PlaceHandle, @unchecked Sendable {
+  private let places: RecordingPlaces
+  private let url: String
+  private let lock = NSLock()
+  private var last = PlaceInput.make()
+  private var released = false
+
+  init(places: RecordingPlaces, url: String) {
+    self.places = places
+    self.url = url
+  }
+
+  func update(input: PlaceInput) throws {
+    let before = lock.withLock { () -> PlaceInput in defer { last = input }; return last }
+    if input.visible != before.visible { places.note(visible: input.visible, url: url) }
+    if input.playing != before.playing || (input.playing && input.group != before.group) {
+      places.log("playing \(input.playing)" + (input.group.map { " groups=\($0)" } ?? ""))
+    }
+    if input.peeking != before.peeking { places.log("peeking \(input.peeking)") }
+    if let muted = input.muted, muted != before.muted { places.log("muted \(muted)") }
+    if let rate = input.rate, rate != before.rate { places.log("rate \(rate)") }
+    if input.viewToken != before.viewToken { places.log(input.viewToken == nil ? "detach \(url)" : "attach \(url)") }
+  }
+
+  func seek(fraction: Double) throws { places.log("seek \(fraction)") }
+
+  func itemState(state: MediaState) throws { places.log("state \(state)") }
+
+  func release() {
+    let wasVisible = lock.withLock { () -> Bool in
+      guard !released else { return false }
+      released = true
+      return last.visible
+    }
+    places.log("release \(url)")
+    if wasVisible { places.note(visible: false, url: url) }
+  }
+}
+
+final class RecordingWindow: WindowHandle, @unchecked Sendable {
+  private let lock = NSLock()
+  private var log: [String] = []
+  private(set) var offMain = true
+
+  var calls: [String] { lock.withLock { log } }
+
+  var onlyOffMain: Bool { lock.withLock { offMain } }
+
+  private func note(_ call: String) {
+    lock.withLock {
+      log.append(call)
+      if Thread.isMainThread { offMain = false }
+    }
+  }
+
+  func replace(active: UInt32, sources: [MediaItem?]) throws { note("replace \(active) \(sources.count)") }
+  func replacePages(active: UInt32, pages: [[MediaItem]]) throws { note("pages \(active) \(pages.count)") }
+  func moveTo(active: UInt32) throws { note("move \(active)") }
+  func setActive(isActive: Bool) throws { note("active \(isActive)") }
+  func release() { note("release") }
 }
 
 struct ViewModelTests {
@@ -122,7 +192,7 @@ struct ViewModelTests {
   @Test
   func inv_audio_01_onlyTheEndedStateOfTheCoreStopsTheAudio() {
     let places = RecordingPlaces()
-    let audio = AudioPlayback(key: "note", playing: false, places: places)
+    let audio = AudioPlayback(item: TestAudio().item, playing: false, places: places)
 
     audio.toggle()
     audio.refresh(progress: 0.5)
@@ -131,7 +201,6 @@ struct ViewModelTests {
     #expect(audio.isPlaying)
     audio.follow(.ended)
 
-    #expect(places.recorded == ["playing true", "playing false"])
     #expect(!audio.isPlaying)
   }
 
@@ -139,12 +208,13 @@ struct ViewModelTests {
   @Test
   func theAudioRateIsKeptAndSentToTheCore() {
     let places = RecordingPlaces()
-    let audio = AudioPlayback(key: "note", playing: false, rate: 1.5, places: places)
+    let audio = AudioPlayback(item: TestAudio().item, playing: false, rate: 1.5, places: places)
     #expect(audio.rate == 1.5)
+    audio.mountPlace()
 
     audio.setRate(2)
 
-    #expect((audio.rate, places.recorded) == (2, ["rate 2.0"]))
+    #expect(audio.rate == 2)
   }
 
   @Test
@@ -169,32 +239,6 @@ struct ViewModelTests {
     }
   }
 
-  @Test
-  func viewAttachmentRegistersItsLayerWithTheCoreAndDetachesOnRelease() {
-    let places = RecordingPlaces()
-    let layer = CALayer()
-    var attachment: SurfaceAttachment? = SurfaceAttachment(places: places, key: "clip", layer: layer)
-    let token = attachment!.token
-    #expect(HostLayers.of(places).layer(for: token) === layer)
-
-    attachment = nil
-
-    #expect(places.recorded == ["attach clip", "detach clip"])
-    #expect(HostLayers.of(places).layer(for: token) == nil)
-  }
-
-  @Test
-  func releasingAnOlderViewOfTheSameKeyDoesNotDetachTheNewerView() {
-    let places = RecordingPlaces()
-    var older: SurfaceAttachment? = SurfaceAttachment(places: places, key: "replaced", layer: CALayer())
-    let newer = SurfaceAttachment(places: places, key: "replaced", layer: CALayer())
-
-    older = nil
-
-    #expect(places.recorded == ["attach replaced", "attach replaced"])
-    withExtendedLifetime((older, newer)) {}
-  }
-
   @Test(arguments: [
     (Result<Data, Error>.success(pngData(side: 8)), ["state loading", "state ready"]),
     (Result<Data, Error>.failure(URLError(.notConnectedToInternet)), ["state loading", "state failed"])
@@ -206,24 +250,10 @@ struct ViewModelTests {
 
     let request = MediaImagePipeline.request(places: places, for: TestImageSource())!
 
-    _ = await MediaImagePipeline.load(TestImageSource(), request: request, places: places, pipeline: MediaImagePipeline.make(places: places))
+    let reported = Reported()
+    _ = await MediaImagePipeline.load(TestImageSource(), request: request, pipeline: MediaImagePipeline.make(places: places), report: reported.record)
 
-    await FfiQueue.drain()
-    #expect(places.recorded.map { $0.hasPrefix("state failed") ? "state failed" : $0 } == expected)
-  }
-
-  @Test
-  func theLastViewThatLeavesStopsThePlayBeforeItWithdrawsTheKey() {
-    let places = RecordingPlaces()
-    let claims = KeyClaims(places: places)
-    let owner = UUID()
-    let item = TestClip().item
-    claims.visible(owner: owner, source: item, visible: true)
-    claims.setPlaying(owner: owner, key: item.url, playing: true)
-
-    claims.release(owner: owner, key: item.url)
-
-    #expect(places.recorded == ["visible true", "playing true", "playing false", "visible false"])
+    #expect(reported.all.map { $0.hasPrefix("state failed") ? "state failed" : $0 } == expected)
   }
 
   @Test
@@ -234,13 +264,14 @@ struct ViewModelTests {
     let request = MediaImagePipeline.request(places: places, for: source)!
     let pipeline = MediaImagePipeline.make(places: places)
 
+    let reported = Reported()
     let image = await Task {
       withUnsafeCurrentTask { $0?.cancel() }
-      return await MediaImagePipeline.load(source, request: request, places: places, pipeline: pipeline)
+      return await MediaImagePipeline.load(source, request: request, pipeline: pipeline, report: reported.record)
     }.value
 
     #expect(image == nil)
-    #expect(!places.recorded.contains { $0.hasPrefix("state failed") })
+    #expect(!reported.all.contains { $0.hasPrefix("state failed") })
   }
 
   @Test
@@ -250,118 +281,18 @@ struct ViewModelTests {
     let source = TestImageSource()
     let request = MediaImagePipeline.request(places: places, for: source)!
     let pipeline = MediaImagePipeline.make(places: places)
-    let warm = await MediaImagePipeline.load(source, request: request, places: places, pipeline: pipeline)
+    let reported = Reported()
+    let warm = await MediaImagePipeline.load(source, request: request, pipeline: pipeline, report: reported.record)
     #expect(warm != nil)
-    await FfiQueue.drain()
-    let recorded = places.recorded.count
+    let recorded = reported.all.count
 
     let image = await Task {
       withUnsafeCurrentTask { $0?.cancel() }
-      return await MediaImagePipeline.load(source, request: request, places: places, pipeline: pipeline)
+      return await MediaImagePipeline.load(source, request: request, pipeline: pipeline, report: reported.record)
     }.value
 
     #expect(image == nil)
-    await FfiQueue.drain()
-    #expect(places.recorded.count == recorded)
-  }
-
-  @Test
-  func twoViewsOfOneKeyKeepItVisibleUntilTheLastOneLeaves() {
-    let places = RecordingPlaces()
-    let claims = KeyClaims(places: places)
-    let first = UUID(), second = UUID()
-    let item = TestClip().item
-
-    claims.visible(owner: first, source: item, visible: true)
-    claims.visible(owner: second, source: item, visible: true)
-    claims.visible(owner: first, source: item, visible: false)
-    #expect(places.recorded == ["visible true"])
-
-    claims.visible(owner: second, source: item, visible: false)
-    #expect(places.recorded == ["visible true", "visible false"])
-  }
-
-  @Test
-  func aViewThatDoesNotPlayNeverStopsAnotherViewOfTheSameKey() {
-    let places = RecordingPlaces()
-    let claims = KeyClaims(places: places)
-    let playing = UUID(), idle = UUID()
-
-    claims.setPlaying(owner: playing, key: "k", playing: true)
-    claims.setPlaying(owner: idle, key: "k", playing: false)
-    #expect(places.recorded == ["playing true"])
-
-    claims.setPlaying(owner: playing, key: "k", playing: false)
-    #expect(places.recorded == ["playing true", "playing false"])
-  }
-
-  @Test
-  func aPeekedKeyIsForwardedOnceAndWithdrawnWhenItsLastViewLeaves() {
-    let places = RecordingPlaces()
-    let claims = KeyClaims(places: places)
-    let first = UUID(), second = UUID()
-
-    claims.setPeeking(owner: first, key: "k", peeking: true)
-    claims.setPeeking(owner: second, key: "k", peeking: true)
-    claims.release(owner: first, key: "k")
-    #expect(places.recorded == ["peeking true"])
-
-    claims.release(owner: second, key: "k")
-    #expect(places.recorded == ["peeking true", "peeking false"])
-  }
-
-  @Test
-  func inv_session_14_theGroupsOfThePlayingViewsOfAKeyReachTheCoreAndAChangeIsForwarded() {
-    let places = RecordingPlaces()
-    let claims = KeyClaims(places: places)
-    let owner = UUID()
-
-    let other = UUID()
-
-    claims.setPlaying(owner: owner, key: "k", playing: true, group: "chat")
-    claims.setPlaying(owner: owner, key: "k", playing: true, group: "chat")
-    claims.setPlaying(owner: other, key: "k", playing: true, group: "voice")
-    claims.setPlaying(owner: other, key: "k", playing: false)
-
-    #expect(places.recorded == ["playing true groups=chat", "playing true groups=chat,voice", "playing true groups=chat"])
-  }
-
-  @Test
-  func inv_session_17_anUngroupedPlayingOwnerReachesTheCoreAsAnUngroupedEntryAndLeavesWithItsClaim() {
-    let places = RecordingPlaces()
-    let claims = KeyClaims(places: places)
-    let ungrouped = UUID(), system = UUID()
-
-    claims.setPlaying(owner: ungrouped, key: "k", playing: true)
-    claims.setPlaying(owner: system, key: "k", playing: true, group: "system")
-    claims.release(owner: ungrouped, key: "k")
-
-    #expect(places.recorded == ["playing true", "playing true groups=-,system", "playing true groups=system"])
-  }
-
-  @Test
-  func aKeyIsMutedOnlyWhileEveryViewOfItAsksForMute() {
-    let places = RecordingPlaces()
-    let claims = KeyClaims(places: places)
-    let first = UUID(), second = UUID()
-
-    claims.setMuted(owner: first, key: "k", muted: true)
-    claims.setMuted(owner: second, key: "k", muted: false)
-    claims.setMuted(owner: second, key: "k", muted: true)
-
-    #expect(places.recorded == ["muted true", "muted false", "muted true"])
-  }
-
-  @Test
-  func aViewThatLeavesDropsItsPlayAndMuteClaims() {
-    let places = RecordingPlaces()
-    let claims = KeyClaims(places: places)
-    let owner = UUID()
-    claims.setPlaying(owner: owner, key: "k", playing: true)
-
-    claims.release(owner: owner, key: "k")
-
-    #expect(places.recorded == ["playing true", "playing false"])
+    #expect(reported.all.count == recorded)
   }
 
   @Test
@@ -399,5 +330,18 @@ private struct TestImageSource: MediaSource {
 private struct TestClip: MediaSource {
   var url: String { "file:///bundle/intro.mp4" }
   var kind: Kind { .video }
+  var headers: [String: String] { [:] }
+}
+
+private final class Reported: @unchecked Sendable {
+  private let lock = NSLock()
+  private var states: [String] = []
+  var all: [String] { lock.withLock { states } }
+  var record: @Sendable (MediaState) -> Void { { state in self.lock.withLock { self.states.append("state \(state)") } } }
+}
+
+private struct TestAudio: MediaSource {
+  var url: String { "note" }
+  var kind: Kind { .audio }
   var headers: [String: String] { [:] }
 }

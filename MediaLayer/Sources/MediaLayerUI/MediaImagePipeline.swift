@@ -94,18 +94,15 @@ extension MediaImagePipeline {
     pipeline.cache[request]
   }
 
-  static func load(_ source: some MediaSource, request: ImageRequest, places: MediaPlaces, pipeline: ImagePipeline, reportsState: Bool = true) async -> ImageContainer? {
+  static func load(_ source: some MediaSource, request: ImageRequest, pipeline: ImagePipeline, report: (@Sendable (MediaState) -> Void)? = nil) async -> ImageContainer? {
     guard !Task.isCancelled else { return nil }
-    if reportsState { FfiQueue.post { places.itemState(key: source.url, state: .loading) } }
+    report?(.loading)
     do {
       let container = try await pipeline.imageTask(with: request).response.container
-      if reportsState { FfiQueue.post { places.itemState(key: source.url, state: .ready) } }
+      report?(.ready)
       return container
     } catch {
-      if reportsState, !Task.isCancelled {
-        let detail = error.localizedDescription
-        FfiQueue.post { places.itemState(key: source.url, state: .failed(detail: detail)) }
-      }
+      if !Task.isCancelled { report?(.failed(detail: error.localizedDescription)) }
       return nil
     }
   }

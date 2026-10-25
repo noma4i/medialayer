@@ -23,7 +23,7 @@ periodic MediaLayer/Sources/MediaLayerUI/URLSessionFetcher.swift 1 # one-shot ML
 periodic MediaLayer/Sources/MediaLayerUI/AudioSessionOwner.swift 2 # one-shot session release delay (300 ms) and a bounded deactivate retry, both end with the session release, owner the session task
 periodic kotlin/ui/src/main/kotlin/com/noma4i/medialayer/ui/AudioFocusOwner.kt 1 # one-shot focus release delay (releaseDelayMs), ends with the focus release, owner the focus coroutine
 periodic kotlin/ui/src/main/kotlin/com/noma4i/medialayer/ui/MediaVideo.kt 1 # progress sampling of a PLAYING video every 100 ms (VideoProgress.INTERVAL_MS), stops when paused, owner the composable effect
-panic:ffi/deferred.rs:expect("a settled outcome holds a value") # wait_for(Option::is_some) returned, so the outcome is Some
+panic:ffi/ready.rs:expect("a settled outcome holds a value") # wait_for(Option::is_some) returned, so the outcome is Some
 panic:limits/chunks.rs:expect("the default list is valid") # the constant list [2, 1] is inside the entry bounds
 panic:prefetch/gate.rs:expect("the gate outlives its waiters") # the waiter sender is dropped only by grant after send, and acquire holds the Arc<Gate>
 panic:prefetch/ledger.rs:expect("evicted entry exists") # both callers pass a key just returned by farthest on the same &mut self

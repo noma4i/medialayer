@@ -74,22 +74,16 @@ private final class MountPlacesLog: MediaPlaces, @unchecked Sendable {
 
   func imageStats() -> ImageCounters { inner.imageStats() }
   func cacheKey(url: String, headers: [String: String]) -> String { inner.cacheKey(url: url, headers: headers) }
-  func visible(source: MediaItem, visible: Bool) { record("visible \(visible) \(source.url)"); inner.visible(source: source, visible: visible) }
-  func setPlaying(key: String, playing: Bool, groups: [String?]) { record("setPlaying \(playing) \(key) \(groups)"); inner.setPlaying(key: key, playing: playing, groups: groups) }
-  func setPeeking(key: String, peeking: Bool) { inner.setPeeking(key: key, peeking: peeking) }
-  func setMuted(key: String, muted: Bool) { inner.setMuted(key: key, muted: muted) }
-  func setRate(key: String, rate: Float) { inner.setRate(key: key, rate: rate) }
-  func setMutedAll(muted: Bool) { inner.setMutedAll(muted: muted) }
-  func seek(key: String, fraction: Double) { inner.seek(key: key, fraction: fraction) }
-  func itemState(key: String, state: MediaState) { inner.itemState(key: key, state: state) }
   func fetchImage(url: String, headers: [String: String]) async throws -> ImageFetchResult { try await inner.fetchImage(url: url, headers: headers) }
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder { await inner.placeholder(source: source, ready: ready) }
-  func setTonePreparation(preparation: TonePreparation) { inner.setTonePreparation(preparation: preparation) }
   func tonePixelsNeeded(source: MediaItem) async -> Bool { await inner.tonePixelsNeeded(source: source) }
   func playUrl(source: MediaItem) async throws -> PlaybackRoute { try await inner.playUrl(source: source) }
   func stateStream(key: String) -> AsyncStream<MediaState> { inner.stateStream(key: key) }
-  func attachView(key: String, token: UInt64) { inner.attachView(key: key, token: token) }
-  func detachView(key: String) { inner.detachView(key: key) }
+  func mountPlace(item: MediaItem) throws -> any PlaceHandle { record("mountPlace \(item.url)"); return try inner.mountPlace(item: item) }
+  func mountVideoWindow() throws -> any WindowHandle { try inner.mountVideoWindow() }
+  func mountImageWindow(name: String) throws -> any WindowHandle { try inner.mountImageWindow(name: name) }
+  func setMutedAll(muted: Bool) throws { try inner.setMutedAll(muted: muted) }
+  func setTonePreparation(preparation: TonePreparation) throws { try inner.setTonePreparation(preparation: preparation) }
 }
 
 @MainActor
@@ -163,7 +157,7 @@ extension GlobalMedia {
     }
 
     private func unmount(_ window: UIWindow, _ media: MediaLayer) {
-      media.releaseAll()
+      media.releaseOwned()
       window.isHidden = true
       window.rootViewController = nil
     }
@@ -223,7 +217,7 @@ extension GlobalMedia {
 
       let played = await settles { slot.playing("file:///clip.mp4") }
       #expect(input.order == ["child onAppear toggle"])
-      #expect(places.calls == ["setPlaying true file:///clip.mp4 [Optional(\"ring\")]", "visible true file:///clip.mp4"])
+      #expect(places.calls == ["mountPlace file:///clip.mp4"])
       #expect(played)
       await barrier(input, media, slot, key: "file:///clip.mp4")
       #expect(input.audio?.isPlaying == true)

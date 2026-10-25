@@ -209,7 +209,7 @@ impl Prefetcher {
     }
 
     fn image_window(&self, name: &str) -> PageWindow {
-        self.shared.image_windows.lock().unwrap_or_else(PoisonError::into_inner).get(name).copied().unwrap_or(PageWindow::DEFAULT)
+        self.shared.image_windows.lock().unwrap_or_else(PoisonError::into_inner).get(name.split('\u{1f}').next().unwrap_or(name)).copied().unwrap_or(PageWindow::DEFAULT)
     }
 
     fn apply_window(&self, key: WindowKey, wanted: Vec<PrefetchJob>, mut sources: HashMap<String, Source>, played: Option<String>) {

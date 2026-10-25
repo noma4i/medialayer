@@ -81,7 +81,8 @@ class MediaComposeTest {
         if (shown) MediaVideo(Clip("https://o.test/a.mp4"), playing = playing, muted = true, modifier = Modifier.size((10 + unrelated).dp)) { Text("tick") }
       }
     }
-    rule.waitForIdle()
+    val looper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("muted:https://o.test/a.mp4:true") }
     val declared = layer.calls.toList()
 
     unrelated++
@@ -89,14 +90,14 @@ class MediaComposeTest {
     assertEquals(declared, layer.calls.toList())
 
     playing = true
-    rule.waitForIdle()
+    rule.waitUntil(5000) { looper.idle(); layer.calls.size == declared.size + 1 }
     assertEquals(declared + "playing:https://o.test/a.mp4:true", layer.calls.toList())
 
     shown = false
-    rule.waitForIdle()
-    assertEquals(listOf("playing:https://o.test/a.mp4:false", "visible:https://o.test/a.mp4:false"), layer.calls.toList().takeLast(2))
+    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("release:https://o.test/a.mp4") }
+    assertEquals(listOf("release:https://o.test/a.mp4", "visible:https://o.test/a.mp4:false"), layer.calls.toList().takeLast(2))
     assertEquals(listOf("mutedAll:false", "visible:https://o.test/a.mp4:true", "muted:https://o.test/a.mp4:true"), declared)
-    assertEquals(listOf("attach:https://o.test/a.mp4:1", "detach:https://o.test/a.mp4"), events.calls.toList())
+    assertEquals(listOf("attach:https://o.test/a.mp4:1"), events.calls.toList())
   }
 
   @Test
@@ -335,6 +336,7 @@ class MediaComposeTest {
     rule.runOnIdle { control!!.seek(0.5f) }
 
     assertEquals(0.5f, control!!.progress)
+    rule.waitUntil { layer.calls.any { it.startsWith("seek") } }
     assertEquals(listOf("seek:https://o.test/n.m4a:0.5"), layer.calls.filter { it.startsWith("seek") })
   }
 }

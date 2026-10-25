@@ -96,7 +96,7 @@ class MediaTileTest {
   }
 
   @Test
-  fun tilesOfOneUrlClaimOnceEachAndTheKeyLeavesWithTheLastTile() {
+  fun eachTileOfOneUrlDeclaresAndReleasesItsOwnPlace() {
     val url = "https://o.test/shared.png"
     var count by mutableIntStateOf(3)
     var unrelated by mutableIntStateOf(0)
@@ -107,16 +107,17 @@ class MediaTileTest {
     }
     rule.waitUntil(5000) { looper.idle(); ready(url) }
 
+    val shown = List(3) { "visible:$url:true" }
     unrelated++
     rule.waitForIdle()
-    assertEquals(listOf("visible:$url:true"), visibles(url))
+    assertEquals(shown, visibles(url))
 
     count = 1
-    rule.waitForIdle()
-    assertEquals(listOf("visible:$url:true"), visibles(url))
+    rule.waitUntil(5000) { looper.idle(); visibles(url).size == 5 }
+    assertEquals(shown + List(2) { "visible:$url:false" }, visibles(url))
 
     count = 0
-    rule.waitForIdle()
-    assertEquals(listOf("visible:$url:true", "visible:$url:false"), visibles(url))
+    rule.waitUntil(5000) { looper.idle(); visibles(url).size == 6 }
+    assertEquals(shown + List(3) { "visible:$url:false" }, visibles(url))
   }
 }

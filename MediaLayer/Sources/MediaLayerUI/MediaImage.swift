@@ -58,8 +58,10 @@ public struct MediaImage<Content: View>: View {
   @Environment(\.displayScale) private var displayScale
   @State private var loaded: LoadedImage?
   @State private var state: MediaState = .idle
-  @State private var owner = UUID()
-  @State private var claimedURL: String?
+  @State private var failure: ScopedFailure?
+  @State private var mount: PlaceMount?
+  @State private var mountedItem: MediaItem?
+  @State private var mountedContext: ObjectIdentifier?
   @State private var onScreen = false
   @State private var inBackground = false
   private static var coldFadeDuration: Double { 0.22 }
@@ -76,6 +78,10 @@ public struct MediaImage<Content: View>: View {
   }
 
   public var body: some View {
+    mounted.onChange(of: context.map { ObjectIdentifier($0.places) }) { syncClaim() }
+  }
+
+  @ViewBuilder private var mounted: some View {
     if let context {
       GeometryReader { geometry in
         let pixels = MediaImagePipeline.decodeSize(places: context.places, for: source, points: geometry.size, scale: displayScale, contentMode: contentMode)
@@ -90,7 +96,7 @@ public struct MediaImage<Content: View>: View {
             } else if let shown {
               Image(platform: shown).resizable().aspectRatio(contentMode: contentMode).transition(.opacity)
             }
-            if isPlaying { content(state) }
+            if isPlaying { content(failure?.of(source.item) ?? state) }
           }
           .frame(width: geometry.size.width, height: geometry.size.height)
           .clipped()
@@ -105,7 +111,7 @@ public struct MediaImage<Content: View>: View {
       .task(id: ImageFollow(url: source.url, active: isPlaying)) {
         if isPlaying { await follow() }
       }
-      .onChange(of: source.url) { syncClaim() }
+      .onChange(of: source.item) { syncClaim() }
       .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.background)) { _ in inBackground = true }
       .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
     }
@@ -129,17 +135,24 @@ public struct MediaImage<Content: View>: View {
   }
 
   private func syncClaim() {
-    guard let places = context?.places else { return }
-    let claims = KeyClaims.of(places)
-    let owner = owner
-    if let claimed = claimedURL, !onScreen || claimed != source.url {
-      FfiQueue.post { claims.release(owner: owner, key: claimed) }
-      claimedURL = nil
+    let item = source.item
+    let places = context?.places
+    let current = places.map { ObjectIdentifier($0) }
+    if let mounted = mountedItem, !onScreen || mounted != item || mountedContext != current {
+      mount?.close()
+      mount = nil
+      mountedItem = nil
+      mountedContext = nil
     }
-    if onScreen, claimedURL == nil {
-      let item = source.item
-      FfiQueue.post { claims.visible(owner: owner, source: item, visible: true) }
-      claimedURL = source.url
+    guard let places else { return }
+    if onScreen, mount == nil {
+      let created = PlaceMount(places: places, item: item) { error in
+        Task { @MainActor in failure = ScopedFailure(item: item, state: .failed(detail: String(describing: error))) }
+      }
+      created.update(.make(visible: true))
+      mount = created
+      mountedItem = item
+      mountedContext = current
     }
   }
 
@@ -152,7 +165,8 @@ public struct MediaImage<Content: View>: View {
   private func load(key: ImageKey, request: ImageRequest?) async {
     guard loaded?.key != key, let context, key.pixels != nil, let request else { return }
     let isCold = MediaImagePipeline.cachedContainer(for: request, in: context.pipeline) == nil
-    let container = await MediaImagePipeline.load(source, request: request, places: context.places, pipeline: context.pipeline)
+    let report: (@Sendable (MediaState) -> Void)? = mount.map { mount in { state in mount.report(state) } }
+    let container = await MediaImagePipeline.load(source, request: request, pipeline: context.pipeline, report: report)
     let next = container.map { LoadedImage(key: key, image: $0.image, gif: $0.type == .gif ? $0.data : nil) }
     if isCold {
       withAnimation(.easeOut(duration: Self.coldFadeDuration)) { loaded = next }
@@ -181,7 +195,7 @@ public struct MediaImage<Content: View>: View {
     let url = source.url
     stats.recordLater(work: .observe)
     defer { stats.recordLater(work: .unobserve) }
-    let stream = await FfiQueue.run { places.stateStream(key: url) }
+    let stream = await Task.detached { places.stateStream(key: url) }.value
     for await value in stream { state = value }
   }
 }

@@ -8,6 +8,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::runtime::Handle;
 use tokio::sync::Notify;
+use tokio::task::JoinSet;
 
 const QUEUE_CAPACITY: usize = 64;
 
@@ -73,11 +74,13 @@ struct Reaction {
     ledger: Ledger,
     clock: Arc<dyn Clock>,
     degradation: Mutex<Degradation>,
+    blocking: Arc<Mutex<JoinSet<()>>>,
 }
 
 pub struct Signals {
     queue: Arc<Queue>,
-    _worker: AbortOnDrop,
+    worker: Mutex<Option<AbortOnDrop>>,
+    blocking: Arc<Mutex<JoinSet<()>>>,
 }
 
 impl Signals {
@@ -92,7 +95,8 @@ impl Signals {
         clock: Arc<dyn Clock>,
     ) -> Signals {
         let queue = Arc::new(Queue { pending: Mutex::new(VecDeque::new()), wake: Notify::new() });
-        let reaction = Reaction { pool, prefetch, directives, release, suspendable, ledger, clock, degradation: Mutex::new(Degradation::default()) };
+        let blocking = Arc::new(Mutex::new(JoinSet::new()));
+        let reaction = Reaction { pool, prefetch, directives, release, suspendable, ledger, clock, degradation: Mutex::new(Degradation::default()), blocking: blocking.clone() };
         let inbox = queue.clone();
         let worker = handle.spawn(async move {
             loop {
@@ -102,7 +106,18 @@ impl Signals {
                 }
             }
         });
-        Signals { queue, _worker: AbortOnDrop::new(worker) }
+        Signals { queue, worker: Mutex::new(Some(AbortOnDrop::new(worker))), blocking }
+    }
+
+    /// Stops the worker and waits for the platform cache drops it already started: none runs after this returns.
+    pub async fn close(&self) {
+        let worker = self.worker.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+        if let Some(mut worker) = worker {
+            worker.abort();
+            let _ = worker.join().await;
+        }
+        let mut started = std::mem::take(&mut *self.blocking.lock().unwrap_or_else(|poisoned| poisoned.into_inner()));
+        while started.join_next().await.is_some() {}
     }
 
     pub fn memory_warning(&self, level: Pressure) {
@@ -148,7 +163,7 @@ impl Reaction {
             rest.into_iter().partition(|directive| matches!(directive, Directive::DropMemoryCache));
         if !drops.is_empty() {
             let release = self.release.clone();
-            tokio::task::spawn_blocking(move || release.drop_caches());
+            self.blocking.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).spawn_blocking(move || release.drop_caches());
         }
         if !rest.is_empty() {
             self.directives.apply(rest);

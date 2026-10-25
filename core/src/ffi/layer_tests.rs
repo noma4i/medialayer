@@ -1,4 +1,5 @@
 use super::*;
+use super::ingress::{IngressLimits, Pause, PlaceInput};
 use crate::api::test_support::{assembly, eventually, eventually_async, shared, slow_assembly, FakeSettings, MockFactory, MockSlot};
 use crate::api::{MediaError, MediaItem, MediaState, MediaStats, PlayerSlotFactory, SlotCall, LIMITS_KEY};
 use crate::fetch::mock::MockFetcher;
@@ -49,6 +50,8 @@ impl StateListener for Seen {
     fn changed(&self, state: MediaState) {
         self.0.lock().unwrap().push(state);
     }
+
+    fn failed(&self, _: MediaError) {}
 }
 
 struct Totals(Mutex<Vec<u64>>);
@@ -57,6 +60,8 @@ impl StatsListener for Totals {
     fn changed(&self, stats: MediaStats) {
         self.0.lock().unwrap().push(stats.total_bytes);
     }
+
+    fn failed(&self, _: MediaError) {}
 }
 
 fn config(dir: &std::path::Path, fetcher: Arc<dyn Fetcher>, settings: Arc<FakeSettings>, slots: Option<Arc<dyn PlayerSlotFactory>>) -> OpenConfig {
@@ -77,7 +82,24 @@ fn config(dir: &std::path::Path, fetcher: Arc<dyn Fetcher>, settings: Arc<FakeSe
         evict_audio: None,
         memory_releaser: None,
         silent: false,
+        ingress: None,
     }
+}
+
+fn ring(layer: &MediaLayer, active: u32, sources: Vec<Option<MediaItem>>) -> Arc<MediaWindow> {
+    let window = layer.open_video_window().unwrap();
+    window.replace(active, sources).unwrap();
+    window
+}
+
+fn place(layer: &MediaLayer, url: &str, input: PlaceInput) -> Arc<MediaPlace> {
+    let place = layer.open_place(MediaItem::bare_video(url)).unwrap();
+    place.update(input).unwrap();
+    place
+}
+
+fn playing() -> PlaceInput {
+    PlaceInput { playing: true, ..PlaceInput::default() }
 }
 
 fn caller() -> tokio::runtime::Runtime {
@@ -189,7 +211,7 @@ fn inv_ffi_02_a_play_url_routes_the_platform_fetcher_through_the_proxy_into_the_
         }
         layer.stats().await.unwrap().file_count
     });
-    caller.block_on(layer.purge(source.url.clone()));
+    caller.block_on(layer.purge(source.url.clone())).unwrap();
 
     assert_eq!(reply.body, b"origin bytes");
     assert_eq!(origin.seen.lock().unwrap()[0].headers.get("Authorization").map(String::as_str), Some("token"));
@@ -206,20 +228,19 @@ fn inv_ffi_02_declarations_reach_the_platform_slots_and_the_player_events_move_t
     let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), Some(slots))).unwrap();
     let url = "https://o.test/v1.mp4";
     let seen = Arc::new(Seen(Mutex::new(Vec::new())));
-    let _subscription = layer.subscribe_state(url.to_string(), seen.clone());
+    let _subscription = layer.subscribe_state(url.to_string(), seen.clone()).unwrap();
     let caller = caller();
 
-    layer.replace_window(1, (0..3).map(|index| Some(MediaItem::bare_video(&format!("https://o.test/v{index}.mp4")))).collect());
-    layer.set_playing(url.to_string(), true, Vec::new());
-    layer.set_muted_all(true);
-    layer.visible(MediaItem::bare_video(url), true);
+    let _ring = ring(&layer, 1, (0..3).map(|index| Some(MediaItem::bare_video(&format!("https://o.test/v{index}.mp4")))).collect());
+    layer.set_muted_all(true).unwrap();
+    let _place = place(&layer, url, PlaceInput { playing: true, visible: true, ..PlaceInput::default() });
     caller.block_on(eventually(|| factory.slot_holding(url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))));
     let (index, slot): (u32, Arc<MockSlot>) = factory.slot_holding(url).unwrap();
     layer.player_events().ready(index, slot.generation());
 
     caller.block_on(eventually(|| seen.0.lock().unwrap().last() == Some(&MediaState::Ready)));
     caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Mute)));
-    layer.release_all();
+    layer.release_all().unwrap();
     caller.block_on(eventually(|| slot.calls().last() == Some(&SlotCall::Unload)));
 }
 
@@ -234,7 +255,7 @@ fn inv_ffi_02_a_cache_write_reaches_a_stats_subscriber_without_any_controls_call
         (MediaLayer::from_parts(None, Handle::current(), parts, None, Vec::new()), cache)
     });
     let totals = Arc::new(Totals(Mutex::new(Vec::new())));
-    let _subscription = layer.subscribe_stats(totals.clone());
+    let _subscription = layer.subscribe_stats(totals.clone()).unwrap();
 
     caller.block_on(async {
         cache.put("https://o.test/a.jpg", crate::cache::Kind::Image, &[1; 500]).await.unwrap();
@@ -340,19 +361,20 @@ fn inv_ffi_03_an_item_state_from_a_native_loader_reaches_the_state_subscribers_a
     let slots: Arc<dyn PlayerSlotFactory> = factory.clone();
     let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), Some(slots))).unwrap();
     let seen = Arc::new(Seen(Mutex::new(Vec::new())));
-    let _subscription = layer.subscribe_state("https://o.test/a.jpg".to_string(), seen.clone());
+    let _subscription = layer.subscribe_state("https://o.test/a.jpg".to_string(), seen.clone()).unwrap();
     let caller = caller();
+    let image = layer.open_place(MediaItem::bare("https://o.test/a.jpg", crate::api::Kind::Image)).unwrap();
 
-    layer.item_state("https://o.test/a.jpg".to_string(), MediaState::Loading);
+    image.item_state(MediaState::Loading).unwrap();
     caller.block_on(eventually(|| seen.0.lock().unwrap().last() == Some(&MediaState::Loading)));
-    layer.item_state("https://o.test/a.jpg".to_string(), MediaState::Ready);
+    image.item_state(MediaState::Ready).unwrap();
     caller.block_on(eventually(|| seen.0.lock().unwrap().last() == Some(&MediaState::Ready)));
 
     let url = "https://o.test/v1.mp4";
-    layer.replace_window(0, vec![Some(MediaItem::bare_video(url))]);
+    let _ring = ring(&layer, 0, vec![Some(MediaItem::bare_video(url))]);
+    let video = place(&layer, url, PlaceInput { view_token: Some(5), ..PlaceInput::default() });
     caller.block_on(eventually(|| factory.slot_holding(url).is_some()));
-    layer.seek(url.to_string(), 0.025);
-    layer.player_events().attach(url.to_string(), 5);
+    video.seek(0.025).unwrap();
     let (_, player) = factory.slot_holding(url).unwrap();
     caller.block_on(eventually(|| player.calls().contains(&SlotCall::Seek { position_ms: 1_500 }) && player.calls().contains(&SlotCall::Attach { view_token: 5 })));
 }
@@ -428,7 +450,8 @@ fn inv_ffi_06_an_image_prefetched_by_a_window_is_a_cache_hit_for_fetch_image() {
     let (layer, origin) = origin_layer(dir.path());
     let caller = caller();
 
-    layer.replace_image_window("grid".to_string(), 0, poster_pages(1));
+    let grid = layer.open_image_window("grid".to_string()).unwrap();
+    grid.replace_pages(0, poster_pages(1)).unwrap();
     caller.block_on(eventually(|| !origin.seen.lock().unwrap().is_empty()));
     let fetched = caller.block_on(layer.fetch_image("https://o.test/p0.jpg".to_string(), HashMap::new()));
 
@@ -460,12 +483,11 @@ fn inv_ffi_07_calls_made_before_the_assembly_ends_run_after_it_in_call_order_and
     let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), Some(slots))).unwrap();
     let url = "https://o.test/v1.mp4";
     let seen = Arc::new(Seen(Mutex::new(Vec::new())));
-    let _subscription = layer.subscribe_state(url.to_string(), seen.clone());
+    let _subscription = layer.subscribe_state(url.to_string(), seen.clone()).unwrap();
     let caller = caller();
 
-    layer.replace_window(0, vec![Some(MediaItem::bare_video(url))]);
-    layer.set_playing(url.to_string(), true, Vec::new());
-    layer.player_events().attach(url.to_string(), 5);
+    let _ring = ring(&layer, 0, vec![Some(MediaItem::bare_video(url))]);
+    let _place = place(&layer, url, PlaceInput { view_token: Some(5), ..playing() });
     let declared_in = started.elapsed();
     let limits = caller.block_on(layer.limits()).unwrap();
 
@@ -555,7 +577,7 @@ async fn inv_idle_02_stats_are_published_by_change_events_and_only_with_a_subscr
 }
 
 fn failed_layer(runtime: tokio::runtime::Runtime) -> Arc<MediaLayer> {
-    MediaLayer::assembling(runtime, async { Err(MediaError::Unexpected { detail: "loopback bind failed".to_string() }) }, None, Vec::new())
+    MediaLayer::assembling(runtime, async { Err(MediaError::Unexpected { detail: "loopback bind failed".to_string() }) }, None, Vec::new(), IngressLimits::default(), Pause::new())
 }
 
 #[test]
@@ -567,9 +589,9 @@ fn inv_ffi_04_a_layer_that_failed_to_assemble_reports_the_error_to_the_calls_wit
         assert!(matches!(layer.stats().await, Err(MediaError::Unexpected { .. })));
         assert!(matches!(layer.limits().await, Err(MediaError::Unexpected { .. })));
         assert!(!layer.is_cached(item.clone()).await);
-        layer.clear(None).await;
-        layer.purge(item.url.clone()).await;
-        layer.evict_now().await;
+        assert!(matches!(layer.clear(None).await, Err(MediaError::Unexpected { .. })));
+        assert!(matches!(layer.purge(item.url.clone()).await, Err(MediaError::Unexpected { .. })));
+        assert!(matches!(layer.evict_now().await, Err(MediaError::Unexpected { .. })));
         assert!(matches!(layer.play_url(item).await, Err(MediaError::Unexpected { .. })));
     });
 }
@@ -579,7 +601,7 @@ fn inv_ffi_04_a_panicking_media_task_is_an_error_not_a_panic_across_the_bridge()
     let dir = tempfile::tempdir().unwrap();
     let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared(), None)).unwrap();
 
-    let outcome = caller().block_on(layer.with_assembled(|_| async { panic!("a media task failed") }));
+    let outcome = caller().block_on(layer.controlled(|_| async { panic!("a media task failed") }));
 
     assert!(matches!(outcome, Err(MediaError::Unexpected { .. })));
 }
@@ -592,7 +614,7 @@ async fn inv_ffi_09_cancelling_outer_call_drops_inner_work() {
     let (started, running) = tokio::sync::oneshot::channel();
     let (resource, released) = tokio::sync::oneshot::channel::<()>();
     let outer = tokio::spawn(async move {
-        layer.with_assembled(|_| async move {
+        layer.controlled(|_| async move {
             let _resource = resource;
             started.send(()).unwrap();
             std::future::pending::<()>().await;
@@ -606,7 +628,7 @@ async fn inv_ffi_09_cancelling_outer_call_drops_inner_work() {
 }
 
 #[test]
-fn inv_ffi_11_declarations_before_the_assembly_keep_the_last_wish_of_the_owner_not_the_history() {
+fn inv_ffi_11_updates_before_the_assembly_fold_per_owner_and_stay_bounded() {
     let dir = tempfile::tempdir().unwrap();
     slow_assembly(dir.path(), SLOW);
     let factory: Arc<MockFactory> = Arc::default();
@@ -614,20 +636,18 @@ fn inv_ffi_11_declarations_before_the_assembly_keep_the_last_wish_of_the_owner_n
     let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), Some(slots))).unwrap();
     let items: Vec<Option<MediaItem>> = (0..3).map(|index| Some(MediaItem::bare_video(&format!("https://o.test/v{index}.mp4")))).collect();
     let url = "https://o.test/v1.mp4";
+    let window = layer.open_video_window().unwrap();
+    let place = layer.open_place(MediaItem::bare_video(url)).unwrap();
 
     for round in 0..2_000u32 {
-        layer.replace_window(round % 3, items.clone());
-        layer.move_window(round % 3);
-        layer.set_playing(url.to_string(), round % 2 == 0, Vec::new());
-        layer.set_muted(url.to_string(), round % 2 == 1);
-        layer.seek(url.to_string(), f64::from(round) / 2_000.0);
-        layer.item_state(url.to_string(), MediaState::Loading);
-        layer.visible(MediaItem::bare_video(url), true);
-        layer.visible(MediaItem::bare_video(url), false);
+        window.replace(round % 3, items.clone()).unwrap();
+        window.move_to(round % 3).unwrap();
+        place.update(PlaceInput { playing: round % 2 == 0, muted: Some(round % 2 == 1), visible: true, ..PlaceInput::default() }).unwrap();
+        place.item_state(MediaState::Loading).unwrap();
     }
 
-    let queued = layer.queued_declarations();
-    assert!(queued <= 16, "{queued} declarations wait for an assembly that has not ended");
+    let audit = layer.queue().audit();
+    assert!(audit.counted <= 8 && audit.owners == 2, "{audit:?} wait for an assembly that has not ended");
     let caller = caller();
     caller.block_on(eventually(|| factory.slot_holding(url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Mute))));
     let (_, slot) = factory.slot_holding(url).unwrap();
@@ -665,9 +685,66 @@ fn inv_ffi_12_shutdown_releases_the_platform_then_the_core_once_whoever_holds_th
 
     assert_eq!(releaser.shutdowns.load(std::sync::atomic::Ordering::SeqCst), 1);
     let after = caller.block_on(async { tokio::time::timeout(std::time::Duration::from_secs(5), held.stats()).await });
-    assert!(matches!(after, Ok(Err(MediaError::Unexpected { .. }))), "{after:?}");
+    assert!(matches!(after, Ok(Err(MediaError::Closed))), "{after:?}");
     drop((layer, held));
     assert_eq!(releaser.shutdowns.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[test]
+fn inv_android_07_events_do_not_keep_a_closed_owner_alive() {
+    let dir = tempfile::tempdir().unwrap();
+    let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), None)).unwrap();
+    let caller = caller();
+    caller.block_on(layer.limits()).unwrap();
+    let queue = Arc::downgrade(layer.queue());
+    let events = layer.player_events();
+
+    layer.shutdown();
+    caller.block_on(layer.await_closed());
+    drop(layer);
+
+    caller.block_on(crate::api::test_support::eventually(|| queue.upgrade().is_none()));
+    events.ready(0, 0);
+    events.foreground();
+    assert!(queue.upgrade().is_none(), "a late event revived the closed owner");
+}
+
+#[test]
+fn inv_ffi_17_closing_during_a_held_assembly_leaves_neither_the_queue_nor_the_owner_alive_after_the_build_exits() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+    let (entered_tx, entered) = mpsc::channel::<()>();
+    let (release, released) = mpsc::channel::<()>();
+    let (exited_tx, exited) = mpsc::channel::<()>();
+    let build = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();
+    let held = async move {
+        let _ = tokio::task::spawn_blocking(move || {
+            entered_tx.send(()).ok();
+            let _ = released.recv();
+            exited_tx.send(()).ok();
+        })
+        .await;
+        Err::<crate::api::Parts, MediaError>(MediaError::Unexpected { detail: "held assembly ended".to_string() })
+    };
+    let layer = MediaLayer::assembling(build, held, None, Vec::new(), IngressLimits::default(), Pause::new());
+    entered.recv_timeout(Duration::from_secs(10)).expect("the assembly never started");
+    let queue = Arc::downgrade(layer.queue());
+    let owner = layer.closing_ref();
+    let events = layer.player_events();
+    let caller = caller();
+
+    layer.shutdown();
+    caller.block_on(layer.await_closed());
+    drop(layer);
+    events.ready(0, 0);
+    events.foreground();
+    release.send(()).unwrap();
+    exited.recv_timeout(Duration::from_secs(10)).expect("the held assembly never exited");
+
+    caller.block_on(eventually(|| queue.upgrade().is_none() && owner.upgrade().is_none()));
+    events.ready(0, 0);
+    events.background();
+    assert!(queue.upgrade().is_none() && owner.upgrade().is_none(), "a late event revived the closed owner");
 }
 
 #[test]
@@ -675,7 +752,7 @@ fn inv_ffi_12_shutdown_releases_the_assembled_value_whoever_still_holds_the_laye
     let dir = tempfile::tempdir().unwrap();
     let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), None)).unwrap();
     let caller = caller();
-    let assembled = caller.block_on(layer.with_assembled(|assembled| async move { Arc::downgrade(&assembled) })).unwrap();
+    let assembled = caller.block_on(layer.controlled(|assembled| async move { Arc::downgrade(&assembled) })).unwrap();
     let suspension = layer.suspend_playback(Vec::new()).unwrap();
     let events = layer.player_events();
     assert!(assembled.strong_count() >= 1, "the assembled value is alive while the layer is open");
@@ -686,14 +763,14 @@ fn inv_ffi_12_shutdown_releases_the_assembled_value_whoever_still_holds_the_laye
     assert_eq!(assembled.strong_count(), 0, "the closed layer, its suspension or its events still own the assembled value");
     suspension.release();
     events.ready(0, 0);
-    layer.set_muted_all(true);
-    layer.visible(MediaItem::bare_video("https://o.test/late.mp4"), true);
+    assert!(layer.set_muted_all(true).is_err());
+    assert!(layer.open_place(MediaItem::bare_video("https://o.test/late.mp4")).is_err());
     assert_eq!(assembled.strong_count(), 0, "a call after the close revived the assembled value");
     drop((layer, suspension, events));
 }
 
 #[test]
-fn inv_ffi_12_shutdown_answers_a_call_that_waits_for_the_assembly_with_unexpected() {
+fn inv_ffi_12_shutdown_answers_a_call_that_waits_for_the_assembly_with_closed() {
     let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
     let (started, begun) = tokio::sync::oneshot::channel::<()>();
     let layer = MediaLayer::assembling(
@@ -704,6 +781,8 @@ fn inv_ffi_12_shutdown_answers_a_call_that_waits_for_the_assembly_with_unexpecte
         },
         None,
         Vec::new(),
+        IngressLimits::default(),
+        Pause::new(),
     );
 
     let outcome = caller().block_on(async {
@@ -714,26 +793,26 @@ fn inv_ffi_12_shutdown_answers_a_call_that_waits_for_the_assembly_with_unexpecte
 
     match outcome {
         Err(_) => panic!("stats() never answered after the shutdown of a layer still assembling"),
-        Ok(result) => assert!(matches!(result, Err(MediaError::Unexpected { .. })), "stats() answered {result:?}"),
+        Ok(result) => assert!(matches!(result, Err(MediaError::Closed)), "stats() answered {result:?}"),
     }
 }
 
 #[test]
-fn inv_ffi_13_a_whole_source_shown_and_hidden_before_the_assembly_still_downloads() {
+fn inv_ffi_13_a_whole_source_shown_before_the_assembly_downloads_after_it() {
     let dir = tempfile::tempdir().unwrap();
     slow_assembly(dir.path(), SLOW);
     let origin = Arc::new(Origin::default());
     let layer = MediaLayer::open(config(dir.path(), origin.clone(), shared::<FakeSettings>(), None)).unwrap();
     let clip = MediaItem { strategy: crate::prefetch::CacheStrategy::Whole, ..MediaItem::bare_video("https://o.test/clip.mp4") };
 
-    layer.visible(clip.clone(), true);
-    layer.visible(clip, false);
+    let shown = layer.open_place(clip).unwrap();
+    shown.update(PlaceInput { visible: true, ..PlaceInput::default() }).unwrap();
 
     caller().block_on(eventually(|| !origin.seen.lock().unwrap().is_empty()));
 }
 
 #[test]
-fn inv_ffi_13_a_whole_source_of_a_replaced_window_before_the_assembly_still_downloads() {
+fn inv_ffi_13_a_whole_source_of_each_window_before_the_assembly_downloads_after_it() {
     let dir = tempfile::tempdir().unwrap();
     slow_assembly(dir.path(), SLOW);
     let origin = Arc::new(Origin::default());
@@ -741,10 +820,9 @@ fn inv_ffi_13_a_whole_source_of_a_replaced_window_before_the_assembly_still_down
     let clip = MediaItem { strategy: crate::prefetch::CacheStrategy::Whole, ..MediaItem::bare_video("https://o.test/clip.mp4") };
     let photo = MediaItem { strategy: crate::prefetch::CacheStrategy::Whole, ..MediaItem::bare("https://o.test/photo.jpg", crate::api::Kind::Image) };
 
-    layer.replace_window(0, vec![Some(clip)]);
-    layer.replace_window(0, vec![Some(MediaItem::bare_video("https://o.test/other.mp4"))]);
-    layer.replace_image_window("feed".to_string(), 0, vec![vec![photo]]);
-    layer.replace_image_window("feed".to_string(), 0, vec![vec![MediaItem::bare("https://o.test/page.jpg", crate::api::Kind::Image)]]);
+    let _ring = ring(&layer, 0, vec![Some(clip)]);
+    let feed = layer.open_image_window("feed".to_string()).unwrap();
+    feed.replace_pages(0, vec![vec![photo]]).unwrap();
 
     caller().block_on(eventually(|| {
         let seen = origin.seen.lock().unwrap();
@@ -772,8 +850,8 @@ fn inv_session_12_release_acts_once_and_dropping_the_handle_releases() {
     let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), Some(slots))).unwrap();
     let url = "https://o.test/v1.mp4";
     let caller = caller();
-    layer.replace_window(0, vec![Some(MediaItem::bare_video(url))]);
-    layer.set_playing(url.to_string(), true, Vec::new());
+    let _ring = ring(&layer, 0, vec![Some(MediaItem::bare_video(url))]);
+    let place = place(&layer, url, playing());
     caller.block_on(eventually(|| factory.slot_holding(url).is_some_and(|(_, slot)| transport(&slot) == Some(SlotCall::Play))));
     let (_, slot) = factory.slot_holding(url).unwrap();
 
@@ -784,7 +862,7 @@ fn inv_session_12_release_acts_once_and_dropping_the_handle_releases() {
     for _ in 0..3 {
         first.release();
     }
-    layer.set_rate(url.to_string(), 2.0);
+    place.update(PlaceInput { rate: Some(2.0), ..playing() }).unwrap();
     caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Rate { rate: 2.0 })));
     assert_eq!(transport(&slot), Some(SlotCall::Pause), "three releases of one handle released the other");
 
@@ -801,8 +879,8 @@ fn inv_session_13_a_suspension_taken_and_released_before_the_assembly_ends_leave
     let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), Some(slots))).unwrap();
     let url = "https://o.test/v1.mp4";
     let caller = caller();
-    layer.replace_window(0, vec![Some(MediaItem::bare_video(url))]);
-    layer.set_playing(url.to_string(), true, Vec::new());
+    let _ring = ring(&layer, 0, vec![Some(MediaItem::bare_video(url))]);
+    let _place = place(&layer, url, playing());
     layer.suspend_playback(Vec::new()).unwrap().release();
     let held = layer.suspend_playback(Vec::new()).unwrap();
     held.release();
@@ -836,7 +914,7 @@ fn inv_ffi_16_closing_refuses_input_at_once_and_closed_comes_only_after_every_na
     let layer = opened(dir.path(), &factory, Some(releaser.clone()));
     let url = "https://o.test/v1.mp4";
     let caller = caller();
-    layer.replace_window(0, vec![Some(MediaItem::bare_video(url))]);
+    let ring = ring(&layer, 0, vec![Some(MediaItem::bare_video(url))]);
     caller.block_on(eventually(|| factory.slot_holding(url).is_some()));
     let (_, slot) = factory.slot_holding(url).unwrap();
     let events = layer.player_events();
@@ -844,9 +922,8 @@ fn inv_ffi_16_closing_refuses_input_at_once_and_closed_comes_only_after_every_na
 
     layer.shutdown();
     let created = factory.created.lock().unwrap().len();
-    layer.replace_window(0, (0..3).map(|index| Some(MediaItem::bare_video(&format!("https://o.test/late{index}.mp4")))).collect());
-    layer.visible(MediaItem::bare_video("https://o.test/late.mp4"), true);
-    layer.set_playing(url.to_string(), true, Vec::new());
+    assert!(ring.replace(0, (0..3).map(|index| Some(MediaItem::bare_video(&format!("https://o.test/late{index}.mp4")))).collect()).is_err());
+    assert!(layer.open_place(MediaItem::bare_video("https://o.test/late.mp4")).is_err());
     events.ready(0, slot.generation());
 
     caller.block_on(eventually(|| factory.dispose_gate.entered() == 1));
@@ -868,7 +945,7 @@ fn inv_ffi_16_a_held_native_port_blocks_neither_the_shutdown_nor_the_drop_and_a_
     let layer = opened(dir.path(), &factory, None);
     let url = "https://o.test/v1.mp4";
     let caller = caller();
-    layer.replace_window(0, vec![Some(MediaItem::bare_video(url))]);
+    let _ring = ring(&layer, 0, vec![Some(MediaItem::bare_video(url))]);
     caller.block_on(eventually(|| factory.slot_holding(url).is_some()));
     let gate = factory.dispose_gate.hold();
 
@@ -890,10 +967,10 @@ fn inv_ffi_16_dropping_the_layer_starts_the_same_close_without_any_await() {
     let layer = opened(dir.path(), &factory, Some(releaser.clone()));
     let url = "https://o.test/v1.mp4";
     let caller = caller();
-    layer.replace_window(0, vec![Some(MediaItem::bare_video(url))]);
+    let ring = ring(&layer, 0, vec![Some(MediaItem::bare_video(url))]);
     caller.block_on(eventually(|| factory.slot_holding(url).is_some()));
 
-    drop(layer);
+    drop((ring, layer));
 
     caller.block_on(eventually(|| disposed_all(&factory) && releaser.shutdowns.load(std::sync::atomic::Ordering::SeqCst) == 1));
 }
@@ -921,6 +998,8 @@ fn inv_ffi_17_closed_means_the_cancelled_assembly_future_is_already_dropped() {
         },
         None,
         Vec::new(),
+        IngressLimits::default(),
+        Pause::new(),
     );
 
     caller().block_on(async {
@@ -938,7 +1017,7 @@ fn inv_ffi_17_closing_before_the_assembly_ends_cancels_it_and_still_releases_the
     let factory: Arc<MockFactory> = Arc::default();
     let releaser: Arc<ClosingReleaser> = shared();
     let layer = opened(dir.path(), &factory, Some(releaser.clone()));
-    layer.replace_window(0, vec![Some(MediaItem::bare_video("https://o.test/v1.mp4"))]);
+    let _ring = ring(&layer, 0, vec![Some(MediaItem::bare_video("https://o.test/v1.mp4"))]);
 
     layer.shutdown();
 
@@ -946,5 +1025,5 @@ fn inv_ffi_17_closing_before_the_assembly_ends_cancels_it_and_still_releases_the
     assert!(closed.is_ok(), "the assembly kept the closing waiting");
     assert!(factory.created.lock().unwrap().is_empty());
     assert_eq!(releaser.shutdowns.load(std::sync::atomic::Ordering::SeqCst), 1);
-    assert!(matches!(caller().block_on(layer.stats()), Err(MediaError::Unexpected { .. })));
+    assert!(matches!(caller().block_on(layer.stats()), Err(MediaError::Closed)));
 }

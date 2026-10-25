@@ -74,7 +74,7 @@ struct SlotThreadTests {
     imp_removeBlock(replacementItem)
     #expect(sample.positionMs == 0)
     #expect(sampleCalls.all(for: player).allSatisfy { $0 }, "sample read the native player outside main")
-    media.releaseAll()
+    media.releaseOwned()
     factory.events.bind(nil)
   }
 }

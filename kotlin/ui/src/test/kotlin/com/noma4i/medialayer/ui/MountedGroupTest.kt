@@ -133,24 +133,22 @@ class MountedGroupTest {
 
   @Test
   fun inv_session_16_a_toggled_audio_stays_playing_when_another_view_of_its_key_comes_and_goes() {
-    mountToggledAudio { "ring" }
-    val other = Any()
-    layer.claims.setPlaying(other, CLIP, true, "chat")
-    layer.claims.release(other, CLIP)
-    layer.setRate(CLIP, 2f)
+    val audio = mountToggledAudio { "ring" }
+    val other = layer.openPlace(MediaItem(Kind.VIDEO, CLIP, emptyMap(), null, null, strategy = CacheStrategy.WINDOW))
+    other.update(placeInput(playing = true, group = "chat"))
+    other.release()
+    rule.runOnIdle { audio.rate = 2f }
     rule.waitUntil(10_000) { looper.idle(); slot.log.last() == "rate" }
     assertEquals("play", slot.transport)
   }
 
   @Test
   fun inv_session_14_a_key_with_several_playing_owners_is_allowed_by_any_of_their_groups() {
-    val claims = layer.claims
     val item = MediaItem(Kind.VIDEO, CLIP, emptyMap(), null, null, strategy = CacheStrategy.WINDOW)
-    val ring = Any()
-    val system = Any()
-    claims.visible(ring, item, true)
-    claims.setPlaying(ring, CLIP, true, "ring")
-    claims.setPlaying(system, CLIP, true, "system")
+    val ring = layer.openPlace(item)
+    val system = layer.openPlace(item)
+    ring.update(placeInput(visible = true, playing = true, group = "ring"))
+    system.update(placeInput(playing = true, group = "system"))
     waitFor("play")
 
     val allowing = layer.suspendPlayback(listOf("system"))

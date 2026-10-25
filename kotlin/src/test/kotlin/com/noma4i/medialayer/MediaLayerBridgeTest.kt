@@ -34,6 +34,7 @@ private class StatsRecorder : StatsListener {
   val totals = CopyOnWriteArrayList<ULong>()
 
   override fun changed(stats: MediaStats) { totals.add(stats.totalBytes) }
+  override fun failed(error: MediaException) = Unit
 }
 
 private class CountingFetcher : Fetcher {
@@ -118,6 +119,7 @@ private class StateRecorder : StateListener {
   val states = CopyOnWriteArrayList<MediaState>()
 
   override fun changed(state: MediaState) { states.add(state) }
+  override fun failed(error: MediaException) = Unit
 }
 
 private fun eventually(what: String, timeoutMs: Long = 5_000, condition: () -> Boolean) {
@@ -139,13 +141,13 @@ class MediaLayerBridgeTest {
     try {
       for (page in 1..11) {
         if (page > 1) {
-          media.playerEvents().detach(pages[page - 1].url)
+          media.detachView(pages[page - 1].url)
           media.setPlaying(pages[page - 1].url, false)
         }
         media.replaceWindow(page.toUInt(), pages)
         media.setPlaying(pages[page].url, true)
         eventually("active source loaded") { slots.slots.values.any { it.key == pages[page].url } }
-        media.playerEvents().attach(pages[page].url, page.toULong())
+        media.attachView(pages[page].url, page.toULong())
         eventually("attachment delivered") { slots.slots.values.sumOf { it.log.count { call -> call == "attach" } } >= page }
         assertEquals(1u, media.stats().slots.playing)
       }

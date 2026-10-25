@@ -26,8 +26,6 @@ internal class RecordingEvents : PlayerEvents(NoHandle) {
   override fun visualReady(slot: UInt, generation: ULong) { generations.add("visualReady:$slot:$generation"); calls.add("visualReady:$slot") }
   override fun stalled(slot: UInt, generation: ULong, positionMs: ULong) { calls.add("stalled:$slot:$positionMs") }
   override fun failed(slot: UInt, generation: ULong, status: Int, detail: String) { generations.add("failed:$slot:$generation"); calls.add("failed:$slot:$status") }
-  override fun attach(key: String, viewToken: ULong) { calls.add("attach:$key:$viewToken") }
-  override fun detach(key: String) { calls.add("detach:$key") }
   override fun ended(slot: UInt, generation: ULong) { generations.add("ended:$slot:$generation"); calls.add("ended:$slot") }
   override fun foreground() { calls.add("foreground") }
   override fun background() { calls.add("background") }
@@ -40,14 +38,79 @@ private fun noteMainThreadFfi(into: MutableList<String>, call: String) {
 }
 
 internal class RecordingCounters(private val mainThreadFfi: MutableList<String>, private val observers: MutableList<String>) : com.noma4i.medialayer.ImageCounters() {
+  val adds = AtomicInteger()
+  val observed = java.util.concurrent.atomic.AtomicLong()
+
   override fun record(work: com.noma4i.medialayer.ImageWork) {
     noteMainThreadFfi(mainThreadFfi, "record")
-    if (work is com.noma4i.medialayer.ImageWork.Observe || work is com.noma4i.medialayer.ImageWork.Unobserve) observers.add(work::class.simpleName.orEmpty())
     super.record(work)
+  }
+
+  override fun add(totals: com.noma4i.medialayer.ImageTotals) {
+    noteMainThreadFfi(mainThreadFfi, "record")
+    adds.incrementAndGet()
+    observed.addAndGet(totals.observed)
+    if (totals.observed != 0L) observers.add(if (totals.observed > 0) "Observe" else "Unobserve")
+    super.add(totals)
   }
 }
 
-internal fun drainFfi() = kotlinx.coroutines.runBlocking { kotlinx.coroutines.withContext(ffiQueue) { } }
+internal fun drainFfi() {
+  val deadline = System.nanoTime() + 5_000_000_000
+  while (activeDrains.get() != 0 && System.nanoTime() < deadline) Thread.sleep(2)
+}
+
+internal class NullPlace : com.noma4i.medialayer.MediaPlace(NoHandle) {
+  override fun update(input: com.noma4i.medialayer.PlaceInput) = Unit
+  override fun seek(fraction: Double) = Unit
+  override fun itemState(state: MediaState) = Unit
+  override fun release() = Unit
+  override fun close() = Unit
+}
+
+internal class NullWindow : com.noma4i.medialayer.MediaWindow(NoHandle) {
+  override fun replace(active: UInt, sources: List<MediaItem?>) = Unit
+  override fun replacePages(active: UInt, pages: List<List<MediaItem>>) = Unit
+  override fun moveTo(active: UInt) = Unit
+  override fun setActive(isActive: Boolean) = Unit
+  override fun release() = Unit
+  override fun close() = Unit
+}
+
+private class RecordingPlace(private val layer: RecordingLayer, private val item: MediaItem) : com.noma4i.medialayer.MediaPlace(NoHandle) {
+  private var last = com.noma4i.medialayer.PlaceInput(false, false, null, false, null, null, false, null)
+  private var released = false
+
+  override fun update(input: com.noma4i.medialayer.PlaceInput) {
+    val before = last
+    last = input
+    val url = item.url
+    if (input.visible != before.visible) { layer.items.add(item); layer.calls.add("visible:$url:${input.visible}") }
+    if (input.playing != before.playing || (input.playing && input.group != before.group)) {
+      layer.calls.add("playing:$url:${input.playing}" + (input.group?.let { ":$it" } ?: ""))
+    }
+    if (input.peeking != before.peeking) layer.calls.add("peeking:$url:${input.peeking}")
+    input.muted?.takeIf { it != before.muted }?.let { layer.calls.add("muted:$url:$it") }
+    input.rate?.takeIf { it != before.rate }?.let { layer.calls.add("rate:$url:$it") }
+    if (input.viewToken != before.viewToken) {
+      val events = layer.playerEvents() as? RecordingEvents
+      events?.calls?.add(input.viewToken?.let { "attach:$url:$it" } ?: "detach:$url")
+    }
+  }
+
+  override fun seek(fraction: Double) { layer.calls.add("seek:${item.url}:$fraction") }
+
+  override fun itemState(state: MediaState) { layer.noteMain("itemState"); layer.calls.add("itemState:${item.url}:${state::class.simpleName}") }
+
+  override fun release() {
+    if (released) return
+    released = true
+    layer.calls.add("release:${item.url}")
+    if (last.visible) layer.calls.add("visible:${item.url}:false")
+  }
+
+  override fun close() = Unit
+}
 
 internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents()) : MediaLayer(NoHandle) {
   val mainThreadFfi = CopyOnWriteArrayList<String>()
@@ -60,6 +123,7 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
   val counterWork = CopyOnWriteArrayList<String>()
   private val counters by lazy { RecordingCounters(mainThreadFfi, counterWork) }
   override fun imageStats(): com.noma4i.medialayer.ImageCounters { noteFfi("imageStats"); return counters }
+  val counterObserved: Long get() = counters.observed.get()
   var preparedTones: TonePreparation? = null
   val toneChecks = AtomicInteger()
   var needsTone = false
@@ -68,12 +132,13 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
   override fun playerEvents(): PlayerEvents = events
   val items = CopyOnWriteArrayList<MediaItem>()
 
-  override fun visible(source: MediaItem, visible: Boolean) { noteFfi("visible"); items.add(source); calls.add("visible:${source.url}:$visible") }
-  override fun setPlaying(key: String, playing: Boolean, groups: List<String?>) { calls.add("playing:$key:$playing" + (if (groups.isEmpty() || groups == listOf(null)) "" else ":" + groups.joinToString(",") { it ?: "-" })) }
-  override fun setPeeking(key: String, peeking: Boolean) { calls.add("peeking:$key:$peeking") }
-  override fun setMuted(key: String, muted: Boolean) { calls.add("muted:$key:$muted") }
+  @Volatile var placeFactory: ((MediaItem) -> com.noma4i.medialayer.MediaPlace)? = null
+  @Volatile var placeError: com.noma4i.medialayer.MediaException? = null
+  override fun openPlace(item: MediaItem): com.noma4i.medialayer.MediaPlace { noteFfi("openPlace"); placeError?.let { throw it }; return placeFactory?.invoke(item) ?: RecordingPlace(this, item) }
+  override fun openVideoWindow(): com.noma4i.medialayer.MediaWindow = NullWindow()
+  override fun openImageWindow(name: String): com.noma4i.medialayer.MediaWindow = NullWindow()
+  internal fun noteMain(call: String) = noteFfi(call)
   override fun setMutedAll(muted: Boolean) { calls.add("mutedAll:$muted") }
-  override fun setRate(key: String, rate: Float) { calls.add("rate:$key:$rate") }
 
   override fun subscribeState(key: String, listener: StateListener): Subscription {
     listeners.add(key to listener)
@@ -82,8 +147,6 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
 
   fun emit(key: String, state: MediaState) = listeners.filter { it.first == key }.forEach { it.second.changed(state) }
 
-  override fun itemState(key: String, state: MediaState) { noteFfi("itemState"); calls.add("itemState:$key:${state::class.simpleName}") }
-  override fun seek(key: String, fraction: Double) { calls.add("seek:$key:$fraction") }
   override suspend fun fetchImage(url: String, headers: Map<String, String>): ImageFetchResult { noteFfi("fetchImage"); calls.add("fetchImage:$url"); return ImageFetchResult(image, ImageOrigin.NETWORK) }
   override suspend fun placeholder(source: MediaItem, ready: Boolean): Placeholder {
     noteFfi("placeholder")

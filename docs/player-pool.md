@@ -2,26 +2,28 @@
 
 MediaLayer gives you a pool of native players and juggles them for you. You say which pages are visible and which one plays. The pool decides which player holds which source, reuses players when the window moves and never creates more than the pool size.
 
-You normally do not call pool operations. You declare places with `MediaVideo` ([declaring media](declaring-media.md)) and the pool runs them from visibility. Two calls are public.
+You normally do not call pool operations. You declare places with `MediaVideo` ([declaring media](declaring-media.md)) and the pool runs them from visibility. Two things are public.
 
 | Call | Result |
 | ---- | ------ |
-| `pin(key)`, `unpin(key)` | Keeps a slot for a key, for example an intro video |
+| `pinned` in the input of a place | Keeps a slot for the key of the place while the place lives, for example an intro video |
 | `releaseAll()` | Frees every slot, for example on logout |
 
 ### Swift
 
 ```swift
-media.pin(key: introUrl)
-media.unpin(key: introUrl)
+let intro = try media.openPlace(item: introItem)
+try intro.update(input: PlaceInput(visible: false, playing: false, group: nil, peeking: false, muted: nil, rate: nil, pinned: true, viewToken: nil))
+intro.release()
 media.releaseAll()
 ```
 
 ### Kotlin
 
 ```kotlin
-media.pin(introUrl)
-media.unpin(introUrl)
+val intro = media.openPlace(introItem)
+intro.update(PlaceInput(false, false, null, false, null, null, true, null))
+intro.release()
 media.releaseAll()
 ```
 
@@ -40,7 +42,7 @@ Slot and reach changes made with `setLimits` apply at once: extra players are un
 
 ## Cost of a window
 
-The pool keeps the list you declared with `replaceWindow`. `moveWindow` takes only the active page, so a scroll step costs the size of the window, not the length of your list. `replaceWindow` takes the list and the active page in one call: call it when the sources change. The pool copies only the pages it needs, so a feed of 2000 pages costs the same as a feed of 20 when the list does not change. Image windows work the same way with `replaceImageWindow` and `moveImageWindow`. A move before any list was declared, or after `releaseAll`, does nothing.
+The pool keeps the list a window object declared. Declare the list with `.mediaWindow(of:rows:source:active:enabled:)` in SwiftUI (an observable model and a key path to its rows; another model mounts a new window) or `MediaWindow(data, source, active, enabled)` in Compose: the library reads your rows, maps them to items off the main thread with a pure function of a row (the latest function serves the next send), and sends only the active index when `active` changes. A feed of 2000 pages costs the same as a feed of 20 while the list does not change. Image windows work the same way with `.mediaImageWindow(name:of:rows:sources:rowsPerPage:active:enabled:)` and `MediaImageWindow`; the name picks the prefetch policy, and two windows with the same name stay independent. Several video windows can be mounted: the last window that declared and is `enabled` drives the ring, and the previous live window returns when it closes or is disabled. At the Rust level a `MediaWindow` object takes `replace`, `replace_pages`, `move_to` and `set_active`.
 
 ## Preferences of a place
 

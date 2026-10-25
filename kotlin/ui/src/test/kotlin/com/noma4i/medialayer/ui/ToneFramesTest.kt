@@ -93,6 +93,7 @@ class ToneFramesTest {
         assertTrue(!runBlocking { media.tonePixelsNeeded(source) })
         val subscription = media.subscribeTone(source, object : ToneListener {
           override fun changed(source: ToneSource) { changes.incrementAndGet() }
+          override fun failed(error: com.noma4i.medialayer.MediaException) = Unit
         })
         try {
           rule.waitUntil(10_000) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); changes.get() == index + 1 }

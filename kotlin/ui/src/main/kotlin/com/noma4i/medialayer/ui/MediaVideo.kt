@@ -130,7 +130,8 @@ fun MediaVideo(
 ) {
   val environment = LocalMediaEnvironment.current
   val screen = rememberScreenVisibility()
-  val state = rememberPlace(source, playing, muted, loop, peeking, screen.visible, group)
+  var view by remember(environment, source.url) { mutableStateOf<ViewHandle?>(null) }
+  val state = rememberPlace(source, playing, muted, loop, peeking, screen.visible, group, viewToken = view?.token)
   val edges = remember(source.url) { VideoEdges() }
   val firstFrame by rememberUpdatedState(onFirstFrame)
   val end by rememberUpdatedState(onEnd)
@@ -149,7 +150,6 @@ fun MediaVideo(
     }
     if (isEnd) end()
   }
-  var view by remember(environment) { mutableStateOf<ViewHandle?>(null) }
   val player by remember(view) { view?.player ?: flowOf(null) }.collectAsState(null)
   val counters = environment.players?.videoOutputCounters
   val outputType = remember(output, alpha) { output.contentFrameType(alpha) }
@@ -161,30 +161,12 @@ fun MediaVideo(
   }
   DisposableEffect(environment, source.url, screen.visible) {
     if (!screen.visible) return@DisposableEffect onDispose { }
-    val events = environment.media.playerEvents()
-    val owners = environment.players?.owners
     val created = environment.players?.newView()
     view = created
-    if (created != null) {
-      if (owners?.claim(source.url, created.token, playing) == true) events.attach(source.url, created.token)
-    }
     onDispose {
-      if (created != null) {
-        when (val released = owners?.release(source.url, created.token)) {
-          ViewRelease.Detach -> events.detach(source.url)
-          is ViewRelease.Handover -> events.attach(source.url, released.token)
-          else -> Unit
-        }
-      }
       created?.let { environment.players?.release(it) }
       view = null
     }
-  }
-  DisposableEffect(environment, source.url, view, playing) {
-    if (playing) view?.let { current ->
-      environment.players?.owners?.prefer(source.url, current.token)?.let { environment.media.playerEvents().attach(source.url, it) }
-    }
-    onDispose { }
   }
   val clipped = if (cornerRadius > 0.dp) modifier.clip(RoundedCornerShape(cornerRadius)) else modifier
   val faded = if (alpha != 1f) clipped.alpha(alpha) else clipped

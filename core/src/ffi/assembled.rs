@@ -1,6 +1,7 @@
 use super::layer::MemoryReleaser;
-use crate::api::{follow_stats, AbortOnDrop, ControlPorts, Controls, MemoryRelease, Parts, Places, Routes, Signals, Stage, Suspendable, Tones};
-use std::sync::Arc;
+use crate::api::{follow_stats, AbortOnDrop, ControlPorts, Controls, MemoryRelease, Parts, PoolControl, Places, Routes, Signals, Stage, Suspendable, Tones};
+use crate::pool::PoolStats;
+use std::sync::{Arc, Mutex, PoisonError};
 use tokio::runtime::Handle;
 
 pub struct Assembled {
@@ -10,7 +11,7 @@ pub struct Assembled {
     pub places: Arc<Places>,
     pub routes: Arc<Routes>,
     pub tones: Arc<Tones>,
-    _stats_feed: AbortOnDrop,
+    stats_feed: Mutex<Option<AbortOnDrop>>,
 }
 
 struct ForeignRelease(Option<Arc<dyn MemoryReleaser>>);
@@ -24,7 +25,20 @@ impl MemoryRelease for ForeignRelease {
 }
 
 impl Assembled {
+    pub fn pool_stats(&self) -> PoolStats {
+        self.stage.stats()
+    }
+
+    /// Cancels and awaits every work the layer started, then the native slots: nothing runs or calls back after this returns.
     pub async fn close(&self) {
+        self.signals.close().await;
+        self.tones.close().await;
+        let feed = self.stats_feed.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if let Some(mut feed) = feed {
+            feed.abort();
+            let _ = feed.join().await;
+        }
+        self.controls.close();
         self.stage.close().await;
     }
 
@@ -55,6 +69,6 @@ impl Assembled {
             parts.clock,
         ));
         let stats_feed = follow_stats(handle, Arc::downgrade(&controls), parts.change);
-        Assembled { controls, signals, stage: parts.stage, places: parts.places, routes: parts.routes, tones: parts.tones, _stats_feed: stats_feed }
+        Assembled { controls, signals, stage: parts.stage, places: parts.places, routes: parts.routes, tones: parts.tones, stats_feed: Mutex::new(Some(stats_feed)) }
     }
 }

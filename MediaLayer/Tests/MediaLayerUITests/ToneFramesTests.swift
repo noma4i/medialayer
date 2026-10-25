@@ -62,6 +62,7 @@ private final class ToneChanges: ToneListener, @unchecked Sendable {
   private var values: [ToneSource] = []
   var count: Int { lock.withLock { values.count } }
   func changed(source: ToneSource) { lock.withLock { values.append(source) } }
+  func failed(error: MediaError) {}
 }
 
 extension GlobalMedia {
@@ -76,10 +77,10 @@ extension GlobalMedia {
       let source = Poster(url: try writePNG(solid(width: 1080, height: 1920, red: 20, green: 40, blue: 60)))
       let context = MediaContext(places: media)
       let request = try #require(MediaImagePipeline.request(places: media, for: source))
-      #expect(await MediaImagePipeline.load(source, request: request, places: media, pipeline: context.pipeline) != nil)
+      #expect(await MediaImagePipeline.load(source, request: request, pipeline: context.pipeline) != nil)
       #expect(await media.tonePixelsNeeded(source: source.item) == false)
       let changes = ToneChanges()
-      let subscription = media.subscribeTone(source: source.item, listener: changes)
+      let subscription = try media.subscribeTone(source: source.item, listener: changes)
       await eventually("late subscriber receives pixels") { changes.count == 1 }
       #expect(await pixelsTone(media, source.item))
       #expect(await media.tonePixelsNeeded(source: source.item) == false)
@@ -149,7 +150,7 @@ extension GlobalMedia {
       let context = MediaContext(places: media)
       let request = try #require(MediaImagePipeline.request(places: media, for: source, points: CGSize(width: 40, height: 40), scale: 2))
 
-      let container = await MediaImagePipeline.load(source, request: request, places: media, pipeline: context.pipeline)
+      let container = await MediaImagePipeline.load(source, request: request, pipeline: context.pipeline)
 
       #expect(container != nil)
       await eventually("tone answers with pixels") { await pixelsTone(media, source.item) }

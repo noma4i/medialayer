@@ -139,7 +139,9 @@ class LoadedAnimationVisibilityTest {
     x = 5000
     rule.waitForIdle()
     rule.waitUntil(5000) { looper.idle(); animations.count { it.isRunning } == 1 }
-    assertFalse(layer.calls.contains("visible:${page.url}:false"))
+    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("visible:${page.url}:false") }
+    assertEquals("Only the leaving tile hides its own place", 1, layer.calls.count { it == "visible:${page.url}:false" })
+    assertFalse("The staying tile keeps its place", layer.calls.contains("release:${page.url}"))
     x = 0
     rule.waitForIdle()
     rule.waitUntil(5000) { looper.idle(); animations.all { it.isRunning } }

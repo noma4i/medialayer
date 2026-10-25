@@ -4,20 +4,6 @@ import ObjectiveC
 
 nonisolated(unsafe) private var pixelSizesKey: UInt8 = 0
 
-enum FfiQueue {
-  private static let queue = DispatchQueue(label: "com.noma4i.medialayer.ffi")
-
-  static func post(_ call: @escaping @Sendable () -> Void) { queue.async(execute: call) }
-
-  static func run<Result: Sendable>(_ call: @escaping @Sendable () -> Result) async -> Result {
-    await withCheckedContinuation { continuation in queue.async { continuation.resume(returning: call()) } }
-  }
-}
-
-extension ImageCounters {
-  func recordLater(work: ImageWork) { FfiQueue.post { self.record(work: work) } }
-}
-
 final class PixelSizeMemo: @unchecked Sendable {
   private struct Args: Hashable {
     let width: Double

@@ -376,7 +376,7 @@ extension GlobalMedia {
     }
 
     @Test
-    func two_views_of_one_gif_share_one_decode_and_the_url_stays_claimed_until_the_last_view_leaves() async {
+    func two_views_of_one_gif_share_one_decode_and_each_releases_only_its_own_place() async {
       let url = newURL()
       let screen = Screen(gif: animatedGif(frames: 1200, side: 64))
       defer { screen.close() }
@@ -389,29 +389,30 @@ extension GlobalMedia {
       #expect(FrameCache.shared.decodes == before + 1)
 
       screen.unmount(first)
+      await until("the first view releases its own place") { screen.places.visibleCalls(of: url) == [true, true, false] }
       await settle()
-      #expect(screen.places.visibleCalls(of: url) == [true])
+      #expect(screen.places.visibleCalls(of: url) == [true, true, false])
 
       screen.unmount(second)
-      await until("the last view releases the url") { screen.places.visibleCalls(of: url) == [true, false] }
+      await until("the second view releases its own place") { screen.places.visibleCalls(of: url) == [true, true, false, false] }
     }
 
     @Test
-    func a_view_whose_url_changes_in_place_hands_the_old_url_back_and_never_withdraws_the_new_one_from_its_other_viewer() async {
+    func a_view_whose_url_changes_in_place_releases_the_old_place_and_leaves_the_place_of_its_other_viewer_alone() async {
       let old = newURL(), shared = newURL()
       let screen = Screen(gif: animatedGif(frames: 12, side: 64))
       defer { screen.close() }
       await settle(0.3)
       let other = screen.mount(shared, y: 50)
       let moving = screen.mount(old, y: 0)
-      await until("both urls are claimed") { screen.places.visibleCalls(of: old) == [true] && screen.places.visibleCalls(of: shared) == [true] }
+      await until("both urls are declared") { screen.places.visibleCalls(of: old) == [true] && screen.places.visibleCalls(of: shared) == [true] }
 
       moving.rootView = GifCell(url: shared, context: screen.context)
       await settle()
       screen.unmount(moving)
       await settle()
 
-      #expect(screen.places.visibleCalls(of: shared) == [true])
+      #expect(screen.places.visibleCalls(of: shared) == [true, true, false])
       #expect(screen.places.visibleCalls(of: old) == [true, false])
       withExtendedLifetime(other) {}
     }

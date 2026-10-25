@@ -6,37 +6,46 @@ import SwiftUI
 public protocol MediaPlaces: AnyObject, Sendable {
   func imageStats() -> ImageCounters
   func cacheKey(url: String, headers: [String: String]) -> String
-  func visible(source: MediaItem, visible: Bool)
-  func setPlaying(key: String, playing: Bool, groups: [String?])
-  func setPeeking(key: String, peeking: Bool)
-  func setMuted(key: String, muted: Bool)
-  func setRate(key: String, rate: Float)
-  func setMutedAll(muted: Bool)
-  func seek(key: String, fraction: Double)
-  func itemState(key: String, state: MediaState)
+  func mountPlace(item: MediaItem) throws -> any PlaceHandle
+  func mountVideoWindow() throws -> any WindowHandle
+  func mountImageWindow(name: String) throws -> any WindowHandle
+  func setMutedAll(muted: Bool) throws
   func fetchImage(url: String, headers: [String: String]) async throws -> ImageFetchResult
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder
-  func setTonePreparation(preparation: TonePreparation)
+  func setTonePreparation(preparation: TonePreparation) throws
   func tonePixelsNeeded(source: MediaItem) async -> Bool
   func playUrl(source: MediaItem) async throws -> PlaybackRoute
   func stateStream(key: String) -> AsyncStream<MediaState>
-  func attachView(key: String, token: UInt64)
-  func detachView(key: String)
 }
 
-extension MediaLayer: MediaPlaces {
-  public func attachView(key: String, token: UInt64) {
-    playerEvents().attach(key: key, viewToken: token)
-  }
+public protocol PlaceHandle: AnyObject, Sendable {
+  func update(input: PlaceInput) throws
+  func seek(fraction: Double) throws
+  func itemState(state: MediaState) throws
+  func release()
+}
 
-  public func detachView(key: String) {
-    playerEvents().detach(key: key)
-  }
+public protocol WindowHandle: AnyObject, Sendable {
+  func replace(active: UInt32, sources: [MediaItem?]) throws
+  func replacePages(active: UInt32, pages: [[MediaItem]]) throws
+  func moveTo(active: UInt32) throws
+  func setActive(isActive: Bool) throws
+  func release()
+}
+
+extension MediaPlace: PlaceHandle {}
+extension MediaWindow: WindowHandle {}
+
+extension MediaLayer: MediaPlaces {
+  public func mountPlace(item: MediaItem) throws -> any PlaceHandle { try openPlace(item: item) }
+  public func mountVideoWindow() throws -> any WindowHandle { try openVideoWindow() }
+  public func mountImageWindow(name: String) throws -> any WindowHandle { try openImageWindow(name: name) }
 }
 
 @Observable
 final class MutedFlag: @unchecked Sendable {
   var value = false
+  var failure: MediaError?
 }
 
 public enum Media {
@@ -44,13 +53,22 @@ public enum Media {
   nonisolated(unsafe) static weak var current: MediaPlaces?
   nonisolated(unsafe) public internal(set) static var audio: MediaAudioSession?
 
-  public static var muted: Bool {
-    get { flag.value }
-    set {
-      flag.value = newValue
-      current?.setMutedAll(muted: newValue)
+  public static var muted: Bool { flag.value }
+
+  /// Applies the flag to the open layer first: a refusal of the core throws and leaves the flag unchanged.
+  public static func setMuted(_ value: Bool) throws {
+    do {
+      try current?.setMutedAll(muted: value)
+    } catch {
+      flag.failure = mediaError(error)
+      throw error
     }
+    flag.failure = nil
+    flag.value = value
   }
+
+  /// The last refusal of the core to apply the global mute, or nil after a success.
+  public static var failure: MediaError? { flag.failure }
 }
 
 public final class MediaContext: @unchecked Sendable {
@@ -63,7 +81,6 @@ public final class MediaContext: @unchecked Sendable {
     self.places = places
     self.slots = slots ?? LoadedSlots.of(places)
     stats = places.imageStats()
-    places.setTonePreparation(preparation: ToneFrames(places: places))
   }
 }
 

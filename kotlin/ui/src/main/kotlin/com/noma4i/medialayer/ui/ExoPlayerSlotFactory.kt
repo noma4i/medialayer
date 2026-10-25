@@ -51,7 +51,6 @@ class SlotPlayers internal constructor(val videoOutputCounters: VideoOutputCount
     }
   }
 
-  internal val owners = ViewOwners()
   private val views = ConcurrentHashMap<ULong, ViewHandle>()
   private val nextToken = AtomicLong(1)
 

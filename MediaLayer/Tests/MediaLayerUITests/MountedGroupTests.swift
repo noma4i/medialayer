@@ -91,7 +91,7 @@ extension GlobalMedia {
       window.rootViewController = host
       window.isHidden = false
       defer {
-        media.releaseAll()
+        media.releaseOwned()
         window.isHidden = true
         window.rootViewController = nil
       }
@@ -128,7 +128,7 @@ extension GlobalMedia {
       let input = GroupInput()
       let (window, audio) = await mountedToggledAudio(slot, media, input)
       defer {
-        media.releaseAll()
+        media.releaseOwned()
         window.isHidden = true
         window.rootViewController = nil
       }
@@ -146,19 +146,19 @@ extension GlobalMedia {
       let slot = TransportSlot()
       let media = try openCore(slot)
       let input = GroupInput()
-      let (window, _) = await mountedToggledAudio(slot, media, input)
+      let (window, audio) = await mountedToggledAudio(slot, media, input)
       defer {
-        media.releaseAll()
+        media.releaseOwned()
         window.isHidden = true
         window.rootViewController = nil
       }
-      let claims = KeyClaims.of(media)
-      let other = UUID()
+      let other = try media.openPlace(item: MediaItem(kind: .video, url: clip, headers: [:], cover: nil, blurHash: nil, strategy: .window))
 
-      claims.setPlaying(owner: other, key: clip, playing: true, group: "chat")
-      claims.release(owner: other, key: clip)
-      media.setRate(key: clip, rate: 2)
-      #expect(await until { slot.all.last == "rate" })
+      try other.update(input: .make(playing: true, group: "chat"))
+      other.release()
+      await MainActor.run { audio?.setRate(2) }
+      let rated = await until { slot.all.last == "rate" }
+      #expect(rated, "calls: \(slot.all)")
       #expect(slot.transport == "play")
     }
 
@@ -176,13 +176,15 @@ extension GlobalMedia {
     func inv_session_14_aKeyWithSeveralPlayingOwnersIsAllowedByAnyOfTheirGroups() async throws {
       let slot = TransportSlot()
       let media = try openCore(slot)
-      let claims = KeyClaims(places: media)
       let item = MediaItem(kind: .video, url: clip, headers: [:], cover: nil, blurHash: nil, strategy: .window)
-      let ring = UUID(), system = UUID()
-      defer { media.releaseAll() }
-      claims.visible(owner: ring, source: item, visible: true)
-      claims.setPlaying(owner: ring, key: clip, playing: true, group: "ring")
-      claims.setPlaying(owner: system, key: clip, playing: true, group: "system")
+      let ring = try media.openPlace(item: item), system = try media.openPlace(item: item)
+      defer {
+        ring.release()
+        system.release()
+        media.releaseOwned()
+      }
+      try ring.update(input: .make(visible: true, playing: true, group: "ring"))
+      try system.update(input: .make(playing: true, group: "system"))
       #expect(await until { slot.transport == "play" })
 
       let allowing = try media.suspendPlayback(allowGroups: ["system"])

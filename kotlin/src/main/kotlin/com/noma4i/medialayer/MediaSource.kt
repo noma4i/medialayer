@@ -11,6 +11,3 @@ interface MediaSource {
 }
 
 fun MediaSource.toItem(): MediaItem = MediaItem(kind, url, headers, cover, blurHash, strategy = strategy)
-
-fun MediaLayer.replaceImageWindow(name: String, active: Int, pages: List<List<MediaSource>>) =
-    replaceImageWindow(name, active.coerceAtLeast(0).toUInt(), pages.map { page -> page.map { it.toItem() } })

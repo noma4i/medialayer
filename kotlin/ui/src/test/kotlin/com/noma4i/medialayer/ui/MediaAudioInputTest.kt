@@ -134,12 +134,12 @@ class MediaAudioInputTest {
     return seen.last()
   }
 
-  // Compose is idle, then a command through the core reaches the slot behind every earlier command.
-  private fun barrier(key: String) {
+  // Compose is idle, then a new rate of the mounted audio reaches the slot behind every earlier command of its place.
+  private fun barrier() {
     rule.waitForIdle()
     looper.idle()
     val before = slot.count("rate")
-    layer.setRate(key, 3f + before)
+    rule.runOnIdle { rate = 3f + before }
     rule.waitUntil(10_000) { looper.idle(); slot.count("rate") > before }
   }
 
@@ -173,7 +173,7 @@ class MediaAudioInputTest {
     playOnMount = true
     val first = mount()
     waitForPlaying("file:///first.mp4")
-    barrier("file:///first.mp4")
+    barrier()
     rule.runOnIdle { assertTrue(first.isPlaying) }
     assertTrue(slot.playing("file:///first.mp4"))
   }
@@ -190,7 +190,7 @@ class MediaAudioInputTest {
       muted = true
       group = "system"
     }
-    barrier("file:///first.mp4")
+    barrier()
 
     rule.runOnIdle { assertTrue(first.isPlaying) }
     assertTrue(slot.playing("file:///first.mp4"))

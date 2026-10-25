@@ -9,17 +9,46 @@ public final class AudioPlayback {
   public private(set) var progress = 0.0
   public private(set) var rate: Float
   public private(set) var state: MediaState = .idle
-  @ObservationIgnored let owner = UUID()
-  @ObservationIgnored private let key: String
+  @ObservationIgnored private let item: MediaItem
   @ObservationIgnored private(set) var group: String?
+  @ObservationIgnored private var muted: Bool
   @ObservationIgnored private let places: MediaPlaces
+  @ObservationIgnored private var mount: PlaceMount?
 
-  init(key: String, playing: Bool, rate: Float = 1, group: String? = nil, places: MediaPlaces) {
-    self.key = key
+  init(item: MediaItem, playing: Bool, muted: Bool = false, rate: Float = 1, group: String? = nil, places: MediaPlaces) {
+    self.item = item
     self.group = group
+    self.muted = muted
     self.rate = rate
     self.places = places
     isPlaying = playing
+  }
+
+  func mountPlace() {
+    guard mount == nil else { return }
+    mount = PlaceMount(places: places, item: item) { [weak self] error in
+      Task { @MainActor in self?.follow(.failed(detail: String(describing: error))) }
+    }
+    push()
+  }
+
+  func unmountPlace() {
+    mount?.close()
+    mount = nil
+  }
+
+  func follow(muted value: Bool) {
+    muted = value
+    push()
+  }
+
+  func follow(group value: String?) {
+    group = value
+    push()
+  }
+
+  private func push() {
+    mount?.update(.make(visible: true, playing: isPlaying, group: group, muted: muted, rate: rate))
   }
 
   public func toggle() {
@@ -30,20 +59,16 @@ public final class AudioPlayback {
     setPlaying(value)
   }
 
-  func follow(group value: String?) {
-    group = value
-  }
-
   public func setRate(_ value: Float) {
     rate = value
-    places.setRate(key: key, rate: value)
+    push()
   }
 
   public func seek(to fraction: Double) {
     guard fraction.isFinite else { return }
     let clamped = min(max(fraction, 0), 1)
     refresh(progress: clamped)
-    places.seek(key: key, fraction: clamped)
+    mount?.seek(clamped)
   }
 
   func refresh(progress value: Double) {
@@ -60,7 +85,7 @@ public final class AudioPlayback {
 
   private func setPlaying(_ value: Bool) {
     isPlaying = value
-    KeyClaims.of(places).setPlaying(owner: owner, key: key, playing: value, group: group)
+    push()
   }
 }
 
@@ -93,8 +118,7 @@ public struct MediaAudio<Content: View>: View {
   public var body: some View {
     if let context {
       Placed(source: source, playing: playing, muted: muted, rate: rate, group: group, context: context, content: content)
-        .id(source.url)
-        .id(ObjectIdentifier(context.places))
+        .id(MountIdentity(item: source.item, context: context))
     }
   }
 
@@ -122,7 +146,7 @@ public struct MediaAudio<Content: View>: View {
       self.group = group
       self.context = context
       self.content = content
-      _audio = State(initialValue: AudioPlayback(key: source.url, playing: playing, rate: rate, group: group, places: context.places))
+      _audio = State(initialValue: AudioPlayback(item: source.item, playing: playing, muted: muted, rate: rate, group: group, places: context.places))
     }
 
     var body: some View {
@@ -136,24 +160,12 @@ public struct MediaAudio<Content: View>: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.background)) { _ in inBackground = true }
         .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
-        .onAppear {
-          let claims = KeyClaims.of(context.places)
-          claims.visible(owner: audio.owner, source: source.item, visible: true)
-          claims.setPlaying(owner: audio.owner, key: source.url, playing: audio.isPlaying, group: group)
-          claims.setMuted(owner: audio.owner, key: source.url, muted: muted)
-          context.places.setRate(key: source.url, rate: audio.rate)
-        }
-        .onDisappear {
-          let claims = KeyClaims.of(context.places)
-          claims.release(owner: audio.owner, key: source.url)
-        }
+        .onAppear { audio.mountPlace() }
+        .onDisappear { audio.unmountPlace() }
         .onChange(of: playing) { _, value in audio.follow(playing: value) }
-        .onChange(of: muted) { _, value in KeyClaims.of(context.places).setMuted(owner: audio.owner, key: source.url, muted: value) }
+        .onChange(of: muted) { _, value in audio.follow(muted: value) }
         .onChange(of: rate) { _, value in audio.setRate(value) }
-        .onChange(of: group) { _, value in
-          audio.follow(group: value)
-          KeyClaims.of(context.places).setPlaying(owner: audio.owner, key: source.url, playing: audio.isPlaying, group: value)
-        }
+        .onChange(of: group) { _, value in audio.follow(group: value) }
     }
   }
 }

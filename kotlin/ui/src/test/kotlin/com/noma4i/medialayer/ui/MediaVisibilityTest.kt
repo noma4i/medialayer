@@ -131,7 +131,7 @@ class MediaVisibilityTest {
   }
 
   @Test
-  fun aLeavingOwnerDoesNotCancelOrReleaseTheKeyOfAnOwnerThatStays() {
+  fun aLeavingOwnerCancelsAndReleasesOnlyItsOwnPlaceWhileTheOwnerThatStaysKeepsItsDeclaration() {
     var x by mutableIntStateOf(0)
     rule.setContent {
       MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
@@ -150,6 +150,6 @@ class MediaVisibilityTest {
     rule.waitUntil(5000) { looper.idle(); layer.calls.any { it == "itemState:$url:Ready" } }
     settle()
 
-    assertEquals("started=2 cancelled=1 decodes=1 claims=[visible:$url:true]", counters())
+    assertEquals("started=2 cancelled=1 decodes=1 claims=[visible:$url:true, visible:$url:true, visible:$url:false]", counters())
   }
 }

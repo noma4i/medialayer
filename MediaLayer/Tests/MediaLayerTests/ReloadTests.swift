@@ -49,7 +49,7 @@ struct ReloadTests {
     ))
     let key = "file:///clip.mp4"
     let events = media.playerEvents()
-    events.attach(key: key, viewToken: 42)
+    media.attachView(key: key, token: 42)
     media.replaceWindow(active: 0, sources: [MediaItem(kind: .video, url: key, headers: [:], cover: nil, blurHash: nil, strategy: .window)])
     media.setPlaying(key: key, playing: true)
     var plays = slot.plays.stream.makeAsyncIterator()

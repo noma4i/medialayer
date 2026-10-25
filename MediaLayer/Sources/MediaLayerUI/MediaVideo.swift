@@ -32,7 +32,8 @@ enum VideoProgress {
 public struct MediaVideo<Content: View>: View {
   @Environment(\.mediaContext) private var context
   @State private var state: MediaState = .idle
-  @State private var owner = UUID()
+  @State private var mount: PlaceMount?
+  @State private var host: SurfaceHost?
   @State private var onScreen = false
   @State private var inBackground = false
   private let source: any MediaSource
@@ -78,7 +79,7 @@ public struct MediaVideo<Content: View>: View {
       Color.clear
       if active, let context {
         PlaceholderView(item: item, ready: state.isReady, context: context)
-        VideoSurface(places: context.places, key: source.url, owner: owner, isPlaying: playing, gravity: gravity)
+        if let host { VideoSurface(host: host, gravity: gravity) }
       }
       if active { content(state) }
     }
@@ -92,12 +93,11 @@ public struct MediaVideo<Content: View>: View {
     .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
     .onChange(of: onScreen) { _, value in declare(visible: value) }
     .onDisappear { declare(visible: false) }
-    .onChange(of: playing) { _, value in context.map { KeyClaims.of($0.places).setPlaying(owner: owner, key: source.url, playing: value, group: group) } }
-    .onChange(of: group) { _, value in context.map { KeyClaims.of($0.places).setPlaying(owner: owner, key: source.url, playing: playing, group: value) } }
-    .onChange(of: peeking) { _, value in context.map { KeyClaims.of($0.places).setPeeking(owner: owner, key: source.url, peeking: value) } }
-    .onChange(of: muted) { _, value in context.map { KeyClaims.of($0.places).setMuted(owner: owner, key: source.url, muted: value) } }
-    .id(source.url)
-    .id(context.map { ObjectIdentifier($0.places) })
+    .onChange(of: playing) { mount?.update(input()) }
+    .onChange(of: group) { mount?.update(input()) }
+    .onChange(of: peeking) { mount?.update(input()) }
+    .onChange(of: muted) { mount?.update(input()) }
+    .id(MountIdentity(item: item, context: context))
   }
 
   var item: MediaItem {
@@ -119,14 +119,25 @@ public struct MediaVideo<Content: View>: View {
     for await value in slots.progress.stream(for: source.url) { onProgress(value) }
   }
 
+  private func input() -> PlaceInput {
+    .make(visible: true, playing: playing, group: group, peeking: peeking, muted: muted, viewToken: host?.token)
+  }
+
   private func declare(visible: Bool) {
-    guard let places = context?.places else { return }
-    let claims = KeyClaims.of(places)
-    guard visible else { return claims.release(owner: owner, key: source.url) }
-    claims.visible(owner: owner, source: item, visible: true)
-    claims.setMuted(owner: owner, key: source.url, muted: muted)
-    claims.setPlaying(owner: owner, key: source.url, playing: playing, group: group)
-    claims.setPeeking(owner: owner, key: source.url, peeking: peeking)
+    guard visible else {
+      mount?.close()
+      mount = nil
+      host = nil
+      return
+    }
+    guard mount == nil, let places = context?.places else { return }
+    let surface = SurfaceHost(places: places)
+    host = surface
+    let created = PlaceMount(places: places, item: item) { error in
+      Task { @MainActor in state = .failed(detail: String(describing: error)) }
+    }
+    mount = created
+    created.update(input())
   }
 
   private func follow() async {

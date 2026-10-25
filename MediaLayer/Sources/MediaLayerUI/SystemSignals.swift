@@ -42,7 +42,7 @@ final class SystemSignals {
   private var tokens: [NSObjectProtocol] = []
   private var onRelease: () -> Void
 
-  init(events: PlayerEventsProtocol, center: NotificationCenter, names: SystemSignalNames, onOutputLost: @escaping () -> Void = { Media.muted = true }, onRelease: @escaping () -> Void = {}) {
+  init(events: PlayerEventsProtocol, center: NotificationCenter, names: SystemSignalNames, onOutputLost: @escaping () -> Void = { try? Media.setMuted(true) }, onRelease: @escaping () -> Void = {}) {
     self.center = center
     self.onRelease = onRelease
     tokens = [

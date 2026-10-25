@@ -140,20 +140,14 @@ private final class ScriptedPlaces: MediaPlaces, @unchecked Sendable {
 
   func imageStats() -> ImageCounters { counters }
   func cacheKey(url: String, headers: [String: String]) -> String { url }
-  func visible(source: MediaItem, visible: Bool) {}
-  func setPlaying(key: String, playing: Bool, groups: [String?]) {}
-  func setPeeking(key: String, peeking: Bool) {}
-  func setMuted(key: String, muted: Bool) {}
-  func setRate(key: String, rate: Float) {}
-  func setMutedAll(muted: Bool) {}
-  func seek(key: String, fraction: Double) {}
-  func itemState(key: String, state: MediaState) {}
-  func setTonePreparation(preparation: TonePreparation) {}
   func tonePixelsNeeded(source: MediaItem) async -> Bool { false }
   func playUrl(source: MediaItem) async throws -> PlaybackRoute { throw CancellationError() }
   func stateStream(key: String) -> AsyncStream<MediaState> { AsyncStream { _ in } }
-  func attachView(key: String, token: UInt64) {}
-  func detachView(key: String) {}
+  func mountPlace(item: MediaItem) throws -> any PlaceHandle { throw MediaError.Closed }
+  func mountVideoWindow() throws -> any WindowHandle { throw MediaError.Closed }
+  func mountImageWindow(name: String) throws -> any WindowHandle { throw MediaError.Closed }
+  func setMutedAll(muted: Bool) throws {}
+  func setTonePreparation(preparation: TonePreparation) throws {}
 }
 
 private func tint(_ image: CGImage?) -> Tint {

@@ -90,17 +90,13 @@ private class ScriptedLayer(val label: String, private val events: Events, priva
   override fun cacheKey(url: String, headers: Map<String, String>): String = url
   override fun imageStats(): com.noma4i.medialayer.ImageCounters = counters
   override fun playerEvents() = recordingEvents
-  override fun visible(source: MediaItem, visible: Boolean) {}
-  override fun itemState(key: String, state: MediaState) {}
+  override fun openPlace(item: MediaItem): com.noma4i.medialayer.MediaPlace = NullPlace()
+  override fun openVideoWindow(): com.noma4i.medialayer.MediaWindow = NullWindow()
+  override fun openImageWindow(name: String): com.noma4i.medialayer.MediaWindow = NullWindow()
   override fun subscribeState(key: String, listener: StateListener): Subscription { listeners.add(key to listener); return Subscription(NoHandle) }
   override fun setTonePreparation(preparation: TonePreparation) {}
   override suspend fun tonePixelsNeeded(source: MediaItem): Boolean = false
   override fun setMutedAll(muted: Boolean) {}
-  override fun setMuted(key: String, muted: Boolean) {}
-  override fun setPlaying(key: String, playing: Boolean, groups: List<String?>) {}
-  override fun setPeeking(key: String, peeking: Boolean) {}
-  override fun setRate(key: String, rate: Float) {}
-  override fun seek(key: String, fraction: Double) {}
   override suspend fun fetchImage(url: String, headers: Map<String, String>): ImageFetchResult = throw kotlinx.coroutines.CancellationException("unused")
   override suspend fun playUrl(source: MediaItem): PlaybackRoute = throw kotlinx.coroutines.CancellationException("unused")
   override fun close() {}

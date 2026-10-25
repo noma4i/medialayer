@@ -1,26 +1,7 @@
 package com.noma4i.medialayer.ui
 
-import com.noma4i.medialayer.ImageCounters
-import com.noma4i.medialayer.ImageWork
 import com.noma4i.medialayer.PixelSize
 import com.noma4i.medialayer.imagePixelSize
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
-
-@OptIn(ExperimentalCoroutinesApi::class)
-internal val ffiQueue: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1)
-
-private val ffiScope = CoroutineScope(SupervisorJob() + ffiQueue)
-
-internal fun postFfi(call: () -> Unit) {
-  ffiScope.launch { call() }
-}
-
-internal fun ImageCounters.recordLater(work: ImageWork) = postFfi { record(work) }
 
 internal class PixelSizeMemo(private val compute: (Double, Double, Double, PixelSize?, Boolean) -> PixelSize? = ::imagePixelSize) {
   private data class Args(val width: Double, val height: Double, val scale: Double, val declared: PixelSize?, val crop: Boolean)

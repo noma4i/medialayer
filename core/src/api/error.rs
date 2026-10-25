@@ -14,6 +14,10 @@ pub enum MediaError {
     Tone { detail: String },
     #[error("invalid suspension: {detail}")]
     InvalidSuspension { detail: String },
+    #[error("overloaded: {detail}")]
+    Overloaded { detail: String },
+    #[error("the media layer is closed")]
+    Closed,
     #[error("unexpected: {detail}")]
     Unexpected { detail: String },
 }

@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -62,50 +64,50 @@ fun MediaImage(
   content: @Composable (MediaState) -> Unit = {}
 ) {
   val screen = rememberScreenVisibility(LocalMediaEnvironment.current.stats)
-  claimImage(source, screen)
   val item = source.toItem()
+  val failure = remember { mutableStateOf<ScopedFailure?>(null) }
+  val mount = claimImage(source, item, screen, failure)
   if (source.size != null) {
-    Box(modifier.then(screen.modifier)) { ImageBody(source, item, null, 0L, screen, contentScale, content) }
+    Box(modifier.then(screen.modifier)) { ImageBody(source, item, mount, failure, null, 0L, screen, contentScale, content) }
     return
   }
   val density = LocalDensity.current.density
   val pixelSizes = LocalMediaEnvironment.current.pixelSizes
   BoxWithConstraints(modifier.then(screen.modifier)) {
     val placementPixels = if (constraints.hasBoundedWidth && constraints.hasBoundedHeight) constraints.maxWidth.toLong() * constraints.maxHeight else 0L
-    ImageBody(source, item, decodePixels(constraints, density, source, contentScale, pixelSizes), placementPixels, screen, contentScale, content)
+    ImageBody(source, item, mount, failure, decodePixels(constraints, density, source, contentScale, pixelSizes), placementPixels, screen, contentScale, content)
   }
 }
 
 @Composable
-private fun claimImage(source: MediaSource, screen: ScreenVisibility) {
+private fun claimImage(source: MediaSource, item: MediaItem, screen: ScreenVisibility, failure: MutableState<ScopedFailure?>): PlaceMount {
   val environment = LocalMediaEnvironment.current
   val media = environment.media
   val stats = environment.stats
-  LaunchedEffect(media, source, screen) {
-    withContext(ffiQueue) {
-      val owner = Any()
-      val item = source.toItem()
-      snapshotFlow { screen.visible }.onStart { stats.record(ImageWork.Observe) }.onCompletion { stats.record(ImageWork.Unobserve) }.collectLatest { visible ->
-        if (visible) {
-          media.claims.visible(owner, item, true)
-          try { awaitCancellation() } finally { media.claims.release(owner, item.url) }
-        }
+  val mount = remember(media, item) { PlaceMount(media, item) { failure.value = ScopedFailure(item, MediaState.Failed(it.toString())) } }
+  DisposableEffect(mount) { onDispose { mount.close() } }
+  LaunchedEffect(mount, screen) {
+    withContext(Dispatchers.Default) {
+      snapshotFlow { screen.visible }.onStart { stats.recordLater(ImageWork.Observe) }.onCompletion { stats.recordLater(ImageWork.Unobserve) }.collect { visible ->
+        mount.update(placeInput(visible = visible))
       }
     }
   }
+  return mount
 }
 
 @Composable
 @OptIn(ExperimentalCoroutinesApi::class)
-private fun ImageBody(source: MediaSource, item: MediaItem, pixels: PixelSize?, placementPixels: Long, screen: ScreenVisibility, contentScale: ContentScale, content: @Composable (MediaState) -> Unit) {
+private fun ImageBody(source: MediaSource, item: MediaItem, mount: PlaceMount, failure: State<ScopedFailure?>, pixels: PixelSize?, placementPixels: Long, screen: ScreenVisibility, contentScale: ContentScale, content: @Composable (MediaState) -> Unit) {
   val context = LocalContext.current
   val environment = LocalMediaEnvironment.current
   val media = environment.media
   val scale = contentScale.toScale()
   val stats = environment.stats
   val request = remember(media, source, pixels, scale, placementPixels) { imageRequest(context, source, pixels, scale, { media.cacheKey(source.url, source.headers) }, placementPixels) }
-  val state = remember(source.url) { mutableStateOf<MediaState>(MediaState.Idle) }
+  val state = remember(item) { mutableStateOf<MediaState>(MediaState.Idle) }
   val animation = remember { mutableStateOf<Animatable?>(null) }
+  LaunchedEffect(failure.value, item) { failure.value.of(item)?.let { state.value = it } }
   LaunchedEffect(screen) {
     snapshotFlow { animation.value to screen.visible }.onStart { stats.recordLater(ImageWork.Observe) }.onCompletion { stats.recordLater(ImageWork.Unobserve) }.collectLatest { (drawable, visible) ->
       if (visible) drawable?.start() else drawable?.stop()
@@ -131,7 +133,7 @@ private fun ImageBody(source: MediaSource, item: MediaItem, pixels: PixelSize?, 
       animation.value = ((painterState as? AsyncImagePainter.State.Success)?.result?.image as? DrawableImage)?.drawable as? Animatable
       painterState.toMediaState()?.let { reached ->
         state.value = reached
-        postFfi { media.itemState(source.url, reached) }
+        mount.report(reached)
       }
     },
     modifier = Modifier.fillMaxSize()
@@ -152,7 +154,7 @@ private fun ImageBlur(item: MediaItem, screen: ScreenVisibility, state: State<Me
   val observer = LocalPlaceholderObserver.current
   key(media, item) {
     val blur by produceState<ImageBitmap?>(null) {
-      val answer = withContext(ffiQueue) { media.placeholder(item, false) as? Placeholder.BlurHash }
+      val answer = withContext(Dispatchers.Default) { media.placeholder(item, false) as? Placeholder.BlurHash }
       value = answer?.let { decodeBlur(it.hash, decoder) }
       value?.let { observer?.invoke("blurhash", it.asAndroidBitmap()) }
     }

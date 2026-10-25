@@ -12,49 +12,35 @@ func layoutHosted(_ layer: CALayer?, bounds: CGRect, gravity: AVLayerVideoGravit
   CATransaction.commit()
 }
 
-final class SurfaceAttachment {
-  let places: MediaPlaces
-  let key: String
+final class SurfaceHost: @unchecked Sendable {
+  let layer = CALayer()
   let token: UInt64
   private let hosts: HostLayers
 
-  init(places: MediaPlaces, key: String, layer: CALayer, owner: UUID = UUID(), isPlaying: Bool = false, hosts: HostLayers? = nil) {
-    let hosts = hosts ?? HostLayers.of(places)
-    self.places = places
-    self.key = key
-    self.hosts = hosts
+  init(places: MediaPlaces) {
+    hosts = HostLayers.of(places)
     token = hosts.register(layer)
-    if hosts.claim(key: key, token: token, owner: owner, isPlaying: isPlaying) { places.attachView(key: key, token: token) }
   }
 
-  deinit {
-    hosts.unregister(token)
-    switch hosts.release(key: key, token: token) {
-    case .none: break
-    case .detach: places.detachView(key: key)
-    case .handover(let previous): places.attachView(key: key, token: previous)
-    }
-  }
+  deinit { hosts.unregister(token) }
 }
 
 #if canImport(UIKit)
 import UIKit
 
 final class SurfaceView: UIView {
-  var attachment: SurfaceAttachment?
+  var host: SurfaceHost?
   var gravity = AVLayerVideoGravity.resizeAspectFill
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    layoutHosted(layer, bounds: bounds, gravity: gravity)
+    host?.layer.frame = bounds
+    layoutHosted(host?.layer, bounds: bounds, gravity: gravity)
   }
 }
 
 struct VideoSurface: UIViewRepresentable {
-  let places: MediaPlaces
-  let key: String
-  let owner: UUID
-  let isPlaying: Bool
+  let host: SurfaceHost
   var gravity = AVLayerVideoGravity.resizeAspectFill
 
   func makeUIView(context: Context) -> SurfaceView {
@@ -69,33 +55,35 @@ struct VideoSurface: UIViewRepresentable {
       view.gravity = gravity
       view.setNeedsLayout()
     }
-    if view.attachment == nil {
-      view.attachment = SurfaceAttachment(places: places, key: key, layer: view.layer, owner: owner, isPlaying: isPlaying)
+    if view.host !== host {
+      view.host?.layer.removeFromSuperlayer()
+      view.host = host
+      view.layer.addSublayer(host.layer)
+      view.setNeedsLayout()
     }
   }
 
   static func dismantleUIView(_ view: SurfaceView, coordinator: ()) {
-    view.attachment = nil
+    view.host?.layer.removeFromSuperlayer()
+    view.host = nil
   }
 }
 #else
 import AppKit
 
 final class SurfaceView: NSView {
-  var attachment: SurfaceAttachment?
+  var host: SurfaceHost?
   var gravity = AVLayerVideoGravity.resizeAspectFill
 
   override func layout() {
     super.layout()
-    layoutHosted(layer, bounds: bounds, gravity: gravity)
+    host?.layer.frame = bounds
+    layoutHosted(host?.layer, bounds: bounds, gravity: gravity)
   }
 }
 
 struct VideoSurface: NSViewRepresentable {
-  let places: MediaPlaces
-  let key: String
-  let owner: UUID
-  let isPlaying: Bool
+  let host: SurfaceHost
   var gravity = AVLayerVideoGravity.resizeAspectFill
 
   func makeNSView(context: Context) -> SurfaceView {
@@ -109,13 +97,17 @@ struct VideoSurface: NSViewRepresentable {
       view.gravity = gravity
       view.needsLayout = true
     }
-    if view.attachment == nil, let layer = view.layer {
-      view.attachment = SurfaceAttachment(places: places, key: key, layer: layer, owner: owner, isPlaying: isPlaying)
+    if view.host !== host {
+      view.host?.layer.removeFromSuperlayer()
+      view.host = host
+      view.layer?.addSublayer(host.layer)
+      view.needsLayout = true
     }
   }
 
   static func dismantleNSView(_ view: SurfaceView, coordinator: ()) {
-    view.attachment = nil
+    view.host?.layer.removeFromSuperlayer()
+    view.host = nil
   }
 }
 #endif

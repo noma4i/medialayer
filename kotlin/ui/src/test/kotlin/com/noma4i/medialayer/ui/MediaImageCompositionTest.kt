@@ -147,16 +147,11 @@ class MediaImageCompositionTest {
       rule.runOnIdle { shown.value = 0 }
       rule.waitUntil(10000) { looper.idle(); settled(false, round) }
     }
-    rule.waitUntil(10000) { looper.idle(); layer.counterWork.isNotEmpty() && layer.counterWork.count { it == "Observe" } == layer.counterWork.count { it == "Unobserve" } }
+    rule.waitUntil(10000) { looper.idle(); drainFfi(); layer.counterWork.isNotEmpty() && layer.counterObserved == 0L }
 
     assertEquals(emptyList<String>(), layer.mainThreadFfi.filter { it != "cacheKey" })
     assertEquals(true, layer.mainThreadFfi.size <= total * 2)
     for (url in urls) assertEquals(listOf("visible:$url:true", "visible:$url:false", "visible:$url:true", "visible:$url:false"), layer.calls.filter { it.startsWith("visible:$url:") })
-    var open = 0
-    for (work in layer.counterWork) {
-      open += if (work == "Observe") 1 else -1
-      assertEquals(true, open >= 0)
-    }
   }
 
   @Test

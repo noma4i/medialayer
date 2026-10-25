@@ -7,9 +7,10 @@ use crate::proxy::block_key;
 use async_trait::async_trait;
 use futures_util::future::{AbortHandle, Abortable};
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::runtime::Handle;
+use tokio::sync::Notify;
 
 pub const MEMO_ENTRIES: usize = 256;
 
@@ -29,6 +30,7 @@ pub trait TonePreparation: Send + Sync {
 struct Demand {
     source: MediaItem,
     queried: bool,
+    seq: u64,
 }
 
 #[async_trait]
@@ -103,6 +105,10 @@ pub struct Tones {
     hubs: Hubs,
     analyses: AtomicU64,
     suspended: AtomicBool,
+    closed: AtomicBool,
+    active: AtomicUsize,
+    idle: Notify,
+    demand_seq: AtomicU64,
 }
 
 struct Running {
@@ -113,6 +119,9 @@ struct Running {
 impl Drop for Running {
     fn drop(&mut self) {
         locked(&self.tones.running).remove(&self.key);
+        if self.tones.active.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.tones.idle.notify_waiters();
+        }
     }
 }
 
@@ -132,6 +141,10 @@ impl Tones {
             hubs: Arc::new(Mutex::new(HashMap::new())),
             analyses: AtomicU64::new(0),
             suspended: AtomicBool::new(false),
+            closed: AtomicBool::new(false),
+            active: AtomicUsize::new(0),
+            idle: Notify::new(),
+            demand_seq: AtomicU64::new(0),
         })
     }
 
@@ -148,13 +161,47 @@ impl Tones {
         let key = self.store.key_for(&source.url, &source.headers);
         let data = self.known(&key).await.or_else(|| self.from_blurhash(&key, source));
         if !data.as_ref().is_some_and(|tone| tone.source == ToneSource::Pixels) {
-            locked(&self.demands).entry(key.clone()).or_insert_with(|| Demand { source: source.clone(), queried: false }).queried = true;
+            let seq = self.demand_seq.fetch_add(1, Ordering::Relaxed);
+            locked(&self.demands).entry(key.clone()).or_insert_with(|| Demand { source: source.clone(), queried: false, seq }).queried = true;
+            self.trim_demands();
             self.request(&key);
         }
         data.map(|data| data.at(band)).transpose()
     }
 
+    /// Reads that found no pixels leave one demand each; the oldest reads beyond the memo size are forgotten.
+    fn trim_demands(&self) {
+        let hubs = locked(&self.hubs);
+        let mut demands = locked(&self.demands);
+        let mut reads: Vec<(u64, String)> = demands.iter().filter(|(key, demand)| demand.queried && !hubs.contains_key(*key)).map(|(key, demand)| (demand.seq, key.clone())).collect();
+        if reads.len() <= MEMO_ENTRIES {
+            return;
+        }
+        reads.sort_unstable();
+        let excess = reads.len() - MEMO_ENTRIES;
+        let running = locked(&self.running);
+        for (_, key) in reads.into_iter().take(excess).filter(|(_, key)| !running.contains_key(key)) {
+            demands.remove(&key);
+        }
+    }
+
+    /// Cancels every preparation and waits until none runs: no callback is delivered after this returns.
+    pub async fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        *locked(&self.preparation) = None;
+        for abort in locked(&self.running).values() { abort.abort(); }
+        loop {
+            let idle = self.idle.notified();
+            tokio::pin!(idle);
+            idle.as_mut().enable();
+            if self.active.load(Ordering::SeqCst) == 0 { break; }
+            idle.await;
+        }
+        locked(&self.demands).clear();
+    }
+
     pub fn set_preparation(self: &Arc<Self>, preparation: Arc<dyn TonePreparation>) {
+        if self.closed.load(Ordering::SeqCst) { return; }
         *locked(&self.preparation) = Some(preparation);
         let keys: Vec<_> = locked(&self.demands).keys().cloned().collect();
         for key in keys { self.request(&key); }
@@ -164,7 +211,8 @@ impl Tones {
         let key = self.store.key_for(&source.url, &source.headers);
         let mut hubs = locked(&self.hubs);
         let inner = hubs.entry(key.clone()).or_insert_with(|| Hub::new(self.handle.clone())).subscribe(deliver);
-        locked(&self.demands).entry(key.clone()).or_insert_with(|| Demand { source: source.clone(), queried: false });
+        let seq = self.demand_seq.fetch_add(1, Ordering::Relaxed);
+        locked(&self.demands).entry(key.clone()).or_insert_with(|| Demand { source: source.clone(), queried: false, seq });
         drop(hubs);
         self.request(&key);
         let hubs = self.hubs.clone();
@@ -217,7 +265,7 @@ impl Tones {
     }
 
     fn request(self: &Arc<Self>, key: &str) {
-        if self.suspended.load(Ordering::SeqCst) { return; }
+        if self.suspended.load(Ordering::SeqCst) || self.closed.load(Ordering::SeqCst) { return; }
         let Some(source) = locked(&self.demands).get(key).map(|demand| demand.source.clone()) else { return };
         let Some(preparation) = locked(&self.preparation).clone() else { return };
         if !self.demanded(key) { return; }
@@ -225,6 +273,7 @@ impl Tones {
         if running.contains_key(key) { return; }
         let (abort, registration) = AbortHandle::new_pair();
         running.insert(key.to_string(), abort);
+        self.active.fetch_add(1, Ordering::SeqCst);
         drop(running);
         let guard = Running { tones: self.clone(), key: key.to_string() };
         let tones = self.clone();
@@ -234,6 +283,7 @@ impl Tones {
             let cancelled = Abortable::new(async move {
                 if !tones.pixels_needed(&source).await { return; }
                 let Some(pixels) = preparation.prepare(source.clone()).await else { return };
+                if tones.closed.load(Ordering::SeqCst) { return; }
                 if pixels.width > 64 || pixels.height > 64 || !tones.pixels_needed(&source).await { return; }
                 tones.analyze_pixels(source, pixels.width, pixels.height, pixels.rgba).await;
             }, registration).await.is_err();

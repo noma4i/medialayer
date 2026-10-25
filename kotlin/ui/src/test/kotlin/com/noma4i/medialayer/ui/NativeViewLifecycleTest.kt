@@ -26,6 +26,7 @@ import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.PlaybackRoute
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -202,10 +203,13 @@ class NativeViewLifecycleTest {
     rule.waitUntil(5000) { looper.idle(); events.calls.any { it.startsWith("attach:first:") } }
     val first = events.calls.last { it.startsWith("attach:first:") }
     rule.runOnIdle { newer = true }
-    rule.waitUntil(5000) { looper.idle(); events.calls.lastOrNull() != first && factory.players.liveViews == 2 }
+    rule.waitUntil(5000) { looper.idle(); events.calls.count { it.startsWith("attach:first:") } == 2 && factory.players.liveViews == 2 }
+    val second = events.calls.last { it.startsWith("attach:first:") }
+    assertNotEquals(first, second)
     rule.runOnIdle { newer = false }
-    rule.waitUntil(5000) { looper.idle(); factory.players.liveViews == 1 }
-    assertEquals(first, events.calls.last())
+    rule.waitUntil(5000) { looper.idle(); factory.players.liveViews == 1 && layer.calls.contains("release:first") }
+    assertEquals(1, layer.calls.count { it == "release:first" })
+    assertEquals(2, events.calls.count { it.startsWith("attach:first:") })
   }
 
   @Test
@@ -230,10 +234,9 @@ class NativeViewLifecycleTest {
     rule.waitUntil(5000) { looper.idle(); layer.calls.contains("visible:first:true") }
     rule.runOnIdle { url = "second" }
     rule.waitUntil(5000) { looper.idle(); layer.calls.contains("visible:second:true") }
-    assertTrue(layer.calls.contains("visible:first:false"))
     val events = layer.playerEvents() as RecordingEvents
-    assertTrue(events.calls.contains("detach:first"))
-    assertTrue(events.calls.any { it.startsWith("attach:second:") })
+    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("release:first") && events.calls.any { it.startsWith("attach:second:") } }
+    assertTrue(layer.calls.contains("visible:first:false"))
   }
 
   @Test
@@ -306,7 +309,7 @@ class NativeViewLifecycleTest {
     clock.advanceTime(1000)
     rule.waitUntil(5000) { looper.idleFor(java.time.Duration.ofMillis(100)); control!!.progress > 0 }
     rule.runOnIdle { control!!.seek(0.5f) }
-    assertTrue(layer.calls.contains("seek:first:0.5"))
+    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("seek:first:0.5") }
     layer.emit("first", com.noma4i.medialayer.MediaState.Ended)
     rule.waitUntil(5000) { looper.idle(); !control!!.isPlaying }
     assertEquals(com.noma4i.medialayer.MediaState.Ended, control!!.state)

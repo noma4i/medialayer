@@ -22,10 +22,6 @@ impl Stage {
         }
     }
 
-    pub fn keep_whole(&self, source: &MediaItem) {
-        self.declare_whole(std::iter::once(source));
-    }
-
     pub fn replace_window(&self, active: usize, sources: Vec<Option<MediaItem>>) {
         self.declare_whole(sources.iter().flatten());
         let mut state = self.state();
@@ -81,6 +77,11 @@ impl Stage {
         self.declare_whole(pages.iter().flatten());
         self.state().image_windows.insert(name.to_string(), pages);
         self.move_image_window(name, active);
+    }
+
+    pub fn close_image_window(&self, name: &str) {
+        self.state().image_windows.remove(name);
+        self.inner.prefetcher.set_image_window(name, 0, Vec::<Vec<crate::prefetch::Source>>::new());
     }
 
     pub fn move_image_window(&self, name: &str, active: usize) {
@@ -261,6 +262,17 @@ impl Stage {
             (state, commands)
         };
         self.dispatch(state, commands);
+    }
+
+    /// A later declaration of a shown key changed its item: the catalog follows without a second show.
+    pub fn replace_source(&self, source: MediaItem) {
+        let url = source.url.clone();
+        let mut state = self.state();
+        if !state.shown.contains_key(&url) {
+            return;
+        }
+        state.catalog.insert(url.clone(), source);
+        state.refresh_pending(&url);
     }
 
     pub fn release_all(&self) {

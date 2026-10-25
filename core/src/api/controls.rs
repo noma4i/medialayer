@@ -6,7 +6,7 @@ use super::types::{Kind, MediaStats};
 use crate::change::Change;
 use crate::limits::Limits;
 use crate::memory::{effective_ceiling, DeviceMemory, Ledger, ShareTuning};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use tokio::runtime::Handle;
 use tokio::sync::Mutex as AsyncMutex;
@@ -35,6 +35,7 @@ pub struct Controls {
     stats_hub: Hub<MediaStats>,
     change: Arc<Change>,
     wakes: AtomicU64,
+    closed: AtomicBool,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -52,6 +53,7 @@ impl Controls {
             stats_hub: Hub::new(handle),
             change,
             wakes: AtomicU64::new(0),
+            closed: AtomicBool::new(false),
         }
     }
 
@@ -91,9 +93,18 @@ impl Controls {
         Ok(())
     }
 
+    pub fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+    }
+
     pub async fn stats(&self) -> MediaStats {
+        self.stats_with(self.ports.pool.stats()).await
+    }
+
+    /// Stats over a pool snapshot the media executor took at its own barrier.
+    pub async fn stats_with(&self, pool: crate::pool::PoolStats) -> MediaStats {
         let diagnostics = locked(&self.diagnostics).clone();
-        MediaStats::collect(&self.ports.cache.stats().await, &self.ports.pool.stats(), diagnostics)
+        MediaStats::collect(&self.ports.cache.stats().await, &pool, diagnostics)
     }
 
     pub async fn clear(&self, kind: Option<Kind>) {
@@ -137,7 +148,7 @@ impl Controls {
     }
 
     pub async fn publish_stats(&self) {
-        if self.stats_hub.listener_count() == 0 {
+        if self.closed.load(Ordering::SeqCst) || self.stats_hub.listener_count() == 0 {
             return;
         }
         let stats = self.stats().await;

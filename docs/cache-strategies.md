@@ -42,7 +42,7 @@ MediaVideo(MomentCircle(url: moment.circleUrl), playing: isActive)
 MediaVideo(source = MomentCircle(url = moment.circleUrl), playing = isActive)
 ```
 
-A source is declared when a place shows it (`visible`) or when it is in a list given to `replaceWindow` or `replaceImageWindow`. The library looks at every item of the list, not only at the items around the active page, and starts a `whole` load for each `whole` item once. A `whole` or `on_demand` item is never part of the prefetch window, so it takes no window slot and no chunk budget.
+A source is declared when a place shows it (`visible`) or when it is in a list a window object received through `replace` or `replace_pages`. The library looks at every item of the list, not only at the items around the active page, and starts a `whole` load for each `whole` item once. A `whole` or `on_demand` item is never part of the prefetch window, so it takes no window slot and no chunk budget.
 
 ## How `whole` loads
 
