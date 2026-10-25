@@ -297,6 +297,7 @@ pub async fn proxy_rig() -> ProxyRig {
 pub struct MockSlot {
     pub calls: Mutex<Vec<SlotCall>>,
     pub gate: Arc<LoadGate>,
+    pub seek_gate: Arc<LoadGate>,
     pub sample: Mutex<SlotSample>,
     pub samples: AtomicUsize,
     pub on_sample: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
@@ -355,6 +356,9 @@ impl PlayerSlot for MockSlot {
         if matches!(command, SlotCall::Load { .. }) {
             self.gate.pass().await;
         }
+        if matches!(command, SlotCall::Seek { .. }) {
+            self.seek_gate.pass().await;
+        }
         flight.1 = true;
         let is_seek = matches!(command, SlotCall::Seek { .. });
         self.calls.lock().unwrap().push(command);
@@ -380,6 +384,7 @@ pub struct MockFactory {
     pub slots: Mutex<HashMap<u32, Arc<MockSlot>>>,
     pub created: Mutex<Vec<u32>>,
     pub gate: Arc<LoadGate>,
+    pub seek_gate: Arc<LoadGate>,
     pub create_gate: Arc<LoadGate>,
     pub advance_ms: Mutex<u64>,
 }
@@ -410,6 +415,7 @@ impl PlayerSlotFactory for MockFactory {
         let player = Arc::new(MockSlot {
             calls: Mutex::default(),
             gate: self.gate.clone(),
+            seek_gate: self.seek_gate.clone(),
             sample: Mutex::new(idle),
             samples: AtomicUsize::new(0),
             on_sample: Mutex::new(None),

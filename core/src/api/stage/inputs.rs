@@ -295,7 +295,7 @@ impl Stage {
             self.inner.places.retire_all();
             (state, commands)
         };
-        self.dispatch_with(state, commands, false);
+        self.dispatch_with(state, commands, false, Vec::new());
         self.inner.prefetcher.forget_windows();
     }
 }

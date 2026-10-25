@@ -9,31 +9,39 @@ pub const LANE_CAPACITY: usize = 16;
 struct Pending {
     calls: VecDeque<SlotCall>,
     in_flight: bool,
+    source_revision: u64,
 }
 
 #[derive(Default)]
 pub struct Queue {
     pending: Mutex<Pending>,
     pub wake: Notify,
+    source_replaced: Notify,
 }
 
 impl Queue {
     pub fn push(&self, call: SlotCall) {
         let mut state = self.pending();
-        let pending = &mut state.calls;
-        if matches!(call, SlotCall::Load { .. } | SlotCall::Unload) {
+        let replaces_source = matches!(call, SlotCall::Load { .. } | SlotCall::Unload);
+        if replaces_source {
+            state.source_revision += 1;
+            let pending = &mut state.calls;
             let sound = pending.iter().rfind(|queued| matches!(queued, SlotCall::Mute | SlotCall::Unmute)).cloned();
             let release = pending.contains(&SlotCall::Unload).then_some(SlotCall::Unload).filter(|_| matches!(call, SlotCall::Load { .. }));
             pending.clear();
             pending.extend(sound);
             pending.extend(release);
         }
+        let pending = &mut state.calls;
         pending.push_back(call);
         if pending.len() > LANE_CAPACITY {
             *pending = fold(pending);
         }
         drop(state);
         self.wake.notify_one();
+        if replaces_source {
+            self.source_replaced.notify_waiters();
+        }
     }
 
     pub fn begin_batch(&self) -> bool {
@@ -42,11 +50,23 @@ impl Queue {
         state.in_flight
     }
 
-    pub fn pop(&self) -> Option<SlotCall> {
+    pub fn pop(&self) -> Option<(SlotCall, u64)> {
         let mut state = self.pending();
         let call = state.calls.pop_front();
         state.in_flight = call.is_some();
-        call
+        call.map(|call| (call, state.source_revision))
+    }
+
+    pub async fn source_replaced_since(&self, revision: u64) {
+        loop {
+            let replaced = self.source_replaced.notified();
+            tokio::pin!(replaced);
+            replaced.as_mut().enable();
+            if self.pending().source_revision != revision {
+                return;
+            }
+            replaced.await;
+        }
     }
 
     pub fn finish(&self) {

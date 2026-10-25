@@ -243,6 +243,42 @@ class ExoPlayerSlotTest {
   }
 
   @Test
+  fun aSeekCancelledBeforeItsPostRunsIsNeverApplied() {
+    val slot = factory().createSlot(0u)
+    slot.load("k", route); idle()
+
+    val job = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined).launch { slot.apply(com.noma4i.medialayer.SlotCall.Seek(500u)) }
+    job.cancel()
+    idle()
+
+    assertEquals(0L, slot.player!!.currentPosition)
+  }
+
+  @Test
+  fun aPausedAndRewoundSlotThatEndedPlaysAgainFromTheStart() {
+    val clock = FakeClock(0)
+    val slot = factory().also { it.clock = clock }.createSlot(0u)
+    slot.load("k", route.copy(looping = false)); idle()
+    slot.play(); idle()
+    playUntilReady(clock, slot)
+    for (step in 0 until 200) {
+      if (slot.player!!.playbackState == Player.STATE_ENDED) break
+      clock.advanceTime(1000); idle(); Thread.sleep(10)
+    }
+    assertEquals(Player.STATE_ENDED, slot.player!!.playbackState)
+
+    slot.pause(); slot.seek(0u); idle()
+
+    assertEquals(0L, slot.player!!.currentPosition)
+    assertFalse(slot.player!!.isPlaying)
+    assertTrue(slot.player!!.playbackState != Player.STATE_ENDED)
+    slot.play(); idle()
+    playUntilReady(clock, slot)
+    assertTrue(slot.player!!.isPlaying)
+    assertTrue(slot.sample().positionMs < slot.sample().durationMs!!)
+  }
+
+  @Test
   fun theRateIsThePlaybackSpeedAndGoesBackToNormalWithUnload() {
     val slot = factory().createSlot(0u)
     slot.load("k", route); idle()

@@ -33,6 +33,11 @@ class AudioControl internal constructor(playing: Boolean, private val seekTo: (D
 
   fun toggle() { isPlaying = !isPlaying }
 
+  internal fun ended() {
+    isPlaying = false
+    progress = 0f
+  }
+
   internal fun follow(playing: Boolean) {
     if (declared == playing) return
     declared = playing
@@ -62,7 +67,7 @@ fun MediaAudio(source: MediaSource, playing: Boolean = false, muted: Boolean = f
   val state = rememberPlace(source, control.isPlaying, muted, group = group)
   if (control.state != state) control.state = state
   val player by remember(environment, source.url) { environment.players?.player(source.url) ?: flowOf(null) }.collectAsState(null)
-  LaunchedEffect(state, control) { if (state == MediaState.Ended) control.pause() }
+  LaunchedEffect(state, control) { if (state == MediaState.Ended) control.ended() }
   DisposableEffect(player, screen.started, control) {
     val exo = player
     if (!screen.started || exo == null) return@DisposableEffect onDispose { }

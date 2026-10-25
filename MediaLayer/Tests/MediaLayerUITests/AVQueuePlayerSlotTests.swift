@@ -293,6 +293,79 @@ struct AVQueuePlayerSlotTests {
     await eventually("sample() advances after a rate change") { slot.sample().positionMs > paused + 40 }
   }
 
+  @Test
+  func aSeekFinishesOnThePlayerBeforeTheNextCommandOfTheLaneRuns() async {
+    let log = PlayerEventLog()
+    let slot = await makeSlot(log)
+    await slot.load(key: "clip", route: route(Self.silentClip))
+    await log.wait(for: "ready")
+    await slot.play()
+    await log.wait(for: "ended")
+    await slot.pause()
+    #expect(slot.sample().positionMs > 0)
+
+    await slot.seek(positionMs: 0)
+
+    #expect(slot.sample().positionMs == 0)
+    await slot.play()
+    await eventually("the replay from the start ended again") { log.count("ended") == 2 }
+  }
+
+  @Test
+  func aSeekAndAPlayIssuedBeforeTheItemIsReadyStartPlaybackFromTheSoughtPosition() async {
+    let log = PlayerEventLog()
+    let slot = await makeSlot(log)
+    await slot.load(key: "clip", route: route(Self.silentClip))
+
+    await slot.seek(positionMs: 300)
+    await slot.play()
+    await log.wait(for: "ready")
+
+    await eventually("playback runs from the sought position") { slot.sample().positionMs >= 290 }
+  }
+
+  @Test
+  func aCancelledOrUnloadedSeekOfAnItemThatNeverGetsReadyReturnsAndLeavesTheSlotFree() async {
+    let log = PlayerEventLog()
+    let slot = await makeSlot(log)
+    let stuck = route("http://192.0.2.1/never.mp4")
+    await slot.load(key: "a", route: stuck)
+    let cancelled = Task { await slot.seek(positionMs: 300) }
+    await eventually("the seek waits for the item") { await MainActor.run { slot.player.currentItem?.status == .unknown } }
+    cancelled.cancel()
+    await cancelled.value
+
+    await slot.load(key: "b", route: stuck)
+    let unloaded = Task { await slot.seek(positionMs: 300) }
+    try? await Task.sleep(for: .milliseconds(100))
+    await slot.unload()
+    await unloaded.value
+
+    await slot.load(key: "c", route: route(Self.silentClip))
+    await log.wait(for: "ready")
+    await slot.seek(positionMs: 300)
+    #expect(slot.sample().positionMs >= 290)
+  }
+
+  @MainActor
+  @Test
+  func inv_audio_03_anEndedAudioStopsAtTheStartAndALaterSeekSurvivesARepeatedEnd() {
+    let places = RecordingPlaces()
+    let audio = AudioPlayback(key: "note", playing: false, places: places)
+    audio.toggle()
+    audio.refresh(progress: 1)
+
+    audio.follow(.ended)
+    #expect(!audio.isPlaying && audio.progress == 0)
+    audio.seek(to: 0.5)
+    audio.follow(.ended)
+    #expect(audio.progress == 0.5)
+    audio.toggle()
+
+    #expect(audio.isPlaying)
+    #expect(places.recorded.filter { $0.hasPrefix("playing") || $0.hasPrefix("seek") } == ["playing true", "playing false", "seek 0.5", "playing true"])
+  }
+
   @Test(arguments: [
     (["X-Test": "1"], true, ["AVURLAssetHTTPHeaderFieldsKey", "AVURLAssetOverrideMIMETypeKey"]),
     (["X-Test": "1"], false, ["AVURLAssetHTTPHeaderFieldsKey"]),

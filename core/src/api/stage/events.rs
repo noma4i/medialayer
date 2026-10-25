@@ -3,8 +3,9 @@ use crate::api::guard::AbortOnDrop;
 use crate::api::slots::{SlotCall, SlotSample};
 use crate::api::types::MediaState;
 use crate::proxy::Readiness;
-use crate::session::{Action, Event, Sample};
+use crate::session::{Action, Event, Intent, Sample};
 use std::sync::atomic::Ordering;
+use std::sync::PoisonError;
 use std::time::Duration;
 
 #[derive(PartialEq)]
@@ -118,8 +119,20 @@ impl Stage {
         {
             let mut state = self.state();
             let Some(key) = Self::current_key(&state, slot, generation) else { return };
+            if state.loaded.get(&key).is_some_and(|loaded| loaded.route.looping) || !self.inner.places.ended(&key) {
+                return;
+            }
             self.advance(&mut state, &key, Event::Pause, &mut actions);
-            self.inner.places.ended(&key);
+            state.positions.forget(&key);
+            if let Some(loaded) = state.loaded.get(&key) {
+                self.inner.seeks.lock().unwrap_or_else(PoisonError::into_inner).remove(&loaded.source.url);
+            }
+            let orders = match state.leases.get(&key).copied() {
+                Some(lease) => state.election.set_intent(&key, lease, Intent::Idle),
+                None => Vec::new(),
+            };
+            let commands = state.commands_for(orders);
+            self.dispatch_with(state, commands, true, vec![(slot, SlotCall::Seek { position_ms: 0 })]);
         }
         for (id, action) in actions {
             self.perform(id, action);

@@ -6,6 +6,7 @@ mod hub;
 mod lane;
 mod placeholder;
 mod places;
+mod places_state;
 mod ports;
 mod routes;
 mod signals;

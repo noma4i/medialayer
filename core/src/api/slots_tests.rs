@@ -127,6 +127,38 @@ async fn inv_api_42_closing_the_runner_cancels_the_held_apply_and_runs_nothing_a
 }
 
 #[tokio::test]
+async fn inv_api_42_a_held_seek_blocks_a_play_but_gives_way_to_a_new_source() {
+    let factory: Arc<MockFactory> = Arc::default();
+    let runner = SlotRunner::new(Handle::current(), Some(factory.clone()));
+    runner.send(0, load("a", 1));
+    eventually(|| runner.is_idle()).await;
+    let slot = factory.slot(0);
+
+    let held = factory.seek_gate.hold();
+    runner.send(0, SlotCall::Seek { position_ms: 0 });
+    eventually(|| factory.seek_gate.entered() == 1).await;
+    runner.send(0, SlotCall::Play);
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(slot.calls(), vec![load("a", 1)], "the play passed the held seek");
+    assert_eq!(slot.cancelled_applies(), 0, "a play cancelled the seek");
+    drop(held);
+    eventually(|| runner.is_idle()).await;
+    assert_eq!(slot.calls(), vec![load("a", 1), SlotCall::Seek { position_ms: 0 }, SlotCall::Play]);
+
+    let held = factory.seek_gate.hold();
+    runner.send(0, SlotCall::Seek { position_ms: 5 });
+    eventually(|| factory.seek_gate.entered() == 2).await;
+    runner.send(0, SlotCall::Play);
+    runner.send(0, SlotCall::Unload);
+    eventually(|| slot.calls().last() == Some(&SlotCall::Unload)).await;
+    assert_eq!(slot.cancelled_applies(), 1, "the held seek of the old source was not dropped");
+    assert_eq!(slot.calls().iter().filter(|call| matches!(call, SlotCall::Seek { position_ms: 5 })).count(), 0);
+    drop(held);
+}
+
+#[tokio::test]
 async fn inv_api_01_each_slot_gets_one_player_for_its_whole_life_and_a_slow_slot_does_not_hold_another() {
     let factory: Arc<MockFactory> = Arc::default();
     let runner = SlotRunner::new(Handle::current(), Some(factory.clone()));

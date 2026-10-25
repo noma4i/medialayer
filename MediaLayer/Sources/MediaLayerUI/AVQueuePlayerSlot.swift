@@ -78,6 +78,36 @@ private final class MadeSlots: @unchecked Sendable {
   }
 }
 
+private final class SeekWait: @unchecked Sendable {
+  let positionMs: UInt64
+  var item: AVPlayerItem?
+  var isStarted = false
+  private let lock = NSLock()
+  private var continuation: CheckedContinuation<Void, Never>?
+  private var finished = false
+
+  init(positionMs: UInt64) { self.positionMs = positionMs }
+
+  var isFinished: Bool { lock.withLock { finished } }
+
+  func park(_ parked: CheckedContinuation<Void, Never>) {
+    let isDone = lock.withLock { () -> Bool in
+      if !finished { continuation = parked }
+      return finished
+    }
+    if isDone { parked.resume() }
+  }
+
+  func finish() {
+    let parked = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+      finished = true
+      defer { continuation = nil }
+      return continuation
+    }
+    parked?.resume()
+  }
+}
+
 public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable {
   public let id: UInt32
   public private(set) lazy var player: AVQueuePlayer = {
@@ -112,6 +142,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private var itemReady = false
   private var looping = false
   private var wantsPlay = false
+  private var seekWait: SeekWait?
   private var readahead: TimeInterval = 0
   private let closed = Latch()
 
@@ -148,6 +179,10 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   }
 
   public func apply(command: SlotCall) async {
+    if case let .seek(positionMs) = command {
+      await applySeek(positionMs: positionMs)
+      return
+    }
     await MainActor.run { [self] in
       guard !closed.isSet, !Task.isCancelled else { return }
       perform(command)
@@ -173,7 +208,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     case .unmute: player.isMuted = false
     case let .attach(viewToken): attach(viewToken: viewToken)
     case .detach: detach()
-    case let .seek(positionMs): seek(positionMs: positionMs)
+    case .seek: break  // applySeek waits for the completion of a seek, perform cannot
     case let .rate(rate): setRate(rate: rate)
     case let .readahead(ms): setReadahead(ms: ms)
     }
@@ -248,10 +283,51 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     }
   }
 
-  private func seek(positionMs: UInt64) {
-    player.seek(to: CMTime(value: CMTimeValue(positionMs), timescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
-      self?.onMain { [weak self] in self?.refreshSample() }
+  private func applySeek(positionMs: UInt64) async {
+    let wait = SeekWait(positionMs: positionMs)
+    await withTaskCancellationHandler {
+      await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        wait.park(continuation)
+        Task { @MainActor [self] in beginSeek(wait) }
+      }
+    } onCancel: {
+      Task { @MainActor [self] in cancelSeek(wait) }
     }
+  }
+
+  private func beginSeek(_ wait: SeekWait) {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard !wait.isFinished, !closed.isSet, let item else { return wait.finish() }
+    finishSeek()
+    wait.item = item
+    seekWait = wait
+    if item.status == .readyToPlay { startSeek(wait) }
+  }
+
+  private func startSeek(_ wait: SeekWait) {
+    wait.isStarted = true
+    player.seek(to: CMTime(value: CMTimeValue(wait.positionMs), timescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+      self?.onMain { [weak self] in
+        self?.refreshSample()
+        self?.completeSeek(wait)
+      }
+    }
+  }
+
+  private func completeSeek(_ wait: SeekWait) {
+    wait.finish()
+    if seekWait === wait { seekWait = nil }
+  }
+
+  private func cancelSeek(_ wait: SeekWait) {
+    wait.item?.cancelPendingSeeks()
+    completeSeek(wait)
+  }
+
+  private func finishSeek() {
+    guard let wait = seekWait else { return }
+    seekWait = nil
+    wait.finish()
   }
 
   private func setRate(rate: Float) {
@@ -369,10 +445,12 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     case .readyToPlay:
       MediaTrace.emit("player", "slot=\(id) item ready key=\(key.map(MediaTrace.tail) ?? "-")")
       itemReady = true
+      if let wait = seekWait, !wait.isStarted, wait.item === item { startSeek(wait) }
       refreshSample()
       events.with { $0.ready(slot: id, generation: generation) }
       prerollIfReady()
     case .failed:
+      finishSeek()
       MediaTrace.emit("player", "slot=\(id) item failed key=\(key.map(MediaTrace.tail) ?? "-") \(item.error.map { String(describing: $0) } ?? "-")")
       events.with { $0.failed(slot: id, generation: generation, status: Self.httpStatus(of: item), detail: item.error?.localizedDescription ?? "failed") }
     default:
@@ -406,6 +484,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     item = nil
     player.defaultRate = 1
     prerollRequested = false
+    finishSeek()
     itemReady = false
     visualReadySent = false
     readahead = 0

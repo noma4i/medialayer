@@ -147,8 +147,15 @@ async fn run_lane(players: Arc<dyn PlayerSlotFactory>, slot: usize, queue: Arc<Q
                 player.get_or_init(|| created.player).clone()
             }
         };
-        while let Some(call) = queue.pop() {
-            current.apply(call).await;
+        while let Some((call, revision)) = queue.pop() {
+            if matches!(call, SlotCall::Seek { .. }) {
+                tokio::select! {
+                    () = current.apply(call) => {}
+                    () = queue.source_replaced_since(revision) => {}
+                }
+            } else {
+                current.apply(call).await;
+            }
         }
         queue.finish();
     }

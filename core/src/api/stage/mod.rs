@@ -352,11 +352,11 @@ impl Stage {
     }
 
     fn dispatch(&self, state: StateGuard<'_>, commands: Vec<Command>) {
-        self.dispatch_with(state, commands, true);
+        self.dispatch_with(state, commands, true, Vec::new());
     }
 
-    fn dispatch_with(&self, mut state: StateGuard<'_>, mut commands: Vec<Command>, is_remembering: bool) {
-        if commands.is_empty() {
+    fn dispatch_with(&self, mut state: StateGuard<'_>, mut commands: Vec<Command>, is_remembering: bool, follow: Vec<(usize, SlotCall)>) {
+        if commands.is_empty() && follow.is_empty() {
             return;
         }
         let loads: Vec<(usize, String)> = commands
@@ -377,7 +377,7 @@ impl Stage {
             crate::trace!("stage", "command {command:?}");
             self.translate(&mut state, command, &mut calls, &mut actions, &mut unloaded, &mut resumed, &mut parked);
         }
-        for (slot, call) in calls {
+        for (slot, call) in calls.into_iter().chain(follow) {
             self.inner.runner.send(slot, call);
         }
         for key in unloaded {

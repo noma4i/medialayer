@@ -11,7 +11,7 @@ fn pending_after(calls: Vec<SlotCall>) -> Vec<SlotCall> {
     for call in calls {
         queue.push(call);
     }
-    std::iter::from_fn(|| queue.pop()).collect()
+    std::iter::from_fn(|| queue.pop().map(|(call, _)| call)).collect()
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn inv_api_01_inv_api_16_an_overflowing_queue_folds_to_the_last_state_of_each_ki
         deepest = deepest.max(queue.len());
     }
 
-    let folded: Vec<SlotCall> = std::iter::from_fn(|| queue.pop()).collect();
+    let folded: Vec<SlotCall> = std::iter::from_fn(|| queue.pop().map(|(call, _)| call)).collect();
 
     assert!(deepest <= LANE_CAPACITY, "held {deepest}");
     assert_eq!(folded.iter().rfind(|call| matches!(call, Play | Pause)), Some(&Play));

@@ -10,6 +10,10 @@ use std::sync::{Arc, Mutex};
 
 const HLS: &str = "https://o.test/hls/master.m3u8";
 
+fn once(url: &str) -> MediaItem {
+    MediaItem { looping: false, ..video(url) }
+}
+
 fn hls() -> MediaItem {
     MediaItem::bare(HLS, Kind::Video)
 }
@@ -192,8 +196,8 @@ async fn inv_api_06_returning_to_the_foreground_rebinds_a_listener_that_died_in_
 async fn inv_api_13_a_slot_that_renders_ends_and_plays_again_moves_the_place_through_rendered_and_ended() {
     let rig = rig().await;
     let stage = &rig.parts.stage;
-    let (slot, _) = playing(&rig, video(&url_of(0))).await;
-    stage.visible(video(&url_of(0)), true);
+    let (slot, player) = playing(&rig, once(&url_of(0))).await;
+    stage.visible(once(&url_of(0)), true);
     let state = || rig.parts.places.state(&url_of(0));
 
     stage.ready(slot as usize, stage.generation_at(slot as usize));
@@ -204,10 +208,57 @@ async fn inv_api_13_a_slot_that_renders_ends_and_plays_again_moves_the_place_thr
     assert_eq!(state(), MediaState::Ended);
     stage.visual_ready(slot as usize, stage.generation_at(slot as usize));
     assert_eq!(state(), MediaState::Ended);
-    stage.set_playing(&url_of(0), false, &[]);
     stage.set_playing(&url_of(0), true, &[]);
 
     eventually(|| state() == MediaState::Rendered).await;
+    eventually(|| player.calls().iter().filter(|call| **call == SlotCall::Play).count() == 2).await;
+    let calls = player.calls();
+    let tail: Vec<&SlotCall> = calls.iter().rev().take(3).rev().collect();
+    assert_eq!(tail, [&SlotCall::Pause, &SlotCall::Seek { position_ms: 0 }, &SlotCall::Play], "the end stops, rewinds, and only then does the next play start");
+}
+
+#[tokio::test]
+async fn inv_api_13_a_repeated_or_stale_ended_never_replaces_a_seek_made_after_the_end_and_forgets_the_old_position() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    let (slot, player) = playing(&rig, once(&url_of(0))).await;
+    let key = url_of(0);
+    stage.visible(once(&key), true);
+    let slot = slot as usize;
+    let generation = stage.generation_at(slot);
+    stage.ready(slot, generation);
+    {
+        let mut state = stage.state();
+        state.positions.remember(&key, 900);
+    }
+    stage.note_seek(&key, 900);
+
+    stage.ended(slot, generation);
+    let (remembered, hinted) = (stage.state().positions.take(&key), stage.inner.seeks.lock().unwrap().contains_key(&key));
+    assert_eq!((remembered, hinted), (None, false));
+    stage.seek(&key, 1_200);
+    stage.ended(slot, generation);
+    stage.ended(slot, generation - 1);
+
+    eventually(|| player.calls().last() == Some(&SlotCall::Seek { position_ms: 1_200 })).await;
+    assert_eq!(player.calls().iter().filter(|call| **call == SlotCall::Seek { position_ms: 0 }).count(), 1);
+    assert_eq!(rig.parts.places.state(&key), MediaState::Ended);
+}
+
+#[tokio::test]
+async fn inv_api_13_a_looping_source_never_ends_the_place_or_stops_the_playback() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    let (slot, player) = playing(&rig, video(&url_of(0))).await;
+    stage.visible(video(&url_of(0)), true);
+    let slot = slot as usize;
+    stage.ready(slot, stage.generation_at(slot));
+    let before = player.calls();
+
+    stage.ended(slot, stage.generation_at(slot));
+
+    assert_eq!(rig.parts.places.state(&url_of(0)), MediaState::Ready);
+    assert_eq!(player.calls(), before);
 }
 
 fn quick_trim(config: &mut crate::api::Assembly) {

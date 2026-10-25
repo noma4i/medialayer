@@ -121,6 +121,7 @@ async fn inv_api_13_a_rendered_or_ended_place_is_never_pulled_back_by_a_late_rea
 
         places.ready("v1");
         places.item_state("v1", MediaState::Loading);
+        places.item_state("v1", MediaState::Ready);
         places.declared("v1", false);
         places.declared("v1", true);
 
@@ -132,4 +133,30 @@ async fn inv_api_13_a_rendered_or_ended_place_is_never_pulled_back_by_a_late_rea
     places.ended("v2");
     places.resumed("v2");
     assert_eq!(places.state("v2"), MediaState::Loading);
+}
+
+#[tokio::test]
+async fn inv_api_13_a_place_ends_once_from_a_ready_state_and_a_repeated_end_is_ignored() {
+    let places = Places::new(Handle::current());
+    places.declared("v1", false);
+
+    let mut steps = vec![(places.ended("v1"), places.state("v1"))];
+    places.ready("v1");
+    steps.push((places.ended("v1"), places.state("v1")));
+    steps.push((places.ended("v1"), places.state("v1")));
+    places.rendered("v1");
+    steps.push((false, places.state("v1")));
+    places.resumed("v1");
+    steps.push((false, places.state("v1")));
+
+    assert_eq!(
+        steps,
+        vec![
+            (false, MediaState::Loading),
+            (true, MediaState::Ended),
+            (false, MediaState::Ended),
+            (false, MediaState::Ended),
+            (false, MediaState::Rendered)
+        ]
+    );
 }

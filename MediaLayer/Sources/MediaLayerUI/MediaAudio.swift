@@ -51,8 +51,11 @@ public final class AudioPlayback {
   }
 
   func follow(_ value: MediaState) {
+    let isNewEnd = value == .ended && state != .ended
     if state != value { state = value }
-    if value == .ended && isPlaying { setPlaying(false) }
+    guard value == .ended else { return }
+    if isPlaying { setPlaying(false) }
+    if isNewEnd { refresh(progress: 0) }
   }
 
   private func setPlaying(_ value: Bool) {

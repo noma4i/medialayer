@@ -71,6 +71,23 @@ private class InputSlot : PlayerSlotFactory {
 
 @RunWith(MediaLayerTestRunner::class)
 class MediaAudioInputTest {
+  @Test
+  fun inv_audio_03_an_ended_control_stops_at_the_start_and_keeps_both_the_toggle_and_the_controlled_input() {
+    val control = AudioControl(true) { }
+    control.progress = 1f
+
+    control.ended()
+    assertFalse(control.isPlaying)
+    assertEquals(0f, control.progress)
+    control.seek(0.5f)
+    assertEquals(0.5f, control.progress)
+    control.toggle()
+    assertTrue(control.isPlaying)
+
+    control.ended()
+    listOf(false, true, false).forEach { control.follow(it); assertEquals(it, control.isPlaying) }
+  }
+
   @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val slot = InputSlot()
