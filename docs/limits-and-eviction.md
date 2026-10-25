@@ -32,6 +32,7 @@ Video overrides also apply to cached stream blocks and HLS objects.
 | `resetLimits()` | Back to the defaults from your media file |
 | `stats()` | Bytes and files, in total and per media kind |
 | `clear(...)` | Removes everything or one media kind. Clearing everything or the images also empties the memory of the image decoder |
+| `resetUserData()` | Clears every media kind, then drops the saved limits so the defaults from your media file apply again. Use it when the user signs out |
 | `purge(url)` | Removes one source |
 | `evictNow()` | Runs eviction now |
 
@@ -48,6 +49,7 @@ print(stats.totalBytes, stats.fileCount)
 
 await media.clear(kind: .video)
 await media.purge(url: url)
+try await media.resetUserData()
 ```
 
 ### Kotlin
@@ -61,6 +63,7 @@ println("${stats.totalBytes} ${stats.fileCount}")
 
 media.clear(Kind.VIDEO)
 media.purge(url)
+media.resetUserData()
 ```
 
 ## Cache integrity

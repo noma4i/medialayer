@@ -118,6 +118,11 @@ impl Controls {
         self.publish_stats().await;
     }
 
+    pub async fn reset_user_data(&self) -> Result<(), MediaError> {
+        self.clear(None).await;
+        self.reset_limits().await
+    }
+
     pub async fn purge(&self, url: &str) {
         self.ports.prefetch.forget_loaded(Some(url));
         self.ports.tones.forget(url);

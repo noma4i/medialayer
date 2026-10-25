@@ -46,6 +46,7 @@ public enum MediaImagePipeline {
   public static func make(places: MediaPlaces) -> ImagePipeline {
     var configuration = ImagePipeline.Configuration(dataLoader: CoreDataLoader(places: places))
     configuration.dataCache = nil
+    configuration.isLocalResourcesSupportEnabled = false
     configuration.imageCache = ImageMemory.cache(for: places)
     return ImagePipeline(configuration: configuration, delegate: ImageEvents(stats: places.imageStats()))
   }

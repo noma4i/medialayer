@@ -397,6 +397,10 @@ impl MediaLayer {
         self.controlled(|assembled| async move { assembled.controls.clear(kind).await }).await
     }
 
+    pub async fn reset_user_data(&self) -> Result<(), MediaError> {
+        self.controlled(|assembled| async move { assembled.controls.reset_user_data().await }).await?
+    }
+
     pub async fn purge(&self, url: String) -> Result<(), MediaError> {
         self.controlled(|assembled| async move { assembled.controls.purge(&url).await }).await
     }

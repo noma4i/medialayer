@@ -141,6 +141,18 @@ async fn inv_limits_04_reset_limits_drops_the_saved_value_and_restores_defaults(
 }
 
 #[tokio::test]
+async fn inv_limits_08_reset_user_data_clears_every_kind_and_drops_the_saved_limits() {
+    let rig = rig_with_saved(Some("budget=536870912"));
+    rig.controls.limits().await;
+
+    rig.controls.reset_user_data().await.unwrap();
+
+    assert_eq!(*rig.cache.cleared.lock().unwrap(), vec![None]);
+    assert_eq!(*rig.settings.removed.lock().unwrap(), vec![LIMITS_KEY.to_string()]);
+    assert_eq!(rig.controls.limits().await, Limits::default());
+}
+
+#[tokio::test]
 async fn inv_api_07_stats_join_the_cache_and_the_pool() {
     let rig = rig_with_saved(None);
     {

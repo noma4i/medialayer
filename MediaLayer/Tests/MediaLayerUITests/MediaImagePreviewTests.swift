@@ -62,6 +62,7 @@ extension GlobalMedia {
       defer { try? FileManager.default.removeItem(at: file) }
       let local = Photo(url: file.absoluteString)
       places.answer(main.url, with: solid(.blue))
+      places.answer(local.url, with: solid(.red))
       let gate = Latch()
       places.fetchLatch = gate
       places.latchedURL = main.url

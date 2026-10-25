@@ -307,6 +307,32 @@ class MediaLayerBridgeTest {
   }
 
   @Test
+  fun inv_limits_08_reset_user_data_drops_the_cached_files_and_the_saved_limits() = runBlocking {
+    val settings = MemorySettings()
+    val media = MediaLayer.open(
+      OpenConfig(availableBytes = ULong.MAX_VALUE,
+        dir = Files.createTempDirectory("medialayer").toString(),
+        fetcher = RangeIgnoringOrigin(),
+        settings = settings,
+        slots = null,
+        device = DeviceMemory(totalMb = 4096u, heapClassMb = null, lowRam = false),
+        defaults = defaultLimits(),
+        pool = defaultPoolSettings()
+      )
+    )
+    media.setLimits(media.limits().copy(budget = 512uL * 1024uL * 1024uL))
+    media.fetchImage("https://o.test/user.jpg", emptyMap())
+    assertEquals(1uL, media.stats().fileCount)
+    assertEquals(setOf("medialayer.limits"), settings.values.keys)
+
+    media.resetUserData()
+
+    assertEquals(0uL, media.stats().fileCount)
+    assertTrue(settings.values.isEmpty())
+    assertEquals(defaultLimits(), media.limits())
+  }
+
+  @Test
   fun invalidLimitsThrowAMediaExceptionWithDetail() = runBlocking {
     val media = open(MemorySettings())
 

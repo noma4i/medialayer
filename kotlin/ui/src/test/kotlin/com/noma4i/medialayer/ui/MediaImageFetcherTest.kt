@@ -60,9 +60,9 @@ class MediaImageFetcherTest {
     }
   }
 
-  private fun load(request: ImageRequest): ImageResult {
+  private fun load(request: ImageRequest, with: coil3.ImageLoader = loader): ImageResult {
     var result: ImageResult? = null
-    loader.enqueue(request.newBuilder().listener(onSuccess = { _, success -> result = success }, onError = { _, failure -> result = failure }).build())
+    with.enqueue(request.newBuilder().listener(onSuccess = { _, success -> result = success }, onError = { _, failure -> result = failure }).build())
     val deadline = System.nanoTime() + 10_000_000_000L
     while (result == null) {
       check(System.nanoTime() < deadline) { "the image request never finished" }
@@ -71,6 +71,34 @@ class MediaImageFetcherTest {
     }
     drainFfi()
     return result!!
+  }
+
+  @Test
+  fun inv_image_49_aFileImageGoesThroughTheCoreAndAFileAboveTheResponseLimitFails() {
+    val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
+      dir = Files.createTempDirectory("local-image").toString(),
+      fetcher = object : com.noma4i.medialayer.Fetcher {
+        override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("unused origin")
+      },
+      settings = SharedPreferencesSettings(context, "local-image"),
+      slots = null, device = DeviceMemory(4096u, null, false),
+      defaults = defaultLimits(), pool = defaultPoolSettings()
+    ))
+    val fetched = CopyOnWriteArrayList<String>()
+    val core = mediaImageLoader(context, ImageBytes { url, headers -> fetched.add(url); media.fetchImage(url, headers) })
+    val small = Files.createTempFile("small", ".png").also { Files.write(it, pngBytes(8, 8)) }
+    val huge = Files.createTempFile("huge", ".png").also { Files.write(it, ByteArray(16 * 1024 * 1024 + 1)) }
+    fun request(file: java.nio.file.Path) = ImageRequest.Builder(context).data(MediaImageData(file.toUri().toString(), emptyMap(), { file.toUri().toString() })).size(8, 8).build()
+
+    val loaded = load(request(small), core)
+    val refused = load(request(huge), core)
+
+    assertTrue((loaded as? ErrorResult)?.throwable?.toString() ?: "", loaded is SuccessResult)
+    assertTrue((refused as? ErrorResult)?.throwable is MediaException)
+    assertEquals(listOf(small.toUri().toString(), huge.toUri().toString()), fetched.toList())
+    Files.deleteIfExists(small)
+    Files.deleteIfExists(huge)
+    media.close()
   }
 
   @Test

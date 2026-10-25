@@ -147,6 +147,32 @@ struct MediaLayerBridgeTests {
   }
 
   @Test
+  func inv_limits_08_reset_user_data_drops_the_cached_files_and_the_saved_limits() async throws {
+    let settings = MemorySettings()
+    let media = try MediaLayer.open(config: OpenConfig(
+      dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
+      availableBytes: UInt64.max, fetcher: RangeIgnoringOrigin(),
+      settings: settings,
+      slots: nil,
+      device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
+      defaults: defaultLimits(),
+      pool: defaultPoolSettings()
+    ))
+    var limits = try await media.limits()
+    limits.budget = 512 * 1024 * 1024
+    try await media.setLimits(limits: limits)
+    _ = try await media.fetchImage(url: "https://o.test/user.jpg", headers: [:])
+    #expect(try await media.stats().fileCount == 1)
+    #expect(settings.keys == ["medialayer.limits"])
+
+    try await media.resetUserData()
+
+    #expect(try await media.stats().fileCount == 0)
+    #expect(settings.keys.isEmpty)
+    #expect(try await media.limits() == defaultLimits())
+  }
+
+  @Test
   func invalidLimitsThrowAMediaErrorWithDetail() async throws {
     let media = try open(settings: MemorySettings())
     var limits = defaultLimits()
