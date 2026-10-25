@@ -99,6 +99,10 @@ pub fn components(hash: &str) -> Result<(u32, u32), BlurHashError> {
 }
 
 pub fn decode(hash: &str, width: u32, height: u32, punch: f32) -> Result<Vec<u8>, BlurHashError> {
+    decode_within(hash, width, height, punch, InputLimits::default().response_bytes)
+}
+
+pub(super) fn decode_within(hash: &str, width: u32, height: u32, punch: f32, budget_bytes: u64) -> Result<Vec<u8>, BlurHashError> {
     let header = parse_header(hash)?;
     if width == 0 || height == 0 {
         return Err(BlurHashError::ZeroSize);
@@ -106,36 +110,48 @@ pub fn decode(hash: &str, width: u32, height: u32, punch: f32) -> Result<Vec<u8>
     if !punch.is_finite() {
         return Err(BlurHashError::InvalidPunch);
     }
+    let columns = header.columns as usize;
+    let rows = header.rows as usize;
     let byte_count = (width as usize)
         .checked_mul(height as usize)
         .and_then(|pixels| pixels.checked_mul(4))
-        .filter(|count| *count <= isize::MAX as usize)
         .ok_or(BlurHashError::SizeTooLarge)?;
-    let mut output = Vec::new();
-    output
-        .try_reserve_exact(byte_count)
-        .map_err(|_| BlurHashError::SizeTooLarge)?;
+    let horizontal_len = (width as usize).checked_mul(columns).ok_or(BlurHashError::SizeTooLarge)?;
+    let vertical_len = (height as usize).checked_mul(rows).ok_or(BlurHashError::SizeTooLarge)?;
+    let working_bytes = [
+        byte_count,
+        horizontal_len.checked_mul(size_of::<f64>()).ok_or(BlurHashError::SizeTooLarge)?,
+        vertical_len.checked_mul(size_of::<f64>()).ok_or(BlurHashError::SizeTooLarge)?,
+        (columns * rows) * size_of::<[f64; 3]>(),
+    ]
+    .into_iter()
+    .try_fold(0usize, usize::checked_add)
+    .ok_or(BlurHashError::SizeTooLarge)?;
+    if working_bytes as u64 > budget_bytes {
+        return Err(BlurHashError::SizeTooLarge);
+    }
+    let mut output = reserve::<u8>(byte_count)?;
+    let mut colors = reserve::<[f64; 3]>(columns * rows)?;
+    let mut horizontal = reserve::<f64>(horizontal_len)?;
+    let mut vertical = reserve::<f64>(vertical_len)?;
 
     let bytes = hash.as_bytes();
     let scale = (base83_value(&bytes[1..2]) as f64 + 1.0) / 166.0 * punch as f64;
-    let colors: Vec<[f64; 3]> = (0..(header.columns * header.rows) as usize)
-        .map(|index| {
-            if index == 0 {
-                dc_color(base83_value(&bytes[2..6]))
-            } else {
-                ac_color(base83_value(&bytes[4 + index * 2..6 + index * 2]), scale)
-            }
-        })
-        .collect();
+    colors.extend((0..columns * rows).map(|index| {
+        if index == 0 {
+            dc_color(base83_value(&bytes[2..6]))
+        } else {
+            ac_color(base83_value(&bytes[4 + index * 2..6 + index * 2]), scale)
+        }
+    }));
+    fill_cosines(&mut horizontal, width, columns);
+    fill_cosines(&mut vertical, height, rows);
 
-    let horizontal = cosine_table(width, header.columns);
-    let vertical = cosine_table(height, header.rows);
-    for vertical_row in &vertical {
-        for horizontal_row in &horizontal {
+    for vertical_row in vertical.chunks_exact(rows) {
+        for horizontal_row in horizontal.chunks_exact(columns) {
             let mut sum = [0.0; 3];
             for (index, color) in colors.iter().enumerate() {
-                let basis = horizontal_row[index % header.columns as usize]
-                    * vertical_row[index / header.columns as usize];
+                let basis = horizontal_row[index % columns] * vertical_row[index / columns];
                 for (total, part) in sum.iter_mut().zip(color) {
                     *total += part * basis;
                 }
@@ -151,12 +167,14 @@ pub fn decode(hash: &str, width: u32, height: u32, punch: f32) -> Result<Vec<u8>
     Ok(output)
 }
 
-fn cosine_table(size: u32, count: u32) -> Vec<Vec<f64>> {
-    (0..size)
-        .map(|position| {
-            (0..count)
-                .map(|index| (std::f64::consts::PI * position as f64 * index as f64 / size as f64).cos())
-                .collect()
-        })
-        .collect()
+fn reserve<T>(count: usize) -> Result<Vec<T>, BlurHashError> {
+    let mut buffer = Vec::new();
+    buffer.try_reserve_exact(count).map_err(|_| BlurHashError::SizeTooLarge)?;
+    Ok(buffer)
+}
+
+fn fill_cosines(table: &mut Vec<f64>, size: u32, count: usize) {
+    table.extend((0..size).flat_map(|position| {
+        (0..count).map(move |index| (std::f64::consts::PI * position as f64 * index as f64 / size as f64).cos())
+    }));
 }

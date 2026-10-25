@@ -11,6 +11,8 @@ While media loads, a place shows placeholders chosen by MediaLayer. You only dec
 
 Videos never use BlurHash. For a stream, the first frame comes from the first chunk through the local proxy, and playback starts as soon as the player has a buffer. Each step replaces the previous one only when it is ready, so nothing flickers.
 
+The core decodes a BlurHash into RGBA with a memory limit: the output and the two scratch tables together may not exceed 16 MiB, whatever the sides are. A larger request is refused with a size error.
+
 The place owns this work for the source it was given. When the url, the BlurHash, the cover or the opened library object changes, the old placeholder goes away at once and a late answer for the old input is dropped. The BlurHash decodes off the main thread, and only the result is published on it.
 
 ### Swift
