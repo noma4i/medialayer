@@ -6,6 +6,7 @@ import com.noma4i.medialayer.MediaItem
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.MediaWindow
 import com.noma4i.medialayer.NoHandle
+import com.noma4i.medialayer.WindowReadyListener
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -16,8 +17,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 private class CountingWindow(private val log: CopyOnWriteArrayList<String>, private val threads: CopyOnWriteArrayList<Thread>) : MediaWindow(NoHandle) {
+  @Volatile var readyListener: WindowReadyListener? = null
+
   override fun replace(active: UInt, sources: List<MediaItem?>) { threads.add(Thread.currentThread()); log.add("replace $active ${sources.size}") }
   override fun replacePages(active: UInt, pages: List<List<MediaItem>>) { threads.add(Thread.currentThread()); log.add("pages $active ${pages.size}") }
+  override fun replaceRows(rows: List<List<MediaItem>>) { threads.add(Thread.currentThread()); log.add("rows ${rows.size}") }
+  override fun showRows(first: UInt, last: UInt) { threads.add(Thread.currentThread()); log.add("show $first $last") }
+  override fun subscribeReady(listener: WindowReadyListener) { readyListener = listener }
   override fun moveTo(active: UInt) { threads.add(Thread.currentThread()); log.add("move $active") }
   override fun setActive(isActive: Boolean) { log.add("active $isActive") }
   override fun release() { log.add("release") }
@@ -27,8 +33,9 @@ private class CountingWindow(private val log: CopyOnWriteArrayList<String>, priv
 private class WindowLayer : MediaLayer(NoHandle) {
   val log = CopyOnWriteArrayList<String>()
   val threads = CopyOnWriteArrayList<Thread>()
-  override fun openVideoWindow(): MediaWindow = CountingWindow(log, threads)
-  override fun openImageWindow(name: String): MediaWindow = CountingWindow(log, threads)
+  val windows = CopyOnWriteArrayList<CountingWindow>()
+  override fun openVideoWindow(): MediaWindow = CountingWindow(log, threads).also { windows.add(it) }
+  override fun openImageWindow(name: String, rowsPerPage: UInt, reversed: Boolean): MediaWindow = CountingWindow(log, threads).also { windows.add(it) }
   override fun close() = Unit
 }
 
@@ -177,13 +184,30 @@ class PlatformInputTest {
   }
 
   @Test
-  fun anImageWindowSendsPagesOfRowsPerPageRowsAndKeepsEmptyRows() {
+  fun inv_window_06_the_visible_rows_of_the_list_move_the_window_without_an_active_page() {
     val layer = WindowLayer()
-    val follower = WindowFollower<Int>(layer, WindowLayout.Image("grid", 2) { row -> if (row == 3) emptyList() else listOf(clip(row)) }) { }
+    val follower = WindowFollower<Int>(layer, WindowLayout.Image("grid", 2, true) { row -> listOf(clip(row)) }) { }
 
-    follower.replace(listOf(1, 2, 3, 4, 5))
+    follower.replace(listOf(1, 2, 3))
+    eventually("the rows") { layer.log.contains("rows 3") }
+    follower.show(1..2)
 
-    eventually("pages") { layer.log.contains("pages 0 3") }
+    eventually("the visible rows") { layer.log.contains("show 1 2") }
+    assertTrue(layer.log.none { it.startsWith("move") })
+    follower.close()
+  }
+
+  @Test
+  fun inv_window_05_the_readiness_of_the_core_reaches_the_view() {
+    val layer = WindowLayer()
+    val readings = CopyOnWriteArrayList<Boolean>()
+    val follower = WindowFollower<Int>(layer, WindowLayout.Image("grid", 1, false) { row -> listOf(clip(row)) }, { readings.add(it) }) { }
+
+    follower.replace(listOf(1))
+    eventually("the window is subscribed") { layer.windows.firstOrNull()?.readyListener != null }
+    layer.windows.first().readyListener!!.changed(true)
+
+    assertEquals(listOf(true), readings.toList())
     follower.close()
   }
 

@@ -339,3 +339,51 @@ private final class MapperProbe: @unchecked Sendable {
   var touches: Int { lock.withLock { count } }
   func touch() { lock.withLock { count += 1 } }
 }
+
+private final class Readings: @unchecked Sendable {
+  private let lock = NSLock()
+  private var values: [Bool] = []
+
+  func add(_ value: Bool) { lock.withLock { values.append(value) } }
+
+  var all: [Bool] { lock.withLock { values } }
+}
+
+extension PlatformInputTests {
+  @MainActor
+  @Test func inv_window_05_theReadinessOfTheCoreReachesTheViewAndAClosedWindowIsNotReady() async {
+    let places = RecordingPlaces()
+    let feed = Feed()
+    let readings = Readings()
+    let follower = WindowFollower<Int>()
+    follower.use(ready: { readings.add($0) })
+    follower.mount(
+      places: places, layout: .image(name: "grid", rowsPerPage: 1, reversed: false, sources: { _ in [] }), data: { feed.rows }, active: 0, enabled: true, failed: { _ in }
+    )
+    await eventually("the window is opened") { places.openedWindows.first?.calls.contains("rows 3") == true }
+
+    places.openedWindows[0].reportReady(true)
+    await eventually("the core readiness arrives") { readings.all == [true] }
+    follower.close()
+
+    #expect(readings.all == [true, false])
+  }
+
+  @MainActor
+  @Test func inv_window_06_theVisibleRowsOfTheListMoveTheWindowWithoutAnActivePage() async {
+    let places = RecordingPlaces()
+    let feed = Feed()
+    let follower = WindowFollower<Int>()
+    follower.mount(
+      places: places, layout: .image(name: "grid", rowsPerPage: 2, reversed: true, sources: { _ in [] }), data: { feed.rows }, active: 0, enabled: true, tracksRows: true,
+      failed: { _ in }
+    )
+    await eventually("the rows are sent") { places.openedWindows.first?.calls.contains("rows 3") == true }
+
+    follower.show(1...2)
+    await eventually("the visible rows are sent") { places.openedWindows.first?.calls.contains("show 1 2") == true }
+
+    #expect(places.openedWindows.first?.calls.contains { $0.hasPrefix("move") } == false)
+    follower.close()
+  }
+}

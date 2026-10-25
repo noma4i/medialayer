@@ -22,6 +22,20 @@ impl Stage {
         }
     }
 
+    pub fn settled(&self) -> tokio::sync::broadcast::Receiver<crate::prefetch::Settled> {
+        self.inner.prefetcher.settled()
+    }
+
+    #[cfg(test)]
+    pub fn prefetch_suspended(&self) -> bool {
+        self.inner.prefetcher.is_suspended()
+    }
+
+    pub fn announce_image(&self, url: &str, outcome: Result<(), String>) {
+        let outcome = outcome.map_or_else(crate::prefetch::Outcome::Failed, |()| crate::prefetch::Outcome::Loaded);
+        self.inner.prefetcher.announce(crate::prefetch::Settled { url: url.to_string(), outcome });
+    }
+
     pub fn replace_window(&self, active: usize, sources: Vec<Option<MediaItem>>) {
         self.declare_whole(sources.iter().flatten());
         let mut state = self.state();

@@ -126,6 +126,41 @@ A window named like an `image` block takes the range of that block (`prefetch wi
 MediaImageWindow(name = "avatar", data = { feed.rows }, sources = { listOf(Avatar(url = it.avatarUrl)) }, active = row)
 ```
 
+#### Visible rows
+
+A list does not have to compute `active`. Without `active`, the window follows the rows on screen: its active page is the page of the first visible row. In SwiftUI each row calls `mediaWindowRow(name, index:)` and the window above it with the same name receives the rows that appear and disappear. In Compose the window reads the visible items of a `LazyListState` or a `LazyGridState`; the index of an item is the index of its row. The window does not move while no row is visible.
+
+A list that shows its newest row first sets `reversed`. The pages then count from the last row, so the pages ahead are the rows above the screen, and the active page is the page of the last visible row. An empty row stays in its page. Set `rowsPerPage` to 1 for one page per row. A row holds zero or more images.
+
+#### Swift
+
+```swift
+List(rows.indices, id: \.self) { index in Bubble(rows[index]).mediaWindowRow("chat", index: index) }
+  .mediaImageWindow(name: "chat", of: thread, rows: \.rows, sources: { $0.photos }, reversed: true)
+```
+
+#### Kotlin
+
+```kotlin
+MediaImageWindow(name = "chat", data = { thread.rows }, sources = { it.photos }, state = listState, reversed = true)
+```
+
+#### Ready
+
+The window tells when its active page is prepared. A video window is ready when the active source has shown its first frame or is already in the cache. An image window is ready when every image of the active page is in the cache or has failed. A change of the active page, or of the sources on it, makes the window not ready until the next event. The window needs no timer and no polling: show the list when `ready` turns true. A list that only grows keeps the readiness it has while the active page keeps the same sources.
+
+#### Swift
+
+```swift
+.mediaWindow(of: feed, rows: \.rows, source: { $0.video }, active: page, ready: $windowReady)
+```
+
+#### Kotlin
+
+```kotlin
+val windowReady = MediaWindow(data = { feed.rows }, source = { it.video }, active = page)
+```
+
 ### Image size and memory
 
 `MediaImage` reads the size of its view and the screen scale and asks the decoder for exactly that many pixels, so a grid never decodes full-size photos. `contentMode` (Swift) and `contentScale` (Kotlin) choose between filling and fitting the view. The decoder keys memory by the core cache identity, decoded size and content mode. Selected namespace headers separate images, covers and animated frames in memory. An image that is already there shows in the first frame, without a placeholder. `imageMemoryBytes` задаёт явный бюджет. По умолчанию Android использует `min(128 MiB, 25% memoryClass)`, Swift использует 128 MiB. `clear()` and `clear(image)` also empty this memory.

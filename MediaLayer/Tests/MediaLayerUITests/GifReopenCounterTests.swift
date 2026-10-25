@@ -47,7 +47,9 @@ private final class CountingPlaces: MediaPlaces, @unchecked Sendable {
   func stateStream(key: String) -> AsyncStream<MediaState> { inner.stateStream(key: key) }
   func mountPlace(item: MediaItem) throws -> any PlaceHandle { try inner.mountPlace(item: item) }
   func mountVideoWindow() throws -> any WindowHandle { try inner.mountVideoWindow() }
-  func mountImageWindow(name: String) throws -> any WindowHandle { try inner.mountImageWindow(name: name) }
+  func mountImageWindow(name: String, rowsPerPage: Int, reversed: Bool) throws -> any WindowHandle {
+    try inner.mountImageWindow(name: name, rowsPerPage: rowsPerPage, reversed: reversed)
+  }
   func seek(key: String, fraction: Double) throws { try inner.seek(key: key, fraction: fraction) }
   func setMutedAll(muted: Bool) throws { try inner.setMutedAll(muted: muted) }
   func setTonePreparation(preparation: TonePreparation) throws { try inner.setTonePreparation(preparation: preparation) }

@@ -4,7 +4,7 @@ use crate::api::{AbortOnDrop, Placeholder, MediaError, MediaItem, MediaState, Pl
 use crate::pool::PoolStats;
 use crate::image_size::ImageSize;
 use crate::proxy::ImageFetchResult;
-use super::super::layer::{StateListener, StatsListener, ToneListener};
+use super::super::layer::{StateListener, StatsListener, ToneListener, WindowReadyListener};
 use std::collections::HashMap;
 use std::mem::size_of;
 use std::sync::Arc;
@@ -108,6 +108,7 @@ pub(crate) enum Declared {
     WindowActive { owner: u64, is_active: bool },
     VideoWindow { owner: u64, active: u32, sources: Option<Arc<Vec<Option<MediaItem>>>> },
     ImageWindow { owner: u64, active: u32, pages: Option<Arc<Vec<Vec<MediaItem>>>> },
+    WindowReady { owner: u64, listener: Arc<dyn WindowReadyListener> },
     Suspend { owner: u64, groups: Vec<String> },
     Subscribe { owner: u64, subscribing: Subscribing },
     Player(PlayerEvent),
@@ -182,6 +183,7 @@ impl Declared {
             | Declared::WindowActive { owner, .. }
             | Declared::VideoWindow { owner, .. }
             | Declared::ImageWindow { owner, .. }
+            | Declared::WindowReady { owner, .. }
             | Declared::Suspend { owner, .. }
             | Declared::Subscribe { owner, .. } => Some(*owner),
             _ => None,

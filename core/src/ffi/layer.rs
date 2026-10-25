@@ -74,6 +74,11 @@ pub trait ToneListener: Send + Sync {
 }
 
 #[uniffi::export(with_foreign)]
+pub trait WindowReadyListener: Send + Sync {
+    fn changed(&self, ready: bool);
+}
+
+#[uniffi::export(with_foreign)]
 pub trait StateListener: Send + Sync {
     fn changed(&self, state: MediaState);
     fn failed(&self, error: MediaError);
@@ -481,8 +486,14 @@ impl MediaLayer {
         self.open_window(WindowKind::Video)
     }
 
-    pub fn open_image_window(&self, name: String) -> Result<Arc<MediaWindow>, MediaError> {
-        self.open_window(WindowKind::Image(name))
+    #[uniffi::method(default(rows_per_page = 1, reversed = false))]
+    pub fn open_image_window(&self, name: String, rows_per_page: u32, reversed: bool) -> Result<Arc<MediaWindow>, MediaError> {
+        if rows_per_page == 0 {
+            return Err(MediaError::Unexpected { detail: "rows_per_page must be positive".to_string() });
+        }
+        let window = self.open_window(WindowKind::Image(name))?;
+        window.lay_out(rows_per_page, reversed);
+        Ok(window)
     }
 
     #[uniffi::method(default(allow_groups = []))]

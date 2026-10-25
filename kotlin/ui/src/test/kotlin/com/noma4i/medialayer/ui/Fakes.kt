@@ -71,6 +71,9 @@ internal class NullPlace : com.noma4i.medialayer.MediaPlace(NoHandle) {
 internal class NullWindow : com.noma4i.medialayer.MediaWindow(NoHandle) {
   override fun replace(active: UInt, sources: List<MediaItem?>) = Unit
   override fun replacePages(active: UInt, pages: List<List<MediaItem>>) = Unit
+  override fun replaceRows(rows: List<List<MediaItem>>) = Unit
+  override fun showRows(first: UInt, last: UInt) = Unit
+  override fun subscribeReady(listener: com.noma4i.medialayer.WindowReadyListener) = Unit
   override fun moveTo(active: UInt) = Unit
   override fun setActive(isActive: Boolean) = Unit
   override fun release() = Unit
@@ -136,7 +139,7 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
   @Volatile var placeError: com.noma4i.medialayer.MediaException? = null
   override fun openPlace(item: MediaItem): com.noma4i.medialayer.MediaPlace { noteFfi("openPlace"); placeError?.let { throw it }; return placeFactory?.invoke(item) ?: RecordingPlace(this, item) }
   override fun openVideoWindow(): com.noma4i.medialayer.MediaWindow = NullWindow()
-  override fun openImageWindow(name: String): com.noma4i.medialayer.MediaWindow = NullWindow()
+  override fun openImageWindow(name: String, rowsPerPage: UInt, reversed: Boolean): com.noma4i.medialayer.MediaWindow = NullWindow()
   internal fun noteMain(call: String) = noteFfi(call)
   override fun setMutedAll(muted: Boolean) { calls.add("mutedAll:$muted") }
 

@@ -8,7 +8,7 @@ public protocol MediaPlaces: AnyObject, Sendable {
   func cacheKey(url: String, headers: [String: String]) -> String
   func mountPlace(item: MediaItem) throws -> any PlaceHandle
   func mountVideoWindow() throws -> any WindowHandle
-  func mountImageWindow(name: String) throws -> any WindowHandle
+  func mountImageWindow(name: String, rowsPerPage: Int, reversed: Bool) throws -> any WindowHandle
   func seek(key: String, fraction: Double) throws
   func setMutedAll(muted: Bool) throws
   func fetchImage(url: String, headers: [String: String]) async throws -> ImageFetchResult
@@ -28,7 +28,9 @@ public protocol PlaceHandle: AnyObject, Sendable {
 
 public protocol WindowHandle: AnyObject, Sendable {
   func replace(active: UInt32, sources: [MediaItem?]) throws
-  func replacePages(active: UInt32, pages: [[MediaItem]]) throws
+  func replaceRows(rows: [[MediaItem]]) throws
+  func showRows(first: UInt32, last: UInt32) throws
+  func subscribeReady(listener: any WindowReadyListener) throws
   func moveTo(active: UInt32) throws
   func setActive(isActive: Bool) throws
   func release()
@@ -40,7 +42,9 @@ extension MediaWindow: WindowHandle {}
 extension MediaLayer: MediaPlaces {
   public func mountPlace(item: MediaItem) throws -> any PlaceHandle { try openPlace(item: item) }
   public func mountVideoWindow() throws -> any WindowHandle { try openVideoWindow() }
-  public func mountImageWindow(name: String) throws -> any WindowHandle { try openImageWindow(name: name) }
+  public func mountImageWindow(name: String, rowsPerPage: Int, reversed: Bool) throws -> any WindowHandle {
+    try openImageWindow(name: name, rowsPerPage: UInt32(rowsPerPage), reversed: reversed)
+  }
 }
 
 @Observable

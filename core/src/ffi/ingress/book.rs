@@ -1,5 +1,7 @@
 use super::command::{Answer, Declared, Observer, Finished, OwnerKind, PlaceInput, PlayerEvent, Query, Subscribing, WindowKind};
 use super::queue::{InputQueue, Reserve, EntryPlace};
+use super::readiness::PageReadiness;
+use super::super::layer::WindowReadyListener;
 use crate::api::{placeholder_for, AbortOnDrop, CacheState, Kind, MediaError, MediaItem, MediaState, Placeholder, Subscription};
 use tokio::runtime::Handle;
 use super::super::assembled::Assembled;
@@ -68,6 +70,7 @@ struct VideoWindow {
     is_active: bool,
     intent: u64,
     replaced: u64,
+    ready: PageReadiness,
     _opened: Reserve,
     held: Reserve,
 }
@@ -77,6 +80,7 @@ struct ImageWindow {
     pages: Arc<Vec<Vec<MediaItem>>>,
     active: u32,
     is_active: bool,
+    ready: PageReadiness,
     _opened: Reserve,
     held: Reserve,
 }
@@ -141,6 +145,7 @@ impl Book {
             }
             Declared::WindowOpen { owner, kind } => self.open_window(owner, kind, reserve),
             Declared::WindowActive { owner, is_active } => self.set_window_active(owner, is_active),
+            Declared::WindowReady { owner, listener } => self.window_ready(owner, listener),
             Declared::VideoWindow { owner, active, sources } => self.video_window(owner, active, sources, reserve),
             Declared::ImageWindow { owner, active, pages } => self.image_window(owner, active, pages, reserve),
             Declared::Suspend { owner, groups } => {
@@ -181,7 +186,9 @@ impl Book {
             Query::Pixels(item) => self.running(reserve, slot, async move { Finished::Pixels(assembled.tones.pixels_needed(&item).await) }),
             Query::ImageSize { url, headers } => self.running(reserve, slot, async move { Finished::ImageSize(assembled.routes.image_size(&url, &headers).await) }),
             Query::Image { url, headers } => self.running(reserve, slot, async move {
-                Finished::Image(assembled.routes.image_bytes(&url, &headers, crate::memory::InputLimits::default().response_bytes).await)
+                let result = assembled.routes.image_bytes(&url, &headers, crate::memory::InputLimits::default().response_bytes).await;
+                assembled.stage.announce_image(&url, result.as_ref().map(|_| ()).map_err(ToString::to_string));
+                Finished::Image(result)
             }),
         }
     }
@@ -342,8 +349,8 @@ impl Book {
 
     fn open_window(&mut self, owner: u64, kind: WindowKind, reserve: Reserve) {
         let window = match kind {
-            WindowKind::Video => Window::Video(VideoWindow { sources: Arc::new(Vec::new()), active: 0, is_active: true, intent: 0, replaced: 0, _opened: reserve, held: Reserve::none() }),
-            WindowKind::Image(name) => Window::Image(ImageWindow { scoped: format!("{name}\u{1f}{owner}"), pages: Arc::new(Vec::new()), active: 0, is_active: true, _opened: reserve, held: Reserve::none() }),
+            WindowKind::Video => Window::Video(VideoWindow { sources: Arc::new(Vec::new()), active: 0, is_active: true, intent: 0, replaced: 0, ready: PageReadiness::new(), _opened: reserve, held: Reserve::none() }),
+            WindowKind::Image(name) => Window::Image(ImageWindow { scoped: format!("{name}\u{1f}{owner}"), pages: Arc::new(Vec::new()), active: 0, is_active: true, ready: PageReadiness::new(), _opened: reserve, held: Reserve::none() }),
         };
         self.windows.insert(owner, window);
     }
@@ -384,6 +391,31 @@ impl Book {
             self.video_order.insert(intent, owner);
         }
         self.resolve_video();
+        self.follow_ready(owner);
+    }
+
+    fn window_ready(&mut self, owner: u64, listener: Arc<dyn WindowReadyListener>) {
+        match self.windows.get_mut(&owner) {
+            Some(Window::Video(window)) => window.ready.listen(listener),
+            Some(Window::Image(window)) => window.ready.listen(listener),
+            None => return,
+        }
+        self.follow_ready(owner);
+    }
+
+    fn follow_ready(&mut self, owner: u64) {
+        let (assembled, handle) = (&self.assembled, &self.handle);
+        match self.windows.get_mut(&owner) {
+            Some(Window::Video(window)) => {
+                let page = window.sources.get(window.active as usize).cloned().flatten().map(|item| vec![item]);
+                window.ready.follow(assembled, handle, page);
+            }
+            Some(Window::Image(window)) => {
+                let page = window.pages.get(window.active as usize).cloned();
+                window.ready.follow(assembled, handle, page);
+            }
+            None => {}
+        }
     }
 
     fn resolve_video(&mut self) {
@@ -419,6 +451,7 @@ impl Book {
             window.held = reserve;
         }
         if replaced { self.apply_image(owner) } else if window.is_active { self.assembled.stage.move_image_window(&window.scoped, active as usize) }
+        self.follow_ready(owner);
     }
 
     fn apply_image(&self, owner: u64) {

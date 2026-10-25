@@ -92,7 +92,7 @@ private class ScriptedLayer(val label: String, private val events: Events, priva
   override fun playerEvents() = recordingEvents
   override fun openPlace(item: MediaItem): com.noma4i.medialayer.MediaPlace = NullPlace()
   override fun openVideoWindow(): com.noma4i.medialayer.MediaWindow = NullWindow()
-  override fun openImageWindow(name: String): com.noma4i.medialayer.MediaWindow = NullWindow()
+  override fun openImageWindow(name: String, rowsPerPage: UInt, reversed: Boolean): com.noma4i.medialayer.MediaWindow = NullWindow()
   override fun subscribeState(key: String, listener: StateListener): Subscription { listeners.add(key to listener); return Subscription(NoHandle) }
   override fun setTonePreparation(preparation: TonePreparation) {}
   override suspend fun tonePixelsNeeded(source: MediaItem): Boolean = false

@@ -90,7 +90,7 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
     return placeFactory?(item.url) ?? RecordingPlace(places: self, url: item.url)
   }
   func mountVideoWindow() throws -> any WindowHandle { opened(RecordingWindow()) }
-  func mountImageWindow(name: String) throws -> any WindowHandle { opened(RecordingWindow()) }
+  func mountImageWindow(name: String, rowsPerPage: Int, reversed: Bool) throws -> any WindowHandle { opened(RecordingWindow()) }
   private var windows: [RecordingWindow] = []
   var openedWindows: [RecordingWindow] { lock.withLock { windows } }
   private func opened(_ window: RecordingWindow) -> RecordingWindow {
@@ -173,6 +173,10 @@ final class RecordingWindow: WindowHandle, @unchecked Sendable {
   private let lock = NSLock()
   private var log: [String] = []
   private(set) var offMain = true
+  private var readyListener: (any WindowReadyListener)?
+
+  /// What the core does when the active page is prepared.
+  func reportReady(_ ready: Bool) { lock.withLock { readyListener }?.changed(ready: ready) }
 
   var calls: [String] { lock.withLock { log } }
 
@@ -186,7 +190,9 @@ final class RecordingWindow: WindowHandle, @unchecked Sendable {
   }
 
   func replace(active: UInt32, sources: [MediaItem?]) throws { note("replace \(active) \(sources.count)") }
-  func replacePages(active: UInt32, pages: [[MediaItem]]) throws { note("pages \(active) \(pages.count)") }
+  func replaceRows(rows: [[MediaItem]]) throws { note("rows \(rows.count)") }
+  func showRows(first: UInt32, last: UInt32) throws { note("show \(first) \(last)") }
+  func subscribeReady(listener: any WindowReadyListener) throws { lock.withLock { readyListener = listener } }
   func moveTo(active: UInt32) throws { note("move \(active)") }
   func setActive(isActive: Bool) throws { note("active \(isActive)") }
   func release() { note("release") }

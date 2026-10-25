@@ -384,6 +384,15 @@ impl Prefetcher {
         state.windows.clear();
     }
 
+    #[cfg(test)]
+    pub fn is_suspended(&self) -> bool {
+        self.shared.state().suspended
+    }
+
+    pub fn announce(&self, settled: Settled) {
+        let _ = self.shared.events.send(settled);
+    }
+
     pub fn settled(&self) -> broadcast::Receiver<Settled> {
         self.shared.events.subscribe()
     }
