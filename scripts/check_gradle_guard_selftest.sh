@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Self test: on Darwin the Gradle step refuses before any side effect, build_kotlin.sh runs only cargo and reaches it, on Linux they reach their tools.
-# Stubs stand in for uname, gradle, cargo and cargo-ndk, no real build runs. SCRIPTS_DIR names the scripts under test.
+# Stubs stand in for uname, gradle, cargo and cargo-ndk, no real build runs; python3 stays the real interpreter, resolved before HOME is replaced. SCRIPTS_DIR names the scripts under test.
 set -uo pipefail
 
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 scripts_dir="${SCRIPTS_DIR:-$here}"
 fail=0
+python="$(python3 -c 'import sys; print(sys.executable)')" || { echo "check_gradle_guard_selftest: python3 is not runnable" >&2; exit 1; }
 
 # case_run <uname> <expect refuse|reach> <label> <script> <args...>
 case_run() {
@@ -20,6 +21,7 @@ case_run() {
   printf '#!/bin/sh\necho 8\n' > "$tmp/bin/sysctl"
   for tool in gradle cargo cargo-ndk; do printf '#!/bin/sh\necho %s >> "%s/calls.log"\n' "$tool" "$tmp" > "$tmp/bin/$tool"; done
   chmod +x "$tmp"/bin/*
+  ln -s "$python" "$tmp/bin/python3"
   err="$(cd "$tmp" && PATH="$tmp/bin:$PATH" HOME="$tmp/home" GRADLE="$tmp/bin/gradle" ANDROID_NDK_HOME="$tmp" bash "scripts/$script" "$@" 2>&1 > /dev/null)" || code=$?
   calls="$(cat "$tmp/calls.log" 2> /dev/null)"
   if [ "$expect" = refuse ]; then
