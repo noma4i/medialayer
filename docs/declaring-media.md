@@ -159,6 +159,26 @@ let info = try await media.mediaInfo(MediaSourceValue.file(clipUrl, kind: .video
 val info = media.mediaInfo(MediaSourceValue.file(clipFile, Kind.VIDEO))   // MediaInfo(durationMs, frame) or null
 ```
 
+## Preparing media for sending
+
+`prepareVideo` and `prepareImage` make a local file ready to upload. Both take a `file://` source and run off the main thread. Cancelling the call stops the work and leaves no output file.
+
+```swift
+let video = try await media.prepareVideo(source, limits: defaultVideoLimits(), progress: { fraction in })
+let photo = try await media.prepareImage(source, quality: 0.9)
+```
+
+```kotlin
+val video = media.prepareVideo(source, limits = defaultVideoLimits(), onProgress = { fraction -> })
+val photo = media.prepareImage(source, quality = 0.9)
+```
+
+- The result is `PreparedMedia`: the file and `isNew`. When `isNew` is false the source already fitted and is returned untouched, so there is nothing to delete.
+- Video limits are yours: `VideoLimits` holds the long side, the bitrate corridors, the frame rates and the audio settings. `defaultVideoLimits()` gives a long side of 1920, corridors from 0.5 to 3.5 Mbit/s and 30 to 60 frames per second.
+- The video is made upright, with even sides, a long side up to your table (never scaled up), a bitrate inside the corridor of the result and a limited frame rate. The codecs are H.264 and AAC in an mp4 file made for streaming.
+- The photo is turned upright by its EXIF orientation and saved as JPEG with your quality (0.0 to 1.0). No metadata is copied, so the editor tag and the EXIF fields are gone.
+- Android reports video progress only while the export runs, with no timer at rest.
+
 ## Image as a value
 
 To get the decoded image without a view (a share card drawn by `ImageRenderer`, a bitmap for a canvas), call `image` on the media context. It goes through the same loader, the same core cache, the same item state and tone as `MediaImage`, and it does not wait for a window or a lifecycle. It returns `nil` (`null`) when the source fails or the task is cancelled, and a second call for the same source and size reads the cache.

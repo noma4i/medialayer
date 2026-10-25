@@ -18,6 +18,7 @@ pub mod pages;
 pub mod pool;
 pub mod prefetch;
 pub mod proxy;
+pub mod send_prep;
 pub mod session;
 pub mod spec;
 pub mod trace;
