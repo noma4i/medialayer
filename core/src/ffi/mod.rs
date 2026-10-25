@@ -15,6 +15,8 @@ pub use limits::{default_limits, default_pool_settings, DeviceMemory, Evict, Ima
 pub use spec_defaults::{spec_defaults, SpecDefaults};
 
 #[cfg(test)]
+mod deferred_tests;
+#[cfg(test)]
 mod fetcher_tests;
 #[cfg(test)]
 mod layer_tests;

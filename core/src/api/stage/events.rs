@@ -17,28 +17,34 @@ enum Wake {
 impl Stage {
     pub fn ready(&self, slot: usize) {
         crate::trace!("event", "ready slot={slot} key={:?}", self.key_at(slot).as_deref().map(crate::trace::tail));
-        let Some(key) = self.key_at(slot) else { return };
+        let Some((key, generation)) = self.load_at(slot) else { return };
         self.feed(&key, Event::Loaded);
-        self.apply_pending_fraction(slot, &key);
+        self.apply_pending_fraction(slot, &key, generation, false);
         self.inner.places.ready(&key);
         self.sync_foreground();
     }
 
-    fn apply_pending_fraction(&self, slot: usize, key: &str) {
+    fn load_at(&self, slot: usize) -> Option<(String, u64)> {
+        let state = self.state();
+        let key = state.slot_keys.get(&slot)?;
+        Some((key.clone(), state.loaded.get(key)?.generation))
+    }
+
+    pub(super) fn apply_pending_fraction(&self, slot: usize, key: &str, generation: u64, is_quiet: bool) {
         let duration = self.inner.runner.sample_now(slot).and_then(|sample| sample.duration_ms);
-        let seek = {
-            let mut state = self.state();
-            self.fraction_seek(&mut state, key, duration)
-        };
-        if let Some(call) = seek {
+        let mut state = if is_quiet { self.state_quiet() } else { self.state() };
+        if !state.is_loaded_as(key, slot, generation) {
+            return;
+        }
+        if let Some(call) = self.fraction_seek(&mut state, key, duration) {
             self.inner.runner.send(slot, call);
         }
     }
 
     pub fn visual_ready(&self, slot: usize) {
         crate::trace!("event", "visual_ready slot={slot} key={:?}", self.key_at(slot).as_deref().map(crate::trace::tail));
-        if let Some(key) = self.key_at(slot) {
-            self.apply_pending_fraction(slot, &key);
+        if let Some((key, generation)) = self.load_at(slot) {
+            self.apply_pending_fraction(slot, &key, generation, false);
             self.inner.places.rendered(&key);
         }
         self.sync_foreground();
@@ -179,6 +185,10 @@ impl Stage {
             let mut state = self.state();
             let Some(loaded) = state.loaded.get(key) else { return };
             let slot = loaded.slot;
+            let generation = state.next_generation();
+            if let Some(loaded) = state.loaded.get_mut(key) {
+                loaded.generation = generation;
+            }
             let mut calls = vec![(slot, SlotCall::Unload)];
             let resume = state.positions.take(key);
             calls.extend(self.load_calls(&state, key, resume));

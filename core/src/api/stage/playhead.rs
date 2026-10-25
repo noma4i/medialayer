@@ -41,6 +41,12 @@ impl Stage {
         self.inner.routes.nudge_window(url);
     }
 
+    pub(super) fn forget_seek_hint(&self, state: &super::State, url: &str) {
+        if !state.loaded.values().any(|loaded| loaded.source.url == url) {
+            self.inner.seeks.lock().unwrap_or_else(PoisonError::into_inner).remove(url);
+        }
+    }
+
     pub(super) fn url_of(&self, key: &str) -> Option<String> {
         self.state().loaded.get(key).map(|loaded| loaded.source.url.clone())
     }

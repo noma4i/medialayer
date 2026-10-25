@@ -668,6 +668,53 @@ fn inv_ffi_12_shutdown_releases_the_platform_then_the_core_once_whoever_holds_th
 }
 
 #[test]
+fn inv_ffi_12_shutdown_releases_the_assembled_value_whoever_still_holds_the_layer() {
+    let dir = tempfile::tempdir().unwrap();
+    let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), None)).unwrap();
+    let caller = caller();
+    let assembled = caller.block_on(layer.with_assembled(|assembled| async move { Arc::downgrade(&assembled) })).unwrap();
+    let suspension = layer.suspend_playback(Vec::new()).unwrap();
+    let events = layer.player_events();
+    assert!(assembled.strong_count() >= 1, "the assembled value is alive while the layer is open");
+
+    layer.shutdown();
+
+    assert_eq!(assembled.strong_count(), 0, "the closed layer, its suspension or its events still own the assembled value");
+    suspension.release();
+    events.ready(0);
+    layer.set_muted_all(true);
+    layer.visible(MediaItem::bare_video("https://o.test/late.mp4"), true);
+    assert_eq!(assembled.strong_count(), 0, "a call after the close revived the assembled value");
+    drop((layer, suspension, events));
+}
+
+#[test]
+fn inv_ffi_12_shutdown_answers_a_call_that_waits_for_the_assembly_with_unexpected() {
+    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+    let (started, begun) = tokio::sync::oneshot::channel::<()>();
+    let layer = MediaLayer::assembling(
+        runtime,
+        async move {
+            let _ = started.send(());
+            std::future::pending::<Result<crate::api::Parts, MediaError>>().await
+        },
+        None,
+        Vec::new(),
+    );
+
+    let outcome = caller().block_on(async {
+        begun.await.unwrap();
+        layer.shutdown();
+        tokio::time::timeout(std::time::Duration::from_secs(2), layer.stats()).await
+    });
+
+    match outcome {
+        Err(_) => panic!("stats() never answered after the shutdown of a layer still assembling"),
+        Ok(result) => assert!(matches!(result, Err(MediaError::Unexpected { .. })), "stats() answered {result:?}"),
+    }
+}
+
+#[test]
 fn inv_ffi_13_a_whole_source_shown_and_hidden_before_the_assembly_still_downloads() {
     let dir = tempfile::tempdir().unwrap();
     slow_assembly(dir.path(), SLOW);

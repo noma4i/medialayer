@@ -168,6 +168,7 @@ impl MediaLayer {
         if let Some(releaser) = releaser {
             releaser.shutdown();
         }
+        self.assembled.close();
         if let Some(runtime) = self.runtime.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take() {
             runtime.shutdown_background();
         }

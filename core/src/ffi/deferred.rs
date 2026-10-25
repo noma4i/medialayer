@@ -29,7 +29,7 @@ struct Waiting<T> {
 struct Queue<T> {
     value: Option<Arc<T>>,
     draining: bool,
-    failed: bool,
+    ended: bool,
     waiting: Vec<Waiting<T>>,
     next_id: u64,
 }
@@ -80,7 +80,7 @@ fn locked<V>(mutex: &Mutex<V>) -> MutexGuard<'_, V> {
 impl<T: Send + Sync + 'static> Deferred<T> {
     pub fn new() -> Arc<Deferred<T>> {
         let (outcome, _) = watch::channel(None);
-        Arc::new(Deferred { queue: Mutex::new(Queue { value: None, draining: false, failed: false, waiting: Vec::new(), next_id: 0 }), outcome })
+        Arc::new(Deferred { queue: Mutex::new(Queue { value: None, draining: false, ended: false, waiting: Vec::new(), next_id: 0 }), outcome })
     }
 
     fn submit<P: Send + 'static>(&self, payload: P, work: impl FnOnce(&T, P) + Send + 'static, plan: impl FnOnce(&mut Queue<T>, &P) -> Plan) -> Option<u64> {
@@ -92,7 +92,7 @@ impl<T: Send + Sync + 'static> Deferred<T> {
                 work(&value, payload);
                 None
             }
-            _ if queue.failed => None,
+            _ if queue.ended => None,
             _ => match plan(&mut queue, &payload) {
                 Plan::Push(name, rule) => Some(queue.push(name, rule, Box::new(move |value| work(value, payload)))),
                 Plan::Drop => None,
@@ -132,7 +132,7 @@ impl<T: Send + Sync + 'static> Deferred<T> {
 
     pub fn is_pending(&self) -> bool {
         let queue = locked(&self.queue);
-        queue.value.is_none() || queue.draining
+        !queue.ended && (queue.value.is_none() || queue.draining)
     }
 
     #[cfg(test)]
@@ -142,28 +142,52 @@ impl<T: Send + Sync + 'static> Deferred<T> {
 
     pub fn install(&self, value: Arc<T>) {
         let mut queue = locked(&self.queue);
+        if queue.ended {
+            return;
+        }
         queue.value = Some(value.clone());
         queue.draining = true;
         loop {
             let waiting = std::mem::take(&mut queue.waiting);
             if waiting.is_empty() {
                 queue.draining = false;
-                break;
+                self.outcome.send_replace(Some(Ok(value)));
+                return;
             }
             drop(queue);
-            waiting.into_iter().for_each(|waiting| (waiting.work)(&value));
+            for waiting in waiting {
+                let ended = locked(&self.queue).ended;
+                if ended {
+                    break;
+                }
+                (waiting.work)(&value);
+            }
             queue = locked(&self.queue);
+            if queue.ended {
+                return;
+            }
         }
-        drop(queue);
-        self.outcome.send_replace(Some(Ok(value)));
     }
 
     pub fn fail(&self, error: MediaError) {
+        self.end(error);
+    }
+
+    pub fn close(&self) {
+        self.end(MediaError::Unexpected { detail: "the media layer is closed".to_string() });
+    }
+
+    fn end(&self, error: MediaError) {
         let mut queue = locked(&self.queue);
-        queue.failed = true;
-        queue.waiting.clear();
+        if queue.ended {
+            return;
+        }
+        queue.ended = true;
+        let value = queue.value.take();
+        let waiting = std::mem::take(&mut queue.waiting);
+        let settled = self.outcome.send_replace(Some(Err(error)));
         drop(queue);
-        self.outcome.send_replace(Some(Err(error)));
+        drop((value, waiting, settled));
     }
 
     pub async fn wait(&self) -> Result<Arc<T>, MediaError> {

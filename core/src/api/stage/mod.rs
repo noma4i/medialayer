@@ -43,6 +43,7 @@ pub struct StageParts {
 
 struct Loaded {
     slot: usize,
+    generation: u64,
     recovery: RecoveryState,
     source: MediaItem,
     route: PlaybackRoute,
@@ -57,6 +58,7 @@ struct State {
     slot_keys: HashMap<usize, String>,
     tasks: HashMap<String, AbortOnDrop>,
     catalog: HashMap<String, MediaItem>,
+    sliced: HashSet<String>,
     views: HashMap<String, u64>,
     shown: HashMap<String, usize>,
     declarations: HashMap<String, Arc<()>>,
@@ -68,6 +70,8 @@ struct State {
     is_room_wanted: bool,
     refusal_room: u64,
     pending_wanted: HashSet<String>,
+    loads: u64,
+    releases: u64,
 }
 
 struct Inner {
@@ -130,7 +134,25 @@ impl State {
         self.leases.remove(key);
         self.keys_by_lease.remove(&lease);
         self.pending_wanted.remove(key);
+        self.retire(key);
         commands
+    }
+
+    fn next_generation(&mut self) -> u64 {
+        self.loads += 1;
+        self.loads
+    }
+
+    fn retire(&mut self, key: &str) {
+        let is_owned = self.sliced.contains(key)
+            || self.loaded.contains_key(key)
+            || self.leases.contains_key(key)
+            || self.views.contains_key(key)
+            || self.declarations.contains_key(key);
+        if !is_owned {
+            self.catalog.remove(key);
+            self.pending_wanted.remove(key);
+        }
     }
 
     fn refresh_pending(&mut self, key: &str) {
@@ -139,11 +161,6 @@ impl State {
         } else {
             self.pending_wanted.remove(key);
         }
-    }
-
-    fn prune_pending(&mut self) {
-        let catalog = &self.catalog;
-        self.pending_wanted.retain(|key| catalog.contains_key(key));
     }
 
     fn has_pending_restore(&self) -> bool {
@@ -174,8 +191,16 @@ impl State {
         self.leases.get(key).is_some_and(|lease| self.election.active() == Some(*lease))
     }
 
-    fn playing_slots(&self) -> Vec<(usize, String)> {
-        self.slot_keys.iter().filter(|(_, key)| self.is_playing(key)).map(|(slot, key)| (*slot, key.clone())).collect()
+    fn playing_slots(&self) -> Vec<(usize, String, u64)> {
+        self.slot_keys
+            .iter()
+            .filter(|(_, key)| self.is_playing(key))
+            .filter_map(|(slot, key)| Some((*slot, key.clone(), self.loaded.get(key)?.generation)))
+            .collect()
+    }
+
+    fn is_loaded_as(&self, key: &str, slot: usize, generation: u64) -> bool {
+        self.loaded.get(key).is_some_and(|loaded| loaded.slot == slot && loaded.generation == generation)
     }
 
     fn playing_page(&self, keys: &impl PageKeys, pages: Range<usize>) -> Option<usize> {
@@ -207,6 +232,7 @@ impl Stage {
             slot_keys: HashMap::new(),
             tasks: HashMap::new(),
             catalog: HashMap::new(),
+            sliced: HashSet::new(),
             views: HashMap::new(),
             shown: HashMap::new(),
             declarations: HashMap::new(),
@@ -218,6 +244,8 @@ impl Stage {
             is_room_wanted: false,
             refusal_room: 0,
             pending_wanted: HashSet::new(),
+            loads: 0,
+            releases: 0,
         };
         let inner = Arc::new(Inner {
             state: Mutex::new(state),
@@ -302,7 +330,11 @@ impl Stage {
         self.inner.clock.now_ms()
     }
 
-    fn dispatch(&self, mut state: StateGuard<'_>, commands: Vec<Command>) {
+    fn dispatch(&self, state: StateGuard<'_>, commands: Vec<Command>) {
+        self.dispatch_with(state, commands, true);
+    }
+
+    fn dispatch_with(&self, mut state: StateGuard<'_>, commands: Vec<Command>, is_remembering: bool) {
         if commands.is_empty() {
             return;
         }
@@ -325,11 +357,16 @@ impl Stage {
                 state.ring.forget_mute(&key);
             }
         }
-        for key in resumed {
-            self.inner.places.resumed(&key);
+        for (_, key, _) in &resumed {
+            self.inner.places.resumed(key);
         }
         drop(state);
-        self.remember_parked(parked);
+        if is_remembering {
+            self.remember_parked(parked);
+        }
+        for (slot, key, generation) in resumed {
+            self.apply_pending_fraction(slot, &key, generation, true);
+        }
         self.refresh_hints();
         for (key, action) in actions {
             self.perform(key, action);
@@ -343,8 +380,8 @@ impl Stage {
         calls: &mut Vec<(usize, SlotCall)>,
         actions: &mut Vec<(String, Action)>,
         unloaded: &mut Vec<String>,
-        resumed: &mut Vec<String>,
-        parked: &mut Vec<(usize, String)>,
+        resumed: &mut Vec<(usize, String, u64)>,
+        parked: &mut Vec<(usize, String, u64)>,
     ) {
         match &command {
             Command::Load { slot, key } => {
@@ -354,7 +391,8 @@ impl Stage {
                 let mut recovery = RecoveryState::new(self.inner.watchdog.clone());
                 next_action(&mut recovery, Event::Source { key: key.clone(), via_proxy_hls }, self.now());
                 state.slot_keys.insert(*slot, key.clone());
-                state.loaded.insert(key.clone(), Loaded { slot: *slot, recovery, source, route: route.clone() });
+                let generation = state.next_generation();
+                state.loaded.insert(key.clone(), Loaded { slot: *slot, generation, recovery, source, route: route.clone() });
                 state.pending_wanted.remove(key);
                 let resume = state.positions.take(key);
                 calls.extend(self.load_calls(state, key, resume));
@@ -362,9 +400,12 @@ impl Stage {
             Command::Unload { slot } => {
                 if let Some(key) = state.slot_keys.remove(slot) {
                     if !state.is_playing(&key) {
-                        parked.push((*slot, key.clone()));
+                        parked.push((*slot, key.clone(), state.releases));
                     }
-                    state.loaded.remove(&key);
+                    if let Some(unloaded) = state.loaded.remove(&key) {
+                        self.forget_seek_hint(state, &unloaded.source.url);
+                    }
+                    state.retire(&key);
                     state.refresh_pending(&key);
                     state.tasks.remove(&key);
                     unloaded.push(key);
@@ -374,19 +415,13 @@ impl Stage {
             Command::Play { slot } | Command::Pause { slot } => {
                 let event = if matches!(command, Command::Play { .. }) { Event::Play { position_ms: 0 } } else { Event::Pause };
                 if let Some(key) = state.slot_keys.get(slot).cloned() {
-                    if matches!(command, Command::Play { .. }) {
-                        if let Some(loaded) = state.loaded.get(&key) {
-                            self.inner.routes.nudge_window(&loaded.source.url);
-                        }
-                        resumed.push(key.clone());
+                    if let (Command::Play { .. }, Some(loaded)) = (&command, state.loaded.get(&key)) {
+                        self.inner.routes.nudge_window(&loaded.source.url);
+                        resumed.push((*slot, key.clone(), loaded.generation));
                     }
                     self.advance(state, &key, event, actions);
                 }
                 calls.extend(SlotCall::from_command(command.clone(), None));
-                if let (Command::Play { slot }, Some(key)) = (&command, state.slot_keys.get(slot).cloned()) {
-                    let duration = self.inner.runner.sample_now(*slot).and_then(|sample| sample.duration_ms);
-                    calls.extend(self.fraction_seek(state, &key, duration).map(|call| (*slot, call)));
-                }
             }
             Command::Unmute { slot } if self.inner.silent => calls.push((*slot, SlotCall::Mute)),
             _ => calls.extend(SlotCall::from_command(command, None)),
@@ -402,18 +437,18 @@ impl Stage {
         Some(SlotCall::Seek { position_ms })
     }
 
-    fn remember_parked(&self, parked: Vec<(usize, String)>) {
-        let positions: Vec<(String, u64)> = parked
+    fn remember_parked(&self, parked: Vec<(usize, String, u64)>) {
+        let positions: Vec<(usize, String, u64, u64)> = parked
             .into_iter()
-            .filter_map(|(slot, key)| Some((key, self.inner.runner.sample_now(slot)?.position_ms)))
-            .filter(|(_, position)| *position > 0)
+            .filter_map(|(slot, key, releases)| Some((slot, key, releases, self.inner.runner.sample_now(slot)?.position_ms)))
+            .filter(|(_, _, _, position)| *position > 0)
             .collect();
         if positions.is_empty() {
             return;
         }
         let mut state = self.state_quiet();
-        for (key, position) in positions {
-            if !state.loaded.contains_key(&key) {
+        for (slot, key, releases, position) in positions {
+            if state.releases == releases && !state.slot_keys.contains_key(&slot) && !state.loaded.contains_key(&key) {
                 state.positions.remember(&key, position);
             }
         }

@@ -1,11 +1,12 @@
-use super::{Stage, State};
+use super::Stage;
 use crate::api::slots::SlotCall;
 use crate::api::source::MediaItem;
 use crate::api::types::Kind;
 use crate::pages::Sliced;
 use crate::prefetch::CacheStrategy;
 use crate::session::{Context, Intent};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
+use std::sync::PoisonError;
 
 const MIN_RATE: f32 = 0.25;
 const MAX_RATE: f32 = 4.0;
@@ -36,14 +37,16 @@ impl Stage {
         let playing = if state.window.is_empty() { state.playing_slots() } else { Vec::new() };
         if !playing.is_empty() {
             drop(state);
-            let positions: Vec<(String, u64)> = playing
+            let positions: Vec<(usize, String, u64, u64)> = playing
                 .into_iter()
-                .filter_map(|(slot, key)| Some((key, self.inner.runner.sample_now(slot)?.position_ms)))
-                .filter(|(_, position)| *position > 0)
+                .filter_map(|(slot, key, generation)| Some((slot, key, generation, self.inner.runner.sample_now(slot)?.position_ms)))
+                .filter(|(_, _, _, position)| *position > 0)
                 .collect();
             state = self.state();
-            for (key, position) in positions {
-                state.positions.remember(&key, position);
+            for (slot, key, generation, position) in positions {
+                if state.is_loaded_as(&key, slot, generation) {
+                    state.positions.remember(&key, position);
+                }
             }
         }
         let (count, reach) = (state.window.len(), state.ring.pages(active, state.window.len()));
@@ -59,10 +62,10 @@ impl Stage {
             }
             let playing = state.playing_page(&keys, reach.start..reach.end);
             let commands = state.ring.plan(now, active, playing, &keys);
-            let kept: HashSet<&str> = sources.present().map(|source| source.url.as_str()).collect();
-            let State { catalog, loaded, leases, views, .. } = &mut *state;
-            catalog.retain(|key, _| kept.contains(key.as_str()) || loaded.contains_key(key) || leases.contains_key(key) || views.contains_key(key));
-            state.prune_pending();
+            let sliced = sources.present().map(|source| source.url.clone()).collect();
+            for departed in std::mem::replace(&mut state.sliced, sliced) {
+                state.retire(&departed);
+            }
             (state, commands, sources)
         };
         self.dispatch(state, commands);
@@ -142,6 +145,7 @@ impl Stage {
     pub fn detach(&self, key: &str) {
         let mut state = self.state();
         state.views.remove(key);
+        state.retire(key);
         let slot = state.loaded.get(key).map(|loaded| loaded.slot);
         if let Some(slot) = slot {
             self.inner.runner.send(slot, SlotCall::Detach);
@@ -165,11 +169,12 @@ impl Stage {
             return;
         }
         let fraction = fraction.clamp(0.0, 1.0);
+        let load = self.state().loaded.get(key).map(|loaded| (loaded.slot, loaded.generation));
+        let duration = load.and_then(|(slot, _)| self.inner.runner.sample_now(slot)).and_then(|sample| sample.duration_ms).filter(|duration| *duration > 0);
         let mut state = self.state();
-        let slot = state.loaded.get(key).map(|loaded| loaded.slot);
-        let duration = slot.and_then(|slot| self.inner.runner.sample_now(slot)).and_then(|sample| sample.duration_ms).filter(|duration| *duration > 0);
-        match (slot, duration) {
-            (Some(slot), Some(duration)) => {
+        let current = state.loaded.get(key).map(|loaded| (loaded.slot, loaded.generation));
+        match (current, duration) {
+            (Some((slot, _)), Some(duration)) if current == load => {
                 state.positions.forget(key);
                 let position_ms = (duration as f64 * fraction) as u64;
                 self.note_seek(&state.loaded[key].source.url, position_ms);
@@ -229,6 +234,7 @@ impl Stage {
                 return;
             }
             state.declarations.remove(&url);
+            state.retire(&url);
             let commands = state.ring.untouch(&url);
             self.inner.places.retired(&url);
             self.dispatch(state, commands);
@@ -274,19 +280,22 @@ impl Stage {
                 state.forget_lease(&key);
             }
             state.catalog.clear();
+            state.sliced.clear();
+            self.inner.seeks.lock().unwrap_or_else(PoisonError::into_inner).clear();
             state.pending_wanted.clear();
             state.views.clear();
             state.shown.clear();
             state.declarations.clear();
             state.rates.clear();
             state.positions.clear();
+            state.releases += 1;
             state.window.clear();
             state.image_windows.clear();
             let commands = state.ring.release_all();
             self.inner.places.retire_all();
             (state, commands)
         };
-        self.dispatch(state, commands);
+        self.dispatch_with(state, commands, false);
         self.inner.prefetcher.forget_windows();
     }
 }
