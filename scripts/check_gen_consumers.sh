@@ -9,11 +9,7 @@ root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
 
 remove_tree() {
-  local target="$1" doomed
-  [ -e "$target" ] || return 0
-  doomed="$(mktemp -u "$target.removing.XXXXXX")"
-  mv "$target" "$doomed" && rm -rf "$doomed"
-  [ ! -e "$target" ]
+  python3 -c 'import os, shutil, sys; os.path.isdir(sys.argv[1]) and shutil.rmtree(sys.argv[1])' "$1"
 }
 
 case "${1:-}" in
