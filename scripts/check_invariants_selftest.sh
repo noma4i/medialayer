@@ -13,8 +13,7 @@ trap 'rm -rf "$work"' EXIT
 failed=0
 
 fixture() {
-  repo="$work/repo"
-  rm -rf "$repo"
+  repo="$(mktemp -d "$work/repo.XXXXXX")"
   mkdir -p "$repo/scripts" "$repo/specs" "$repo/core/src"
   cp "$here/check_invariants.sh" "$repo/scripts/"
   cat > "$repo/specs/invariants.md" <<'SPEC'
@@ -271,8 +270,7 @@ inv_check_07_a_name_without_a_row_is_red() {
 }
 
 table_repo() {
-  repo="$work/table"
-  rm -rf "$repo"
+  repo="$(mktemp -d "$work/table.XXXXXX")"
   mkdir -p "$repo/scripts"
   cp "$here/check_medialayer.sh" "$here/check_steps.sh" "$here/gradle_host_guard.sh" "$repo/scripts/"
   git -C "$repo" init -q -b master
@@ -312,8 +310,7 @@ inv_check_09_a_core_or_gen_edit_selects_the_cargo_and_both_platform_lanes_and_th
 }
 
 docs_repo() {
-  repo="$work/docs"
-  rm -rf "$repo"
+  repo="$(mktemp -d "$work/docs.XXXXXX")"
   mkdir -p "$repo/scripts" "$repo/docs"
   cp "$here/check_docs.sh" "$repo/scripts/"
   echo "# comment" > "$repo/scripts/docs_unbuilt.txt"
@@ -358,8 +355,8 @@ inv_check_11_the_full_check_compiles_the_generated_consumers_on_both_platforms()
 
 swift_test_runs() {
   local bin="$work/swift-bin" calls="$work/swift-calls"
-  rm -rf "$bin" "$calls"
   mkdir -p "$bin"
+  : > "$calls"
   printf '#!/bin/sh\necho "xcodebuild $*" >> "%s"\n' "$calls" > "$bin/xcodebuild"
   printf '#!/bin/sh\nprintf "    iPhone 17 (11111111-2222-3333-4444-555555555555) (Shutdown)\\n"\n' > "$bin/xcrun"
   chmod +x "$bin"/*
@@ -383,8 +380,7 @@ inv_check_12_the_swift_test_lane_runs_on_a_machine_without_the_local_tooling() {
 }
 
 kotlin_run_repo() {
-  repo="$work/kotlin-run"
-  rm -rf "$repo"
+  repo="$(mktemp -d "$work/kotlin-run.XXXXXX")"
   mkdir -p "$repo/scripts" "$repo/bin" "$repo/kotlin/src/test/kotlin/app/media"
   sed "/opt\/homebrew\/opt\/rustup/d" "$here/check_gen_consumers.sh" > "$repo/scripts/check_gen_consumers.sh"
   echo "class Stale" > "$repo/kotlin/src/test/kotlin/app/media/Stale.kt"

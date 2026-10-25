@@ -8,6 +8,14 @@ set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
 
+remove_tree() {
+  local target="$1" doomed
+  [ -e "$target" ] || return 0
+  doomed="$(mktemp -u "$target.removing.XXXXXX")"
+  mv "$target" "$doomed" && rm -rf "$doomed"
+  [ ! -e "$target" ]
+}
+
 case "${1:-}" in
   swift)
     SWIFT_TEST_RUNNER=bash
@@ -19,8 +27,8 @@ case "${1:-}" in
     shift
     [ "$#" -gt 0 ] || { echo "usage: check_gen_consumers.sh kotlin-run <command...>" >&2; exit 2; }
     directory="$root/kotlin/src/test/kotlin/app/media"
-    rm -rf "$directory"
-    trap 'rm -rf "$directory"' EXIT
+    remove_tree "$directory"
+    trap 'remove_tree "$directory"' EXIT
     trap 'exit 143' TERM INT
     cargo test --manifest-path "$root/gen/Cargo.toml" --features compile-kotlin compile_tests
     "$@"
