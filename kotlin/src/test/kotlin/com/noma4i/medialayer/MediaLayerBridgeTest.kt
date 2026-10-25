@@ -8,7 +8,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
@@ -206,7 +206,7 @@ class MediaLayerBridgeTest {
     media.replaceImageWindow("grid", 0, (0 until 4).map { listOf(Poster("https://o.test/p$it.jpg")) })
 
     eventually("2 distinct urls were fetched") { fetcher.urls.toSet().size >= 2 }
-    Thread.sleep(100)
+    runBlocking { media.awaitClosed() }
     assertEquals(setOf("https://o.test/p0.jpg", "https://o.test/p1.jpg"), fetcher.urls.toSet())
   }
 
@@ -224,7 +224,7 @@ class MediaLayerBridgeTest {
     media.setMuted(item.url, false)
 
     eventually("the slot turned the unmute of mute-all into a mute") { slots.loaded()!!.log.count { it == "mute" } >= 3 }
-    Thread.sleep(200)
+    runBlocking { media.awaitClosed() }
     val log = slots.loaded()!!.log.toList()
     assertEquals("mute", log[log.indexOf("load") + 1])
     assertTrue("unmute" !in log)
@@ -253,11 +253,11 @@ class MediaLayerBridgeTest {
     eventually("the place state reached Ended") { states.states.lastOrNull() == MediaState.Ended }
     assertEquals(listOf<Any?>("file:///bundle/intro.mp4", false, null), listOf(slot.route!!.url, slot.route!!.looping, slot.route!!.generation))
     assertTrue("rate:1.5" in slot.log)
-    Thread.sleep(200)
-    assertEquals(0, fetcher.count.get())
     assertEquals(0uL, media.stats().fileCount)
     assertEquals(Placeholder.None, media.placeholder(item, false))
     subscription.close()
+    media.awaitClosed()
+    assertEquals(0, fetcher.count.get())
   }
 
   @Test
@@ -371,9 +371,8 @@ class MediaLayerBridgeTest {
   @Test
   fun statsFlowDeliversTheCurrentStats() = runBlocking {
     val media = open(MemorySettings())
-    val collected = async { withTimeout(5000) { media.statsFlow().first() } }
+    val collected = async(start = CoroutineStart.UNDISPATCHED) { withTimeout(5000) { media.statsFlow().first() } }
 
-    delay(50)
     media.evictNow()
 
     assertEquals(0uL, collected.await().totalBytes)

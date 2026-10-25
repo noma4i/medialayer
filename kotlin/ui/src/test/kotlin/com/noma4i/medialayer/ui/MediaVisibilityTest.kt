@@ -57,7 +57,12 @@ class MediaVisibilityTest {
 
   private fun claims() = layer.calls.filter { it.startsWith("visible:$url:") }
 
-  private fun settle() = repeat(20) { looper.idleFor(java.time.Duration.ofMillis(50)); Thread.sleep(25) }
+  private fun until(condition: () -> Boolean) {
+    rule.waitForIdle()
+    rule.waitUntil(5000) { looper.idleFor(java.time.Duration.ofMillis(50)); condition() }
+  }
+
+  private fun left() = cancelled.get() == 1 && claims().lastOrNull() == "visible:$url:false"
 
   private fun counters() = "started=${started.get()} cancelled=${cancelled.get()} decodes=${layer.imageStats().snapshot().decodes} claims=${claims()}"
 
@@ -73,10 +78,9 @@ class MediaVisibilityTest {
     rule.waitUntil(5000) { looper.idle(); started.get() == 1 && claims() == listOf("visible:$url:true") }
 
     x = FAR
-    rule.waitForIdle()
-    settle()
+    until { left() }
     gate.complete(Unit)
-    settle()
+    looper.idleFor(java.time.Duration.ofMillis(1000))
 
     assertEquals("started=1 cancelled=1 decodes=0 claims=[visible:$url:true, visible:$url:false]", counters())
     assertEquals(1uL, layer.imageStats().snapshot().cancellations)
@@ -97,13 +101,11 @@ class MediaVisibilityTest {
     }
     rule.waitUntil(5000) { looper.idle(); started.get() == 1 }
     x = FAR
-    rule.waitForIdle()
-    settle()
+    until { left() }
     assertEquals("started=1 cancelled=1 decodes=0 claims=[visible:$url:true, visible:$url:false]", counters())
 
     x = 0
-    rule.waitForIdle()
-    settle()
+    until { started.get() == 2 }
     gate.complete(Unit)
     rule.waitUntil(5000) { looper.idle(); layer.calls.any { it == "itemState:$url:Ready" } }
 
@@ -118,12 +120,12 @@ class MediaVisibilityTest {
         Box(Modifier.fillMaxSize()) { Box(Modifier.offset { IntOffset(x, 0) }) { MediaImage(page, Modifier.size(50.dp)) } }
       }
     }
-    settle()
+    rule.waitForIdle()
+    looper.idleFor(java.time.Duration.ofMillis(1000))
     assertEquals("started=0 cancelled=0 decodes=0 claims=[]", counters())
 
     x = 0
-    rule.waitForIdle()
-    settle()
+    until { started.get() == 1 }
     gate.complete(Unit)
     rule.waitUntil(5000) { looper.idle(); layer.calls.any { it == "itemState:$url:Ready" } }
 
@@ -144,11 +146,9 @@ class MediaVisibilityTest {
     rule.waitUntil(5000) { looper.idle(); started.get() == 2 }
 
     x = FAR
-    rule.waitForIdle()
-    settle()
+    until { left() }
     gate.complete(Unit)
-    rule.waitUntil(5000) { looper.idle(); layer.calls.any { it == "itemState:$url:Ready" } }
-    settle()
+    until { layer.calls.any { it == "itemState:$url:Ready" } }
 
     assertEquals("started=2 cancelled=1 decodes=1 claims=[visible:$url:true, visible:$url:true, visible:$url:false]", counters())
   }

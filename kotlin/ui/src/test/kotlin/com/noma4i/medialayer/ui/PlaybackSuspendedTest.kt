@@ -139,11 +139,12 @@ class PlaybackSuspendedTest {
     waitFor(listOf("play", "pause"))
     rule.runOnIdle { groups = listOf("two") }
     rule.waitForIdle()
-    Thread.sleep(300)
     looper.idle()
     rule.runOnIdle { active = false }
     waitFor(listOf("play", "pause", "play"))
     layer.close()
+    looper.idle()
+    assertEquals(listOf("play", "pause", "play"), slot.transport.toList())
   }
 
   @Test

@@ -64,7 +64,6 @@ extension GlobalMedia {
       window.rootViewController = UIHostingController(rootView: Pages(context: MediaContext(places: media)))
       window.isHidden = false
       defer {
-        media.releaseOwned()
         window.isHidden = true
         window.rootViewController = nil
       }
@@ -74,7 +73,7 @@ extension GlobalMedia {
         settled = slot.hasPlayed
         try await Task.sleep(for: .milliseconds(25))
       }
-      try await Task.sleep(for: .milliseconds(300))
+      await media.awaitClosed()
 
       #expect(settled)
       #expect(slot.createdCount == 1, "created \(slot.createdCount) players for \(pageCount) mounted pages, 1 visible")

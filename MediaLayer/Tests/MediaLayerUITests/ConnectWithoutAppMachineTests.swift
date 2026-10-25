@@ -86,6 +86,11 @@ private func connectRemove(_ window: UIWindow) {
   window.rootViewController = nil
 }
 
+private func connectDrainMain() async {
+  await MainActor.run {}
+  await MainActor.run {}
+}
+
 private func untilConnect(_ condition: () -> Bool) async -> Bool {
   for _ in 0..<400 {
     if condition() { return true }
@@ -139,7 +144,7 @@ extension GlobalMedia {
         connectRemove(window)
       }
 
-      try await Task.sleep(for: .milliseconds(300))
+      await connectDrainMain()
       #expect(slot.plays == 0)
       #expect(seen.seenLayer == nil)
 
@@ -181,7 +186,7 @@ extension GlobalMedia {
       #expect(insideFirst.seenPlaces === first)
 
       connectRemove(firstWindow)
-      try await Task.sleep(for: .milliseconds(200))
+      await connectDrainMain()
       #expect(outside.seenPlaces === second)
 
       connectRemove(secondWindow)
@@ -202,7 +207,7 @@ extension GlobalMedia {
         media.releaseOwned()
       }
 
-      try await Task.sleep(for: .milliseconds(300))
+      await connectDrainMain()
       #expect(seen.seenLayer == nil)
       #expect(outside.seenLayer == nil)
 

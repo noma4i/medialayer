@@ -107,7 +107,8 @@ struct MediaLayerBridgeTests {
     media.replaceImageWindow("grid", active: 0, pages: (0..<4).map { [Poster(url: "https://o.test/p\($0).jpg")] })
 
     for _ in 0..<200 where fetcher.urls.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
-    try await Task.sleep(for: .milliseconds(50))
+    media.close()
+    await media.awaitClosed()
     #expect(Set(fetcher.urls) == ["https://o.test/p0.jpg", "https://o.test/p1.jpg"])
   }
 

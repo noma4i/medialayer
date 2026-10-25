@@ -47,7 +47,7 @@ class MediaBackgroundTest {
 
   private fun claims() = layer.calls.filter { it.startsWith("visible:$url:") }
 
-  private fun settle() = repeat(20) { looper.idle(); Thread.sleep(25) }
+  private fun until(condition: () -> Boolean) = rule.waitUntil(5000) { looper.idleFor(java.time.Duration.ofMillis(50)); condition() }
 
   @Test
   fun aStoppedActivityReleasesTheKeyAndCancelsTheRequestAndARestartAsksAgain() {
@@ -55,13 +55,11 @@ class MediaBackgroundTest {
     rule.waitUntil(5000) { looper.idle(); started.get() == 1 }
 
     rule.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
-    rule.waitForIdle()
-    settle()
+    until { cancelled.get() == 1 && claims().lastOrNull() == "visible:$url:false" }
     assertEquals("started=1 cancelled=1 claims=[visible:$url:true, visible:$url:false]", "started=${started.get()} cancelled=${cancelled.get()} claims=${claims()}")
 
     rule.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
-    rule.waitForIdle()
-    settle()
+    until { started.get() == 2 }
     gate.complete(Unit)
     rule.waitUntil(5000) { looper.idle(); layer.calls.any { it == "itemState:$url:Ready" } }
 

@@ -158,7 +158,8 @@ extension GlobalMedia {
       model.active = true
       unopened.rootViewController = UIHostingController(rootView: Color.clear.mediaPlaybackSuspended(active: model.active))
       unopened.isHidden = false
-      try? await Task.sleep(for: .milliseconds(100))
+      await MainActor.run {}
+      await MainActor.run {}
       unopened.isHidden = true
       unopened.rootViewController = nil
       #expect(rig.slot.transport == ["play", "pause", "play", "pause", "play"])
@@ -174,9 +175,11 @@ extension GlobalMedia {
 
       rig.model.groups = ["two"]
       rig.model.unrelated += 1
-      try? await Task.sleep(for: .milliseconds(150))
+      await MainActor.run {}
       rig.model.active = false
       #expect(await waits { rig.slot.transport.count >= 3 })
+      rig.media.close()
+      await rig.media.awaitClosed()
       #expect(rig.slot.transport == ["play", "pause", "play"])
       withExtendedLifetime(rig.media) {}
     }
@@ -214,7 +217,8 @@ extension GlobalMedia {
       #expect(await waits { rig.slot.transport == ["play", "pause"] })
       center.post(name: names.foreground, object: nil)
       _ = await waits { rig.slot.transport.last == "play" }
-      try? await Task.sleep(for: .milliseconds(200))
+      rig.media.close()
+      await rig.media.awaitClosed()
       let collapsed = rig.slot.transport.reduce(into: [String]()) { seen, next in if seen.last != next { seen.append(next) } }
       #expect(collapsed == ["play", "pause", "play"])
     }

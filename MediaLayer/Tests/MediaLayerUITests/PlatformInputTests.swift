@@ -182,9 +182,11 @@ extension PlatformInputTests {
     mount.update(.make(visible: true))
     await eventually("the refused update was tried") { refusing.updates == 1 }
 
+    let held = HeldQueue()
     mount.update(.make(visible: true, playing: true))
     mount.close()
     mount.close()
+    held.release()
 
     await eventually("released once") { refusing.releases == 1 }
     #expect(refusing.updates == 1)

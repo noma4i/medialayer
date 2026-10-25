@@ -332,9 +332,8 @@ struct AVQueuePlayerSlotTests {
     await slot.play()
     await eventually("sample() advances between player events") { slot.sample().positionMs >= 80 }
     await slot.pause()
-    await drainMain()
+    await eventually("the player is paused") { await MainActor.run { slot.player.timeControlStatus == .paused } }
     let paused = slot.sample().positionMs
-    try? await Task.sleep(for: .milliseconds(60))
     #expect(slot.sample().positionMs == paused)
     await slot.setRate(rate: 2)
     await slot.play()
@@ -385,7 +384,7 @@ struct AVQueuePlayerSlotTests {
 
     await slot.load(key: "b", route: stuck)
     let unloaded = Task { await slot.seek(positionMs: 300) }
-    try? await Task.sleep(for: .milliseconds(100))
+    await drainMain()
     await slot.unload()
     await unloaded.value
 

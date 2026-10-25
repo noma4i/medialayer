@@ -21,9 +21,9 @@ extension GlobalMedia {
       return await factory.makeSlot(7)
     }
 
-    private func drain() async {
+    private func drain(_ audio: MediaAudioSession) async {
       await MainActor.run {}
-      try? await Task.sleep(for: .milliseconds(400))
+      _ = await audio.settled()
       await MainActor.run {}
     }
 
@@ -34,11 +34,12 @@ extension GlobalMedia {
     @Test
     func aMutedPlayingSlotNeverTouchesTheSession() async {
       let port = FakeAudioSessionPort()
-      let slot = await makeSlot(startMuted: true, session: session(.duck, port))
+      let audio = session(.duck, port)
+      let slot = await makeSlot(startMuted: true, session: audio)
 
       await slot.load(key: "a", route: route())
       await slot.play()
-      await drain()
+      await drain(audio)
 
       #expect(port.log.isEmpty)
       await slot.unload()
@@ -62,11 +63,12 @@ extension GlobalMedia {
     @Test
     func unmutingAPlayingSlotTakesTheFocusAndMutingReleasesIt() async {
       let port = FakeAudioSessionPort()
-      let slot = await makeSlot(startMuted: true, session: session(.duck, port))
+      let audio = session(.duck, port)
+      let slot = await makeSlot(startMuted: true, session: audio)
 
       await slot.load(key: "a", route: route())
       await slot.play()
-      await drain()
+      await drain(audio)
       #expect(port.log.isEmpty)
       await slot.unmute()
       await eventually("focus taken") { port.log.contains("active true") }

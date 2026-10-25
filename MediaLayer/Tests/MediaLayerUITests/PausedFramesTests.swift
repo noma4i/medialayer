@@ -39,20 +39,17 @@ private func update(_ view: UIImageView, _ playback: AnimatedFramesView.Playback
 struct PausedFramesTests {
   @Test
   func inv_idle_01_streamed_gif_owns_one_preparation_until_cancelled() async throws {
-    let frames = try decodedFrames()
-    let stream = frames.stream
+    var frames: AnimatedFrames? = try decodedFrames()
     let view = FrameImageView()
     let playback = AnimatedFramesView.Playback()
     let window = attach(view)
-    update(view, playback, frames, playing: true)
-    try await Task.sleep(for: .milliseconds(450))
-    #expect(stream.decodes >= 2)
-    #expect(stream.preparations == 1)
-    update(view, playback, frames, playing: false)
-    try await Task.sleep(for: .milliseconds(50))
-    let stopped = stream.decodes
-    try await Task.sleep(for: .milliseconds(250))
-    #expect(stream.decodes == stopped)
+    weak var stream = frames?.stream
+    update(view, playback, try #require(frames), playing: true)
+    await eventually("the stream decoded two frames") { stream?.decodes ?? 0 >= 2 }
+    #expect(stream?.preparations == 1)
+    update(view, playback, try #require(frames), playing: false)
+    frames = nil
+    await eventually("the cancelled playback task released the stream") { stream == nil }
     withExtendedLifetime(window) {}
   }
 
@@ -75,41 +72,50 @@ struct PausedFramesTests {
     let playback = AnimatedFramesView.Playback()
 
     update(view, playback, frames, playing: true)
-    try await Task.sleep(for: .milliseconds(250))
-    let playing = frames.stream.decodes
-    #expect(playing > 0)
+    await eventually("the gif decoded a frame") { frames.stream.decodes > 0 }
     update(view, playback, frames, playing: false)
-    try await Task.sleep(for: .milliseconds(50))
-    let stopped = frames.stream.decodes
-    try await Task.sleep(for: .milliseconds(250))
-    #expect(frames.stream.decodes == stopped)
     #expect(view.image != nil, "away: image=\(String(describing: view.image))")
+    let stopped = frames.stream.decodes
     update(view, playback, frames, playing: true)
-    try await Task.sleep(for: .milliseconds(250))
-    #expect(frames.stream.decodes > stopped)
+    #expect(frames.stream.preparations == 2)
+    await eventually("the gif decoded again after it came back") { frames.stream.decodes > stopped }
     withExtendedLifetime(window) {}
   }
 
   @Test
-  func a_decoded_gif_animates_only_while_its_view_is_in_a_window() async throws {
+  func a_gif_without_a_window_decodes_nothing_and_resumes_when_it_joins_one() async throws {
     let frames = try decodedFrames()
     let view = FrameImageView()
     let playback = AnimatedFramesView.Playback()
 
     update(view, playback, frames, playing: true)
-    try await Task.sleep(for: .milliseconds(250))
     #expect(frames.stream.decodes == 0)
+    #expect(frames.stream.preparations == 0)
     let window = attach(view)
-    try await Task.sleep(for: .milliseconds(250))
-    #expect(frames.stream.decodes > 0)
+    await eventually("the gif decoded after it joined a window") { frames.stream.decodes > 0 }
+    #expect(frames.stream.preparations == 1)
     view.removeFromSuperview()
-    try await Task.sleep(for: .milliseconds(50))
     let stopped = frames.stream.decodes
-    try await Task.sleep(for: .milliseconds(250))
-    #expect(frames.stream.decodes == stopped)
     window.addSubview(view)
-    try await Task.sleep(for: .milliseconds(250))
-    #expect(frames.stream.decodes > stopped)
+    #expect(frames.stream.preparations == 2)
+    await eventually("the gif decoded again after it rejoined the window") { frames.stream.decodes > stopped }
+  }
+
+  @Test
+  func a_gif_that_left_its_window_ends_its_playback_task() async throws {
+    var frames: AnimatedFrames? = try decodedFrames()
+    let view = FrameImageView()
+    let playback = AnimatedFramesView.Playback()
+    let window = attach(view)
+    weak var stream = frames?.stream
+
+    update(view, playback, try #require(frames), playing: true)
+    await eventually("the stream decoded a frame") { stream?.decodes ?? 0 > 0 }
+    view.removeFromSuperview()
+    playback.plan = nil
+    frames = nil
+    await eventually("the cancelled playback task released the stream") { stream == nil }
+    withExtendedLifetime(window) {}
   }
 }
 #endif

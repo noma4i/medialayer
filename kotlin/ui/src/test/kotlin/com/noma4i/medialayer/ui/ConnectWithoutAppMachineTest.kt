@@ -75,7 +75,7 @@ class ConnectWithoutAppMachineTest {
     var drawn = false
     rule.setContent { MediaLayerProvider(opened, loader, slots.players) { SideEffect { drawn = true }; MediaVideo(ConnectClip(), modifier = Modifier.size(50.dp)) } }
     rule.waitForIdle()
-    repeat(10) { looper.idle(); Thread.sleep(25) }
+    looper.idleFor(java.time.Duration.ofMillis(1000))
     assertTrue(drawn)
     assertEquals(emptyList<String>(), visibles(layer))
 

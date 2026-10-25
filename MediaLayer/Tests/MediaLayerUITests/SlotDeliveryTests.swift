@@ -64,8 +64,8 @@ struct SlotDeliveryTests {
     await slot.apply(command: .load(key: "a", route: route(), generation: 7))
     await log.wait(for: "ready")
     let old = try #require(await MainActor.run { slot.loadedItem })
+    log.holdReady(generation: 8)
     await slot.apply(command: .load(key: "a", route: route(), generation: 8))
-    await eventually("the current load is ready") { log.generations("ready") == [7, 8] }
     let current = try #require(await MainActor.run { slot.loadedItem })
 
     await MainActor.run {
@@ -74,7 +74,9 @@ struct SlotDeliveryTests {
       slot.itemEnded(current, generation: 7)
     }
     #expect(log.count("ended") == 0, "a stale end reached the core: \(log.generations("ended"))")
-    #expect(log.generations("ready") == [7, 8], "a stale status reached the core: \(log.generations("ready"))")
+    #expect(log.generations("ready") == [7], "a stale status reached the core: \(log.generations("ready"))")
+    log.releaseReady(generation: 8)
+    await eventually("the current load is ready") { log.generations("ready") == [7, 8] }
     await MainActor.run { slot.itemEnded(current, generation: 8) }
 
     #expect(log.generations("ended") == [8])

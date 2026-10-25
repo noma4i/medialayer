@@ -16,6 +16,7 @@ import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaItem
 import com.noma4i.medialayer.MediaLayer
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
@@ -115,8 +116,7 @@ class AndroidShutdownTest {
       media.replaceWindow(0u, listOf(MediaItem(Kind.VIDEO, "http://127.0.0.1:9/a.mp4", emptyMap(), null, null, strategy = CacheStrategy.WINDOW)))
       untilMain { counters.snapshot()["livePlayers"] == 1L }
       if (cancelled) {
-        val waiting = CoroutineScope(Dispatchers.Default).launch { media.awaitClosed() }
-        Thread.sleep(200)
+        val waiting = CoroutineScope(Dispatchers.Default).launch(start = CoroutineStart.UNDISPATCHED) { media.awaitClosed() }
         waiting.cancel()
         untilMain { counters.snapshot()["livePlayers"] == 0L }
       } else {
@@ -133,8 +133,7 @@ class AndroidShutdownTest {
     val media = open()
     assertTrue(owner.lifecycle.observerCount > 0)
 
-    val waiting = CoroutineScope(Dispatchers.Default).async { media.awaitClosed() }
-    Thread.sleep(300)
+    val waiting = CoroutineScope(Dispatchers.Default).async(start = CoroutineStart.UNDISPATCHED) { media.awaitClosed() }
     assertFalse("Closed came while the main thread still held the system subscriptions", waiting.isCompleted)
     assertTrue(owner.lifecycle.observerCount > 0)
 

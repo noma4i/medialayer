@@ -68,7 +68,8 @@ class MountedVideoPagesTest {
       }
     }
     rule.waitUntil(10_000) { looper.idle(); slot.calls.isNotEmpty() }
-    repeat(20) { looper.idleFor(java.time.Duration.ofMillis(50)); Thread.sleep(25) }
+    rule.waitForIdle()
+    looper.idleFor(java.time.Duration.ofMillis(1000))
 
     assertTrue(slot.calls.isNotEmpty())
     assertEquals("created ${slot.created.get()} players for $PAGES mounted pages, 1 visible", 1, slot.created.get())

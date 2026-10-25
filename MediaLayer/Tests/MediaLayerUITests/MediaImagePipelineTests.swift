@@ -168,6 +168,27 @@ extension GlobalMedia {
     }
 
     @Test
+    func inv_image_11_the_counters_of_a_decode_arrive_with_the_recorder_drain() async throws {
+      let places = RecordingPlaces()
+      places.imageResult = .success(pngData(side: 1080, height: 1920))
+      ImageMemory.install(ImageCache(), on: places)
+      let pipeline = MediaImagePipeline.make(places: places)
+      let source = TestImage(url: "https://o.test/portrait.png", size: MediaSize(width: 1080, height: 1920))
+      let request = try #require(MediaImagePipeline.request(places: places, for: source, points: CGSize(width: 352, height: 352), contentMode: .fill))
+      let held = HeldQueue()
+      defer { held.release() }
+
+      _ = try await pipeline.image(for: request)
+      #expect(places.imageStats().snapshot().decodes == 0, "the drain applied while the queue was held")
+      held.release()
+
+      await eventually("the request is counted") { let applied = places.imageStats().snapshot(); return applied.requests == 1 && applied.activeRequests == 0 }
+      let stats = places.imageStats().snapshot()
+      #expect(stats.decodes == 1)
+      #expect(stats.placementPixels == 352 * 352)
+    }
+
+    @Test
     func inv_memory_04_a_system_warning_clears_decoded_images() async throws {
       let media = try await MediaLayer.open(
         fetcher: URLSessionFetcher(),

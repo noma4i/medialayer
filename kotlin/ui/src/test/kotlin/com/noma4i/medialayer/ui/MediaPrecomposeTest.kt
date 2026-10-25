@@ -58,7 +58,7 @@ class MediaPrecomposeTest {
     rule.runOnIdle { state.precompose(page.url, content) }
     if (measured) measuring = true
     rule.waitForIdle()
-    repeat(20) { looper.idle(); Thread.sleep(25) }
+    looper.idleFor(java.time.Duration.ofMillis(1000))
 
     val work = "fetched=${fetched.size} visible=${visibles(page.url).size} attach=${attaches(page.url).size} placeholder=${layer.placeholders.count { it.first == page.url }}"
     assertEquals("fetched=0 visible=0 attach=0 placeholder=0", work)

@@ -280,7 +280,7 @@ class NativeViewLifecycleTest {
     rule.waitForIdle()
     val background = control!!.progress
     clock.advanceTime(1000)
-    repeat(20) { looper.idle(); Thread.sleep(25) }
+    looper.idleFor(java.time.Duration.ofMillis(1000))
     assertEquals(background, control!!.progress)
     rule.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
     rule.waitUntil(5000) { looper.idleFor(java.time.Duration.ofMillis(100)); control!!.progress > background }
