@@ -24,7 +24,7 @@ if [ ! -f "$spec" ]; then
   exit 1
 fi
 
-test_dirs="${TEST_DIRS:-core/src gen/src swift/Tests MediaLayer/Tests kotlin/src/test kotlin/ui/src/test scripts}"
+test_dirs="${TEST_DIRS:-core/src gen/src gen/fixtures swift/Tests MediaLayer/Tests kotlin/src/test kotlin/ui/src/test scripts}"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
