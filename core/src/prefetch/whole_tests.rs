@@ -305,11 +305,11 @@ async fn inv_strategy_05_a_failed_whole_load_starts_again_when_the_app_returns_t
     assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
 }
 
-struct Stack {
+pub(super) struct Stack {
     dir: tempfile::TempDir,
     cache: Cache,
-    fetcher: Arc<MockFetcher>,
-    proxy: Proxy,
+    pub(super) fetcher: Arc<MockFetcher>,
+    pub(super) proxy: Proxy,
 }
 
 async fn stack_in(dir: tempfile::TempDir) -> Stack {
@@ -321,7 +321,7 @@ async fn stack_in(dir: tempfile::TempDir) -> Stack {
     Stack { dir, cache, fetcher, proxy }
 }
 
-async fn stack() -> Stack {
+pub(super) async fn stack() -> Stack {
     stack_in(tempfile::tempdir().unwrap()).await
 }
 

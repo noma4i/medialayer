@@ -1,0 +1,151 @@
+use super::loader::ProxyLoader;
+use super::runner_tests::{eventually, next, quiet, rig, rig_with, Rig};
+use super::whole_tests::{stack, Stack};
+use super::*;
+use crate::cache::{Clock, ManualClock};
+use crate::fetch::mock::Script;
+use crate::limits::Limits;
+use crate::proxy::Priority;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
+
+const URL: &str = "https://o.test/a.jpg";
+
+fn photo(strategy: CacheStrategy) -> Source {
+    Source { url: URL.to_string(), headers: HashMap::new(), kind: SourceKind::Image, strategy }
+}
+
+fn fetches(rig: &Rig) -> usize {
+    rig.loader.urls().iter().filter(|url| *url == URL).count()
+}
+
+fn over_proxy(stack: &Stack) -> Prefetcher {
+    let limits = Limits { prefetch_from: 0, prefetch_to: 0, ..Limits::default() };
+    let ledger = PrefetchLedger::new(Duration::from_secs(limits.dedupe_window_seconds.into()), limits.dedupe_max_entries as usize);
+    Prefetcher::new(Arc::new(ProxyLoader::new(stack.proxy.clone())), &limits, ledger, Arc::new(ManualClock::new(1_000)) as Arc<dyn Clock>)
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_strategy_22_a_failing_whole_source_is_fetched_three_times_in_one_block_and_a_recovering_one_twice() {
+    let failing = rig();
+    let mut events = failing.prefetcher.settled();
+    failing.loader.fail(URL, true);
+    failing.prefetcher.keep_whole(photo(CacheStrategy::Whole));
+    assert!(matches!(next(&mut events).await.outcome, Outcome::Failed(_)));
+    tokio::time::sleep(Duration::from_secs(120)).await;
+    assert_eq!(fetches(&failing), 3);
+
+    let recovering = rig();
+    let mut events = recovering.prefetcher.settled();
+    recovering.loader.fail(URL, true);
+    recovering.prefetcher.keep_whole(photo(CacheStrategy::Whole));
+    eventually(|| fetches(&recovering) == 1).await;
+    recovering.loader.fail(URL, false);
+    assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
+    assert_eq!(fetches(&recovering), 2);
+}
+
+#[tokio::test]
+async fn inv_strategy_23_suspend_and_resume_restart_a_whole_load_once_and_resume_or_foreground_alone_add_none() {
+    let rig = rig();
+    rig.loader.hang(URL);
+    rig.prefetcher.keep_whole(photo(CacheStrategy::Whole));
+    eventually(|| rig.loader.alive() == [URL]).await;
+
+    rig.prefetcher.set_foreground_busy(true);
+    rig.prefetcher.set_foreground_busy(false);
+    rig.prefetcher.resume();
+    quiet().await;
+    assert_eq!(fetches(&rig), 1);
+
+    rig.prefetcher.suspend();
+    eventually(|| rig.loader.alive().is_empty()).await;
+    rig.prefetcher.resume();
+    eventually(|| rig.loader.alive() == [URL]).await;
+    quiet().await;
+    assert_eq!((fetches(&rig), rig.loader.alive().len()), (2, 1));
+}
+
+#[tokio::test]
+async fn inv_strategy_24_a_window_and_a_whole_declaration_of_one_url_share_the_running_load_in_both_orders() {
+    for whole_first in [true, false] {
+        let rig = rig_with(|limits| {
+            limits.prefetch_from = 0;
+            limits.prefetch_to = 0;
+        });
+        rig.loader.hang(URL);
+        let window = |rig: &Rig| rig.prefetcher.set_window(0, vec![Some(photo(CacheStrategy::Window))]);
+        let whole = |rig: &Rig| rig.prefetcher.keep_whole(photo(CacheStrategy::Whole));
+        if whole_first { whole(&rig) } else { window(&rig) }
+        eventually(|| rig.loader.alive() == [URL]).await;
+        if whole_first { window(&rig) } else { whole(&rig) }
+        quiet().await;
+        assert_eq!((fetches(&rig), rig.loader.alive().len()), (1, 1), "whole first: {whole_first}");
+    }
+}
+
+#[tokio::test]
+async fn inv_strategy_25_a_window_load_then_a_whole_declaration_reach_the_network_once_in_both_orders() {
+    for whole_first in [true, false] {
+        let stack = stack().await;
+        stack.fetcher.route(URL, Script::ok(vec![7; 2048]));
+        let prefetcher = over_proxy(&stack);
+        let mut events = prefetcher.settled();
+        let window = || prefetcher.set_window(0, vec![Some(photo(CacheStrategy::Window))]);
+        let whole = || prefetcher.keep_whole(photo(CacheStrategy::Whole));
+        if whole_first { whole() } else { window() }
+        assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
+        if whole_first { window() } else { whole() }
+        quiet().await;
+        assert_eq!(stack.fetcher.calls_for(URL), 1, "whole first: {whole_first}");
+    }
+}
+
+#[tokio::test]
+async fn inv_strategy_26_a_declaration_made_right_after_a_release_leaves_exactly_one_live_fetch() {
+    let rig = rig();
+    rig.loader.hang(URL);
+    rig.prefetcher.hold_whole(1, photo(CacheStrategy::Whole));
+    eventually(|| rig.loader.alive() == [URL]).await;
+
+    rig.prefetcher.release_owner(1);
+    rig.prefetcher.hold_whole(2, photo(CacheStrategy::Whole));
+    eventually(|| fetches(&rig) == 2 && rig.loader.alive().len() == 1).await;
+    quiet().await;
+    assert_eq!((fetches(&rig), rig.loader.alive().len(), rig.prefetcher.counters().cancelled), (2, 1, 1));
+}
+
+#[tokio::test]
+async fn inv_strategy_27_an_image_load_of_a_place_and_a_whole_load_of_the_same_url_share_one_upstream_fetch() {
+    let stack = stack().await;
+    stack.fetcher.route(URL, Script::ok(vec![7; 2048]).head_delay(Duration::from_millis(150)));
+    let loader = ProxyLoader::new(stack.proxy.clone());
+    let headers = HashMap::new();
+    let progress = tokio::sync::Notify::new();
+
+    let (place, whole) = tokio::join!(
+        stack.proxy.fetch_bytes(URL, &headers, u64::MAX),
+        super::loader::Loader::load(&loader, URL, &headers, Priority::ImagePrefetch, &progress),
+    );
+
+    assert!(place.is_ok() && whole.is_ok());
+    assert_eq!(stack.fetcher.calls_for(URL), 1);
+}
+
+#[tokio::test]
+async fn inv_strategy_28_forgetting_a_loaded_source_allows_exactly_one_new_load_and_nothing_else_does() {
+    let rig = rig();
+    let mut events = rig.prefetcher.settled();
+    rig.prefetcher.keep_whole(photo(CacheStrategy::Whole));
+    assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
+    rig.prefetcher.keep_whole(photo(CacheStrategy::Whole));
+    quiet().await;
+    assert_eq!(fetches(&rig), 1);
+
+    rig.prefetcher.forget_loaded(Some(URL));
+    rig.prefetcher.keep_whole(photo(CacheStrategy::Whole));
+    assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
+    quiet().await;
+    assert_eq!(fetches(&rig), 2);
+}
