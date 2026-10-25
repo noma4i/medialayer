@@ -104,7 +104,8 @@ class SlotDeliveryTest {
 
   @Test
   fun inv_api_43_the_events_of_a_load_carry_its_generation_and_the_listener_of_an_older_load_is_removed() {
-    val slot = factory().createSlot(3u)
+    val factory = factory().also { it.renderersFactory = fakeRenderersFactory(); it.clock = androidx.media3.test.utils.FakeClock(true) }
+    val slot = factory.createSlot(3u)
     launching(slot, SlotCall.Load("a", route.copy(looping = false), 5uL)); launching(slot, SlotCall.Play); idle()
     androidx.media3.test.utils.robolectric.TestPlayerRunHelper.runUntilPlaybackState(slot.player!!, androidx.media3.common.Player.STATE_READY)
     val first = slot.loadEvents

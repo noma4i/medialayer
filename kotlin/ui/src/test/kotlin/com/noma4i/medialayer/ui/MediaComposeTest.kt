@@ -64,6 +64,8 @@ private data class Note(override val url: String) : MediaSource {
 class MediaComposeTest {
   @get:Rule val rule = createComposeRule()
 
+  private fun settled() { rule.waitForIdle(); drainFfi() }
+
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val events = RecordingEvents()
   private val layer = RecordingLayer(events)
@@ -110,7 +112,7 @@ class MediaComposeTest {
         }
       }
     }
-    rule.waitForIdle()
+    settled()
 
     fun told(name: String) = layer.calls.filter { name in it }.map { it.replace(name, "x") }
     assertEquals(3, told("texture").size)
@@ -120,13 +122,13 @@ class MediaComposeTest {
   @Test
   fun theAppWideMuteReachesTheCore() {
     rule.setContent { MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { } }
-    rule.waitForIdle()
+    settled()
 
     Media.muted = true
-    rule.waitForIdle()
+    settled()
     Media.muted = false
 
-    rule.waitForIdle()
+    settled()
     assertEquals(listOf("mutedAll:false", "mutedAll:true", "mutedAll:false"), layer.calls.toList())
   }
 
@@ -190,10 +192,10 @@ class MediaComposeTest {
   fun anAudioRateGoesToTheCoreAndAChangeOfTheParameterGoesAgain() {
     var rate by androidx.compose.runtime.mutableFloatStateOf(1.5f)
     rule.setContent { MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { MediaAudio(Note("https://o.test/n.m4a"), rate = rate) { } } }
-    rule.waitForIdle()
+    settled()
 
     rate = 2f
-    rule.waitForIdle()
+    settled()
 
     assertEquals(listOf("rate:https://o.test/n.m4a:1.5", "rate:https://o.test/n.m4a:2.0"), layer.calls.filter { it.startsWith("rate") })
   }
@@ -310,15 +312,15 @@ class MediaComposeTest {
         } }
       }
     }
-    rule.waitForIdle()
+    settled()
 
     rule.onNodeWithText("play").performClick()
-    rule.waitForIdle()
+    settled()
     rule.onNodeWithText("pause").performClick()
-    rule.waitForIdle()
+    settled()
 
     rule.onNodeWithText("seek").performClick()
-    rule.waitForIdle()
+    settled()
 
     assertEquals(
       listOf("playing:https://o.test/n.m4a:true", "playing:https://o.test/n.m4a:false"),

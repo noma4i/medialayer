@@ -595,7 +595,7 @@ class ExoPlayerSlotTest {
   }
 }
 
-private fun fakeRenderersFactory() = androidx.media3.exoplayer.RenderersFactory { handler, videoListener, _, _, _ ->
+internal fun fakeRenderersFactory() = androidx.media3.exoplayer.RenderersFactory { handler, videoListener, _, _, _ ->
   arrayOf<androidx.media3.exoplayer.Renderer>(
     androidx.media3.test.utils.FakeVideoRenderer(androidx.media3.common.util.Clock.DEFAULT.createHandler(handler.looper, null), videoListener)
   )

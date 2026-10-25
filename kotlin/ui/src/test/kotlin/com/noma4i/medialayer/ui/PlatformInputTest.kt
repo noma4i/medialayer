@@ -132,9 +132,16 @@ class PlatformInputTest {
     val updates = AtomicInteger()
     val releases = AtomicInteger()
     val closes = AtomicInteger()
+    val entered = CountDownLatch(1)
+    val gate = CountDownLatch(1)
     layer.placeFactory = {
       object : com.noma4i.medialayer.MediaPlace(NoHandle) {
-        override fun update(input: com.noma4i.medialayer.PlaceInput) { updates.incrementAndGet(); throw com.noma4i.medialayer.MediaException.Overloaded("entry limit reached") }
+        override fun update(input: com.noma4i.medialayer.PlaceInput) {
+          updates.incrementAndGet()
+          entered.countDown()
+          gate.await(5, TimeUnit.SECONDS)
+          throw com.noma4i.medialayer.MediaException.Overloaded("entry limit reached")
+        }
         override fun seek(fraction: Double) = Unit
         override fun itemState(state: com.noma4i.medialayer.MediaState) = Unit
         override fun release() { releases.incrementAndGet() }
@@ -143,11 +150,12 @@ class PlatformInputTest {
     }
     val mount = PlaceMount(layer, clip(1)) { }
     mount.update(placeInput(visible = true))
-    eventually("the refused update was tried") { updates.get() == 1 }
+    assertTrue(entered.await(5, TimeUnit.SECONDS))
 
     mount.update(placeInput(visible = true, playing = true))
     mount.close()
     mount.close()
+    gate.countDown()
 
     eventually("released once") { releases.get() == 1 && closes.get() == 1 }
     assertEquals(1, updates.get())
