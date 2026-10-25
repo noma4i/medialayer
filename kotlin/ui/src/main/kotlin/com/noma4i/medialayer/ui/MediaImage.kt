@@ -33,6 +33,8 @@ import coil3.Extras
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import coil3.ImageLoader
+import coil3.decode.BitmapFactoryDecoder
+import coil3.gif.repeatCount
 import coil3.request.ImageResult
 import coil3.request.ImageRequest
 import coil3.size.Scale
@@ -63,6 +65,7 @@ fun MediaImage(
   modifier: Modifier = Modifier,
   contentScale: ContentScale = ContentScale.Crop,
   preview: MediaSource? = null,
+  animation: ImageAnimation = ImageAnimation(),
   content: @Composable (MediaState) -> Unit = {}
 ) {
   if (currentEnvironmentOrNull() == null) {
@@ -74,14 +77,14 @@ fun MediaImage(
   val failure = remember { mutableStateOf<ScopedFailure?>(null) }
   val mount = claimImage(source, item, screen, failure)
   if (source.size != null) {
-    Box(modifier.then(screen.modifier)) { ImageBody(source, preview, item, mount, failure, null, 0L, screen, contentScale, content) }
+    Box(modifier.then(screen.modifier)) { ImageBody(source, preview, item, mount, failure, null, 0L, screen, contentScale, animation, content) }
     return
   }
   val density = LocalDensity.current.density
   val pixelSizes = LocalMediaEnvironment.current.pixelSizes
   BoxWithConstraints(modifier.then(screen.modifier)) {
     val placementPixels = if (constraints.hasBoundedWidth && constraints.hasBoundedHeight) constraints.maxWidth.toLong() * constraints.maxHeight else 0L
-    ImageBody(source, preview, item, mount, failure, decodePixels(constraints, density, source, contentScale, pixelSizes), placementPixels, screen, contentScale, content)
+    ImageBody(source, preview, item, mount, failure, decodePixels(constraints, density, source, contentScale, pixelSizes), placementPixels, screen, contentScale, animation, content)
   }
 }
 
@@ -104,19 +107,28 @@ private fun claimImage(source: MediaSource, item: MediaItem, screen: ScreenVisib
 
 @Composable
 @OptIn(ExperimentalCoroutinesApi::class)
-private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaItem, mount: PlaceMount, failure: State<ScopedFailure?>, pixels: PixelSize?, placementPixels: Long, screen: ScreenVisibility, contentScale: ContentScale, content: @Composable (MediaState) -> Unit) {
+private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaItem, mount: PlaceMount, failure: State<ScopedFailure?>, pixels: PixelSize?, placementPixels: Long, screen: ScreenVisibility, contentScale: ContentScale, animation: ImageAnimation, content: @Composable (MediaState) -> Unit) {
   val context = LocalContext.current
   val environment = LocalMediaEnvironment.current
   val media = environment.media
   val scale = contentScale.toScale()
   val stats = environment.stats
-  val request = remember(media, source, pixels, scale, placementPixels) { imageRequest(context, source, pixels, scale, { media.cacheKey(source.url, source.headers) }, placementPixels) }
+  val reduceMotion by rememberReduceMotion()
+  val finished = remember(source.url, animation.repeats, animation.playing) { mutableStateOf(false) }
+  val rests = animation.rests(reduceMotion) || finished.value
+  val resting = if (rests) animation.rest else null
+  val request = remember(media, source, pixels, scale, placementPixels, resting, animation.repeats) { imageRequest(context, source, pixels, scale, { media.cacheKey(source.url, source.headers) }, placementPixels, resting, animation.repeats) }
   val state = remember(item) { mutableStateOf<MediaState>(MediaState.Idle) }
-  val animation = remember { mutableStateOf<Animatable?>(null) }
+  val animated = remember { mutableStateOf<Animatable?>(null) }
   LaunchedEffect(failure.value, item) { failure.value.of(item)?.let { state.value = it } }
   LaunchedEffect(screen) {
-    snapshotFlow { animation.value to screen.visible }.onStart { stats.recordLater(ImageWork.Observe) }.onCompletion { stats.recordLater(ImageWork.Unobserve) }.collectLatest { (drawable, visible) ->
-      if (visible) drawable?.start() else drawable?.stop()
+    snapshotFlow { animated.value to screen.visible }.onStart { stats.recordLater(ImageWork.Observe) }.onCompletion { stats.recordLater(ImageWork.Unobserve) }.collectLatest { (drawable, visible) ->
+      if (visible) {
+        drawable?.repeating()?.onFinished { finished.value = true }
+        drawable?.start()
+      } else {
+        drawable?.stop()
+      }
       try { awaitCancellation() } finally { drawable?.stop() }
     }
   }
@@ -140,7 +152,7 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
     imageLoader = loader,
     contentScale = contentScale,
     onState = { painterState ->
-      animation.value = ((painterState as? AsyncImagePainter.State.Success)?.result?.image as? DrawableImage)?.drawable as? Animatable
+      animated.value = ((painterState as? AsyncImagePainter.State.Success)?.result?.image as? DrawableImage)?.drawable as? Animatable
       painterState.toMediaState()?.let { reached ->
         state.value = reached
         mount.report(reached)
@@ -179,9 +191,16 @@ internal fun decodePixels(constraints: Constraints, density: Float, source: Medi
   return pixelSizes.size(width, height, density.toDouble(), declared, contentScale.toScale() == Scale.FILL)
 }
 
-internal fun imageRequest(context: Context, source: MediaSource, pixels: PixelSize?, scale: Scale, cacheKey: () -> String, placementPixels: Long = 0): ImageRequest =
+internal fun imageRequest(context: Context, source: MediaSource, pixels: PixelSize?, scale: Scale, cacheKey: () -> String, placementPixels: Long = 0, rest: RestFrame? = null, repeats: Repeats = Repeats.Forever): ImageRequest =
   ImageRequest.Builder(context)
-    .data(MediaImageData(source.url, source.headers, cacheKey, if (pixels == null) source.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) } else null, pixels))
+    .data(MediaImageData(source.url, source.headers, cacheKey, if (pixels == null) source.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) } else null, pixels, rest, repeats))
+    .apply {
+      when (rest) {
+        RestFrame.First -> decoderFactory(BitmapFactoryDecoder.Factory())
+        RestFrame.Last -> decoderFactory(RestFrameDecoder.Factory())
+        null -> (repeats as? Repeats.Times)?.let { repeatCount(maxOf(it.count, 1) - 1) }
+      }
+    }
     .scale(scale)
     .apply {
       extras[PLACEMENT_PIXELS] = placementPixels

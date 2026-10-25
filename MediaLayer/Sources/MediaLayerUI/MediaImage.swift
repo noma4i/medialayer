@@ -11,7 +11,7 @@ struct ImageKey: Equatable {
 private struct LoadedImage {
   let key: ImageKey
   let image: PlatformImage
-  var gif: Data?
+  var animated: Data?
   var frames: AnimatedFrames?
 }
 
@@ -66,8 +66,8 @@ private struct PreviewInputs: Hashable {
 
 private struct FramesJob: Equatable {
   let key: ImageKey
-  let hasGif: Bool
-  let playing: Bool
+  let hasAnimation: Bool
+  let needed: Bool
 }
 
 private struct ImageInputs: Hashable {
@@ -102,9 +102,23 @@ private struct ImageRequestView<Content: View>: View {
   var body: some View { content(prepared.key, prepared.request) }
 }
 
+private struct ReduceMotionOverrideKey: EnvironmentKey {
+  static let defaultValue: Bool? = nil
+}
+
+extension EnvironmentValues {
+  /// Replaces the system "reduce motion" setting for the views below; the system value is read when it is nil.
+  var mediaReduceMotionOverride: Bool? {
+    get { self[ReduceMotionOverrideKey.self] }
+    set { self[ReduceMotionOverrideKey.self] = newValue }
+  }
+}
+
 public struct MediaImage<Content: View>: View {
   @ResolvedMediaContext private var context
   @Environment(\.displayScale) private var displayScale
+  @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+  @Environment(\.mediaReduceMotionOverride) private var reduceMotionOverride
   @State private var loaded: LoadedImage?
   @State private var state: MediaState = .idle
   @State private var failure: ScopedFailure?
@@ -118,21 +132,23 @@ public struct MediaImage<Content: View>: View {
   private let preview: (any MediaSource)?
   private let contentMode: ContentMode
   private let playbackRate: Double
+  private let animation: ImageAnimation
   private let content: (MediaState) -> Content
 
-  public init(_ source: some MediaSource, contentMode: ContentMode = .fill, playbackRate: Double = 1, @ViewBuilder content: @escaping (MediaState) -> Content) {
-    self.init(shown: source, preview: nil, contentMode: contentMode, playbackRate: playbackRate, content: content)
+  public init(_ source: some MediaSource, contentMode: ContentMode = .fill, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation(), @ViewBuilder content: @escaping (MediaState) -> Content) {
+    self.init(shown: source, preview: nil, contentMode: contentMode, playbackRate: playbackRate, animation: animation, content: content)
   }
 
-  public init(_ source: some MediaSource, preview: (some MediaSource)?, contentMode: ContentMode = .fill, playbackRate: Double = 1, @ViewBuilder content: @escaping (MediaState) -> Content) {
-    self.init(shown: source, preview: preview, contentMode: contentMode, playbackRate: playbackRate, content: content)
+  public init(_ source: some MediaSource, preview: (some MediaSource)?, contentMode: ContentMode = .fill, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation(), @ViewBuilder content: @escaping (MediaState) -> Content) {
+    self.init(shown: source, preview: preview, contentMode: contentMode, playbackRate: playbackRate, animation: animation, content: content)
   }
 
-  private init(shown source: any MediaSource, preview: (any MediaSource)?, contentMode: ContentMode, playbackRate: Double, content: @escaping (MediaState) -> Content) {
+  private init(shown source: any MediaSource, preview: (any MediaSource)?, contentMode: ContentMode, playbackRate: Double, animation: ImageAnimation, content: @escaping (MediaState) -> Content) {
     self.source = source
     self.preview = preview
     self.contentMode = contentMode
     self.playbackRate = playbackRate
+    self.animation = animation
     self.content = content
   }
 
@@ -154,7 +170,7 @@ public struct MediaImage<Content: View>: View {
               }
             }
             if let frames = loaded.flatMap({ $0.key == key ? $0.frames : nil }) {
-              AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isPlaying, playbackRate: playbackRate)
+              AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isPlaying, playbackRate: playbackRate, animation: animation, rests: animation.rests(reduceMotion: reduceMotion))
             } else if let shown {
               Image(platform: shown).resizable().aspectRatio(contentMode: contentMode).transition(.opacity)
             }
@@ -180,6 +196,7 @@ public struct MediaImage<Content: View>: View {
   }
 
   private var isPlaying: Bool { onScreen && !inBackground }
+  private var reduceMotion: Bool { reduceMotionOverride ?? systemReduceMotion }
 
   private struct ImageLoad: Equatable {
     let key: ImageKey
@@ -229,7 +246,7 @@ public struct MediaImage<Content: View>: View {
     let isCold = MediaImagePipeline.cachedContainer(for: request, in: context.pipeline) == nil
     let report: (@Sendable (MediaState) -> Void)? = mount.map { mount in { state in mount.report(state) } }
     let container = await MediaImagePipeline.load(source, request: request, pipeline: context.pipeline, report: report)
-    let next = container.map { LoadedImage(key: key, image: $0.image, gif: $0.type == .gif ? $0.data : nil) }
+    let next = container.map { LoadedImage(key: key, image: $0.image, animated: $0.type == .gif || $0.type == .webp ? $0.data : nil) }
     if isCold, preview == nil {
       withAnimation(.easeOut(duration: Self.coldFadeDuration)) { loaded = next }
     } else {
@@ -238,11 +255,12 @@ public struct MediaImage<Content: View>: View {
   }
 
   private func framesJob(for key: ImageKey) -> FramesJob {
-    FramesJob(key: key, hasGif: loaded.map { $0.key == key && $0.gif != nil } ?? false, playing: isPlaying)
+    let resting = animation.rests(reduceMotion: reduceMotion)
+    return FramesJob(key: key, hasAnimation: loaded.map { $0.key == key && $0.animated != nil } ?? false, needed: isPlaying && (!resting || animation.rest == .last))
   }
 
   private func decodeFrames(_ job: FramesJob) async {
-    guard job.playing, job.hasGif, let loaded, loaded.key == job.key, loaded.frames == nil, let data = loaded.gif, let pixels = job.key.pixels else { return }
+    guard job.needed, job.hasAnimation, let loaded, loaded.key == job.key, loaded.frames == nil, let data = loaded.animated, let pixels = job.key.pixels else { return }
 
     let frames = await FrameCache.shared.load(identity: job.key.identity, data: data, maxPixel: Int(max(pixels.width, pixels.height)))
     guard !Task.isCancelled, self.loaded?.key == job.key else { return }
@@ -263,11 +281,11 @@ public struct MediaImage<Content: View>: View {
 }
 
 extension MediaImage where Content == EmptyView {
-  public init(_ source: some MediaSource, contentMode: ContentMode = .fill, playbackRate: Double = 1) {
-    self.init(source, contentMode: contentMode, playbackRate: playbackRate) { _ in EmptyView() }
+  public init(_ source: some MediaSource, contentMode: ContentMode = .fill, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation()) {
+    self.init(source, contentMode: contentMode, playbackRate: playbackRate, animation: animation) { _ in EmptyView() }
   }
 
-  public init(_ source: some MediaSource, preview: (some MediaSource)?, contentMode: ContentMode = .fill, playbackRate: Double = 1) {
-    self.init(source, preview: preview, contentMode: contentMode, playbackRate: playbackRate) { _ in EmptyView() }
+  public init(_ source: some MediaSource, preview: (some MediaSource)?, contentMode: ContentMode = .fill, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation()) {
+    self.init(source, preview: preview, contentMode: contentMode, playbackRate: playbackRate, animation: animation) { _ in EmptyView() }
   }
 }

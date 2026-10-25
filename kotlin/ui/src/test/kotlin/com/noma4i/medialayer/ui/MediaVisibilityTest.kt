@@ -82,13 +82,10 @@ class MediaVisibilityTest {
     gate.complete(Unit)
     looper.idleFor(java.time.Duration.ofMillis(1000))
 
+    until { layer.imageStats().snapshot().let { it.cancellations == 1uL && it.activeRequests == 0uL && it.activeObservers > 0uL } }
     assertEquals("started=1 cancelled=1 decodes=0 claims=[visible:$url:true, visible:$url:false]", counters())
-    assertEquals(1uL, layer.imageStats().snapshot().cancellations)
-    assertEquals(0uL, layer.imageStats().snapshot().activeRequests)
-    org.junit.Assert.assertTrue(layer.imageStats().snapshot().activeObservers > 0uL)
     mounted = false
-    rule.waitForIdle()
-    assertEquals(0uL, layer.imageStats().snapshot().activeObservers)
+    until { layer.imageStats().snapshot().activeObservers == 0uL }
   }
 
   @Test
@@ -109,6 +106,7 @@ class MediaVisibilityTest {
     gate.complete(Unit)
     rule.waitUntil(5000) { looper.idle(); layer.calls.any { it == "itemState:$url:Ready" } }
 
+    drainFfi()
     assertEquals("started=2 cancelled=1 decodes=1 claims=[visible:$url:true, visible:$url:false, visible:$url:true]", counters())
   }
 
@@ -129,6 +127,7 @@ class MediaVisibilityTest {
     gate.complete(Unit)
     rule.waitUntil(5000) { looper.idle(); layer.calls.any { it == "itemState:$url:Ready" } }
 
+    drainFfi()
     assertEquals("started=1 cancelled=0 decodes=1 claims=[visible:$url:true]", counters())
   }
 
@@ -150,6 +149,7 @@ class MediaVisibilityTest {
     gate.complete(Unit)
     until { layer.calls.any { it == "itemState:$url:Ready" } }
 
+    drainFfi()
     assertEquals("started=2 cancelled=1 decodes=1 claims=[visible:$url:true, visible:$url:true, visible:$url:false]", counters())
   }
 }

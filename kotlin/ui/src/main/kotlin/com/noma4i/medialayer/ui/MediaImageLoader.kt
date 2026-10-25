@@ -18,12 +18,12 @@ fun interface ImageBytes {
   suspend fun load(url: String, headers: Map<String, String>): com.noma4i.medialayer.ImageFetchResult
 }
 
-internal data class MediaImageData(val url: String, val headers: Map<String, String>, private val keyOf: () -> String, val declared: com.noma4i.medialayer.PixelSize? = null, val pixels: com.noma4i.medialayer.PixelSize? = null) {
+internal data class MediaImageData(val url: String, val headers: Map<String, String>, private val keyOf: () -> String, val declared: com.noma4i.medialayer.PixelSize? = null, val pixels: com.noma4i.medialayer.PixelSize? = null, val rest: RestFrame? = null, val repeats: Repeats = Repeats.Forever) {
   val cacheKey: String by lazy(keyOf)
 }
 
-internal fun imageMemoryKey(cacheKey: String, pixels: com.noma4i.medialayer.PixelSize, scale: coil3.size.Scale): MemoryCache.Key =
-  MemoryCache.Key("$cacheKey|${pixels.width}x${pixels.height}|$scale")
+internal fun imageMemoryKey(cacheKey: String, pixels: com.noma4i.medialayer.PixelSize, scale: coil3.size.Scale, rest: RestFrame? = null, repeats: Repeats = Repeats.Forever): MemoryCache.Key =
+  MemoryCache.Key("$cacheKey|${pixels.width}x${pixels.height}|$scale" + (rest?.let { "|rest:$it" } ?: if (repeats == Repeats.Forever) "" else "|repeats:$repeats"))
 
 private const val MAX_IMAGE_MEMORY_BYTES: Int = 128 * 1024 * 1024
 
@@ -46,7 +46,7 @@ internal fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: 
           val height = (chain.size.height as? coil3.size.Dimension.Pixels)?.px?.toDouble() ?: 0.0
           pixelSizes.size(width, height, 1.0, it, chain.request.scale == coil3.size.Scale.FILL)
         } ?: data.pixels ?: return@Interceptor chain.proceed()
-        val keyed = chain.withRequest(chain.request.newBuilder().memoryCacheKey(imageMemoryKey(data.cacheKey, pixels, chain.request.scale)).build())
+        val keyed = chain.withRequest(chain.request.newBuilder().memoryCacheKey(imageMemoryKey(data.cacheKey, pixels, chain.request.scale, data.rest, data.repeats)).build())
         if (declared == null) keyed.proceed() else keyed.withSize(coil3.size.Size(pixels.width.toInt(), pixels.height.toInt())).proceed()
       })
       add(AnimatedImageDecoder.Factory())

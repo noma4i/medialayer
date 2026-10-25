@@ -123,6 +123,7 @@ class MediaPrecomposeTest {
     var handle: androidx.compose.ui.layout.SubcomposeLayoutState.PrecomposedSlotHandle? = null
     rule.runOnIdle { handle = state.precompose("ahead") { MediaImage(page, Modifier.size(50.dp)) } }
     rule.waitUntil(5000) { looper.idle(); fetched.toList() == listOf(page.url) }
+    rule.waitUntil(5000) { looper.idle(); visibles(page.url) == listOf("visible:${page.url}:true") }
     rule.runOnIdle { handle?.dispose() }
     rule.waitForIdle()
 

@@ -48,6 +48,7 @@ public enum MediaImagePipeline {
     configuration.dataCache = nil
     configuration.isLocalResourcesSupportEnabled = false
     configuration.imageCache = ImageMemory.cache(for: places)
+    configuration.makeImageDecoder = { context in AnimatedKeepingDecoder(context: context) }
     return ImagePipeline(configuration: configuration, delegate: ImageEvents(stats: places.imageStats()))
   }
 
@@ -133,5 +134,26 @@ public final class ImageMemoryReleaser: MemoryReleaser, @unchecked Sendable {
 
   public func shutdown() {
     dropMemoryCaches()
+  }
+}
+
+/// The default decoder keeps the bytes of a GIF only; an animated WebP needs its bytes as well to be played frame by frame.
+struct AnimatedKeepingDecoder: ImageDecoding {
+  private let base: ImageDecoders.Default
+
+  init?(context: ImageDecodingContext) {
+    guard let base = ImageDecoders.Default(context: context) else { return nil }
+
+    self.base = base
+  }
+
+  func decode(_ data: Data) throws -> ImageContainer {
+    var container = try base.decode(data)
+    if container.type == .webp { container.data = data }
+    return container
+  }
+
+  func decodePartiallyDownloadedData(_ data: Data) -> ImageContainer? {
+    base.decodePartiallyDownloadedData(data)
   }
 }

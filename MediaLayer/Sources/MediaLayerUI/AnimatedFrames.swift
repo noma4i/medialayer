@@ -107,7 +107,9 @@ struct AnimatedFrames {
   private static func delay(source: CGImageSource, index: Int) -> TimeInterval {
     let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
     let gif = properties?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
-    let value = (gif?[kCGImagePropertyGIFUnclampedDelayTime] as? Double) ?? (gif?[kCGImagePropertyGIFDelayTime] as? Double) ?? 0
+    let webp = properties?[kCGImagePropertyWebPDictionary] as? [CFString: Any]
+    let value = (gif?[kCGImagePropertyGIFUnclampedDelayTime] as? Double) ?? (gif?[kCGImagePropertyGIFDelayTime] as? Double)
+      ?? (webp?[kCGImagePropertyWebPUnclampedDelayTime] as? Double) ?? (webp?[kCGImagePropertyWebPDelayTime] as? Double) ?? 0
     return value < minimumDelay ? defaultDelay : value
   }
 }
@@ -117,6 +119,11 @@ import UIKit
 
 final class FrameImageView: UIImageView {
   var windowChanged: (() -> Void)?
+  private(set) var framesShown = 0
+
+  override var image: UIImage? {
+    didSet { framesShown += 1 }
+  }
 
   override func didMoveToWindow() {
     super.didMoveToWindow()
@@ -129,30 +136,88 @@ struct AnimatedFramesView: UIViewRepresentable {
     let stream: FrameStream
     let frames: AnimatedFrames
     let rate: Double
+    var repeats: ImageAnimation.Repeats = .forever
+    var rest: ImageAnimation.RestFrame = .first
 
     var interval: TimeInterval { frames.loopDuration(rate: rate) / Double(frames.frameCount) }
+    var key: PlanKey { PlanKey(interval: interval, repeats: repeats, rest: rest) }
+    var restIndex: Int { rest == .last ? frames.frameCount - 1 : 0 }
+  }
+
+  struct PlanKey: Equatable {
+    let interval: TimeInterval
+    let repeats: ImageAnimation.Repeats
+    let rest: ImageAnimation.RestFrame
   }
 
   final class Playback {
     var token: UUID?
     var plan: StreamPlan?
     private var task: Task<Void, Never>?
-    private var runningInterval: TimeInterval = 0
+    private var restTask: Task<Void, Never>?
+    private var runningKey: PlanKey?
+    private var shownRest: RestShown?
+    private(set) var finished: PlanKey?
 
-    deinit { task?.cancel() }
+    private struct RestShown: Equatable {
+      let token: UUID?
+      let rest: ImageAnimation.RestFrame
+    }
+
+    deinit {
+      task?.cancel()
+      restTask?.cancel()
+    }
 
     func sync(_ view: UIImageView) {
       guard let plan, view.window != nil else { return stop() }
-      guard task == nil || runningInterval != plan.interval else { return }
+      guard finished != plan.key else { return }
+      guard task == nil || runningKey != plan.key else { return }
 
       stop()
-      runningInterval = plan.interval
-      task = AnimatedFramesView.play(plan, on: view)
+      shownRest = nil
+      finished = nil
+      runningKey = plan.key
+      task = AnimatedFramesView.play(plan, on: view, finish: { [weak self] key in self?.finished = key })
     }
 
     func stop() {
       task?.cancel()
       task = nil
+    }
+
+    func reset() {
+      stop()
+      restTask?.cancel()
+      restTask = nil
+      runningKey = nil
+      shownRest = nil
+      finished = nil
+    }
+
+    /// Shows the rest frame once per source and rest choice; the last frame is decoded off the main thread.
+    func rest(_ rest: ImageAnimation.RestFrame, of frames: AnimatedFrames, on view: UIImageView) {
+      plan = nil
+      stop()
+      finished = nil
+      runningKey = nil
+      let shown = RestShown(token: token, rest: rest)
+      guard shownRest != shown else { return }
+
+      shownRest = shown
+      restTask?.cancel()
+      guard rest == .last else {
+        restTask = nil
+        view.image = UIImage(cgImage: frames.firstImage)
+        return
+      }
+      restTask = Task.detached { [weak view] in
+        guard let image = frames.image(at: frames.frameCount - 1), !Task.isCancelled else { return }
+
+        await MainActor.run { [weak view] in
+          if !Task.isCancelled { view?.image = UIImage(cgImage: image) }
+        }
+      }
     }
   }
 
@@ -160,6 +225,8 @@ struct AnimatedFramesView: UIViewRepresentable {
   let contentMode: ContentMode
   let isPlaying: Bool
   let playbackRate: Double
+  var animation = ImageAnimation()
+  var rests = false
 
   func makeCoordinator() -> Playback { Playback() }
 
@@ -182,28 +249,45 @@ struct AnimatedFramesView: UIViewRepresentable {
     }
     if playback.token != frames.token {
       playback.token = frames.token
-      playback.stop()
+      playback.reset()
       view.stopAnimating()
       view.image = UIImage(cgImage: frames.firstImage)
     }
-    playback.plan = isPlaying ? StreamPlan(stream: frames.stream, frames: frames, rate: playbackRate) : nil
+    if rests {
+      playback.rest(animation.rest, of: frames, on: view)
+      return
+    }
+    playback.plan = isPlaying ? StreamPlan(stream: frames.stream, frames: frames, rate: playbackRate, repeats: animation.repeats, rest: animation.rest) : nil
     playback.sync(view)
   }
 
   static func dismantleUIView(_ view: UIImageView, coordinator: Playback) {
     coordinator.plan = nil
-    coordinator.stop()
+    coordinator.reset()
   }
 
-  private static func play(_ plan: StreamPlan, on view: UIImageView) -> Task<Void, Never> {
+  private static func play(_ plan: StreamPlan, on view: UIImageView, finish: @escaping @MainActor (PlanKey) -> Void) -> Task<Void, Never> {
     plan.stream.preparedTask()
     return Task.detached { [weak view] in
       let clock = ContinuousClock()
       let start = clock.now
       var shown = -1
+      let limit: Int? = if case .times(let count) = plan.repeats { max(count, 1) * plan.frames.frameCount } else { nil }
       while !Task.isCancelled {
         let parts = (clock.now - start).components
         let tick = plan.frames.frameTick(elapsed: Double(parts.seconds) + Double(parts.attoseconds) * 1e-18, rate: plan.rate)
+        if let limit, tick >= limit {
+          let resting = plan.frames.image(at: plan.restIndex)
+          guard !Task.isCancelled else { return }
+
+          await MainActor.run { [weak view] in
+            if !Task.isCancelled {
+              if let resting { view?.image = UIImage(cgImage: resting) }
+              finish(plan.key)
+            }
+          }
+          return
+        }
         let index = tick % plan.frames.frameCount
         if index != shown {
           let image = plan.frames.image(at: index)

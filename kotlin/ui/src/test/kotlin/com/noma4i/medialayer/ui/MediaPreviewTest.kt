@@ -62,6 +62,7 @@ class MediaPreviewTest {
     rule.waitUntil(5000) { looper.idle(); previews().fetchSemanticsNodes().isEmpty() }
 
     assertTrue(layer.calls.toString(), layer.calls.none { local.url in it })
+    drainFfi()
     assertEquals(2uL, layer.imageStats().snapshot().decodes)
   }
 }
