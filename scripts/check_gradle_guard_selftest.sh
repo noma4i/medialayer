@@ -22,7 +22,7 @@ case_run() {
   for tool in gradle cargo cargo-ndk; do printf '#!/bin/sh\necho %s >> "%s/calls.log"\n' "$tool" "$tmp" > "$tmp/bin/$tool"; done
   chmod +x "$tmp"/bin/*
   ln -s "$python" "$tmp/bin/python3"
-  err="$(cd "$tmp" && PATH="$tmp/bin:$PATH" HOME="$tmp/home" GRADLE="$tmp/bin/gradle" ANDROID_NDK_HOME="$tmp" bash "scripts/$script" "$@" 2>&1 > /dev/null)" || code=$?
+  err="$(cd "$tmp" && PATH="$tmp/bin:$PATH" HOME="$tmp/home" GRADLE="$tmp/bin/gradle" ANDROID_NDK_HOME="$tmp" bash "scripts/$script" "$@" 2>&1 > /dev/null < /dev/null)" || code=$?
   calls="$(cat "$tmp/calls.log" 2> /dev/null)"
   if [ "$expect" = refuse ]; then
     if [ "$code" -ne 0 ] && [ -z "$calls" ] && [ -e "$tmp/kotlin/src/main/kotlin/com/noma4i/medialayer/medialayer.kt" ] && [[ "$err" == *"gradle runs only on brick"* ]]; then
