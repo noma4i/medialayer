@@ -748,6 +748,25 @@ fn inv_ingress_37_key_seeks_of_one_key_fold_into_the_last_fraction_and_other_key
     assert_eq!(pending_fractions(&queue), vec![("a".to_string(), 0.3), ("b".to_string(), 0.9)]);
 }
 
+fn pending_muted_all(queue: &Arc<InputQueue>) -> Vec<bool> {
+    let mut seen = Vec::new();
+    while let queue::Upcoming::Apply(popped) = queue.next() {
+        if let Declared::MutedAll(muted) = popped.command {
+            seen.push(muted);
+        }
+    }
+    seen
+}
+
+#[test]
+fn inv_ingress_42_mute_all_calls_fold_into_the_last_value_until_they_are_drained() {
+    let queue = InputQueue::new(IngressLimits::default());
+    queue.submit(Declared::MutedAll(true)).unwrap();
+    queue.submit(Declared::MutedAll(false)).unwrap();
+
+    assert_eq!(pending_muted_all(&queue), vec![false]);
+}
+
 #[test]
 fn inv_ingress_38_a_key_seek_after_a_barrier_never_folds_into_one_before_it_and_keeps_its_order() {
     let queue = InputQueue::new(IngressLimits::default());
@@ -786,13 +805,20 @@ fn inv_ingress_40_a_key_seek_of_an_unloaded_key_applies_when_the_key_loads() {
     let caller = caller();
     let url = "https://o.test/v1.mp4";
 
+    let creating = factory.create_gate.hold();
+
     layer.seek(url.to_string(), 0.5).unwrap();
     let ring = layer.open_video_window().unwrap();
     ring.replace(0, vec![Some(MediaItem::bare_video(url))]).unwrap();
     let place = layer.open_place(MediaItem::bare_video(url)).unwrap();
     place.update(PlaceInput { playing: true, ..PlaceInput::default() }).unwrap();
+    caller.block_on(eventually(|| factory.create_gate.entered() == 1 && layer.queue().audit().counted == 0));
+    drop(creating);
+    caller.block_on(eventually(|| factory.slot_holding(url).is_some()));
+    let (index, slot) = factory.slot_holding(url).unwrap();
+    layer.player_events().ready(index, slot.generation());
 
-    caller.block_on(eventually(|| factory.slot_holding(url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Seek { position_ms: 30_000 }))));
+    caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Seek { position_ms: 30_000 })));
 }
 
 #[test]

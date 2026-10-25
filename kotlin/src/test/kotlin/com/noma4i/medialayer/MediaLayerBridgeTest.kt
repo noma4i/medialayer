@@ -219,10 +219,11 @@ class MediaLayerBridgeTest {
     media.visible(item, true)
     eventually("a slot holds a loaded key") { slots.loaded() != null }
     media.setMutedAll(true)
+    eventually("the slot received the mute of mute-all") { slots.loaded()!!.log.count { it == "mute" } >= 2 }
     media.setMutedAll(false)
     media.setMuted(item.url, false)
 
-    eventually("the slot received 2 mute calls") { slots.loaded()!!.log.count { it == "mute" } >= 2 }
+    eventually("the slot turned the unmute of mute-all into a mute") { slots.loaded()!!.log.count { it == "mute" } >= 3 }
     Thread.sleep(200)
     val log = slots.loaded()!!.log.toList()
     assertEquals("mute", log[log.indexOf("load") + 1])
