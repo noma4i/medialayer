@@ -130,6 +130,7 @@ impl Book {
                     self.assembled.stage.seek_fraction(&place.item.url, fraction);
                 }
             }
+            Declared::KeySeek { key, fraction } => self.assembled.stage.seek_fraction(&key, fraction),
             Declared::PlaceState { owner, state } => {
                 if let Some(place) = self.places.get(&owner) {
                     if state == MediaState::Ready {

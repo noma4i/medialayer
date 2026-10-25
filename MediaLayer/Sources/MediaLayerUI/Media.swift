@@ -9,6 +9,7 @@ public protocol MediaPlaces: AnyObject, Sendable {
   func mountPlace(item: MediaItem) throws -> any PlaceHandle
   func mountVideoWindow() throws -> any WindowHandle
   func mountImageWindow(name: String) throws -> any WindowHandle
+  func seek(key: String, fraction: Double) throws
   func setMutedAll(muted: Bool) throws
   func fetchImage(url: String, headers: [String: String]) async throws -> ImageFetchResult
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder

@@ -196,6 +196,8 @@ While an audio plays, its progress updates 4 times per second. A paused audio up
 
 A seek by fraction chosen before the audio loads is applied when the player reports ready. A stream with no known duration at that moment keeps the fraction until the next player event that reports a duration.
 
+A source without a mounted view seeks by key: `MediaLayer.seek(key, fraction)` on Kotlin and `seek(key:fraction:)` on `MediaPlaces` on Swift. The key is the source URL. The call works for any key, not loaded or paused too, and the position is applied when the key loads. A call made after MediaLayer closed, or while the input is full, throws and the caller sees the error. Several calls for one key before the next event keep the last fraction. A fraction outside 0..1 is clamped, a NaN or infinite fraction is ignored. `MediaPlace.seek` of a mounted place works as before.
+
 Audio does not depend on the size or position of its view. Progress, seek and the end of the audio work in a 0 x 0 host and in a view that is off screen. Only the app going to the background pauses the progress updates.
 
 ## One-shot video

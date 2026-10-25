@@ -82,6 +82,7 @@ private final class MountPlacesLog: MediaPlaces, @unchecked Sendable {
   func mountPlace(item: MediaItem) throws -> any PlaceHandle { record("mountPlace \(item.url)"); return try inner.mountPlace(item: item) }
   func mountVideoWindow() throws -> any WindowHandle { try inner.mountVideoWindow() }
   func mountImageWindow(name: String) throws -> any WindowHandle { try inner.mountImageWindow(name: name) }
+  func seek(key: String, fraction: Double) throws { try inner.seek(key: key, fraction: fraction) }
   func setMutedAll(muted: Bool) throws { try inner.setMutedAll(muted: muted) }
   func setTonePreparation(preparation: TonePreparation) throws { try inner.setTonePreparation(preparation: preparation) }
 }

@@ -99,6 +99,7 @@ pub(crate) enum Declared {
     PlaceOpen { owner: u64, item: MediaItem },
     PlaceUpdate { owner: u64, input: PlaceInput },
     PlaceSeek { owner: u64, fraction: f64 },
+    KeySeek { key: String, fraction: f64 },
     PlaceState { owner: u64, state: MediaState },
     WindowOpen { owner: u64, kind: WindowKind },
     WindowActive { owner: u64, is_active: bool },
@@ -122,6 +123,7 @@ pub(crate) enum Declared {
 pub(crate) enum Fold {
     Place(u64),
     State(u64),
+    KeySeek(String),
     Window(u64),
     WindowActive(u64),
     Lifecycle,
@@ -156,6 +158,7 @@ impl Declared {
         Some(match self {
             Declared::PlaceUpdate { owner, .. } => Fold::Place(*owner),
             Declared::PlaceState { owner, .. } => Fold::State(*owner),
+            Declared::KeySeek { key, .. } => Fold::KeySeek(key.clone()),
             Declared::VideoWindow { owner, .. } | Declared::ImageWindow { owner, .. } => Fold::Window(*owner),
             Declared::WindowActive { owner, .. } => Fold::WindowActive(*owner),
             Declared::Lifecycle { .. } => Fold::Lifecycle,
@@ -192,6 +195,8 @@ impl Declared {
         let own = match self {
             Declared::PlaceOpen { item, .. } => weight::item_heap(item),
             Declared::PlaceUpdate { input, .. } => input.group.as_ref().map_or(Some(0), weight::string),
+            // The fold slot holds a second copy of the key.
+            Declared::KeySeek { key, .. } => weight::sum([weight::string(key), weight::string(key)]),
             Declared::WindowOpen { kind: WindowKind::Image(name), .. } => weight::string(name),
             Declared::VideoWindow { sources: Some(sources), .. } => weight::sum([weight::sources(sources), Some(16 + size_of::<Vec<Option<MediaItem>>>() as u64)]),
             Declared::ImageWindow { pages: Some(pages), .. } => weight::sum([weight::pages(pages), Some(16 + size_of::<Vec<Vec<MediaItem>>>() as u64)]),

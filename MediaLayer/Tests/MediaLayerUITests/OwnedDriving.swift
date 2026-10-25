@@ -95,11 +95,6 @@ extension MediaLayer {
 
   func detachView(key: String) { driving.edit(self, key: key) { $0.viewToken = nil } }
 
-  func seek(key: String, fraction: Double) {
-    driving.edit(self, key: key) { _ in }
-    try! driving.place(key)?.seek(fraction: fraction)
-  }
-
   func itemState(key: String, state: MediaState) {
     driving.edit(self, key: key) { _ in }
     try! driving.place(key)?.itemState(state: state)

@@ -146,6 +146,7 @@ private final class ScriptedPlaces: MediaPlaces, @unchecked Sendable {
   func mountPlace(item: MediaItem) throws -> any PlaceHandle { throw MediaError.Closed }
   func mountVideoWindow() throws -> any WindowHandle { throw MediaError.Closed }
   func mountImageWindow(name: String) throws -> any WindowHandle { throw MediaError.Closed }
+  func seek(key: String, fraction: Double) throws {}
   func setMutedAll(muted: Bool) throws {}
   func setTonePreparation(preparation: TonePreparation) throws {}
 }

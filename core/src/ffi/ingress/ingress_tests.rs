@@ -59,6 +59,7 @@ fn queued(queue: &Arc<InputQueue>) -> Vec<&'static str> {
                 Declared::PlaceOpen { .. } => "open",
                 Declared::PlaceUpdate { .. } => "update",
                 Declared::PlaceSeek { .. } => "seek",
+                Declared::KeySeek { .. } => "key-seek",
                 Declared::Query { .. } => "query",
                 _ => "other",
             }),
@@ -720,4 +721,88 @@ fn inv_ingress_36_without_any_rate_opinion_a_key_returns_to_normal_speed() {
 
     caller.block_on(eventually(|| slot.calls().iter().rposition(|call| matches!(call, SlotCall::Rate { .. })).is_some_and(|last| slot.calls()[last] == SlotCall::Rate { rate: 1.0 })));
     drop(plain);
+}
+
+fn key_seek(key: &str, fraction: f64) -> Declared {
+    Declared::KeySeek { key: key.to_string(), fraction }
+}
+
+fn pending_fractions(queue: &Arc<InputQueue>) -> Vec<(String, f64)> {
+    let mut seen = Vec::new();
+    while let queue::Upcoming::Apply(popped) = queue.next() {
+        if let Declared::KeySeek { key, fraction } = popped.command {
+            seen.push((key, fraction));
+        }
+    }
+    seen
+}
+
+#[test]
+fn inv_ingress_37_key_seeks_of_one_key_fold_into_the_last_fraction_and_other_keys_stay_apart() {
+    let queue = InputQueue::new(IngressLimits::default());
+    queue.submit(key_seek("a", 0.1)).unwrap();
+    queue.submit(key_seek("b", 0.9)).unwrap();
+    queue.submit(key_seek("a", 0.2)).unwrap();
+    queue.submit(key_seek("a", 0.3)).unwrap();
+
+    assert_eq!(pending_fractions(&queue), vec![("a".to_string(), 0.3), ("b".to_string(), 0.9)]);
+}
+
+#[test]
+fn inv_ingress_38_a_key_seek_after_a_barrier_never_folds_into_one_before_it_and_keeps_its_order() {
+    let queue = InputQueue::new(IngressLimits::default());
+    opened(&queue, 1);
+    queue.submit(key_seek("a", 0.1)).unwrap();
+    queue.submit(update(1)).unwrap();
+    let (_held, _answer) = queue.query(Query::Pool).unwrap();
+    queue.submit(key_seek("a", 0.2)).unwrap();
+    queue.submit(key_seek("a", 0.3)).unwrap();
+
+    assert_eq!(queued(&queue), vec!["open", "key-seek", "update", "query", "key-seek"]);
+}
+
+#[test]
+fn inv_ingress_39_a_key_seek_is_weighed_and_refused_as_overloaded_at_the_limits() {
+    let heavy = InputQueue::new(IngressLimits { entries: 64, owners: 4, bytes: 4_096 });
+    let full = InputQueue::new(IngressLimits { entries: 1, owners: 4, bytes: u64::MAX });
+    full.submit(key_seek("a", 0.1)).unwrap();
+
+    let long = heavy.submit(key_seek(&"k".repeat(10_000), 0.5));
+    let beyond = full.submit(key_seek("b", 0.1));
+    let folded = full.submit(key_seek("a", 0.2));
+
+    assert!(matches!(long, Err(MediaError::Overloaded { .. })), "{long:?}");
+    assert!(matches!(beyond, Err(MediaError::Overloaded { .. })), "{beyond:?}");
+    assert!(folded.is_ok());
+    assert_eq!(heavy.audit().bytes, 0);
+}
+
+#[test]
+fn inv_ingress_40_a_key_seek_of_an_unloaded_key_applies_when_the_key_loads() {
+    let dir = tempfile::tempdir().unwrap();
+    let factory: Arc<MockFactory> = Arc::default();
+    let slots: Arc<dyn PlayerSlotFactory> = factory.clone();
+    let layer = MediaLayer::build(config(dir.path(), Some(slots), None), Pause::new()).unwrap();
+    let caller = caller();
+    let url = "https://o.test/v1.mp4";
+
+    layer.seek(url.to_string(), 0.5).unwrap();
+    let ring = layer.open_video_window().unwrap();
+    ring.replace(0, vec![Some(MediaItem::bare_video(url))]).unwrap();
+    let place = layer.open_place(MediaItem::bare_video(url)).unwrap();
+    place.update(PlaceInput { playing: true, ..PlaceInput::default() }).unwrap();
+
+    caller.block_on(eventually(|| factory.slot_holding(url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Seek { position_ms: 30_000 }))));
+}
+
+#[test]
+fn inv_ingress_41_a_closed_core_refuses_the_key_seek_to_the_caller() {
+    let dir = tempfile::tempdir().unwrap();
+    let layer = MediaLayer::build(config(dir.path(), None, None), Pause::new()).unwrap();
+    let caller = caller();
+    caller.block_on(layer.await_closed());
+
+    let refused = layer.seek("https://o.test/v1.mp4".to_string(), 0.5);
+
+    assert!(matches!(refused, Err(MediaError::Closed)), "{refused:?}");
 }

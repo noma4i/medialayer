@@ -94,6 +94,7 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
     lock.withLock { windows.append(window) }
     return window
   }
+  func seek(key: String, fraction: Double) throws { record("seek \(key) \(fraction)") }
   func setMutedAll(muted: Bool) throws {
     if let mutedAllError { throw mutedAllError }
     record("mutedAll \(muted)")

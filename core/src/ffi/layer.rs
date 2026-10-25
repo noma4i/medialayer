@@ -486,6 +486,10 @@ impl MediaLayer {
         Ok(Arc::new(PlaybackSuspension::new(self.closing.queue.clone(), owner)))
     }
 
+    pub fn seek(&self, key: String, fraction: f64) -> Result<(), MediaError> {
+        self.submit(Declared::KeySeek { key, fraction })
+    }
+
     pub fn set_muted_all(&self, muted: bool) -> Result<(), MediaError> {
         self.submit(Declared::MutedAll(muted))
     }
