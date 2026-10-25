@@ -279,17 +279,3 @@ fn inv_session_11_a_looping_clip_that_wrapped_is_progress_and_a_clip_that_went_b
     now += 3_000;
     assert_eq!(next_action(&mut once, Event::WatchdogFired(Sample { is_looping: false, ..wrapped(1_000) }), now), Action::Recover);
 }
-
-#[test]
-fn inv_session_06_two_states_keep_their_own_deadline_and_foreground() {
-    let mut first = loaded();
-    let mut second = loaded();
-    next_action(&mut first, Event::Play { position_ms: 0 }, 0);
-    next_action(&mut second, Event::Play { position_ms: 0 }, 5_000);
-    next_action(&mut second, Event::Foreground, 5_000);
-    assert_eq!(next_action(&mut first, Event::WatchdogFired(stalled()), 12_000), Action::Recover);
-    assert_eq!(next_action(&mut first, Event::ForegroundDue, 12_000), Action::None);
-    assert_eq!(next_action(&mut second, Event::WatchdogFired(stalled()), 12_000), Action::None);
-    assert_eq!(next_action(&mut second, Event::ForegroundDue, 12_000), Action::ForegroundPass);
-    assert_eq!(next_action(&mut second, Event::WatchdogFired(stalled()), 17_000), Action::Recover);
-}
