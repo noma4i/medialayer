@@ -190,6 +190,8 @@ MediaAudio(VoiceNote(url = message.audioUrl)) { audio ->
 }
 ```
 
+`playing` starts the audio when it is true and stays false by default. Both platforms apply a change of `playing` to the mounted audio: the same `audio` object plays or pauses, and nothing is mounted again. While `playing` keeps its value, a rerender, a new `rate`, `muted` or `group` leave the buttons alone: a local `toggle()` stays in force, and so do `play()` and `pause()` on Kotlin. A new source starts a new `audio` that follows the current `playing`.
+
 While an audio plays, its progress updates 4 times per second. A paused audio updates for 1 second after it appears or after a seek, then stops, so a chat full of voice notes does not wake up every 250 milliseconds.
 
 A seek by fraction chosen before the audio loads is applied when the player reports ready. A stream with no known duration at that moment keeps the fraction until the next player event that reports a duration.

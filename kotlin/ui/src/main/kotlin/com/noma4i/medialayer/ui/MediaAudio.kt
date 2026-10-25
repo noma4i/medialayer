@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.flowOf
 
 @Stable
 class AudioControl internal constructor(playing: Boolean, private val seekTo: (Double) -> Unit) {
+  private var declared = playing
+
   var rate: Float by mutableFloatStateOf(1f)
 
   var state: MediaState by mutableStateOf(MediaState.Idle)
@@ -30,6 +32,12 @@ class AudioControl internal constructor(playing: Boolean, private val seekTo: (D
   fun pause() { isPlaying = false }
 
   fun toggle() { isPlaying = !isPlaying }
+
+  internal fun follow(playing: Boolean) {
+    if (declared == playing) return
+    declared = playing
+    isPlaying = playing
+  }
 
   fun seek(fraction: Float) {
     if (!fraction.isFinite()) return
@@ -46,7 +54,7 @@ fun MediaAudio(source: MediaSource, playing: Boolean = false, muted: Boolean = f
   val screen = rememberScreenVisibility()
   val control = remember(environment, source.url) { AudioControl(playing) { environment.media.seek(source.url, it) }.also { it.rate = rate } }
   LaunchedEffect(rate) { control.rate = rate }
-  LaunchedEffect(control, playing) { if (playing) control.play() else control.pause() }
+  LaunchedEffect(control, playing) { control.follow(playing) }
   DisposableEffect(environment.media, source.url, control.rate) {
     environment.media.setRate(source.url, control.rate)
     onDispose { }

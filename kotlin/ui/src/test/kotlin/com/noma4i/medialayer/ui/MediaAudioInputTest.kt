@@ -31,23 +31,44 @@ private data class InputSource(override val url: String, override val kind: Kind
   override val headers: Map<String, String> get() = emptyMap()
 }
 
-private class InputSlot : PlayerSlot, PlayerSlotFactory {
-  val log = CopyOnWriteArrayList<String>()
-  val transport: String? get() = log.lastOrNull { it == "play" || it == "pause" }
-  override fun create(slot: UInt): PlayerSlot = this
-  override fun load(key: String, route: PlaybackRoute) {}
-  override fun unload() {}
-  override fun preroll() {}
-  override fun play() { log.add("play") }
-  override fun pause() { log.add("pause") }
-  override fun mute() {}
-  override fun unmute() {}
-  override fun attach(viewToken: ULong) {}
-  override fun detach() {}
-  override fun seek(positionMs: ULong) {}
-  override fun setRate(rate: Float) { log.add("rate") }
-  override fun setReadahead(ms: ULong) {}
-  override fun sample() = SlotSample(0u, null, false, false, false)
+private class InputSlot : PlayerSlotFactory {
+  private data class Event(val slot: UInt, val name: String, val key: String)
+
+  private val events = CopyOnWriteArrayList<Event>()
+  val all: List<String> get() = events.map { "${it.slot}:${it.name}:${it.key}" }
+
+  fun playing(key: String): Boolean {
+    val loaded = mutableMapOf<UInt, String>()
+    val active = mutableSetOf<UInt>()
+    for (event in events) when (event.name) {
+      "load" -> { loaded[event.slot] = event.key; active.remove(event.slot) }
+      "play" -> active.add(event.slot)
+      "pause", "unload" -> active.remove(event.slot)
+    }
+    return active.any { loaded[it] == key }
+  }
+
+  fun count(name: String) = events.count { it.name == name }
+
+  override fun create(slot: UInt): PlayerSlot = Recorder(slot)
+
+  private inner class Recorder(private val slot: UInt) : PlayerSlot {
+    @Volatile private var key = ""
+    private fun note(name: String) { events.add(Event(slot, name, key)) }
+    override fun load(key: String, route: PlaybackRoute) { this.key = key; note("load") }
+    override fun unload() { note("unload") }
+    override fun preroll() {}
+    override fun play() { note("play") }
+    override fun pause() { note("pause") }
+    override fun mute() {}
+    override fun unmute() {}
+    override fun attach(viewToken: ULong) {}
+    override fun detach() {}
+    override fun seek(positionMs: ULong) {}
+    override fun setRate(rate: Float) { note("rate") }
+    override fun setReadahead(ms: ULong) {}
+    override fun sample() = SlotSample(0u, null, false, false, false)
+  }
 }
 
 @RunWith(MediaLayerTestRunner::class)
@@ -67,6 +88,8 @@ class MediaAudioInputTest {
 
   private val looper = shadowOf(Looper.getMainLooper())
   private val seen = CopyOnWriteArrayList<AudioControl>()
+  private var firstSeenPlaying: Boolean? = null
+  private var playOnMount = false
   private var url by mutableStateOf("file:///first.mp4")
   private var playing by mutableStateOf(false)
   private var rate by mutableStateOf(1f)
@@ -74,14 +97,19 @@ class MediaAudioInputTest {
   private var group by mutableStateOf("ring")
   private var unrelated by mutableIntStateOf(0)
 
-  private fun waitFor(transport: String) = rule.waitUntil(10_000) { looper.idle(); slot.transport == transport }
+  private fun waitForPlaying(key: String, expected: Boolean = true) = rule.waitUntil(10_000) { looper.idle(); slot.playing(key) == expected }
 
   private fun mount(): AudioControl {
     rule.setContent {
       MediaLayerProvider(CompletableDeferred(layer), loader, null) {
         val tick = unrelated
-        MediaAudio(InputSource(url, Kind.AUDIO), playing = playing, muted = muted, rate = rate, group = group) {
-          seen.add(it)
+        MediaAudio(InputSource(url, Kind.AUDIO), playing = playing, muted = muted, rate = rate, group = group) { control ->
+          if (firstSeenPlaying == null) firstSeenPlaying = control.isPlaying
+          seen.add(control)
+          if (playOnMount) {
+            playOnMount = false
+            control.play()
+          }
           Box(Modifier.size(80.dp + tick.dp))
         }
       }
@@ -90,18 +118,27 @@ class MediaAudioInputTest {
     return seen.last()
   }
 
+  // Compose is idle, then a command through the core reaches the slot behind every earlier command.
+  private fun barrier(key: String) {
+    rule.waitForIdle()
+    looper.idle()
+    val before = slot.count("rate")
+    layer.setRate(key, 3f + before)
+    rule.waitUntil(10_000) { looper.idle(); slot.count("rate") > before }
+  }
+
   @Test
   fun a_mounted_audio_follows_a_changing_playing_input_without_remount() {
     val first = mount()
     rule.runOnIdle { assertFalse(first.isPlaying) }
-    assertTrue(slot.transport != "play")
+    assertEquals(0, slot.count("play"))
 
     rule.runOnIdle { playing = true }
-    waitFor("play")
+    waitForPlaying("file:///first.mp4")
     rule.runOnIdle { assertTrue(first.isPlaying) }
 
     rule.runOnIdle { playing = false }
-    waitFor("pause")
+    waitForPlaying("file:///first.mp4", false)
     rule.runOnIdle { assertFalse(first.isPlaying) }
     seen.forEach { assertSame(first, it) }
   }
@@ -110,15 +147,26 @@ class MediaAudioInputTest {
   fun a_mounted_audio_starts_at_an_initial_true_playing_input() {
     playing = true
     val first = mount()
-    waitFor("play")
+    assertEquals(true, firstSeenPlaying)
+    waitForPlaying("file:///first.mp4")
     rule.runOnIdle { assertTrue(first.isPlaying) }
+  }
+
+  @Test
+  fun a_local_play_at_mount_survives_an_initial_false_playing_input() {
+    playOnMount = true
+    val first = mount()
+    waitForPlaying("file:///first.mp4")
+    barrier("file:///first.mp4")
+    rule.runOnIdle { assertTrue(first.isPlaying) }
+    assertTrue(slot.playing("file:///first.mp4"))
   }
 
   @Test
   fun a_local_toggle_survives_rerenders_that_leave_playing_unchanged() {
     val first = mount()
     rule.runOnIdle { first.toggle() }
-    waitFor("play")
+    waitForPlaying("file:///first.mp4")
 
     rule.runOnIdle {
       unrelated += 1
@@ -126,20 +174,19 @@ class MediaAudioInputTest {
       muted = true
       group = "system"
     }
-    rule.waitUntil(10_000) { looper.idle(); slot.log.last() == "rate" }
-    rule.waitForIdle()
+    barrier("file:///first.mp4")
 
     rule.runOnIdle { assertTrue(first.isPlaying) }
-    assertEquals("play", slot.transport)
-    assertFalse(slot.log.contains("pause"))
+    assertTrue(slot.playing("file:///first.mp4"))
+    assertEquals(0, slot.count("pause"))
     seen.forEach { assertSame(first, it) }
   }
 
   @Test
-  fun a_changed_source_starts_from_the_current_playing_input() {
+  fun a_changed_source_releases_the_old_one_and_starts_from_the_current_playing_input() {
     playing = true
     val first = mount()
-    waitFor("play")
+    waitForPlaying("file:///first.mp4")
 
     rule.runOnIdle {
       url = "file:///second.mp4"
@@ -147,14 +194,15 @@ class MediaAudioInputTest {
     }
     rule.waitUntil(10_000) { looper.idle(); seen.last() !== first }
     rule.runOnIdle { assertFalse(seen.last().isPlaying) }
-    waitFor("pause")
 
     rule.runOnIdle {
       url = "file:///third.mp4"
       playing = true
     }
-    rule.waitUntil(10_000) { looper.idle(); seen.last().isPlaying }
+    waitForPlaying("file:///third.mp4")
     assertNotSame(first, seen.last())
-    waitFor("play")
+    rule.runOnIdle { assertTrue(seen.last().isPlaying) }
+    assertFalse(slot.all.any { it.contains(":play:file:///second.mp4") })
+    assertFalse(slot.playing("file:///first.mp4"))
   }
 }
