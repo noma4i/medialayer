@@ -21,7 +21,7 @@ struct SlotDeliveryTests {
   }
 
   @Test
-  func inv_api_36_applyReturnsAfterTheNativeSideChangedNotAfterThePost() async {
+  func inv_api_42_applyReturnsAfterTheNativeSideChangedNotAfterThePost() async {
     let hosts = HostLayers()
     let slot = await makeSlot(PlayerEventLog(), hosts: hosts)
     let host = CALayer()
@@ -38,7 +38,7 @@ struct SlotDeliveryTests {
   }
 
   @Test
-  func inv_api_36_aCommandOfACancelledTaskOrAClosedSlotIsNotApplied() async {
+  func inv_api_42_aCommandOfACancelledTaskOrAClosedSlotIsNotApplied() async {
     let slot = await makeSlot(PlayerEventLog())
     let load = SlotCall.load(key: "a", route: route(), generation: 1)
 
@@ -58,7 +58,7 @@ struct SlotDeliveryTests {
   }
 
   @Test
-  func inv_api_37_theEventsOfAnItemCarryTheGenerationOfItsLoadAndAnOldItemOrGenerationSaysNothing() async throws {
+  func inv_api_43_theEventsOfAnItemCarryTheGenerationOfItsLoadAndAnOldItemOrGenerationSaysNothing() async throws {
     let log = PlayerEventLog()
     let slot = await makeSlot(log)
     await slot.apply(command: .load(key: "a", route: route(), generation: 7))

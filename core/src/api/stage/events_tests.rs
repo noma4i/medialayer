@@ -409,7 +409,7 @@ async fn inv_idle_04_a_ledger_release_that_leaves_the_room_unchanged_does_not_st
 }
 
 #[tokio::test]
-async fn inv_api_37_a_late_event_of_an_older_load_does_not_touch_the_new_load_of_the_slot() {
+async fn inv_api_43_a_late_event_of_an_older_load_does_not_touch_the_new_load_of_the_slot() {
     let events: [(&str, fn(&super::Stage, usize, u64)); 3] = [
         ("ready", |stage, slot, generation| stage.ready(slot, generation)),
         ("visual_ready", |stage, slot, generation| stage.visual_ready(slot, generation)),
@@ -436,7 +436,7 @@ async fn inv_api_37_a_late_event_of_an_older_load_does_not_touch_the_new_load_of
 }
 
 #[tokio::test]
-async fn inv_api_39_an_action_held_across_a_reload_of_the_same_key_does_not_touch_the_new_load() {
+async fn inv_api_44_an_action_held_across_a_reload_of_the_same_key_does_not_touch_the_new_load() {
     for (name, action) in [("recover", crate::session::Action::Recover), ("purge", crate::session::Action::PurgeCache(url_of(0)))] {
         let rig = rig().await;
         let (slot, player) = playing(&rig, video(&url_of(0))).await;
@@ -461,7 +461,7 @@ async fn inv_api_39_an_action_held_across_a_reload_of_the_same_key_does_not_touc
 }
 
 #[tokio::test]
-async fn inv_api_39_a_stale_action_changes_nothing_of_the_new_load() {
+async fn inv_api_44_a_stale_action_changes_nothing_of_the_new_load() {
     use crate::session::Action;
     let rig = rig().await;
     let (slot, player) = playing(&rig, video(&url_of(0))).await;

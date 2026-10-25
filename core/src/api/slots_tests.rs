@@ -17,7 +17,7 @@ fn applied(factory: &MockFactory, slot: u32) -> Vec<SlotCall> {
 }
 
 #[tokio::test]
-async fn inv_api_36_a_command_is_done_only_after_the_native_side_applied_it() {
+async fn inv_api_42_a_command_is_done_only_after_the_native_side_applied_it() {
     let factory: Arc<MockFactory> = Arc::default();
     let held = factory.gate.hold();
     let runner = SlotRunner::new(Handle::current(), Some(factory.clone()));
@@ -70,7 +70,7 @@ async fn inv_api_01_commands_reach_the_player_in_order_while_the_caller_never_wa
 }
 
 #[tokio::test]
-async fn inv_api_36_a_burst_while_the_native_side_is_held_keeps_the_queue_bounded_and_one_command_in_flight() {
+async fn inv_api_42_a_burst_while_the_native_side_is_held_keeps_the_queue_bounded_and_one_command_in_flight() {
     let factory: Arc<MockFactory> = Arc::default();
     let held = factory.gate.hold();
     let runner = SlotRunner::new(Handle::current(), Some(factory.clone()));
@@ -108,7 +108,7 @@ async fn inv_api_36_a_burst_while_the_native_side_is_held_keeps_the_queue_bounde
 }
 
 #[tokio::test]
-async fn inv_api_36_closing_the_runner_cancels_the_held_apply_and_runs_nothing_after_it() {
+async fn inv_api_42_closing_the_runner_cancels_the_held_apply_and_runs_nothing_after_it() {
     let factory: Arc<MockFactory> = Arc::default();
     let held = factory.gate.hold();
     let runner = SlotRunner::new(Handle::current(), Some(factory.clone()));

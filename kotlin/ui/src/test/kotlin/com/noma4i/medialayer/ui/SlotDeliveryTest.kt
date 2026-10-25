@@ -42,7 +42,7 @@ class SlotDeliveryTest {
   fun releaseEverything() { factories.forEach { it.release() }; idle() }
 
   @Test
-  fun inv_api_36_apply_completes_only_after_the_player_looper_ran_the_command() {
+  fun inv_api_42_apply_completes_only_after_the_player_looper_ran_the_command() {
     val slot = factory().createSlot(0u)
 
     val load = launching(slot, SlotCall.Load("k", route, 1uL))
@@ -71,7 +71,7 @@ class SlotDeliveryTest {
   }
 
   @Test
-  fun inv_api_36_a_command_after_the_player_looper_quit_still_returns() {
+  fun inv_api_42_a_command_after_the_player_looper_quit_still_returns() {
     val factory = ExoPlayerSlotFactory(context, OkHttpClient(), startMuted = true).also {
       it.mediaSourceFor = { FakeMediaSource() }
       it.bind(events)
@@ -89,7 +89,7 @@ class SlotDeliveryTest {
   }
 
   @Test
-  fun inv_api_36_a_late_command_after_the_release_returns_and_does_nothing() {
+  fun inv_api_42_a_late_command_after_the_release_returns_and_does_nothing() {
     val factory = factory()
     val slot = factory.createSlot(0u)
     factory.release()
@@ -103,7 +103,7 @@ class SlotDeliveryTest {
   }
 
   @Test
-  fun inv_api_37_the_events_of_a_load_carry_its_generation_and_the_listener_of_an_older_load_is_removed() {
+  fun inv_api_43_the_events_of_a_load_carry_its_generation_and_the_listener_of_an_older_load_is_removed() {
     val slot = factory().createSlot(3u)
     launching(slot, SlotCall.Load("a", route.copy(looping = false), 5uL)); launching(slot, SlotCall.Play); idle()
     androidx.media3.test.utils.robolectric.TestPlayerRunHelper.runUntilPlaybackState(slot.player!!, androidx.media3.common.Player.STATE_READY)
