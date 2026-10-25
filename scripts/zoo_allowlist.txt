@@ -27,3 +27,4 @@ panic:limits/chunks.rs:expect("the default list is valid") # the constant list [
 panic:prefetch/gate.rs:expect("the gate outlives its waiters") # the waiter sender is dropped only by grant after send, and acquire holds the Arc<Gate>
 panic:prefetch/ledger.rs:expect("evicted entry exists") # both callers pass a key just returned by farthest on the same &mut self
 panic:spec/types.rs:expect("spec serializes") # MediaSpec is a derived Serialize tree of plain fields with no maps
+periodic MediaLayer/Sources/MediaLayerTesting/TestFetcher.swift 1 # one-shot configured delay before a response, only for URLs given to delay(_:for:), cancelled with the fetch

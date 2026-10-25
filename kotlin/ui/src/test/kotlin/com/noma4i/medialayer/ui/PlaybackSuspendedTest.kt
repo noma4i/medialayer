@@ -1,11 +1,12 @@
 package com.noma4i.medialayer.ui
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import com.noma4i.medialayer.testing.TestFetcher
 import android.content.Context
 import android.os.Looper
 import androidx.activity.ComponentActivity
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.core.app.ApplicationProvider
 import com.noma4i.medialayer.*
@@ -46,9 +47,7 @@ class PlaybackSuspendedTest {
   private fun openLayer(ingress: IngressLimits? = null): MediaLayer {
     val layer = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
       dir = Files.createTempDirectory("suspended").toString(),
-      fetcher = object : Fetcher {
-        override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("unused origin")
-      },
+      fetcher = TestFetcher(),
       settings = SharedPreferencesSettings(context, "suspended"), slots = slot,
       device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings(), ingress = ingress
     ))

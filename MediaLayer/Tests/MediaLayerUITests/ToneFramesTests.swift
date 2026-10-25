@@ -3,16 +3,11 @@ import CoreGraphics
 import Foundation
 import ImageIO
 import MediaLayer
+import MediaLayerTesting
 import Nuke
 import Testing
 import UniformTypeIdentifiers
 @testable import MediaLayerUI
-
-private final class OfflineFetcher: Fetcher, @unchecked Sendable {
-  func fetch(request: FetchRequest) async throws -> FetchResponse {
-    throw MediaError.Fetch(detail: "offline")
-  }
-}
 
 private struct Poster: MediaSource {
   let url: String
@@ -46,7 +41,7 @@ private func writePNG(_ image: CGImage) throws -> String {
 
 private func openLayer() async throws -> MediaLayer {
   try await MediaLayer.open(
-    fetcher: OfflineFetcher(),
+    fetcher: TestFetcher(),
     settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
     directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
     silent: true

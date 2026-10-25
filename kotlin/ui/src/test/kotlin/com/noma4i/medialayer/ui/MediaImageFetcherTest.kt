@@ -1,5 +1,6 @@
 package com.noma4i.medialayer.ui
 
+import com.noma4i.medialayer.testing.TestFetcher
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.Looper
@@ -38,9 +39,7 @@ class MediaImageFetcherTest {
   fun selectedHeadersSeparateDecodedImagesAndUnselectedHeadersReuseThem() {
     val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
       dir = Files.createTempDirectory("image-identity").toString(),
-      fetcher = object : com.noma4i.medialayer.Fetcher {
-        override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("unused origin")
-      },
+      fetcher = TestFetcher(),
       settings = SharedPreferencesSettings(context, "image-identity"),
       slots = null, device = DeviceMemory(4096u, null, false),
       defaults = defaultLimits(), pool = defaultPoolSettings(), namespaceHeaders = listOf("Authorization")
@@ -77,9 +76,7 @@ class MediaImageFetcherTest {
   fun inv_image_49_aFileImageGoesThroughTheCoreAndAFileAboveTheResponseLimitFails() {
     val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
       dir = Files.createTempDirectory("local-image").toString(),
-      fetcher = object : com.noma4i.medialayer.Fetcher {
-        override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("unused origin")
-      },
+      fetcher = TestFetcher(),
       settings = SharedPreferencesSettings(context, "local-image"),
       slots = null, device = DeviceMemory(4096u, null, false),
       defaults = defaultLimits(), pool = defaultPoolSettings()

@@ -22,7 +22,9 @@ import kotlinx.coroutines.withContext
 class ExoPlayerSlot internal constructor(private val id: UInt, private val host: ExoPlayerSlotFactory) : PlayerSlot {
   private val looper = host.looperFor(id)
   private val commands = Handler(looper)
-  private var key: String? = null
+  @Volatile private var key: String? = null
+  @Volatile private var wantsPlay = false
+  @Volatile private var volumeNow = 1f
   private var hasBeenReady = false
   @Volatile private var released = false
   private var viewToken: ULong? = null
@@ -49,9 +51,15 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
       reportAudible()
     }
 
-    override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) = reportAudible()
+    override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+      wantsPlay = playWhenReady
+      reportAudible()
+    }
 
-    override fun onVolumeChanged(volume: Float) = reportAudible()
+    override fun onVolumeChanged(volume: Float) {
+      volumeNow = volume
+      reportAudible()
+    }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) = refresh()
 
@@ -195,6 +203,8 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
 
   override fun sample(): SlotSample = SlotSample(livePosition().toULong(), durationMs?.toULong(), looping, viewAttached, frameRendered)
 
+  internal fun snapshot(): PlayerSnapshot? = key?.let { PlayerSnapshot(it, wantsPlay, volumeNow == 0f, livePosition(), speed) }
+
   private fun livePosition(): Long {
     val position = if (advancing) anchorMs + ((host.clock.elapsedRealtime() - anchorAt) * speed).toLong() else anchorMs
     return durationMs?.let { position.coerceAtMost(it) } ?: position
@@ -258,6 +268,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
         .setLooper(looper)
         .build()
       exo.volume = if (host.startMuted) 0f else 1f
+      volumeNow = exo.volume
       output = LooperPlayer(exo)
       exo.addListener(housekeeping)
       player = exo

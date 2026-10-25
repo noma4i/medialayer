@@ -1,5 +1,6 @@
 package com.noma4i.medialayer
 
+import com.noma4i.medialayer.testing.TestFetcher
 import com.noma4i.medialayer.CreatedPlayer
 import com.noma4i.medialayer.SlotCall
 import java.nio.file.Files
@@ -29,15 +30,11 @@ private class SeekSettings : SettingsStore {
   override fun remove(key: String) {}
 }
 
-private class SeekFetcher : Fetcher {
-  override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("offline")
-}
-
 private const val CLIP = "file:///clip.mp4"
 
 private fun open(slot: SeekSlot) = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
   dir = Files.createTempDirectory("seek").toString(),
-  fetcher = SeekFetcher(), settings = SeekSettings(), slots = slot,
+  fetcher = TestFetcher(), settings = SeekSettings(), slots = slot,
   device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings()
 ))
 

@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import MediaLayer
+import MediaLayerTesting
 
 private final class TransportSlot: PlayerSlot, PlayerSlotFactory, @unchecked Sendable {
   let log = AsyncStream<String>.makeStream()
@@ -26,17 +27,13 @@ private final class QuietSettings: SettingsStore, @unchecked Sendable {
   func remove(key: String) {}
 }
 
-private final class OfflineFetcher: Fetcher, @unchecked Sendable {
-  func fetch(request: FetchRequest) async throws -> FetchResponse { throw MediaError.Fetch(detail: "offline") }
-}
-
 private let clip = "file:///clip.mp4"
 
 private func openPlaying(groups: [String?] = [nil]) async throws -> (MediaLayer, AsyncStream<String>.Iterator) {
   let slot = TransportSlot()
   let media = try MediaLayer.open(config: OpenConfig(
     dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-    availableBytes: UInt64.max, fetcher: OfflineFetcher(), settings: QuietSettings(), slots: slot,
+    availableBytes: UInt64.max, fetcher: TestFetcher(), settings: QuietSettings(), slots: slot,
     device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
     defaults: defaultLimits(), pool: defaultPoolSettings()
   ))
@@ -82,7 +79,7 @@ struct SuspendPlaybackTests {
   func inv_session_13_a_blank_allow_group_throws() throws {
     let media = try MediaLayer.open(config: OpenConfig(
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-      availableBytes: UInt64.max, fetcher: OfflineFetcher(), settings: QuietSettings(), slots: nil,
+      availableBytes: UInt64.max, fetcher: TestFetcher(), settings: QuietSettings(), slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
       defaults: defaultLimits(), pool: defaultPoolSettings()
     ))

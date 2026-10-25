@@ -1,5 +1,6 @@
 import Foundation
 import MediaLayer
+import MediaLayerTesting
 import Testing
 @testable import MediaLayerUI
 
@@ -9,10 +10,6 @@ private final class ConfigBox: @unchecked Sendable {
 
   var config: OpenConfig? { lock.withLock { stored } }
   func keep(_ config: OpenConfig) { lock.withLock { stored = config } }
-}
-
-private final class OfflineOrigin: Fetcher, @unchecked Sendable {
-  func fetch(request: FetchRequest) async throws -> FetchResponse { throw MediaError.Fetch(detail: "offline") }
 }
 
 extension GlobalMedia {
@@ -26,7 +23,7 @@ extension GlobalMedia {
       )
 
       _ = try await MediaLayer.open(
-        defaults: { resolved }, fetcher: OfflineOrigin(),
+        defaults: { resolved }, fetcher: TestFetcher(),
         settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
         directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
         silent: false, audioFocus: .mix, imageMemoryBytes: 1_000_000,

@@ -29,6 +29,8 @@ public final class LoadedSlots: @unchecked Sendable {
     lock.withLock { slots[key]?.value }
   }
 
+  public func snapshot(for key: String) -> PlayerSnapshot? { slot(for: key)?.snapshot() }
+
   func assign(_ slot: AVQueuePlayerSlot, key: String) {
     lock.withLock { slots[key] = WeakSlot(slot) }
     Task { @MainActor in progress.changed(key) }

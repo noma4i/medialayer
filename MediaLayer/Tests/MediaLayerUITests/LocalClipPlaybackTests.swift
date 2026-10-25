@@ -1,23 +1,12 @@
 import Foundation
 import MediaLayer
+import MediaLayerTesting
 import QuartzCore
 import Testing
 @testable import MediaLayerUI
 #if canImport(UIKit)
 import UIKit
 #endif
-
-private final class CountingFetcher: Fetcher, @unchecked Sendable {
-  private let lock = NSLock()
-  private var calls = 0
-
-  var count: Int { lock.withLock { calls } }
-
-  func fetch(request: FetchRequest) async throws -> FetchResponse {
-    lock.withLock { calls += 1 }
-    throw MediaError.Fetch(detail: "offline")
-  }
-}
 
 private final class StateLog: StateListener, @unchecked Sendable {
   private let lock = NSLock()
@@ -63,7 +52,7 @@ extension GlobalMedia {
     @MainActor
     @Test
     func aLocalOneShotClipRendersAndEndsWithoutTheNetworkOrTheCache() async throws {
-      let fetcher = CountingFetcher()
+      let fetcher = TestFetcher()
       let media = try await open(silent: false, fetcher: fetcher)
       let log = StateLog()
       let subscription = try media.subscribeState(key: Self.clip, listener: log)
@@ -90,7 +79,7 @@ extension GlobalMedia {
       #expect(ended)
       #expect(log.all.contains(.rendered))
       #expect(log.all.contains(.loading) == false)
-      #expect(fetcher.count == 0)
+      #expect(fetcher.requests.isEmpty)
       #expect(try await media.stats().fileCount == 0)
       #expect(await media.placeholder(source: item, ready: false) == .none)
       withExtendedLifetime(subscription) {}
@@ -100,7 +89,7 @@ extension GlobalMedia {
 
     @Test
     func aSilentLayerKeepsEverySlotMutedWhateverThePlacesAsk() async throws {
-      let media = try await open(silent: true, fetcher: CountingFetcher())
+      let media = try await open(silent: true, fetcher: TestFetcher())
       let item = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: nil, blurHash: nil, looping: true, strategy: .window)
 
       media.visible(source: item, visible: true)
@@ -129,7 +118,7 @@ extension GlobalMedia {
     @Test
     func aClaimToUnmuteReachesASlotOfANonSilentLayer() async throws {
       let media = try await MediaLayer.open(
-        fetcher: CountingFetcher(),
+        fetcher: TestFetcher(),
         settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
         directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
         silent: false
@@ -150,7 +139,7 @@ extension GlobalMedia {
 
     @Test
     func aRateSetOnTheLayerReachesThePlayerOfTheLoadedClip() async throws {
-      let media = try await open(silent: true, fetcher: CountingFetcher())
+      let media = try await open(silent: true, fetcher: TestFetcher())
       let item = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: nil, blurHash: nil, looping: true, strategy: .window)
 
       media.setRate(key: Self.clip, rate: 1.5)

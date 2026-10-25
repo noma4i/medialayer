@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import MediaLayer
+import MediaLayerTesting
 @testable import MediaLayerUI
 
 private final class SeekSlot: PlayerSlot, PlayerSlotFactory, @unchecked Sendable {
@@ -26,16 +27,12 @@ private final class SeekSettings: SettingsStore, @unchecked Sendable {
   func remove(key: String) {}
 }
 
-private final class OfflineFetcher: Fetcher, @unchecked Sendable {
-  func fetch(request: FetchRequest) async throws -> FetchResponse { throw MediaError.Fetch(detail: "offline") }
-}
-
 private let clip = "file:///clip.mp4"
 
 private func open(_ slot: SeekSlot) throws -> MediaLayer {
   try MediaLayer.open(config: OpenConfig(
     dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-    availableBytes: UInt64.max, fetcher: OfflineFetcher(), settings: SeekSettings(), slots: slot,
+    availableBytes: UInt64.max, fetcher: TestFetcher(), settings: SeekSettings(), slots: slot,
     device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
     defaults: defaultLimits(), pool: defaultPoolSettings()
   ))

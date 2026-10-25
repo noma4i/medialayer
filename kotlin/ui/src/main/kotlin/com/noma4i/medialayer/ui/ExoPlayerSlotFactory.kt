@@ -64,6 +64,8 @@ class SlotPlayers internal constructor(val videoOutputCounters: VideoOutputCount
 
   internal val liveViews: Int get() = views.size
 
+  fun snapshot(key: String): PlayerSnapshot? = slots[key]?.snapshot()
+
   internal fun sample(key: String): SlotSample? = slots[key]?.sample()
 
   internal fun route(key: String): PlaybackRoute? = slots[key]?.route

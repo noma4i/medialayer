@@ -1,11 +1,11 @@
 package com.noma4i.medialayer
 
+import com.noma4i.medialayer.testing.TestFetcher
 import com.noma4i.medialayer.CreatedPlayer
 import com.noma4i.medialayer.SlotCall
 import java.nio.file.Files
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineStart
@@ -26,33 +26,11 @@ private class MemorySettings : SettingsStore {
   override fun remove(key: String) { values.remove(key) }
 }
 
-private class OfflineFetcher : Fetcher {
-  override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("offline")
-}
-
 private class StatsRecorder : StatsListener {
   val totals = CopyOnWriteArrayList<ULong>()
 
   override fun changed(stats: MediaStats) { totals.add(stats.totalBytes) }
   override fun failed(error: MediaException) = Unit
-}
-
-private class CountingFetcher : Fetcher {
-  val count = AtomicInteger()
-
-  override suspend fun fetch(request: FetchRequest): FetchResponse {
-    count.incrementAndGet()
-    throw MediaException.Fetch("offline")
-  }
-}
-
-private class UrlFetcher : Fetcher {
-  val urls = CopyOnWriteArrayList<String>()
-
-  override suspend fun fetch(request: FetchRequest): FetchResponse {
-    urls.add(request.url)
-    throw MediaException.Fetch("offline")
-  }
 }
 
 private class MemoryBody(data: ByteArray) : BodyReader {
@@ -135,7 +113,7 @@ class MediaLayerBridgeTest {
 
   @Test
   fun inv_image_47_theImageSizeReachesTheCallerFromTheHeadOfAFile() = runBlocking {
-    val media = openWith(OfflineFetcher(), LoggingSlots(), silent = true)
+    val media = openWith(TestFetcher(), LoggingSlots(), silent = true)
     val head = intArrayOf(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0x02, 0x80, 0, 0, 0x01, 0xe0, 8, 6, 0, 0, 0)
     val file = Files.createTempFile("size", ".png").toFile().apply { writeBytes(head.map { it.toByte() }.toByteArray()); deleteOnExit() }
 
@@ -147,7 +125,7 @@ class MediaLayerBridgeTest {
   @Test
   fun inv_native_06_ten_page_changes_reuse_slots_and_attach_once_per_page() = runBlocking {
     val slots = LoggingSlots()
-    val media = openWith(OfflineFetcher(), slots, silent = true)
+    val media = openWith(TestFetcher(), slots, silent = true)
     val pages = (0..12).map { MediaItem(Kind.VIDEO, "file:///bundle/$it.mp4", emptyMap(), null, null, strategy = CacheStrategy.WINDOW) }
     try {
       for (page in 1..11) {
@@ -189,7 +167,7 @@ class MediaLayerBridgeTest {
 
   @Test
   fun inv_api_17_a_typed_image_window_prefetches_the_remote_images_of_its_pages() {
-    val fetcher = UrlFetcher()
+    val fetcher = TestFetcher()
     val media = MediaLayer.open(
       OpenConfig(availableBytes = ULong.MAX_VALUE,
         dir = Files.createTempDirectory("medialayer").toString(),
@@ -205,15 +183,15 @@ class MediaLayerBridgeTest {
 
     media.replaceImageWindow("grid", 0, (0 until 4).map { listOf(Poster("https://o.test/p$it.jpg")) })
 
-    eventually("2 distinct urls were fetched") { fetcher.urls.toSet().size >= 2 }
+    eventually("2 distinct urls were fetched") { fetcher.requests.map { it.url }.toSet().size >= 2 }
     runBlocking { media.awaitClosed() }
-    assertEquals(setOf("https://o.test/p0.jpg", "https://o.test/p1.jpg"), fetcher.urls.toSet())
+    assertEquals(setOf("https://o.test/p0.jpg", "https://o.test/p1.jpg"), fetcher.requests.map { it.url }.toSet())
   }
 
   @Test
   fun aSilentLayerMutesEverySlotAndNeverUnmutesWhateverThePlacesAsk() {
     val slots = LoggingSlots()
-    val media = openWith(OfflineFetcher(), slots, silent = true)
+    val media = openWith(TestFetcher(), slots, silent = true)
     val item = MediaItem(Kind.VIDEO, "https://o.test/a.mp4", emptyMap(), null, null, strategy = CacheStrategy.WINDOW)
 
     media.visible(item, true)
@@ -233,7 +211,7 @@ class MediaLayerBridgeTest {
   @Test
   fun aLocalOneShotClipPlaysFromItsFileEndsAndNeverTouchesTheNetworkOrTheCache() = runBlocking {
     val slots = LoggingSlots()
-    val fetcher = CountingFetcher()
+    val fetcher = TestFetcher()
     val media = openWith(fetcher, slots, silent = true)
     val item = MediaItem(Kind.VIDEO, "file:///bundle/intro.mp4", emptyMap(), "https://o.test/cover.jpg", null, looping = false, strategy = CacheStrategy.WINDOW)
     val states = StateRecorder()
@@ -257,7 +235,7 @@ class MediaLayerBridgeTest {
     assertEquals(Placeholder.None, media.placeholder(item, false))
     subscription.close()
     media.awaitClosed()
-    assertEquals(0, fetcher.count.get())
+    assertEquals(0, fetcher.requests.size)
   }
 
   @Test
@@ -274,7 +252,7 @@ class MediaLayerBridgeTest {
     MediaLayer.open(
       OpenConfig(availableBytes = ULong.MAX_VALUE,
         dir = Files.createTempDirectory("medialayer").toString(),
-        fetcher = OfflineFetcher(),
+        fetcher = TestFetcher(),
         settings = settings,
         slots = null,
         device = DeviceMemory(totalMb = 4096u, heapClassMb = null, lowRam = false),

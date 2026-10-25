@@ -10,7 +10,8 @@ let package = Package(
   ],
   products: [
     .library(name: "MediaLayer", targets: ["MediaLayer"]),
-    .library(name: "MediaLayerUI", targets: ["MediaLayerUI"])
+    .library(name: "MediaLayerUI", targets: ["MediaLayerUI"]),
+    .library(name: "MediaLayerTesting", targets: ["MediaLayerTesting"])
   ],
   dependencies: [
     .package(url: "https://github.com/kean/Nuke", from: "13.2.0")
@@ -30,13 +31,18 @@ let package = Package(
       ],
       swiftSettings: [.swiftLanguageMode(.v5)]
     ),
+    .target(
+      name: "MediaLayerTesting",
+      dependencies: ["MediaLayer"],
+      swiftSettings: [.swiftLanguageMode(.v5)]
+    ),
     .testTarget(
       name: "MediaLayerTests",
-      dependencies: ["MediaLayer"]
+      dependencies: ["MediaLayer", "MediaLayerTesting"]
     ),
     .testTarget(
       name: "MediaLayerUITests",
-      dependencies: ["MediaLayerUI", "MediaLayer"],
+      dependencies: ["MediaLayerUI", "MediaLayer", "MediaLayerTesting"],
       resources: [.copy("Fixtures")],
       swiftSettings: [.swiftLanguageMode(.v5)]
     )

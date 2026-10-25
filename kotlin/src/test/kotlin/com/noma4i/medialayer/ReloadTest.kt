@@ -1,5 +1,6 @@
 package com.noma4i.medialayer
 
+import com.noma4i.medialayer.testing.TestFetcher
 import com.noma4i.medialayer.CreatedPlayer
 import com.noma4i.medialayer.SlotCall
 import java.nio.file.Files
@@ -33,10 +34,6 @@ private class ReloadSettings : SettingsStore {
   override fun remove(key: String) {}
 }
 
-private class ReloadFetcher : Fetcher {
-  override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("offline")
-}
-
 class ReloadTest {
   init { NativeCallbacks.install() }
 
@@ -45,7 +42,7 @@ class ReloadTest {
     val slot = ReloadSlot()
     val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
       dir = Files.createTempDirectory("reload").toString(),
-      fetcher = ReloadFetcher(), settings = ReloadSettings(), slots = slot,
+      fetcher = TestFetcher(), settings = ReloadSettings(), slots = slot,
       device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings()
     ))
     val key = "file:///clip.mp4"

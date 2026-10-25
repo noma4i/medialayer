@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 rootProject.name = "medialayer"
 
 include(":ui")
+include(":testing")

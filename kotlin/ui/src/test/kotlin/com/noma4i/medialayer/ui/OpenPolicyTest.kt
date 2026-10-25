@@ -1,14 +1,11 @@
 package com.noma4i.medialayer.ui
 
+import com.noma4i.medialayer.testing.TestFetcher
 import android.app.Application
 import android.app.ActivityManager
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.test.core.app.ApplicationProvider
 import com.noma4i.medialayer.Evict
-import com.noma4i.medialayer.Fetcher
-import com.noma4i.medialayer.FetchRequest
-import com.noma4i.medialayer.FetchResponse
-import com.noma4i.medialayer.MediaException
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.OpenConfig
 import com.noma4i.medialayer.SpecDefaults
@@ -20,10 +17,6 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
-
-private class OfflineOrigin : Fetcher {
-  override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("offline")
-}
 
 @RunWith(MediaLayerTestRunner::class)
 class OpenPolicyTest {
@@ -46,7 +39,7 @@ class OpenPolicyTest {
     )
 
     openMediaLayer(
-      application, OfflineOrigin(), SharedPreferencesSettings(application, UUID.randomUUID().toString()),
+      application, TestFetcher(), SharedPreferencesSettings(application, UUID.randomUUID().toString()),
       defaults = { resolved }, lifecycle = ProcessLifecycleOwner.get().lifecycle
     ) { config = it; MediaLayer.open(it) }.blocking().close()
 

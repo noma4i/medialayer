@@ -1,5 +1,8 @@
 package com.noma4i.medialayer.ui
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import com.noma4i.medialayer.testing.TestFetcher
 import com.noma4i.medialayer.CreatedPlayer
 import com.noma4i.medialayer.SlotCall
 import android.content.Context
@@ -7,9 +10,7 @@ import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.unit.dp
@@ -54,9 +55,7 @@ class MountedGroupTest {
   private val loader = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) })
   private val layer = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
     dir = Files.createTempDirectory("mounted-group").toString(),
-    fetcher = object : Fetcher {
-      override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("unused origin")
-    },
+    fetcher = TestFetcher(),
     settings = SharedPreferencesSettings(context, "mounted-group"), slots = slot,
     device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings()
   ))

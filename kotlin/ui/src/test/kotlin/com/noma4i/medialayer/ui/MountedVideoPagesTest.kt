@@ -1,5 +1,6 @@
 package com.noma4i.medialayer.ui
 
+import com.noma4i.medialayer.testing.TestFetcher
 import android.content.Context
 import android.os.Looper
 import androidx.activity.ComponentActivity
@@ -50,9 +51,7 @@ class MountedVideoPagesTest {
   private val loader = mediaImageLoader(context, ImageBytes { _, _ -> ImageFetchResult(pngBytes(), ImageOrigin.NETWORK) })
   private val layer = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
     dir = Files.createTempDirectory("mounted-pages").toString(),
-    fetcher = object : Fetcher {
-      override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("unused origin")
-    },
+    fetcher = TestFetcher(),
     settings = SharedPreferencesSettings(context, "mounted-pages"), slots = slot,
     device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings()
   ))

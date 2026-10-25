@@ -1,6 +1,7 @@
 #if canImport(UIKit)
 import Foundation
 import MediaLayer
+import MediaLayerTesting
 import SwiftUI
 import Testing
 import UIKit
@@ -64,7 +65,7 @@ private struct Cell: View {
 private func openCore(_ slot: TransportSlot) throws -> MediaLayer {
   try MediaLayer.open(config: OpenConfig(
     dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-    availableBytes: UInt64.max, fetcher: UnusedFetcher(), settings: QuietSettings(), slots: slot,
+    availableBytes: UInt64.max, fetcher: TestFetcher(), settings: QuietSettings(), slots: slot,
     device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
     defaults: defaultLimits(), pool: defaultPoolSettings()
   ))

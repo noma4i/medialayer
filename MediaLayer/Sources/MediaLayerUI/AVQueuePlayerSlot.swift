@@ -104,6 +104,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private var cachedSample = SlotSample(positionMs: 0, durationMs: nil, isLooping: false, viewAttached: false, frameRendered: false)
   private var sampledAt: TimeInterval = 0
   private var sampledRate: Double = 0
+  private var commanded = Commanded()
 
   private var key: String?
   private var hostKey: String?
@@ -137,6 +138,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     super.init()
     dispatchPrecondition(condition: .onQueue(.main))
     player.isMuted = startMuted
+    sampleLock.withLock { commanded.isMuted = startMuted }
     player.automaticallyWaitsToMinimizeStalling = true
     observeAudibility()
     layer.videoGravity = .resizeAspectFill
@@ -199,8 +201,8 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     case .preroll: preroll()
     case .play: play()
     case .pause: pause()
-    case .mute: player.isMuted = true
-    case .unmute: player.isMuted = false
+    case .mute: player.isMuted = true; sampleLock.withLock { commanded.isMuted = true }
+    case .unmute: player.isMuted = false; sampleLock.withLock { commanded.isMuted = false }
     case let .attach(viewToken): attach(viewToken: viewToken)
     case .detach: detach()
     case .seek: break  // applySeek waits for the completion of a seek, perform cannot
@@ -227,6 +229,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     looping = route.looping
     player.actionAtItemEnd = route.looping ? .advance : .pause
     self.key = key
+    sampleLock.withLock { commanded.key = key }
     observe(item, generation: generation)
     player.insert(item, after: nil)
     queueNextRound()
@@ -242,6 +245,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     MediaTrace.emit("player", "slot=\(id) unload key=\(released.map(MediaTrace.tail) ?? "-")")
     tearDownItem()
     key = nil
+    sampleLock.withLock { commanded.key = nil; commanded.isPlaying = false; commanded.rate = 1 }
     if let released { slots.release(key: released, slot: self) }
   }
 
@@ -252,12 +256,14 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
 
   private func play() {
     wantsPlay = true
+    sampleLock.withLock { commanded.isPlaying = true }
     MediaTrace.emit("player", "slot=\(id) play key=\(key.map(MediaTrace.tail) ?? "-")")
     player.play()
   }
 
   private func pause() {
     wantsPlay = false
+    sampleLock.withLock { commanded.isPlaying = false }
     MediaTrace.emit("player", "slot=\(id) pause key=\(key.map(MediaTrace.tail) ?? "-")")
     player.pause()
   }
@@ -276,6 +282,12 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
       }
       return sample
     }
+  }
+
+  public func snapshot() -> PlayerSnapshot? {
+    let state = sampleLock.withLock { commanded }
+    guard let key = state.key else { return nil }
+    return PlayerSnapshot(key: key, isPlaying: state.isPlaying, isMuted: state.isMuted, positionMs: sample().positionMs, rate: state.rate)
   }
 
   private func applySeek(positionMs: UInt64) async {
@@ -327,6 +339,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
 
   private func setRate(rate: Float) {
     player.defaultRate = rate
+    sampleLock.withLock { commanded.rate = rate }
     if player.rate != 0 { player.rate = rate }
   }
 
@@ -548,4 +561,11 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private static func httpStatus(of item: AVPlayerItem) -> Int32 {
     Int32(item.errorLog()?.events.last?.errorStatusCode ?? 0)
   }
+}
+
+private struct Commanded {
+  var key: String?
+  var isPlaying = false
+  var isMuted = false
+  var rate: Float = 1
 }

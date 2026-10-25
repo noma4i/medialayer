@@ -47,6 +47,7 @@ dependencies {
 
   testImplementation("net.java.dev.jna:jna:5.19.1")
   testImplementation("junit:junit:4.13.2")
+  testImplementation(project(":testing"))
   testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
   testImplementation("org.robolectric:robolectric:4.17")
   testImplementation("androidx.test:core:1.7.0")

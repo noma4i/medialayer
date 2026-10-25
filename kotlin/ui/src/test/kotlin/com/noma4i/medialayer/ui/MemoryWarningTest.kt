@@ -1,5 +1,6 @@
 package com.noma4i.medialayer.ui
 
+import com.noma4i.medialayer.testing.TestFetcher
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -31,9 +32,7 @@ class MemoryWarningTest {
     val dropped = CompletableDeferred<Unit>()
     val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
       dir = Files.createTempDirectory("memory-warning").toString(),
-      fetcher = object : Fetcher {
-        override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("unused origin")
-      },
+      fetcher = TestFetcher(),
       settings = SharedPreferencesSettings(context, "memory-warning"), slots = null,
       device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings(),
       memoryReleaser = object : MemoryReleaser {

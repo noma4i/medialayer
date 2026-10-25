@@ -1,5 +1,6 @@
 package com.noma4i.medialayer
 
+import com.noma4i.medialayer.testing.TestFetcher
 import com.sun.jna.Library
 import com.sun.jna.Memory
 import com.sun.jna.Native
@@ -50,10 +51,6 @@ private class IdleSettings : SettingsStore {
   override fun remove(key: String) {}
 }
 
-private class IdleFetcher : Fetcher {
-  override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("offline")
-}
-
 class NativeCallbackThreadTest {
   @Test
   fun inv_ffi_08_a_continuation_that_resumes_inline_on_a_runtime_thread_never_detaches_the_thread_under_its_own_frames() {
@@ -61,7 +58,7 @@ class NativeCallbackThreadTest {
     val media = MediaLayer.open(
       OpenConfig(availableBytes = ULong.MAX_VALUE,
         dir = Files.createTempDirectory("medialayer").toString(),
-        fetcher = IdleFetcher(),
+        fetcher = TestFetcher(),
         settings = IdleSettings(),
         slots = null,
         device = DeviceMemory(totalMb = 4096u, heapClassMb = null, lowRam = false),

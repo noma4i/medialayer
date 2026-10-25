@@ -1,5 +1,6 @@
 package com.noma4i.medialayer.ui
 
+import com.noma4i.medialayer.testing.TestFetcher
 import coil3.request.allowHardware
 import kotlinx.coroutines.CompletableDeferred
 import android.content.Context
@@ -16,9 +17,6 @@ import com.noma4i.medialayer.MediaItem
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.OpenConfig
-import com.noma4i.medialayer.Fetcher
-import com.noma4i.medialayer.FetchRequest
-import com.noma4i.medialayer.FetchResponse
 import com.noma4i.medialayer.MediaException
 import com.noma4i.medialayer.DeviceMemory
 import com.noma4i.medialayer.defaultLimits
@@ -74,9 +72,7 @@ class ToneFramesTest {
       }).build()
     val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
       dir = Files.createTempDirectory("tone-demand").toString(),
-      fetcher = object : Fetcher {
-        override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("unused origin")
-      },
+      fetcher = TestFetcher(),
       settings = SharedPreferencesSettings(context, "tone-demand"), slots = null,
       device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings()
     ))

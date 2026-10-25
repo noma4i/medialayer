@@ -1,5 +1,6 @@
 package com.noma4i.medialayer
 
+import com.noma4i.medialayer.testing.TestFetcher
 import com.noma4i.medialayer.CreatedPlayer
 import com.noma4i.medialayer.SlotCall
 import java.nio.file.Files
@@ -31,15 +32,11 @@ private class QuietSettings : SettingsStore {
   override fun remove(key: String) {}
 }
 
-private class QuietFetcher : Fetcher {
-  override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("offline")
-}
-
 private const val CLIP = "file:///clip.mp4"
 
 private fun open(slot: TransportSlot?) = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
   dir = Files.createTempDirectory("suspend").toString(),
-  fetcher = QuietFetcher(), settings = QuietSettings(), slots = slot,
+  fetcher = TestFetcher(), settings = QuietSettings(), slots = slot,
   device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings()
 ))
 

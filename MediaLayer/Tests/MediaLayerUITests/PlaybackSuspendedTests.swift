@@ -1,5 +1,6 @@
 import Foundation
 import MediaLayer
+import MediaLayerTesting
 import Observation
 import SwiftUI
 import Testing
@@ -80,7 +81,7 @@ private struct SuspendRig {
     let slot = self.slot
     media = try MediaLayer.open(config: OpenConfig(
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-      availableBytes: UInt64.max, fetcher: SuspendProbeFetcher(), settings: SuspendProbeSettings(), slots: slot,
+      availableBytes: UInt64.max, fetcher: TestFetcher(), settings: SuspendProbeSettings(), slots: slot,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
       defaults: defaultLimits(), pool: defaultPoolSettings(), ingress: ingress
     ))

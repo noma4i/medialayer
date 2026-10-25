@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import MediaLayer
+import MediaLayerTesting
 
 private final class MemorySettings: SettingsStore, @unchecked Sendable {
   private let lock = NSLock()
@@ -13,24 +14,6 @@ private final class MemorySettings: SettingsStore, @unchecked Sendable {
   func read(key: String) -> String? { lock.withLock { values[key] } }
   func write(key: String, value: String) { lock.withLock { values[key] = value } }
   func remove(key: String) { lock.withLock { values[key] = nil } }
-}
-
-private final class OfflineFetcher: Fetcher, @unchecked Sendable {
-  func fetch(request: FetchRequest) async throws -> FetchResponse {
-    throw MediaError.Fetch(detail: "offline")
-  }
-}
-
-private final class RecordingFetcher: Fetcher, @unchecked Sendable {
-  private let lock = NSLock()
-  private var seen: [String] = []
-
-  var urls: [String] { lock.withLock { seen } }
-
-  func fetch(request: FetchRequest) async throws -> FetchResponse {
-    lock.withLock { seen.append(request.url) }
-    throw MediaError.Fetch(detail: "offline")
-  }
 }
 
 private final class MemoryBody: BodyReader, @unchecked Sendable {
@@ -81,7 +64,7 @@ struct MediaLayerBridgeTests {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     return try MediaLayer.open(config: OpenConfig(
       dir: directory.path,
-      availableBytes: UInt64.max, fetcher: OfflineFetcher(),
+      availableBytes: UInt64.max, fetcher: TestFetcher(),
       settings: settings,
       slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
@@ -92,7 +75,7 @@ struct MediaLayerBridgeTests {
 
   @Test
   func inv_api_17_a_typed_image_window_prefetches_the_remote_images_of_its_pages() async throws {
-    let fetcher = RecordingFetcher()
+    let fetcher = TestFetcher()
     let media = try MediaLayer.open(config: OpenConfig(
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
       availableBytes: UInt64.max, fetcher: fetcher,
@@ -106,10 +89,10 @@ struct MediaLayerBridgeTests {
 
     media.replaceImageWindow("grid", active: 0, pages: (0..<4).map { [Poster(url: "https://o.test/p\($0).jpg")] })
 
-    for _ in 0..<200 where fetcher.urls.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+    for _ in 0..<200 where fetcher.requests.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
     media.close()
     await media.awaitClosed()
-    #expect(Set(fetcher.urls) == ["https://o.test/p0.jpg", "https://o.test/p1.jpg"])
+    #expect(Set(fetcher.requests.map(\.url)) == ["https://o.test/p0.jpg", "https://o.test/p1.jpg"])
   }
 
   @Test

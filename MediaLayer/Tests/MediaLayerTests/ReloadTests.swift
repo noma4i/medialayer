@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import MediaLayer
+import MediaLayerTesting
 
 private final class ReloadSlot: PlayerSlot, PlayerSlotFactory, @unchecked Sendable {
   let plays = AsyncStream<Bool>.makeStream()
@@ -32,10 +33,6 @@ private final class ReloadSettings: SettingsStore, @unchecked Sendable {
   func remove(key: String) {}
 }
 
-private final class ReloadFetcher: Fetcher, @unchecked Sendable {
-  func fetch(request: FetchRequest) async throws -> FetchResponse { throw MediaError.Fetch(detail: "offline") }
-}
-
 @Suite(.timeLimit(.minutes(1)))
 struct ReloadTests {
   @Test
@@ -43,7 +40,7 @@ struct ReloadTests {
     let slot = ReloadSlot()
     let media = try MediaLayer.open(config: OpenConfig(
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-      availableBytes: UInt64.max, fetcher: ReloadFetcher(), settings: ReloadSettings(), slots: slot,
+      availableBytes: UInt64.max, fetcher: TestFetcher(), settings: ReloadSettings(), slots: slot,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
       defaults: defaultLimits(), pool: defaultPoolSettings()
     ))
