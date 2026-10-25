@@ -172,6 +172,8 @@ impl Stage {
                 self.inner.handle.spawn(async move {
                     stage.inner.routes.repair().await;
                     stage.reload(&id, true);
+                    #[cfg(test)]
+                    stage.inner.action_completed.notify_one();
                 });
             }
             Action::PurgeCache(url) => {
@@ -179,6 +181,8 @@ impl Stage {
                 self.inner.handle.spawn(async move {
                     stage.inner.routes.purge(&url).await;
                     stage.feed_id(&id, Event::CachePurged);
+                    #[cfg(test)]
+                    stage.inner.action_completed.notify_one();
                 });
             }
             Action::RefreshRoute => self.refresh_route(&id),

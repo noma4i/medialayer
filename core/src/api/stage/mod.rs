@@ -105,6 +105,8 @@ struct Inner {
     hints: Mutex<HashMap<usize, u64>>,
     #[cfg(test)]
     declaration_completed: tokio::sync::Notify,
+    #[cfg(test)]
+    action_completed: tokio::sync::Notify,
 }
 
 #[derive(Clone)]
@@ -278,6 +280,8 @@ impl Stage {
             hints: Mutex::new(HashMap::new()),
             #[cfg(test)]
             declaration_completed: tokio::sync::Notify::new(),
+            #[cfg(test)]
+            action_completed: tokio::sync::Notify::new(),
         });
         let tick = handle.spawn(tick_loop(Arc::downgrade(&inner), inner.due.subscribe(), parts.ledger));
         *inner.tick.lock().unwrap_or_else(PoisonError::into_inner) = Some(AbortOnDrop::new(tick));

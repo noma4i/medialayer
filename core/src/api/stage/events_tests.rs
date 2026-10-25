@@ -443,8 +443,6 @@ async fn inv_api_44_an_action_held_across_a_reload_of_the_same_key_does_not_touc
         let (stage, routes) = (&rig.parts.stage, &rig.parts.routes);
         let slot = slot as usize;
         let old = stage.load_id_at(slot).unwrap();
-        let runtime = tokio::runtime::Handle::current().metrics();
-        let alive = runtime.num_alive_tasks();
         routes.hold_repair_and_purge(true);
         stage.perform(old, action);
         eventually(|| routes.barrier_entries() == 1).await;
@@ -454,7 +452,7 @@ async fn inv_api_44_an_action_held_across_a_reload_of_the_same_key_does_not_touc
         let (calls, generation) = (player.calls(), stage.generation_at(slot));
 
         routes.hold_repair_and_purge(false);
-        eventually(|| runtime.num_alive_tasks() == alive).await;
+        stage.inner.action_completed.notified().await;
         eventually(|| stage.commands_idle()).await;
 
         assert_eq!(player.calls(), calls, "{name} held across the reload sent commands to the new load");
