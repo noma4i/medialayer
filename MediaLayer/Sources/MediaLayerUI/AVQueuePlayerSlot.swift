@@ -78,7 +78,7 @@ private final class MadeSlots: @unchecked Sendable {
   }
 }
 
-private final class SeekWait: @unchecked Sendable {
+class SeekWait: @unchecked Sendable {
   let positionMs: UInt64
   var item: AVPlayerItem?
   var isStarted = false
@@ -89,6 +89,8 @@ private final class SeekWait: @unchecked Sendable {
   init(positionMs: UInt64) { self.positionMs = positionMs }
 
   var isFinished: Bool { lock.withLock { finished } }
+
+  func cancelNative() { item?.cancelPendingSeeks() }
 
   func park(_ parked: CheckedContinuation<Void, Never>) {
     let isDone = lock.withLock { () -> Bool in
@@ -295,7 +297,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     }
   }
 
-  private func beginSeek(_ wait: SeekWait) {
+  func beginSeek(_ wait: SeekWait) {
     dispatchPrecondition(condition: .onQueue(.main))
     guard !wait.isFinished, !closed.isSet, let item else { return wait.finish() }
     finishSeek()
@@ -319,8 +321,8 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     if seekWait === wait { seekWait = nil }
   }
 
-  private func cancelSeek(_ wait: SeekWait) {
-    wait.item?.cancelPendingSeeks()
+  func cancelSeek(_ wait: SeekWait) {
+    if seekWait === wait { wait.cancelNative() }
     completeSeek(wait)
   }
 

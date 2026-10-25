@@ -347,6 +347,36 @@ struct AVQueuePlayerSlotTests {
     #expect(slot.sample().positionMs >= 290)
   }
 
+  private final class CountingSeekWait: SeekWait, @unchecked Sendable {
+    private(set) var nativeCancels = 0
+    override func cancelNative() {
+      nativeCancels += 1
+      super.cancelNative()
+    }
+  }
+
+  @Test
+  func aLateCancelOfAnOldSeekNeverCancelsTheNativeSeekOfTheNewOne() async {
+    let log = PlayerEventLog()
+    let slot = await makeSlot(log)
+    await slot.load(key: "clip", route: route(Self.silentClip))
+    await log.wait(for: "ready")
+    let old = CountingSeekWait(positionMs: 100)
+    let current = CountingSeekWait(positionMs: 300)
+
+    await MainActor.run {
+      slot.beginSeek(old)
+      slot.beginSeek(current)
+      slot.cancelSeek(old)
+    }
+    #expect(old.nativeCancels == 0 && current.nativeCancels == 0)
+    await MainActor.run { slot.cancelSeek(current) }
+    #expect(current.nativeCancels == 1)
+
+    await slot.seek(positionMs: 300)
+    #expect(slot.sample().positionMs >= 290)
+  }
+
   @MainActor
   @Test
   func inv_audio_03_anEndedAudioStopsAtTheStartAndALaterSeekSurvivesARepeatedEnd() {
