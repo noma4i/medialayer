@@ -8,6 +8,8 @@ pub enum MediaError {
     InvalidSpec { detail: String },
     #[error("fetch failed: {detail}")]
     Fetch { detail: String },
+    #[error("timeout: {detail}")]
+    Timeout { detail: String },
     #[error("blurhash: {detail}")]
     BlurHash { detail: String },
     #[error("tone: {detail}")]

@@ -12,6 +12,7 @@ pub mod identity;
 pub mod image_size;
 pub mod limits;
 pub mod memory;
+pub mod outside;
 pub mod pages;
 pub mod pool;
 pub mod prefetch;

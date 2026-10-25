@@ -93,6 +93,15 @@ val pixels = decodeBlurhash(blurHash, 32u, 32u, 1f)
 
 `fetchImage` returns bytes and their source in `ImageFetchResult`. `source` distinguishes a core cache hit, a network fetch, and a local file read. Network fetches use the `Fetcher` and disk cache, with no local HTTP hop. A `file://` URL is read straight from its file and never enters the disk cache. A response above 16 MiB fails. `decodeBlurhash` returns RGBA bytes and throws `MediaError.BlurHash` for a bad string. A loader reports its progress with `media.itemState(key:state:)` so images and audio use the same placeholder chain as video.
 
+### Images outside MediaLayer
+
+A process that cannot open MediaLayer, such as an iOS notification extension or an Android push receiver, loads one image with `MediaImageLoad.load(url:headers:directory:cacheBytes:timeout:fetcher:)` (Swift) or `MediaImageLoad.load(url, directory, headers, cacheBytes, timeoutMs, fetcher)` (Kotlin, `suspend`). The call runs off the calling thread and returns `ImageFetchResult` with `bytes` and `source` (`Cache` or `Network`).
+
+- The core keeps a bounded disk cache in `directory`: the key is the URL, `cacheBytes` is the limit, and the least recently used entries leave first. On iOS pass a directory in the app group so the app and the extension share the cache. On Android pass a directory under `cacheDir`.
+- The second load of a URL reads the cache and makes no request.
+- No answer within the timeout throws `MediaError.Timeout`. A status other than 200 or a response above 16 MiB throws `MediaError.Fetch` and stores nothing.
+- The call opens no MediaLayer, no proxy and no background task: all work ends before it returns. Defaults are 8 MiB of cache and a 5 second timeout.
+
 ## Repository
 
 | Path | Contents |
