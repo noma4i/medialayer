@@ -13,7 +13,7 @@ use super::types::Kind;
 use crate::cache::Clock;
 use crate::change::Change;
 use crate::hls::is_manifest_url;
-use crate::memory::Ledger;
+use crate::memory::{Held, Ledger};
 use crate::pages::PageKeys;
 use crate::pool::{Command, Ring};
 use crate::prefetch::Prefetcher;
@@ -42,6 +42,7 @@ pub struct StageParts {
 }
 
 struct Loaded {
+    held: Held,
     slot: usize,
     generation: u64,
     recovery: RecoveryState,
@@ -56,9 +57,31 @@ pub(super) struct LoadId {
     generation: u64,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Work {
+    Watchdog,
+    Retry,
+    Foreground,
+    Repair,
+    Purge,
+}
+
+impl Work {
+    fn is_timer(self) -> bool {
+        matches!(self, Work::Watchdog | Work::Retry | Work::Foreground)
+    }
+}
+
 struct Armed {
     generation: u64,
+    work: Work,
+    token: u64,
     _task: AbortOnDrop,
+}
+
+struct Declaration {
+    token: Arc<()>,
+    check: Option<AbortOnDrop>,
 }
 
 struct State {
@@ -68,12 +91,13 @@ struct State {
     keys_by_lease: HashMap<u64, String>,
     loaded: HashMap<String, Loaded>,
     slot_keys: HashMap<usize, String>,
-    tasks: HashMap<String, Armed>,
+    tasks: HashMap<String, Vec<Armed>>,
+    foreground: Option<(u64, AbortOnDrop)>,
     catalog: HashMap<String, MediaItem>,
     sliced: HashSet<String>,
     views: HashMap<String, u64>,
     shown: HashMap<String, usize>,
-    declarations: HashMap<String, Arc<()>>,
+    declarations: HashMap<String, Declaration>,
     rates: HashMap<String, f32>,
     positions: ResumePositions,
     window: Vec<Option<MediaItem>>,
@@ -97,14 +121,13 @@ struct Inner {
     silent: bool,
     handle: Handle,
     tick: Mutex<Option<AbortOnDrop>>,
+    next_task: AtomicU64,
     due: watch::Sender<Option<u64>>,
     change: Arc<Change>,
     foreground_passes: AtomicU64,
     wakes: AtomicU64,
     seeks: Mutex<HashMap<String, (u64, std::time::Instant)>>,
     hints: Mutex<HashMap<usize, u64>>,
-    #[cfg(test)]
-    declaration_completed: tokio::sync::Notify,
     #[cfg(test)]
     action_completed: tokio::sync::Notify,
 }
@@ -178,7 +201,7 @@ impl State {
     }
 
     fn has_pending_restore(&self) -> bool {
-        self.ring.is_restoring() || (!self.ring.is_background() && !self.pending_wanted.is_empty())
+        self.ring.is_restoring() || self.ring.has_refused() || (!self.ring.is_background() && !self.pending_wanted.is_empty())
     }
 
     fn next_due(&self) -> Option<u64> {
@@ -199,6 +222,10 @@ impl State {
             }
         }
         (commands, is_refused)
+    }
+
+    fn playing_key(&self) -> Option<String> {
+        self.keys_by_lease.get(&self.election.active()?).cloned()
     }
 
     fn is_playing(&self, key: &str) -> bool {
@@ -245,6 +272,7 @@ impl Stage {
             loaded: HashMap::new(),
             slot_keys: HashMap::new(),
             tasks: HashMap::new(),
+            foreground: None,
             catalog: HashMap::new(),
             sliced: HashSet::new(),
             views: HashMap::new(),
@@ -272,14 +300,13 @@ impl Stage {
             silent: parts.silent,
             handle: handle.clone(),
             tick: Mutex::new(None),
+            next_task: AtomicU64::new(0),
             due: watch::channel(None).0,
             change: parts.change,
             foreground_passes: AtomicU64::new(0),
             wakes: AtomicU64::new(0),
             seeks: Mutex::new(HashMap::new()),
             hints: Mutex::new(HashMap::new()),
-            #[cfg(test)]
-            declaration_completed: tokio::sync::Notify::new(),
             #[cfg(test)]
             action_completed: tokio::sync::Notify::new(),
         });
@@ -301,12 +328,37 @@ impl Stage {
 
     #[cfg(test)]
     pub fn armed_tasks(&self) -> usize {
-        self.state().tasks.len()
+        self.state().tasks.values().map(Vec::len).sum()
+    }
+
+    #[cfg(test)]
+    pub fn slot_records(&self) -> usize {
+        self.inner.runner.live_slots()
+    }
+
+    #[cfg(test)]
+    pub fn holders(&self) -> usize {
+        Arc::strong_count(&self.inner)
+    }
+
+    #[cfg(test)]
+    pub fn repairs_in_flight(&self) -> usize {
+        self.state().tasks.values().flatten().filter(|armed| matches!(armed.work, Work::Repair | Work::Purge)).count()
+    }
+
+    #[cfg(test)]
+    pub fn has_foreground(&self) -> bool {
+        self.state().foreground.is_some()
+    }
+
+    #[cfg(test)]
+    pub fn declaration_checks(&self) -> usize {
+        self.state().declarations.values().filter(|declaration| declaration.check.is_some()).count()
     }
 
     #[cfg(test)]
     pub fn armed_generation(&self, key: &str) -> Option<u64> {
-        self.state().tasks.get(key).map(|armed| armed.generation)
+        self.state().tasks.get(key).and_then(|armed| armed.iter().find(|armed| armed.work.is_timer())).map(|armed| armed.generation)
     }
 
     #[cfg(test)]
@@ -339,6 +391,49 @@ impl Stage {
         }
     }
 
+    fn next_token(&self) -> u64 {
+        self.inner.next_task.fetch_add(1, Ordering::Relaxed)
+    }
+
+    fn track(&self, id: &LoadId, work: Work, token: u64, body: impl std::future::Future<Output = ()> + Send + 'static) {
+        self.with_id(id, |state| {
+            let task = AbortOnDrop::new(self.inner.handle.spawn(body));
+            let entries = state.tasks.entry(id.key.clone()).or_default();
+            if work.is_timer() {
+                entries.retain(|armed| !armed.work.is_timer());
+            }
+            entries.push(Armed { generation: id.generation, work, token, _task: task });
+        });
+    }
+
+    fn finish_work(&self, key: &str, token: u64) {
+        let finished = {
+            let mut state = self.inner.state.lock().unwrap_or_else(PoisonError::into_inner);
+            let Some(entries) = state.tasks.get_mut(key) else { return };
+            let position = entries.iter().position(|armed| armed.token == token);
+            let finished = position.map(|position| entries.remove(position));
+            if entries.is_empty() {
+                state.tasks.remove(key);
+            }
+            finished
+        };
+        drop(finished);
+    }
+
+    pub async fn close(&self) {
+        self.inner.tick.lock().unwrap_or_else(PoisonError::into_inner).take();
+        self.inner.runner.dispose_all();
+        let released = {
+            let mut state = self.inner.state.lock().unwrap_or_else(PoisonError::into_inner);
+            let released = (std::mem::take(&mut state.tasks), state.foreground.take(), std::mem::take(&mut state.declarations), state.ring.close());
+            state.loaded.clear();
+            state.slot_keys.clear();
+            released
+        };
+        drop(released);
+        self.inner.runner.disposed().await;
+    }
+
     fn state(&self) -> StateGuard<'_> {
         StateGuard { guard: self.inner.state.lock().unwrap_or_else(PoisonError::into_inner), inner: &self.inner, is_changed: false, is_quiet: false }
     }
@@ -355,16 +450,17 @@ impl Stage {
         self.dispatch_with(state, commands, true, Vec::new());
     }
 
-    fn dispatch_with(&self, mut state: StateGuard<'_>, mut commands: Vec<Command>, is_remembering: bool, follow: Vec<(usize, SlotCall)>) {
+    fn dispatch_with(&self, mut state: StateGuard<'_>, commands: Vec<Command>, is_remembering: bool, follow: Vec<(usize, SlotCall)>) {
         if commands.is_empty() && follow.is_empty() {
             return;
         }
+        let (disposals, mut commands): (Vec<Command>, Vec<Command>) = commands.into_iter().partition(|command| matches!(command, Command::Dispose { .. }));
         let loads: Vec<(usize, String)> = commands
             .iter()
-            .filter_map(|command| if let Command::Load { slot, key } = command { Some((*slot, key.clone())) } else { None })
+            .filter_map(|command| if let Command::Load { slot, key, .. } = command { Some((*slot, key.clone())) } else { None })
             .collect();
         for (slot, key) in loads {
-            if state.is_playing(&key) && !commands.iter().any(|command| *command == Command::Play { slot }) {
+            if state.is_playing(&key) && !commands.iter().any(|command| matches!(command, Command::Play { slot: playing } if *playing == slot)) {
                 commands.extend(state.ring.set_playing(&key, true));
             }
         }
@@ -378,7 +474,12 @@ impl Stage {
             self.translate(&mut state, command, &mut calls, &mut actions, &mut unloaded, &mut resumed, &mut parked);
         }
         for (slot, call) in calls.into_iter().chain(follow) {
-            self.inner.runner.send(slot, call);
+            self.send_call(&state, slot, call);
+        }
+        for command in disposals {
+            if let Command::Dispose { slot } = command {
+                self.inner.runner.dispose(slot);
+            }
         }
         for key in unloaded {
             self.inner.places.unloaded(&key);
@@ -403,6 +504,14 @@ impl Stage {
         }
     }
 
+    fn send_call(&self, state: &State, slot: usize, call: SlotCall) {
+        let held = match &call {
+            SlotCall::Load { key, .. } => state.loaded.get(key).map(|loaded| loaded.held.clone()),
+            _ => None,
+        };
+        self.inner.runner.send_held(slot, call, held);
+    }
+
     fn translate(
         &self,
         state: &mut State,
@@ -414,7 +523,7 @@ impl Stage {
         parked: &mut Vec<(usize, String, u64)>,
     ) {
         match &command {
-            Command::Load { slot, key } => {
+            Command::Load { slot, key, held } => {
                 let source = state.catalog.get(key).cloned().unwrap_or_else(|| MediaItem::bare(key, Kind::Video));
                 let route = self.inner.routes.play_url(&source);
                 let via_proxy_hls = route.generation.is_some() && is_manifest_url(&source.url);
@@ -422,7 +531,7 @@ impl Stage {
                 next_action(&mut recovery, Event::Source { key: key.clone(), via_proxy_hls }, self.now());
                 state.slot_keys.insert(*slot, key.clone());
                 let generation = state.next_generation();
-                state.loaded.insert(key.clone(), Loaded { slot: *slot, generation, recovery, source, route: route.clone() });
+                state.loaded.insert(key.clone(), Loaded { held: held.clone(), slot: *slot, generation, recovery, source, route: route.clone() });
                 state.pending_wanted.remove(key);
                 let resume = state.positions.take(key);
                 calls.extend(self.load_calls(state, key, resume));
@@ -442,6 +551,7 @@ impl Stage {
                 }
                 calls.extend(SlotCall::from_command(command));
             }
+            Command::Dispose { .. } => {}
             Command::Play { slot } | Command::Pause { slot } => {
                 let event = if matches!(command, Command::Play { .. }) { Event::Play { position_ms: 0 } } else { Event::Pause };
                 if let Some(key) = state.slot_keys.get(slot).cloned() {
@@ -557,6 +667,7 @@ async fn tick_loop(inner: Weak<Inner>, mut due: watch::Receiver<Option<u64>>, le
         let (state, commands) = {
             let now = stage.now();
             let mut state = stage.state_quiet();
+            let room = ledger.ceiling().saturating_sub(ledger.used());
             let is_requested = std::mem::take(&mut state.is_restore_requested);
             let queued = state.ring.restore_len();
             let mut commands = state.ring.tick(now);
@@ -566,11 +677,14 @@ async fn tick_loop(inner: Weak<Inner>, mut due: watch::Receiver<Option<u64>>, le
                 let (restored, refused) = state.restore_wanted(now);
                 commands.extend(restored);
                 is_refused |= refused;
+                let playing = state.playing_key();
+                commands.extend(state.ring.retry_refused(now, playing.as_deref()));
+                is_refused |= state.ring.has_refused();
             }
             state.is_restore_requested = state.ring.is_restoring() && drained > 0;
             if is_requested || queued > 0 {
                 state.is_room_wanted = is_refused;
-                state.refusal_room = ledger.ceiling().saturating_sub(ledger.used());
+                state.refusal_room = room;
             }
             (state, commands)
         };
@@ -628,6 +742,10 @@ mod inputs_tests;
 mod lifetime_tests;
 #[cfg(test)]
 mod playhead_tests;
+#[cfg(test)]
+mod reservation_tests;
+#[cfg(test)]
+mod tasks_tests;
 #[cfg(test)]
 mod strategy_tests;
 

@@ -1,14 +1,14 @@
-use super::{Armed, LoadId, Stage, StateGuard};
-use crate::api::guard::AbortOnDrop;
+use super::{LoadId, Stage, StateGuard, Work};
 use crate::api::slots::{SlotCall, SlotSample};
 use crate::api::types::MediaState;
 use crate::proxy::Readiness;
 use crate::session::{Action, Event, Intent, Sample};
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::sync::PoisonError;
 use std::time::Duration;
 
-#[derive(PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 enum Wake {
     Watchdog,
     Retry,
@@ -175,25 +175,37 @@ impl Stage {
             Action::Arm { delay_ms } => self.wake_after(id, delay_ms, Wake::Watchdog),
             Action::Retry(delay_ms) => self.wake_after(id, delay_ms, Wake::Retry),
             Action::Disarm => {
-                self.with_id(&id, |state| state.tasks.remove(&id.key));
+                self.with_id(&id, |state| {
+                    if let Some(entries) = state.tasks.get_mut(&id.key) {
+                        entries.retain(|armed| !armed.work.is_timer());
+                    }
+                });
             }
             Action::Replay => {
                 self.reload(&id, false);
             }
             Action::Recover => {
-                let stage = self.clone();
-                self.inner.handle.spawn(async move {
-                    stage.inner.routes.repair().await;
-                    stage.reload(&id, true);
+                let token = self.next_token();
+                let (inner, routes, target) = (Arc::downgrade(&self.inner), self.inner.routes.clone(), id.clone());
+                self.track(&id, Work::Repair, token, async move {
+                    routes.repair().await;
+                    let Some(inner) = inner.upgrade() else { return };
+                    let stage = Stage { inner };
+                    stage.reload(&target, true);
+                    stage.finish_work(&target.key, token);
                     #[cfg(test)]
                     stage.inner.action_completed.notify_one();
                 });
             }
             Action::PurgeCache(url) => {
-                let stage = self.clone();
-                self.inner.handle.spawn(async move {
-                    stage.inner.routes.purge(&url).await;
-                    stage.feed_id(&id, Event::CachePurged);
+                let token = self.next_token();
+                let (inner, routes, target) = (Arc::downgrade(&self.inner), self.inner.routes.clone(), id.clone());
+                self.track(&id, Work::Purge, token, async move {
+                    routes.purge(&url).await;
+                    let Some(inner) = inner.upgrade() else { return };
+                    let stage = Stage { inner };
+                    stage.feed_id(&target, Event::CachePurged);
+                    stage.finish_work(&target.key, token);
                     #[cfg(test)]
                     stage.inner.action_completed.notify_one();
                 });
@@ -211,35 +223,43 @@ impl Stage {
     }
 
     fn wake_after(&self, id: LoadId, delay_ms: u64, wake: Wake) {
-        let stage = self.clone();
-        let target = id.clone();
-        let task = self.inner.handle.spawn(async move {
+        let work = match wake {
+            Wake::Watchdog => Work::Watchdog,
+            Wake::Retry => Work::Retry,
+            Wake::Foreground => Work::Foreground,
+        };
+        let token = self.next_token();
+        let (inner, routes, runner, target) = (Arc::downgrade(&self.inner), self.inner.routes.clone(), self.inner.runner.clone(), id.clone());
+        self.track(&id, work, token, async move {
             tokio::time::sleep(Duration::from_millis(delay_ms)).await;
             if wake != Wake::Watchdog {
-                stage.inner.routes.repair().await;
+                routes.repair().await;
             }
-            match wake {
-                Wake::Watchdog => stage.sample_watchdog(&target).await,
-                Wake::Retry => stage.retry_due(&target),
-                Wake::Foreground => {
+            let sample = if wake == Wake::Watchdog {
+                let is_current = inner.upgrade().and_then(|inner| Stage { inner }.with_id(&target, |_| ()));
+                if is_current.is_none() {
+                    return;
+                }
+                let Some(sample) = runner.sample(target.slot).await else { return };
+                Some(sample)
+            } else {
+                None
+            };
+            let Some(inner) = inner.upgrade() else { return };
+            let stage = Stage { inner };
+            match (wake, sample) {
+                (Wake::Watchdog, Some(SlotSample { position_ms, duration_ms, is_looping, view_attached, frame_rendered })) => {
+                    let sample = Sample { position_ms, duration_ms, is_looping, view_attached, frame_rendered };
+                    stage.feed_id(&target, Event::WatchdogFired(sample));
+                }
+                (Wake::Retry, _) => stage.retry_due(&target),
+                (Wake::Foreground, _) => {
                     stage.feed_id(&target, Event::ForegroundDue);
                 }
+                (Wake::Watchdog, None) => {}
             }
+            stage.finish_work(&target.key, token);
         });
-        let armed = Armed { generation: id.generation, _task: AbortOnDrop::new(task) };
-        self.with_id(&id, |state| state.tasks.insert(id.key.clone(), armed));
-    }
-
-    async fn sample_watchdog(&self, id: &LoadId) {
-        if self.with_id(id, |_| ()).is_none() {
-            return;
-        }
-        let Some(SlotSample { position_ms, duration_ms, is_looping, view_attached, frame_rendered }) = self.inner.runner.sample(id.slot).await
-        else {
-            return;
-        };
-        let sample = Sample { position_ms, duration_ms, is_looping, view_attached, frame_rendered };
-        self.feed_id(id, Event::WatchdogFired(sample));
     }
 
     fn retry_due(&self, id: &LoadId) {
@@ -285,6 +305,9 @@ impl Stage {
             if let Some(loaded) = state.loaded.get_mut(key) {
                 loaded.generation = generation;
             }
+            if let Some(entries) = state.tasks.get_mut(key) {
+                entries.retain(|armed| !armed.work.is_timer() || armed.generation == generation);
+            }
             let mut calls = vec![(id.slot, SlotCall::Unload)];
             let resume = state.positions.take(key);
             calls.extend(self.load_calls(&state, key, resume));
@@ -295,7 +318,7 @@ impl Stage {
         };
         let is_playing = calls.iter().any(|(_, call)| *call == SlotCall::Play);
         for (slot, call) in calls {
-            self.inner.runner.send(slot, call);
+            self.send_call(&state, slot, call);
         }
         drop(state);
         self.refresh_hints();

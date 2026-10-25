@@ -65,6 +65,7 @@ private class InputSlot : PlayerSlotFactory {
         else -> {}
       }
     }
+    override suspend fun dispose() {}
     override fun sample() = SlotSample(0u, null, false, false, false)
   }
 }

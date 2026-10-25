@@ -79,8 +79,9 @@ class PlayerLooperTest {
       renderer!!.gate.countDown()
     }
     val surface = Surface(SurfaceTexture(0))
+    var created: ExoPlayerSlot? = null
     try {
-      val slot = factory.createSlot(0u)
+      val slot = factory.createSlot(0u).also { created = it }
       val view = factory.players.newView()
       slot.load("k", PlaybackRoute("http://127.0.0.1:9/a.mp4", emptyMap(), null, false, true))
       slot.attach(view.token)
@@ -101,6 +102,7 @@ class PlayerLooperTest {
     } finally {
       renderer?.gate?.countDown()
       factory.release()
+      created?.let { kotlinx.coroutines.runBlocking { it.dispose() } }
       surface.release()
     }
   }
@@ -168,8 +170,9 @@ class PlayerLooperTest {
         super.release()
       }
     }
+    var created: ExoPlayerSlot? = null
     try {
-      val slot = factory.createSlot(0u)
+      val slot = factory.createSlot(0u).also { created = it }
       val view = factory.players.newView()
       slot.load("k", PlaybackRoute("http://127.0.0.1:9/a.mp4", emptyMap(), null, false, true))
       slot.attach(view.token)
@@ -218,6 +221,7 @@ class PlayerLooperTest {
       checked.countDown()
       renderer?.gate?.countDown()
       factory.release()
+      created?.let { kotlinx.coroutines.runBlocking { it.dispose() } }
       frame.release()
     }
   }

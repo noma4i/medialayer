@@ -30,11 +30,11 @@ fn inv_pool_13_hot_next_is_retained_without_playing() {
     let mut pool = ring_with(5, 2, |config| config.trim_delay_ms = 100);
     pool.plan(0, 11, Some(11), &list);
     let next = pool.slot_of("k12").unwrap();
-    assert!(pool.tick(100).contains(&Command::Retain { slot: next, level: Retention::Warm }));
+    assert!(pool.tick(100).iter().any(|command| *command == Shape::Retain { slot: next, level: Retention::Warm }));
     pool.plan(101, 10, None, &list);
     let commands = pool.plan(102, 11, Some(11), &list);
-    assert!(commands.contains(&Command::Retain { slot: next, level: Retention::Hot }));
-    assert!(!commands.contains(&Command::Play { slot: next }));
+    assert!(commands.iter().any(|command| *command == Shape::Retain { slot: next, level: Retention::Hot }));
+    assert!(!commands.iter().any(|command| *command == Shape::Play { slot: next }));
 }
 
 #[test]

@@ -7,6 +7,10 @@ impl<T> AbortOnDrop<T> {
         AbortOnDrop(task)
     }
 
+    pub fn abort(&self) {
+        self.0.abort();
+    }
+
     pub async fn join(&mut self) -> Result<T, JoinError> {
         (&mut self.0).await
     }

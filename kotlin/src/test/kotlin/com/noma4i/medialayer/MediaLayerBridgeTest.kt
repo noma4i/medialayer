@@ -102,6 +102,7 @@ private class LoggingSlot(val id: UInt) : PlayerSlot {
       is SlotCall.Rate -> log.add("rate:${command.rate}")
     }
   }
+  override suspend fun dispose() {}
   override fun sample(): SlotSample = SlotSample(0uL, null, false, false, false)
 }
 

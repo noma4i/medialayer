@@ -65,7 +65,7 @@ fn inv_pool_06_memory_frees_the_least_recently_used_slots_for_a_page_in_the_wind
     pool.touch(2, "y");
     assert_eq!(ledger.used(), 200);
     let commands = pool.plan(3, 4, Some(4), &keys(10));
-    assert!(commands.contains(&Command::Unload { slot: 0 }) && commands.contains(&Command::Unload { slot: 1 }));
+    assert!(commands.iter().any(|command| *command == Shape::Unload { slot: 0 }) && commands.iter().any(|command| *command == Shape::Unload { slot: 1 }));
     let mut loaded = loaded_keys(&commands);
     loaded.sort();
     assert_eq!(loaded, ["k4", "k5"]);
@@ -80,7 +80,7 @@ fn inv_pool_06_memory_frees_farther_ring_slots_for_a_nearer_page() {
     assert_eq!(live(&pool), 2);
     let commands = pool.plan(1, 12, Some(12), &list);
     assert_eq!(loaded_keys(&commands), ["k12"]);
-    assert!(commands.contains(&Command::Unload { slot: 1 }));
+    assert!(commands.iter().any(|command| *command == Shape::Unload { slot: 1 }));
     assert_eq!(ledger.used(), 200);
     let mut bound: Vec<usize> = pool.states().iter().filter(|state| state.retention != Retention::Cold).map(|state| state.distance).collect();
     bound.sort();
@@ -206,4 +206,37 @@ fn inv_pool_06_a_step_also_lowers_the_ledger_admission() {
     assert!(ledger.reserve(MemoryOwner::Queue, 900).is_err());
     pool.set_step(Step::Normal);
     assert!(ledger.reserve(MemoryOwner::Queue, 900).is_ok());
+}
+
+#[test]
+fn inv_pool_17_a_load_command_carries_the_reservation_and_the_ring_release_waits_for_its_last_holder() {
+    let (mut pool, ledger) = tight(1000, 5, 2);
+    let carried: Vec<Command> = pool.plan(0, 5, Some(5), &keys(20)).into_iter().filter(|command| matches!(command, Command::Load { .. })).collect();
+    assert_eq!(carried.len(), 5);
+
+    pool.release_all();
+
+    assert_eq!(ledger.used(), 500, "the ring gave the bytes back while the commands still held them");
+    drop(carried);
+    assert_eq!(ledger.used(), 0);
+}
+
+#[test]
+fn inv_pool_20_a_refused_admission_counts_the_release_under_way_and_evicts_no_more() {
+    let (mut pool, ledger) = tight(300, 3, 0);
+    let held: Vec<Command> = ["x", "y", "z"].iter().enumerate().flat_map(|(index, key)| pool.touch(index as u64 + 1, key)).collect();
+    assert_eq!(ledger.used(), 300);
+    let list = keys(5);
+    let unloads = |commands: &[Command]| commands.iter().filter(|command| matches!(command, Command::Unload { .. })).count();
+
+    let first = pool.plan(10, 2, None, &list);
+    let second = pool.plan(11, 2, None, &list);
+
+    assert_eq!((unloads(&first), loaded_keys(&first).len()), (1, 0));
+    assert_eq!(unloads(&second), 0, "the second pass evicted again for bytes already on their way");
+    assert!(pool.has_refused());
+    drop(held);
+    let refill = pool.retry_refused(12, None);
+    assert_eq!(loaded_keys(&refill), ["k2"]);
+    assert_eq!(ledger.used(), 300);
 }

@@ -35,12 +35,12 @@ fn inv_pool_10_first_plan_loads_window_plays_active_and_prerolls_neighbours() {
     assert_eq!(
         commands,
         [
-            Command::Load { slot: 1, key: "k4".into() },
-            Command::Load { slot: 2, key: "k5".into() },
-            Command::Load { slot: 0, key: "k6".into() },
-            Command::Play { slot: 2 },
-            Command::Preroll { slot: 0 },
-            Command::Preroll { slot: 1 },
+            load(1, "k4".into()),
+            load(2, "k5".into()),
+            load(0, "k6".into()),
+            Shape::Play { slot: 2 },
+            Shape::Preroll { slot: 0 },
+            Shape::Preroll { slot: 1 },
         ]
     );
 }
@@ -53,12 +53,12 @@ fn inv_pool_10_scroll_reuses_the_freed_slot() {
     assert_eq!(
         commands,
         [
-            Command::Unload { slot: 1 },
-            Command::Load { slot: 1, key: "k7".into() },
-            Command::Pause { slot: 2 },
-            Command::Play { slot: 0 },
-            Command::Preroll { slot: 1 },
-            Command::Preroll { slot: 2 },
+            Shape::Unload { slot: 1 },
+            load(1, "k7".into()),
+            Shape::Pause { slot: 2 },
+            Shape::Play { slot: 0 },
+            Shape::Preroll { slot: 1 },
+            Shape::Preroll { slot: 2 },
         ]
     );
 }
@@ -87,7 +87,7 @@ fn inv_pool_10_changed_key_for_same_page_reloads_the_slot() {
     let mut list = keys(20);
     list[6] = Some("other".into());
     let commands = ring.plan(0, 5, Some(5), &list);
-    assert_eq!(commands[..2], [Command::Unload { slot: 0 }, Command::Load { slot: 0, key: "other".into() }]);
+    assert_eq!(commands[..2], [Shape::Unload { slot: 0 }, load(0, "other".into())]);
 }
 
 #[test]
@@ -160,7 +160,7 @@ fn inv_pool_04_preroll_hits_only_non_playing_window_pages_once_per_source() {
         let window = ring.pages(active, list.len());
         for command in ring.plan(0, active, Some(active), &list) {
             match command {
-                Command::Load { slot, key } => {
+                Command::Load { slot, key, .. } => {
                     loads += 1;
                     loaded.insert(slot, (key, loads));
                 }
@@ -208,7 +208,7 @@ fn inv_pool_10_growing_the_ring_adds_free_slots_and_shrinking_it_unloads_the_ext
     assert_eq!(ring.slots(), 7);
     let commands = ring.set_slots(3);
 
-    assert_eq!(commands, [Command::Unload { slot: 3 }]);
+    assert_eq!(commands, [Shape::Unload { slot: 3 }, Shape::Dispose { slot: 3 }, Shape::Dispose { slot: 4 }, Shape::Dispose { slot: 5 }, Shape::Dispose { slot: 6 }]);
     assert_eq!(ring.slots(), 3);
     assert_eq!(ring.stats().released.explicit, 1);
     assert!(ring.plan(1, 3, None, &keys(20)).iter().all(|command| slot_of(command) < 3));

@@ -31,7 +31,6 @@ public final class AVQueuePlayerSlotFactory: PlayerSlotFactory, @unchecked Senda
   public let events = PlayerEventsLink()
   private let startMuted: Bool
   private let audio: MediaAudioSession?
-  private let closed = Latch()
   let slots: LoadedSlots
   let hosts: HostLayers
 
@@ -46,35 +45,11 @@ public final class AVQueuePlayerSlotFactory: PlayerSlotFactory, @unchecked Senda
     let created = await MainActor.run {
       AVQueuePlayerSlot(id: slot, events: events, startMuted: startMuted, audio: audio, slots: slots, hosts: hosts)
     }
-    made.add(created)
-    if closed.isSet { created.close() }
     return CreatedPlayer(player: created)
   }
 
   func release() {
-    closed.set()
     events.bind(nil)
-    made.all.forEach { $0.close() }
-  }
-
-  private let made = MadeSlots()
-}
-
-private final class MadeSlots: @unchecked Sendable {
-  private struct Weak {
-    weak var value: AVQueuePlayerSlot?
-  }
-
-  private let lock = NSLock()
-  private var slots: [Weak] = []
-
-  var all: [AVQueuePlayerSlot] { lock.withLock { slots.compactMap(\.value) } }
-
-  func add(_ slot: AVQueuePlayerSlot) {
-    lock.withLock {
-      slots.removeAll { $0.value == nil }
-      slots.append(Weak(value: slot))
-    }
   }
 }
 
@@ -147,6 +122,8 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private var seekWait: SeekWait?
   private var readahead: TimeInterval = 0
   private let closed = Latch()
+  private var isDisposed = false
+  private var traceTimer: Timer?
 
   public init(
     id: UInt32, events: PlayerEventsLink, startMuted: Bool, audio: MediaAudioSession? = nil, slots: LoadedSlots = LoadedSlots(),
@@ -191,12 +168,28 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     }
   }
 
+  public func dispose() async {
+    closed.set()
+    await MainActor.run { [self] in disposeNow() }
+  }
+
   func close() {
     closed.set()
-    DispatchQueue.main.async { [self] in
-      unload()
-      detach()
-    }
+    DispatchQueue.main.async { [self] in disposeNow() }
+  }
+
+  private func disposeNow() {
+    dispatchPrecondition(condition: .onQueue(.main))
+    guard !isDisposed else { return }
+    isDisposed = true
+    unload()
+    detach()
+    (audibleObservations + traceObservations).forEach { $0.invalidate() }
+    audibleObservations = []
+    traceObservations = []
+    traceTimer?.invalidate()
+    traceTimer = nil
+    audio?.setAudible(slot: id, false)
   }
 
   private func perform(_ command: SlotCall) {
@@ -508,7 +501,8 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
       }
     ]
     DispatchQueue.main.async { [weak self] in
-      Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
+      guard let self, !isDisposed else { return }
+      traceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
         guard let self else { return timer.invalidate() }
         traceSnapshot()
       }

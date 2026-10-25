@@ -63,7 +63,7 @@ extension MediaLayer {
         }
         return (config, factory, media)
       } catch {
-        resources?.shutdown()
+        await resources?.shutdown()
         throw error
       }
     }
@@ -161,7 +161,7 @@ final class OpenedResources: MemoryReleaser, @unchecked Sendable {
     images.dropMemoryCaches()
   }
 
-  func shutdown() {
+  func shutdown() async {
     let media: MediaLayer?? = lock.withLock {
       guard !isClosed else { return nil }
       isClosed = true

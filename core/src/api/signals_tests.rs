@@ -2,7 +2,7 @@ use super::test_support::{eventually, shared, unload, FakeDirectives, FakePool, 
 use super::*;
 use crate::cache::SystemClock;
 use crate::memory::{Ledger, Step};
-use crate::pool::Directive;
+use crate::pool::{Command, Directive};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio::runtime::Handle;
@@ -61,7 +61,8 @@ async fn inv_api_05_pressure_and_background_stop_prefetch_drop_the_platform_memo
 
         eventually(|| !rig.directives.applied.lock().unwrap().is_empty() && rig.release.drops.load(Ordering::SeqCst) == 1).await;
         assert_eq!(rig.prefetch.stops.load(Ordering::SeqCst), 1);
-        assert_eq!(*rig.directives.applied.lock().unwrap(), vec![vec![unload(1)]]);
+        let applied = rig.directives.applied.lock().unwrap();
+        assert!(matches!(applied.as_slice(), [batch] if matches!(batch.as_slice(), [Directive::Slot(Command::Unload { slot: 1 })])));
     }
 }
 

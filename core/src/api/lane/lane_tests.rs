@@ -6,12 +6,20 @@ fn load(key: &str) -> SlotCall {
     Load { key: key.to_string(), route: PlaybackRoute { url: key.to_string(), headers: Default::default(), generation: None, hls: false, looping: true }, generation: 0 }
 }
 
+fn drain(queue: &Queue) -> Vec<SlotCall> {
+    std::iter::from_fn(|| match queue.take()? {
+        Next::Call { call, .. } => Some(call),
+        Next::Dispose => None,
+    })
+    .collect()
+}
+
 fn pending_after(calls: Vec<SlotCall>) -> Vec<SlotCall> {
     let queue = Queue::default();
     for call in calls {
-        queue.push(call);
+        queue.push(call, None);
     }
-    std::iter::from_fn(|| queue.pop().map(|(call, _)| call)).collect()
+    drain(&queue)
 }
 
 #[test]
@@ -44,11 +52,11 @@ fn inv_api_01_inv_api_16_an_overflowing_queue_folds_to_the_last_state_of_each_ki
     let queue = Queue::default();
     let mut deepest = 0;
     for call in calls {
-        queue.push(call);
+        queue.push(call, None);
         deepest = deepest.max(queue.len());
     }
 
-    let folded: Vec<SlotCall> = std::iter::from_fn(|| queue.pop().map(|(call, _)| call)).collect();
+    let folded = drain(&queue);
 
     assert!(deepest <= LANE_CAPACITY, "held {deepest}");
     assert_eq!(folded.iter().rfind(|call| matches!(call, Play | Pause)), Some(&Play));

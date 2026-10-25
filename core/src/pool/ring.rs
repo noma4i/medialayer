@@ -1,15 +1,17 @@
 use super::config::PoolConfig;
-use crate::memory::{Ledger, Reservation, Step};
+use crate::memory::{Held, Ledger, Reservation, Step};
 use super::retention::{Retention, SlotState};
 use super::stats::{PoolCounters, ReleaseReason};
 use crate::pages::PageKeys;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
+use std::sync::Weak;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum Command {
-    Load { slot: usize, key: String },
+    Load { slot: usize, key: String, held: Held },
     Unload { slot: usize },
+    Dispose { slot: usize },
     Preroll { slot: usize },
     Play { slot: usize },
     Pause { slot: usize },
@@ -38,7 +40,7 @@ pub(super) struct Binding {
     pub is_trimmed: bool,
     pub since: u64,
     pub last_used: u64,
-    pub reservation: Reservation,
+    pub reservation: Held,
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +74,9 @@ pub struct Ring {
     pub(super) counters: PoolCounters,
     pub(super) ledger: Ledger,
     pub(super) step: Step,
+    pub(super) releasing: Vec<Weak<Reservation>>,
+    pub(super) refused: Vec<(usize, String)>,
+    pub(super) is_closed: bool,
 }
 
 impl Ring {
@@ -97,6 +102,9 @@ impl Ring {
             counters: PoolCounters::default(),
             ledger,
             step: Step::Normal,
+            releasing: Vec::new(),
+            refused: Vec::new(),
+            is_closed: false,
             config,
         }
     }
@@ -110,6 +118,7 @@ impl Ring {
         let mut unloads = Vec::new();
         for slot in slots..self.slots {
             self.unbind(slot, ReleaseReason::Explicit, &mut unloads);
+            unloads.push(Command::Dispose { slot });
         }
         self.bindings.resize_with(slots, || None);
         self.native_muted.resize(slots, self.muted_all);
@@ -133,6 +142,7 @@ impl Ring {
 
     pub fn plan(&mut self, now: u64, active: usize, playback: Option<usize>, keys: &(impl PageKeys + ?Sized)) -> Vec<Command> {
         self.active = active;
+        self.refused.clear();
         if self.is_background {
             return Vec::new();
         }
@@ -171,10 +181,13 @@ impl Ring {
                 continue;
             }
             let Some(slot) = self.acquire(Some(self.slot(page)), &mut unloads) else {
+                self.refused.push((page, key.to_string()));
                 continue;
             };
             let mut staged = Vec::new();
-            self.bind(slot, key.to_string(), Holder::Ring, Some(page), now, &mut unloads, &mut staged);
+            if !self.bind(slot, key.to_string(), Holder::Ring, Some(page), now, &mut unloads, &mut staged) {
+                self.refused.push((page, key.to_string()));
+            }
             staged_loads.push((page, staged));
         }
         staged_loads.sort_by_key(|(page, _)| *page);
@@ -278,7 +291,7 @@ impl Ring {
             self.counters.reuses += 1;
         }
         self.uses[slot] += 1;
-        loads.push(Command::Load { slot, key: key.clone() });
+        loads.push(Command::Load { slot, key: key.clone(), held: reservation.clone() });
         self.bindings[slot] = Some(Binding {
             key,
             owner,
@@ -299,6 +312,7 @@ impl Ring {
     pub(super) fn take_binding(&mut self, slot: usize, reason: ReleaseReason) -> Option<Binding> {
         let binding = self.bindings[slot].take()?;
         self.counters.released.count(reason);
+        self.releasing.push(binding.reservation.downgrade());
         Some(binding)
     }
 

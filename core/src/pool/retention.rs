@@ -22,7 +22,7 @@ pub struct SlotState {
     pub distance: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum Directive {
     StopPrefetch,
     DropMemoryCache,

@@ -61,8 +61,15 @@ impl Ring {
         out
     }
 
+    pub fn close(&mut self) -> Vec<Command> {
+        let commands = self.release_all();
+        self.is_closed = true;
+        self.is_background = true;
+        commands
+    }
+
     pub fn foreground(&mut self) {
-        self.is_background = false;
+        self.is_background = self.is_closed;
     }
 
     pub fn next_due(&self) -> Option<u64> {

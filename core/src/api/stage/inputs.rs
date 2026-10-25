@@ -1,4 +1,6 @@
-use super::Stage;
+use super::{Declaration, Stage};
+use crate::api::guard::AbortOnDrop;
+use crate::api::Routes;
 use crate::api::slots::SlotCall;
 use crate::api::source::MediaItem;
 use crate::api::types::Kind;
@@ -6,7 +8,9 @@ use crate::pages::Sliced;
 use crate::prefetch::CacheStrategy;
 use crate::session::{Context, Intent};
 use std::collections::BTreeSet;
-use std::sync::PoisonError;
+use std::collections::HashMap;
+use std::sync::{Arc, PoisonError, Weak};
+use super::Inner;
 
 const MIN_RATE: f32 = 0.25;
 const MAX_RATE: f32 = 4.0;
@@ -246,30 +250,17 @@ impl Stage {
         let declaration = std::sync::Arc::new(());
         let (state, commands) = {
             let mut state = self.state();
-            state.declarations.insert(url.clone(), declaration.clone());
             self.inner.places.claimed(&url);
             *state.shown.entry(url.clone()).or_insert(0) += 1;
             let is_player = source.kind != Kind::Image;
             state.catalog.insert(url.clone(), source);
             state.refresh_pending(&url);
             let commands = if is_player { state.ring.touch(now, &url) } else { Vec::new() };
+            let check = self.inner.handle.spawn(check_cached(std::sync::Arc::downgrade(&self.inner), self.inner.routes.clone(), url.clone(), headers, declaration.clone()));
+            state.declarations.insert(url.clone(), Declaration { token: declaration, check: Some(AbortOnDrop::new(check)) });
             (state, commands)
         };
         self.dispatch(state, commands);
-        let inner = self.inner.clone();
-        self.inner.handle.spawn(async move {
-            let is_cached = inner.routes.is_cached(&url, &headers).await;
-            let stage = Stage { inner: inner.clone() };
-            {
-                let state = stage.state();
-                if state.declarations.get(&url).is_some_and(|current| std::sync::Arc::ptr_eq(current, &declaration)) {
-                    inner.places.declared(&url, is_cached);
-                }
-            }
-            stage.sync_foreground();
-            #[cfg(test)]
-            inner.declaration_completed.notify_one();
-        });
     }
 
     pub fn release_all(&self) {
@@ -298,4 +289,20 @@ impl Stage {
         self.dispatch_with(state, commands, false, Vec::new());
         self.inner.prefetcher.forget_windows();
     }
+}
+
+async fn check_cached(inner: Weak<Inner>, routes: Arc<Routes>, url: String, headers: HashMap<String, String>, declaration: Arc<()>) {
+    let is_cached = routes.is_cached(&url, &headers).await;
+    let Some(inner) = inner.upgrade() else { return };
+    let finished = {
+        let mut state = inner.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(current) = state.declarations.get_mut(&url).filter(|current| Arc::ptr_eq(&current.token, &declaration)) else {
+            return;
+        };
+        inner.places.declared(&url, is_cached);
+        current.check.take()
+    };
+    drop(finished);
+    let stage = Stage { inner };
+    stage.sync_foreground();
 }

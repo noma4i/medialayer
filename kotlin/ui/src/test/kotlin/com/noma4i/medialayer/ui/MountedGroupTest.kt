@@ -42,6 +42,7 @@ private class TransportSlot : PlayerSlot, PlayerSlotFactory {
       else -> {}
     }
   }
+  override suspend fun dispose() {}
   override fun sample() = SlotSample(0u, null, false, false, false)
 }
 

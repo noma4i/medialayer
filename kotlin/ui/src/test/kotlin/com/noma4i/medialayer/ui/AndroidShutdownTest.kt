@@ -1,5 +1,6 @@
 package com.noma4i.medialayer.ui
 
+import android.app.ActivityManager
 import android.app.Application
 import android.graphics.Bitmap
 import android.os.Looper
@@ -10,11 +11,15 @@ import coil3.asImage
 import coil3.memory.MemoryCache
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
+import com.noma4i.medialayer.CacheStrategy
+import com.noma4i.medialayer.Kind
+import com.noma4i.medialayer.MediaItem
 import com.noma4i.medialayer.MediaLayer
-import com.noma4i.medialayer.PlaybackRoute
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -28,6 +33,12 @@ class AndroidShutdownTest {
     override val lifecycle = LifecycleRegistry.createUnsafe(this)
   }
 
+  private fun roomyDevice() {
+    val manager = app.getSystemService(ActivityManager::class.java)
+    shadowOf(manager).setMemoryInfo(ActivityManager.MemoryInfo().apply { totalMem = 8L shl 30; availMem = 4L shl 30 })
+    shadowOf(manager).setMemoryClass(256)
+  }
+
   private fun open(): MediaLayer = openMediaLayer(app, settings = SharedPreferencesSettings(app), lifecycle = owner.lifecycle) { MediaLayer.open(it) }.blocking()
 
   private fun closedResources(): Pair<MediaLayer, List<java.lang.ref.WeakReference<Any>>> {
@@ -35,8 +46,18 @@ class AndroidShutdownTest {
     val binding = media.binding!!
     val references = listOf(binding.factory, binding.signals, binding.imageLoader).map { java.lang.ref.WeakReference(it) }
     media.close()
+    untilMain { media.binding == null }
     shadowOf(Looper.getMainLooper()).idle()
     return media to references
+  }
+
+  private fun untilMain(timeoutMs: Long = 10_000, condition: () -> Boolean) {
+    val deadline = System.nanoTime() + timeoutMs * 1_000_000
+    while (!condition()) {
+      check(System.nanoTime() < deadline) { "never became true within $timeoutMs ms" }
+      shadowOf(Looper.getMainLooper()).idle()
+      Thread.sleep(1)
+    }
   }
 
   @Test
@@ -79,27 +100,67 @@ class AndroidShutdownTest {
     loader.memoryCache!![MemoryCache.Key("held")] = MemoryCache.Value(Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888).asImage())
     assertTrue(loader.memoryCache!!.size > 0)
     media.close()
-    assertEquals(0, loader.memoryCache!!.size)
+    untilMain { loader.memoryCache!!.size == 0L }
   }
 
   @Test
-  fun inv_android_03_close_releases_players_callbacks_and_binding() {
+  fun inv_ffi_16_await_closed_on_a_live_handle_ends_after_the_real_dispose_and_a_cancelled_wait_keeps_the_cleanup() {
+    for (cancelled in listOf(false, true)) {
+      roomyDevice()
+      val counters = VideoOutputCounters()
+      val media = openMediaLayer(app, settings = SharedPreferencesSettings(app), lifecycle = owner.lifecycle, videoOutputCounters = counters) { MediaLayer.open(it) }.blocking()
+      val binding = media.binding!!
+      binding.factory.mediaSourceFor = { androidx.media3.test.utils.FakeMediaSource() }
+      binding.factory.onMainLooper()
+      media.replaceWindow(0u, listOf(MediaItem(Kind.VIDEO, "http://127.0.0.1:9/a.mp4", emptyMap(), null, null, strategy = CacheStrategy.WINDOW)))
+      untilMain { counters.snapshot()["livePlayers"] == 1L }
+      if (cancelled) {
+        val waiting = CoroutineScope(Dispatchers.Default).launch { media.awaitClosed() }
+        Thread.sleep(200)
+        waiting.cancel()
+        untilMain { counters.snapshot()["livePlayers"] == 0L }
+      } else {
+        onWorker { media.awaitClosed() }
+        assertEquals(0L, counters.snapshot()["livePlayers"])
+      }
+      untilMain { media.binding == null }
+      media.close()
+    }
+  }
+
+  @Test
+  fun inv_ffi_16_closed_waits_for_the_system_subscriptions_to_leave_on_the_held_main_thread() {
+    val media = open()
+    assertTrue(owner.lifecycle.observerCount > 0)
+
+    val waiting = CoroutineScope(Dispatchers.Default).async { media.awaitClosed() }
+    Thread.sleep(300)
+    assertFalse("Closed came while the main thread still held the system subscriptions", waiting.isCompleted)
+    assertTrue(owner.lifecycle.observerCount > 0)
+
+    untilMain { waiting.isCompleted }
+    assertEquals(0, owner.lifecycle.observerCount)
+    media.close()
+  }
+
+  @Test
+  fun inv_android_03_close_disposes_the_players_the_core_created_then_releases_callbacks_and_binding() {
+    roomyDevice()
     val counters = VideoOutputCounters()
     val media = openMediaLayer(app, settings = SharedPreferencesSettings(app), lifecycle = owner.lifecycle, videoOutputCounters = counters) { MediaLayer.open(it) }.blocking()
     val binding = media.binding!!
     binding.factory.mediaSourceFor = { androidx.media3.test.utils.FakeMediaSource() }
     binding.factory.onMainLooper()
-    val slot = binding.factory.createSlot(0u)
-    slot.load("held", PlaybackRoute("http://127.0.0.1:9/a.mp4", emptyMap(), null, false, false))
-    shadowOf(Looper.getMainLooper()).idle()
-    assertEquals(1L, counters.snapshot()["livePlayers"])
+    val key = "http://127.0.0.1:9/a.mp4"
+    media.replaceWindow(0u, listOf(MediaItem(Kind.VIDEO, key, emptyMap(), null, null, strategy = CacheStrategy.WINDOW)))
+    untilMain { counters.snapshot()["livePlayers"] == 1L }
+    assertNotNull(runBlocking { binding.factory.players.player(key).first() })
     assertTrue(owner.lifecycle.observerCount > 0)
     media.close()
-    shadowOf(Looper.getMainLooper()).idle()
+    untilMain { media.binding == null }
     assertEquals(0L, counters.snapshot()["livePlayers"])
     assertEquals(0, owner.lifecycle.observerCount)
     assertNull(binding.factory.events)
-    assertNull(media.binding)
-    assertNull(slot.player)
+    assertNull(runBlocking { binding.factory.players.player(key).first() })
   }
 }

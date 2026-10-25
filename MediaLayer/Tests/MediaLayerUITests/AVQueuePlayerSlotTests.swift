@@ -44,6 +44,54 @@ struct AVQueuePlayerSlotTests {
   }
 
   @Test
+  func inv_pool_21_disposeCleansTheNativePlayerAndAnotherDisposeOrLateCommandIsHarmless() async {
+    let log = PlayerEventLog()
+    let slots = LoadedSlots()
+    let slot = await makeSlot(log, slots: slots)
+    let host = CALayer()
+    await slot.load(key: "a", route: route(Self.silentClip, looping: true))
+    await log.wait(for: "ready")
+    await MainActor.run { slot.attach(to: host) }
+    await drainMain()
+    #expect(slots.slot(for: "a") === slot)
+
+    await slot.dispose()
+    await slot.dispose()
+
+    #expect(slots.slot(for: "a") == nil)
+    let state = await MainActor.run { (slot.player.items().count, slot.layer.superlayer == nil, slot.player.currentItem == nil) }
+    #expect(state == (0, true, true))
+    let events = log.all.count
+    await slot.load(key: "b", route: route(Self.silentClip), generation: 2)
+    await slot.play()
+    await drainMain()
+    let rate = await MainActor.run { slot.player.rate }
+    #expect(rate == 0)
+    #expect(slots.slot(for: "b") == nil)
+    #expect(log.all.count == events)
+  }
+
+  @Test
+  func inv_pool_21_theFactoryOwnsNoSlotSoItsReleaseNeitherKeepsNorDisposesOne() async {
+    let log = PlayerEventLog()
+    let factory = AVQueuePlayerSlotFactory(startMuted: true, slots: LoadedSlots())
+    factory.events.bind(log)
+    weak var weakSlot: AVQueuePlayerSlot?
+    do {
+      let slot = await factory.makeSlot(3)
+      weakSlot = slot
+      await slot.load(key: "a", route: route(Self.silentClip))
+      await log.wait(for: "ready")
+      factory.release()
+      let items = await MainActor.run { slot.player.items().count }
+      #expect(items == 1, "the factory release disposed a slot that the core still owns")
+      await slot.dispose()
+    }
+    await drainMain()
+    #expect(weakSlot == nil, "something still holds the disposed slot")
+  }
+
+  @Test
   func theReadaheadOfTheCoreReachesEveryItemOfTheSlotAndTheLoopCopy() async {
     let log = PlayerEventLog()
     let slot = await makeSlot(log)

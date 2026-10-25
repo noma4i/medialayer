@@ -227,6 +227,27 @@ impl Drop for Reservation {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Held(Arc<Reservation>);
+
+impl Held {
+    pub fn new(reservation: Reservation) -> Held {
+        Held(Arc::new(reservation))
+    }
+
+    pub fn bytes(&self) -> u64 {
+        self.0.bytes
+    }
+
+    pub fn downgrade(&self) -> std::sync::Weak<Reservation> {
+        Arc::downgrade(&self.0)
+    }
+
+    pub fn holders(&self) -> usize {
+        Arc::strong_count(&self.0)
+    }
+}
+
 #[derive(Debug)]
 pub struct Buffer {
     data: Box<[u8]>,

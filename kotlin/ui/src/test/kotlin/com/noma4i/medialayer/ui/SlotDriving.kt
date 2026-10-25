@@ -10,6 +10,10 @@ internal fun ExoPlayerSlot.post(call: SlotCall) {
   CoroutineScope(Dispatchers.Unconfined).launch { apply(call) }
 }
 
+internal fun ExoPlayerSlot.disposing() {
+  CoroutineScope(Dispatchers.Unconfined).launch { dispose() }
+}
+
 internal fun ExoPlayerSlot.load(key: String, route: PlaybackRoute, generation: ULong = 1uL) = post(SlotCall.Load(key, route, generation))
 internal fun ExoPlayerSlot.unload() = post(SlotCall.Unload)
 internal fun ExoPlayerSlot.preroll() = post(SlotCall.Preroll)

@@ -15,7 +15,7 @@ fn playing_slots(pool: &Ring) -> Vec<usize> {
 fn inv_pool_30_peeking_plays_the_neighbour_muted_and_leaves_the_playing_page_alone() {
     let mut pool = loaded(20);
     pool.set_playing("k5", true);
-    assert_eq!(pool.set_peeking("k6", true), [Command::Mute { slot: 0 }, Command::Play { slot: 0 }]);
+    assert_eq!(pool.set_peeking("k6", true), [Shape::Mute { slot: 0 }, Shape::Play { slot: 0 }]);
     assert_eq!(playing_slots(&pool), [2]);
     assert!(pool.set_peeking("k6", true).is_empty());
 }
@@ -25,7 +25,7 @@ fn inv_pool_30_promoting_a_peeked_page_keeps_its_player_running_and_unmutes_it()
     let mut pool = loaded(20);
     pool.set_playing("k5", true);
     pool.set_peeking("k6", true);
-    assert_eq!(pool.set_playing("k6", true), [Command::Pause { slot: 2 }, Command::Unmute { slot: 0 }]);
+    assert_eq!(pool.set_playing("k6", true), [Shape::Pause { slot: 2 }, Shape::Unmute { slot: 0 }]);
     assert_eq!(playing_slots(&pool), [0]);
 }
 
@@ -33,7 +33,7 @@ fn inv_pool_30_promoting_a_peeked_page_keeps_its_player_running_and_unmutes_it()
 fn inv_pool_30_ending_a_peek_pauses_the_neighbour_and_restores_its_sound() {
     let mut pool = loaded(20);
     pool.set_peeking("k6", true);
-    assert_eq!(pool.set_peeking("k6", false), [Command::Pause { slot: 0 }, Command::Unmute { slot: 0 }]);
+    assert_eq!(pool.set_peeking("k6", false), [Shape::Pause { slot: 0 }, Shape::Unmute { slot: 0 }]);
     assert!(pool.set_peeking("k6", false).is_empty());
 }
 
@@ -42,7 +42,7 @@ fn inv_pool_30_a_new_peek_stops_the_previous_one_and_a_playing_or_unbound_key_ne
     let mut pool = loaded(20);
     pool.set_playing("k5", true);
     pool.set_peeking("k6", true);
-    assert_eq!(pool.set_peeking("k4", true), [Command::Pause { slot: 0 }, Command::Unmute { slot: 0 }, Command::Mute { slot: 1 }, Command::Play { slot: 1 }]);
+    assert_eq!(pool.set_peeking("k4", true), [Shape::Pause { slot: 0 }, Shape::Unmute { slot: 0 }, Shape::Mute { slot: 1 }, Shape::Play { slot: 1 }]);
     assert!(pool.set_peeking("k5", true).is_empty());
     assert!(pool.set_peeking("ghost", true).is_empty());
 }

@@ -16,7 +16,6 @@ import com.noma4i.medialayer.PlayerEventsInterface
 import com.noma4i.medialayer.PlayerSlotFactory
 import com.noma4i.medialayer.SlotSample
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -95,7 +94,6 @@ class ExoPlayerSlotFactory(
   internal var looperFor: (UInt) -> Looper = { id -> HandlerThread("medialayer-player-$id").apply { start() }.looper }
   internal var mediaSourceFor: (PlaybackRoute) -> MediaSource = HttpMediaSources(appContext, callFactory)::create
   @Volatile internal var events: PlayerEventsInterface? = null
-  private val created = CopyOnWriteArrayList<ExoPlayerSlot>()
   private var closed = false
 
   val players = SlotPlayers(videoOutputCounters)
@@ -108,16 +106,12 @@ class ExoPlayerSlotFactory(
   override suspend fun create(slot: UInt): CreatedPlayer = CreatedPlayer(createSlot(slot))
 
   @Synchronized
-  internal fun createSlot(slot: UInt): ExoPlayerSlot = ExoPlayerSlot(slot, this).also {
-    if (closed) it.release() else created.add(it)
-  }
+  internal fun createSlot(slot: UInt): ExoPlayerSlot = ExoPlayerSlot(slot, this)
 
   @Synchronized
   fun release() {
     closed = true
     events = null
-    created.forEach { it.release() }
-    created.clear()
     audio.close()
   }
 }

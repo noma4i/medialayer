@@ -40,10 +40,10 @@ While a place plays, the core samples its player and reloads it when the positio
 | `BodyReader` | Reads the body in chunks with `nextChunk()`. The core calls `release()` when the body ends or is dropped |
 | `SettingsStore` | Local storage for saved limits (read, write, remove a string by key). Ready-made: `UserDefaultsSettings`, `SharedPreferencesSettings` |
 | `PlayerSlotFactory` | Creates the native player of a slot. `create` is `async`: it may wait for the native thread |
-| `PlayerSlot` | `apply(command)` is `async` and returns after the native player took the `SlotCall` (`load`, `unload`, `preroll`, `play`, `pause`, `mute`, `unmute`, `attach`, `detach`, `seek`, `rate`, `readahead`). The core sends one command at a time per slot. `sample` returns a ready snapshot. `load` carries the generation of the load. `PlaybackRoute` says whether the source is HLS and whether it loops |
+| `PlayerSlot` | `apply(command)` is `async` and returns after the native player took the `SlotCall` (`load`, `unload`, `preroll`, `play`, `pause`, `mute`, `unmute`, `attach`, `detach`, `seek`, `rate`, `readahead`). The core sends one command at a time per slot. `dispose` is `async` and returns after the native player is destroyed: observers, notifications, view, audio and source are gone, and the thread the slot owns has ended. The core calls it once for every player it created, when the pool shrinks and when the MediaLayer closes. A second `dispose` does nothing and a command after it is ignored. `sample` returns a ready snapshot. `load` carries the generation of the load. `PlaybackRoute` says whether the source is HLS and whether it loops |
 | `PlayerEvents` | Player events to the core: `ready`, `visualReady`, `stalled`, `failed`, `ended` (each with the slot and the generation of the load that produced it, the core drops an event of an older load; a delayed step of the recovery, such as a repair, a purge, a retry timer or a watchdog sample, also drops itself when the slot holds another load by the time it finishes), `attach`, `detach`, `foreground`, `background`, `memoryWarning`. Get it from `media.playerEvents()` |
 | `DeviceMemory` | Device class in `OpenConfig`: memory size, heap class and the low-memory flag |
-| `MemoryReleaser` | Called when the system reports critical memory pressure, so Nuke and Coil can drop their memory caches |
+| `MemoryReleaser` | `dropMemoryCaches` is called when the system reports critical memory pressure, so Nuke and Coil can drop their memory caches. `shutdown` is `async` and runs once, after every slot is disposed, to end the rest of the platform resources |
 | `StatsListener`, `StateListener` | Core notifications: cache statistics and the `MediaState` of one place. `statsStream()` and `stateStream(key:)` wrap them |
 
 ## Implementing the platform interfaces
@@ -101,3 +101,7 @@ val pixels = decodeBlurhash(blurHash, 32u, 32u, 1f)
 | `MediaLayer/`, `kotlin/` | Platform bindings |
 | `scripts/` | Build and check scripts |
 | `docs/` | This documentation |
+
+## Closing the MediaLayer
+
+`close()` on Swift (`shutdown`) starts the close and returns at once. The same close starts when the last reference to the MediaLayer goes away, so an app does not have to wait. The MediaLayer stops taking input and `PlayerEvents` first, cancels the assembly and the background work of the sources, disposes every player, then calls `MemoryReleaser.shutdown`. `awaitClosed()` starts the same close if it has not started and returns when all of this is done, so it works on a live handle on both platforms and `close()` after it only frees the handle; cancelling the wait does not cancel the close. Neither your app nor the DSL has to call it. The MediaLayer owns its task executor and ends it after the cleanup, off the calling thread. With a MediaLayer built from parts on an external task executor handle the executor must stay alive until `awaitClosed()` returns.

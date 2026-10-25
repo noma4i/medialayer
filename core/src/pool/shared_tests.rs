@@ -128,8 +128,8 @@ fn inv_pool_05_replaying_the_same_calls_gives_the_same_commands() {
         let mut pool = ring(4, 1);
         let mut all = Vec::new();
         for (step, active) in walk(30, 200).into_iter().enumerate() {
-            all.extend(pool.plan(step as u64, active, Some(active), &keys(30)));
-            all.extend(pool.touch(step as u64, "chat"));
+            all.extend(pool.plan(step as u64, active, Some(active), &keys(30)).iter().map(Shape::from));
+            all.extend(pool.touch(step as u64, "chat").iter().map(Shape::from));
         }
         all
     };

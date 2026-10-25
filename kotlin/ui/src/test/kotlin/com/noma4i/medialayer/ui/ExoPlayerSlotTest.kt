@@ -39,14 +39,47 @@ import org.robolectric.Shadows.shadowOf
 @RunWith(MediaLayerTestRunner::class)
 class ExoPlayerSlotTest {
   @Test
-  fun inv_android_08_closed_factory_does_not_create_a_live_player() {
+  fun inv_android_08_a_disposed_slot_does_not_create_a_live_player_and_a_closed_factory_drops_its_events() {
     val factory = factory()
-    factory.release()
     val slot = factory.createSlot(0u)
+    slot.disposing()
+    idle()
+    slot.disposing()
     slot.load("late", route)
     idle()
     assertNull(slot.player)
+    factory.release()
     assertNull(factory.events)
+  }
+
+  @Test
+  fun inv_pool_21_dispose_releases_media3_ends_the_owned_thread_and_a_second_dispose_is_safe() = kotlinx.coroutines.runBlocking {
+    val threads = mutableListOf<android.os.HandlerThread>()
+    val factory = factory().also {
+      it.looperFor = { id -> android.os.HandlerThread("test-slot-$id").apply { start(); threads.add(this) }.looper }
+    }
+    val slot = factory.createSlot(0u)
+    slot.apply(com.noma4i.medialayer.SlotCall.Load("k", route, 1uL))
+    assertNotNull(slot.player)
+    assertNotNull(factory.players.player("k").first())
+
+    slot.dispose()
+    slot.dispose()
+
+    assertNull(slot.player)
+    assertNull(factory.players.player("k").first())
+    assertFalse("the thread of the slot outlived its dispose", threads.single().isAlive)
+  }
+
+  @Test
+  fun inv_pool_21_the_factory_keeps_no_reference_to_a_disposed_slot() {
+    val factory = factory()
+    val reference = disposedSlot(factory)
+    repeat(100) {
+      System.gc()
+      if (reference.get() != null) Thread.sleep(10)
+    }
+    assertNull(reference.get())
   }
 
   @Test
@@ -130,6 +163,12 @@ class ExoPlayerSlotTest {
     }
 
   private fun idle() = shadowOf(Looper.getMainLooper()).idle()
+
+  private fun disposedSlot(factory: ExoPlayerSlotFactory): java.lang.ref.WeakReference<ExoPlayerSlot> {
+    val slot = factory.createSlot(0u)
+    slot.load("k", route); idle(); slot.disposing(); idle()
+    return java.lang.ref.WeakReference(slot)
+  }
 
   @After
   fun releaseEverything() { factories.forEach { it.release() }; idle() }
@@ -390,7 +429,7 @@ class ExoPlayerSlotTest {
     val slot = factory.createSlot(0u)
     slot.load("k", route); slot.play(); idle()
 
-    factory.release(); idle(); advanceFocus(300)
+    slot.disposing(); idle(); advanceFocus(300)
 
     assertEquals(listOf("request:Duck", "abandon"), focusPort.calls.toList())
   }
@@ -499,7 +538,7 @@ class ExoPlayerSlotTest {
     val player = slot.player!!
     val loadEvents = slot.loadEvents!!
 
-    factory.release(); idle()
+    slot.disposing(); idle()
 
     assertTrue(player.isReleased)
     assertNull(kotlinx.coroutines.runBlocking { factory.players.player("k").first() })

@@ -15,7 +15,9 @@ import com.noma4i.medialayer.PlayerSlot
 import com.noma4i.medialayer.SlotCall
 import com.noma4i.medialayer.SlotSample
 import kotlin.coroutines.resume
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 
 class ExoPlayerSlot internal constructor(private val id: UInt, private val host: ExoPlayerSlotFactory) : PlayerSlot {
   private val looper = host.looperFor(id)
@@ -198,14 +200,24 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     return durationMs?.let { position.coerceAtMost(it) } ?: position
   }
 
-  internal fun release() {
-    commands.post {
-      releaseNow()
-      if (looper != Looper.getMainLooper()) looper.quitSafely()
+  override suspend fun dispose() {
+    suspendCancellableCoroutine<Unit> { continuation ->
+      val posted = commands.post {
+        try {
+          releaseNow()
+        } finally {
+          continuation.resume(Unit)
+        }
+      }
+      if (!posted) continuation.resume(Unit)
     }
+    if (looper == Looper.getMainLooper()) return
+    looper.quitSafely()
+    withContext(Dispatchers.IO) { looper.thread.join() }
   }
 
   private fun releaseNow() {
+    if (released) return
     released = true
     host.audio.setAudible(id, false)
     hideFromView()

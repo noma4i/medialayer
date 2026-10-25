@@ -140,12 +140,12 @@ impl Reaction {
 
     fn dispatch(&self, directives: Vec<Directive>) {
         let (stops, rest): (Vec<Directive>, Vec<Directive>) =
-            directives.into_iter().partition(|directive| *directive == Directive::StopPrefetch);
+            directives.into_iter().partition(|directive| matches!(directive, Directive::StopPrefetch));
         if !stops.is_empty() {
             self.prefetch.stop();
         }
         let (drops, rest): (Vec<Directive>, Vec<Directive>) =
-            rest.into_iter().partition(|directive| *directive == Directive::DropMemoryCache);
+            rest.into_iter().partition(|directive| matches!(directive, Directive::DropMemoryCache));
         if !drops.is_empty() {
             let release = self.release.clone();
             tokio::task::spawn_blocking(move || release.drop_caches());

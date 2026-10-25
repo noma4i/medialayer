@@ -15,6 +15,18 @@ fn settled(deferred: &Deferred<Value>) -> Result<Arc<Value>, MediaError> {
 }
 
 #[test]
+fn inv_ffi_17_an_install_after_the_close_hands_the_value_back_to_the_closer() {
+    let deferred = Deferred::<Value>::new();
+    deferred.close();
+    let value = Arc::new(Value);
+
+    let rejected = deferred.install(value.clone());
+
+    assert!(rejected.is_some_and(|rejected| Arc::ptr_eq(&rejected, &value)));
+    assert!(Deferred::<Value>::new().install(value).is_none());
+}
+
+#[test]
 fn inv_ffi_12_a_value_installed_after_the_close_is_dropped_and_its_work_never_runs() {
     let deferred = Deferred::<Value>::new();
     let ran = Arc::new(AtomicUsize::new(0));

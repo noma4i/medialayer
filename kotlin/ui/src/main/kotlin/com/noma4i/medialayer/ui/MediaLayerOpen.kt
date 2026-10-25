@@ -40,12 +40,14 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ensureActive
 import coil3.ImageLoader
 import okhttp3.Call
 import okhttp3.OkHttpClient
 
-private class HeldResources(val signals: SystemSignals?, val factory: ExoPlayerSlotFactory?, val imageLoader: ImageLoader?, val layer: MediaLayer?)
+internal class HeldResources(val signals: SystemSignals?, val factory: ExoPlayerSlotFactory?, val imageLoader: ImageLoader?, val layer: MediaLayer?)
 
 internal class Binding(val factory: ExoPlayerSlotFactory, val signals: SystemSignals, val imageLoader: ImageLoader)
 
@@ -103,24 +105,31 @@ internal fun openMediaLayer(
   var reference: WeakReference<MediaLayer>? = null
   var imageLoader: ImageLoader? = null
   var signals: SystemSignals? = null
+  fun detach(): HeldResources = synchronized(lock) {
+    HeldResources(signals, factory, imageLoader, reference?.get()).also {
+      signals = null
+      factory = null
+      imageLoader = null
+    }
+  }
+  fun finish(held: HeldResources) {
+    held.factory?.release() ?: audio.close()
+    held.imageLoader?.shutdown()
+    held.layer?.let { bindings.remove(it) }
+    if (Media.audio === audio) Media.audio = null
+  }
   val releaser = object : MemoryReleaser {
     override fun dropMemoryCaches() {
       synchronized(lock) { imageLoader }?.memoryCache?.clear()
     }
 
-    override fun shutdown() {
-      val held = synchronized(lock) {
-        HeldResources(signals, factory, imageLoader, reference?.get()).also {
-          signals = null
-          factory = null
-          imageLoader = null
-        }
+    override suspend fun shutdown() {
+      val held = detach()
+      try {
+        held.signals?.unregister()
+      } finally {
+        finish(held)
       }
-      held.signals?.unregister()
-      held.factory?.release() ?: audio.close()
-      held.imageLoader?.shutdown()
-      held.layer?.let { bindings.remove(it) }
-      if (Media.audio === audio) Media.audio = null
     }
   }
   Media.audio = audio
@@ -185,7 +194,9 @@ internal fun openMediaLayer(
     val layer = created.getAndSet(null)
     if (failure != null) {
       layer?.close()
-      releaser.shutdown()
+      val held = detach()
+      finish(held)
+      held.signals?.let { openScope.launch { it.unregister() } }
     }
   }
   return opened
@@ -217,10 +228,10 @@ internal class SystemSignals(
     onMain { lifecycle.addObserver(this) }
   }
 
-  fun unregister() {
-    context.unregisterComponentCallbacks(this)
+  suspend fun unregister() = withContext(Dispatchers.Main.immediate) {
+    context.unregisterComponentCallbacks(this@SystemSignals)
     context.unregisterReceiver(outputLost)
-    onMain { lifecycle.removeObserver(this) }
+    lifecycle.removeObserver(this@SystemSignals)
   }
 
   override fun onTrimMemory(level: Int) {

@@ -20,6 +20,7 @@ private final class ReloadSlot: PlayerSlot, PlayerSlotFactory, @unchecked Sendab
     default: break
     }
   }
+  func dispose() async {}
   func sample() -> SlotSample {
     SlotSample(positionMs: 0, durationMs: nil, isLooping: false, viewAttached: lock.withLock { attached }, frameRendered: false)
   }

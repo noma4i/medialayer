@@ -32,6 +32,9 @@ impl Shadow {
                     assert!(self.loaded.remove(&slot).is_some(), "{command:?} of a slot that holds nothing");
                     self.playing.remove(&slot);
                 }
+                Command::Dispose { .. } => {
+                    assert!(!self.loaded.contains_key(&slot), "{command:?} of a slot that still holds a source");
+                }
                 other => {
                     assert!(self.loaded.contains_key(&slot), "{other:?} reached an unloaded slot");
                     match other {

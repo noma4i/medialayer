@@ -1,5 +1,6 @@
 use super::assembled::Assembled;
-use super::deferred::Deferred;
+use super::deferred::{Deferred, Retired};
+use super::layer_life::LayerLife;
 use super::events::PlayerEvents;
 use super::fetcher::{Fetcher, ForeignFetcher};
 use crate::analysis::{MediaTone, ToneSource};
@@ -15,8 +16,9 @@ use crate::session::WatchdogConfig;
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use tokio::runtime::{Builder, Handle, Runtime};
+use tokio::sync::watch;
 
 const WORKER_THREADS: usize = 2;
 
@@ -49,9 +51,10 @@ pub struct OpenConfig {
 }
 
 #[uniffi::export(with_foreign)]
+#[async_trait::async_trait]
 pub trait MemoryReleaser: Send + Sync {
     fn drop_memory_caches(&self);
-    fn shutdown(&self);
+    async fn shutdown(&self);
 }
 
 #[uniffi::export(with_foreign)]
@@ -69,14 +72,62 @@ pub trait StateListener: Send + Sync {
     fn changed(&self, state: MediaState);
 }
 
+struct Closing {
+    handle: Handle,
+    life: Mutex<LayerLife>,
+    assembled: Arc<Deferred<Assembled>>,
+    runtime: Mutex<Option<Runtime>>,
+    releaser: Mutex<Option<Arc<dyn MemoryReleaser>>>,
+    assembling: Mutex<Option<AbortOnDrop>>,
+    late: Mutex<Option<Arc<Assembled>>>,
+    closed: watch::Sender<bool>,
+}
+
+impl Closing {
+    fn life(&self) -> MutexGuard<'_, LayerLife> {
+        self.life.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn shutdown(self: &Arc<Closing>) {
+        if !self.life().shutdown() {
+            return;
+        }
+        let retired = self.assembled.close();
+        let closing = self.clone();
+        self.handle.spawn(async move { closing.clean(retired).await });
+    }
+
+    async fn clean(&self, mut retired: Retired<Assembled>) {
+        let assembling = self.assembling.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if let Some(mut assembling) = assembling {
+            assembling.abort();
+            let _ = assembling.join().await;
+        }
+        let late = self.late.lock().unwrap_or_else(PoisonError::into_inner).take();
+        for assembled in retired.take_value().into_iter().chain(late) {
+            assembled.close().await;
+        }
+        drop(retired);
+        let releaser = self.releaser.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if let Some(releaser) = releaser {
+            releaser.shutdown().await;
+        }
+        self.life().cleaned();
+        self.closed.send_replace(true);
+        let runtime = self.runtime.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if let Some(runtime) = runtime {
+            std::thread::Builder::new().name("medialayer-closer".to_string()).spawn(move || runtime.shutdown_background()).ok();
+        }
+    }
+}
+
 #[derive(uniffi::Object)]
 pub struct MediaLayer {
     handle: Handle,
-    runtime: Mutex<Option<Runtime>>,
+    closing: Arc<Closing>,
     assembled: Arc<Deferred<Assembled>>,
     namespace_headers: Vec<String>,
     image_stats: Arc<super::image::ImageCounters>,
-    releaser: Mutex<Option<Arc<dyn MemoryReleaser>>>,
     next_suspension: AtomicU64,
 }
 
@@ -107,27 +158,61 @@ impl Drop for PlaybackSuspension {
 }
 
 impl MediaLayer {
+    /// With an external `Handle` the caller keeps the runtime alive until `await_closed` returns.
     pub fn from_parts(runtime: Option<Runtime>, handle: Handle, parts: Parts, releaser: Option<Arc<dyn MemoryReleaser>>, namespace_headers: Vec<String>) -> Arc<MediaLayer> {
         let layer = MediaLayer::pending(runtime, handle.clone(), namespace_headers, releaser.clone());
-        layer.assembled.install(Arc::new(Assembled::new(&handle, parts, releaser)));
+        if layer.closing.life().installed() {
+            let _ = layer.assembled.install(Arc::new(Assembled::new(&handle, parts, releaser)));
+        }
         layer
     }
 
     pub(crate) fn assembling(runtime: Runtime, assembling: impl Future<Output = Result<Parts, MediaError>> + Send + 'static, releaser: Option<Arc<dyn MemoryReleaser>>, namespace_headers: Vec<String>) -> Arc<MediaLayer> {
         let handle = runtime.handle().clone();
         let layer = MediaLayer::pending(Some(runtime), handle.clone(), namespace_headers, releaser.clone());
-        let assembled = layer.assembled.clone();
-        handle.clone().spawn(async move {
+        let (closing, assembled) = (layer.closing.clone(), layer.assembled.clone());
+        let mut slot = layer.closing.assembling.lock().unwrap_or_else(PoisonError::into_inner);
+        let task = handle.clone().spawn(async move {
             match assembling.await {
-                Ok(parts) => assembled.install(Arc::new(Assembled::new(&handle, parts, releaser))),
-                Err(error) => assembled.fail(error),
+                Ok(parts) => {
+                    let is_installed = closing.life().installed();
+                    if is_installed {
+                        let rejected = assembled.install(Arc::new(Assembled::new(&handle, parts, releaser)));
+                        *closing.late.lock().unwrap_or_else(PoisonError::into_inner) = rejected;
+                    }
+                }
+                Err(error) => {
+                    if closing.life().failed() {
+                        assembled.fail(error);
+                    }
+                }
             }
+            let finished = closing.assembling.lock().unwrap_or_else(PoisonError::into_inner).take();
+            drop(finished);
         });
+        *slot = Some(AbortOnDrop::new(task));
+        drop(slot);
         layer
     }
 
     fn pending(runtime: Option<Runtime>, handle: Handle, namespace_headers: Vec<String>, releaser: Option<Arc<dyn MemoryReleaser>>) -> Arc<MediaLayer> {
-        Arc::new(MediaLayer { handle, runtime: Mutex::new(runtime), assembled: Deferred::new(), namespace_headers, image_stats: super::image::ImageCounters::new(), releaser: Mutex::new(releaser), next_suspension: AtomicU64::new(1) })
+        let assembled = Deferred::new();
+        let closing = Arc::new(Closing {
+            handle: handle.clone(),
+            life: Mutex::new(LayerLife::new()),
+            assembled: assembled.clone(),
+            runtime: Mutex::new(runtime),
+            releaser: Mutex::new(releaser),
+            assembling: Mutex::new(None),
+            late: Mutex::new(None),
+            closed: watch::channel(false).0,
+        });
+        Arc::new(MediaLayer { handle, closing, assembled, namespace_headers, image_stats: super::image::ImageCounters::new(), next_suspension: AtomicU64::new(1) })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn owns_runtime(&self) -> bool {
+        self.closing.runtime.lock().unwrap_or_else(PoisonError::into_inner).is_some()
     }
 
     #[cfg(test)]
@@ -162,22 +247,9 @@ impl MediaLayer {
     }
 }
 
-impl MediaLayer {
-    fn teardown(&self) {
-        let releaser = self.releaser.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
-        if let Some(releaser) = releaser {
-            releaser.shutdown();
-        }
-        self.assembled.close();
-        if let Some(runtime) = self.runtime.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take() {
-            runtime.shutdown_background();
-        }
-    }
-}
-
 impl Drop for MediaLayer {
     fn drop(&mut self) {
-        self.teardown();
+        self.closing.shutdown();
     }
 }
 
@@ -218,7 +290,13 @@ impl MediaLayer {
     }
 
     pub fn shutdown(&self) {
-        self.teardown();
+        self.closing.shutdown();
+    }
+
+    pub async fn await_closed(&self) {
+        self.closing.shutdown();
+        let mut closed = self.closing.closed.subscribe();
+        let _ = closed.wait_for(|closed| *closed).await;
     }
 
     pub fn cache_key(&self, url: String, headers: HashMap<String, String>) -> String {

@@ -24,6 +24,10 @@ impl MemoryRelease for ForeignRelease {
 }
 
 impl Assembled {
+    pub async fn close(&self) {
+        self.stage.close().await;
+    }
+
     pub fn new(handle: &Handle, parts: Parts, releaser: Option<Arc<dyn MemoryReleaser>>) -> Assembled {
         let release: Arc<dyn MemoryRelease> = Arc::new(ForeignRelease(releaser));
         let ports = ControlPorts {

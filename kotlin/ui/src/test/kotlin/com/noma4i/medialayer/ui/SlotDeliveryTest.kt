@@ -78,7 +78,7 @@ class SlotDeliveryTest {
       factories.add(it)
     }
     val slot = factory.createSlot(0u)
-    factory.release()
+    kotlinx.coroutines.runBlocking { slot.dispose() }
 
     repeat(50) {
       Thread.sleep(2)
@@ -92,7 +92,7 @@ class SlotDeliveryTest {
   fun inv_api_42_a_late_command_after_the_release_returns_and_does_nothing() {
     val factory = factory()
     val slot = factory.createSlot(0u)
-    factory.release()
+    slot.disposing()
     idle()
 
     val late = launching(slot, SlotCall.Load("k", route, 1uL))

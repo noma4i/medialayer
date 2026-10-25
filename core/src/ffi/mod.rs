@@ -4,6 +4,7 @@ mod events;
 mod fetcher;
 mod image;
 mod layer;
+mod layer_life;
 mod limits;
 mod spec_defaults;
 
@@ -18,6 +19,8 @@ pub use spec_defaults::{spec_defaults, SpecDefaults};
 mod deferred_tests;
 #[cfg(test)]
 mod fetcher_tests;
+#[cfg(test)]
+mod layer_life_tests;
 #[cfg(test)]
 mod layer_tests;
 #[cfg(test)]

@@ -42,8 +42,8 @@ fn inv_pool_08_critical_orders_warm_then_hot_non_playing_then_playing_last() {
 #[test]
 fn inv_pool_08_cold_slots_get_no_commands() {
     let slots = [state(0, Retention::Cold, false, 0), state(1, Retention::Cold, false, 1)];
-    assert_eq!(relieve(Pressure::Critical, &slots), [Directive::StopPrefetch, Directive::DropMemoryCache]);
-    assert_eq!(relieve(Pressure::Moderate, &slots), [Directive::StopPrefetch]);
+    assert_eq!(plan_of(&relieve(Pressure::Critical, &slots)), [Plan::StopPrefetch, Plan::DropMemoryCache]);
+    assert_eq!(plan_of(&relieve(Pressure::Moderate, &slots)), [Plan::StopPrefetch]);
 }
 
 #[test]
@@ -78,13 +78,13 @@ fn inv_pool_08_critical_orders_directives_stop_prefetch_then_slots_then_memory_c
         state(4, Retention::Hot, false, 1),
     ];
     assert_eq!(
-        relieve(Pressure::Critical, &slots),
+        plan_of(&relieve(Pressure::Critical, &slots)),
         [
-            Directive::StopPrefetch,
-            Directive::Slot(Command::Unload { slot: 1 }),
-            Directive::Slot(Command::Unload { slot: 4 }),
-            Directive::DropMemoryCache,
-            Directive::Slot(Command::Unload { slot: 0 }),
+            Plan::StopPrefetch,
+            Plan::Slot(Shape::Unload { slot: 1 }),
+            Plan::Slot(Shape::Unload { slot: 4 }),
+            Plan::DropMemoryCache,
+            Plan::Slot(Shape::Unload { slot: 0 }),
         ]
     );
 }
@@ -93,8 +93,8 @@ fn inv_pool_08_critical_orders_directives_stop_prefetch_then_slots_then_memory_c
 fn inv_pool_08_moderate_stops_prefetch_first_and_keeps_the_memory_cache() {
     let slots = [state(1, Retention::Warm, false, 1)];
     assert_eq!(
-        relieve(Pressure::Moderate, &slots),
-        [Directive::StopPrefetch, Directive::Slot(Command::Unload { slot: 1 })]
+        plan_of(&relieve(Pressure::Moderate, &slots)),
+        [Plan::StopPrefetch, Plan::Slot(Shape::Unload { slot: 1 })]
     );
 }
 
@@ -105,5 +105,5 @@ fn inv_pool_08_pinned_slots_survive_moderate_and_go_last_under_critical() {
     assert_eq!(unloaded(&relieve(Pressure::Moderate, &slots)), [1]);
     let critical = relieve(Pressure::Critical, &slots);
     assert_eq!(unloaded(&critical), [1, 0, 2]);
-    assert_eq!(critical.last(), Some(&Directive::Slot(Command::Unload { slot: 2 })));
+    assert_eq!(plan_of(&critical).last(), Some(&Plan::Slot(Shape::Unload { slot: 2 })));
 }

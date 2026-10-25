@@ -202,7 +202,7 @@ async fn inv_api_40_hidden_images_leave_the_catalog() {
             next += 1;
             stage.visible(item.clone(), true);
             stage.visible(item, false);
-            stage.inner.declaration_completed.notified().await;
+            assert_eq!(stage.declaration_checks(), 0);
         }
         let state = stage.state();
         sizes.push((series, state.catalog.len(), state.declarations.len()));

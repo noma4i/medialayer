@@ -298,6 +298,11 @@ pub struct MockSlot {
     pub calls: Mutex<Vec<SlotCall>>,
     pub gate: Arc<LoadGate>,
     pub seek_gate: Arc<LoadGate>,
+    pub unload_gate: Arc<LoadGate>,
+    pub dispose_gate: Arc<LoadGate>,
+    pub live: AtomicUsize,
+    pub disposed: AtomicUsize,
+    pub disposals: Arc<AtomicUsize>,
     pub sample: Mutex<SlotSample>,
     pub samples: AtomicUsize,
     pub on_sample: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
@@ -359,12 +364,31 @@ impl PlayerSlot for MockSlot {
         if matches!(command, SlotCall::Seek { .. }) {
             self.seek_gate.pass().await;
         }
+        if matches!(command, SlotCall::Unload) {
+            self.unload_gate.pass().await;
+        }
+        match command {
+            SlotCall::Load { .. } => {
+                self.live.fetch_add(1, Ordering::SeqCst);
+            }
+            SlotCall::Unload => {
+                self.live.fetch_sub(1, Ordering::SeqCst);
+            }
+            _ => {}
+        }
         flight.1 = true;
         let is_seek = matches!(command, SlotCall::Seek { .. });
         self.calls.lock().unwrap().push(command);
         if is_seek {
             self.seeked.notify_one();
         }
+    }
+
+    async fn dispose(&self) {
+        self.dispose_gate.pass().await;
+        self.live.store(0, Ordering::SeqCst);
+        self.disposed.fetch_add(1, Ordering::SeqCst);
+        self.disposals.fetch_add(1, Ordering::SeqCst);
     }
 
     fn sample(&self) -> SlotSample {
@@ -385,13 +409,24 @@ pub struct MockFactory {
     pub created: Mutex<Vec<u32>>,
     pub gate: Arc<LoadGate>,
     pub seek_gate: Arc<LoadGate>,
+    pub unload_gate: Arc<LoadGate>,
+    pub dispose_gate: Arc<LoadGate>,
     pub create_gate: Arc<LoadGate>,
+    pub disposals: Arc<AtomicUsize>,
     pub advance_ms: Mutex<u64>,
 }
 
 impl MockFactory {
     pub fn slot(&self, index: u32) -> Arc<MockSlot> {
         self.slots.lock().unwrap().get(&index).cloned().unwrap_or_else(|| panic!("slot {index} was never created"))
+    }
+
+    pub fn live_sources(&self) -> usize {
+        self.slots.lock().unwrap().values().map(|slot| slot.live.load(Ordering::SeqCst)).sum()
+    }
+
+    pub fn disposed_slots(&self) -> usize {
+        self.disposals.load(Ordering::SeqCst)
     }
 
     pub fn slot_holding(&self, key: &str) -> Option<(u32, Arc<MockSlot>)> {
@@ -416,6 +451,11 @@ impl PlayerSlotFactory for MockFactory {
             calls: Mutex::default(),
             gate: self.gate.clone(),
             seek_gate: self.seek_gate.clone(),
+            unload_gate: self.unload_gate.clone(),
+            dispose_gate: self.dispose_gate.clone(),
+            live: AtomicUsize::new(0),
+            disposed: AtomicUsize::new(0),
+            disposals: self.disposals.clone(),
             sample: Mutex::new(idle),
             samples: AtomicUsize::new(0),
             on_sample: Mutex::new(None),

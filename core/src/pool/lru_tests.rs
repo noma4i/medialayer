@@ -4,8 +4,8 @@ use super::*;
 #[test]
 fn inv_pool_15_touch_loads_unknown_keys_into_free_slots_and_ignores_known_ones() {
     let mut pool = ring(3, 0);
-    assert_eq!(pool.touch(1, "a"), [Command::Load { slot: 0, key: "a".into() }]);
-    assert_eq!(pool.touch(2, "b"), [Command::Load { slot: 1, key: "b".into() }]);
+    assert_eq!(pool.touch(1, "a"), [load(0, "a".into())]);
+    assert_eq!(pool.touch(2, "b"), [load(1, "b".into())]);
     assert!(pool.touch(3, "a").is_empty());
 }
 
@@ -16,7 +16,7 @@ fn inv_pool_15_full_pool_evicts_the_least_recently_used_key() {
     pool.touch(2, "b");
     pool.touch(3, "c");
     pool.touch(4, "a");
-    assert_eq!(pool.touch(5, "d"), [Command::Unload { slot: 1 }, Command::Load { slot: 1, key: "d".into() }]);
+    assert_eq!(pool.touch(5, "d"), [Shape::Unload { slot: 1 }, load(1, "d".into())]);
 }
 
 #[test]
@@ -25,7 +25,7 @@ fn inv_pool_15_playing_key_is_not_evicted() {
     pool.touch(1, "a");
     pool.touch(2, "b");
     pool.set_playing("a", true);
-    assert_eq!(pool.touch(3, "c"), [Command::Unload { slot: 1 }, Command::Load { slot: 1, key: "c".into() }]);
+    assert_eq!(pool.touch(3, "c"), [Shape::Unload { slot: 1 }, load(1, "c".into())]);
 }
 
 #[test]
@@ -67,5 +67,5 @@ fn inv_pool_15_untouch_unloads_a_recently_used_key_but_keeps_window_and_pinned_k
 
     assert!(pool.untouch("k0").is_empty());
     assert!(pool.untouch("intro").is_empty());
-    assert_eq!(pool.untouch("chat"), [Command::Unload { slot: 3 }]);
+    assert_eq!(pool.untouch("chat"), [Shape::Unload { slot: 3 }]);
 }

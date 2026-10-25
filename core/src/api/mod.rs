@@ -10,6 +10,7 @@ mod places_state;
 mod ports;
 mod routes;
 mod signals;
+mod slot_life;
 mod slots;
 mod source;
 mod stage;

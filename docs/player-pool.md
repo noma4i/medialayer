@@ -36,7 +36,7 @@ Policies decide assignment: `ring` keeps a window around the active page, `lru` 
 | `hold_off` | Time before a slot released under memory pressure loads again, default 1 second |
 | `trim_delay` | Time before an idle slot drops from hot to warm to cold, default 30 seconds |
 
-Slot and reach changes made with `setLimits` apply at once: extra players are unloaded and the window is rebuilt at the next update. These are written in the `pool` line of the `video` block of your `.mdl` file.
+Slot and reach changes made with `setLimits` apply at once: extra players are unloaded and destroyed, and the window is rebuilt at the next update. These are written in the `pool` line of the `video` block of your `.mdl` file.
 
 ## Cost of a window
 

@@ -245,8 +245,9 @@ fn inv_ffi_02_a_cache_write_reaches_a_stats_subscriber_without_any_controls_call
 #[derive(Default)]
 struct CountingReleaser(std::sync::atomic::AtomicUsize);
 
+#[async_trait]
 impl MemoryReleaser for CountingReleaser {
-    fn shutdown(&self) {}
+    async fn shutdown(&self) {}
 
     fn drop_memory_caches(&self) {
         self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -638,10 +639,11 @@ struct ClosingReleaser {
     shutdowns: std::sync::atomic::AtomicUsize,
 }
 
+#[async_trait]
 impl MemoryReleaser for ClosingReleaser {
     fn drop_memory_caches(&self) {}
 
-    fn shutdown(&self) {
+    async fn shutdown(&self) {
         self.shutdowns.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 }
@@ -659,6 +661,7 @@ fn inv_ffi_12_shutdown_releases_the_platform_then_the_core_once_whoever_holds_th
 
     layer.shutdown();
     layer.shutdown();
+    caller.block_on(layer.await_closed());
 
     assert_eq!(releaser.shutdowns.load(std::sync::atomic::Ordering::SeqCst), 1);
     let after = caller.block_on(async { tokio::time::timeout(std::time::Duration::from_secs(5), held.stats()).await });
@@ -678,6 +681,7 @@ fn inv_ffi_12_shutdown_releases_the_assembled_value_whoever_still_holds_the_laye
     assert!(assembled.strong_count() >= 1, "the assembled value is alive while the layer is open");
 
     layer.shutdown();
+    caller.block_on(layer.await_closed());
 
     assert_eq!(assembled.strong_count(), 0, "the closed layer, its suspension or its events still own the assembled value");
     suspension.release();
@@ -803,4 +807,144 @@ fn inv_session_13_a_suspension_taken_and_released_before_the_assembly_ends_leave
     let held = layer.suspend_playback(Vec::new()).unwrap();
     held.release();
     caller.block_on(eventually(|| factory.slot_holding(url).is_some_and(|(_, slot)| transport(&slot) == Some(SlotCall::Play))));
+}
+
+fn opened(dir: &std::path::Path, factory: &Arc<MockFactory>, releaser: Option<Arc<dyn MemoryReleaser>>) -> Arc<MediaLayer> {
+    let slots: Arc<dyn PlayerSlotFactory> = factory.clone();
+    let mut open = config(dir, Arc::new(Offline), shared::<FakeSettings>(), Some(slots));
+    open.memory_releaser = releaser;
+    MediaLayer::open(open).unwrap()
+}
+
+async fn pending_once(closed: impl std::future::Future<Output = ()>) -> bool {
+    tokio::select! {
+        biased;
+        () = closed => false,
+        () = std::future::ready(()) => true,
+    }
+}
+
+fn disposed_all(factory: &MockFactory) -> bool {
+    factory.disposed_slots() == factory.created.lock().unwrap().len()
+}
+
+#[test]
+fn inv_ffi_16_closing_refuses_input_at_once_and_closed_comes_only_after_every_native_dispose() {
+    let dir = tempfile::tempdir().unwrap();
+    let factory: Arc<MockFactory> = Arc::default();
+    let releaser: Arc<ClosingReleaser> = shared();
+    let layer = opened(dir.path(), &factory, Some(releaser.clone()));
+    let url = "https://o.test/v1.mp4";
+    let caller = caller();
+    layer.replace_window(0, vec![Some(MediaItem::bare_video(url))]);
+    caller.block_on(eventually(|| factory.slot_holding(url).is_some()));
+    let (_, slot) = factory.slot_holding(url).unwrap();
+    let events = layer.player_events();
+    let gate = factory.dispose_gate.hold();
+
+    layer.shutdown();
+    let created = factory.created.lock().unwrap().len();
+    layer.replace_window(0, (0..3).map(|index| Some(MediaItem::bare_video(&format!("https://o.test/late{index}.mp4")))).collect());
+    layer.visible(MediaItem::bare_video("https://o.test/late.mp4"), true);
+    layer.set_playing(url.to_string(), true, Vec::new());
+    events.ready(0, slot.generation());
+
+    caller.block_on(eventually(|| factory.dispose_gate.entered() == 1));
+    assert!(caller.block_on(pending_once(layer.await_closed())), "closed came before the native dispose ended");
+    assert_eq!(releaser.shutdowns.load(std::sync::atomic::Ordering::SeqCst), 0, "the platform resources were released before the slots");
+    drop(gate);
+    caller.block_on(layer.await_closed());
+
+    assert!(disposed_all(&factory) && slot.disposed.load(std::sync::atomic::Ordering::SeqCst) == 1);
+    assert_eq!(factory.created.lock().unwrap().len(), created, "input after the shutdown made a player");
+    assert_eq!(releaser.shutdowns.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(!layer.owns_runtime(), "the closed layer still owns its runtime");
+}
+
+#[test]
+fn inv_ffi_16_a_held_native_port_blocks_neither_the_shutdown_nor_the_drop_and_a_cancelled_wait_keeps_the_cleanup() {
+    let dir = tempfile::tempdir().unwrap();
+    let factory: Arc<MockFactory> = Arc::default();
+    let layer = opened(dir.path(), &factory, None);
+    let url = "https://o.test/v1.mp4";
+    let caller = caller();
+    layer.replace_window(0, vec![Some(MediaItem::bare_video(url))]);
+    caller.block_on(eventually(|| factory.slot_holding(url).is_some()));
+    let gate = factory.dispose_gate.hold();
+
+    let started = std::time::Instant::now();
+    assert!(caller.block_on(pending_once(layer.await_closed())), "await_closed does not start the close itself");
+    drop(layer);
+    assert!(started.elapsed() < std::time::Duration::from_secs(2), "the caller waited for the held native port");
+
+    caller.block_on(eventually(|| factory.dispose_gate.entered() == 1));
+    drop(gate);
+    caller.block_on(eventually(|| disposed_all(&factory)));
+}
+
+#[test]
+fn inv_ffi_16_dropping_the_layer_starts_the_same_close_without_any_await() {
+    let dir = tempfile::tempdir().unwrap();
+    let factory: Arc<MockFactory> = Arc::default();
+    let releaser: Arc<ClosingReleaser> = shared();
+    let layer = opened(dir.path(), &factory, Some(releaser.clone()));
+    let url = "https://o.test/v1.mp4";
+    let caller = caller();
+    layer.replace_window(0, vec![Some(MediaItem::bare_video(url))]);
+    caller.block_on(eventually(|| factory.slot_holding(url).is_some()));
+
+    drop(layer);
+
+    caller.block_on(eventually(|| disposed_all(&factory) && releaser.shutdowns.load(std::sync::atomic::Ordering::SeqCst) == 1));
+}
+
+struct Dropped(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for Dropped {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn inv_ffi_17_closed_means_the_cancelled_assembly_future_is_already_dropped() {
+    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
+    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (started, begun) = tokio::sync::oneshot::channel::<()>();
+    let held = Dropped(dropped.clone());
+    let layer = MediaLayer::assembling(
+        runtime,
+        async move {
+            let _held = held;
+            let _ = started.send(());
+            std::future::pending::<Result<crate::api::Parts, MediaError>>().await
+        },
+        None,
+        Vec::new(),
+    );
+
+    caller().block_on(async {
+        begun.await.unwrap();
+        layer.await_closed().await;
+    });
+
+    assert!(dropped.load(std::sync::atomic::Ordering::SeqCst), "Closed came before the cancelled assembly released what it held");
+}
+
+#[test]
+fn inv_ffi_17_closing_before_the_assembly_ends_cancels_it_and_still_releases_the_platform() {
+    let dir = tempfile::tempdir().unwrap();
+    slow_assembly(dir.path(), std::time::Duration::from_secs(60));
+    let factory: Arc<MockFactory> = Arc::default();
+    let releaser: Arc<ClosingReleaser> = shared();
+    let layer = opened(dir.path(), &factory, Some(releaser.clone()));
+    layer.replace_window(0, vec![Some(MediaItem::bare_video("https://o.test/v1.mp4"))]);
+
+    layer.shutdown();
+
+    let closed = caller().block_on(async { tokio::time::timeout(std::time::Duration::from_secs(10), layer.await_closed()).await });
+    assert!(closed.is_ok(), "the assembly kept the closing waiting");
+    assert!(factory.created.lock().unwrap().is_empty());
+    assert_eq!(releaser.shutdowns.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(matches!(caller().block_on(layer.stats()), Err(MediaError::Unexpected { .. })));
 }

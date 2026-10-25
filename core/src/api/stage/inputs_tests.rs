@@ -38,7 +38,10 @@ async fn inv_api_03_retired_declarations_ignore_late_cache_results() {
         } else {
             stage.visible(source.clone(), false);
         }
-        stage.inner.declaration_completed.notified().await;
+        assert_eq!(stage.declaration_checks(), 0, "the check of a retired declaration is still running");
+        for _ in 0..50 {
+            tokio::task::yield_now().await;
+        }
         assert!(!rig.parts.places.is_declared(&source.url), "late cache check redeclared hidden image");
     }
 }

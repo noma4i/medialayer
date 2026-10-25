@@ -23,6 +23,7 @@ private class ReloadSlot : PlayerSlot, PlayerSlotFactory {
       else -> {}
     }
   }
+  override suspend fun dispose() {}
   override fun sample() = SlotSample(0u, null, false, attached, false)
 }
 

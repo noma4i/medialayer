@@ -57,6 +57,7 @@ private final class InputSlot: PlayerSlotFactory, @unchecked Sendable {
       default: break
       }
     }
+    func dispose() async {}
     func sample() -> SlotSample { SlotSample(positionMs: 0, durationMs: nil, isLooping: false, viewAttached: false, frameRendered: false) }
   }
 }

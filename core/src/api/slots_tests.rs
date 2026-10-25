@@ -163,6 +163,9 @@ async fn inv_api_01_each_slot_gets_one_player_for_its_whole_life_and_a_slow_slot
     let factory: Arc<MockFactory> = Arc::default();
     let runner = SlotRunner::new(Handle::current(), Some(factory.clone()));
 
+    for slot in 0..3 {
+        runner.send(slot, SlotCall::Mute);
+    }
     for round in 0..50u64 {
         for slot in 0..3 {
             runner.send(slot, load(&format!("k{round}"), round));

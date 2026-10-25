@@ -5,6 +5,7 @@ Memory is managed automatically. You do not call anything: there is no pressure 
 | What happens | When |
 | ------------ | ---- |
 | Player slots are reused, never created per screen | Always. An unloaded slot holds no frames, buffers or decoders |
+| A slot keeps its room in the limit until the native player confirms the unload | Always. A page that needs the room loads when the confirmation arrives, without any call from you |
 | Slots drop from hot to warm to cold | After a slot sits idle for `trim_delay` (default 30 seconds) |
 | Prefetch stops, then far slots are released, then the playing slot last | The system reports memory pressure (iOS memory warning, Android `onTrimMemory` and `onLowMemory`) |
 | Everything except the chosen slot is released, prefetch stops | The app goes to the background |

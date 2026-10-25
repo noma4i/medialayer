@@ -30,6 +30,7 @@ private final class TransportSlot: PlayerSlot, PlayerSlotFactory, @unchecked Sen
     default: break
     }
   }
+  func dispose() async {}
   func sample() -> SlotSample { SlotSample(positionMs: 0, durationMs: nil, isLooping: false, viewAttached: false, frameRendered: false) }
 }
 

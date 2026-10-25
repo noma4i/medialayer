@@ -62,6 +62,20 @@ impl<T> Queue<T> {
     }
 }
 
+pub struct Retired<T> {
+    value: Option<Arc<T>>,
+    #[allow(dead_code)]
+    waiting: Vec<Waiting<T>>,
+    #[allow(dead_code)]
+    settled: Option<Result<Arc<T>, MediaError>>,
+}
+
+impl<T> Retired<T> {
+    pub fn take_value(&mut self) -> Option<Arc<T>> {
+        self.value.take()
+    }
+}
+
 pub struct Deferred<T> {
     queue: Mutex<Queue<T>>,
     outcome: watch::Sender<Option<Result<Arc<T>, MediaError>>>,
@@ -140,10 +154,10 @@ impl<T: Send + Sync + 'static> Deferred<T> {
         locked(&self.queue).waiting.len()
     }
 
-    pub fn install(&self, value: Arc<T>) {
+    pub fn install(&self, value: Arc<T>) -> Option<Arc<T>> {
         let mut queue = locked(&self.queue);
         if queue.ended {
-            return;
+            return Some(value);
         }
         queue.value = Some(value.clone());
         queue.draining = true;
@@ -152,7 +166,7 @@ impl<T: Send + Sync + 'static> Deferred<T> {
             if waiting.is_empty() {
                 queue.draining = false;
                 self.outcome.send_replace(Some(Ok(value)));
-                return;
+                return None;
             }
             drop(queue);
             for waiting in waiting {
@@ -164,30 +178,29 @@ impl<T: Send + Sync + 'static> Deferred<T> {
             }
             queue = locked(&self.queue);
             if queue.ended {
-                return;
+                return None;
             }
         }
     }
 
     pub fn fail(&self, error: MediaError) {
-        self.end(error);
+        drop(self.end(error));
     }
 
-    pub fn close(&self) {
-        self.end(MediaError::Unexpected { detail: "the media layer is closed".to_string() });
+    pub fn close(&self) -> Retired<T> {
+        self.end(MediaError::Unexpected { detail: "the media layer is closed".to_string() })
     }
 
-    fn end(&self, error: MediaError) {
+    fn end(&self, error: MediaError) -> Retired<T> {
         let mut queue = locked(&self.queue);
         if queue.ended {
-            return;
+            return Retired { value: None, waiting: Vec::new(), settled: None };
         }
         queue.ended = true;
         let value = queue.value.take();
         let waiting = std::mem::take(&mut queue.waiting);
         let settled = self.outcome.send_replace(Some(Err(error)));
-        drop(queue);
-        drop((value, waiting, settled));
+        Retired { value, waiting, settled }
     }
 
     pub async fn wait(&self) -> Result<Arc<T>, MediaError> {

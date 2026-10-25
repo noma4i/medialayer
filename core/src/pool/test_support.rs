@@ -24,10 +24,68 @@ pub fn slot_commands(directives: &[Directive]) -> Vec<Command> {
         .collect()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Shape {
+    Load { slot: usize, key: String },
+    Unload { slot: usize },
+    Dispose { slot: usize },
+    Preroll { slot: usize },
+    Play { slot: usize },
+    Pause { slot: usize },
+    Mute { slot: usize },
+    Unmute { slot: usize },
+    Retain { slot: usize, level: Retention },
+}
+
+impl From<&Command> for Shape {
+    fn from(command: &Command) -> Shape {
+        match command {
+            Command::Load { slot, key, .. } => Shape::Load { slot: *slot, key: key.clone() },
+            Command::Unload { slot } => Shape::Unload { slot: *slot },
+            Command::Dispose { slot } => Shape::Dispose { slot: *slot },
+            Command::Preroll { slot } => Shape::Preroll { slot: *slot },
+            Command::Play { slot } => Shape::Play { slot: *slot },
+            Command::Pause { slot } => Shape::Pause { slot: *slot },
+            Command::Mute { slot } => Shape::Mute { slot: *slot },
+            Command::Unmute { slot } => Shape::Unmute { slot: *slot },
+            Command::Retain { slot, level } => Shape::Retain { slot: *slot, level: *level },
+        }
+    }
+}
+
+impl PartialEq<Shape> for Command {
+    fn eq(&self, other: &Shape) -> bool {
+        Shape::from(self) == *other
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Plan {
+    StopPrefetch,
+    DropMemoryCache,
+    Slot(Shape),
+}
+
+pub fn plan_of(directives: &[Directive]) -> Vec<Plan> {
+    directives
+        .iter()
+        .map(|directive| match directive {
+            Directive::StopPrefetch => Plan::StopPrefetch,
+            Directive::DropMemoryCache => Plan::DropMemoryCache,
+            Directive::Slot(command) => Plan::Slot(Shape::from(command)),
+        })
+        .collect()
+}
+
+pub fn load(slot: usize, key: &str) -> Shape {
+    Shape::Load { slot, key: key.to_string() }
+}
+
 pub fn slot_of(command: &Command) -> usize {
     match command {
         Command::Load { slot, .. }
         | Command::Unload { slot }
+        | Command::Dispose { slot }
         | Command::Preroll { slot }
         | Command::Play { slot }
         | Command::Pause { slot }

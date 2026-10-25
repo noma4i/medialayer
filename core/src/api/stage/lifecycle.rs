@@ -1,8 +1,10 @@
 use super::{LoadId, Stage};
+use crate::api::guard::AbortOnDrop;
 use crate::api::ports::{PoolControl, SlotDirectives};
 use crate::memory::{Step, StepPlan};
 use crate::pool::{Directive, Pressure, PoolStats};
 use crate::session::Event;
+use std::sync::{Arc, PoisonError};
 
 impl PoolControl for Stage {
     fn stats(&self) -> PoolStats {
@@ -51,13 +53,23 @@ impl PoolControl for Stage {
             (state, commands, ids)
         };
         self.dispatch(state, commands);
-        let stage = self.clone();
-        self.inner.handle.spawn(async move {
-            stage.inner.routes.repair().await;
+        let (inner, routes) = (Arc::downgrade(&self.inner), self.inner.routes.clone());
+        let token = self.next_token();
+        let mut state = self.inner.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let task = self.inner.handle.spawn(async move {
+            routes.repair().await;
+            let Some(inner) = inner.upgrade() else { return };
+            let stage = Stage { inner };
             for id in ids {
                 stage.feed_id(&id, Event::Foreground);
             }
+            let finished = {
+                let mut state = stage.inner.state.lock().unwrap_or_else(PoisonError::into_inner);
+                state.foreground.take_if(|(current, _)| *current == token)
+            };
+            drop(finished);
         });
+        state.foreground = Some((token, AbortOnDrop::new(task)));
     }
 }
 
