@@ -45,6 +45,7 @@ private final class CountingPlaces: MediaPlaces, @unchecked Sendable {
   func tonePixelsNeeded(source: MediaItem) async -> Bool { await inner.tonePixelsNeeded(source: source) }
   func playUrl(source: MediaItem) async throws -> PlaybackRoute { try await inner.playUrl(source: source) }
   func stateStream(key: String) -> AsyncStream<MediaState> { inner.stateStream(key: key) }
+  func toneStream(source: MediaItem, band: Float) -> AsyncStream<ToneUpdate> { inner.toneStream(source: source, band: band) }
   func mountPlace(item: MediaItem) throws -> any PlaceHandle { try inner.mountPlace(item: item) }
   func mountVideoWindow() throws -> any WindowHandle { try inner.mountVideoWindow() }
   func mountImageWindow(name: String, rowsPerPage: Int, reversed: Bool) throws -> any WindowHandle {

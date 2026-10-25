@@ -1,3 +1,4 @@
+use super::guard::AbortOnDrop;
 use super::hub::{Deliver, Hub, Subscription};
 use super::ports::Suspendable;
 use super::source::MediaItem;
@@ -8,7 +9,7 @@ use async_trait::async_trait;
 use futures_util::future::{AbortHandle, Abortable};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use tokio::runtime::Handle;
 use tokio::sync::Notify;
 
@@ -159,7 +160,7 @@ impl Tones {
     pub async fn tone(self: &Arc<Self>, source: &MediaItem, band: f32) -> Result<Option<MediaTone>, ToneError> {
         valid_band(band)?;
         let key = self.store.key_for(&source.url, &source.headers);
-        let data = self.known(&key).await.or_else(|| self.from_blurhash(&key, source));
+        let data = self.current(&key, source).await;
         if !data.as_ref().is_some_and(|tone| tone.source == ToneSource::Pixels) {
             let seq = self.demand_seq.fetch_add(1, Ordering::Relaxed);
             locked(&self.demands).entry(key.clone()).or_insert_with(|| Demand { source: source.clone(), queried: false, seq }).queried = true;
@@ -207,17 +208,24 @@ impl Tones {
         for key in keys { self.request(&key); }
     }
 
-    pub fn subscribe(self: &Arc<Self>, source: &MediaItem, deliver: Deliver<ToneSource>) -> Subscription {
+    /// Delivers the tone at `band` once after the watch is set and again after every change of the source tone.
+    pub fn subscribe(self: &Arc<Self>, source: &MediaItem, band: f32, deliver: Deliver<Option<MediaTone>>) -> Result<Subscription, ToneError> {
+        valid_band(band)?;
         let key = self.store.key_for(&source.url, &source.headers);
+        let pending = Arc::new(Notify::new());
+        let mark = pending.clone();
         let mut hubs = locked(&self.hubs);
-        let inner = hubs.entry(key.clone()).or_insert_with(|| Hub::new(self.handle.clone())).subscribe(deliver);
+        let inner = hubs.entry(key.clone()).or_insert_with(|| Hub::new(self.handle.clone())).subscribe(Arc::new(move |_: ToneSource| mark.notify_one()));
         let seq = self.demand_seq.fetch_add(1, Ordering::Relaxed);
         locked(&self.demands).entry(key.clone()).or_insert_with(|| Demand { source: source.clone(), queried: false, seq });
         drop(hubs);
+        pending.notify_one();
+        let reader = AbortOnDrop::new(self.handle.spawn(read_changes(Arc::downgrade(self), key.clone(), source.clone(), band, pending, deliver)));
         self.request(&key);
         let hubs = self.hubs.clone();
         let tones = Arc::downgrade(self);
-        Subscription::cancelling(move || {
+        Ok(Subscription::cancelling(move || {
+            drop(reader);
             drop(inner);
             let mut hubs = locked(&hubs);
             if hubs.get(&key).is_some_and(|hub| hub.listener_count() == 0) {
@@ -225,7 +233,7 @@ impl Tones {
             }
             drop(hubs);
             if let Some(tones) = tones.upgrade() { tones.cancel_unused(&key); }
-        })
+        }))
     }
 
     fn demanded(&self, key: &str) -> bool {
@@ -296,6 +304,10 @@ impl Tones {
         });
     }
 
+    async fn current(&self, key: &str, source: &MediaItem) -> Option<ToneData> {
+        self.known(key).await.or_else(|| self.from_blurhash(key, source))
+    }
+
     async fn known(&self, key: &str) -> Option<ToneData> {
         match self.store.tone(key).await {
             Some(tone) => Some(tone),
@@ -326,9 +338,38 @@ impl Tones {
         } else {
             locked(&self.memo).insert(key.clone(), tone);
         }
-        if let Some(hub) = locked(&self.hubs).get(&key) {
+        self.publish(&key);
+    }
+
+    fn publish(&self, key: &str) {
+        if let Some(hub) = locked(&self.hubs).get(key) {
             hub.publish(ToneSource::Pixels);
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn changed(&self, key: &str) {
+        self.publish(key);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn demand_count(&self) -> usize {
+        locked(&self.demands).len()
+    }
+}
+
+/// The only reader of a subscription: `pending` holds at most one mark, so changes during a read cost one more read.
+async fn read_changes(tones: Weak<Tones>, key: String, source: MediaItem, band: f32, pending: Arc<Notify>, deliver: Deliver<Option<MediaTone>>) {
+    let mut last: Option<Option<MediaTone>> = None;
+    loop {
+        pending.notified().await;
+        let Some(tones) = tones.upgrade() else { return };
+        let value = tones.current(&key, &source).await.and_then(|data| data.at(band).ok());
+        drop(tones);
+        if last.as_ref() == Some(&value) { continue; }
+        last = Some(value.clone());
+        let deliver = deliver.clone();
+        let _ = tokio::task::spawn_blocking(move || deliver(value)).await;
     }
 }
 

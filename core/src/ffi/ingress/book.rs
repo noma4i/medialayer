@@ -487,10 +487,13 @@ impl Book {
                 let subscription = self.assembled.controls.subscribe_stats(Arc::new(move |stats| if live() { deliver.changed(stats) }));
                 (subscription, Observer::Stats(listener))
             }
-            Subscribing::Tone { item, listener } => {
+            Subscribing::Tone { item, band, listener } => {
                 let deliver = listener.clone();
-                let subscription = self.assembled.tones.subscribe(&item, Arc::new(move |source| if live() { deliver.changed(source) }));
-                (subscription, Observer::Tone(listener))
+                let subscribed = self.assembled.tones.subscribe(&item, band, Arc::new(move |tone| if live() { deliver.changed(tone) }));
+                match subscribed {
+                    Ok(subscription) => (subscription, Observer::Tone(listener)),
+                    Err(error) => return listener.failed(error.into()),
+                }
             }
         };
         self.subscriptions.insert(owner, Observed { _subscription: subscription, listener, _reserve: reserve });

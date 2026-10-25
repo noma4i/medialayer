@@ -61,7 +61,7 @@ private final class ToneChanges: ToneListener, @unchecked Sendable {
   private let lock = NSLock()
   private var values: [ToneSource] = []
   var count: Int { lock.withLock { values.count } }
-  func changed(source: ToneSource) { lock.withLock { values.append(source) } }
+  func changed(tone: MediaTone?) { if let tone, tone.source == .pixels { lock.withLock { values.append(tone.source) } } }
   func failed(error: MediaError) {}
 }
 
@@ -80,7 +80,7 @@ extension GlobalMedia {
       #expect(await MediaImagePipeline.load(source, request: request, pipeline: context.pipeline) != nil)
       #expect(await media.tonePixelsNeeded(source: source.item) == false)
       let changes = ToneChanges()
-      let subscription = try media.subscribeTone(source: source.item, listener: changes)
+      let subscription = try media.subscribeTone(source: source.item, band: 0.15, listener: changes)
       await eventually("late subscriber receives pixels") { changes.count == 1 }
       #expect(await pixelsTone(media, source.item))
       #expect(await media.tonePixelsNeeded(source: source.item) == false)

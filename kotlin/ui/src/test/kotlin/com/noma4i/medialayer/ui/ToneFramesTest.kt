@@ -91,8 +91,8 @@ class ToneFramesTest {
       assertEquals(0, decodedBytes.get())
       sources.forEachIndexed { index, source ->
         assertTrue(!runBlocking { media.tonePixelsNeeded(source) })
-        val subscription = media.subscribeTone(source, object : ToneListener {
-          override fun changed(source: ToneSource) { changes.incrementAndGet() }
+        val subscription = media.subscribeTone(source, 0.15f, object : ToneListener {
+          override fun changed(tone: com.noma4i.medialayer.MediaTone?) { if (tone?.source == ToneSource.PIXELS) changes.incrementAndGet() }
           override fun failed(error: com.noma4i.medialayer.MediaException) = Unit
         })
         try {

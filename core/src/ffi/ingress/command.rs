@@ -55,7 +55,7 @@ impl Observer {
 pub(crate) enum Subscribing {
     State { key: String, listener: Arc<dyn StateListener> },
     Stats { listener: Arc<dyn StatsListener> },
-    Tone { item: MediaItem, listener: Arc<dyn ToneListener> },
+    Tone { item: MediaItem, band: f32, listener: Arc<dyn ToneListener> },
 }
 
 pub(crate) enum PlayerEvent {

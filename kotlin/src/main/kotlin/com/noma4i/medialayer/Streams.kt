@@ -34,6 +34,26 @@ fun MediaLayer.stateFlow(key: String): Flow<MediaState> = callbackFlow {
   awaitClose { subscription?.close() }
 }.conflate()
 
+sealed interface ToneUpdate {
+  data class Value(val tone: MediaTone?) : ToneUpdate
+  data class Failed(val error: MediaException) : ToneUpdate
+}
+
+/** The tone of [source] at [band]: the value after the watch is set, then after every change. Cancelling the collector cancels the watch. */
+fun MediaLayer.toneFlow(source: MediaItem, band: Float): Flow<ToneUpdate> = callbackFlow {
+  val subscription = try {
+    subscribeTone(source, band, object : ToneListener {
+      override fun changed(tone: MediaTone?) { trySend(ToneUpdate.Value(tone)) }
+      override fun failed(error: MediaException) { trySend(ToneUpdate.Failed(error)); close() }
+    })
+  } catch (error: MediaException) {
+    trySend(ToneUpdate.Failed(error))
+    close()
+    null
+  }
+  awaitClose { subscription?.close() }
+}.conflate()
+
 val MediaState.isFailed: Boolean get() = this is MediaState.Failed
 
 val MediaState.isReady: Boolean get() = this is MediaState.Ready || this is MediaState.Rendered || this is MediaState.Ended

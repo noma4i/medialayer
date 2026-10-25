@@ -107,12 +107,12 @@ async fn inv_tone_14_background_cancels_tone_preparation_and_the_foreground_rest
     rig.parts.tones.set_preparation(preparation.clone());
     let first = MediaItem::bare("https://o.test/a.jpg", Kind::Image);
     let second = MediaItem::bare("https://o.test/b.jpg", Kind::Image);
-    let _first = rig.parts.tones.subscribe(&first, Arc::new(|_| {}));
+    let _first = rig.parts.tones.subscribe(&first, 0.15, Arc::new(|_| {})).unwrap();
     eventually(|| preparation.started.load(Ordering::SeqCst) == 1).await;
 
     backgrounded(&rig, &signals).await;
     eventually(|| preparation.dropped.load(Ordering::SeqCst) == 1).await;
-    let _second = rig.parts.tones.subscribe(&second, Arc::new(|_| {}));
+    let _second = rig.parts.tones.subscribe(&second, 0.15, Arc::new(|_| {})).unwrap();
     quiet().await;
     assert_eq!(preparation.started.load(Ordering::SeqCst), 1, "tone work started in the background");
 

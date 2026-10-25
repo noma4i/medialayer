@@ -1,6 +1,6 @@
 # Tone
 
-MediaLayer считает цвет только после запроса `tone(source, band)` или подписки `subscribeTone`. Ядро хранит результат вместе с файлом кэша. Приложение не запускает подготовку пикселей.
+MediaLayer считает цвет только после запроса `tone(source, band)` или подписки `WithMediaTone`, `rememberMediaTone`, `subscribeTone`. Ядро хранит результат вместе с файлом кэша. Приложение не запускает подготовку пикселей.
 
 | Question | Answer |
 | -------- | ------ |
@@ -39,24 +39,32 @@ if (tone != null) {
 
 ## React to a new tone
 
-Тон пикселей заменяет BlurHash после появления спроса. Поздняя подписка запускает подготовку источника без повторного появления вида. `subscribeTone(source, listener)` учитывает заголовки источника и сообщает об изменении тона. Несколько изменений могут объединиться в одно уведомление. Храните подписку, пока нужны обновления.
+Тон пикселей заменяет BlurHash после появления спроса. Поздняя подписка запускает подготовку источника без повторного появления вида. В интерфейсе подписку держит `WithMediaTone` (Swift) или `rememberMediaTone` (Compose): монтаж подписывает, демонтаж отменяет, приложение не создаёт `Task` и не читает тон повторно.
 
 ### Swift
 
 ```swift
-final class Bar: ToneListener {
-    func changed(source: ToneSource) { /* ask tone(source:band:) again */ }
+WithMediaTone(source: item, band: 0.15) { tone, error in
+    Bar(color: tone?.top.color)   // tone is nil until the core knows one
 }
-let subscription = media.subscribeTone(source: item, listener: bar)
 ```
 
 ### Kotlin
 
 ```kotlin
-val subscription = media.subscribeTone(item, object : ToneListener {
-    override fun changed(source: ToneSource) { /* ask tone(source, band) again */ }
-})
+val tone by rememberMediaTone(item, 0.15f)
+Bar(color = tone.tone?.top?.color)  // tone.error holds the failure of the watch
 ```
+
+Правила обёрток:
+
+- Первое значение приходит после установки наблюдения: `nil`, BlurHash или пиксели. Изменение во время первого чтения не теряется. Несколько изменений подряд объединяются в одно чтение.
+- Источник `nil` снимает подписку и очищает значение. Другой источник заменяет подписку и очищает значение прежнего. Другой `band` заменяет запрос, пока значение остаётся, и не запускает анализ пикселей.
+- Платформа не хранит значения по URL. Хранит их ядро в ограниченной таблице и в записи кэша.
+
+### Низкоуровневая подписка
+
+Потребитель вне интерфейса вызывает `subscribeTone(source, band, listener)`. Слушатель получает `Option<MediaTone>`: сначала после установки наблюдения, затем после каждого изменения. Храните подписку, пока нужны обновления. Отмена снимает слушателя и удержанное чтение.
 
 ## What you do not do
 
@@ -70,6 +78,6 @@ val subscription = media.subscribeTone(item, object : ToneListener {
 
 `submitTonePixels` удалён. Библиотека устанавливает один `TonePreparation` через `setTonePreparation` при открытии UI. Метод `prepare(source)` возвращает `TonePixels` и не хранит пиксели между вызовами.
 
-Swift: `subscribeTone(url:listener:)` заменён на `subscribeTone(source:listener:)`. Kotlin: `subscribeTone(url, listener)` заменён на `subscribeTone(source, listener)`. Передавайте `MediaItem` с заголовками вместо URL.
+Swift: `subscribeTone(url:listener:)` заменён на `subscribeTone(source:band:listener:)`. Kotlin: `subscribeTone(url, listener)` заменён на `subscribeTone(source, band, listener)`. `ToneListener.changed` получает `MediaTone?` вместо `ToneSource`. Передавайте `MediaItem` с заголовками вместо URL. Ручная связка `subscribeTone` с повторным `tone()` заменена на `WithMediaTone` и `rememberMediaTone`.
 
 Сигнатуры `tone(source:band:)` и `tone(source, band)` сохранены. При отсутствии пиксельного результата запрос запускает подготовку. Тестовые реализации `MediaPlaces` реализуют `setTonePreparation`, `tonePixelsNeeded` и `playUrl`.

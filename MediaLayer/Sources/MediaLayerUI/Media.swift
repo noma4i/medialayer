@@ -17,6 +17,7 @@ public protocol MediaPlaces: AnyObject, Sendable {
   func tonePixelsNeeded(source: MediaItem) async -> Bool
   func playUrl(source: MediaItem) async throws -> PlaybackRoute
   func stateStream(key: String) -> AsyncStream<MediaState>
+  func toneStream(source: MediaItem, band: Float) -> AsyncStream<ToneUpdate>
 }
 
 public protocol PlaceHandle: AnyObject, Sendable {

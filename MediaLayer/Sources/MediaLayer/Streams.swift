@@ -23,6 +23,24 @@ private final class StateRelay: StateListener, @unchecked Sendable {
   }
 }
 
+public enum ToneUpdate: Sendable {
+  case tone(MediaTone?)
+  case failed(MediaError)
+}
+
+private final class ToneRelay: ToneListener, @unchecked Sendable {
+  private let continuation: AsyncStream<ToneUpdate>.Continuation
+
+  init(_ continuation: AsyncStream<ToneUpdate>.Continuation) { self.continuation = continuation }
+
+  func changed(tone: MediaTone?) { continuation.yield(.tone(tone)) }
+
+  func failed(error: MediaError) {
+    continuation.yield(.failed(error))
+    continuation.finish()
+  }
+}
+
 extension MediaLayer {
   public func imageSize(_ source: some MediaSource) async throws -> ImageSize? {
     try await imageSize(url: source.url, headers: source.headers)
@@ -34,6 +52,19 @@ extension MediaLayer {
         let subscription = try subscribeStats(listener: StatsRelay(continuation))
         continuation.onTermination = { _ in withExtendedLifetime(subscription) {} }
       } catch {
+        continuation.finish()
+      }
+    }
+  }
+
+  /// The tone of the source at `band`: the value after the watch is set, then after every change. Ending the iteration cancels the watch.
+  public func toneStream(source: MediaItem, band: Float) -> AsyncStream<ToneUpdate> {
+    AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+      do {
+        let subscription = try subscribeTone(source: source, band: band, listener: ToneRelay(continuation))
+        continuation.onTermination = { _ in withExtendedLifetime(subscription) {} }
+      } catch {
+        continuation.yield(.failed((error as? MediaError) ?? .Unexpected(detail: String(describing: error))))
         continuation.finish()
       }
     }

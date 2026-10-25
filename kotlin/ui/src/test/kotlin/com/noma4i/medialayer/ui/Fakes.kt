@@ -148,6 +148,18 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
     return Subscription(NoHandle)
   }
 
+  class ToneWatch(val item: MediaItem, val band: Float, val listener: com.noma4i.medialayer.ToneListener) {
+    val closed = java.util.concurrent.atomic.AtomicBoolean(false)
+  }
+  val toneWatches = CopyOnWriteArrayList<ToneWatch>()
+
+  override fun subscribeTone(source: MediaItem, band: Float, listener: com.noma4i.medialayer.ToneListener): Subscription {
+    noteFfi("subscribeTone")
+    val watch = ToneWatch(source, band, listener)
+    toneWatches.add(watch)
+    return object : Subscription(NoHandle) { override fun close() { watch.closed.set(true) } }
+  }
+
   fun emit(key: String, state: MediaState) = listeners.filter { it.first == key }.forEach { it.second.changed(state) }
 
   override suspend fun fetchImage(url: String, headers: Map<String, String>): ImageFetchResult { noteFfi("fetchImage"); calls.add("fetchImage:$url"); return ImageFetchResult(image, ImageOrigin.NETWORK) }

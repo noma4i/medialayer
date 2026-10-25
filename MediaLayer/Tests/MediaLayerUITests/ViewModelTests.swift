@@ -120,6 +120,21 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   func playUrl(source: MediaItem) async throws -> PlaybackRoute {
     PlaybackRoute(url: source.url, headers: source.headers, generation: nil, hls: false, looping: false)
   }
+  struct ToneRequest: @unchecked Sendable {
+    let source: MediaItem
+    let band: Float
+    let continuation: AsyncStream<ToneUpdate>.Continuation
+  }
+  private var toneAsked: [ToneRequest] = []
+  private var toneEnded = 0
+  var toneRequests: [ToneRequest] { lock.withLock { toneAsked } }
+  var toneTerminations: Int { lock.withLock { toneEnded } }
+  func toneStream(source: MediaItem, band: Float) -> AsyncStream<ToneUpdate> {
+    let pair = AsyncStream<ToneUpdate>.makeStream()
+    pair.continuation.onTermination = { [weak self] _ in self?.lock.withLock { self?.toneEnded += 1 } }
+    lock.withLock { toneAsked.append(ToneRequest(source: source, band: band, continuation: pair.continuation)) }
+    return pair.stream
+  }
   func stateStream(key: String) -> AsyncStream<MediaState> {
     noteMain("stateStream")
     let pair = AsyncStream<MediaState>.makeStream()

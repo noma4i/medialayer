@@ -1,6 +1,6 @@
 use super::tones::{CacheTones, Tones};
 use super::*;
-use crate::analysis::{analyze, ToneSource};
+use crate::analysis::{analyze, MediaTone, ToneSource};
 use crate::cache::{Cache, Kind as CacheKind};
 use crate::limits::Limits;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -90,13 +90,18 @@ async fn inv_tone_13_late_demand_prepares_once_and_cached_pixels_skip_preparatio
     assert!(!rig.tones.pixels_needed(&source).await);
     assert_eq!((preparation.calls.load(Ordering::SeqCst), preparation.bytes.load(Ordering::SeqCst), rig.tones.analyses()), (0, 0, 0));
     let (sent, mut received) = tokio::sync::mpsc::unbounded_channel();
-    let listener = rig.tones.subscribe(&source, Arc::new(move |value| { sent.send(value).unwrap(); }));
+    let listener = rig.tones.subscribe(&source, 0.15, Arc::new(move |value: Option<MediaTone>| { sent.send(value).unwrap(); })).unwrap();
     tokio::time::timeout(WAIT_LIMIT, preparation.started.notified()).await.unwrap();
     for _ in 0..8 { rig.tones.refresh(&source.url); }
     tokio::task::yield_now().await;
     assert_eq!(preparation.calls.load(Ordering::SeqCst), 1);
     preparation.release.add_permits(1);
-    assert_eq!(tokio::time::timeout(WAIT_LIMIT, received.recv()).await.unwrap(), Some(ToneSource::Pixels));
+    let mut sources = Vec::new();
+    while sources.last() != Some(&Some(ToneSource::Pixels)) {
+        let value = tokio::time::timeout(WAIT_LIMIT, received.recv()).await.unwrap().unwrap();
+        sources.push(value.map(|tone| tone.source));
+    }
+    assert!(sources[..sources.len() - 1].iter().all(|source| *source == Some(ToneSource::BlurHash)), "{sources:?}");
     assert!(!rig.tones.pixels_needed(&source).await);
     rig.tones.refresh(&source.url);
     assert_eq!((preparation.calls.load(Ordering::SeqCst), preparation.bytes.load(Ordering::SeqCst), rig.tones.analyses()), (1, 64, 1));
@@ -109,10 +114,10 @@ async fn inv_tone_13_last_listener_cancels_preparation_and_later_demand_retries(
     let source = item("https://cdn.test/cancel.jpg", None);
     let preparation = Counted::new();
     rig.tones.set_preparation(preparation.clone());
-    let listener = rig.tones.subscribe(&source, Arc::new(|_| {}));
+    let listener = rig.tones.subscribe(&source, 0.15, Arc::new(|_| {})).unwrap();
     tokio::time::timeout(WAIT_LIMIT, preparation.started.notified()).await.unwrap();
     drop(listener);
-    let next = rig.tones.subscribe(&source, Arc::new(|_| {}));
+    let next = rig.tones.subscribe(&source, 0.15, Arc::new(|_| {})).unwrap();
     tokio::time::timeout(WAIT_LIMIT, preparation.started.notified()).await.unwrap();
     assert_eq!(preparation.calls.load(Ordering::SeqCst), 2);
     assert_eq!(preparation.bytes.load(Ordering::SeqCst), 0);
@@ -248,28 +253,29 @@ async fn inv_tone_11_a_listener_hears_every_stored_or_replaced_tone_of_its_sourc
     let count = Arc::new(AtomicUsize::new(0));
     let listener = {
         let (heard, count) = (heard.clone(), count.clone());
-        rig.tones.subscribe(&watched, Arc::new(move |source: ToneSource| {
-            heard.lock().unwrap().push(source);
+        rig.tones.subscribe(&watched, 0.15, Arc::new(move |tone: Option<MediaTone>| {
+            heard.lock().unwrap().push(tone.map(|tone| tone.source));
             count.fetch_add(1, Ordering::SeqCst);
-        }))
+        })).unwrap()
     };
+    wait_for(|| count.load(Ordering::SeqCst) == 1).await;
 
     offer(&rig.tones, other.clone(), 10);
     offer(&rig.tones, watched.clone(), 10);
-    wait_for(|| count.load(Ordering::SeqCst) == 1).await;
+    wait_for(|| count.load(Ordering::SeqCst) == 2).await;
     rig.cache.remove(&watched.url).await;
     rig.cache.put(&watched.url, CacheKind::Image, b"replaced bytes").await.unwrap();
     offer(&rig.tones, watched.clone(), 240);
-    wait_for(|| count.load(Ordering::SeqCst) == 2).await;
+    wait_for(|| count.load(Ordering::SeqCst) == 3).await;
 
-    assert_eq!(*heard.lock().unwrap(), vec![ToneSource::Pixels, ToneSource::Pixels]);
+    assert_eq!(*heard.lock().unwrap(), vec![None, Some(ToneSource::Pixels), Some(ToneSource::Pixels)]);
     drop(listener);
     rig.cache.remove(&watched.url).await;
     rig.cache.put(&watched.url, CacheKind::Image, b"third bytes").await.unwrap();
     offer(&rig.tones, watched.clone(), 60);
     wait_for_source(&rig.tones, &watched, ToneSource::Pixels).await;
     tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(count.load(Ordering::SeqCst), 2);
+    assert_eq!(count.load(Ordering::SeqCst), 3);
     assert_eq!(rig.tones.listener_count(), 0);
 }
 
@@ -287,4 +293,188 @@ async fn inv_tone_09_a_video_tone_rides_on_its_first_block_and_leaves_with_it() 
     assert_eq!(rig.cache.tone(&video.url), None);
     rig.cache.purge_prefix(&format!("{}#", video.url)).await;
     assert_eq!(rig.tones.tone(&video, 0.15).await, Ok(None));
+}
+
+/// Holds the first `holds` reads of the tone store until a permit arrives and records how the reads overlap.
+struct Gated {
+    inner: CacheTones,
+    holds: AtomicUsize,
+    gate: tokio::sync::Semaphore,
+    started: AtomicUsize,
+    inflight: AtomicUsize,
+    peak: AtomicUsize,
+    dropped: AtomicUsize,
+}
+
+struct Reading<'a> {
+    store: &'a Gated,
+    finished: bool,
+}
+
+impl Drop for Reading<'_> {
+    fn drop(&mut self) {
+        self.store.inflight.fetch_sub(1, Ordering::SeqCst);
+        if !self.finished {
+            self.store.dropped.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl ToneStore for Gated {
+    fn key_for(&self, url: &str, headers: &std::collections::HashMap<String, String>) -> String {
+        self.inner.key_for(url, headers)
+    }
+
+    async fn tone(&self, key: &str) -> Option<crate::analysis::ToneData> {
+        self.started.fetch_add(1, Ordering::SeqCst);
+        let now = self.inflight.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::SeqCst);
+        let mut reading = Reading { store: self, finished: false };
+        let tone = self.inner.tone(key).await;
+        if self.holds.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1)).is_ok() {
+            self.gate.acquire().await.unwrap().forget();
+        }
+        reading.finished = true;
+        tone
+    }
+
+    async fn set_tone(&self, key: &str, tone: crate::analysis::ToneData) -> bool {
+        self.inner.set_tone(key, tone).await
+    }
+}
+
+struct GatedRig {
+    cache: Cache,
+    tones: Arc<Tones>,
+    store: Arc<Gated>,
+    _dir: tempfile::TempDir,
+}
+
+async fn gated_rig(holds: usize) -> GatedRig {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::open(dir.path(), Limits::default(), u64::MAX);
+    cache.ready().await;
+    let inner = CacheTones::new(cache.clone(), Arc::new(|url, _| url.to_string()));
+    let store = Arc::new(Gated {
+        inner,
+        holds: AtomicUsize::new(holds),
+        gate: tokio::sync::Semaphore::new(0),
+        started: AtomicUsize::new(0),
+        inflight: AtomicUsize::new(0),
+        peak: AtomicUsize::new(0),
+        dropped: AtomicUsize::new(0),
+    });
+    let tones = Tones::new(Handle::current(), store.clone(), 8);
+    GatedRig { cache, tones, store, _dir: dir }
+}
+
+type Heard = Arc<Mutex<Vec<Option<MediaTone>>>>;
+
+fn recording(heard: &Heard) -> Arc<dyn Fn(Option<MediaTone>) + Send + Sync> {
+    let heard = heard.clone();
+    Arc::new(move |tone| heard.lock().unwrap().push(tone))
+}
+
+#[tokio::test]
+async fn inv_tone_15_a_change_between_subscribing_and_the_first_read_is_not_lost() {
+    let rig = gated_rig(1).await;
+    let source = item("https://cdn.test/raced.jpg", None);
+    rig.cache.put(&source.url, CacheKind::Image, b"bytes").await.unwrap();
+    let heard: Heard = Arc::new(Mutex::new(Vec::new()));
+    let _subscription = rig.tones.subscribe(&source, 0.15, recording(&heard)).unwrap();
+    wait_for(|| rig.store.started.load(Ordering::SeqCst) == 1).await;
+
+    offer(&rig.tones, source.clone(), 200);
+    wait_for(|| rig.cache.tone(&source.url).is_some()).await;
+    rig.store.gate.add_permits(1);
+
+    wait_for(|| heard.lock().unwrap().last().is_some_and(|tone| tone.as_ref().is_some_and(|tone| tone.source == ToneSource::Pixels))).await;
+    assert_eq!(heard.lock().unwrap().first(), Some(&None), "the first value is the state read before the change");
+}
+
+#[tokio::test]
+async fn inv_tone_16_rapid_changes_keep_one_reader_and_one_pending_mark() {
+    let rig = gated_rig(2).await;
+    let source = item("https://cdn.test/rapid.jpg", None);
+    let heard: Heard = Arc::new(Mutex::new(Vec::new()));
+    let _subscription = rig.tones.subscribe(&source, 0.15, recording(&heard)).unwrap();
+    wait_for(|| rig.store.started.load(Ordering::SeqCst) == 1).await;
+    for _ in 0..50 { rig.tones.changed(&source.url); }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(rig.store.started.load(Ordering::SeqCst), 1, "a change started a read while one was held");
+
+    rig.store.gate.add_permits(1);
+    wait_for(|| rig.store.started.load(Ordering::SeqCst) == 2).await;
+    for _ in 0..50 { rig.tones.changed(&source.url); }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(rig.store.started.load(Ordering::SeqCst), 2);
+
+    rig.store.gate.add_permits(1);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(rig.store.started.load(Ordering::SeqCst) <= 4, "reads: {}", rig.store.started.load(Ordering::SeqCst));
+    assert_eq!(rig.store.peak.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn inv_tone_17_cancel_drops_a_held_read_and_an_old_generation_never_delivers() {
+    let rig = gated_rig(1).await;
+    let old = item("https://cdn.test/old.jpg", None);
+    let new = item("https://cdn.test/new.jpg", None);
+    let heard_old: Heard = Arc::new(Mutex::new(Vec::new()));
+    let heard_new: Heard = Arc::new(Mutex::new(Vec::new()));
+    let first = rig.tones.subscribe(&old, 0.15, recording(&heard_old)).unwrap();
+    wait_for(|| rig.store.started.load(Ordering::SeqCst) == 1).await;
+
+    drop(first);
+    wait_for(|| rig.store.dropped.load(Ordering::SeqCst) == 1).await;
+    let _second = rig.tones.subscribe(&new, 0.15, recording(&heard_new)).unwrap();
+    wait_for(|| !heard_new.lock().unwrap().is_empty()).await;
+    rig.store.gate.add_permits(1);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    assert!(heard_old.lock().unwrap().is_empty(), "the cancelled subscription delivered");
+    assert_eq!(rig.tones.listener_count(), 1);
+}
+
+#[tokio::test]
+async fn inv_tone_18_a_band_change_reads_the_stored_tone_without_a_new_analysis() {
+    let rig = rig(8).await;
+    let source = item("https://cdn.test/banded.jpg", None);
+    rig.cache.put(&source.url, CacheKind::Image, b"bytes").await.unwrap();
+    let preparation = Counted::new();
+    preparation.release.add_permits(8);
+    rig.tones.set_preparation(preparation.clone());
+    let narrow: Heard = Arc::new(Mutex::new(Vec::new()));
+    let first = rig.tones.subscribe(&source, 0.15, recording(&narrow)).unwrap();
+    wait_for(|| narrow.lock().unwrap().iter().any(|tone| tone.as_ref().is_some_and(|tone| tone.source == ToneSource::Pixels))).await;
+    drop(first);
+
+    let wide: Heard = Arc::new(Mutex::new(Vec::new()));
+    let _second = rig.tones.subscribe(&source, 1.0, recording(&wide)).unwrap();
+    wait_for(|| !wide.lock().unwrap().is_empty()).await;
+
+    assert_eq!((rig.tones.analyses(), preparation.calls.load(Ordering::SeqCst)), (1, 1));
+    let wide_tone = wide.lock().unwrap()[0].clone().unwrap();
+    assert_eq!(wide_tone.source, ToneSource::Pixels);
+    assert_eq!(wide_tone, rig.tones.tone(&source, 1.0).await.unwrap().unwrap());
+}
+
+#[tokio::test]
+async fn inv_tone_19_a_cancelled_one_shot_read_leaves_no_standing_preparation_demand() {
+    let rig = gated_rig(1).await;
+    let source = item("https://cdn.test/oneshot.jpg", None);
+    let preparation = Counted::new();
+    rig.tones.set_preparation(preparation.clone());
+    let tones = rig.tones.clone();
+    let read = { let source = source.clone(); tokio::spawn(async move { tones.tone(&source, 0.15).await }) };
+    wait_for(|| rig.store.started.load(Ordering::SeqCst) == 1).await;
+
+    read.abort();
+    wait_for(|| rig.store.dropped.load(Ordering::SeqCst) == 1).await;
+    rig.store.gate.add_permits(1);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    assert_eq!(rig.tones.demand_count(), 0);
+    assert_eq!(preparation.calls.load(Ordering::SeqCst), 0);
 }

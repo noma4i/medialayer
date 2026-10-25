@@ -6,7 +6,7 @@ use super::layer_life::LayerLife;
 use super::limits::{DeviceMemory, Evict, ImageWindow, Limits, PoolSettings};
 use super::owned::{MediaPlace, MediaWindow, PlaybackSuspension};
 use super::ready::Ready;
-use crate::analysis::{MediaTone, ToneSource};
+use crate::analysis::MediaTone;
 use crate::api::TonePreparation;
 use crate::api::{
     assemble, placeholder_for, CacheState, Placeholder, Assembly, Kind, MediaError, MediaItem, MediaState, MediaStats, Parts, PlaybackRoute,
@@ -69,7 +69,7 @@ pub trait StatsListener: Send + Sync {
 
 #[uniffi::export(with_foreign)]
 pub trait ToneListener: Send + Sync {
-    fn changed(&self, source: ToneSource);
+    fn changed(&self, tone: Option<MediaTone>);
     fn failed(&self, error: MediaError);
 }
 
@@ -417,8 +417,8 @@ impl MediaLayer {
         self.subscribe(Subscribing::State { key, listener })
     }
 
-    pub fn subscribe_tone(&self, source: MediaItem, listener: Arc<dyn ToneListener>) -> Result<Arc<Subscription>, MediaError> {
-        self.subscribe(Subscribing::Tone { item: source, listener })
+    pub fn subscribe_tone(&self, source: MediaItem, band: f32, listener: Arc<dyn ToneListener>) -> Result<Arc<Subscription>, MediaError> {
+        self.subscribe(Subscribing::Tone { item: source, band, listener })
     }
 
     pub async fn tone(&self, source: MediaItem, band: f32) -> Result<Option<MediaTone>, MediaError> {
