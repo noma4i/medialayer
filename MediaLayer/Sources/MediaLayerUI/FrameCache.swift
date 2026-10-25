@@ -9,9 +9,18 @@ final class FrameCache: @unchecked Sendable {
   static let defaultByteLimit = 64 << 20
   static let shared = FrameCache()
 
+  private final class Waiter {
+    var continuation: CheckedContinuation<AnimatedFrames?, Never>?
+    var cancelled = false
+    var settled = false
+  }
+
   private final class Flight {
-    var task: Task<AnimatedFrames?, Never>!
+    var task: Task<Void, Never>!
     var waiters = 1
+    var parked: [Waiter] = []
+    var finished = false
+    var frames: AnimatedFrames?
   }
 
   private enum Joined {
@@ -49,7 +58,11 @@ final class FrameCache: @unchecked Sendable {
     let key = Key(identity: identity, maxPixel: maxPixel)
     switch lock.withLock({ join(key, data: data, maxPixel: maxPixel) }) {
     case let .hit(frames): return frames
-    case let .flight(flight): return await withTaskCancellationHandler { await flight.task.value } onCancel: { leave(flight, key) }
+    case let .flight(flight):
+      let waiter = Waiter()
+      return await withTaskCancellationHandler {
+        await withCheckedContinuation { park(waiter, on: flight, continuation: $0) }
+      } onCancel: { leave(waiter, flight, key) }
     }
   }
 
@@ -60,9 +73,12 @@ final class FrameCache: @unchecked Sendable {
       recency.removeAll()
       let pending = Array(flights.values)
       flights.removeAll()
-      return pending
+      return pending.map { ($0, finish($0, with: nil)) }
     }
-    pending.forEach { $0.task.cancel() }
+    for (flight, parked) in pending {
+      flight.task.cancel()
+      parked.forEach { $0.continuation?.resume(returning: nil) }
+    }
   }
 
   private func join(_ key: Key, data: Data, maxPixel: Int) -> Joined {
@@ -76,28 +92,57 @@ final class FrameCache: @unchecked Sendable {
     let flight = Flight()
     flight.task = Task {
       let frames = await decode(data, maxPixel)
-      return lock.withLock {
-        guard flights[key] === flight else { return nil }
+      let (result, parked) = lock.withLock { () -> (AnimatedFrames?, [Waiter]) in
+        guard flights[key] === flight else { return (nil, []) }
         flights[key] = nil
         if let frames { store(frames, for: key) }
-        return frames
+        return (frames, finish(flight, with: frames))
       }
+      parked.forEach { $0.continuation?.resume(returning: result) }
     }
     flights[key] = flight
     return .flight(flight)
   }
 
-  private func leave(_ flight: Flight, _ key: Key) {
-    let abandoned = lock.withLock { () -> Bool in
-      guard flights[key] === flight else { return false }
+  private func park(_ waiter: Waiter, on flight: Flight, continuation: CheckedContinuation<AnimatedFrames?, Never>) {
+    let ready = lock.withLock { () -> AnimatedFrames?? in
+      if waiter.cancelled { return .some(nil) }
+      if flight.finished { return .some(flight.frames) }
+      waiter.continuation = continuation
+      flight.parked.append(waiter)
+      return nil
+    }
+    if let ready { continuation.resume(returning: ready) }
+  }
+
+  private func leave(_ waiter: Waiter, _ flight: Flight, _ key: Key) {
+    let (abandoned, continuation) = lock.withLock { () -> (Bool, CheckedContinuation<AnimatedFrames?, Never>?) in
+      waiter.cancelled = true
+      guard !waiter.settled else { return (false, nil) }
+
+      waiter.settled = true
+      flight.parked.removeAll { $0 === waiter }
+      defer { waiter.continuation = nil }
+      guard flights[key] === flight else { return (false, waiter.continuation) }
 
       flight.waiters -= 1
-      guard flight.waiters == 0 else { return false }
+      guard flight.waiters == 0 else { return (false, waiter.continuation) }
 
       flights[key] = nil
-      return true
+      _ = finish(flight, with: nil)
+      return (true, waiter.continuation)
     }
+    continuation?.resume(returning: nil)
     if abandoned { flight.task.cancel() }
+  }
+
+  private func finish(_ flight: Flight, with frames: AnimatedFrames?) -> [Waiter] {
+    flight.finished = true
+    flight.frames = frames
+    let parked = flight.parked
+    flight.parked = []
+    parked.forEach { $0.settled = true }
+    return parked
   }
 
   private func touch(_ key: Key) -> AnimatedFrames? {

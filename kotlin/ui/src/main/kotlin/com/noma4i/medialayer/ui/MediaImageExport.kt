@@ -14,8 +14,10 @@ import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.PixelSize
 import com.noma4i.medialayer.imagePixelSize
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 
 suspend fun MediaLayer.image(
   context: Context,
@@ -42,4 +44,5 @@ suspend fun MediaLayer.image(
   }
 }
 
-private fun Bitmap.softwareCopy(): Bitmap? = if (config == Bitmap.Config.HARDWARE) copy(Bitmap.Config.ARGB_8888, false) else this
+internal suspend fun Bitmap.softwareCopy(copy: (Bitmap) -> Bitmap? = { it.copy(Bitmap.Config.ARGB_8888, false) }): Bitmap? =
+  if (config == Bitmap.Config.HARDWARE) withContext(Dispatchers.Default) { copy(this@softwareCopy) } else this
