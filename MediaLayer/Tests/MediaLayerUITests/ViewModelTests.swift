@@ -61,6 +61,9 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   private let lock = NSLock()
   private var visibility: [VisibleCall] = []
   var fetchLatch: Latch?
+  var latchedURL: String?
+  private var bytesByURL: [String: Data] = [:]
+  func answer(_ url: String, with bytes: Data) { lock.withLock { bytesByURL[url] = bytes } }
 
   func visibleCalls(of url: String) -> [Bool] { lock.withLock { visibility.filter { $0.url == url }.map(\.visible) } }
   private var preparation: TonePreparation?
@@ -107,7 +110,8 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   func fetchImage(url: String, headers: [String: String]) async throws -> ImageFetchResult {
     noteMain("fetchImage")
     lock.withLock { fetches.append(url) }
-    if let latch = lock.withLock({ fetchLatch }) { await latch.wait() }
+    if let latch = lock.withLock({ latchedURL == nil || latchedURL == url ? fetchLatch : nil }) { await latch.wait() }
+    if let bytes = lock.withLock({ bytesByURL[url] }) { return ImageFetchResult(bytes: bytes, source: imageOrigin) }
     return ImageFetchResult(bytes: try imageResult.get(), source: imageOrigin)
   }
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder { noteMain("placeholder"); return .none }

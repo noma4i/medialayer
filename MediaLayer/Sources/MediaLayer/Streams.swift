@@ -24,6 +24,10 @@ private final class StateRelay: StateListener, @unchecked Sendable {
 }
 
 extension MediaLayer {
+  public func imageSize(_ source: some MediaSource) async throws -> ImageSize? {
+    try await imageSize(url: source.url, headers: source.headers)
+  }
+
   public func statsStream() -> AsyncStream<MediaStats> {
     AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
       do {

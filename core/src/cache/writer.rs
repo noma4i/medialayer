@@ -144,7 +144,7 @@ impl Writer {
                 sums.push(sum_of(std::mem::take(&mut self.hasher)));
             }
             let check = Check(sums.into());
-            let entry = Entry { size, check, kind: self.kind, created: now, last_access: now, hits: 0, meta: self.meta.clone(), tone: None };
+            let entry = Entry { size, check, kind: self.kind, created: now, last_access: now, hits: 0, meta: self.meta.clone(), tone: None, image_size: None };
             state.insert(self.name.clone(), self.key.clone(), entry, true);
         }
         mark_dirty(&inner);

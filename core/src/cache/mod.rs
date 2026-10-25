@@ -55,6 +55,8 @@ mod test_support;
 #[cfg(test)]
 mod tone_tests;
 #[cfg(test)]
+mod image_size_tests;
+#[cfg(test)]
 mod optimization_tests;
 
 #[cfg(test)]

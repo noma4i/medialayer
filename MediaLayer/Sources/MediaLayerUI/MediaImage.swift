@@ -15,6 +15,55 @@ private struct LoadedImage {
   var frames: AnimatedFrames?
 }
 
+private struct PreviewFrame: View {
+  let source: any MediaSource
+  let context: MediaContext
+  let key: ImageKey
+  let request: ImageRequest?
+  let contentMode: ContentMode
+  @State private var loaded: PlatformImage?
+
+  var body: some View {
+    Color.clear.overlay {
+      if let image = loaded ?? cached {
+        Image(platform: image).resizable().aspectRatio(contentMode: contentMode)
+      }
+    }
+    .task(id: key) {
+      guard loaded == nil, key.pixels != nil, let request else { return }
+      loaded = await MediaImagePipeline.load(source, request: request, pipeline: context.pipeline)?.image
+    }
+  }
+
+  private var cached: PlatformImage? {
+    guard key.pixels != nil, let request else { return nil }
+    return MediaImagePipeline.cachedImage(for: request, in: context.pipeline)
+  }
+}
+
+private struct PreviewImage: View {
+  let source: any MediaSource
+  let context: MediaContext
+  let points: CGSize
+  let scale: CGFloat
+  let contentMode: ContentMode
+
+  var body: some View {
+    ImageRequestView(source: source, context: context, points: points, scale: scale, contentMode: contentMode) { key, request in
+      PreviewFrame(source: source, context: context, key: key, request: request, contentMode: contentMode)
+    }
+    .id(PreviewInputs(url: source.url, headers: source.headers, pixelWidth: points.width * scale, pixelHeight: points.height * scale, contentMode: contentMode))
+  }
+}
+
+private struct PreviewInputs: Hashable {
+  let url: String
+  let headers: [String: String]
+  let pixelWidth: CGFloat
+  let pixelHeight: CGFloat
+  let contentMode: ContentMode
+}
+
 private struct FramesJob: Equatable {
   let key: ImageKey
   let hasGif: Bool
@@ -66,12 +115,22 @@ public struct MediaImage<Content: View>: View {
   @State private var inBackground = false
   private static var coldFadeDuration: Double { 0.22 }
   private let source: any MediaSource
+  private let preview: (any MediaSource)?
   private let contentMode: ContentMode
   private let playbackRate: Double
   private let content: (MediaState) -> Content
 
   public init(_ source: some MediaSource, contentMode: ContentMode = .fill, playbackRate: Double = 1, @ViewBuilder content: @escaping (MediaState) -> Content) {
+    self.init(shown: source, preview: nil, contentMode: contentMode, playbackRate: playbackRate, content: content)
+  }
+
+  public init(_ source: some MediaSource, preview: (some MediaSource)?, contentMode: ContentMode = .fill, playbackRate: Double = 1, @ViewBuilder content: @escaping (MediaState) -> Content) {
+    self.init(shown: source, preview: preview, contentMode: contentMode, playbackRate: playbackRate, content: content)
+  }
+
+  private init(shown source: any MediaSource, preview: (any MediaSource)?, contentMode: ContentMode, playbackRate: Double, content: @escaping (MediaState) -> Content) {
     self.source = source
+    self.preview = preview
     self.contentMode = contentMode
     self.playbackRate = playbackRate
     self.content = content
@@ -90,6 +149,9 @@ public struct MediaImage<Content: View>: View {
           ZStack {
             if isPlaying && shown == nil {
               PlaceholderView(item: source.item, ready: false, context: context)
+              if let preview, loaded.flatMap({ $0.key == key ? $0.frames : nil }) == nil {
+                PreviewImage(source: preview, context: context, points: geometry.size, scale: displayScale, contentMode: contentMode)
+              }
             }
             if let frames = loaded.flatMap({ $0.key == key ? $0.frames : nil }) {
               AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isPlaying, playbackRate: playbackRate)
@@ -168,7 +230,7 @@ public struct MediaImage<Content: View>: View {
     let report: (@Sendable (MediaState) -> Void)? = mount.map { mount in { state in mount.report(state) } }
     let container = await MediaImagePipeline.load(source, request: request, pipeline: context.pipeline, report: report)
     let next = container.map { LoadedImage(key: key, image: $0.image, gif: $0.type == .gif ? $0.data : nil) }
-    if isCold {
+    if isCold, preview == nil {
       withAnimation(.easeOut(duration: Self.coldFadeDuration)) { loaded = next }
     } else {
       loaded = next
@@ -203,5 +265,9 @@ public struct MediaImage<Content: View>: View {
 extension MediaImage where Content == EmptyView {
   public init(_ source: some MediaSource, contentMode: ContentMode = .fill, playbackRate: Double = 1) {
     self.init(source, contentMode: contentMode, playbackRate: playbackRate) { _ in EmptyView() }
+  }
+
+  public init(_ source: some MediaSource, preview: (some MediaSource)?, contentMode: ContentMode = .fill, playbackRate: Double = 1) {
+    self.init(source, preview: preview, contentMode: contentMode, playbackRate: playbackRate) { _ in EmptyView() }
   }
 }

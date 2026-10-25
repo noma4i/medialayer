@@ -73,6 +73,45 @@ MediaImage(
 )
 ```
 
+## Preview until the upload is ready
+
+`preview` puts a second source in the place of one image. It shows while the main source has no frame, usually a local `file://` copy of a picture that is still uploading. The first frame of the main source replaces it in the same frame, with no empty frame and no timer. The preview takes no place of its own and is never prefetched. The cache key of the main source stays its URL.
+
+### Swift
+
+```swift
+MediaImage(Upload(url: message.remoteUrl), preview: message.localPreview.map { Upload(url: $0) })
+  .frame(width: 120, height: 160)
+```
+
+### Kotlin
+
+```kotlin
+MediaImage(
+  source = Upload(url = message.remoteUrl),
+  modifier = Modifier.size(width = 120.dp, height = 160.dp),
+  preview = message.localPreview?.let { Upload(url = it) }
+)
+```
+
+Without a preview, call `MediaImage` as before. Swift takes the preview as an optional source in a second initializer.
+
+## Image size
+
+`imageSize` answers the pixel size of an image before the app draws it, for a chat bubble or a placeholder frame. The core reads the size from the head of the file: PNG, GIF, WebP and JPEG, and a JPEG turned by EXIF orientation 5 to 8 reports the turned size. A `file://` source is read from its file. A remote source needs one `Range` request for its first 1 MiB (the first block of the cache) and never downloads the whole file; a file that is already stored is read from the cache. The answer is kept with the cache entry, survives a restart and leaves with the entry. A source without an entry keeps it in a bounded table of 256 answers. A repeat for the same source makes no network request. It returns `nil` (`null`) when the head holds no known image.
+
+### Swift
+
+```swift
+let size = try await media.imageSize(Upload(url: message.remoteUrl))   // ImageSize(width:height:) or nil
+```
+
+### Kotlin
+
+```kotlin
+val size = media.imageSize(Upload(url = message.remoteUrl))   // ImageSize(width, height) or null
+```
+
 ## Image as a value
 
 To get the decoded image without a view (a share card drawn by `ImageRenderer`, a bitmap for a canvas), call `image` on the media context. It goes through the same loader, the same core cache, the same item state and tone as `MediaImage`, and it does not wait for a window or a lifecycle. It returns `nil` (`null`) when the source fails or the task is cancelled, and a second call for the same source and size reads the cache.

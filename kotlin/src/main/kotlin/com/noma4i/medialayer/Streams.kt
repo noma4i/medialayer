@@ -5,6 +5,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.conflate
 
+suspend fun MediaLayer.imageSize(source: MediaSource): ImageSize? = imageSize(source.url, source.headers)
+
 fun MediaLayer.statsFlow(): Flow<MediaStats> = callbackFlow {
   val subscription = try {
     subscribeStats(object : StatsListener {

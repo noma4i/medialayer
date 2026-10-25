@@ -5,7 +5,7 @@ use std::time::Duration;
 
 const PLAYBACK_RESERVED: usize = 1;
 const STREAM_CHUNK: usize = 64 * 1024;
-const BLOCK_SIZE: u64 = 1024 * 1024;
+pub const BLOCK_SIZE: u64 = 1024 * 1024;
 const PLAYLIST_TTL: Duration = Duration::from_secs(2);
 const MAX_WAITING: usize = 64;
 const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);

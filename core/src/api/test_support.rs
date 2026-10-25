@@ -126,6 +126,10 @@ impl CacheControl for FakeCache {
     async fn contains(&self, key: &str) -> bool {
         self.cached.lock().unwrap().iter().any(|cached| cached == key)
     }
+
+    fn image_size(&self, _: &str) -> Option<crate::image_size::ImageSize> { None }
+
+    fn set_image_size(&self, _: &str, _: crate::image_size::ImageSize) -> bool { false }
 }
 
 #[async_trait]

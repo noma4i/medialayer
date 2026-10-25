@@ -179,6 +179,7 @@ impl Book {
             Query::Cached(item) => self.running(reserve, slot, async move { Finished::Cached(assembled.routes.is_cached(&item.url, &item.headers).await) }),
             Query::Tone(item, band) => self.running(reserve, slot, async move { Finished::Tone(assembled.tones.tone(&item, band).await) }),
             Query::Pixels(item) => self.running(reserve, slot, async move { Finished::Pixels(assembled.tones.pixels_needed(&item).await) }),
+            Query::ImageSize { url, headers } => self.running(reserve, slot, async move { Finished::ImageSize(assembled.routes.image_size(&url, &headers).await) }),
             Query::Image { url, headers } => self.running(reserve, slot, async move {
                 Finished::Image(assembled.routes.image_bytes(&url, &headers, crate::memory::InputLimits::default().response_bytes).await)
             }),

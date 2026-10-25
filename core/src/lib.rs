@@ -9,6 +9,7 @@ pub mod fetch;
 pub mod ffi;
 pub mod hls;
 pub mod identity;
+pub mod image_size;
 pub mod limits;
 pub mod memory;
 pub mod pages;

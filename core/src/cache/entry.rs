@@ -1,4 +1,5 @@
 use crate::analysis::ToneData;
+use crate::image_size::ImageSize;
 use crate::proxy::Meta;
 use std::collections::BTreeMap;
 
@@ -48,6 +49,7 @@ pub struct Entry {
     pub hits: u64,
     pub meta: Meta,
     pub tone: Option<ToneData>,
+    pub image_size: Option<ImageSize>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

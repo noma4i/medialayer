@@ -133,6 +133,14 @@ impl CacheControl for Cache {
         Cache::ready(self).await;
         Cache::contains(self, key).await
     }
+
+    fn image_size(&self, key: &str) -> Option<crate::image_size::ImageSize> {
+        Cache::image_size(self, key)
+    }
+
+    fn set_image_size(&self, key: &str, size: crate::image_size::ImageSize) -> bool {
+        Cache::set_image_size(self, key, size)
+    }
 }
 
 impl TransportControl for Proxy {

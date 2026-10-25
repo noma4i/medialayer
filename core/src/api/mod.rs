@@ -44,6 +44,8 @@ mod controls_tests;
 #[cfg(test)]
 mod hub_tests;
 #[cfg(test)]
+mod image_size_tests;
+#[cfg(test)]
 mod placeholder_tests;
 #[cfg(test)]
 mod places_tests;

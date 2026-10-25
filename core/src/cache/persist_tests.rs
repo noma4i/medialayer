@@ -37,7 +37,7 @@ async fn inv_cache_24_unknown_index_version_discards_entries() {
 }
 
 fn sample(meta: Meta) -> Entry {
-    Entry { check: super::entry::Check(vec![0; 1].into()), size: 42, kind: Kind::Stream, created: 7, last_access: 9, hits: 3, meta, tone: None }
+    Entry { check: super::entry::Check(vec![0; 1].into()), size: 42, kind: Kind::Stream, created: 7, last_access: 9, hits: 3, meta, tone: None, image_size: None }
 }
 
 #[test]
@@ -87,7 +87,9 @@ fn inv_tone_08_a_line_carries_the_tone_and_a_damaged_tone_field_keeps_the_entry_
     encode_line("tone key", &entry, &mut line);
 
     assert_eq!(decode_line(line.trim_end_matches('\n')), Some(("tone key".to_string(), entry.clone())));
-    let damaged = line.trim_end_matches('\n').rsplit_once('\t').map(|(head, _)| format!("{head}\tzz")).unwrap();
+    let mut fields = line.trim_end_matches('\n').rsplitn(3, '\t');
+    let (size, _, head) = (fields.next().unwrap(), fields.next().unwrap(), fields.next().unwrap());
+    let damaged = format!("{head}\tzz\t{size}");
     assert_eq!(decode_line(&damaged), Some(("tone key".to_string(), Entry { tone: None, ..entry })));
 }
 

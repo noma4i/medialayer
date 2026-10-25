@@ -1,4 +1,5 @@
 use crate::cache;
+use crate::image_size::ImageSize;
 use crate::limits::{Limits, LimitsError};
 use crate::memory::Step;
 use crate::pool::{Directive, Pressure, PoolStats};
@@ -19,6 +20,8 @@ pub trait CacheControl: Send + Sync {
     async fn purge(&self, url: &str);
     async fn evict_now(&self);
     async fn contains(&self, key: &str) -> bool;
+    fn image_size(&self, key: &str) -> Option<ImageSize>;
+    fn set_image_size(&self, key: &str, size: ImageSize) -> bool;
 }
 
 pub trait PoolControl: Send + Sync {

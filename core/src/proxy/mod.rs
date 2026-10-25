@@ -20,7 +20,7 @@ pub(crate) mod memory_store;
 pub(crate) mod test_client;
 
 pub use byte_store::{ByteStore, Meta, StoreReader, StoreWriter};
-pub use config::Config;
+pub use config::{Config, BLOCK_SIZE};
 pub use route::block_key;
 pub use slots::Priority;
 pub(crate) use slots::closing_inline;
@@ -170,6 +170,19 @@ impl Proxy {
         let length = self.inner.store.len(&key).await.filter(|length| *length <= limit)?;
         let _held = self.inner.buffers().reserve_exact(length as usize).await.ok()?;
         self.inner.store.get_range(&key, 0, length).await
+    }
+
+    pub async fn read_head(&self, url: &str, headers: &HashMap<String, String>, limit: u64) -> Option<(String, Vec<u8>)> {
+        let key = self.key_for(url, headers);
+        for stored in [key.clone(), route::block_key(&key, 0)] {
+            let Some(length) = self.inner.store.len(&stored).await else { continue };
+            let length = length.min(limit);
+            let _held = self.inner.buffers().reserve_exact(length as usize).await.ok()?;
+            if let Some(bytes) = self.inner.store.get_range(&stored, 0, length).await {
+                return Some((stored, bytes));
+            }
+        }
+        None
     }
 
     pub async fn playlist_plan(&self, url: &str, headers: &HashMap<String, String>) -> Option<Arc<StoredPlaylist>> {

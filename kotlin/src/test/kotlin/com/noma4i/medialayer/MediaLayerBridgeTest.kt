@@ -134,6 +134,17 @@ class MediaLayerBridgeTest {
   init { NativeCallbacks.install() }
 
   @Test
+  fun inv_image_47_theImageSizeReachesTheCallerFromTheHeadOfAFile() = runBlocking {
+    val media = openWith(OfflineFetcher(), LoggingSlots(), silent = true)
+    val head = intArrayOf(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0x02, 0x80, 0, 0, 0x01, 0xe0, 8, 6, 0, 0, 0)
+    val file = Files.createTempFile("size", ".png").toFile().apply { writeBytes(head.map { it.toByte() }.toByteArray()); deleteOnExit() }
+
+    val size = media.imageSize(Poster("file://" + file.absolutePath))
+
+    assertEquals(ImageSize(640u, 480u), size)
+  }
+
+  @Test
   fun inv_native_06_ten_page_changes_reuse_slots_and_attach_once_per_page() = runBlocking {
     val slots = LoggingSlots()
     val media = openWith(OfflineFetcher(), slots, silent = true)

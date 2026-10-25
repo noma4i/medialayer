@@ -112,6 +112,19 @@ struct MediaLayerBridgeTests {
   }
 
   @Test
+  func inv_image_47_the_image_size_reaches_the_caller_from_the_head_of_a_file() async throws {
+    let media = try open(settings: MemorySettings())
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).png")
+    let head: [UInt8] = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0x02, 0x80, 0, 0, 0x01, 0xe0, 8, 6, 0, 0, 0]
+    try Data(head).write(to: file)
+    defer { try? FileManager.default.removeItem(at: file) }
+
+    let size = try await media.imageSize(Poster(url: file.absoluteString))
+
+    #expect(size == ImageSize(width: 640, height: 480))
+  }
+
+  @Test
   func limitsReachThePlatformSettingsAndStatsAnswer() async throws {
     let settings = MemorySettings()
     let media = try open(settings: settings)

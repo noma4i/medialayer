@@ -3,16 +3,45 @@ use super::ports::CacheControl;
 use super::source::{is_local_url, MediaItem, PlaybackRoute};
 use super::types::Kind;
 use crate::hls::is_manifest_url;
-use crate::proxy::{block_key, Playhead, Proxy, Readiness};
+use crate::image_size::{parse, ImageSize};
+use crate::proxy::{block_key, BLOCK_SIZE, Playhead, Priority, Proxy, Readiness};
 use crate::session::RouteStaleness;
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex};
 use tokio::io::AsyncReadExt;
 use url::Url;
+
+pub const SIZE_MEMO_ENTRIES: usize = 256;
+
+#[derive(Default)]
+struct SizeMemo {
+    order: VecDeque<String>,
+    sizes: HashMap<String, ImageSize>,
+}
+
+impl SizeMemo {
+    fn insert(&mut self, key: String, size: ImageSize) {
+        if self.sizes.insert(key.clone(), size).is_none() {
+            self.order.push_back(key);
+        }
+        while self.order.len() > SIZE_MEMO_ENTRIES {
+            if let Some(oldest) = self.order.pop_front() {
+                self.sizes.remove(&oldest);
+            }
+        }
+    }
+
+    fn forget(&mut self, url: &str) {
+        let matches = |key: &str| key == url || key.strip_prefix(url).is_some_and(|suffix| suffix.starts_with('#'));
+        self.sizes.retain(|key, _| !matches(key));
+        self.order.retain(|key| !matches(key));
+    }
+}
 
 pub struct Routes {
     proxy: Proxy,
     cache: Arc<dyn CacheControl>,
+    sizes: Mutex<SizeMemo>,
     #[cfg(test)]
     barrier: Barrier,
 }
@@ -36,6 +65,7 @@ impl Routes {
         Routes {
             proxy,
             cache,
+            sizes: Mutex::new(SizeMemo::default()),
             #[cfg(test)]
             barrier: Barrier { held: tokio::sync::watch::channel(false).0, entered: std::sync::atomic::AtomicUsize::new(0) },
         }
@@ -112,7 +142,41 @@ impl Routes {
         self.proxy.fetch_bytes(url, headers, limit).await.map_err(|error| MediaError::Fetch { detail: error.to_string() })
     }
 
+    pub async fn image_size(&self, url: &str, headers: &HashMap<String, String>) -> Result<Option<ImageSize>, MediaError> {
+        let local = is_local_url(url);
+        let key = if local { url.to_string() } else { self.proxy.key_for(url, headers) };
+        if let Some(size) = self.known_size(&key) {
+            return Ok(Some(size));
+        }
+        let (stored, head) = if local {
+            (key.clone(), read_local_head(url, BLOCK_SIZE).await?)
+        } else {
+            self.network_head(url, headers).await?
+        };
+        let size = parse(&head);
+        if let Some(size) = size {
+            if local || !self.cache.set_image_size(&stored, size) {
+                locked(&self.sizes).insert(key, size);
+            }
+        }
+        Ok(size)
+    }
+
+    fn known_size(&self, key: &str) -> Option<ImageSize> {
+        locked(&self.sizes).sizes.get(key).copied().or_else(|| self.cache.image_size(key)).or_else(|| self.cache.image_size(&block_key(key, 0)))
+    }
+
+    async fn network_head(&self, url: &str, headers: &HashMap<String, String>) -> Result<(String, Vec<u8>), MediaError> {
+        if let Some(head) = self.proxy.read_head(url, headers, BLOCK_SIZE).await {
+            return Ok(head);
+        }
+        let failed = |detail: String| MediaError::Fetch { detail };
+        self.proxy.fetch_first_block(url, headers, Priority::Image).await.map_err(|error| failed(error.to_string()))?;
+        self.proxy.read_head(url, headers, BLOCK_SIZE).await.ok_or_else(|| failed("the response vanished from the cache".to_string()))
+    }
+
     pub async fn purge(&self, url: &str) {
+        locked(&self.sizes).forget(url);
         self.cache.purge(url).await;
         #[cfg(test)]
         self.barrier.pass().await;
@@ -127,10 +191,25 @@ impl Routes {
     }
 }
 
-async fn read_local_file(url: &str, limit: u64) -> Result<Vec<u8>, MediaError> {
+fn locked<V>(mutex: &Mutex<V>) -> std::sync::MutexGuard<'_, V> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+async fn open_local(url: &str) -> Result<tokio::fs::File, MediaError> {
     let failed = |detail: String| MediaError::Fetch { detail };
     let path = Url::parse(url).ok().and_then(|parsed| parsed.to_file_path().ok()).ok_or_else(|| failed(format!("{url} is not a file path")))?;
-    let file = tokio::fs::File::open(&path).await.map_err(|error| failed(error.to_string()))?;
+    tokio::fs::File::open(&path).await.map_err(|error| failed(error.to_string()))
+}
+
+async fn read_local_head(url: &str, length: u64) -> Result<Vec<u8>, MediaError> {
+    let mut bytes = Vec::new();
+    open_local(url).await?.take(length).read_to_end(&mut bytes).await.map_err(|error| MediaError::Fetch { detail: error.to_string() })?;
+    Ok(bytes)
+}
+
+async fn read_local_file(url: &str, limit: u64) -> Result<Vec<u8>, MediaError> {
+    let failed = |detail: String| MediaError::Fetch { detail };
+    let file = open_local(url).await?;
     let mut bytes = Vec::new();
     file.take(limit.saturating_add(1)).read_to_end(&mut bytes).await.map_err(|error| failed(error.to_string()))?;
     if bytes.len() as u64 > limit {

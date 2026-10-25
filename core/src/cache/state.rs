@@ -1,6 +1,7 @@
 use super::entry::{Entry, Kind, KindStats, CacheStats};
 use super::verify::Verified;
 use crate::analysis::ToneData;
+use crate::image_size::ImageSize;
 use crate::limits::Limits;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound;
@@ -105,6 +106,14 @@ impl State {
 
     pub fn set_tone(&mut self, name: &str, tone: ToneData) -> bool {
         let changed = self.entries.get_mut(name).map(|slot| slot.entry.tone = Some(tone)).is_some();
+        if changed {
+            self.changed(name);
+        }
+        changed
+    }
+
+    pub fn set_image_size(&mut self, name: &str, size: ImageSize) -> bool {
+        let changed = self.entries.get_mut(name).map(|slot| slot.entry.image_size = Some(size)).is_some();
         if changed {
             self.changed(name);
         }

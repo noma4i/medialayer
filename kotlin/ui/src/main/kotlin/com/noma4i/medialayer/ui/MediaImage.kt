@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Constraints
 import coil3.DrawableImage
 import coil3.Extras
@@ -61,6 +62,7 @@ fun MediaImage(
   source: MediaSource,
   modifier: Modifier = Modifier,
   contentScale: ContentScale = ContentScale.Crop,
+  preview: MediaSource? = null,
   content: @Composable (MediaState) -> Unit = {}
 ) {
   if (currentEnvironmentOrNull() == null) {
@@ -72,14 +74,14 @@ fun MediaImage(
   val failure = remember { mutableStateOf<ScopedFailure?>(null) }
   val mount = claimImage(source, item, screen, failure)
   if (source.size != null) {
-    Box(modifier.then(screen.modifier)) { ImageBody(source, item, mount, failure, null, 0L, screen, contentScale, content) }
+    Box(modifier.then(screen.modifier)) { ImageBody(source, preview, item, mount, failure, null, 0L, screen, contentScale, content) }
     return
   }
   val density = LocalDensity.current.density
   val pixelSizes = LocalMediaEnvironment.current.pixelSizes
   BoxWithConstraints(modifier.then(screen.modifier)) {
     val placementPixels = if (constraints.hasBoundedWidth && constraints.hasBoundedHeight) constraints.maxWidth.toLong() * constraints.maxHeight else 0L
-    ImageBody(source, item, mount, failure, decodePixels(constraints, density, source, contentScale, pixelSizes), placementPixels, screen, contentScale, content)
+    ImageBody(source, preview, item, mount, failure, decodePixels(constraints, density, source, contentScale, pixelSizes), placementPixels, screen, contentScale, content)
   }
 }
 
@@ -102,7 +104,7 @@ private fun claimImage(source: MediaSource, item: MediaItem, screen: ScreenVisib
 
 @Composable
 @OptIn(ExperimentalCoroutinesApi::class)
-private fun ImageBody(source: MediaSource, item: MediaItem, mount: PlaceMount, failure: State<ScopedFailure?>, pixels: PixelSize?, placementPixels: Long, screen: ScreenVisibility, contentScale: ContentScale, content: @Composable (MediaState) -> Unit) {
+private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaItem, mount: PlaceMount, failure: State<ScopedFailure?>, pixels: PixelSize?, placementPixels: Long, screen: ScreenVisibility, contentScale: ContentScale, content: @Composable (MediaState) -> Unit) {
   val context = LocalContext.current
   val environment = LocalMediaEnvironment.current
   val media = environment.media
@@ -128,6 +130,10 @@ private fun ImageBody(source: MediaSource, item: MediaItem, mount: PlaceMount, f
     }
   }
   ImageBlur(item, screen, state, contentScale)
+  if (preview != null && screen.visible && state.value != MediaState.Ready) {
+    val previewRequest = remember(media, preview, pixels, scale, placementPixels) { imageRequest(context, preview, pixels, scale, { media.cacheKey(preview.url, preview.headers) }, placementPixels) }
+    AsyncImage(model = previewRequest, contentDescription = null, imageLoader = loader, contentScale = contentScale, modifier = Modifier.fillMaxSize().testTag(PREVIEW_TAG))
+  }
   AsyncImage(
     model = request,
     contentDescription = null,
@@ -184,6 +190,8 @@ internal fun imageRequest(context: Context, source: MediaSource, pixels: PixelSi
       }
     }
     .build()
+
+internal const val PREVIEW_TAG = "medialayer-preview"
 
 internal val PLACEMENT_PIXELS = Extras.Key(default = 0L)
 

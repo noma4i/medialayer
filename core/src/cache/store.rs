@@ -10,6 +10,7 @@ use super::save::{mark_dirty, write_index};
 use super::verify::verified;
 use super::writer::Writer;
 use crate::analysis::ToneData;
+use crate::image_size::ImageSize;
 use crate::limits::{Limits, LimitsError};
 use crate::proxy::Meta;
 use std::path::PathBuf;
@@ -112,6 +113,21 @@ impl Cache {
 
     pub fn set_tone(&self, key: &str, tone: ToneData) -> bool {
         if !self.is_ready() || !self.inner.state().set_tone(&file_name(key), tone) {
+            return false;
+        }
+        mark_dirty(&self.inner);
+        true
+    }
+
+    pub fn image_size(&self, key: &str) -> Option<ImageSize> {
+        if !self.is_ready() {
+            return None;
+        }
+        self.inner.state().slot(&file_name(key)).and_then(|slot| slot.entry.image_size)
+    }
+
+    pub fn set_image_size(&self, key: &str, size: ImageSize) -> bool {
+        if !self.is_ready() || !self.inner.state().set_image_size(&file_name(key), size) {
             return false;
         }
         mark_dirty(&self.inner);

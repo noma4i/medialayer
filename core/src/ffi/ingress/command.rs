@@ -2,6 +2,7 @@ use super::weight::{self, Bytes};
 use crate::analysis::{MediaTone, ToneError};
 use crate::api::{AbortOnDrop, Placeholder, MediaError, MediaItem, MediaState, PlaybackRoute, Pressure, TonePreparation};
 use crate::pool::PoolStats;
+use crate::image_size::ImageSize;
 use crate::proxy::ImageFetchResult;
 use super::super::layer::{StateListener, StatsListener, ToneListener};
 use std::collections::HashMap;
@@ -74,6 +75,7 @@ pub(crate) enum Query {
     Tone(MediaItem, f32),
     Pixels(MediaItem),
     Image { url: String, headers: HashMap<String, String> },
+    ImageSize { url: String, headers: HashMap<String, String> },
     Placeholder(MediaItem, bool),
 }
 
@@ -82,6 +84,7 @@ pub(crate) enum Finished {
     Tone(Result<Option<MediaTone>, ToneError>),
     Pixels(bool),
     Image(Result<ImageFetchResult, MediaError>),
+    ImageSize(Result<Option<ImageSize>, MediaError>),
     Placeholder(Placeholder),
 }
 
@@ -148,7 +151,7 @@ impl Query {
             Query::PlayUrl(item) | Query::Cached(item) | Query::Pixels(item) | Query::Tone(item, _) | Query::Placeholder(item, _) => weight::item(item),
             Query::Refresh(item, route) => weight::sum([weight::item(item), weight::string(&route.url), weight::headers(&route.headers)]),
             Query::Pool => Some(0),
-            Query::Image { url, headers } => weight::sum([weight::string(url), weight::headers(headers)]),
+            Query::Image { url, headers } | Query::ImageSize { url, headers } => weight::sum([weight::string(url), weight::headers(headers)]),
         }
     }
 }

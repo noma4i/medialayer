@@ -2,6 +2,7 @@ use super::entry::{Check, Entry, Kind};
 use super::naming::hex_decode_bytes;
 use crate::analysis::ToneData;
 use crate::identity::hex_into;
+use crate::image_size::ImageSize;
 use crate::proxy::Meta;
 use std::fmt::Write;
 
@@ -27,6 +28,10 @@ pub fn encode_line(key: &str, entry: &Entry, text: &mut String) {
     if let Some(tone) = &entry.tone {
         hex_into(&tone.encode(), text);
     }
+    text.push('\t');
+    if let Some(size) = &entry.image_size {
+        text.push_str(&size.encode());
+    }
     text.push('\n');
 }
 
@@ -42,10 +47,11 @@ pub fn decode_line(line: &str) -> Option<(String, Entry)> {
     let total_length = optional(fields.next()?, |text| text.parse().ok())?;
     let check = decode_sums(fields.next()?, size)?;
     let tone = fields.next().and_then(|field| hex_decode_bytes(field).and_then(|bytes| ToneData::decode(&bytes)));
+    let image_size = fields.next().and_then(ImageSize::decode);
     if fields.next().is_some() {
         return None;
     }
-    Some((key, Entry { size, check, kind, created, last_access, hits, meta: Meta { content_type, total_length }, tone }))
+    Some((key, Entry { size, check, kind, created, last_access, hits, meta: Meta { content_type, total_length }, tone, image_size }))
 }
 
 fn decode_sums(field: &str, size: u64) -> Option<Check> {

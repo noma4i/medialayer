@@ -442,6 +442,13 @@ impl MediaLayer {
         }
     }
 
+    pub async fn image_size(&self, url: String, headers: HashMap<String, String>) -> Result<Option<crate::image_size::ImageSize>, MediaError> {
+        match self.outcome(Query::ImageSize { url, headers }).await? {
+            Finished::ImageSize(size) => size,
+            _ => Err(MediaError::Unexpected { detail: "the executor answered with another result".to_string() }),
+        }
+    }
+
     pub fn image_stats(&self) -> Arc<super::image::ImageCounters> { self.image_stats.clone() }
 
     pub async fn is_cached(&self, source: MediaItem) -> bool {
