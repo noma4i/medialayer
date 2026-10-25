@@ -57,7 +57,7 @@ async fn inv_api_06_reload_restores_attached_view_and_playback_preferences() {
     let player = rig.factory.slot(slot as u32);
     player.seeked.notified().await;
     player.calls.lock().unwrap().clear();
-    stage.reload(&key);
+    stage.reload_key(&key);
     stage.seek(&key, 200);
     player.seeked.notified().await;
     let calls = player.calls();

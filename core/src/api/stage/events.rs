@@ -1,4 +1,4 @@
-use super::Stage;
+use super::{Armed, LoadId, Stage, StateGuard};
 use crate::api::guard::AbortOnDrop;
 use crate::api::slots::{SlotCall, SlotSample};
 use crate::api::types::MediaState;
@@ -21,6 +21,24 @@ impl Stage {
         self.apply_pending_fraction(slot, &key, generation, false);
         self.with_current(slot, generation, |key| self.inner.places.ready(key));
         self.sync_foreground();
+    }
+
+    #[cfg(test)]
+    pub(super) fn load_id_at(&self, slot: usize) -> Option<LoadId> {
+        let state = self.state();
+        let key = state.slot_keys.get(&slot)?;
+        state.loaded.get(key).map(|loaded| LoadId { key: key.clone(), slot, generation: loaded.generation })
+    }
+
+    #[cfg(test)]
+    pub fn reload_key(&self, key: &str) {
+        let id = {
+            let state = self.state();
+            state.loaded.get(key).map(|loaded| LoadId { key: key.to_string(), slot: loaded.slot, generation: loaded.generation })
+        };
+        if let Some(id) = id {
+            self.reload(&id, false);
+        }
     }
 
     #[cfg(test)]
@@ -48,8 +66,8 @@ impl Stage {
             self.advance(&mut state, &key, event, &mut actions);
             key
         };
-        for (key, action) in actions {
-            self.perform(key, action);
+        for (id, action) in actions {
+            self.perform(id, action);
         }
         Some(key)
     }
@@ -103,8 +121,8 @@ impl Stage {
             self.advance(&mut state, &key, Event::Pause, &mut actions);
             self.inner.places.ended(&key);
         }
-        for (key, action) in actions {
-            self.perform(key, action);
+        for (id, action) in actions {
+            self.perform(id, action);
         }
     }
 
@@ -117,59 +135,67 @@ impl Stage {
         self.inner.prefetcher.set_foreground_busy(busy);
     }
 
-    pub(super) fn feed(&self, key: &str, event: Event) {
+    pub(super) fn feed_id(&self, id: &LoadId, event: Event) -> bool {
         let mut actions = Vec::new();
-        self.advance(&mut self.state(), key, event, &mut actions);
-        for (key, action) in actions {
-            self.perform(key, action);
+        if self.with_id(id, |state| self.advance(state, &id.key, event, &mut actions)).is_none() {
+            return false;
         }
+        for (id, action) in actions {
+            self.perform(id, action);
+        }
+        true
     }
 
-    pub(super) fn perform(&self, key: String, action: Action) {
-        crate::trace!("event", "action {} {action:?}", crate::trace::tail(&key));
+    pub(super) fn with_id<R>(&self, id: &LoadId, work: impl FnOnce(&mut StateGuard<'_>) -> R) -> Option<R> {
+        let mut state = self.state();
+        if !state.is_loaded_as(&id.key, id.slot, id.generation) {
+            return None;
+        }
+        Some(work(&mut state))
+    }
+
+    pub(super) fn perform(&self, id: LoadId, action: Action) {
+        crate::trace!("event", "action {} {action:?}", crate::trace::tail(&id.key));
         match action {
             Action::None => {}
-            Action::ForegroundRetry(delay_ms) => self.wake_after(key, delay_ms, Wake::Foreground),
-            Action::Arm { delay_ms } => self.wake_after(key, delay_ms, Wake::Watchdog),
-            Action::Retry(delay_ms) => self.wake_after(key, delay_ms, Wake::Retry),
-            Action::Disarm => self.cancel_task(&key),
-            Action::Replay => self.reload(&key),
+            Action::ForegroundRetry(delay_ms) => self.wake_after(id, delay_ms, Wake::Foreground),
+            Action::Arm { delay_ms } => self.wake_after(id, delay_ms, Wake::Watchdog),
+            Action::Retry(delay_ms) => self.wake_after(id, delay_ms, Wake::Retry),
+            Action::Disarm => {
+                self.with_id(&id, |state| state.tasks.remove(&id.key));
+            }
+            Action::Replay => {
+                self.reload(&id, false);
+            }
             Action::Recover => {
                 let stage = self.clone();
                 self.inner.handle.spawn(async move {
                     stage.inner.routes.repair().await;
-                    stage.refresh_stale_route(&key);
-                    stage.reload(&key);
+                    stage.reload(&id, true);
                 });
             }
             Action::PurgeCache(url) => {
                 let stage = self.clone();
                 self.inner.handle.spawn(async move {
                     stage.inner.routes.purge(&url).await;
-                    stage.feed(&key, Event::CachePurged);
+                    stage.feed_id(&id, Event::CachePurged);
                 });
             }
-            Action::RefreshRoute => {
-                if let Some(loaded) = self.state().loaded.get_mut(&key) {
-                    loaded.route = self.inner.routes.play_url(&loaded.source);
-                }
-                self.feed(&key, Event::RouteRefreshed);
+            Action::RefreshRoute => self.refresh_route(&id),
+            Action::Fail(reason) => {
+                self.with_id(&id, |_| self.inner.places.failed(&id.key, &reason));
             }
-            Action::Fail(reason) => self.inner.places.failed(&key, &reason),
             Action::ForegroundPass => {
-                let is_ok = self.foreground_pass(&key);
-                self.feed(&key, Event::ForegroundPassDone { is_ok });
+                if let Some((is_ok, current)) = self.foreground_pass(&id) {
+                    self.feed_id(&current, Event::ForegroundPassDone { is_ok });
+                }
             }
         }
     }
 
-    fn cancel_task(&self, key: &str) {
-        self.state().tasks.remove(key);
-    }
-
-    fn wake_after(&self, key: String, delay_ms: u64, wake: Wake) {
+    fn wake_after(&self, id: LoadId, delay_ms: u64, wake: Wake) {
         let stage = self.clone();
-        let target = key.clone();
+        let target = id.clone();
         let task = self.inner.handle.spawn(async move {
             tokio::time::sleep(Duration::from_millis(delay_ms)).await;
             if wake != Wake::Watchdog {
@@ -178,54 +204,77 @@ impl Stage {
             match wake {
                 Wake::Watchdog => stage.sample_watchdog(&target).await,
                 Wake::Retry => stage.retry_due(&target),
-                Wake::Foreground => stage.feed(&target, Event::ForegroundDue),
+                Wake::Foreground => {
+                    stage.feed_id(&target, Event::ForegroundDue);
+                }
             }
         });
-        self.state().tasks.insert(key, AbortOnDrop::new(task));
+        let armed = Armed { generation: id.generation, _task: AbortOnDrop::new(task) };
+        self.with_id(&id, |state| state.tasks.insert(id.key.clone(), armed));
     }
 
-    async fn sample_watchdog(&self, key: &str) {
-        let Some(slot) = self.state().loaded.get(key).map(|loaded| loaded.slot) else { return };
-        let Some(SlotSample { position_ms, duration_ms, is_looping, view_attached, frame_rendered }) = self.inner.runner.sample(slot).await
+    async fn sample_watchdog(&self, id: &LoadId) {
+        if self.with_id(id, |_| ()).is_none() {
+            return;
+        }
+        let Some(SlotSample { position_ms, duration_ms, is_looping, view_attached, frame_rendered }) = self.inner.runner.sample(id.slot).await
         else {
             return;
         };
         let sample = Sample { position_ms, duration_ms, is_looping, view_attached, frame_rendered };
-        self.feed(key, Event::WatchdogFired(sample));
+        self.feed_id(id, Event::WatchdogFired(sample));
     }
 
-    fn retry_due(&self, key: &str) {
-        let Some(resolved_generation) = self.state().loaded.get(key).map(|loaded| loaded.route.generation) else { return };
+    fn retry_due(&self, id: &LoadId) {
+        let Some(resolved_generation) = self.with_id(id, |state| state.loaded.get(&id.key).map(|loaded| loaded.route.generation)).flatten() else {
+            return;
+        };
         let event = Event::RetryDue {
             resolved_generation,
             current_generation: self.inner.routes.generation(),
             readiness: self.inner.routes.readiness(),
         };
-        self.feed(key, event);
+        self.feed_id(id, event);
     }
 
-    fn refresh_stale_route(&self, key: &str) {
-        let mut state = self.state();
-        let Some(loaded) = state.loaded.get_mut(key) else { return };
-        loaded.route = self.inner.routes.refresh(&loaded.source, &loaded.route);
+    fn refresh_route(&self, id: &LoadId) {
+        let mut actions = Vec::new();
+        let done = self.with_id(id, |state| {
+            if let Some(loaded) = state.loaded.get_mut(&id.key) {
+                loaded.route = self.inner.routes.play_url(&loaded.source);
+            }
+            self.advance(state, &id.key, Event::RouteRefreshed, &mut actions);
+        });
+        if done.is_some() {
+            for (id, action) in actions {
+                self.perform(id, action);
+            }
+        }
     }
 
-    pub(super) fn reload(&self, key: &str) {
-        let (state, calls) = {
+    pub(super) fn reload(&self, id: &LoadId, is_refreshing: bool) -> Option<LoadId> {
+        let (state, calls, current) = {
             let mut state = self.state();
-            let Some(loaded) = state.loaded.get(key) else { return };
-            let slot = loaded.slot;
+            if !state.is_loaded_as(&id.key, id.slot, id.generation) {
+                return None;
+            }
+            let key = id.key.as_str();
+            if is_refreshing {
+                if let Some(loaded) = state.loaded.get_mut(key) {
+                    loaded.route = self.inner.routes.refresh(&loaded.source, &loaded.route);
+                }
+            }
             let generation = state.next_generation();
             if let Some(loaded) = state.loaded.get_mut(key) {
                 loaded.generation = generation;
             }
-            let mut calls = vec![(slot, SlotCall::Unload)];
+            let mut calls = vec![(id.slot, SlotCall::Unload)];
             let resume = state.positions.take(key);
             calls.extend(self.load_calls(&state, key, resume));
             if state.is_playing(key) {
-                calls.push((slot, SlotCall::Play));
+                calls.push((id.slot, SlotCall::Play));
             }
-            (state, calls)
+            (state, calls, LoadId { key: id.key.clone(), slot: id.slot, generation })
         };
         let is_playing = calls.iter().any(|(_, call)| *call == SlotCall::Play);
         for (slot, call) in calls {
@@ -234,30 +283,32 @@ impl Stage {
         drop(state);
         self.refresh_hints();
         if is_playing {
-            self.feed(key, Event::Play { position_ms: 0 });
+            self.feed_id(&current, Event::Play { position_ms: 0 });
         }
+        Some(current)
     }
 
-    fn foreground_pass(&self, key: &str) -> bool {
+    fn foreground_pass(&self, id: &LoadId) -> Option<(bool, LoadId)> {
+        self.with_id(id, |_| ())?;
         self.inner.foreground_passes.fetch_add(1, Ordering::SeqCst);
         if self.inner.routes.readiness() != Readiness::Ready {
-            return false;
+            return Some((false, id.clone()));
         }
-        let stale = self.state().loaded.get(key).is_some_and(|loaded| self.inner.routes.is_stale(&loaded.route));
-        if stale {
-            self.perform(key.to_string(), Action::RefreshRoute);
-            self.reload(key);
-        } else {
-            self.replay_play(key);
+        let is_stale = self.with_id(id, |state| state.loaded.get(&id.key).is_some_and(|loaded| self.inner.routes.is_stale(&loaded.route)))?;
+        if !is_stale {
+            self.replay_play(id);
+            return Some((true, id.clone()));
         }
-        true
+        self.refresh_route(id);
+        let current = self.reload(id, false)?;
+        Some((true, current))
     }
 
-    fn replay_play(&self, key: &str) {
-        let state = self.state();
-        let slot = state.loaded.get(key).filter(|_| state.is_playing(key)).map(|loaded| loaded.slot);
-        if let Some(slot) = slot {
-            self.inner.runner.send(slot, SlotCall::Play);
-        }
+    fn replay_play(&self, id: &LoadId) {
+        self.with_id(id, |state| {
+            if state.is_playing(&id.key) {
+                self.inner.runner.send(id.slot, SlotCall::Play);
+            }
+        });
     }
 }

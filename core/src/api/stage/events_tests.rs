@@ -424,7 +424,8 @@ async fn inv_api_37_a_late_event_of_an_older_load_does_not_touch_the_new_load_of
         let (slot, _) = rig.holder(&url_of(0));
         let slot = slot as usize;
         let old = stage.generation_at(slot);
-        stage.reload(&url_of(0));
+        let id = stage.load_id_at(slot).unwrap();
+        stage.reload(&id, false);
         assert_ne!(stage.generation_at(slot), old, "{name}: the reload kept the generation");
         let before = rig.parts.places.state(&url_of(0));
 
@@ -432,4 +433,64 @@ async fn inv_api_37_a_late_event_of_an_older_load_does_not_touch_the_new_load_of
 
         assert_eq!(rig.parts.places.state(&url_of(0)), before, "{name} of the old load changed the new load");
     }
+}
+
+#[tokio::test]
+async fn inv_api_39_an_action_held_across_a_reload_of_the_same_key_does_not_touch_the_new_load() {
+    for (name, action) in [("recover", crate::session::Action::Recover), ("purge", crate::session::Action::PurgeCache(url_of(0)))] {
+        let rig = rig().await;
+        let (slot, player) = playing(&rig, video(&url_of(0))).await;
+        let (stage, routes) = (&rig.parts.stage, &rig.parts.routes);
+        let slot = slot as usize;
+        let old = stage.load_id_at(slot).unwrap();
+        routes.hold_repair_and_purge(true);
+        stage.perform(old, action);
+        eventually(|| routes.barrier_entries() == 1).await;
+        let current = stage.load_id_at(slot).unwrap();
+        stage.reload(&current, false);
+        eventually(|| player.loads() == 2 && stage.commands_idle()).await;
+        let (calls, generation) = (player.calls(), stage.generation_at(slot));
+
+        routes.hold_repair_and_purge(false);
+        eventually(|| routes.barrier_exits() == 1).await;
+        eventually(|| stage.commands_idle()).await;
+
+        assert_eq!(player.calls(), calls, "{name} held across the reload sent commands to the new load");
+        assert_eq!(stage.generation_at(slot), generation, "{name} held across the reload reloaded the new load again");
+    }
+}
+
+#[tokio::test]
+async fn inv_api_39_a_stale_action_changes_nothing_of_the_new_load() {
+    use crate::session::Action;
+    let rig = rig().await;
+    let (slot, player) = playing(&rig, video(&url_of(0))).await;
+    let stage = &rig.parts.stage;
+    let slot = slot as usize;
+    let old = stage.load_id_at(slot).unwrap();
+    let current = stage.load_id_at(slot).unwrap();
+    stage.reload(&current, false);
+    eventually(|| player.loads() == 2 && stage.commands_idle()).await;
+    let snapshot = || (stage.generation_at(slot), stage.armed_generation(&url_of(0)), rig.parts.places.state(&url_of(0)), stage.foreground_passes());
+    let before = snapshot();
+    assert_eq!(before.1, Some(before.0), "the new load did not arm its own timer");
+    let calls = player.calls();
+
+    let actions = [
+        Action::Replay,
+        Action::Disarm,
+        Action::Arm { delay_ms: 5 },
+        Action::Retry(5),
+        Action::ForegroundRetry(5),
+        Action::Fail("late".to_string()),
+        Action::RefreshRoute,
+        Action::ForegroundPass,
+    ];
+    for action in actions {
+        let name = format!("{action:?}");
+        stage.perform(old.clone(), action);
+        assert_eq!(snapshot(), before, "a stale {name} changed the new load");
+    }
+    eventually(|| stage.commands_idle()).await;
+    assert_eq!(player.calls(), calls, "a stale action sent commands to the new load");
 }

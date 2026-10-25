@@ -1,4 +1,4 @@
-use super::Stage;
+use super::{LoadId, Stage};
 use crate::api::ports::{PoolControl, SlotDirectives};
 use crate::memory::{Step, StepPlan};
 use crate::pool::{Directive, Pressure, PoolStats};
@@ -42,20 +42,20 @@ impl PoolControl for Stage {
     }
 
     fn foreground(&self) {
-        let (state, commands, keys) = {
+        let (state, commands, ids) = {
             let mut state = self.state();
             state.ring.foreground();
             let orders = state.election.set_foreground(true);
             let commands = state.commands_for(orders);
-            let keys = state.loaded.keys().cloned().collect::<Vec<String>>();
-            (state, commands, keys)
+            let ids = state.loaded.iter().map(|(key, loaded)| LoadId { key: key.clone(), slot: loaded.slot, generation: loaded.generation }).collect::<Vec<LoadId>>();
+            (state, commands, ids)
         };
         self.dispatch(state, commands);
         let stage = self.clone();
         self.inner.handle.spawn(async move {
             stage.inner.routes.repair().await;
-            for key in keys {
-                stage.feed(&key, Event::Foreground);
+            for id in ids {
+                stage.feed_id(&id, Event::Foreground);
             }
         });
     }

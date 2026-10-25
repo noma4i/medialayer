@@ -317,7 +317,7 @@ fn inv_api_35_a_sample_that_returns_after_a_reload_of_the_same_key_is_not_applie
             *slot.on_sample.lock().unwrap() = Some(Arc::new(move || {
                 seen.lock().unwrap().push(std::thread::current().id());
                 if claim_trigger_mark(&owner) {
-                    reloading.reload(&key);
+                    reloading.reload_key(&key);
                 }
             }));
             let (target, key, sampler, foreign_id) = (stage.clone(), url.clone(), slot.clone(), foreign.clone());

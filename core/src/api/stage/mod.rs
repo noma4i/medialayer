@@ -49,6 +49,18 @@ struct Loaded {
     route: PlaybackRoute,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct LoadId {
+    key: String,
+    slot: usize,
+    generation: u64,
+}
+
+struct Armed {
+    generation: u64,
+    _task: AbortOnDrop,
+}
+
 struct State {
     ring: Ring,
     election: Election,
@@ -56,7 +68,7 @@ struct State {
     keys_by_lease: HashMap<u64, String>,
     loaded: HashMap<String, Loaded>,
     slot_keys: HashMap<usize, String>,
-    tasks: HashMap<String, AbortOnDrop>,
+    tasks: HashMap<String, Armed>,
     catalog: HashMap<String, MediaItem>,
     sliced: HashSet<String>,
     views: HashMap<String, u64>,
@@ -289,6 +301,11 @@ impl Stage {
     }
 
     #[cfg(test)]
+    pub fn armed_generation(&self, key: &str) -> Option<u64> {
+        self.state().tasks.get(key).map(|armed| armed.generation)
+    }
+
+    #[cfg(test)]
     pub fn foreground_passes(&self) -> u64 {
         self.inner.foreground_passes.load(std::sync::atomic::Ordering::SeqCst)
     }
@@ -368,8 +385,8 @@ impl Stage {
             self.apply_pending_fraction(slot, &key, generation, true);
         }
         self.refresh_hints();
-        for (key, action) in actions {
-            self.perform(key, action);
+        for (id, action) in actions {
+            self.perform(id, action);
         }
     }
 
@@ -378,7 +395,7 @@ impl Stage {
         state: &mut State,
         command: Command,
         calls: &mut Vec<(usize, SlotCall)>,
-        actions: &mut Vec<(String, Action)>,
+        actions: &mut Vec<(LoadId, Action)>,
         unloaded: &mut Vec<String>,
         resumed: &mut Vec<(usize, String, u64)>,
         parked: &mut Vec<(usize, String, u64)>,
@@ -475,12 +492,12 @@ impl Stage {
         calls
     }
 
-    fn advance(&self, state: &mut State, key: &str, event: Event, actions: &mut Vec<(String, Action)>) {
+    fn advance(&self, state: &mut State, key: &str, event: Event, actions: &mut Vec<(LoadId, Action)>) {
         let now = self.now();
         let Some(loaded) = state.loaded.get_mut(key) else { return };
         let action = next_action(&mut loaded.recovery, event, now);
         if action != Action::None {
-            actions.push((key.to_string(), action));
+            actions.push((LoadId { key: key.to_string(), slot: loaded.slot, generation: loaded.generation }, action));
         }
     }
 }

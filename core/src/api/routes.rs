@@ -13,11 +13,49 @@ use url::Url;
 pub struct Routes {
     proxy: Proxy,
     cache: Arc<dyn CacheControl>,
+    #[cfg(test)]
+    barrier: Barrier,
+}
+
+#[cfg(test)]
+pub struct Barrier {
+    held: tokio::sync::watch::Sender<bool>,
+    entered: std::sync::atomic::AtomicUsize,
+    exited: std::sync::atomic::AtomicUsize,
+}
+
+#[cfg(test)]
+impl Barrier {
+    async fn pass(&self) {
+        self.entered.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let _ = self.held.subscribe().wait_for(|held| !*held).await;
+        self.exited.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 impl Routes {
     pub fn new(proxy: Proxy, cache: Arc<dyn CacheControl>) -> Routes {
-        Routes { proxy, cache }
+        Routes {
+            proxy,
+            cache,
+            #[cfg(test)]
+            barrier: Barrier { held: tokio::sync::watch::channel(false).0, entered: std::sync::atomic::AtomicUsize::new(0), exited: std::sync::atomic::AtomicUsize::new(0) },
+        }
+    }
+
+    #[cfg(test)]
+    pub fn hold_repair_and_purge(&self, held: bool) {
+        self.barrier.held.send_replace(held);
+    }
+
+    #[cfg(test)]
+    pub fn barrier_exits(&self) -> usize {
+        self.barrier.exited.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[cfg(test)]
+    pub fn barrier_entries(&self) -> usize {
+        self.barrier.entered.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     pub fn play_url(&self, source: &MediaItem) -> PlaybackRoute {
@@ -64,7 +102,10 @@ impl Routes {
     }
 
     pub async fn repair(&self) -> bool {
-        self.proxy.repair().await
+        let repaired = self.proxy.repair().await;
+        #[cfg(test)]
+        self.barrier.pass().await;
+        repaired
     }
 
     pub fn readiness(&self) -> Readiness {
@@ -80,6 +121,8 @@ impl Routes {
 
     pub async fn purge(&self, url: &str) {
         self.cache.purge(url).await;
+        #[cfg(test)]
+        self.barrier.pass().await;
     }
 
     pub async fn is_cached(&self, url: &str, headers: &HashMap<String, String>) -> bool {
