@@ -113,3 +113,36 @@ async fn inv_ffi_01_the_platform_reader_is_closed_when_the_body_is_dropped_midwa
         assert_eq!(platform.closes.load(std::sync::atomic::Ordering::SeqCst), 1, "read_to_end={read_to_end}");
     }
 }
+
+fn platform_body(runtime: &tokio::runtime::Runtime, closes: &Arc<std::sync::atomic::AtomicUsize>) -> fetch::BodyStream {
+    let platform = Arc::new(Platform { seen: Mutex::new(Vec::new()), chunks: vec![Ok(Some(b"ab".to_vec()))], closes: closes.clone() });
+    runtime.block_on(ForeignFetcher::new(platform, InputLimits::default()).fetch(request())).unwrap().body
+}
+
+#[test]
+fn inv_ffi_18_a_body_dropped_while_the_runtime_closes_is_released_once() {
+    for queued in [true, false] {
+        let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).max_blocking_threads(1).build().unwrap();
+        let closes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let body = platform_body(&runtime, &closes);
+        let handle = runtime.handle().clone();
+        let (hold, gate) = std::sync::mpsc::channel::<()>();
+        let (busy, started) = std::sync::mpsc::channel::<()>();
+        if queued {
+            handle.spawn_blocking(move || {
+                busy.send(()).unwrap();
+                let _ = gate.recv();
+            });
+            started.recv().unwrap();
+            drop(body);
+            runtime.shutdown_background();
+        } else {
+            runtime.shutdown_background();
+            let _inside = handle.enter();
+            drop(body);
+        }
+        drop(hold);
+
+        assert_eq!(closes.load(std::sync::atomic::Ordering::SeqCst), 1, "queued={queued}");
+    }
+}

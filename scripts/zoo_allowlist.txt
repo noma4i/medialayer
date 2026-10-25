@@ -12,8 +12,7 @@ spawn cache/evict.rs 1 # eviction pass, guarded by the evicting flag, ends when 
 spawn cache/save.rs 1 # index persist loop, guarded by the persisting flag, ends when nothing is dirty
 spawn cache/store.rs 1 # index load on open, ends with the load
 spawn cache/writer.rs 2 # part cleanup after a dropped writer, part creation that deletes its file when abandoned
-spawn ffi/fetcher.rs 1 # closes the platform reader on the blocking pool after the body is dropped
-spawn proxy/slots.rs 1 # closes a dropped origin body on the blocking pool, then returns its permit, ends with both
+spawn detached.rs 1 # platform release of a response body on the blocking pool, runs once even when the runtime drops the task
 spawn ffi/layer.rs 2 # layer cleanup after shutdown, ends with the cleanup that joins the assembly and the releaser, and the closer thread that stops the runtime in the background
 spawn api/tones.rs 1 # pixel analysis of one key, one run per key through the running set, ends with the analysis and the tone write
 spawn prefetch/runner.rs 1 # load jobs owned by prefetch::Owner through the cancel notify of every job

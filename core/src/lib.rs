@@ -25,6 +25,7 @@ pub fn version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+mod detached;
 #[cfg(test)]
 mod alloc_probe;
 #[cfg(test)]

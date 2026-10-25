@@ -10,7 +10,7 @@ thread_local! {
 
 fn grow(bytes: isize) {
     let _ = LIVE.try_with(|live| {
-        live.set(live.get() + bytes);
+        live.set(live.get().saturating_add(bytes));
         let _ = PEAK.try_with(|peak| peak.set(peak.get().max(live.get())));
     });
 }

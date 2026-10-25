@@ -118,12 +118,7 @@ impl Drop for HeldBody {
             drop(_inline);
             drop(permit);
         };
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                handle.spawn_blocking(close);
-            }
-            Err(_) => close(),
-        }
+        crate::detached::release_once(close);
     }
 }
 

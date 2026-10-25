@@ -70,12 +70,7 @@ impl Drop for ClosingReader {
         if crate::proxy::closing_inline() {
             return reader.release();
         }
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                handle.spawn_blocking(move || reader.release());
-            }
-            Err(_) => reader.release(),
-        }
+        crate::detached::release_once(move || reader.release());
     }
 }
 
