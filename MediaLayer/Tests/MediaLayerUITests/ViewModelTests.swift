@@ -293,11 +293,11 @@ struct ViewModelTests {
   }
 
   @Test
-  func firstFrameFiresOncePerLoadAndEndFiresEveryTimeTheClipEnds() {
+  func inv_mount_02_firstFrameFiresOncePerSourceAcrossLoadingAndEndFiresEveryTimeTheClipEnds() {
     var edges = VideoEdges()
     let steps: [(MediaState, firstFrame: Bool, ended: Bool)] = [
       (.loading, false, false), (.ready, false, false), (.rendered, true, false), (.rendered, false, false),
-      (.ended, false, true), (.rendered, false, false), (.ended, false, true), (.loading, false, false), (.rendered, true, false)
+      (.ended, false, true), (.rendered, false, false), (.ended, false, true), (.loading, false, false), (.rendered, false, false), (.idle, false, false), (.rendered, true, false)
     ]
 
     for (state, firstFrame, ended) in steps {

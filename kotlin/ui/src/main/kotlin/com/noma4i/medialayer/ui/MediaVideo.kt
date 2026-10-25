@@ -46,7 +46,7 @@ internal class VideoEdges {
   private var hasRendered = false
 
   fun advance(state: MediaState): Pair<Boolean, Boolean> = when (state) {
-    is MediaState.Idle, is MediaState.Loading -> { hasRendered = false; false to false }
+    is MediaState.Idle -> { hasRendered = false; false to false }
     is MediaState.Rendered -> (!hasRendered).also { hasRendered = true } to false
     is MediaState.Ended -> false to true
     else -> false to false

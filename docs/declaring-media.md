@@ -332,7 +332,7 @@ All three kinds share one state type, `MediaState`:
 | `ended` | A one-shot video or audio reached its end. The core stops it and rewinds it to the start. The next play starts from zero and returns the place to `rendered`, no manual seek is needed. A seek made after the end is kept |
 | `failed` | The load failed; carries the reason |
 
-`rendered` and `ended` count as ready: `state.isReady` is true for `ready`, `rendered` and `ended`. A ready place never goes back to `loading` by itself.
+`rendered` and `ended` count as ready: `state.isReady` is true for `ready`, `rendered` and `ended`. A ready place never goes back to `loading` by itself. `onFirstFrame` fires once per source of a place: a pause, a late `loading` or a reload does not repeat it, and only a new source (or the view leaving the screen) resets it, so the app needs no "started" flag of its own.
 
 ### Swift
 

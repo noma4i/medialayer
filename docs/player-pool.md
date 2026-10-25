@@ -2,7 +2,7 @@
 
 MediaLayer gives you a pool of native players and juggles them for you. You say which pages are visible and which one plays. The pool decides which player holds which source, reuses players when the window moves and never creates more than the pool size.
 
-You normally do not call pool operations. You declare places with `MediaVideo` ([declaring media](declaring-media.md)) and the pool runs them from visibility. Two things are public.
+You normally do not call pool operations. You declare places with `MediaVideo` ([declaring media](declaring-media.md)) and the pool runs them from visibility. Mount every video of a pager or list as it is: the app needs no mount policy of its own (no "only the current page and its neighbours" filter). A `MediaVideo` that is off screen declares nothing, takes no slot, loads nothing and creates no native player, and the pool keeps the number of live players within its size. Two things are public.
 
 | Call | Result |
 | ---- | ------ |

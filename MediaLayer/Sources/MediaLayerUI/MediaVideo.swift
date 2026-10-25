@@ -7,7 +7,7 @@ struct VideoEdges {
 
   mutating func advance(to state: MediaState) -> (firstFrame: Bool, ended: Bool) {
     switch state {
-    case .idle, .loading:
+    case .idle:
       hasRendered = false
       return (false, false)
     case .rendered:
@@ -15,7 +15,7 @@ struct VideoEdges {
       return (!hasRendered, false)
     case .ended:
       return (false, true)
-    case .ready, .failed:
+    case .loading, .ready, .failed:
       return (false, false)
     }
   }
