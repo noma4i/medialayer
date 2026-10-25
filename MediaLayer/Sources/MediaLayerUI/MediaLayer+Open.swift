@@ -145,7 +145,7 @@ final class OpenedResources: MemoryReleaser, @unchecked Sendable {
   private let audio: MediaAudioSession?
   private let lock = NSLock()
   private weak var media: MediaLayer?
-  private(set) var isClosed = false
+  private var isClosed = false
 
   init(images: ImageMemoryReleaser, factory: AVQueuePlayerSlotFactory, audio: MediaAudioSession?) {
     self.images = images
