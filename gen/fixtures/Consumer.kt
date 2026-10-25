@@ -1,6 +1,10 @@
 package app.media
 
 import com.noma4i.medialayer.CacheStrategy
+import com.noma4i.medialayer.Evict
+import com.noma4i.medialayer.ImageWindow
+import com.noma4i.medialayer.PoolSettings
+import com.noma4i.medialayer.specDefaults
 import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaItem
 import com.noma4i.medialayer.MediaSource
@@ -35,5 +39,35 @@ class GeneratedSourcesTest {
   @Test
   fun inv_gen_03_the_embedded_spec_json_is_the_dsl_data() {
     assertEquals(ExpectedSpecJson.VALUE, MediaSpecJson.VALUE)
+  }
+
+  @Test
+  fun inv_gen_03_the_generated_spec_reaches_the_core_with_every_dsl_option() {
+    val parsed = specDefaults(MediaSpecJson.VALUE)
+    val limits = parsed.defaults
+
+    assertEquals(3UL * 1024UL * 1024UL * 1024UL, limits.budget)
+    assertEquals(96UL * 1024UL * 1024UL, limits.minBudget)
+    assertEquals(0.75, limits.shrinkTo, 0.0)
+    assertEquals(0.15, limits.freeSpaceFraction, 0.0)
+    assertEquals(Evict.ExpireAfter(2u * 86400u), limits.evict)
+    assertEquals(192UL * 1024UL * 1024UL, limits.memoryBudget)
+    assertEquals(180u, limits.timeoutSeconds)
+    assertEquals(5u, limits.maxConcurrent)
+    assertEquals(7200u, limits.dedupeWindowSeconds)
+    assertEquals(250u, limits.dedupeMaxEntries)
+    assertEquals(80u, limits.prefetchBudgetMib)
+    assertEquals(4u, limits.slots)
+    assertEquals(2u, limits.prefetchFrom)
+    assertEquals(5u, limits.prefetchTo)
+    assertEquals(listOf(2u, 1u), limits.leadingChunks)
+    assertEquals(4u, limits.playbackChunksAhead)
+    assertEquals(PoolSettings(reach = 2u, holdOffMs = 7_000UL, trimDelayMs = 60_000UL, lowRamSlots = 1u, lowRamReach = 0u), parsed.pool)
+    assertEquals(listOf("Authorization", "Cookie"), parsed.namespaceHeaders)
+    assertEquals(listOf("Authorization", "Cookie"), parsed.forwardHeaders)
+    assertEquals(Evict.Lfu, parsed.evictVideo)
+    assertEquals(Evict.LargestFirst, parsed.evictImage)
+    assertEquals(Evict.Fifo, parsed.evictAudio)
+    assertEquals(listOf(ImageWindow("rich_image", 3u, 2u, 6u)), parsed.imageWindows)
   }
 }

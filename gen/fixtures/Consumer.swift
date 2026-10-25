@@ -38,4 +38,34 @@ struct GeneratedSourcesTests {
   func inv_gen_03_the_embedded_spec_json_is_the_dsl_data() {
     #expect(MediaSpecJSON.value == ExpectedSpecJSON.value)
   }
+
+  @Test
+  func inv_gen_03_the_generated_spec_reaches_the_core_with_every_dsl_option() throws {
+    let parsed = try specDefaults(json: MediaSpecJSON.value)
+    let limits = parsed.defaults
+
+    #expect(limits.budget == 3 * 1024 * 1024 * 1024)
+    #expect(limits.minBudget == 96 * 1024 * 1024)
+    #expect(limits.shrinkTo == 0.75)
+    #expect(limits.freeSpaceFraction == 0.15)
+    #expect(limits.evict == .expireAfter(seconds: 2 * 86400))
+    #expect(limits.memoryBudget == 192 * 1024 * 1024)
+    #expect(limits.timeoutSeconds == 180)
+    #expect(limits.maxConcurrent == 5)
+    #expect(limits.dedupeWindowSeconds == 7200)
+    #expect(limits.dedupeMaxEntries == 250)
+    #expect(limits.prefetchBudgetMib == 80)
+    #expect(limits.slots == 4)
+    #expect(limits.prefetchFrom == 2)
+    #expect(limits.prefetchTo == 5)
+    #expect(limits.leadingChunks == [2, 1])
+    #expect(limits.playbackChunksAhead == 4)
+    #expect(parsed.pool == PoolSettings(reach: 2, holdOffMs: 7_000, trimDelayMs: 60_000, lowRamSlots: 1, lowRamReach: 0))
+    #expect(parsed.namespaceHeaders == ["Authorization", "Cookie"])
+    #expect(parsed.forwardHeaders == ["Authorization", "Cookie"])
+    #expect(parsed.evictVideo == .lfu)
+    #expect(parsed.evictImage == .largestFirst)
+    #expect(parsed.evictAudio == .fifo)
+    #expect(parsed.imageWindows == [ImageWindow(name: "rich_image", behind: 3, from: 2, to: 6)])
+  }
 }

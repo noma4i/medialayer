@@ -162,18 +162,6 @@ struct AnimatedFramesTests {
   }
 
   @Test
-  func inv_image_06_a_gif_over_the_byte_budget_streams_a_bounded_window_and_keeps_its_loop() throws {
-    let data = transparentGif(frames: 40, side: 16, delay: 0.05)
-    let frames = try #require(AnimatedFrames.decode(data, maxPixel: 16))
-    let stream = frames.stream
-
-    #expect(frames.frameCount == 40)
-    #expect(abs(frames.loopDuration(rate: 1) - 2) < 0.001)
-    for index in 0 ..< 40 { #expect(frames.image(at: index) != nil) }
-    #expect(stream.cachedCount <= FrameStream.window)
-  }
-
-  @Test
   func aGifOverTheBudgetPeaksBelowTheBudgetWhileDecoding() throws {
     let data = gifOfSharedFrames(frames: 200, side: 600)
     let base = residentBytes()

@@ -63,6 +63,7 @@ fn inv_gen_03_generated_swift_compiles_with_the_library() {
     for test in [
         "inv_strategy_15_generated_sources_turn_into_media_items_with_the_dsl_values",
         "inv_gen_03_the_embedded_spec_json_is_the_dsl_data",
+        "inv_gen_03_the_generated_spec_reaches_the_core_with_every_dsl_option",
     ] {
         assert!(text.contains(test), "the generated test {test} did not run:\n{text}");
     }

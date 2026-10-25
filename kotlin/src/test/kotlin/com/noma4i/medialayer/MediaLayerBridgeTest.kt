@@ -261,10 +261,7 @@ class MediaLayerBridgeTest {
   }
 
   @Test
-  fun specDefaultsCarryTheSpecLimitsPoolAndNamespaceHeadersAndRefuseABrokenSpec() {
-    val parsed = specDefaults("""{"cache":{"budget":3000000000,"namespace_headers":["Authorization"]},"videos":[{"name":"clip","pool":{"slots":5}}]}""")
-
-    assertEquals(listOf<Any>(3_000_000_000uL, 5u, listOf("Authorization")), listOf(parsed.defaults.budget, parsed.defaults.slots, parsed.namespaceHeaders))
+  fun aBrokenSpecIsRefusedWithInvalidSpecAndItsDetail() {
     try {
       specDefaults("{")
       fail("expected MediaException.InvalidSpec")
