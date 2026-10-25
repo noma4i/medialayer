@@ -184,10 +184,14 @@ pub(super) async fn collect_limited(mut body: BodyStream, limit: usize, idle: Du
     loop {
         match tokio::time::timeout(idle, body.next()).await {
             Ok(Some(Ok(chunk))) => {
-                collected.extend_from_slice(&chunk);
-                if collected.len() > limit {
+                if chunk.len() > limit - collected.len() {
                     return None;
                 }
+                if chunk.len() > collected.capacity() - collected.len() {
+                    let grown = (collected.capacity() * 2).max(collected.len() + chunk.len()).min(limit);
+                    collected.reserve_exact(grown - collected.len());
+                }
+                collected.extend_from_slice(&chunk);
             }
             Ok(None) => return Some(collected),
             _ => return None,

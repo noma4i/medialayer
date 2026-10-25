@@ -400,6 +400,8 @@ mod route_tests;
 #[cfg(test)]
 mod slots_tests;
 #[cfg(test)]
+mod waiters_tests;
+#[cfg(test)]
 mod stand_tests;
 #[cfg(test)]
 mod readahead_tests;

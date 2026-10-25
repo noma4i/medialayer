@@ -2,7 +2,7 @@ use crate::fetch::{BodyStream, FetchError};
 use bytes::Bytes;
 use futures_util::Stream;
 use std::cell::Cell;
-use std::collections::VecDeque;
+use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -42,8 +42,25 @@ struct State {
     max_waiting: usize,
     reserved: usize,
     in_use: usize,
-    playback: VecDeque<oneshot::Sender<Permit>>,
-    prefetch: VecDeque<oneshot::Sender<Permit>>,
+    next: u64,
+    playback: BTreeMap<u64, oneshot::Sender<Permit>>,
+    prefetch: BTreeMap<u64, oneshot::Sender<Permit>>,
+}
+
+struct Waiting {
+    state: Arc<Mutex<State>>,
+    seq: u64,
+    prefetch: bool,
+}
+
+impl Drop for Waiting {
+    fn drop(&mut self) {
+        let mut state = lock(&self.state);
+        let queue = if self.prefetch { &mut state.prefetch } else { &mut state.playback };
+        if queue.remove(&self.seq).is_some() {
+            state.hand_out(&self.state);
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -125,8 +142,9 @@ impl PrioritySlots {
                 max_waiting,
                 reserved,
                 in_use: 0,
-                playback: VecDeque::new(),
-                prefetch: VecDeque::new(),
+                next: 0,
+                playback: BTreeMap::new(),
+                prefetch: BTreeMap::new(),
             })),
         }
     }
@@ -155,24 +173,26 @@ impl PrioritySlots {
     }
 
     pub async fn acquire(&self, priority: Priority) -> Result<Permit, QueueFull> {
-        let receiver = {
+        let (receiver, _waiting) = {
             let mut state = lock(&self.state);
-            state.drop_abandoned();
             if state.can_take_now(priority) {
                 state.in_use += 1;
                 return Ok(Permit { state: Some(self.state.clone()) });
             }
-            if priority.is_prefetch() && state.prefetch.len() >= state.max_waiting {
+            let prefetch = priority.is_prefetch();
+            if prefetch && state.prefetch.len() >= state.max_waiting {
                 return Err(QueueFull);
             }
             let (sender, receiver) = oneshot::channel();
             crate::trace!("slots", "wait {priority:?} in_use={} playback={} prefetch={}", state.in_use, state.playback.len(), state.prefetch.len());
-            if priority.is_prefetch() {
-                state.prefetch.push_back(sender);
+            let seq = state.next;
+            state.next += 1;
+            if prefetch {
+                state.prefetch.insert(seq, sender);
             } else {
-                state.playback.push_back(sender);
+                state.playback.insert(seq, sender);
             }
-            receiver
+            (receiver, Waiting { state: self.state.clone(), seq, prefetch })
         };
         match receiver.await {
             Ok(permit) => Ok(permit),
@@ -182,11 +202,6 @@ impl PrioritySlots {
 }
 
 impl State {
-    fn drop_abandoned(&mut self) {
-        self.playback.retain(|waiter| !waiter.is_closed());
-        self.prefetch.retain(|waiter| !waiter.is_closed());
-    }
-
     fn prefetch_limit(&self) -> usize {
         self.max - self.reserved.min(self.max - 1)
     }
@@ -202,9 +217,9 @@ impl State {
     fn hand_out(&mut self, shared: &Arc<Mutex<State>>) {
         loop {
             let waiter = if self.in_use < self.max && !self.playback.is_empty() {
-                self.playback.pop_front()
+                self.playback.pop_first().map(|(_, sender)| sender)
             } else if self.in_use < self.prefetch_limit() && self.playback.is_empty() {
-                self.prefetch.pop_front()
+                self.prefetch.pop_first().map(|(_, sender)| sender)
             } else {
                 None
             };

@@ -21,6 +21,20 @@ struct Waiter {
     wake: oneshot::Sender<LoadPermit>,
 }
 
+struct Pending {
+    gate: Arc<Gate>,
+    seq: u64,
+}
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        let mut queue = self.gate.queue();
+        if let Some(index) = queue.waiters.iter().position(|waiter| waiter.seq == self.seq) {
+            queue.waiters.swap_remove(index);
+        }
+    }
+}
+
 pub(super) struct LoadPermit(Option<Arc<Gate>>);
 
 impl Drop for LoadPermit {
@@ -44,7 +58,7 @@ impl Gate {
     }
 
     pub async fn acquire(self: &Arc<Gate>, held: Option<LoadPermit>, distance: &Arc<AtomicUsize>, chunk: usize) -> LoadPermit {
-        let receiver = {
+        let (receiver, _pending) = {
             let mut queue = self.queue();
             if let Some(mut permit) = held {
                 permit.0 = None;
@@ -55,9 +69,19 @@ impl Gate {
             queue.next += 1;
             queue.waiters.push(Waiter { distance: distance.clone(), chunk, seq, wake });
             self.grant(&mut queue);
-            receiver
+            (receiver, Pending { gate: self.clone(), seq })
         };
         receiver.await.expect("the gate outlives its waiters")
+    }
+
+    #[cfg(test)]
+    pub fn waiting(&self) -> usize {
+        self.queue().waiters.len()
+    }
+
+    #[cfg(test)]
+    pub fn running(&self) -> usize {
+        self.queue().running
     }
 
     fn queue(&self) -> MutexGuard<'_, Queue> {

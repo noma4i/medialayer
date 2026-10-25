@@ -106,6 +106,17 @@ impl Registry {
     }
 }
 
+#[cfg(test)]
+impl ProxyShared {
+    pub fn registered_headers_of(&self, url: &str) -> Option<HashMap<String, String>> {
+        locked(&self.registered_headers).get(url).cloned()
+    }
+
+    pub fn unregister_headers(&self, url: &str) {
+        locked(&self.registered_headers).0.remove(url);
+    }
+}
+
 pub(super) fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }

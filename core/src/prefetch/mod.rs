@@ -23,6 +23,8 @@ mod mock_loader;
 #[cfg(test)]
 mod chunk_tests;
 #[cfg(test)]
+mod gate_tests;
+#[cfg(test)]
 mod ledger_tests;
 #[cfg(test)]
 mod proxy_loader_tests;

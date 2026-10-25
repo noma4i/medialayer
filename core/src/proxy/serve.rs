@@ -5,6 +5,7 @@ use super::route::{
     answered_length, block_key, content_range_total, content_type_for, parse_range, resolve_range, target_url, ByteRange,
     RangeOutcome,
 };
+use super::playlists::StoredPlaylist;
 use super::slots::Priority;
 use crate::fetch::{header_value, FetchError, Request};
 use crate::hls::{is_manifest_url, Playlist};
@@ -29,6 +30,10 @@ mod probe_tests;
 #[cfg(test)]
 #[path = "playlist_work_tests.rs"]
 mod playlist_work_tests;
+
+#[cfg(test)]
+#[path = "register_tests.rs"]
+mod register_tests;
 
 pub(super) type ProxyBody = UnsyncBoxBody<Bytes, io::Error>;
 
@@ -132,7 +137,9 @@ async fn playlist(inner: &Arc<ProxyShared>, target: &str, headers: Upstream, hea
         if inner.store.contains(&key).await {
             match inner.stored_plan(target, &key).await {
                 Ok(Some(stored)) => {
-                    register_plan(inner, target, &stored.plan, &headers, head_only);
+                    if !inner.windows.restart_registered(target, &stored, &headers) {
+                        register_plan(inner, target, &stored.plan, &headers, head_only, Some(&stored));
+                    }
                     let body = stored.body();
                     return respond(200, vec![("content-type", PLAYLIST_TYPE.to_string()), ("content-length", body.len().to_string())], full(body), head_only);
                 }
@@ -173,18 +180,21 @@ async fn playlist_direct(inner: &ProxyShared, target: &str, headers: Upstream, h
 fn playlist_response(inner: &ProxyShared, target: &str, bytes: &[u8], headers: &Upstream, head_only: bool) -> Response<ProxyBody> {
     let source = String::from_utf8_lossy(bytes);
     let plan = Playlist::parse(&source, target);
-    register_plan(inner, target, &plan, headers, head_only);
+    register_plan(inner, target, &plan, headers, head_only, None);
     let body = plan.body;
     let headers = vec![("content-type", PLAYLIST_TYPE.to_string()), ("content-length", body.len().to_string())];
     respond(200, headers, full(body), head_only)
 }
 
-fn register_plan(inner: &ProxyShared, target: &str, plan: &Playlist, headers: &Upstream, head_only: bool) {
+fn register_plan(inner: &ProxyShared, target: &str, plan: &Playlist, headers: &Upstream, head_only: bool, stored: Option<&Arc<StoredPlaylist>>) {
     inner.inherit_headers(&plan.references, headers);
     if !head_only {
         match plan.variant.as_ref() {
             Some(variant) => inner.windows.remember_variant(variant, target),
-            None => inner.windows.register_plan(target, &plan),
+            None => match stored {
+                Some(stored) => inner.windows.register_stored(target, stored, headers),
+                None => inner.windows.register_plan(target, plan),
+            },
         }
     }
 }

@@ -1,4 +1,5 @@
 use super::inner::{locked, ProxyShared};
+use super::playlists::StoredPlaylist;
 use super::recent::Recent;
 use crate::limits::MAX_CHUNKS_AHEAD;
 use crate::pool::Retention;
@@ -6,7 +7,7 @@ use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use tokio::sync::Notify;
 use tokio::time::Instant;
@@ -24,8 +25,14 @@ pub trait Playhead: Send + Sync {
     fn readahead(&self, playlist: &str, hint_ms: u64);
 }
 
+struct Registered {
+    plan: Weak<StoredPlaylist>,
+    headers: HashMap<String, String>,
+}
+
 pub(super) struct Stream {
     root: String,
+    registered: Option<Registered>,
     starts_ms: Vec<u64>,
     target_ms: u64,
     grown: AtomicU32,
@@ -125,12 +132,42 @@ impl Windows {
     }
 
     pub fn register_plan(&self, playlist: &str, plan: &crate::hls::Playlist) {
-        if !plan.is_vod { return; }
-        let segments = plan.chunks.iter().zip(&plan.durations).map(|(chunk, duration)| (chunk.segment.clone(), *duration)).collect();
-        self.register_segments(playlist, segments, plan.target_ms);
+        self.register(playlist, plan, None);
     }
 
-    fn register_segments(&self, playlist: &str, segments: Vec<(String, u64)>, target_ms: u64) {
+    pub fn register_stored(&self, playlist: &str, stored: &Arc<StoredPlaylist>, headers: &HashMap<String, String>) {
+        let registered = Registered { plan: Arc::downgrade(stored), headers: headers.clone() };
+        self.register(playlist, &stored.plan, Some(registered));
+    }
+
+    pub fn restart_registered(&self, playlist: &str, stored: &Arc<StoredPlaylist>, headers: &HashMap<String, String>) -> bool {
+        let stream = {
+            let mut table = locked(&self.table);
+            let root = table.variants.get(playlist).cloned().unwrap_or_else(|| playlist.to_string());
+            let Some(stream) = table.by_root.get(&root).cloned() else { return false };
+            let Some(registered) = stream.registered.as_ref() else { return false };
+            if !Weak::ptr_eq(&registered.plan, &Arc::downgrade(stored)) || registered.headers != *headers {
+                return false;
+            }
+            stream
+        };
+        stream.grown.store(0, Ordering::SeqCst);
+        self.announce(&stream);
+        true
+    }
+
+    #[cfg(test)]
+    pub fn stream_id(&self, root: &str) -> Option<usize> {
+        locked(&self.table).by_root.get(root).map(|stream| Arc::as_ptr(stream) as usize)
+    }
+
+    fn register(&self, playlist: &str, plan: &crate::hls::Playlist, registered: Option<Registered>) {
+        if !plan.is_vod { return; }
+        let segments = plan.chunks.iter().zip(&plan.durations).map(|(chunk, duration)| (chunk.segment.clone(), *duration)).collect();
+        self.register_segments(playlist, segments, plan.target_ms, registered);
+    }
+
+    fn register_segments(&self, playlist: &str, segments: Vec<(String, u64)>, target_ms: u64, registered: Option<Registered>) {
         let mut starts_ms = Vec::with_capacity(segments.len());
         let mut elapsed = 0;
         for (_, duration) in &segments {
@@ -138,7 +175,7 @@ impl Windows {
             elapsed += duration;
         }
         let root = locked(&self.table).variants.get(playlist).cloned().unwrap_or_else(|| playlist.to_string());
-        let stream = Arc::new(Stream { root: root.clone(), starts_ms, target_ms, grown: AtomicU32::new(0), nudge: Notify::new() });
+        let stream = Arc::new(Stream { root: root.clone(), registered, starts_ms, target_ms, grown: AtomicU32::new(0), nudge: Notify::new() });
         {
             let mut table = locked(&self.table);
             Self::forget(&mut table, &root);
