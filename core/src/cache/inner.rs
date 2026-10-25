@@ -38,6 +38,12 @@ pub struct CacheShared {
     #[cfg(test)]
     pub hashed_bytes: AtomicU64,
     #[cfg(test)]
+    pub write_open_threads: Mutex<Vec<std::thread::ThreadId>>,
+    #[cfg(test)]
+    pub writer_drops: AtomicU64,
+    #[cfg(test)]
+    pub write_open_pause: Mutex<Option<(tokio::sync::oneshot::Sender<()>, tokio::sync::oneshot::Receiver<()>)>>,
+    #[cfg(test)]
     pub save_pause: Mutex<Option<(tokio::sync::oneshot::Sender<()>, tokio::sync::oneshot::Receiver<()>)>>,
     pub dir: PathBuf,
     pub available_bytes: u64,
@@ -86,6 +92,12 @@ impl CacheShared {
             persist_attempts: AtomicU64::new(0),
             #[cfg(test)]
             hashed_bytes: AtomicU64::new(0),
+            #[cfg(test)]
+            write_open_threads: Mutex::new(Vec::new()),
+            #[cfg(test)]
+            writer_drops: AtomicU64::new(0),
+            #[cfg(test)]
+            write_open_pause: Mutex::new(None),
             #[cfg(test)]
             save_pause: Mutex::new(None),
             dir,

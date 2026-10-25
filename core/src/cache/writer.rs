@@ -176,6 +176,8 @@ async fn create_part(handle: &Handle, part: &Path) -> Result<Arc<std::fs::File>,
 
 impl Drop for Writer {
     fn drop(&mut self) {
+        #[cfg(test)]
+        self.inner.writer_drops.fetch_add(1, Ordering::Relaxed);
         if !self.renamed {
             let part = self.part.clone();
             self.inner.handle.spawn(delete_files(vec![part]));

@@ -54,6 +54,22 @@ pub(super) fn read_at(file: &File, start: u64, len: u64) -> Option<Vec<u8>> {
     Some(buffer)
 }
 
+fn open_part(inner: &super::inner::CacheShared, part: &std::path::Path) -> Option<File> {
+    #[cfg(test)]
+    {
+        let paused = inner.write_open_pause.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if let Some((started, release)) = paused {
+            let _ = started.send(());
+            let _ = release.blocking_recv();
+        }
+    }
+    let file = File::open(part).ok()?;
+    #[cfg(test)]
+    inner.write_open_threads.lock().unwrap_or_else(PoisonError::into_inner).push(std::thread::current().id());
+    let _ = inner;
+    Some(file)
+}
+
 #[derive(Clone)]
 pub struct CacheStore {
     cache: Cache,
@@ -64,6 +80,11 @@ pub struct CacheStore {
 impl CacheStore {
     pub fn new(cache: Cache, classify: Classify) -> CacheStore {
         CacheStore { cache, classify, open: Arc::new(Mutex::new(HashMap::new())) }
+    }
+
+    #[cfg(test)]
+    pub(super) fn open_writes(&self) -> usize {
+        self.open.lock().unwrap_or_else(PoisonError::into_inner).len()
     }
 
 }
@@ -112,7 +133,14 @@ impl ByteStore for CacheStore {
     async fn begin_write(&self, key: &str, meta: Meta) -> Option<Box<dyn StoreWriter>> {
         let kind = (self.classify)(key, &meta);
         let writer = self.cache.begin_write(key, kind).await.ok()?.with_meta(meta);
-        let file = Arc::new(File::open(writer.part()).ok()?);
+        let inner = self.cache.inner.clone();
+        let (writer, file) = tokio::task::spawn_blocking(move || {
+            let file = open_part(&inner, writer.part())?;
+            Some((writer, file))
+        })
+        .await
+        .ok()??;
+        let file = Arc::new(file);
         self.open.lock().unwrap_or_else(PoisonError::into_inner).insert(key.to_string(), file.clone());
         let registration = Registration { open: self.open.clone(), key: key.to_string(), file };
         Some(Box::new(OpenWrite { writer: Some(writer), _registration: registration }))

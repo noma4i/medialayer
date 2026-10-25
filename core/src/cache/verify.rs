@@ -16,12 +16,57 @@ pub fn sum_of(hasher: Sha256) -> u64 {
     u64::from_be_bytes([digest[0], digest[1], digest[2], digest[3], digest[4], digest[5], digest[6], digest[7]])
 }
 
+mod bitmap {
+    #[cfg(test)]
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    #[cfg(test)]
+    use std::sync::Arc;
+
+    pub struct Segments {
+        checked: Vec<bool>,
+        unchecked: usize,
+        #[cfg(test)]
+        touches: Arc<AtomicUsize>,
+    }
+
+    impl Segments {
+        #[cfg(not(test))]
+        pub fn new(len: usize) -> Segments {
+            Segments { checked: vec![false; len], unchecked: len }
+        }
+
+        #[cfg(test)]
+        pub fn new(len: usize, touches: Arc<AtomicUsize>) -> Segments {
+            touches.fetch_add(len, Ordering::Relaxed);
+            Segments { checked: vec![false; len], unchecked: len, touches }
+        }
+
+        pub fn is_checked(&self, index: usize) -> bool {
+            #[cfg(test)]
+            self.touches.fetch_add(1, Ordering::Relaxed);
+            self.checked.get(index).copied().unwrap_or(false)
+        }
+
+        pub fn check(&mut self, index: usize) -> bool {
+            #[cfg(test)]
+            self.touches.fetch_add(1, Ordering::Relaxed);
+            if std::mem::replace(&mut self.checked[index], true) {
+                return false;
+            }
+            self.unchecked -= 1;
+            self.unchecked == 0
+        }
+    }
+}
+
 pub struct Verified {
     sums: Arc<[u64]>,
     sized: AtomicBool,
     complete: AtomicBool,
-    done: Mutex<Vec<bool>>,
+    progress: Mutex<Option<bitmap::Segments>>,
     turn: tokio::sync::Mutex<()>,
+    #[cfg(test)]
+    cells: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl Verified {
@@ -38,8 +83,10 @@ impl Verified {
             sums: check.0.clone(),
             sized: AtomicBool::new(written_here),
             complete: AtomicBool::new(written_here || check.0.is_empty()),
-            done: Mutex::new(Vec::new()),
+            progress: Mutex::new(None),
             turn: tokio::sync::Mutex::new(()),
+            #[cfg(test)]
+            cells: Arc::default(),
         }
     }
 
@@ -52,18 +99,24 @@ impl Verified {
     }
 
     fn missing(&self, first: usize, last: usize) -> Vec<usize> {
-        let done = self.done.lock().unwrap_or_else(PoisonError::into_inner);
-        (first..=last).filter(|index| !done.get(*index).copied().unwrap_or(false)).collect()
+        let progress = self.progress.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.is_complete() {
+            return Vec::new();
+        }
+        (first..=last).filter(|index| !progress.as_ref().is_some_and(|segments| segments.is_checked(*index))).collect()
     }
 
     fn mark(&self, index: usize) {
-        let mut done = self.done.lock().unwrap_or_else(PoisonError::into_inner);
-        if done.is_empty() {
-            done.resize(self.sums.len(), false);
+        let mut progress = self.progress.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.is_complete() {
+            return;
         }
-        done[index] = true;
-        if done.iter().all(|checked| *checked) {
-            *done = Vec::new();
+        #[cfg(not(test))]
+        let segments = progress.get_or_insert_with(|| bitmap::Segments::new(self.sums.len()));
+        #[cfg(test)]
+        let segments = progress.get_or_insert_with(|| bitmap::Segments::new(self.sums.len(), self.cells.clone()));
+        if segments.check(index) {
+            *progress = None;
             self.complete.store(true, Ordering::Release);
         }
     }
@@ -176,3 +229,7 @@ async fn reject(inner: &Arc<CacheShared>, name: &str, version: u64, reason: &str
     }
     mark_dirty(inner);
 }
+
+#[cfg(test)]
+#[path = "verify_tests.rs"]
+mod tests;

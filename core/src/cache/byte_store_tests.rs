@@ -62,3 +62,39 @@ async fn inv_cache_12_an_aborted_write_leaves_nothing_readable_and_no_part_file(
     wait_until(|| files_with_suffix(f.dir.path(), ".part") == 0).await;
     assert_eq!(f.cache.stats().await.open_writers, 0);
 }
+
+#[tokio::test]
+async fn inv_cache_34_the_open_of_an_unfinished_write_runs_off_the_polling_thread() {
+    let (store, f) = store().await;
+
+    let writer = store.begin_write(KEY, Meta::default()).await.unwrap();
+
+    let opened = f.cache.inner.write_open_threads.lock().unwrap().clone();
+    assert_eq!(opened.len(), 1);
+    assert_ne!(opened[0], std::thread::current().id());
+    writer.abort().await;
+}
+
+#[tokio::test]
+async fn inv_cache_34_cancelling_begin_write_inside_the_open_keeps_the_part_until_the_open_and_leaves_nothing_after() {
+    let (store, f) = store().await;
+    let (started_sender, started) = tokio::sync::oneshot::channel();
+    let (release, released) = tokio::sync::oneshot::channel();
+    *f.cache.inner.write_open_pause.lock().unwrap() = Some((started_sender, released));
+    let call = {
+        let store = store.clone();
+        tokio::spawn(async move { store.begin_write(KEY, Meta::default()).await.is_some() })
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(10), started).await.expect("the open never started").unwrap();
+
+    call.abort();
+    assert!(call.await.unwrap_err().is_cancelled());
+
+    assert_eq!(f.cache.inner.writer_drops.load(std::sync::atomic::Ordering::Relaxed), 0, "the cancel dropped the writer before its open");
+    assert_eq!(files_with_suffix(f.dir.path(), ".part"), 1);
+    assert_eq!(store.open_writes(), 0);
+    release.send(()).unwrap();
+    wait_until(|| store.open_writes() == 0 && files_with_suffix(f.dir.path(), ".part") == 0).await;
+    assert_eq!(f.cache.inner.writer_drops.load(std::sync::atomic::Ordering::Relaxed), 1);
+    assert_eq!(f.cache.inner.write_open_threads.lock().unwrap().len(), 1, "the open of the abandoned write did not succeed");
+}
