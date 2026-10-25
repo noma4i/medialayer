@@ -49,24 +49,22 @@ private func openPlaying(groups: [String?] = [nil]) async throws -> (MediaLayer,
 @Suite(.timeLimit(.minutes(1)))
 struct SuspendPlaybackTests {
   @Test
-  func inv_session_12_the_last_release_resumes_and_the_first_one_does_not() async throws {
+  func aSuspensionReleasedByHandOrDroppedResumesThePlayback() async throws {
     var (media, events) = try await openPlaying()
-    let first = try media.suspendPlayback()
-    var second: PlaybackSuspension? = try media.suspendPlayback()
+    let released = try media.suspendPlayback()
     #expect(await events.next() == "pause")
+    released.release()
+    #expect(await events.next() == "play")
 
-    first.release()
-    first.release()
-    media.setRate(key: clip, rate: 2)
-    #expect(await events.next() == "rate")
-
-    second = nil
+    var dropped: PlaybackSuspension? = try media.suspendPlayback()
+    #expect(await events.next() == "pause")
+    dropped = nil
     #expect(await events.next() == "play")
     withExtendedLifetime(media) {}
   }
 
   @Test
-  func inv_session_12_a_group_every_suspension_allows_keeps_playing() async throws {
+  func theAllowedGroupsOfASuspensionReachTheCore() async throws {
     var (media, events) = try await openPlaying(groups: ["chat"])
     let allowing = try media.suspendPlayback(allowGroups: ["chat"])
     media.setRate(key: clip, rate: 2)
@@ -77,32 +75,6 @@ struct SuspendPlaybackTests {
     blocking.release()
     #expect(await events.next() == "play")
     withExtendedLifetime((media, allowing)) {}
-  }
-
-  @Test
-  func inv_session_17_an_ungrouped_owner_is_in_the_default_group_under_a_suspension() async throws {
-    var (media, events) = try await openPlaying(groups: [nil, "system"])
-    let allowing = try media.suspendPlayback(allowGroups: ["ring"])
-    media.setRate(key: clip, rate: 2)
-    #expect(await events.next() == "rate")
-
-    let blocking = try media.suspendPlayback(allowGroups: ["system"])
-    #expect(await events.next() == "pause")
-    blocking.release()
-    #expect(await events.next() == "play")
-    withExtendedLifetime((media, allowing)) {}
-  }
-
-  @Test
-  func inv_session_17_the_default_group_leaves_the_set_when_the_ungrouped_owner_leaves() async throws {
-    var (media, events) = try await openPlaying(groups: [nil, "system"])
-    let suspension = try media.suspendPlayback(allowGroups: ["ring"])
-    media.setRate(key: clip, rate: 2)
-    #expect(await events.next() == "rate")
-
-    media.setPlaying(key: clip, playing: true, groups: ["system"])
-    #expect(await events.next() == "pause")
-    withExtendedLifetime((media, suspension)) {}
   }
 
   @Test

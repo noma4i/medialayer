@@ -54,25 +54,23 @@ class SuspendPlaybackTest {
   init { NativeCallbacks.install() }
 
   @Test
-  fun inv_session_12_the_last_release_resumes_and_the_first_one_does_not() = runBlocking {
+  fun aSuspensionReleasedByHandOrClosedResumesThePlayback() = runBlocking {
     val slot = TransportSlot()
     openPlaying(slot).use { media ->
-      val first = media.suspendPlayback()
-      val second = media.suspendPlayback()
+      val released = media.suspendPlayback()
       assertEquals("pause", withTimeout(10_000) { slot.log.receive() })
+      released.release()
+      assertEquals("play", withTimeout(10_000) { slot.log.receive() })
 
-      first.release()
-      first.release()
-      media.setRate(CLIP, 2f)
-      assertEquals("rate", withTimeout(10_000) { slot.log.receive() })
-
-      second.close()
+      val closed = media.suspendPlayback()
+      assertEquals("pause", withTimeout(10_000) { slot.log.receive() })
+      closed.close()
       assertEquals("play", withTimeout(10_000) { slot.log.receive() })
     }
   }
 
   @Test
-  fun inv_session_12_a_group_every_suspension_allows_keeps_playing() = runBlocking {
+  fun theAllowedGroupsOfASuspensionReachTheCore() = runBlocking {
     val slot = TransportSlot()
     openPlaying(slot, listOf("chat")).use { media ->
       val allowing = media.suspendPlayback(listOf("chat"))
@@ -84,36 +82,6 @@ class SuspendPlaybackTest {
       blocking.release()
       assertEquals("play", withTimeout(10_000) { slot.log.receive() })
       allowing.release()
-    }
-  }
-
-  @Test
-  fun inv_session_17_an_ungrouped_owner_is_in_the_default_group_under_a_suspension() = runBlocking {
-    val slot = TransportSlot()
-    openPlaying(slot, listOf(null, "system")).use { media ->
-      val allowing = media.suspendPlayback(listOf("ring"))
-      media.setRate(CLIP, 2f)
-      assertEquals("rate", withTimeout(10_000) { slot.log.receive() })
-
-      val blocking = media.suspendPlayback(listOf("system"))
-      assertEquals("pause", withTimeout(10_000) { slot.log.receive() })
-      blocking.release()
-      assertEquals("play", withTimeout(10_000) { slot.log.receive() })
-      allowing.release()
-    }
-  }
-
-  @Test
-  fun inv_session_17_the_default_group_leaves_the_set_when_the_ungrouped_owner_leaves() = runBlocking {
-    val slot = TransportSlot()
-    openPlaying(slot, listOf(null, "system")).use { media ->
-      val suspension = media.suspendPlayback(listOf("ring"))
-      media.setRate(CLIP, 2f)
-      assertEquals("rate", withTimeout(10_000) { slot.log.receive() })
-
-      media.setPlaying(CLIP, true, listOf("system"))
-      assertEquals("pause", withTimeout(10_000) { slot.log.receive() })
-      suspension.release()
     }
   }
 

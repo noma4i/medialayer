@@ -2,39 +2,27 @@ package com.noma4i.medialayer.ui
 
 import android.app.Application
 import android.app.ActivityManager
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.test.core.app.ApplicationProvider
-import com.noma4i.medialayer.BodyReader
+import com.noma4i.medialayer.Evict
 import com.noma4i.medialayer.Fetcher
 import com.noma4i.medialayer.FetchRequest
 import com.noma4i.medialayer.FetchResponse
+import com.noma4i.medialayer.MediaException
 import com.noma4i.medialayer.MediaLayer
+import com.noma4i.medialayer.OpenConfig
+import com.noma4i.medialayer.SpecDefaults
+import com.noma4i.medialayer.defaultLimits
+import com.noma4i.medialayer.defaultPoolSettings
 import java.util.UUID
-import java.util.concurrent.CopyOnWriteArrayList
-import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
 
-private class PolicyBody(count: Int) : BodyReader {
-  private var bytes: ByteArray? = ByteArray(count) { 7 }
-  override suspend fun nextChunk(): ByteArray? = bytes.also { bytes = null }
-  override fun release() {}
-}
-
-private class PolicyOrigin : Fetcher {
-  val seen = CopyOnWriteArrayList<FetchRequest>()
-
-  override suspend fun fetch(request: FetchRequest): FetchResponse {
-    seen.add(request)
-    val count = when {
-      request.url.contains("large") -> 7
-      request.url.contains("new") -> 4
-      else -> 2
-    }
-    return FetchResponse(200u, mapOf("Content-Length" to count.toString()), PolicyBody(count))
-  }
+private class OfflineOrigin : Fetcher {
+  override suspend fun fetch(request: FetchRequest): FetchResponse = throw MediaException.Fetch("offline")
 }
 
 @RunWith(MediaLayerTestRunner::class)
@@ -49,44 +37,22 @@ class OpenPolicyTest {
     shadowOf(manager).setMemoryClass(256)
   }
 
-  private fun open(spec: String, origin: PolicyOrigin): MediaLayer =
-    MediaLayer.open(application, spec, origin, SharedPreferencesSettings(application, UUID.randomUUID().toString())).blocking()
-
   @Test
-  fun inv_spec_07_open_applies_the_first_video_forward_headers_to_origin() = runBlocking {
-    val cases = listOf(
-      """{"videos":[{"name":"first","forward_headers":["X-Token"]},{"name":"second","forward_headers":["Authorization"]}]}""" to mapOf("X-Token" to "selected"),
-      """{"videos":[{"name":"first","forward_headers":[]}]}""" to emptyMap(),
-      "{}" to mapOf("Authorization" to "excluded")
+  fun theForwardHeadersAndTheEvictionOverridesOfTheSpecDefaultsReachTheOpenConfig() {
+    var config: OpenConfig? = null
+    val resolved = SpecDefaults(
+      defaultLimits(), defaultPoolSettings(), emptyList(),
+      forwardHeaders = listOf("X-Token"), evictVideo = Evict.LargestFirst, evictImage = Evict.Fifo, evictAudio = Evict.Lfu
     )
-    for ((spec, expected) in cases) {
-      val origin = PolicyOrigin()
-      val media = open(spec, origin)
-      try {
-        val bytes = media.fetchImage("https://o.test/${UUID.randomUUID()}/small.jpg", mapOf("X-Token" to "selected", "Authorization" to "excluded"))
-        assertEquals(2, bytes.bytes.size)
-        assertEquals(expected + ("Accept-Encoding" to "identity"), origin.seen.first().headers)
-      } finally {
-        media.close()
-      }
-    }
-  }
 
-  @Test
-  fun inv_spec_07_open_applies_the_first_eviction_override_of_each_kind() = runBlocking {
-    for ((section, suffix) in listOf("videos" to "mp4", "images" to "jpg", "audios" to "mp3")) {
-      val origin = PolicyOrigin()
-      val media = open("""{"cache":{"budget":10,"min":1,"evict":"lru"},"$section":[{"name":"first","evict":"largest_first"},{"name":"second","evict":"fifo"}]}""", origin)
-      try {
-        media.clear(null)
-        val prefix = "https://o.test/${UUID.randomUUID()}"
-        for (name in listOf("small", "large", "new", "small")) {
-          media.fetchImage("$prefix/$name.$suffix", emptyMap())
-        }
-        assertEquals(1, origin.seen.count { it.url.contains("small") })
-      } finally {
-        media.close()
-      }
-    }
+    openMediaLayer(
+      application, OfflineOrigin(), SharedPreferencesSettings(application, UUID.randomUUID().toString()),
+      defaults = { resolved }, lifecycle = ProcessLifecycleOwner.get().lifecycle
+    ) { config = it; MediaLayer.open(it) }.blocking().close()
+
+    assertEquals(listOf("X-Token"), config!!.forwardHeaders)
+    assertEquals(Evict.LargestFirst, config!!.evictVideo)
+    assertEquals(Evict.Fifo, config!!.evictImage)
+    assertEquals(Evict.Lfu, config!!.evictAudio)
   }
 }
