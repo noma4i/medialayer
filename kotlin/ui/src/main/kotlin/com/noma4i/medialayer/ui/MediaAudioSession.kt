@@ -10,12 +10,13 @@ class MediaAudioSession internal constructor(
   val focus: MediaAudioFocus,
   port: AudioFocusPort,
   releaseDelayMs: Long = RELEASE_DELAY_MS,
-  private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+  private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+  private val volume: VolumePort? = null
 ) {
   private val demand = AudioDemand()
   private val owner = AudioFocusOwner(port, { synchronized(demand) { demand.target(focus) } }, releaseDelayMs, scope)
 
-  constructor(context: Context, focus: MediaAudioFocus) : this(focus, SystemAudioFocus(context))
+  constructor(context: Context, focus: MediaAudioFocus) : this(focus, SystemAudioFocus(context), volume = SystemVolume(context))
 
   val isRecording: Boolean get() = synchronized(demand) { demand.recording }
 
@@ -27,6 +28,8 @@ class MediaAudioSession internal constructor(
     owner.reconcile()
     return false
   }
+
+  fun readVolume(): MediaVolumeReading? = volume?.reading()
 
   fun deactivateRecording() {
     synchronized(demand) { demand.setRecording(false) }

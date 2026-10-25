@@ -341,6 +341,30 @@ class NativeViewLifecycleTest {
   }
 
   @Test
+  fun inv_audio_08_every_core_end_rewinds_the_place_and_reports_once() {
+    var control: AudioControl? = null
+    var ends = 0
+    rule.setContent {
+      MediaLayerProvider(CompletableDeferred(layer), loader, factory.players) {
+        MediaAudio(LifecycleSource("first", Kind.AUDIO), playing = true, onEnd = { ends++ }) { control = it; Box(Modifier.size(80.dp)) }
+      }
+    }
+    rule.waitUntil(5000) { looper.idle(); control != null }
+
+    layer.emit("first", com.noma4i.medialayer.MediaState.Ended)
+    rule.waitUntil(5000) { looper.idle(); ends == 1 }
+    layer.emit("first", com.noma4i.medialayer.MediaState.Ended)
+    layer.emit("first", com.noma4i.medialayer.MediaState.Ready)
+    rule.waitUntil(5000) { looper.idle(); control!!.state == com.noma4i.medialayer.MediaState.Ready }
+    layer.emit("first", com.noma4i.medialayer.MediaState.Ended)
+    rule.waitUntil(5000) { looper.idle(); ends == 2 }
+    rule.waitUntil(5000) { looper.idle(); layer.calls.count { it == "seek:first:0.0" } == 2 }
+
+    assertEquals(2, ends)
+    assertTrue(!control!!.isPlaying && control!!.progress == 0f)
+  }
+
+  @Test
   fun inv_native_05_video_progress_stops_when_inactive_and_resumes() {
     val clock = FakeClock(0)
     factory.clock = clock

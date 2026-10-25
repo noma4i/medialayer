@@ -49,6 +49,10 @@ extension MediaLayer {
 }
 
 extension MediaState {
+  public var isFailed: Bool {
+    if case .failed = self { true } else { false }
+  }
+
   public var isReady: Bool {
     switch self {
     case .ready, .rendered, .ended: true

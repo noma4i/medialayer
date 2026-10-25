@@ -88,6 +88,8 @@ On Android recording asks for `AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE`, so other ap
 
 `readVolume` gives the current system volume and a stream of the changes, for example to unmute when the user presses volume up. While the stream lives, MediaLayer keeps a session that mixes and never ducks, even under `duck`. End the stream and the session goes back to idle.
 
+Kotlin gives the volume of `STREAM_MUSIC` as a value from 0 to 1, as Swift does. `readVolume` returns null when the system reports no volume range. The system observer is registered when the stream is collected and removed when the collector is cancelled. No polling runs and no audio focus is requested.
+
 ### Swift
 
 ```swift
@@ -98,5 +100,7 @@ for await volume in reading.changes { /* react */ }
 ### Kotlin
 
 ```kotlin
-// Android: observe the system volume with the platform API. No focus is needed.
+val reading = Media.audio!!.readVolume() ?: return
+val initial = reading.initial
+reading.changes.collect { volume -> /* react */ }
 ```

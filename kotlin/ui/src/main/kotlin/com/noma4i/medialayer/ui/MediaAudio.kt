@@ -9,6 +9,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
@@ -33,9 +34,14 @@ class AudioControl internal constructor(playing: Boolean, private val seekTo: (D
 
   fun toggle() { isPlaying = !isPlaying }
 
+  val isSounding: Boolean get() = isPlaying && (state is MediaState.Ready || state is MediaState.Rendered)
+
+  val isBuffering: Boolean get() = isPlaying && (state is MediaState.Idle || state is MediaState.Loading)
+
   internal fun ended() {
     isPlaying = false
     progress = 0f
+    seekTo(0.0)
   }
 
   internal fun follow(playing: Boolean) {
@@ -54,7 +60,7 @@ class AudioControl internal constructor(playing: Boolean, private val seekTo: (D
 }
 
 @Composable
-fun MediaAudio(source: MediaSource, playing: Boolean = false, muted: Boolean = false, rate: Float = 1f, group: String? = null, content: @Composable (AudioControl) -> Unit) {
+fun MediaAudio(source: MediaSource, playing: Boolean = false, muted: Boolean = false, rate: Float = 1f, group: String? = null, onEnd: () -> Unit = {}, content: @Composable (AudioControl) -> Unit) {
   val environment = LocalMediaEnvironment.current
   val screen = rememberScreenVisibility()
   val mounted = remember(environment, source.url) { mutableStateOf<PlaceMount?>(null) }
@@ -64,7 +70,12 @@ fun MediaAudio(source: MediaSource, playing: Boolean = false, muted: Boolean = f
   val state = rememberPlace(source, control.isPlaying, muted, group = group, rate = control.rate, mounted = mounted)
   if (control.state != state) control.state = state
   val player by remember(environment, source.url) { environment.players?.player(source.url) ?: flowOf(null) }.collectAsState(null)
-  LaunchedEffect(state, control) { if (state == MediaState.Ended) control.ended() }
+  val end by rememberUpdatedState(onEnd)
+  LaunchedEffect(state, control) {
+    if (state != MediaState.Ended) return@LaunchedEffect
+    control.ended()
+    end()
+  }
   DisposableEffect(player, screen.started, control) {
     val exo = player
     if (!screen.started || exo == null) return@DisposableEffect onDispose { }

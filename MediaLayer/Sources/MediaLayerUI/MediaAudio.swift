@@ -75,12 +75,30 @@ public final class AudioPlayback {
     if progress != value { progress = value }
   }
 
-  func follow(_ value: MediaState) {
+  public var isSounding: Bool {
+    switch state {
+    case .ready, .rendered: isPlaying
+    case .idle, .loading, .ended, .failed: false
+    }
+  }
+
+  public var isBuffering: Bool {
+    switch state {
+    case .idle, .loading: isPlaying
+    case .ready, .rendered, .ended, .failed: false
+    }
+  }
+
+  @discardableResult
+  func follow(_ value: MediaState) -> Bool {
     let isNewEnd = value == .ended && state != .ended
     if state != value { state = value }
-    guard value == .ended else { return }
+    guard value == .ended else { return false }
     if isPlaying { setPlaying(false) }
-    if isNewEnd { refresh(progress: 0) }
+    guard isNewEnd else { return false }
+    refresh(progress: 0)
+    mount?.seek(0)
+    return true
   }
 
   private func setPlaying(_ value: Bool) {
@@ -97,6 +115,7 @@ public struct MediaAudio<Content: View>: View {
   private let muted: Bool
   private let rate: Float
   private let group: String?
+  private let onEnd: () -> Void
   private let content: (AudioPlayback) -> Content
 
   public init(
@@ -105,6 +124,7 @@ public struct MediaAudio<Content: View>: View {
     muted: Bool = false,
     rate: Float = 1,
     group: String? = nil,
+    onEnd: @escaping () -> Void = {},
     @ViewBuilder content: @escaping (AudioPlayback) -> Content
   ) {
     self.source = source
@@ -112,12 +132,13 @@ public struct MediaAudio<Content: View>: View {
     self.muted = muted
     self.rate = rate
     self.group = group
+    self.onEnd = onEnd
     self.content = content
   }
 
   public var body: some View {
     if let context {
-      Placed(source: source, playing: playing, muted: muted, rate: rate, group: group, context: context, content: content)
+      Placed(source: source, playing: playing, muted: muted, rate: rate, group: group, context: context, onEnd: onEnd, content: content)
         .id(MountIdentity(item: source.item, context: context))
     }
   }
@@ -129,6 +150,7 @@ public struct MediaAudio<Content: View>: View {
     let rate: Float
     let group: String?
     let context: MediaContext
+    let onEnd: () -> Void
     let content: (AudioPlayback) -> Content
     @State private var audio: AudioPlayback
     @State private var inBackground = false
@@ -138,13 +160,14 @@ public struct MediaAudio<Content: View>: View {
       let active: Bool
     }
 
-    init(source: any MediaSource, playing: Bool, muted: Bool, rate: Float, group: String?, context: MediaContext, content: @escaping (AudioPlayback) -> Content) {
+    init(source: any MediaSource, playing: Bool, muted: Bool, rate: Float, group: String?, context: MediaContext, onEnd: @escaping () -> Void, content: @escaping (AudioPlayback) -> Content) {
       self.source = source
       self.playing = playing
       self.muted = muted
       self.rate = rate
       self.group = group
       self.context = context
+      self.onEnd = onEnd
       self.content = content
       _audio = State(initialValue: AudioPlayback(item: source.item, playing: playing, muted: muted, rate: rate, group: group, places: context.places))
     }
@@ -152,7 +175,7 @@ public struct MediaAudio<Content: View>: View {
     var body: some View {
       content(audio)
         .task(id: source.url) {
-          for await value in context.places.stateStream(key: source.url) { audio.follow(value) }
+          for await value in context.places.stateStream(key: source.url) { if audio.follow(value) { onEnd() } }
         }
         .task(id: Sampling(url: source.url, active: !inBackground)) {
           guard !inBackground else { return }

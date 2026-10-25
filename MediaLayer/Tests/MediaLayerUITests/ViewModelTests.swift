@@ -207,6 +207,47 @@ struct ViewModelTests {
 
   @MainActor
   @Test
+  func inv_audio_06_everyEndRewindsToTheStartPausesAndReportsOnce() async {
+    let places = RecordingPlaces()
+    let audio = AudioPlayback(item: TestAudio().item, playing: true, places: places)
+    audio.mountPlace()
+    audio.refresh(progress: 0.7)
+
+    #expect(audio.follow(.ended))
+    #expect(!audio.isPlaying)
+    #expect(audio.progress == 0)
+    #expect(!audio.follow(.ended))
+    await eventually("the first end sought to the start") { places.recorded.filter { $0 == "seek 0.0" }.count == 1 }
+    audio.toggle()
+    #expect(audio.follow(.ready) == false)
+    audio.refresh(progress: 0.4)
+    #expect(audio.follow(.ended))
+
+    #expect(audio.progress == 0)
+    await eventually("both ends sought to the start") { places.recorded.filter { $0 == "seek 0.0" }.count == 2 }
+  }
+
+  @MainActor
+  @Test
+  func inv_audio_07_theAudioStateTableDecidesSoundingBufferingAndFailed() {
+    let table: [(MediaState, sounding: Bool, buffering: Bool, failed: Bool)] = [
+      (.idle, false, true, false), (.loading, false, true, false), (.ready, true, false, false),
+      (.rendered, true, false, false), (.ended, false, false, false), (.failed(detail: "x"), false, false, true)
+    ]
+    for (state, sounding, buffering, failed) in table {
+      let audio = AudioPlayback(item: TestAudio().item, playing: true, places: RecordingPlaces())
+      audio.follow(state)
+      #expect(audio.isSounding == sounding, "\(state)")
+      #expect(audio.isBuffering == buffering, "\(state)")
+      #expect(state.isFailed == failed, "\(state)")
+    }
+    let paused = AudioPlayback(item: TestAudio().item, playing: false, places: RecordingPlaces())
+    paused.follow(.rendered)
+    #expect(!paused.isSounding && !paused.isBuffering)
+  }
+
+  @MainActor
+  @Test
   func theAudioRateIsKeptAndSentToTheCore() {
     let places = RecordingPlaces()
     let audio = AudioPlayback(item: TestAudio().item, playing: false, rate: 1.5, places: places)

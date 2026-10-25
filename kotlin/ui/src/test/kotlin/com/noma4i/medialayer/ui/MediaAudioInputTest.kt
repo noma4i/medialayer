@@ -17,6 +17,8 @@ import com.noma4i.medialayer.*
 import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CompletableDeferred
+import com.noma4i.medialayer.MediaState
+import com.noma4i.medialayer.isFailed
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotSame
@@ -87,6 +89,37 @@ class MediaAudioInputTest {
 
     control.ended()
     listOf(false, true, false).forEach { control.follow(it); assertEquals(it, control.isPlaying) }
+  }
+
+  @Test
+  fun inv_audio_07_the_audio_state_table_decides_sounding_buffering_and_failed() {
+    val table = listOf(
+      Triple(MediaState.Idle, false, true), Triple(MediaState.Loading, false, true), Triple(MediaState.Ready, true, false),
+      Triple(MediaState.Rendered, true, false), Triple(MediaState.Ended, false, false), Triple(MediaState.Failed("x"), false, false)
+    )
+    table.forEach { (state, sounding, buffering) ->
+      val control = AudioControl(true) { }
+      control.state = state
+      assertEquals("$state", sounding, control.isSounding)
+      assertEquals("$state", buffering, control.isBuffering)
+      assertEquals("$state", state is MediaState.Failed, state.isFailed)
+    }
+    val paused = AudioControl(false) { }
+    paused.state = MediaState.Rendered
+    assertFalse(paused.isSounding || paused.isBuffering)
+  }
+
+  @Test
+  fun inv_audio_06_an_ended_control_rewinds_the_place_to_the_start() {
+    val seeks = mutableListOf<Double>()
+    val control = AudioControl(true) { seeks.add(it) }
+    control.progress = 0.7f
+
+    control.ended()
+
+    assertEquals(listOf(0.0), seeks)
+    assertEquals(0f, control.progress)
+    assertFalse(control.isPlaying)
   }
 
   @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()

@@ -194,6 +194,10 @@ MediaAudio(VoiceNote(url = message.audioUrl)) { audio ->
 
 While an audio plays, its progress updates 4 times per second. A paused audio updates for 1 second after it appears or after a seek, then stops, so a chat full of voice notes does not wake up every 250 milliseconds.
 
+`onEnd` runs each time the audio reaches its end, once per end. At the end the library rewinds the audio to the start and pauses it: `isPlaying` is false and `progress` is 0. A new `play` starts from the beginning. The app does not rewind or pause the audio itself.
+
+`isSounding` is true while the audio plays and the player is ready or rendered. `isBuffering` is true while the audio is set to play and the player is idle or loading. `MediaState.isFailed` (Swift and Kotlin) is true for the failed state. The app does not write these checks.
+
 A seek by fraction chosen before the audio loads is applied when the player reports ready. A stream with no known duration at that moment keeps the fraction until the next player event that reports a duration.
 
 A source without a mounted view seeks by key: `MediaLayer.seek(key, fraction)` on Kotlin and `seek(key:fraction:)` on `MediaPlaces` on Swift. The key is the source URL. The call works for any key, not loaded or paused too, and the position is applied when the key loads. A call made after MediaLayer closed, or while the input is full, throws and the caller sees the error. Several calls for one key before the next event keep the last fraction. A fraction outside 0..1 is clamped, a NaN or infinite fraction is ignored. `MediaPlace.seek` of a mounted place works as before.
@@ -272,7 +276,7 @@ MediaAudio(VoiceNote(url = message.audioUrl), rate = 1.5f) { audio ->
 | `group` | video, audio | Optional name of the place group, for example `chat`. A playback suspension can allow a group and keep its places playing |
 | `loop` | video | True (default) repeats the video. False plays it once and ends in the `ended` state |
 | `onFirstFrame` | video | Runs when the first frame is on screen. Once per load |
-| `onEnd` | video | Runs each time a one-shot video reaches its end |
+| `onEnd` | video, audio | Runs each time a one-shot video or an audio reaches its end. An audio is already rewound to the start and paused |
 | `rate` | audio | Playback speed, 0.25 to 4, default 1 |
 | content closure | all | Optional. Receives the `MediaState` to draw your own loading and error views |
 
