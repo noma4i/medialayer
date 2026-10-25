@@ -110,8 +110,8 @@ fn inv_placeholder_06_allocations_do_not_grow_with_the_longer_side() {
 
 #[test]
 fn inv_placeholder_07_working_bytes_over_the_budget_are_rejected_before_any_allocation() {
-    // 8x8 with 4x3 components: output 256, horizontal 8*4*8, vertical 8*3*8, colors 12*24.
-    let exact = 256 + 256 + 192 + 288;
+    let (output, horizontal_table, vertical_table, colors) = (8 * 8 * 4, 8 * 4 * 8, 8 * 3 * 8, 4 * 3 * 24);
+    let exact = output + horizontal_table + vertical_table + colors;
     let run = |budget: u64| {
         let mut result = None;
         let allocations = crate::alloc_probe::allocations_of(|| {
@@ -127,7 +127,6 @@ fn inv_placeholder_07_working_bytes_over_the_budget_are_rejected_before_any_allo
 
 #[test]
 fn inv_placeholder_07_the_default_budget_is_the_response_limit() {
-    // 2048x2048 output alone is exactly 16 MiB, the tables push the total over the limit.
     assert_eq!(decode(KNOWN, 2048, 2048, 1.0), Err(BlurHashError::SizeTooLarge));
     assert_eq!(decode(KNOWN, 16385, 16385, 1.0), Err(BlurHashError::SizeTooLarge));
 }
