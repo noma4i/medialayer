@@ -34,7 +34,7 @@ private final class InputSlot: PlayerSlotFactory, @unchecked Sendable {
   func count(_ name: String) -> Int { lock.withLock { events.filter { $0.name == name }.count } }
 
   func note(slot: UInt32, name: String, key: String) { lock.withLock { events.append((slot, name, key)) } }
-  func create(slot: UInt32) -> PlayerSlot { Recorder(slot: slot, log: self) }
+  func create(slot: UInt32) async -> CreatedPlayer { CreatedPlayer(player: Recorder(slot: slot, log: self)) }
 
   private final class Recorder: PlayerSlot, @unchecked Sendable {
     let slot: UInt32
@@ -47,18 +47,16 @@ private final class InputSlot: PlayerSlotFactory, @unchecked Sendable {
     }
 
     private func note(_ name: String) { log.note(slot: slot, name: name, key: lock.withLock { key }) }
-    func load(key: String, route: PlaybackRoute) { lock.withLock { self.key = key }; note("load") }
-    func unload() { note("unload") }
-    func preroll() {}
-    func play() { note("play") }
-    func pause() { note("pause") }
-    func mute() {}
-    func unmute() {}
-    func attach(viewToken: UInt64) {}
-    func detach() {}
-    func seek(positionMs: UInt64) {}
-    func setRate(rate: Float) { note("rate") }
-    func setReadahead(ms: UInt64) {}
+    func apply(command: SlotCall) async {
+      switch command {
+      case .load(let key, _, _): lock.withLock { self.key = key }; note("load")
+      case .unload: note("unload")
+      case .play: note("play")
+      case .pause: note("pause")
+      case .rate: note("rate")
+      default: break
+      }
+    }
     func sample() -> SlotSample { SlotSample(positionMs: 0, durationMs: nil, isLooping: false, viewAttached: false, frameRendered: false) }
   }
 }

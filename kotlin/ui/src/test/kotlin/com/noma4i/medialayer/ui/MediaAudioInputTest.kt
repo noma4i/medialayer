@@ -50,23 +50,21 @@ private class InputSlot : PlayerSlotFactory {
 
   fun count(name: String) = events.count { it.name == name }
 
-  override fun create(slot: UInt): PlayerSlot = Recorder(slot)
+  override suspend fun create(slot: UInt): CreatedPlayer = CreatedPlayer(Recorder(slot))
 
   private inner class Recorder(private val slot: UInt) : PlayerSlot {
     @Volatile private var key = ""
     private fun note(name: String) { events.add(Event(slot, name, key)) }
-    override fun load(key: String, route: PlaybackRoute) { this.key = key; note("load") }
-    override fun unload() { note("unload") }
-    override fun preroll() {}
-    override fun play() { note("play") }
-    override fun pause() { note("pause") }
-    override fun mute() {}
-    override fun unmute() {}
-    override fun attach(viewToken: ULong) {}
-    override fun detach() {}
-    override fun seek(positionMs: ULong) {}
-    override fun setRate(rate: Float) { note("rate") }
-    override fun setReadahead(ms: ULong) {}
+    override suspend fun apply(command: SlotCall) {
+      when (command) {
+        is SlotCall.Load -> { key = command.key; note("load") }
+        SlotCall.Unload -> note("unload")
+        SlotCall.Play -> note("play")
+        SlotCall.Pause -> note("pause")
+        is SlotCall.Rate -> note("rate")
+        else -> {}
+      }
+    }
     override fun sample() = SlotSample(0u, null, false, false, false)
   }
 }
