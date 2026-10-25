@@ -11,8 +11,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +33,7 @@ import coil3.ImageLoader
 import coil3.request.ImageResult
 import coil3.request.ImageRequest
 import coil3.size.Scale
+import com.noma4i.medialayer.MediaItem
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.ImageWork
 import com.noma4i.medialayer.MediaState
@@ -42,6 +46,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onStart
@@ -58,15 +63,16 @@ fun MediaImage(
 ) {
   val screen = rememberScreenVisibility(LocalMediaEnvironment.current.stats)
   claimImage(source, screen)
+  val item = source.toItem()
   if (source.size != null) {
-    Box(modifier.then(screen.modifier)) { ImageBody(source, null, 0L, screen, contentScale, content) }
+    Box(modifier.then(screen.modifier)) { ImageBody(source, item, null, 0L, screen, contentScale, content) }
     return
   }
   val density = LocalDensity.current.density
   val pixelSizes = LocalMediaEnvironment.current.pixelSizes
   BoxWithConstraints(modifier.then(screen.modifier)) {
     val placementPixels = if (constraints.hasBoundedWidth && constraints.hasBoundedHeight) constraints.maxWidth.toLong() * constraints.maxHeight else 0L
-    ImageBody(source, decodePixels(constraints, density, source, contentScale, pixelSizes), placementPixels, screen, contentScale, content)
+    ImageBody(source, item, decodePixels(constraints, density, source, contentScale, pixelSizes), placementPixels, screen, contentScale, content)
   }
 }
 
@@ -91,7 +97,7 @@ private fun claimImage(source: MediaSource, screen: ScreenVisibility) {
 
 @Composable
 @OptIn(ExperimentalCoroutinesApi::class)
-private fun ImageBody(source: MediaSource, pixels: PixelSize?, placementPixels: Long, screen: ScreenVisibility, contentScale: ContentScale, content: @Composable (MediaState) -> Unit) {
+private fun ImageBody(source: MediaSource, item: MediaItem, pixels: PixelSize?, placementPixels: Long, screen: ScreenVisibility, contentScale: ContentScale, content: @Composable (MediaState) -> Unit) {
   val context = LocalContext.current
   val environment = LocalMediaEnvironment.current
   val media = environment.media
@@ -115,7 +121,7 @@ private fun ImageBody(source: MediaSource, pixels: PixelSize?, placementPixels: 
         }.first()
     }
   }
-  ImageBlur(source, screen, state, contentScale)
+  ImageBlur(item, screen, state, contentScale)
   AsyncImage(
     model = request,
     contentDescription = null,
@@ -139,13 +145,19 @@ private fun ImageContent(screen: ScreenVisibility, state: State<MediaState>, con
 }
 
 @Composable
-private fun ImageBlur(source: MediaSource, screen: ScreenVisibility, state: State<MediaState>, contentScale: ContentScale) {
+private fun ImageBlur(item: MediaItem, screen: ScreenVisibility, state: State<MediaState>, contentScale: ContentScale) {
   if (!screen.visible || state.value == MediaState.Ready) return
   val media = LocalMediaEnvironment.current.media
-  val blur by produceState<ImageBitmap?>(null, media, source) {
-    value = withContext(ffiQueue) { media.placeholder(source.toItem(), false) as? Placeholder.BlurHash }?.let { decodeBlur(it.hash) }
+  val decoder = LocalBlurDecoder.current
+  val observer = LocalPlaceholderObserver.current
+  key(media, item) {
+    val blur by produceState<ImageBitmap?>(null) {
+      val answer = withContext(ffiQueue) { media.placeholder(item, false) as? Placeholder.BlurHash }
+      value = answer?.let { decodeBlur(it.hash, decoder) }
+      value?.let { observer?.invoke("blurhash", it.asAndroidBitmap()) }
+    }
+    blur?.let { Image(it, "blurhash", Modifier.fillMaxSize(), contentScale = contentScale) }
   }
-  blur?.let { Image(it, "blurhash", Modifier.fillMaxSize(), contentScale = contentScale) }
 }
 
 internal fun decodePixels(constraints: Constraints, density: Float, source: MediaSource, contentScale: ContentScale, pixelSizes: PixelSizeMemo): PixelSize? {
@@ -174,11 +186,20 @@ internal fun ContentScale.toScale(): Scale = when (this) {
   else -> Scale.FILL
 }
 
-private suspend fun decodeBlur(hash: String): ImageBitmap? = withContext(Dispatchers.Default) {
-  runCatching {
-    val pixels = decodeBlurhash(hash, BLUR_SIZE.toUInt(), BLUR_SIZE.toUInt(), 1f)
+internal val LocalPlaceholderObserver = staticCompositionLocalOf<((String, Any) -> Unit)?> { null }
+
+internal val LocalBlurDecoder = staticCompositionLocalOf<(String) -> ByteArray> { { hash -> decodeBlurhash(hash, BLUR_SIZE.toUInt(), BLUR_SIZE.toUInt(), 1f) } }
+
+private suspend fun decodeBlur(hash: String, decode: (String) -> ByteArray): ImageBitmap? = withContext(Dispatchers.Default) {
+  ensureActive()
+  try {
+    val pixels = decode(hash)
     Bitmap.createBitmap(BLUR_SIZE, BLUR_SIZE, Bitmap.Config.ARGB_8888).apply { copyPixelsFromBuffer(ByteBuffer.wrap(pixels)) }.asImageBitmap()
-  }.getOrNull()
+  } catch (error: CancellationException) {
+    throw error
+  } catch (error: Throwable) {
+    null
+  }
 }
 
 private const val BLUR_SIZE = 32

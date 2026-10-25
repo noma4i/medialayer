@@ -12,6 +12,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
@@ -34,7 +35,10 @@ import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.Placeholder
 import com.noma4i.medialayer.isReady
+import com.noma4i.medialayer.MediaItem
+import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.toItem
+import kotlinx.coroutines.ensureActive
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.flowOf
 
@@ -188,28 +192,39 @@ fun MediaVideo(
     if (outputPlayer != null || outputType == SURFACE_TYPE_SURFACE_VIEW) {
       ContentFrame(outputPlayer, Modifier.fillMaxSize(), outputType, contentScale, true, {})
     }
-    if (screen.visible) VideoPlaceholder(source, state.isReady, contentScale)
+    if (screen.visible) VideoPlaceholder(source.toItem(), state.isReady, contentScale)
     content(state)
   }
 }
 
 @Composable
-private fun VideoPlaceholder(source: MediaSource, ready: Boolean, contentScale: ContentScale) {
+private fun VideoPlaceholder(item: MediaItem, ready: Boolean, contentScale: ContentScale) {
   val media = LocalMediaEnvironment.current.media
-  val placeholder by produceState<Placeholder>(Placeholder.None, media, source, ready) { value = media.placeholder(source.toItem(), ready) }
+  key(media, item) { VideoCover(media, item, ready, contentScale) }
+}
+
+@Composable
+private fun VideoCover(media: MediaLayer, item: MediaItem, ready: Boolean, contentScale: ContentScale) {
+  val placeholder by produceState<Placeholder>(Placeholder.None, ready) {
+    val answer = media.placeholder(item, ready)
+    ensureActive()
+    value = answer
+  }
   val cover = placeholder as? Placeholder.Cover ?: return
+  val observer = LocalPlaceholderObserver.current
   val context = LocalContext.current
   val density = LocalDensity.current.density
   val scale = contentScale.toScale()
-  val image = remember(cover.url, source.headers) { CoverSource(cover.url, source.headers) }
+  val image = remember(cover.url, item.headers) { CoverSource(cover.url, item.headers) }
   BoxWithConstraints(Modifier.fillMaxSize()) {
     val pixels = decodePixels(constraints, density, image, contentScale, LocalMediaEnvironment.current.pixelSizes)
     val placementPixels = if (constraints.hasBoundedWidth && constraints.hasBoundedHeight) constraints.maxWidth.toLong() * constraints.maxHeight else 0L
-    val request = remember(media, cover.url, pixels, scale, placementPixels) { imageRequest(context, image, pixels, scale, { media.cacheKey(cover.url, source.headers) }, placementPixels) }
+    val request = remember(media, cover.url, pixels, scale, placementPixels) { imageRequest(context, image, pixels, scale, { media.cacheKey(cover.url, item.headers) }, placementPixels) }
     AsyncImage(
       model = request,
       contentDescription = "cover",
       imageLoader = LocalMediaEnvironment.current.imageLoader,
+      onSuccess = { success -> observer?.invoke("cover", (success.result.request.data as? MediaImageData)?.url.orEmpty()) },
       contentScale = contentScale,
       modifier = Modifier.fillMaxSize()
     )
