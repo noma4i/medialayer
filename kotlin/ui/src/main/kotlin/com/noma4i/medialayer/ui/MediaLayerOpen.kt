@@ -33,6 +33,7 @@ import java.io.File
 import java.util.Collections
 import java.util.WeakHashMap
 import java.lang.ref.WeakReference
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -43,6 +44,8 @@ import kotlinx.coroutines.ensureActive
 import coil3.ImageLoader
 import okhttp3.Call
 import okhttp3.OkHttpClient
+
+private class HeldResources(val signals: SystemSignals?, val factory: ExoPlayerSlotFactory?, val imageLoader: ImageLoader?, val layer: MediaLayer?)
 
 internal class Binding(val factory: ExoPlayerSlotFactory, val signals: SystemSignals, val imageLoader: ImageLoader)
 
@@ -106,19 +109,22 @@ internal fun openMediaLayer(
     }
 
     override fun shutdown() {
-      synchronized(lock) {
-        signals?.unregister()
-        signals = null
-        factory?.release() ?: audio.close()
-        factory = null
-        imageLoader?.shutdown()
-        imageLoader = null
-        reference?.get()?.let { bindings.remove(it) }
-        if (Media.audio === audio) Media.audio = null
+      val held = synchronized(lock) {
+        HeldResources(signals, factory, imageLoader, reference?.get()).also {
+          signals = null
+          factory = null
+          imageLoader = null
+        }
       }
+      held.signals?.unregister()
+      held.factory?.release() ?: audio.close()
+      held.imageLoader?.shutdown()
+      held.layer?.let { bindings.remove(it) }
+      if (Media.audio === audio) Media.audio = null
     }
   }
   Media.audio = audio
+  val created = AtomicReference<MediaLayer?>()
   val opened = openScope.async {
     val client by lazy(LazyThreadSafetyMode.NONE) { OkHttpClient() }
     Trace.beginSection("MediaLayer.open.platform")
@@ -159,27 +165,29 @@ internal fun openMediaLayer(
     ensureActive()
     Trace.beginSection("MediaLayer.open.ffi")
     val layer = try { open(config) } finally { Trace.endSection() }
-    try {
-      ensureActive()
-      reference = WeakReference(layer)
-      val loader = mediaImageLoader(app, ImageBytes { url, headers ->
-        val media = reference?.get() ?: throw CancellationException("MediaLayer was closed")
-        media.fetchImage(url, headers)
-      }, imageMemoryBytes, stats = layer.imageStats())
-      synchronized(lock) { imageLoader = loader }
-      layer.setTonePreparation(ToneFrames(layer, app, loader))
-      val events = layer.playerEvents()
-      slots.bind(events)
-      val registered = SystemSignals(app, events, lifecycle).also { it.register() }
-      synchronized(lock) { signals = registered }
-      bindings[layer] = Binding(slots, registered, loader)
-      layer
-    } catch (failure: Throwable) {
-      layer.close()
-      throw failure
+    created.set(layer)
+    ensureActive()
+    synchronized(lock) { reference = WeakReference(layer) }
+    val loader = mediaImageLoader(app, ImageBytes { url, headers ->
+      val media = reference?.get() ?: throw CancellationException("MediaLayer was closed")
+      media.fetchImage(url, headers)
+    }, imageMemoryBytes, stats = layer.imageStats())
+    synchronized(lock) { imageLoader = loader }
+    layer.setTonePreparation(ToneFrames(layer, app, loader))
+    val events = layer.playerEvents()
+    slots.bind(events)
+    val registered = SystemSignals(app, events, lifecycle).also { it.register() }
+    synchronized(lock) { signals = registered }
+    bindings[layer] = Binding(slots, registered, loader)
+    layer
+  }
+  opened.invokeOnCompletion { failure ->
+    val layer = created.getAndSet(null)
+    if (failure != null) {
+      layer?.close()
+      releaser.shutdown()
     }
   }
-  opened.invokeOnCompletion { failure -> if (failure != null) releaser.shutdown() }
   return opened
 }
 

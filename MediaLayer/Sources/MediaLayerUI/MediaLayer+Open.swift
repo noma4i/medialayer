@@ -48,13 +48,30 @@ extension MediaLayer {
     guard imageMemoryBytes > 0 else { throw MediaError.InvalidSpec(detail: "imageMemoryBytes must be positive") }
     let imageCache = ImageCache(costLimit: imageMemoryBytes)
     let audio = MediaAudioSession(focus: audioFocus)
-    let (config, factory, media) = try await Task.detached(priority: .userInitiated) {
+    let work = Task.detached(priority: .userInitiated) {
       let (config, factory) = try makeConfig(
         defaults: try defaults(), fetcher: fetcher, settings: settings, directory: directory, silent: silent, audio: audio, imageCache: imageCache
       )
-      return (config, factory, try build(config))
-    }.value
-    (config.memoryReleaser as? OpenedResources)?.bind(media)
+      let resources = config.memoryReleaser as? OpenedResources
+      do {
+        try Task.checkCancellation()
+        let media = try build(config)
+        resources?.bind(media)
+        if Task.isCancelled {
+          media.close()
+          throw CancellationError()
+        }
+        return (config, factory, media)
+      } catch {
+        resources?.shutdown()
+        throw error
+      }
+    }
+    let (_, factory, media) = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+    if Task.isCancelled {
+      media.close()
+      throw CancellationError()
+    }
     media.setTonePreparation(preparation: ToneFrames(places: media))
     ImageMemory.install(imageCache, on: media)
     LoadedSlots.install(factory.slots, on: media)
@@ -128,7 +145,7 @@ final class OpenedResources: MemoryReleaser, @unchecked Sendable {
   private let audio: MediaAudioSession?
   private let lock = NSLock()
   private weak var media: MediaLayer?
-  private var isClosed = false
+  private(set) var isClosed = false
 
   init(images: ImageMemoryReleaser, factory: AVQueuePlayerSlotFactory, audio: MediaAudioSession?) {
     self.images = images
