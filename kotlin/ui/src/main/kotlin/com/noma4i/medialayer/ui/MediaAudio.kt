@@ -61,6 +61,10 @@ class AudioControl internal constructor(playing: Boolean, private val seekTo: (D
 
 @Composable
 fun MediaAudio(source: MediaSource, playing: Boolean = false, muted: Boolean = false, rate: Float = 1f, group: String? = null, onEnd: () -> Unit = {}, content: @Composable (AudioControl) -> Unit) {
+  if (currentEnvironmentOrNull() == null) {
+    content(remember { AudioControl(playing) { } })
+    return
+  }
   val environment = LocalMediaEnvironment.current
   val screen = rememberScreenVisibility()
   val mounted = remember(environment, source.url) { mutableStateOf<PlaceMount?>(null) }

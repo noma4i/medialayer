@@ -30,7 +30,7 @@ enum VideoProgress {
 }
 
 public struct MediaVideo<Content: View>: View {
-  @Environment(\.mediaContext) private var context
+  @ResolvedMediaContext private var context
   @State private var state: MediaState = .idle
   @State private var mount: PlaceMount?
   @State private var host: SurfaceHost?

@@ -7,8 +7,8 @@ nonisolated(unsafe) private var lifetimeKey: UInt8 = 0
 
 extension MediaLayer {
   public static func open(
-    fetcher: Fetcher,
-    settings: SettingsStore,
+    fetcher: Fetcher = URLSessionFetcher(),
+    settings: SettingsStore = UserDefaultsSettings(),
     directory: URL? = nil,
     silent: Bool = false,
     audioFocus: MediaAudioFocus = .mix,
@@ -22,8 +22,8 @@ extension MediaLayer {
 
   public static func open(
     spec: String,
-    fetcher: Fetcher,
-    settings: SettingsStore,
+    fetcher: Fetcher = URLSessionFetcher(),
+    settings: SettingsStore = UserDefaultsSettings(),
     directory: URL? = nil,
     silent: Bool = false,
     audioFocus: MediaAudioFocus = .mix,

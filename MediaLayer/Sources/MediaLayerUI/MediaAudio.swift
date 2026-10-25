@@ -109,7 +109,7 @@ public final class AudioPlayback {
 
 public struct MediaAudio<Content: View>: View {
 
-  @Environment(\.mediaContext) private var context
+  @ResolvedMediaContext private var context
   private let source: any MediaSource
   private let playing: Bool
   private let muted: Bool

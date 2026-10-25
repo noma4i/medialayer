@@ -128,6 +128,10 @@ fun MediaVideo(
   onProgress: ((Double) -> Unit)? = null,
   content: @Composable (MediaState) -> Unit = {}
 ) {
+  if (currentEnvironmentOrNull() == null) {
+    Box(modifier) { content(MediaState.Idle) }
+    return
+  }
   val environment = LocalMediaEnvironment.current
   val screen = rememberScreenVisibility()
   var view by remember(environment, source.url) { mutableStateOf<ViewHandle?>(null) }

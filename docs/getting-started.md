@@ -45,12 +45,11 @@ On Linux, install `cargo-ndk` and the Rust Android targets. Set `ANDROID_NDK_HOM
 ```swift
 @main
 struct ExampleApp: App {
-  @State private var media: MediaLayer?
+  private let opening = Task { try await MediaLayer.open() }
 
   var body: some Scene {
     WindowGroup {
-      Group { if let media { RootView().mediaLayer(media) } }
-        .task { media = try? await MediaLayer.open(fetcher: URLSessionFetcher(), settings: UserDefaultsSettings()) }
+      RootView().mediaLayer(opening: opening)
     }
   }
 }
@@ -64,13 +63,19 @@ class ExampleApp : Application() {
 
   override fun onCreate() {
     super.onCreate()
-    media = MediaLayer.open(
-      context = this,
-      settings = SharedPreferencesSettings(this)
-    )
+    media = MediaLayer.open(context = this)
   }
 }
 ```
+
+### Подключение без кода готовности
+
+Приложение не пишет машину готовности слоя. Четыре правила:
+
+- Умолчания `open`: Swift берёт `URLSessionFetcher()` и `UserDefaultsSettings()`, Kotlin берёт `OkHttpFetcher` и `SharedPreferencesSettings(context)`. Явный `fetcher` или `settings` заменяет умолчание.
+- Swift `.mediaLayer(opening: Task<MediaLayer, Error>)` рисует содержимое сразу. Виды медиа не объявляют места, пока слой не открыт, потом монтируются сами. Ошибка открытия видна в `Media.failure`. Kotlin `MediaLayerProvider(Deferred)` ведёт себя так же и пишет любую ошибку открытия в `Media.failure` (не `MediaException` приходит как `MediaException.Unexpected`).
+- Процессный контекст: вид без провайдера в дереве (корень вне дерева, тост, окно) берёт контекст последнего установленного провайдера процесса. Контекст окружения сильнее процессного. Снятие провайдера снимает процессный контекст, если он текущий. Без обоих контекстов Kotlin бросает ошибку «Wrap the screen in MediaLayerProvider», Swift не рисует медиа.
+- Слой из UI: Swift `@Environment(\.mediaLayer)` и Kotlin `currentMediaLayer()` отдают `MediaLayer?`. Значение `nil` значит, что слой ещё не готов. Оба учитывают процессный контекст.
 
 Открытие возвращается без ожидания сборки ядра. Swift `open` это `async`, Kotlin `open` возвращает `Deferred<MediaLayer>`. Загрузка нативной библиотеки, разбор `spec` и сборка ядра идут вне главного потока. Android создаёт платформенные объекты и каталог кэша на потоке вызова. `MediaLayerProvider` принимает `Deferred` и показывает содержимое, когда слой готов. Передайте `spec` для значений из `.mdl` ([media files](media-files.md)).
 

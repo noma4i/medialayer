@@ -63,6 +63,10 @@ fun MediaImage(
   contentScale: ContentScale = ContentScale.Crop,
   content: @Composable (MediaState) -> Unit = {}
 ) {
+  if (currentEnvironmentOrNull() == null) {
+    Box(modifier) { content(MediaState.Idle) }
+    return
+  }
   val screen = rememberScreenVisibility(LocalMediaEnvironment.current.stats)
   val item = source.toItem()
   val failure = remember { mutableStateOf<ScopedFailure?>(null) }

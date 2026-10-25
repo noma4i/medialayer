@@ -142,7 +142,7 @@ final class WindowFollower<Row: Sendable> {
 }
 
 private struct WindowModifier<Row: Sendable>: ViewModifier {
-  @Environment(\.mediaContext) private var context
+  @ResolvedMediaContext private var context
   @State private var follower = WindowFollower<Row>()
   let layout: WindowLayout<Row>
   let identity: AnyHashable

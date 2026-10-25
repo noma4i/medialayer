@@ -81,6 +81,7 @@ internal class WindowFollower<Row>(private val media: MediaLayer, private val la
 
 @Composable
 private fun <Row> FollowWindow(layout: WindowLayout<Row>, data: () -> List<Row>, active: Int, enabled: Boolean, onFailed: (MediaException) -> Unit) {
+  if (currentEnvironmentOrNull() == null) return
   val media = LocalMediaEnvironment.current.media
   val failed by rememberUpdatedState(onFailed)
   val currentData by rememberUpdatedState(data)

@@ -70,6 +70,31 @@ public enum Media {
 
   /// The last refusal of the core to apply the global mute, or nil after a success.
   public static var failure: MediaError? { flag.failure }
+
+  static func recordOpenFailure(_ error: Error) {
+    flag.failure = mediaError(error)
+  }
+}
+
+@Observable
+final class ProcessMediaContext: @unchecked Sendable {
+  static let shared = ProcessMediaContext()
+  private(set) var current: MediaContext?
+
+  func install(_ context: MediaContext) {
+    current = context
+  }
+
+  func remove(_ context: MediaContext) {
+    if current === context { current = nil }
+  }
+}
+
+@propertyWrapper
+struct ResolvedMediaContext: DynamicProperty {
+  @Environment(\.mediaContext) private var environment
+
+  var wrappedValue: MediaContext? { environment ?? ProcessMediaContext.shared.current }
 }
 
 public final class MediaContext: @unchecked Sendable {
@@ -96,6 +121,12 @@ extension EnvironmentValues {
   }
 }
 
+extension EnvironmentValues {
+  public var mediaLayer: MediaLayer? {
+    (mediaContext ?? ProcessMediaContext.shared.current)?.places as? MediaLayer
+  }
+}
+
 private struct MediaLayerModifier: ViewModifier {
   @State private var context: MediaContext
 
@@ -104,12 +135,43 @@ private struct MediaLayerModifier: ViewModifier {
   }
 
   func body(content: Content) -> some View {
-    content.environment(\.mediaContext, context)
+    content
+      .environment(\.mediaContext, context)
+      .onAppear { ProcessMediaContext.shared.install(context) }
+      .onDisappear { ProcessMediaContext.shared.remove(context) }
+  }
+}
+
+private struct OpeningMediaLayerModifier: ViewModifier {
+  let opening: Task<MediaLayer, Error>
+  @State private var context: MediaContext?
+
+  func body(content: Content) -> some View {
+    content
+      .environment(\.mediaContext, context)
+      .task(id: opening) {
+        do {
+          let layer = try await opening.value
+          guard !Task.isCancelled else { return }
+          let ready = MediaContext(places: layer)
+          context = ready
+          ProcessMediaContext.shared.install(ready)
+        } catch {
+          guard !Task.isCancelled else { return }
+          Media.recordOpenFailure(error)
+        }
+      }
+      .onDisappear { context.map(ProcessMediaContext.shared.remove) }
   }
 }
 
 extension View {
   public func mediaLayer(_ media: MediaPlaces, slots: LoadedSlots? = nil) -> some View {
     modifier(MediaLayerModifier(media: media, slots: slots)).id(ObjectIdentifier(media))
+  }
+
+  /// Draws the content at once. Media views declare no place until the task returns the layer; a failure of the task shows in `Media.failure`.
+  public func mediaLayer(opening: Task<MediaLayer, Error>) -> some View {
+    modifier(OpeningMediaLayerModifier(opening: opening))
   }
 }

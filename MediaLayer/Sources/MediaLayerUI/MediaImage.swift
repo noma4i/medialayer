@@ -54,7 +54,7 @@ private struct ImageRequestView<Content: View>: View {
 }
 
 public struct MediaImage<Content: View>: View {
-  @Environment(\.mediaContext) private var context
+  @ResolvedMediaContext private var context
   @Environment(\.displayScale) private var displayScale
   @State private var loaded: LoadedImage?
   @State private var state: MediaState = .idle

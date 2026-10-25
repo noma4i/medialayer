@@ -27,6 +27,7 @@ import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.stateFlow
 import com.noma4i.medialayer.toItem
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.flow.flowOf
 
@@ -72,45 +73,86 @@ internal fun rememberScreenVisibility(stats: com.noma4i.medialayer.ImageCounters
 
 internal class MediaEnvironment(val media: MediaLayer, val players: SlotPlayers?, val imageLoader: ImageLoader, val stats: com.noma4i.medialayer.ImageCounters, val pixelSizes: PixelSizeMemo)
 
-internal val LocalMediaEnvironment = staticCompositionLocalOf<MediaEnvironment> { error("Wrap the screen in MediaLayerProvider") }
+private val EnvironmentLocal = staticCompositionLocalOf<MediaEnvironment?> { null }
+
+internal object ProcessMediaEnvironment {
+  var current: MediaEnvironment? by mutableStateOf(null)
+    private set
+
+  fun install(environment: MediaEnvironment) {
+    current = environment
+  }
+
+  fun remove(environment: MediaEnvironment) {
+    if (current === environment) current = null
+  }
+}
+
+internal object LocalMediaEnvironment {
+  val current: MediaEnvironment
+    @Composable get() = EnvironmentLocal.current ?: ProcessMediaEnvironment.current ?: error("Wrap the screen in MediaLayerProvider")
+
+}
+
+@Composable
+internal fun currentEnvironmentOrNull(): MediaEnvironment? = EnvironmentLocal.current ?: ProcessMediaEnvironment.current
+
+@Composable
+fun currentMediaLayer(): MediaLayer? = (EnvironmentLocal.current ?: ProcessMediaEnvironment.current)?.media
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @Composable
 fun MediaLayerProvider(opened: Deferred<MediaLayer>, imageLoader: ImageLoader? = null, players: SlotPlayers? = null, content: @Composable () -> Unit) {
   var ready by remember(opened) { mutableStateOf(if (opened.isCompleted && !opened.isCancelled) opened.getCompleted() else null) }
-  if (ready == null) LaunchedEffect(opened) { ready = opened.await() }
-  ready?.let { MediaLayerEnvironment(it, imageLoader, players, content) }
+  if (ready == null) LaunchedEffect(opened) {
+    try {
+      ready = opened.await()
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Throwable) {
+      Media.failure = error as? MediaException ?: MediaException.Unexpected(error.toString())
+    }
+  }
+  MediaLayerEnvironment(ready, imageLoader, players, content)
 }
 
 @Composable
-private fun MediaLayerEnvironment(media: MediaLayer, imageLoader: ImageLoader?, players: SlotPlayers?, content: @Composable () -> Unit) {
+private fun MediaLayerEnvironment(media: MediaLayer?, imageLoader: ImageLoader?, players: SlotPlayers?, content: @Composable () -> Unit) {
   val context = LocalContext.current
   val environment = remember(media, imageLoader, players) {
-    val binding = media.binding
-    val pixelSizes = PixelSizeMemo()
-    val reference = java.lang.ref.WeakReference(media)
-    val loader = imageLoader ?: binding?.imageLoader ?: mediaImageLoader(context, ImageBytes { url, headers ->
-      val current = reference.get() ?: throw kotlinx.coroutines.CancellationException("MediaLayer was released")
-      current.fetchImage(url, headers)
-    }, null, media.imageStats(), pixelSizes)
-    try {
-      media.setTonePreparation(ToneFrames(media, context.applicationContext, loader))
-    } catch (error: MediaException) {
-      Media.failure = error
+    media?.let {
+      val binding = it.binding
+      val pixelSizes = PixelSizeMemo()
+      val reference = java.lang.ref.WeakReference(it)
+      val loader = imageLoader ?: binding?.imageLoader ?: mediaImageLoader(context, ImageBytes { url, headers ->
+        val current = reference.get() ?: throw kotlinx.coroutines.CancellationException("MediaLayer was released")
+        current.fetchImage(url, headers)
+      }, null, it.imageStats(), pixelSizes)
+      try {
+        it.setTonePreparation(ToneFrames(it, context.applicationContext, loader))
+      } catch (error: MediaException) {
+        Media.failure = error
+      }
+      MediaEnvironment(it, players ?: binding?.factory?.players, loader, it.imageStats(), pixelSizes)
     }
-    MediaEnvironment(media, players ?: binding?.factory?.players, loader, media.imageStats(), pixelSizes)
   }
   val muted = Media.muted
   DisposableEffect(media, muted) {
-    try {
-      media.setMutedAll(muted)
-      Media.failure = null
-    } catch (error: MediaException) {
-      Media.failure = error
+    if (media != null) {
+      try {
+        media.setMutedAll(muted)
+        Media.failure = null
+      } catch (error: MediaException) {
+        Media.failure = error
+      }
     }
     onDispose { }
   }
-  CompositionLocalProvider(LocalMediaEnvironment provides environment, content = content)
+  DisposableEffect(environment) {
+    if (environment != null) ProcessMediaEnvironment.install(environment)
+    onDispose { if (environment != null) ProcessMediaEnvironment.remove(environment) }
+  }
+  CompositionLocalProvider(EnvironmentLocal provides environment, content = content)
 }
 
 @Composable
