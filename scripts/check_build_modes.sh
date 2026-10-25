@@ -123,6 +123,7 @@ for platform, modes, host_os, target_dir, custom_library in cases:
             env = dict(os.environ, PATH=f"{work}/bin:{os.environ['PATH']}",
                        BUILD_TEST_ROOT=str(work), BUILD_TEST_OS=host_os, BUILD_TEST_LIB=library,
                        ANDROID_NDK_HOME=str(work))
+            env.pop("CARGO_TARGET_DIR", None)
             if target_dir: env["CARGO_TARGET_DIR"] = str(work / target_dir)
             env.pop("CARGO_BUILD_JOBS", None)
             env.pop("RUST_TEST_THREADS", None)
@@ -174,8 +175,23 @@ sys.exit(bool(failed))
 PY
 }
 
+targets_with_ambient_target_dir() {
+  local outer file status=0
+  outer="$(mktemp -d)"
+  for file in aarch64-apple-ios/release/libmedialayer.a aarch64-apple-ios-sim/release/libmedialayer.a aarch64-apple-darwin/release/libmedialayer.a debug/uniffi-bindgen; do
+    mkdir -p "$outer/$(dirname "$file")"
+    printf sentinel > "$outer/$file"
+  done
+  CARGO_TARGET_DIR="$outer" check_modes targets || status=$?
+  for file in aarch64-apple-ios/release/libmedialayer.a aarch64-apple-ios-sim/release/libmedialayer.a aarch64-apple-darwin/release/libmedialayer.a debug/uniffi-bindgen; do
+    [ "$(cat "$outer/$file")" = sentinel ] || { echo "FAIL ambient CARGO_TARGET_DIR overwritten: $file"; status=1; }
+  done
+  rm -rf "$outer"
+  return "$status"
+}
+
 inv_build_01_selected_targets_and_bindings() {
-  expect_green check_modes targets
+  expect_green targets_with_ambient_target_dir
 }
 
 inv_build_02_release_removes_stale_x86_libraries() {

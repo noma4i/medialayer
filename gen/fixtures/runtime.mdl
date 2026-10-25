@@ -1,0 +1,48 @@
+cache do
+  budget 3.gib, min: 96.mib
+  shrink_to 75.percent
+  free_space 15.percent
+  evict expire_after 2.days
+  memory 192.mib
+  timeout 3.minutes
+  max_concurrent 5
+  dedupe window: 2.hours, entries: 250
+  prefetch_budget 80.mib
+  namespace headers: [:authorization, :cookie]
+end
+
+video :rich_video do
+  cover :coverUrl
+  prefetch from: 2, to: 5, chunks: [2, 1]
+  pool slots: 4, reach: 2, hold_off: 7.seconds, trim_delay: 1.minute, low_ram_slots: 1, low_ram_reach: 0
+  playback chunks_ahead: 4
+  forward_headers [:authorization, :cookie]
+  evict :lfu
+  strategy :whole
+end
+
+image :rich_image do
+  blurhash :blurText
+  size 320, 240
+  prefetch window: 2...6, behind: 3
+  evict :largest_first
+  strategy :on_demand
+end
+
+audio :rich_audio do
+  evict :fifo
+  strategy :whole
+end
+
+video :plain_video do
+end
+
+image :plain_image do
+end
+
+audio :plain_audio do
+end
+
+image :max_image do
+  size 2147483647, 2147483647
+end

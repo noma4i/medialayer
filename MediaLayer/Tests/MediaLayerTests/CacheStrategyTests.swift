@@ -62,19 +62,6 @@ private final class RangeOrigin: Fetcher, @unchecked Sendable {
   }
 }
 
-private struct GeneratedClip: MediaSource {
-  let url: String
-  var kind: Kind { .video }
-  var headers: [String: String] { [:] }
-  var strategy: CacheStrategy { .whole }
-}
-
-private struct PlainPoster: MediaSource {
-  let url: String
-  var kind: Kind { .image }
-  var headers: [String: String] { [:] }
-}
-
 private func item(_ url: String, _ kind: Kind = .video, _ strategy: CacheStrategy) -> MediaItem {
   MediaItem(kind: kind, url: url, headers: [:], cover: nil, blurHash: nil, strategy: strategy)
 }
@@ -179,11 +166,5 @@ struct CacheStrategyTests {
     try await eventually { healthy.requests.count >= 1 }
     try await Task.sleep(for: .milliseconds(300))
     #expect(healthy.requests == [RangeOrigin.blocks[2]])
-  }
-
-  @Test
-  func inv_strategy_15_a_generated_source_declares_its_strategy_and_the_default_is_the_window() {
-    #expect(GeneratedClip(url: "https://o.test/clip.mp4").item.strategy == .whole)
-    #expect(PlainPoster(url: "https://o.test/p.jpg").item.strategy == .window)
   }
 }

@@ -8,7 +8,7 @@ fn inv_limits_01_dsl_configures_the_free_space_fraction() {
     let spec = crate::parse_spec("cache do\n  free_space 25.percent\nend\n").expect("valid disk share");
     assert!(spec.limits().encode().contains("free_space_fraction=0.25\n"));
 }
-use medialayer::spec::{AudioSpec, CacheSpec, Evict, ImageSpec, MediaSpec, PoolSpec, PrefetchSpec, VideoSpec};
+use medialayer::spec::{AudioSpec, CacheSpec, Evict, ImageSpec, MediaSpec, PlaybackSpec, PoolSpec, PrefetchSpec, VideoSpec};
 
 use super::*;
 
@@ -128,4 +128,71 @@ fn inv_strategy_14_generated_swift_and_kotlin_types_carry_the_strategy_with_the_
     assert!(kotlin.contains("CacheStrategy.ON_DEMAND"), "{kotlin}");
     assert_eq!(swift.matches("public var strategy").count(), 2);
     assert_eq!(kotlin.matches("override val strategy").count(), 2);
+}
+
+pub(crate) fn runtime_spec() -> MediaSpec {
+    let mut video = VideoSpec::new("rich_video");
+    video.cover_field = Some("coverUrl".into());
+    video.prefetch = PrefetchSpec { from: 2, to: 5, chunks: medialayer::limits::LeadingChunks::new(&[2, 1]).unwrap() };
+    video.pool = PoolSpec { slots: 4, reach: 2, hold_off: 7, trim_delay: 60, low_ram_slots: Some(1), low_ram_reach: Some(0) };
+    video.playback = PlaybackSpec { chunks_ahead: 4 };
+    video.forward_headers = vec!["Authorization".into(), "Cookie".into()];
+    video.evict = Some(Evict::Lfu);
+    video.strategy = CacheStrategy::Whole;
+    MediaSpec {
+        cache: CacheSpec {
+            budget: 3 * 1024 * 1024 * 1024,
+            min: 96 * 1024 * 1024,
+            shrink_to: 75,
+            evict: Evict::ExpireAfter { seconds: 2 * 86400 },
+            memory: 192 * 1024 * 1024,
+            timeout: 180,
+            max_concurrent: 5,
+            dedupe_window: 7200,
+            dedupe_entries: 250,
+            prefetch_budget_mib: 80,
+            namespace_headers: vec!["Authorization".into(), "Cookie".into()],
+            free_space: 15,
+        },
+        videos: vec![video, VideoSpec::new("plain_video")],
+        images: vec![
+            ImageSpec {
+                name: "rich_image".into(),
+                blurhash_field: Some("blurText".into()),
+                size: Some((320, 240)),
+                prefetch_window: Some((2, 6)),
+                prefetch_behind: Some(3),
+                evict: Some(Evict::LargestFirst),
+                strategy: CacheStrategy::OnDemand,
+            },
+            ImageSpec {
+                name: "plain_image".into(),
+                blurhash_field: None,
+                size: None,
+                prefetch_window: None,
+                prefetch_behind: None,
+                evict: None,
+                strategy: CacheStrategy::Window,
+            },
+            ImageSpec {
+                name: "max_image".into(),
+                blurhash_field: None,
+                size: Some((i32::MAX as u32, i32::MAX as u32)),
+                prefetch_window: None,
+                prefetch_behind: None,
+                evict: None,
+                strategy: CacheStrategy::Window,
+            },
+        ],
+        audios: vec![
+            AudioSpec { name: "rich_audio".into(), evict: Some(Evict::Fifo), strategy: CacheStrategy::Whole },
+            AudioSpec { name: "plain_audio".into(), evict: None, strategy: CacheStrategy::Window },
+        ],
+    }
+}
+
+#[test]
+fn inv_gen_03_the_runtime_fixture_builds_every_option_with_the_contract_value() {
+    let parsed = parse_files(&[root().join("fixtures/runtime.mdl")]).unwrap();
+    assert_eq!(parsed, runtime_spec());
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# check_gen_consumers.sh swift | kotlin-run <command...>: compiles gen/fixtures/Consumer.* against the source the generator emits and the built library.
+# check_gen_consumers.sh swift [<simulator UDID>] | kotlin-run <command...>: runs gen/fixtures/Consumer.* as tests on the source the generator emits and the built library.
+# swift: the Rust test places the sources in the Swift package tests, runs check_swift_test.sh for them and removes them again.
 # kotlin-run clears the Gradle test sources of the consumer, places the freshly generated ones, runs the command (the gradle-test step on brick)
 # and removes them again, so a Gradle run outside this script never compiles stale generated files.
 set -euo pipefail
@@ -9,12 +10,10 @@ export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
 
 case "${1:-}" in
   swift)
-    swift build --package-path "$root/MediaLayer" --product MediaLayer > /dev/null
-    bin="$(swift build --package-path "$root/MediaLayer" --show-bin-path)"
-    SWIFTC="$(xcrun -f swiftc)"
-    SWIFT_CHECK_ARGS="$(printf '["-sdk","%s","-I","%s","-I","%s/MediaLayer/MediaLayerFFI.xcframework/macos-arm64/Headers/medialayerFFI"]' "$(xcrun --sdk macosx --show-sdk-path)" "$bin" "$root")"
-    export SWIFTC SWIFT_CHECK_ARGS
-    cargo test --manifest-path "$root/gen/Cargo.toml" --features compile-swift compile_tests
+    SWIFT_TEST_RUNNER=bash
+    SWIFT_TEST_ARGS="$(printf '["%s/scripts/check_swift_test.sh","%s","-only-testing:MediaLayerTests/GeneratedSourcesTests"]' "$root" "${2:-}")"
+    export SWIFT_TEST_RUNNER SWIFT_TEST_ARGS
+    cargo test --manifest-path "$root/gen/Cargo.toml" --features compile-swift compile_tests -- --nocapture
     ;;
   kotlin-run)
     shift
@@ -26,5 +25,5 @@ case "${1:-}" in
     cargo test --manifest-path "$root/gen/Cargo.toml" --features compile-kotlin compile_tests
     "$@"
     ;;
-  *) echo "usage: check_gen_consumers.sh <swift | kotlin-run <command...>>" >&2; exit 2 ;;
+  *) echo "usage: check_gen_consumers.sh <swift [udid] | kotlin-run <command...>>" >&2; exit 2 ;;
 esac

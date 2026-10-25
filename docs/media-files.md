@@ -149,17 +149,18 @@ Source names cannot collide with types referenced or declared by the generated S
 ### Checking generated consumers
 
 Run Rust checks with `cargo test -p medialayer-gen`.
-The full check compiles `gen/fixtures/Consumer.swift` and `Consumer.kt` against the real library.
-The Rust-only command does not prove compilation in either language.
+The full check generates sources from the DSL fixture in `gen/fixtures`, compiles them with `gen/fixtures/Consumer.swift` and `Consumer.kt` against the real library and runs the consumers as tests.
+Each consumer compares the `MediaItem` and the size of every generated source with the values written in the fixture.
+The Rust-only command does not prove compilation or values in either language.
 
-| Check | Command | Compiled by |
+| Check | Command | Run by |
 | --- | --- | --- |
-| Swift on macOS | `scripts/check_gen_consumers.sh swift` | `swiftc -typecheck`, set up by the script |
+| Swift on iOS Simulator | `scripts/check_gen_consumers.sh swift [udid]` | `scripts/check_swift_test.sh` on an iOS Simulator with `-only-testing:MediaLayerTests/GeneratedSourcesTests`, started by the Rust test, which places the sources in the Swift package tests and removes them |
 | Kotlin on brick | `scripts/check_gen_consumers.sh kotlin-run <command>` | The gradle-test step of the check runs through it: it clears and places the generated sources in the ignored Kotlin test sources, runs Gradle on brick and removes them |
 
-An unavailable library or a compiler error fails the check.
+A missing compiler, a generator error, a compile error or a wrong value fails the check.
 The Kotlin sources are generated files and stay out of git.
-Both checks include all source kinds, explicit cache strategies and the maximum accepted image dimensions.
+The fixture covers all source kinds, explicit and default cache strategies and the maximum accepted image dimensions.
 
 ### Swift
 

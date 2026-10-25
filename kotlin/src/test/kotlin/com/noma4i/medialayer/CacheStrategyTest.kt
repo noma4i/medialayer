@@ -46,17 +46,6 @@ private class RangeOrigin(private val refusal: (Request, Int) -> Boolean = { _, 
   }
 }
 
-private data class GeneratedClip(override val url: String) : MediaSource {
-  override val kind: Kind get() = Kind.VIDEO
-  override val headers: Map<String, String> get() = emptyMap()
-  override val strategy: CacheStrategy get() = CacheStrategy.WHOLE
-}
-
-private data class PlainPoster(override val url: String) : MediaSource {
-  override val kind: Kind get() = Kind.IMAGE
-  override val headers: Map<String, String> get() = emptyMap()
-}
-
 private fun item(url: String, kind: Kind, strategy: CacheStrategy) =
   MediaItem(kind, url, emptyMap(), null, null, strategy = strategy)
 
@@ -170,11 +159,5 @@ class CacheStrategyTest {
     eventuallyStrategy("the missing block was requested") { healthy.requests.isNotEmpty() }
     Thread.sleep(300)
     assertEquals(listOf(RangeOrigin.BLOCKS[2]), healthy.requests.toList())
-  }
-
-  @Test
-  fun inv_strategy_15_a_generated_source_declares_its_strategy_and_the_default_is_the_window() {
-    assertEquals(CacheStrategy.WHOLE, GeneratedClip("https://o.test/clip.mp4").toItem().strategy)
-    assertEquals(CacheStrategy.WINDOW, PlainPoster("https://o.test/p.jpg").toItem().strategy)
   }
 }

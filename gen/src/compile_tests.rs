@@ -9,7 +9,11 @@ fn fixtures() -> PathBuf {
 }
 
 fn spec() -> MediaSpec {
-    parse_files(&[fixtures().join("feed.mdl"), fixtures().join("compile.mdl")]).unwrap()
+    parse_files(&[fixtures().join("runtime.mdl")]).unwrap()
+}
+
+fn expected_json() -> String {
+    crate::lib_tests::runtime_spec().to_json()
 }
 
 fn required(name: &str) -> String {
@@ -32,24 +36,42 @@ fn missing_compiler(test: &str, variable: &str) {
 }
 
 #[cfg(feature = "compile-swift")]
+struct Placed(PathBuf);
+
+#[cfg(feature = "compile-swift")]
+impl Drop for Placed {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+#[cfg(feature = "compile-swift")]
 #[test]
 fn inv_gen_03_generated_swift_compiles_with_the_library() {
-    let directory = tempfile::tempdir().unwrap();
-    let file = directory.path().join("MediaSources.swift");
-    fs::write(&file, crate::swift(&spec())).unwrap();
-    let args: Vec<String> = serde_json::from_str(&required("SWIFT_CHECK_ARGS")).expect("SWIFT_CHECK_ARGS must be a JSON array");
-    let output = compile(Command::new(required("SWIFTC"))
-        .args(args)
-        .arg("-typecheck")
-        .arg(&file)
-        .arg(fixtures().join("Consumer.swift")));
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let runner = required("SWIFT_TEST_RUNNER");
+    compile(Command::new(&runner).arg("--version"));
+    let placed = Placed(fixtures().join("../../MediaLayer/Tests/MediaLayerTests/Generated"));
+    fs::create_dir_all(&placed.0).unwrap();
+    fs::write(placed.0.join("MediaSources.swift"), crate::swift(&spec())).unwrap();
+    fs::copy(fixtures().join("Consumer.swift"), placed.0.join("Consumer.swift")).unwrap();
+    fs::write(placed.0.join("ExpectedSpec.swift"), format!("enum ExpectedSpecJSON {{\n    static let value = #\"\"\"\n{}\n\"\"\"#\n}}\n", expected_json())).unwrap();
+    let args: Vec<String> = serde_json::from_str(&required("SWIFT_TEST_ARGS")).expect("SWIFT_TEST_ARGS must be a JSON array");
+    let output = compile(Command::new(&runner).args(args));
+    let text = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(output.status.success(), "{text}");
+    println!("{text}");
+    for test in [
+        "inv_strategy_15_generated_sources_turn_into_media_items_with_the_dsl_values",
+        "inv_gen_03_the_embedded_spec_json_is_the_dsl_data",
+    ] {
+        assert!(text.contains(test), "the generated test {test} did not run:\n{text}");
+    }
 }
 
 #[cfg(feature = "compile-swift")]
 #[test]
 fn inv_gen_03_missing_swift_compiler_fails_the_selected_check() {
-    missing_compiler("compile_tests::inv_gen_03_generated_swift_compiles_with_the_library", "SWIFTC");
+    missing_compiler("compile_tests::inv_gen_03_generated_swift_compiles_with_the_library", "SWIFT_TEST_RUNNER");
 }
 
 #[cfg(feature = "compile-kotlin")]
@@ -59,5 +81,6 @@ fn inv_gen_03_generated_kotlin_is_placed_in_the_gradle_test_sources() {
     fs::create_dir_all(&directory).unwrap();
     fs::write(directory.join("MediaSources.kt"), crate::kotlin(&spec(), "app.media")).unwrap();
     fs::copy(fixtures().join("Consumer.kt"), directory.join("Consumer.kt")).unwrap();
+    fs::write(directory.join("ExpectedSpec.kt"), format!("package app.media\n\nobject ExpectedSpecJson {{\n    const val VALUE: String = \"\"\"{}\"\"\"\n}}\n", expected_json())).unwrap();
     assert!(directory.join("Consumer.kt").is_file() && directory.join("MediaSources.kt").is_file());
 }
