@@ -350,6 +350,26 @@ struct PlaceholderViewTests {
     #expect(mount.shown() == .blue)
   }
 
+  @Test
+  func inv_placeholder_aTaskCancelledBeforeTheDecodeStartsNeverDecodes() async {
+    let events = Events()
+    let gate = Gate()
+    let task = Task { () -> CGImage? in
+      await gate.wait()
+      return await PlaceholderView.decodeOffMain(red) { hash in
+        events.add(.decode(hash: hash, onMain: Thread.isMainThread))
+        return PlaceholderPixels.blurHash(hash)?.cgImage
+      }
+    }
+
+    task.cancel()
+    gate.open()
+    let image = await task.value
+
+    #expect(image == nil)
+    #expect(events.all == [])
+  }
+
   @MainActor
   @Test
   func inv_placeholder_anUnmountedViewDoesNotDecodeALateAnswer() async {

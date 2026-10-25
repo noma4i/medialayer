@@ -30,7 +30,7 @@ struct PlaceholderView: View {
       }
       .frame(width: geometry.size.width, height: geometry.size.height)
       .task(id: PlanKey(source: source, ready: ready, points: geometry.size, scale: displayScale)) {
-        guard let content = await resolve(points: geometry.size, scale: displayScale) else { return }
+        guard let content = await resolve(points: geometry.size, scale: displayScale), !Task.isCancelled else { return }
         current = Current(source: source, content: content)
         published(content)
       }
@@ -42,7 +42,7 @@ struct PlaceholderView: View {
     guard !Task.isCancelled else { return nil }
     switch plan {
     case .blurHash(let hash):
-      let image = await Self.background(hash, decode)
+      let image = await Self.decodeOffMain(hash, decode)
       guard !Task.isCancelled else { return nil }
       return image.map { .blur($0) } ?? PlaceholderContent.none
     case .cover(let url):
@@ -55,7 +55,10 @@ struct PlaceholderView: View {
   }
 
   @concurrent
-  private static func background(_ hash: String, _ decode: @Sendable (String) -> CGImage?) async -> CGImage? { decode(hash) }
+  static func decodeOffMain(_ hash: String, _ decode: @Sendable (String) -> CGImage?) async -> CGImage? {
+    guard !Task.isCancelled else { return nil }
+    return decode(hash)
+  }
 
   private struct Current {
     let source: Source
