@@ -329,7 +329,7 @@ async fn read_cache(args: &Args) {
     summarize("index_flush", &mut flush, "ms");
 }
 
-fn stats_of(samples: &mut Vec<f64>) -> (f64, f64, f64) {
+fn stats_of(samples: &mut [f64]) -> (f64, f64, f64) {
     if samples.is_empty() {
         return (0.0, 0.0, 0.0);
     }
@@ -410,8 +410,7 @@ async fn read_proxy(args: &Args) {
         let plain = CacheStore::new(cache.clone(), Arc::new(classify_kind));
         let store: Arc<dyn ByteStore> = if slow_ms > 0 { Arc::new(Slow { inner: plain.clone(), delay: Duration::from_millis(slow_ms) }) } else { Arc::new(plain.clone()) };
         let fetcher = Arc::new(CountingFetcher(AtomicU64::new(0)));
-        let mut config = Config::default();
-        config.chunk_size = BLOCK;
+        let config = Config { chunk_size: BLOCK, ..Config::default() };
         let proxy = Proxy::start(config, fetcher.clone(), store).await.expect("proxy");
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let writer = (churn_rate > 0).then(|| tokio::spawn(churn(plain.clone(), stop.clone(), churn_rate)));

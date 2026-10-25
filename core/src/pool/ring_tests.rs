@@ -35,9 +35,9 @@ fn inv_pool_10_first_plan_loads_window_plays_active_and_prerolls_neighbours() {
     assert_eq!(
         commands,
         [
-            load(1, "k4".into()),
-            load(2, "k5".into()),
-            load(0, "k6".into()),
+            load(1, "k4"),
+            load(2, "k5"),
+            load(0, "k6"),
             Shape::Play { slot: 2 },
             Shape::Preroll { slot: 0 },
             Shape::Preroll { slot: 1 },
@@ -54,7 +54,7 @@ fn inv_pool_10_scroll_reuses_the_freed_slot() {
         commands,
         [
             Shape::Unload { slot: 1 },
-            load(1, "k7".into()),
+            load(1, "k7"),
             Shape::Pause { slot: 2 },
             Shape::Play { slot: 0 },
             Shape::Preroll { slot: 1 },
@@ -87,7 +87,7 @@ fn inv_pool_10_changed_key_for_same_page_reloads_the_slot() {
     let mut list = keys(20);
     list[6] = Some("other".into());
     let commands = ring.plan(0, 5, Some(5), &list);
-    assert_eq!(commands[..2], [Shape::Unload { slot: 0 }, load(0, "other".into())]);
+    assert_eq!(commands[..2], [Shape::Unload { slot: 0 }, load(0, "other")]);
 }
 
 #[test]

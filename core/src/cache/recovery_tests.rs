@@ -105,7 +105,8 @@ async fn reopened_after(damage: impl Fn(&mut Vec<u8>)) -> (tempfile::TempDir, Ca
 
 #[tokio::test]
 async fn inv_cache_17_a_damaged_file_is_never_served_and_is_dropped_on_first_touch() {
-    let damages: [(&str, Box<dyn Fn(&mut Vec<u8>)>); 4] = [
+    type Damage = (&'static str, Box<dyn Fn(&mut Vec<u8>)>);
+    let damages: [Damage; 4] = [
         ("flipped byte", Box::new(|bytes| bytes[500] ^= 0xff)),
         ("zeroed tail", Box::new(|bytes| bytes[600..].fill(0))),
         ("torn short", Box::new(|bytes| bytes.truncate(600))),

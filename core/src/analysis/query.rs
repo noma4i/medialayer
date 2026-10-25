@@ -37,7 +37,7 @@ impl ToneData {
     fn weighted(&self, weight: impl Fn(usize) -> f64) -> Option<Swatch> {
         let mut sum = [0.0; 3];
         let mut total = 0.0;
-        for (row, cells) in self.cells.chunks_exact(COLUMNS).enumerate() {
+        for (row, cells) in self.cells.as_chunks::<COLUMNS>().0.iter().enumerate() {
             let share = weight(row);
             for cell in cells {
                 sum[0] += share * linear(cell.r);

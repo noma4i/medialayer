@@ -22,13 +22,15 @@ fn rig() -> Rig {
     let release: Arc<FakeRelease> = shared();
     let signals = Signals::new(
         &Handle::current(),
-        pool.clone(),
-        prefetch.clone(),
-        directives.clone(),
-        release.clone(),
-        Vec::new(),
-        Ledger::new(1 << 30),
-        Arc::new(SystemClock),
+        SignalPorts {
+            pool: pool.clone(),
+            prefetch: prefetch.clone(),
+            directives: directives.clone(),
+            release: release.clone(),
+            suspendable: Vec::new(),
+            ledger: Ledger::new(1 << 30),
+            clock: Arc::new(SystemClock),
+        },
     );
     Rig { pool, prefetch, directives, release, signals }
 }

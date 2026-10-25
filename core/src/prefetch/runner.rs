@@ -244,7 +244,7 @@ impl Prefetcher {
         let entering: HashSet<&str> = diff.to_start.iter().map(|job| job.key.as_str()).collect();
         for job in &wanted {
             if let Some(source) = sources.get(job.key.as_str()) {
-                self.start(&mut state, job.key.clone(), source.clone(), job.priority.unsigned_abs() as usize, entering.contains(job.key.as_str()), now, &tuning);
+                self.start(&mut state, StartJob { key: job.key.clone(), source: source.clone(), distance: job.priority.unsigned_abs() as usize, entering: entering.contains(job.key.as_str()) }, now, &tuning);
             }
         }
     }
@@ -446,7 +446,8 @@ impl Prefetcher {
         self.shared.live.load(Ordering::SeqCst)
     }
 
-    fn start(&self, state: &mut State, key: String, source: Source, distance: usize, entering: bool, now: Duration, tuning: &Tuning) {
+    fn start(&self, state: &mut State, job: StartJob, now: Duration, tuning: &Tuning) {
+        let StartJob { key, source, distance, entering } = job;
         if state.busy || state.suspended {
             return;
         }
@@ -490,6 +491,13 @@ impl Prefetcher {
         self.shared.handle.spawn(run_job(live, run));
         state.running.insert(key, job);
     }
+}
+
+struct StartJob {
+    key: String,
+    source: Source,
+    distance: usize,
+    entering: bool,
 }
 
 struct Run {

@@ -1,5 +1,5 @@
 use super::layer::MemoryReleaser;
-use crate::api::{follow_stats, AbortOnDrop, ControlPorts, Controls, MemoryRelease, Parts, PoolControl, Places, Routes, Signals, Stage, Suspendable, Tones};
+use crate::api::{follow_stats, AbortOnDrop, ControlPorts, Controls, MemoryRelease, Parts, PoolControl, Places, Routes, SignalPorts, Signals, Stage, Suspendable, Tones};
 use crate::pool::PoolStats;
 use std::sync::{Arc, Mutex, PoisonError};
 use tokio::runtime::Handle;
@@ -60,13 +60,15 @@ impl Assembled {
         let suspendable: Vec<Arc<dyn Suspendable>> = vec![Arc::new(parts.prefetcher.clone()), Arc::new(parts.tones.clone())];
         let signals = Arc::new(Signals::new(
             handle,
-            Arc::new(parts.stage.clone()),
-            Arc::new(parts.prefetcher),
-            Arc::new(parts.stage.clone()),
-            release,
-            suspendable,
-            parts.ledger,
-            parts.clock,
+            SignalPorts {
+                pool: Arc::new(parts.stage.clone()),
+                prefetch: Arc::new(parts.prefetcher),
+                directives: Arc::new(parts.stage.clone()),
+                release,
+                suspendable,
+                ledger: parts.ledger,
+                clock: parts.clock,
+            },
         ));
         let stats_feed = follow_stats(handle, Arc::downgrade(&controls), parts.change);
         Assembled { controls, signals, stage: parts.stage, places: parts.places, routes: parts.routes, tones: parts.tones, stats_feed: Mutex::new(Some(stats_feed)) }

@@ -332,7 +332,7 @@ impl ToneStore for Gated {
         self.peak.fetch_max(now, Ordering::SeqCst);
         let mut reading = Reading { store: self, finished: false };
         let tone = self.inner.tone(key).await;
-        if self.holds.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1)).is_ok() {
+        if self.holds.try_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1)).is_ok() {
             self.gate.acquire().await.unwrap().forget();
         }
         reading.finished = true;

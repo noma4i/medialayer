@@ -4,8 +4,8 @@ use super::*;
 #[test]
 fn inv_pool_15_touch_loads_unknown_keys_into_free_slots_and_ignores_known_ones() {
     let mut pool = ring(3, 0);
-    assert_eq!(pool.touch(1, "a"), [load(0, "a".into())]);
-    assert_eq!(pool.touch(2, "b"), [load(1, "b".into())]);
+    assert_eq!(pool.touch(1, "a"), [load(0, "a")]);
+    assert_eq!(pool.touch(2, "b"), [load(1, "b")]);
     assert!(pool.touch(3, "a").is_empty());
 }
 
@@ -16,7 +16,7 @@ fn inv_pool_15_full_pool_evicts_the_least_recently_used_key() {
     pool.touch(2, "b");
     pool.touch(3, "c");
     pool.touch(4, "a");
-    assert_eq!(pool.touch(5, "d"), [Shape::Unload { slot: 1 }, load(1, "d".into())]);
+    assert_eq!(pool.touch(5, "d"), [Shape::Unload { slot: 1 }, load(1, "d")]);
 }
 
 #[test]
@@ -25,7 +25,7 @@ fn inv_pool_15_playing_key_is_not_evicted() {
     pool.touch(1, "a");
     pool.touch(2, "b");
     pool.set_playing("a", true);
-    assert_eq!(pool.touch(3, "c"), [Shape::Unload { slot: 1 }, load(1, "c".into())]);
+    assert_eq!(pool.touch(3, "c"), [Shape::Unload { slot: 1 }, load(1, "c")]);
 }
 
 #[test]

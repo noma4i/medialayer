@@ -1,6 +1,6 @@
 use super::Stage;
 use crate::api::ports::PoolControl;
-use crate::api::signals::Signals;
+use crate::api::signals::{SignalPorts, Signals};
 use crate::api::source::MediaItem;
 use crate::api::slots::{PlayerSlot, SlotCall};
 use crate::api::test_support::{eventually, rig, shared, url_of, videos, FakeRelease, Rig};
@@ -20,13 +20,15 @@ fn signals(rig: &Rig) -> Signals {
     let stage = rig.parts.stage.clone();
     Signals::new(
         &Handle::current(),
-        Arc::new(stage.clone()),
-        Arc::new(rig.parts.prefetcher.clone()),
-        Arc::new(stage),
-        shared::<FakeRelease>(),
-        vec![Arc::new(rig.parts.prefetcher.clone()), Arc::new(rig.parts.tones.clone())],
-        rig.parts.ledger.clone(),
-        rig.parts.clock.clone(),
+        SignalPorts {
+            pool: Arc::new(stage.clone()),
+            prefetch: Arc::new(rig.parts.prefetcher.clone()),
+            directives: Arc::new(stage),
+            release: shared::<FakeRelease>(),
+            suspendable: vec![Arc::new(rig.parts.prefetcher.clone()), Arc::new(rig.parts.tones.clone())],
+            ledger: rig.parts.ledger.clone(),
+            clock: rig.parts.clock.clone(),
+        },
     )
 }
 

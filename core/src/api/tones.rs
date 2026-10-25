@@ -305,7 +305,7 @@ impl Tones {
     }
 
     async fn current(&self, key: &str, source: &MediaItem) -> Option<ToneData> {
-        self.known(key).await.or_else(|| self.from_blurhash(key, source))
+        self.known(key).await.or_else(|| self.blurhash_tone(key, source))
     }
 
     async fn known(&self, key: &str) -> Option<ToneData> {
@@ -315,7 +315,7 @@ impl Tones {
         }
     }
 
-    fn from_blurhash(&self, key: &str, source: &MediaItem) -> Option<ToneData> {
+    fn blurhash_tone(&self, key: &str, source: &MediaItem) -> Option<ToneData> {
         let tone = analyze_blurhash(source.blur_hash.as_deref()?).ok()?;
         locked(&self.memo).insert(key.to_string(), tone.clone());
         Some(tone)

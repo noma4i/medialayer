@@ -53,7 +53,7 @@ fn span(index: usize, count: usize, size: usize) -> (usize, usize) {
 fn cell_color(rgba: &[u8], width: usize, (x0, x1): (usize, usize), (y0, y1): (usize, usize)) -> Rgb {
     let mut sum = [0.0; 3];
     for y in y0..y1 {
-        for pixel in rgba[(y * width + x0) * 4..(y * width + x1) * 4].chunks_exact(4) {
+        for pixel in rgba[(y * width + x0) * 4..(y * width + x1) * 4].as_chunks::<4>().0 {
             for (total, channel) in sum.iter_mut().zip(pixel) {
                 *total += linear(*channel);
             }
@@ -66,7 +66,7 @@ fn cell_color(rgba: &[u8], width: usize, (x0, x1): (usize, usize), (y0, y1): (us
 fn summarize(rgba: &[u8], pixels: u64) -> (Rgb, Vec<DominantColor>) {
     let mut bins = vec![Bin::default(); BINS];
     let mut sum = [0.0; 3];
-    for pixel in rgba.chunks_exact(4) {
+    for pixel in rgba.as_chunks::<4>().0 {
         let bin = &mut bins[bin_of(pixel)];
         bin.count += 1;
         for ((total, part), channel) in sum.iter_mut().zip(bin.sum.iter_mut()).zip(pixel) {

@@ -100,7 +100,7 @@ impl<T: Clone + Send + 'static> Hub<T> {
 
 impl<T> Drop for Hub<T> {
     fn drop(&mut self) {
-        for (_, mailbox) in locked(&self.shared.boxes).iter() {
+        for mailbox in locked(&self.shared.boxes).values() {
             mailbox.closed.store(true, Ordering::SeqCst);
             mailbox.wake.notify_one();
         }
@@ -124,19 +124,6 @@ fn distribute<T: Clone>(shared: &Shared<T>, value: T) {
     }
 }
 
-#[cfg(test)]
-mod allocation_tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn inv_api_02_distribution_allocates_no_listener_snapshot() {
-        let hub = Hub::new(Handle::current());
-        let _subscriptions: Vec<_> = (0..64).map(|_| hub.subscribe(Arc::new(|_: u32| {}))).collect();
-        distribute(&hub.shared, 6);
-        assert_eq!(crate::alloc_probe::allocations_of(|| distribute(&hub.shared, 7)), 0);
-    }
-}
-
 async fn deliver_latest<T: Send + 'static>(mailbox: Arc<Mailbox<T>>, deliver: Deliver<T>) {
     loop {
         mailbox.wake.notified().await;
@@ -148,5 +135,18 @@ async fn deliver_latest<T: Send + 'static>(mailbox: Arc<Mailbox<T>>, deliver: De
         };
         let deliver = deliver.clone();
         let _ = tokio::task::spawn_blocking(move || deliver(value)).await;
+    }
+}
+
+#[cfg(test)]
+mod allocation_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn inv_api_02_distribution_allocates_no_listener_snapshot() {
+        let hub = Hub::new(Handle::current());
+        let _subscriptions: Vec<_> = (0..64).map(|_| hub.subscribe(Arc::new(|_: u32| {}))).collect();
+        distribute(&hub.shared, 6);
+        assert_eq!(crate::alloc_probe::allocations_of(|| distribute(&hub.shared, 7)), 0);
     }
 }

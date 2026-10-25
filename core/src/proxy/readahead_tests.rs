@@ -80,9 +80,7 @@ struct Rig {
 }
 
 async fn rig() -> Rig {
-    let mut config = Config::default();
-    config.hold_ceiling = Duration::from_millis(1_500);
-    config.probe_limit = Duration::from_millis(150);
+    let config = Config { hold_ceiling: Duration::from_millis(1_500), probe_limit: Duration::from_millis(150), ..Config::default() };
     rig_with(config, true).await
 }
 
@@ -151,7 +149,7 @@ async fn inv_readahead_02_a_held_segment_is_released_by_the_playhead_and_a_seek_
 
     let jumped = ask(&rig, &targets[7]);
     settle(250).await;
-    assert_eq!(jumped.is_finished(), false);
+    assert!(!jumped.is_finished());
     rig.playhead.move_to(6 * SEGMENT_MS);
     rig.proxy.nudge_window(MEDIA);
     let reply = tokio::time::timeout(Duration::from_millis(300), jumped).await.expect("released by the seek").unwrap();
@@ -194,7 +192,7 @@ async fn inv_readahead_04_a_stall_grows_the_cap_by_one_chunk_up_to_eight_and_a_n
     let targets = playlist_lines(&rig).await;
     let held = ask(&rig, &targets[3]);
     settle(250).await;
-    assert_eq!(held.is_finished(), false);
+    assert!(!held.is_finished());
     rig.proxy.grow_window(MEDIA);
     let reply = tokio::time::timeout(Duration::from_millis(300), held).await.expect("released by the growth").unwrap();
     assert_eq!(reply.status, 200);

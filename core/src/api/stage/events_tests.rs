@@ -461,7 +461,8 @@ async fn inv_idle_04_a_ledger_release_that_leaves_the_room_unchanged_does_not_st
 
 #[tokio::test]
 async fn inv_api_43_a_late_event_of_an_older_load_does_not_touch_the_new_load_of_the_slot() {
-    let events: [(&str, fn(&super::Stage, usize, u64)); 3] = [
+    type Case = (&'static str, fn(&super::Stage, usize, u64));
+    let events: [Case; 3] = [
         ("ready", |stage, slot, generation| stage.ready(slot, generation)),
         ("visual_ready", |stage, slot, generation| stage.visual_ready(slot, generation)),
         ("ended", |stage, slot, generation| stage.ended(slot, generation)),

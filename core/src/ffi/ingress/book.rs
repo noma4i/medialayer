@@ -38,7 +38,7 @@ struct KeyOwners {
 impl KeyOwners {
     /// `None` while no owner has an opinion; otherwise muted only when every opinion asks for mute.
     fn muted(&self) -> Option<bool> {
-        (self.muted_some > 0).then(|| self.muted_true == self.muted_some)
+        (self.muted_some > 0).then_some(self.muted_true == self.muted_some)
     }
 
     fn is_pinned(&self) -> bool {

@@ -95,7 +95,7 @@ pub(crate) struct Popped {
 
 pub(crate) enum Upcoming {
     Release(u64, OwnerKind),
-    Apply(Popped),
+    Apply(Box<Popped>),
     Idle,
     Ended(MediaError),
 }
@@ -244,7 +244,8 @@ impl InputQueue {
             drop(command);
             return Err(Self::overloaded("owner"));
         }
-        if let Err((error, rejected)) = self.push(&mut inner, command, bytes) {
+        if let Err(refused) = self.push(&mut inner, command, bytes) {
+            let (error, rejected) = *refused;
             drop(inner);
             drop(rejected);
             return Err(error);
@@ -268,7 +269,8 @@ impl InputQueue {
             drop(command);
             return Err(error);
         }
-        if let Err((error, rejected)) = self.push(&mut inner, command, bytes) {
+        if let Err(refused) = self.push(&mut inner, command, bytes) {
+            let (error, rejected) = *refused;
             drop(inner);
             drop(rejected);
             return Err(error);
@@ -278,7 +280,7 @@ impl InputQueue {
         Ok(())
     }
 
-    fn push(&self, inner: &mut Inner, command: Declared, bytes: u64) -> Result<(), (MediaError, Declared)> {
+    fn push(&self, inner: &mut Inner, command: Declared, bytes: u64) -> Result<(), Box<(MediaError, Declared)>> {
         let fold = command.fold();
         if let Some(fold) = &fold {
             let epoch = inner.epoch;
@@ -288,7 +290,7 @@ impl InputQueue {
             }
         }
         if let Err(error) = self.admit(inner, bytes, 1) {
-            return Err((error, command));
+            return Err(Box::new((error, command)));
         }
         let seq = inner.seq;
         inner.seq += 1;
@@ -310,12 +312,12 @@ impl InputQueue {
         Ok(())
     }
 
-    fn replace(&self, inner: &mut Inner, seq: u64, command: Declared, incoming: u64) -> Result<(), (MediaError, Declared)> {
+    fn replace(&self, inner: &mut Inner, seq: u64, command: Declared, incoming: u64) -> Result<(), Box<(MediaError, Declared)>> {
         if let Err(error) = self.admit(inner, incoming, 0) {
-            return Err((error, command));
+            return Err(Box::new((error, command)));
         }
         let Some(entry) = inner.entries.get_mut(&seq) else {
-            return Err((MediaError::Unexpected { detail: "a fold slot points at a missing entry".to_string() }, command));
+            return Err(Box::new((MediaError::Unexpected { detail: "a fold slot points at a missing entry".to_string() }, command)));
         };
         let previous = entry.bytes;
         let (discarded, merge) = entry.command.absorb(command);
@@ -390,7 +392,7 @@ impl InputQueue {
         if let Declared::Release { owner, kind } = entry.command {
             return Upcoming::Release(owner, kind);
         }
-        Upcoming::Apply(Popped { command: entry.command, reserve: Reserve { queue: Some(self.clone()), bytes: entry.bytes }, owner: entry.owner, slot: EntryPlace(self.clone()) })
+        Upcoming::Apply(Box::new(Popped { command: entry.command, reserve: Reserve { queue: Some(self.clone()), bytes: entry.bytes }, owner: entry.owner, slot: EntryPlace(self.clone()) }))
     }
 
     /// Takes every queued entry out after the end so the executor can answer them, and writes their accounting off.

@@ -71,7 +71,7 @@ async fn inv_image_46_a_local_file_is_read_by_its_head_once_and_a_foreign_file_h
 
     let text = dir.path().join("note.txt");
     std::fs::write(&text, b"not an image").unwrap();
-    assert_eq!(routes.image_size(&Url::from_file_path(&text).unwrap().to_string(), &HashMap::new()).await.unwrap(), None);
+    assert_eq!(routes.image_size(Url::from_file_path(&text).unwrap().as_ref(), &HashMap::new()).await.unwrap(), None);
     assert!(matches!(routes.image_size("file:///missing/none.png", &HashMap::new()).await, Err(MediaError::Fetch { .. })));
     assert_eq!(rig.fetcher.calls(), 0);
 }

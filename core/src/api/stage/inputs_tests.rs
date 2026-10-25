@@ -702,7 +702,7 @@ async fn inv_api_39_a_ready_without_duration_keeps_the_fraction_for_the_next_slo
 }
 
 fn transport(rig: &crate::api::test_support::Rig, key: &str) -> Option<SlotCall> {
-    rig.factory.slot_holding(key)?.1.calls().into_iter().filter(|call| matches!(call, SlotCall::Play | SlotCall::Pause)).last()
+    rig.factory.slot_holding(key)?.1.calls().into_iter().rfind(|call| matches!(call, SlotCall::Play | SlotCall::Pause))
 }
 
 #[tokio::test]

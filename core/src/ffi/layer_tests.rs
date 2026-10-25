@@ -855,7 +855,7 @@ fn inv_ffi_13_a_whole_source_of_each_window_before_the_assembly_downloads_after_
 }
 
 fn transport(slot: &MockSlot) -> Option<SlotCall> {
-    slot.calls().into_iter().filter(|call| matches!(call, SlotCall::Play | SlotCall::Pause)).last()
+    slot.calls().into_iter().rfind(|call| matches!(call, SlotCall::Play | SlotCall::Pause))
 }
 
 #[test]

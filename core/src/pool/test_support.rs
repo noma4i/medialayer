@@ -55,7 +55,18 @@ impl From<&Command> for Shape {
 
 impl PartialEq<Shape> for Command {
     fn eq(&self, other: &Shape) -> bool {
-        Shape::from(self) == *other
+        match (self, other) {
+            (Command::Load { slot, key, .. }, Shape::Load { slot: other_slot, key: other_key }) => slot == other_slot && key == other_key,
+            (Command::Unload { slot }, Shape::Unload { slot: other }) => slot == other,
+            (Command::Dispose { slot }, Shape::Dispose { slot: other }) => slot == other,
+            (Command::Preroll { slot }, Shape::Preroll { slot: other }) => slot == other,
+            (Command::Play { slot }, Shape::Play { slot: other }) => slot == other,
+            (Command::Pause { slot }, Shape::Pause { slot: other }) => slot == other,
+            (Command::Mute { slot }, Shape::Mute { slot: other }) => slot == other,
+            (Command::Unmute { slot }, Shape::Unmute { slot: other }) => slot == other,
+            (Command::Retain { slot, level }, Shape::Retain { slot: other_slot, level: other_level }) => slot == other_slot && level == other_level,
+            _ => false,
+        }
     }
 }
 

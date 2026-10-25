@@ -83,17 +83,19 @@ pub struct Signals {
     blocking: Arc<Mutex<JoinSet<()>>>,
 }
 
+pub struct SignalPorts {
+    pub pool: Arc<dyn PoolControl>,
+    pub prefetch: Arc<dyn PrefetchControl>,
+    pub directives: Arc<dyn SlotDirectives>,
+    pub release: Arc<dyn MemoryRelease>,
+    pub suspendable: Vec<Arc<dyn Suspendable>>,
+    pub ledger: Ledger,
+    pub clock: Arc<dyn Clock>,
+}
+
 impl Signals {
-    pub fn new(
-        handle: &Handle,
-        pool: Arc<dyn PoolControl>,
-        prefetch: Arc<dyn PrefetchControl>,
-        directives: Arc<dyn SlotDirectives>,
-        release: Arc<dyn MemoryRelease>,
-        suspendable: Vec<Arc<dyn Suspendable>>,
-        ledger: Ledger,
-        clock: Arc<dyn Clock>,
-    ) -> Signals {
+    pub fn new(handle: &Handle, ports: SignalPorts) -> Signals {
+        let SignalPorts { pool, prefetch, directives, release, suspendable, ledger, clock } = ports;
         let queue = Arc::new(Queue { pending: Mutex::new(VecDeque::new()), wake: Notify::new() });
         let blocking = Arc::new(Mutex::new(JoinSet::new()));
         let reaction = Reaction { pool, prefetch, directives, release, suspendable, ledger, clock, degradation: Mutex::new(Degradation::default()), blocking: blocking.clone() };

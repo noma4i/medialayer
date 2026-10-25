@@ -27,7 +27,7 @@ pub use placeholder::{placeholder_for, CacheState, Placeholder};
 pub use places::Places;
 pub use ports::{CacheControl, MemoryRelease, PoolControl, PrefetchControl, SettingsStore, SlotDirectives, Suspendable, TransportControl};
 pub use routes::Routes;
-pub use signals::Signals;
+pub use signals::{SignalPorts, Signals};
 pub use slots::{CreatedPlayer, PlayerSlot, PlayerSlotFactory, SlotCall, SlotRunner, SlotSample};
 pub use source::{bundled_source_error, is_local_url, local_file_url, normalize_item, remote_url, MediaItem, PlaybackRoute};
 pub use stage::{Stage, StageParts};

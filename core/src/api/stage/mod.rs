@@ -84,6 +84,15 @@ struct Declaration {
     check: Option<AbortOnDrop>,
 }
 
+#[derive(Default)]
+struct Effects {
+    calls: Vec<(usize, SlotCall)>,
+    actions: Vec<(LoadId, Action)>,
+    unloaded: Vec<String>,
+    resumed: Vec<(usize, String, u64)>,
+    parked: Vec<(usize, String, u64)>,
+}
+
 struct State {
     ring: Ring,
     election: Election,
@@ -470,15 +479,12 @@ impl Stage {
                 commands.extend(state.ring.set_playing(&key, true));
             }
         }
-        let mut calls = Vec::new();
-        let mut actions = Vec::new();
-        let mut unloaded = Vec::new();
-        let mut resumed = Vec::new();
-        let mut parked = Vec::new();
+        let mut effects = Effects::default();
         for command in commands {
             crate::trace!("stage", "command {command:?}");
-            self.translate(&mut state, command, &mut calls, &mut actions, &mut unloaded, &mut resumed, &mut parked);
+            self.translate(&mut state, command, &mut effects);
         }
+        let Effects { calls, actions, unloaded, resumed, parked } = effects;
         for (slot, call) in calls.into_iter().chain(follow) {
             self.send_call(&state, slot, call);
         }
@@ -522,12 +528,9 @@ impl Stage {
         &self,
         state: &mut State,
         command: Command,
-        calls: &mut Vec<(usize, SlotCall)>,
-        actions: &mut Vec<(LoadId, Action)>,
-        unloaded: &mut Vec<String>,
-        resumed: &mut Vec<(usize, String, u64)>,
-        parked: &mut Vec<(usize, String, u64)>,
+        effects: &mut Effects,
     ) {
+        let Effects { calls, actions, unloaded, resumed, parked } = effects;
         match &command {
             Command::Load { slot, key, held } => {
                 let source = state.catalog.get(key).cloned().unwrap_or_else(|| MediaItem::bare(key, Kind::Video));

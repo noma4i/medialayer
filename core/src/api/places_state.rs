@@ -61,6 +61,7 @@ impl Lifecycle {
     }
 
     #[allow(unused_variables)]
+    #[allow(clippy::ptr_arg, reason = "the state machine macro binds the state field type String")]
     #[state(superstate = "lifecycle")]
     fn failed(detail: &mut String, event: &Signal) -> Outcome<State> {
         match event {

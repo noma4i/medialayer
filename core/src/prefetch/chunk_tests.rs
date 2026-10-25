@@ -75,8 +75,8 @@ async fn inv_prefetch_12_moving_the_window_requests_only_the_missing_chunks_and_
     for (step, active) in [0usize, 1, 4, 2, 7].into_iter().enumerate() {
         rig.prefetcher.set_window(active, feed(12));
         eventually(|| rig.prefetcher.live_tasks() == 0).await;
-        for item in active + 1..(active + 10).min(12) {
-            expected[item] = expected[item].max(wanted(item - active));
+        for (item, count) in expected.iter_mut().enumerate().take((active + 10).min(12)).skip(active + 1) {
+            *count = (*count).max(wanted(item - active));
         }
         let urls: Vec<String> = rig.loader.urls().into_iter().filter(|url| url.contains("/s")).collect();
         assert_eq!(urls.len(), urls.iter().collect::<HashSet<_>>().len(), "step {step}: a chunk was requested twice");

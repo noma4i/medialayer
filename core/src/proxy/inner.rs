@@ -42,6 +42,8 @@ pub(super) struct Listener {
     pub finished: oneshot::Receiver<()>,
 }
 
+type ProbeEntry = (Arc<tokio::sync::Mutex<()>>, usize);
+
 pub(super) struct ProxyShared {
     pub fetcher: Arc<dyn Fetcher>,
     pub store: Arc<dyn ByteStore>,
@@ -57,7 +59,7 @@ pub(super) struct ProxyShared {
     pub playlists: super::playlists::Playlists,
     pub totals: Mutex<Recent<u64>>,
     whole_only: Mutex<Recent<()>>,
-    probe_locks: Mutex<HashMap<String, (Arc<tokio::sync::Mutex<()>>, usize)>>,
+    probe_locks: Mutex<HashMap<String, ProbeEntry>>,
     pub listener: tokio::sync::Mutex<Option<Listener>>,
     pub running: AtomicBool,
     pub alive: Arc<AtomicBool>,

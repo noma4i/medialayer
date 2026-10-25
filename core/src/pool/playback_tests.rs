@@ -78,7 +78,7 @@ fn inv_pool_12_slot_mute_survives_global_unmute() {
 fn inv_pool_12_mute_set_before_load_applies_right_after_the_load() {
     let mut pool = ring(3, 0);
     assert!(pool.set_muted("a", true).is_empty());
-    assert_eq!(pool.touch(1, "a"), [load(0, "a".into()), Shape::Mute { slot: 0 }]);
+    assert_eq!(pool.touch(1, "a"), [load(0, "a"), Shape::Mute { slot: 0 }]);
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn inv_pool_12_slot_reused_for_an_unmuted_key_is_unmuted() {
     pool.touch(2, "b");
     pool.set_playing("b", true);
     let commands = pool.touch(3, "c");
-    assert_eq!(commands, [Shape::Unload { slot: 0 }, load(0, "c".into()), Shape::Unmute { slot: 0 }]);
+    assert_eq!(commands, [Shape::Unload { slot: 0 }, load(0, "c"), Shape::Unmute { slot: 0 }]);
 }
 
 #[test]

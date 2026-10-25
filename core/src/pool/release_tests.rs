@@ -93,8 +93,8 @@ fn inv_pool_09_foreground_restores_one_slot_per_tick_nearest_first() {
     pool.plan(0, 5, Some(5), &keys(20));
     pool.background();
     pool.foreground();
-    assert_eq!(pool.tick(10), [load(0, "k6".into())]);
-    assert_eq!(pool.tick(20), [load(1, "k4".into())]);
+    assert_eq!(pool.tick(10), [load(0, "k6")]);
+    assert_eq!(pool.tick(20), [load(1, "k4")]);
     assert!(pool.tick(30).is_empty());
 }
 

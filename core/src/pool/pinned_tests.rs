@@ -4,7 +4,7 @@ use super::*;
 #[test]
 fn inv_pool_07_pin_loads_the_key_and_is_idempotent() {
     let mut pool = ring(3, 1);
-    assert_eq!(pool.pin(1, "intro"), [load(0, "intro".into())]);
+    assert_eq!(pool.pin(1, "intro"), [load(0, "intro")]);
     assert!(pool.pin(2, "intro").is_empty());
 }
 
@@ -37,9 +37,9 @@ fn inv_pool_07_lru_never_evicts_pinned_and_unpin_makes_it_evictable() {
     let mut pool = ring(2, 0);
     pool.pin(1, "intro");
     pool.touch(2, "a");
-    assert_eq!(pool.touch(3, "b"), [Shape::Unload { slot: 1 }, load(1, "b".into())]);
+    assert_eq!(pool.touch(3, "b"), [Shape::Unload { slot: 1 }, load(1, "b")]);
     pool.unpin("intro");
-    assert_eq!(pool.touch(4, "c"), [Shape::Unload { slot: 0 }, load(0, "c".into())]);
+    assert_eq!(pool.touch(4, "c"), [Shape::Unload { slot: 0 }, load(0, "c")]);
 }
 
 #[test]

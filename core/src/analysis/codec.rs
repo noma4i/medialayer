@@ -34,10 +34,10 @@ impl ToneData {
         if usize::from(*count) > DOMINANT || shares.len() != DOMINANT_BYTES * usize::from(*count) {
             return None;
         }
-        let mut cells: Vec<Rgb> = colors.chunks_exact(3).map(|part| Rgb { r: part[0], g: part[1], b: part[2] }).collect();
+        let mut cells: Vec<Rgb> = colors.as_chunks::<3>().0.iter().map(|part| Rgb { r: part[0], g: part[1], b: part[2] }).collect();
         let overall = cells.pop()?;
         let dominant = shares
-            .chunks_exact(DOMINANT_BYTES)
+            .as_chunks::<DOMINANT_BYTES>().0.iter()
             .map(|part| DominantColor { color: Rgb { r: part[0], g: part[1], b: part[2] }, share_permille: u16::from_be_bytes([part[3], part[4]]) })
             .collect::<Vec<_>>();
         dominant.iter().all(|kept| kept.share_permille <= MAX_SHARE).then_some(ToneData { source, cells, overall, dominant })

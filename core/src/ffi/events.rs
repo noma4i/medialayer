@@ -16,9 +16,8 @@ impl PlayerEvents {
 
     fn declare(&self, command: Declared) {
         let Some(closing) = self.closing.upgrade() else { return };
-        match closing.queue.submit(command) {
-            Err(error @ MediaError::Overloaded { .. }) => closing.overflowed(error),
-            _ => {}
+        if let Err(error @ MediaError::Overloaded { .. }) = closing.queue.submit(command) {
+            closing.overflowed(error);
         }
     }
 
