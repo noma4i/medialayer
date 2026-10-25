@@ -351,9 +351,18 @@ impl Stage {
         self.dispatch_with(state, commands, true);
     }
 
-    fn dispatch_with(&self, mut state: StateGuard<'_>, commands: Vec<Command>, is_remembering: bool) {
+    fn dispatch_with(&self, mut state: StateGuard<'_>, mut commands: Vec<Command>, is_remembering: bool) {
         if commands.is_empty() {
             return;
+        }
+        let loads: Vec<(usize, String)> = commands
+            .iter()
+            .filter_map(|command| if let Command::Load { slot, key } = command { Some((*slot, key.clone())) } else { None })
+            .collect();
+        for (slot, key) in loads {
+            if state.is_playing(&key) && !commands.iter().any(|command| *command == Command::Play { slot }) {
+                commands.extend(state.ring.set_playing(&key, true));
+            }
         }
         let mut calls = Vec::new();
         let mut actions = Vec::new();

@@ -806,3 +806,41 @@ async fn inv_session_17_the_default_group_leaves_the_set_when_the_ungrouped_owne
     stage.set_playing(&url_of(5), true, &[Some("system".to_string())]);
     eventually(|| transport(&rig, &url_of(5)) == Some(SlotCall::Pause)).await;
 }
+
+#[tokio::test]
+async fn inv_api_45_a_play_intent_given_before_the_source_materializes_reaches_the_slot_in_both_orders() {
+    for kind in [Kind::Video, Kind::Audio] {
+        for intent_first in [true, false] {
+            let rig = rig().await;
+            let (stage, url) = (&rig.parts.stage, url_of(0));
+            let source = MediaItem::bare(&url, kind);
+            if intent_first {
+                stage.set_playing(&url, true, &[]);
+                stage.visible(source, true);
+            } else {
+                stage.visible(source, true);
+                stage.set_playing(&url, true, &[]);
+            }
+            eventually(|| rig.factory.slot_holding(&url).is_some() && stage.commands_idle()).await;
+            let calls = rig.holder(&url).1.calls();
+
+            assert_eq!(calls.iter().filter(|call| **call == SlotCall::Play).count(), 1, "{kind:?} intent_first={intent_first}: {calls:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn inv_api_45_only_the_elected_intent_plays_when_the_sources_materialize_after_it() {
+    let rig = rig().await;
+    let (stage, first, second) = (&rig.parts.stage, url_of(0), url_of(1));
+    stage.set_playing(&first, true, &[]);
+    stage.set_playing(&second, true, &[]);
+    stage.visible(video(&first), true);
+    stage.visible(video(&second), true);
+    eventually(|| rig.factory.slot_holding(&first).is_some() && rig.factory.slot_holding(&second).is_some() && stage.commands_idle()).await;
+
+    let plays = |url: &str| rig.holder(url).1.calls().iter().filter(|call| **call == SlotCall::Play).count();
+    let elected: Vec<usize> = [&first, &second].iter().map(|url| usize::from(stage.state().is_playing(url))).collect();
+    assert_eq!(elected.iter().sum::<usize>(), 1, "exactly one intent is elected");
+    assert_eq!([plays(&first), plays(&second)], [elected[0], elected[1]], "a suppressed intent played or the elected one did not");
+}
