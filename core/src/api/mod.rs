@@ -29,7 +29,7 @@ pub use ports::{CacheControl, MemoryRelease, PoolControl, PrefetchControl, Setti
 pub use routes::Routes;
 pub use signals::Signals;
 pub use slots::{CreatedPlayer, PlayerSlot, PlayerSlotFactory, SlotCall, SlotRunner, SlotSample};
-pub use source::{MediaItem, PlaybackRoute};
+pub use source::{bundled_source_error, local_file_url, normalize_item, remote_url, MediaItem, PlaybackRoute};
 pub use stage::{Stage, StageParts};
 pub use stats_feed::follow_stats;
 pub use tones::{CacheTones, Keying, TonePixels, TonePreparation, ToneStore, Tones, MEMO_ENTRIES};
@@ -53,6 +53,8 @@ mod places_tests;
 mod routes_tests;
 #[cfg(test)]
 mod signals_tests;
+#[cfg(test)]
+mod source_value_tests;
 #[cfg(test)]
 mod slots_tests;
 #[cfg(test)]

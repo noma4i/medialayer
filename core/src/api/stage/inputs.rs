@@ -52,6 +52,15 @@ impl Stage {
         self.inner.prefetcher.announce(crate::prefetch::Settled { url: url.to_string(), outcome });
     }
 
+    /// A place whose source names no url fails here and never reaches a player or the prefetcher.
+    pub fn refuse_source(&self, key: &str) {
+        self.inner.places.failed(key, super::super::source::BLANK_URL_DETAIL);
+    }
+
+    pub fn clear_refusal(&self, key: &str) {
+        self.inner.places.retired(key);
+    }
+
     pub fn replace_window(&self, active: usize, sources: Vec<Option<MediaItem>>) {
         self.declare_whole(sources.iter().flatten());
         let mut state = self.state();

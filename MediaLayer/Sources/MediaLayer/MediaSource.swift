@@ -1,4 +1,4 @@
-public struct MediaSize: Equatable, Sendable {
+public struct MediaSize: Hashable, Sendable {
   public let width: Int
   public let height: Int
 

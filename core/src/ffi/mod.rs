@@ -25,6 +25,8 @@ mod fetcher_tests;
 #[cfg(test)]
 mod layer_life_tests;
 #[cfg(test)]
+mod blank_url_tests;
+#[cfg(test)]
 mod layer_tests;
 #[cfg(test)]
 mod limits_tests;

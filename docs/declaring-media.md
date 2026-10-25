@@ -73,6 +73,35 @@ MediaImage(
 )
 ```
 
+## Sources without a class
+
+`MediaSourceValue` is a source declared by value, next to the generated types of the `.mdl` file. The app writes no class and no string glue. The core cleans the text once, through `normalize_item`: the url loses its edge whitespace, a blank cover or blur hash is absent.
+
+### Swift
+
+```swift
+MediaSourceValue.file(recording.fileUrl, kind: .video)                         // path or file URL
+MediaSourceValue.remote(user.avatarUrl, kind: .image, blurHash: user.blurHash)  // http or https text or URL
+MediaSourceValue.bundled("welcome", extension: "m4v", kind: .video)            // bundle resource, Bundle.main by default
+MediaSourceValue(url: row.url, kind: .image, size: MediaSize(width: 288, height: 288), strategy: .whole)
+```
+
+### Kotlin
+
+```kotlin
+MediaSourceValue.file(recording.file, Kind.VIDEO)                              // path, File or file Uri
+MediaSourceValue.remote(user.avatarUrl, Kind.IMAGE, blurHash = user.blurHash)
+MediaSourceValue.raw(context, R.raw.welcome, Kind.VIDEO)                       // res/raw
+MediaSourceValue.asset("welcome.m4v", Kind.VIDEO)                              // assets
+MediaSourceValue(row.url, Kind.IMAGE, size = 288 to 288, strategy = CacheStrategy.WHOLE)
+```
+
+- A path or a `file://` text becomes one canonical `file://` url (`local_file_url`). A relative path, a web url or an empty text gives an empty url. `remote` keeps only a valid `http` or `https` text (`remote_url`), anything else gives an empty url.
+- A source with an empty url is still created. Its place fails with `MediaState.failed` (`MediaState.Failed`) and the detail `the source has no url`. No player, no prefetch, no request starts. The place leaves the failed state when the last view of it goes away. A missing bundle resource gives the same result, so the app has no `nil` branch to write.
+- `bundled`, `raw` and `asset` take a video or an audio. An image is a programming error: Swift stops with `preconditionFailure`, Kotlin throws `IllegalArgumentException`, both with the text `a bundled source is a video or an audio, not an image` from the core (`bundled_source_error`).
+- iOS reads a bundle resource as a `file://` url. Android `res/raw` is `android.resource://<package>/<id>` and `assets` is `asset:///<name>`. ExoPlayer reads both itself, the core treats them like `file://`: the source counts as cached, stays out of the prefetch window, goes without the proxy and has an empty placeholder (`is_local_url` is the only list of these schemes). `fetch_image` reads only `file://`.
+- `looping` is not a field of a source. `MediaVideo(loop:)` sets it.
+
 ## Preview until the upload is ready
 
 `preview` puts a second source in the place of one image. It shows while the main source has no frame, usually a local `file://` copy of a picture that is still uploading. The first frame of the main source replaces it in the same frame, with no empty frame and no timer. The preview takes no place of its own and is never prefetched. The cache key of the main source stays its URL.

@@ -282,12 +282,19 @@ impl Book {
         self.flush(&key);
         if self.keys.get(&key).is_some_and(|keyed| keyed.owners == 0) {
             self.keys.remove(&key);
+            if key.trim().is_empty() {
+                self.assembled.stage.clear_refusal(&key);
+            }
         }
     }
 
     fn flush(&mut self, key: &str) {
         let stage = &self.assembled.stage;
         let Some(keyed) = self.keys.get_mut(key) else { return };
+        if key.trim().is_empty() {
+            stage.refuse_source(key);
+            return;
+        }
         let visible = keyed.visible.iter().next_back().and_then(|(_, owner)| self.places.get(owner)).map(|place| place.item.clone());
         match (visible, keyed.applied.source.is_some()) {
             (Some(source), false) => {
