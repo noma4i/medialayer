@@ -44,6 +44,8 @@ pub struct Routes {
     sizes: Mutex<SizeMemo>,
     #[cfg(test)]
     barrier: Barrier,
+    #[cfg(test)]
+    storage_lookups: std::sync::atomic::AtomicUsize,
 }
 
 #[cfg(test)]
@@ -68,6 +70,8 @@ impl Routes {
             sizes: Mutex::new(SizeMemo::default()),
             #[cfg(test)]
             barrier: Barrier { held: tokio::sync::watch::channel(false).0, entered: std::sync::atomic::AtomicUsize::new(0) },
+            #[cfg(test)]
+            storage_lookups: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -79,6 +83,11 @@ impl Routes {
     #[cfg(test)]
     pub fn barrier_entries(&self) -> usize {
         self.barrier.entered.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[cfg(test)]
+    pub fn storage_lookups(&self) -> usize {
+        self.storage_lookups.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     pub fn play_url(&self, source: &MediaItem) -> PlaybackRoute {
@@ -186,6 +195,8 @@ impl Routes {
         if is_local_url(url) {
             return true;
         }
+        #[cfg(test)]
+        self.storage_lookups.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let key = self.proxy.key_for(url, headers);
         self.cache.contains(&key).await || self.cache.contains(&block_key(&key, 0)).await
     }

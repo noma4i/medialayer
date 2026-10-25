@@ -26,7 +26,7 @@ final class ToneFrames: TonePreparation, @unchecked Sendable {
     guard let url = URL(string: source.cover ?? source.url) else { return nil }
     let stats = places.imageStats()
     stats.record(work: .request(placementPixels: 0))
-    defer { stats.record(work: Task.isCancelled ? .cancel(key: places.cacheKey(url: url.absoluteString, headers: source.headers)) : .finish(memoryHit: false)) }
+    defer { stats.record(work: Task.isCancelled ? .cancel : .finish(memoryHit: false)) }
     let result = try? await places.fetchImage(url: url.absoluteString, headers: source.headers)
     if result?.source == .cache { stats.record(work: .diskHit) }
     guard !Task.isCancelled, let data = result?.bytes else { return nil }

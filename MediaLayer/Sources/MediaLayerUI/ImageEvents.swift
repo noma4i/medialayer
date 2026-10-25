@@ -23,7 +23,7 @@ final class ImageEvents: ImagePipeline.Delegate {
     os_signpost(.end, log: Self.log, name: "MediaImage.request", signpostID: OSSignpostID(log: Self.log, object: task))
     switch result {
     case .success(let response): stats.recordLater(work: .finish(memoryHit: response.cacheType == .memory))
-    case .failure(.cancelled): stats.recordLater(work: .cancel(key: task.request.imageID ?? task.request.url?.absoluteString ?? ""))
+    case .failure(.cancelled): stats.recordLater(work: .cancel)
     case .failure: stats.recordLater(work: .finish(memoryHit: false))
     }
   }

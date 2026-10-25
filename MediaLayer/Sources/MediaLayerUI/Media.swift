@@ -136,15 +136,27 @@ extension EnvironmentValues {
   }
 }
 
-private struct MediaLayerModifier: ViewModifier {
-  @State private var context: MediaContext
+final class OwnedMediaContext {
+  private let media: MediaPlaces
+  private let slots: LoadedSlots?
+  private(set) lazy var context = MediaContext(places: media, slots: slots)
 
   init(media: MediaPlaces, slots: LoadedSlots?) {
-    _context = State(initialValue: MediaContext(places: media, slots: slots))
+    self.media = media
+    self.slots = slots
+  }
+}
+
+private struct MediaLayerModifier: ViewModifier {
+  @State private var owned: OwnedMediaContext
+
+  init(media: MediaPlaces, slots: LoadedSlots?) {
+    _owned = State(initialValue: OwnedMediaContext(media: media, slots: slots))
   }
 
   func body(content: Content) -> some View {
-    content
+    let context = owned.context
+    return content
       .environment(\.mediaContext, context)
       .onAppear { ProcessMediaContext.shared.install(context) }
       .onDisappear { ProcessMediaContext.shared.remove(context) }

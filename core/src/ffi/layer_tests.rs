@@ -355,6 +355,30 @@ fn inv_placeholder_02_a_source_is_cached_by_its_first_block_and_the_placeholder_
 }
 
 #[test]
+fn inv_placeholder_08_only_an_unready_video_reads_the_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let caller = caller();
+    let (layer, routes) = caller.block_on(async {
+        let parts = crate::api::assemble(assembly(dir.path(), Arc::new(MockFetcher::default()), shared::<MockFactory>())).await.unwrap();
+        let routes = parts.routes.clone();
+        (MediaLayer::from_parts(None, Handle::current(), parts, None, Vec::new()), routes)
+    });
+    let item = |url: &str, kind: crate::api::Kind| MediaItem::bare(url, kind);
+    let cases = [
+        ("image", item("https://o.test/a.jpg", crate::api::Kind::Image), false, 0),
+        ("ready image", item("https://o.test/b.jpg", crate::api::Kind::Image), true, 0),
+        ("audio", item("https://o.test/a.mp3", crate::api::Kind::Audio), false, 0),
+        ("ready video", item("https://o.test/a.mp4", crate::api::Kind::Video), true, 0),
+        ("unready video", item("https://o.test/b.mp4", crate::api::Kind::Video), false, 1),
+    ];
+    for (name, source, ready, lookups) in cases {
+        let before = routes.storage_lookups();
+        caller.block_on(layer.placeholder(source, ready));
+        assert_eq!(routes.storage_lookups() - before, lookups, "{name}");
+    }
+}
+
+#[test]
 fn inv_ffi_03_an_item_state_from_a_native_loader_reaches_the_state_subscribers_and_a_seek_reaches_the_player() {
     let dir = tempfile::tempdir().unwrap();
     let factory: Arc<MockFactory> = Arc::default();

@@ -2,7 +2,7 @@ use super::command::{Answer, Declared, Observer, Finished, OwnerKind, PlaceInput
 use super::queue::{InputQueue, Reserve, EntryPlace};
 use super::readiness::PageReadiness;
 use super::super::layer::WindowReadyListener;
-use crate::api::{placeholder_for, AbortOnDrop, CacheState, Kind, MediaError, MediaItem, MediaState, Placeholder, Subscription};
+use crate::api::{placeholder_for, AbortOnDrop, CacheState, Kind, MediaError, MediaItem, MediaState, Subscription};
 use tokio::runtime::Handle;
 use super::super::assembled::Assembled;
 use std::collections::{BTreeMap, BTreeSet, HashMap};

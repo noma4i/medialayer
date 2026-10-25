@@ -41,11 +41,21 @@ fn inv_image_11_placement_preserves_source_aspect_without_upscaling() {
 }
 
 #[test]
+fn inv_image_50_a_cancellation_settles_its_request_without_a_key() {
+    let counters = ImageCounters::new();
+    counters.record(ImageWork::Request { placement_pixels: 0 });
+    counters.record(ImageWork::Cancel);
+    let snapshot = counters.snapshot();
+
+    assert_eq!((snapshot.active_requests, snapshot.cancellations), (0, 1));
+}
+
+#[test]
 fn inv_image_37_cancellations_are_one_counter_not_a_map_of_every_url() {
     let counters = ImageCounters::new();
-    for index in 0..1000 {
+    for _ in 0..1000 {
         counters.record(ImageWork::Request { placement_pixels: 0 });
-        counters.record(ImageWork::Cancel { key: format!("https://o.test/{index}.png") });
+        counters.record(ImageWork::Cancel);
     }
     let snapshot = counters.snapshot();
 

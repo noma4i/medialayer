@@ -19,7 +19,7 @@ pub enum ImageWork {
     Request { placement_pixels: u64 },
     Decode { width: u32, height: u32, bytes: u64 },
     Finish { memory_hit: bool },
-    Cancel { key: String },
+    Cancel,
     DiskHit,
     Observe,
     Unobserve,
@@ -83,7 +83,7 @@ impl ImageCounters {
                 state.active_requests -= 1;
                 state.memory_hits += u64::from(memory_hit);
             }
-            ImageWork::Cancel { .. } => {
+            ImageWork::Cancel => {
                 state.active_requests -= 1;
                 state.cancellations += 1;
             }
