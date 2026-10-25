@@ -141,6 +141,24 @@ let size = try await media.imageSize(Upload(url: message.remoteUrl))   // ImageS
 val size = media.imageSize(Upload(url = message.remoteUrl))   // ImageSize(width, height) or null
 ```
 
+## Media info
+
+`mediaInfo` answers the length of a local video or audio file and the frame of a video, without a player and without loading the file into memory. It reads `file://`, a bundle resource, `android.resource://` and `asset:///` sources with `AVURLAsset` (Swift) and `MediaMetadataRetriever` (Kotlin), off the main thread, and stops when the task is cancelled. `durationMs` is in milliseconds. `frame` is the size as the screen shows it: a video turned by 90 or 270 degrees reports the sides swapped (one rule in the core, `displayFrameSize`). An audio file has a length and no frame.
+
+It returns `nil` (`null`) when the file holds no media, and for a remote source: a remote file has no metadata without a download, and the library never downloads it a second time for this call. A missing or unreadable local file throws `MediaError.Fetch` (`MediaException.Fetch`), as `imageSize` does.
+
+### Swift
+
+```swift
+let info = try await media.mediaInfo(MediaSourceValue.file(clipUrl, kind: .video))   // MediaInfo(durationMs:frame:) or nil
+```
+
+### Kotlin
+
+```kotlin
+val info = media.mediaInfo(MediaSourceValue.file(clipFile, Kind.VIDEO))   // MediaInfo(durationMs, frame) or null
+```
+
 ## Image as a value
 
 To get the decoded image without a view (a share card drawn by `ImageRenderer`, a bitmap for a canvas), call `image` on the media context. It goes through the same loader, the same core cache, the same item state and tone as `MediaImage`, and it does not wait for a window or a lifecycle. It returns `nil` (`null`) when the source fails or the task is cancelled, and a second call for the same source and size reads the cache.

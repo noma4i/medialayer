@@ -11,6 +11,7 @@ pub mod hls;
 pub mod identity;
 pub mod image_size;
 pub mod limits;
+pub mod media_info;
 pub mod memory;
 pub mod outside;
 pub mod pages;
