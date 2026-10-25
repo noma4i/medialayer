@@ -17,7 +17,6 @@ import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaSource
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -74,9 +73,8 @@ class MediaTileTest {
     rule.waitUntil(5000) { looper.idle(); rule.onAllNodesWithContentDescription("blurhash").fetchSemanticsNodes().isNotEmpty() }
     gate.complete(Unit)
     rule.waitUntil(5000) { looper.idle(); rule.onAllNodesWithContentDescription("blurhash").fetchSemanticsNodes().isEmpty() }
-    rule.waitForIdle()
+    rule.waitUntil(5000) { looper.idle(); ready(url) }
 
-    assertTrue(ready(url))
     assertEquals(listOf(url to false), layer.placeholders.toList())
   }
 
@@ -105,9 +103,9 @@ class MediaTileTest {
         Column { repeat(count) { MediaImage(Thumb(url), Modifier.size((50 + unrelated).dp)) } }
       }
     }
-    rule.waitUntil(5000) { looper.idle(); ready(url) }
-
     val shown = List(3) { "visible:$url:true" }
+    rule.waitUntil(5000) { looper.idle(); ready(url) && visibles(url) == shown }
+
     unrelated++
     rule.waitForIdle()
     assertEquals(shown, visibles(url))

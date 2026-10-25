@@ -72,6 +72,10 @@ private final class Screen {
   func settle(_ duration: Duration = .milliseconds(350)) async {
     try? await Task.sleep(for: duration)
   }
+
+  func settle(until holds: () -> Bool) async {
+    for _ in 0..<200 where !holds() { try? await Task.sleep(for: .milliseconds(50)) }
+  }
 }
 
 extension GlobalMedia {
@@ -120,7 +124,7 @@ extension GlobalMedia {
       await screen.settle(.milliseconds(450))
       #expect(screen.inputs.reports == reports)
       await slot.seek(positionMs: 200)
-      await screen.settle()
+      await screen.settle(until: { screen.inputs.reports > reports })
       #expect(screen.inputs.reports > reports)
     }
 
@@ -139,7 +143,7 @@ extension GlobalMedia {
       let duration = try #require(slot.sample().durationMs)
       let audio = try #require(screen.inputs.audio)
       await slot.seek(positionMs: duration / 5)
-      await screen.settle()
+      await screen.settle(until: { audio.progress > 0 })
       #expect(audio.progress > 0)
       NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
       await screen.settle()
@@ -148,13 +152,13 @@ extension GlobalMedia {
       await screen.settle(.milliseconds(600))
       #expect(audio.progress == background)
       NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
-      await screen.settle()
+      await screen.settle(until: { audio.progress > background })
       #expect(audio.progress > background)
       screen.scroll.contentOffset = CGPoint(x: 0, y: 500)
       await screen.settle()
       let offscreen = audio.progress
       await slot.seek(positionMs: duration * 3 / 5)
-      await screen.settle()
+      await screen.settle(until: { audio.progress > offscreen })
       #expect(audio.progress > offscreen)
     }
 
@@ -173,7 +177,7 @@ extension GlobalMedia {
       let duration = try #require(slot.sample().durationMs)
       let audio = try #require(screen.inputs.audio)
       await slot.seek(positionMs: duration / 5)
-      await screen.settle()
+      await screen.settle(until: { audio.progress > 0 })
       #expect(audio.progress > 0)
       audio.seek(to: 0.5)
       await screen.settle()

@@ -22,6 +22,15 @@ private func settle() async {
 }
 
 @MainActor
+private func settle(until holds: () -> Bool) async {
+  let end = Date().addingTimeInterval(10)
+  while !holds(), Date() < end {
+    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    await Task.yield()
+  }
+}
+
+@MainActor
 @Suite(.timeLimit(.minutes(1)))
 struct OnScreenViewTests {
   @Test
@@ -37,7 +46,7 @@ struct OnScreenViewTests {
       scroll.addSubview(probe)
       return probe
     }
-    await settle()
+    await settle(until: { scroll.offsetObservers - before == 1 })
     #expect(scroll.offsetObservers - before == 1)
     probes.forEach { $0.finish() }
     window.isHidden = true
@@ -58,11 +67,11 @@ struct OnScreenViewTests {
     #expect(reports == [])
 
     scroll.contentOffset = CGPoint(x: 0, y: 1850)
-    await settle()
+    await settle(until: { reports == [true] })
     #expect(reports == [true])
 
     scroll.contentOffset = .zero
-    await settle()
+    await settle(until: { reports == [true, false] })
     #expect(reports == [true, false])
   }
 
@@ -74,11 +83,11 @@ struct OnScreenViewTests {
     var reports: [Bool] = []
     probe.onChange = { reports.append($0) }
     window.addSubview(probe)
-    await settle()
+    await settle(until: { reports == [true] })
     #expect(reports == [true])
 
     probe.removeFromSuperview()
-    await settle()
+    await settle(until: { reports == [true, false] })
     #expect(reports == [true, false])
   }
 }

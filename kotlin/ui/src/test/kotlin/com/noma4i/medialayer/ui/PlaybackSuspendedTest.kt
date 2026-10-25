@@ -120,9 +120,7 @@ class PlaybackSuspendedTest {
     }
     rule.runOnIdle { mounted = false }
     rule.runOnIdle { opening.complete(layer) }
-    looper.idle()
-    rule.waitForIdle()
-    assertEquals(listOf("play"), slot.transport.toList())
+    waitFor(listOf("play"))
     assertNull(Media.failure)
     layer.close()
   }

@@ -30,6 +30,8 @@ private final class HeldOrigin: Fetcher, @unchecked Sendable {
 
   func fetches(_ name: String) -> Int { lock.withLock { urls.filter { $0.contains(name) }.count } }
 
+  var counters: String { "a=\(fetches("a.jpg")) b=\(fetches("b.jpg")) c=\(fetches("c.jpg")) released=\(releaseCount)" }
+
   func released() { lock.withLock { releases += 1 } }
 
   func fetch(request: FetchRequest) async throws -> FetchResponse {
@@ -72,20 +74,20 @@ struct WholeHoldTests {
     let (first, second) = (photo("a.jpg"), photo("b.jpg"))
 
     hold.declare([first], in: media)
-    #expect(await waits { origin.fetches("a.jpg") == 1 })
+    #expect(await waits { origin.fetches("a.jpg") >= 1 }, "\(origin.counters)")
 
     hold.declare([first, second], in: media)
-    #expect(origin.fetches("a.jpg") == 1)
-
     hold.declare([second], in: media)
-    #expect(await waits { origin.releaseCount == 1 })
-    #expect(await waits { origin.fetches("b.jpg") == 1 })
+    #expect(await waits { origin.releaseCount >= 1 && origin.fetches("b.jpg") >= 1 }, "\(origin.counters)")
+    #expect(origin.fetches("a.jpg") == 1, "\(origin.counters)")
 
     hold.add([photo("c.jpg")], in: media)
-    #expect(origin.releaseCount == 1)
+    try? await Task.sleep(for: .milliseconds(300))
+    #expect(origin.releaseCount == 1, "\(origin.counters)")
+    #expect(origin.fetches("b.jpg") == 1, "\(origin.counters)")
 
     hold.release()
-    #expect(await waits { origin.releaseCount >= 2 })
+    #expect(await waits { origin.releaseCount >= 2 }, "\(origin.counters)")
     withExtendedLifetime(media) {}
   }
 }

@@ -8,7 +8,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -18,6 +18,8 @@ private class HeldOrigin : Fetcher {
 
   fun fetches(name: String) = synchronized(fetched) { fetched.count { it.contains(name) } }
 
+  fun counters() = "a=${fetches("a.jpg")} b=${fetches("b.jpg")} c=${fetches("c.jpg")} released=${released.get()}"
+
   override suspend fun fetch(request: FetchRequest): FetchResponse {
     fetched.add(request.url)
     val body = object : BodyReader {
@@ -26,6 +28,12 @@ private class HeldOrigin : Fetcher {
     }
     return FetchResponse(200u, emptyMap(), body)
   }
+}
+
+private const val ABSENCE_WINDOW_MS = 300L
+
+private suspend fun HeldOrigin.reaches(condition: () -> Boolean) {
+  if (!waits(condition)) fail("never reached: ${counters()}")
 }
 
 private fun photo(name: String) = MediaItem(Kind.IMAGE, "https://o.test/$name", emptyMap(), null, null, strategy = CacheStrategy.WHOLE)
@@ -55,20 +63,20 @@ class WholeHoldTest {
     val second = photo("b.jpg")
     try {
       hold.declare(media, listOf(first))
-      assertTrue(waits { origin.fetches("a.jpg") == 1 })
+      origin.reaches { origin.fetches("a.jpg") >= 1 }
 
       hold.declare(media, listOf(first, second))
-      assertEquals(1, origin.fetches("a.jpg"))
-
       hold.declare(media, listOf(second))
-      assertTrue(waits { origin.released.get() == 1 })
-      assertTrue(waits { origin.fetches("b.jpg") == 1 })
+      origin.reaches { origin.released.get() >= 1 && origin.fetches("b.jpg") >= 1 }
+      assertEquals(origin.counters(), 1, origin.fetches("a.jpg"))
 
       hold.add(media, listOf(photo("c.jpg")))
-      assertEquals(1, origin.released.get())
+      delay(ABSENCE_WINDOW_MS)
+      assertEquals(origin.counters(), 1, origin.released.get())
+      assertEquals(origin.counters(), 1, origin.fetches("b.jpg"))
 
       hold.release()
-      assertTrue(waits { origin.released.get() >= 2 })
+      origin.reaches { origin.released.get() >= 2 }
     } finally {
       hold.release()
       media.close()
