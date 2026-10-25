@@ -1,0 +1,223 @@
+import Foundation
+import MediaLayer
+import Observation
+import SwiftUI
+import Testing
+@testable import MediaLayerUI
+
+#if canImport(UIKit)
+import UIKit
+
+private final class SuspendProbeSlot: PlayerSlot, PlayerSlotFactory, @unchecked Sendable {
+  private let lock = NSLock()
+  private var entries: [String] = []
+  var transport: [String] { lock.withLock { entries } }
+  func create(slot: UInt32) async -> CreatedPlayer { CreatedPlayer(player: self) }
+  func apply(command: SlotCall) async {
+    switch command {
+    case .play: lock.withLock { entries.append("play") }
+    case .pause: lock.withLock { entries.append("pause") }
+    default: break
+    }
+  }
+  func dispose() async {}
+  func sample() -> SlotSample { SlotSample(positionMs: 0, durationMs: nil, isLooping: false, viewAttached: false, frameRendered: false) }
+}
+
+private final class SuspendProbeSettings: SettingsStore, @unchecked Sendable {
+  func read(key: String) -> String? { nil }
+  func write(key: String, value: String) {}
+  func remove(key: String) {}
+}
+
+@Observable
+private final class SuspendProbeModel {
+  var active = false
+  var groups: [String] = []
+  var mounted = true
+  var unrelated = 0
+  var tab = 0
+}
+
+private struct SuspendProbeCell: View {
+  let model: SuspendProbeModel
+  let context: MediaContext
+
+  var body: some View {
+    let _ = model.unrelated
+    Group {
+      if model.mounted {
+        TabView(selection: Binding(get: { model.tab }, set: { model.tab = $0 })) {
+          Color.clear.mediaPlaybackSuspended(active: model.active, allowGroups: model.groups).tag(0)
+          Color.clear.tag(1)
+        }
+      }
+    }
+    .environment(\.mediaContext, context)
+  }
+}
+
+private let probeClip = "file:///clip.mp4"
+
+@MainActor
+private func waits(_ condition: () -> Bool) async -> Bool {
+  for _ in 0..<400 {
+    if condition() { return true }
+    try? await Task.sleep(for: .milliseconds(25))
+  }
+  return condition()
+}
+
+@MainActor
+private struct SuspendRig {
+  let media: MediaLayer
+  let slot = SuspendProbeSlot()
+  let model = SuspendProbeModel()
+  let window: UIWindow
+  let host: UIHostingController<SuspendProbeCell>
+
+  init(ingress: IngressLimits? = nil, mountsNow: Bool = true) async throws {
+    let slot = self.slot
+    media = try MediaLayer.open(config: OpenConfig(
+      dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
+      availableBytes: UInt64.max, fetcher: SuspendProbeFetcher(), settings: SuspendProbeSettings(), slots: slot,
+      device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
+      defaults: defaultLimits(), pool: defaultPoolSettings(), ingress: ingress
+    ))
+    media.replaceWindow(active: 0, sources: [MediaItem(kind: .video, url: probeClip, headers: [:], cover: nil, blurHash: nil, strategy: .window)])
+    media.setPlaying(key: probeClip, playing: true, groups: [nil])
+    _ = await waits { slot.transport == ["play"] }
+    window = UIWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+    host = UIHostingController(rootView: SuspendProbeCell(model: model, context: MediaContext(places: media)))
+    window.rootViewController = host
+    window.isHidden = false
+  }
+
+  func tearDown() {
+    window.isHidden = true
+    window.rootViewController = nil
+  }
+}
+
+extension GlobalMedia {
+  @MainActor
+  @Suite(.serialized, .timeLimit(.minutes(2)))
+  struct PlaybackSuspendedTests {
+    @Test
+    func inv_session_18_aMountedSuspensionFollowsActiveAndNeverDuplicates() async throws {
+      let rig = try await SuspendRig()
+      defer { rig.tearDown() }
+
+      rig.model.groups = ["other"]
+      rig.model.unrelated += 1
+      #expect(rig.slot.transport == ["play"])
+
+      rig.model.active = true
+      #expect(await waits { rig.slot.transport == ["play", "pause"] })
+      rig.model.active = true
+      rig.model.unrelated += 1
+      rig.model.groups = ["other"]
+
+      rig.model.active = false
+      #expect(await waits { rig.slot.transport == ["play", "pause", "play"] })
+      withExtendedLifetime(rig.media) {}
+    }
+
+    @Test
+    func inv_session_18_aRepeatedIntentTakesNoSecondHold() async throws {
+      let rig = try await SuspendRig(ingress: IngressLimits(entries: 256, owners: 3, bytes: 1 << 20))
+      defer { rig.tearDown() }
+      let hold = SuspensionHold()
+      let intent = SuspensionIntent(layer: ObjectIdentifier(rig.media), active: true, groups: ["other"])
+
+      hold.apply(intent, layer: rig.media)
+      #expect(await waits { rig.slot.transport == ["play", "pause"] })
+      hold.apply(intent, layer: rig.media)
+      #expect(Media.failure == nil)
+      hold.release()
+      #expect(await waits { rig.slot.transport == ["play", "pause", "play"] })
+    }
+
+    @Test
+    func inv_session_18_aSuspensionLeftBeforeTheLayerOpensHoldsNothing() async throws {
+      let rig = try await SuspendRig()
+      defer { rig.tearDown() }
+      rig.model.active = true
+      #expect(await waits { rig.slot.transport == ["play", "pause"] })
+
+      rig.model.tab = 1
+      #expect(await waits { rig.slot.transport == ["play", "pause", "play"] })
+      rig.model.tab = 0
+      #expect(await waits { rig.slot.transport == ["play", "pause", "play", "pause"] })
+
+      rig.model.mounted = false
+      #expect(await waits { rig.slot.transport == ["play", "pause", "play", "pause", "play"] })
+
+      let unopened = UIWindow(frame: CGRect(x: 0, y: 0, width: 50, height: 50))
+      let model = SuspendProbeModel()
+      model.active = true
+      unopened.rootViewController = UIHostingController(rootView: Color.clear.mediaPlaybackSuspended(active: model.active))
+      unopened.isHidden = false
+      try? await Task.sleep(for: .milliseconds(100))
+      unopened.isHidden = true
+      unopened.rootViewController = nil
+      #expect(rig.slot.transport == ["play", "pause", "play", "pause", "play"])
+    }
+
+    @Test
+    func inv_session_19_aGroupChangeReplacesTheHoldWithoutAGap() async throws {
+      let rig = try await SuspendRig()
+      defer { rig.tearDown() }
+      rig.model.groups = ["one"]
+      rig.model.active = true
+      #expect(await waits { rig.slot.transport == ["play", "pause"] })
+
+      rig.model.groups = ["two"]
+      rig.model.unrelated += 1
+      try? await Task.sleep(for: .milliseconds(150))
+      rig.model.active = false
+      #expect(await waits { rig.slot.transport.count >= 3 })
+      #expect(rig.slot.transport == ["play", "pause", "play"])
+      withExtendedLifetime(rig.media) {}
+    }
+
+    @Test
+    func inv_session_19_aReleaseReachesTheCoreThroughAFullInput() async throws {
+      let rig = try await SuspendRig(ingress: IngressLimits(entries: 256, owners: 3, bytes: 1 << 20))
+      defer { rig.tearDown() }
+      rig.model.groups = ["one"]
+      rig.model.active = true
+      #expect(await waits { rig.slot.transport.last == "pause" })
+
+      rig.model.groups = ["two"]
+      #expect(await waits { Media.failure != nil })
+      #expect(rig.slot.transport == ["play", "pause"])
+
+      rig.model.active = false
+      #expect(await waits { rig.slot.transport == ["play", "pause", "play"] })
+      Media.clearFailure()
+      withExtendedLifetime(rig.media) {}
+    }
+
+    @Test
+    func inv_session_20_aPlayingPlaceSurvivesBackgroundAndForegroundWithoutAppCode() async throws {
+      let rig = try await SuspendRig()
+      defer { rig.tearDown() }
+      let center = NotificationCenter()
+      let names = SystemSignalNames(
+        memoryWarning: Notification.Name("suspend.memory"), background: Notification.Name("suspend.background"),
+        foreground: Notification.Name("suspend.foreground"), outputLost: Notification.Name("suspend.outputLost")
+      )
+      rig.media.followSystem(events: rig.media.playerEvents(), link: PlayerEventsLink(), center: center, names: names)
+
+      center.post(name: names.background, object: nil)
+      #expect(await waits { rig.slot.transport == ["play", "pause"] })
+      center.post(name: names.foreground, object: nil)
+      _ = await waits { rig.slot.transport.last == "play" }
+      try? await Task.sleep(for: .milliseconds(200))
+      let collapsed = rig.slot.transport.reduce(into: [String]()) { seen, next in if seen.last != next { seen.append(next) } }
+      #expect(collapsed == ["play", "pause", "play"])
+    }
+  }
+}
+#endif

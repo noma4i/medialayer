@@ -380,6 +380,25 @@ media.suspendPlayback(listOf("chat")).use {
 }
 ```
 
+### Declaring a suspension in the view tree
+
+A screen that stops playback while it is shown declares it. Swift: `.mediaPlaybackSuspended(active:allowGroups:)` on any view. Kotlin: `SuspendMediaPlayback(active, allowGroups)` in the composition. The declaration takes one suspension when it is mounted and `active` is true. A change of `allowGroups` replaces the suspension: the new one is taken before the old one is released, so no player starts in between. `active = false`, or the view leaving, releases it. The same parameters again take nothing. Until the library is open the declaration holds nothing and takes the suspension when it opens. A refusal of the core shows in `Media.failure`. The app writes no `suspendPlayback` call, no wait for the open and no lifecycle code.
+
+Going to the background pauses the playing places and returning plays them again. The app does not put the lifecycle state into `playing`. The app still decides the reasons (dialog, share sheet, modal) and the `allowGroups`.
+
+#### Swift
+
+```swift
+ChatScreen()
+  .mediaPlaybackSuspended(active: isShareSheetOpen, allowGroups: ["chat"])
+```
+
+#### Kotlin
+
+```kotlin
+SuspendMediaPlayback(active = isShareSheetOpen, allowGroups = listOf("chat"))
+```
+
 MediaLayer owns the sound policy of the players: you pass an `audioFocus` policy to `open` (default `mix`), and the app writes no audio session or audio focus code for playback: [audio focus](audio-focus.md).
 
 You report only whether a place is visible or active. Prefetch, preroll, handoff and release follow from that. Several views can show the same url at once (a chat row and its message preview). The place keeps its state until the last of them reports that it left, so a view that stays on screen never falls back to idle because another view of the same url disappeared.

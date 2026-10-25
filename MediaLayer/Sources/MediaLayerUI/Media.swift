@@ -79,6 +79,10 @@ public enum Media {
   static func recordOpenFailure(_ error: Error) {
     flag.failure = mediaError(error)
   }
+
+  static func clearFailure() {
+    flag.failure = nil
+  }
 }
 
 @Observable
