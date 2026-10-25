@@ -432,11 +432,11 @@ async fn inv_strategy_17_a_source_held_by_two_owners_loads_once_and_stops_when_t
     super::runner_tests::quiet().await;
     assert_eq!(rig.loader.calls().len(), 1);
 
-    rig.prefetcher.release_owner(1);
+    rig.prefetcher.release_owner(2);
     super::runner_tests::quiet().await;
     assert_eq!((rig.loader.active(), rig.prefetcher.counters().cancelled), (1, 0));
 
-    rig.prefetcher.release_owner(2);
+    rig.prefetcher.release_owner(1);
     eventually(|| rig.loader.active() == 0).await;
     assert_eq!(rig.prefetcher.counters().cancelled, 1);
 }

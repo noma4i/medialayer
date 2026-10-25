@@ -20,7 +20,7 @@ fn fetches(rig: &Rig) -> usize {
     rig.loader.urls().iter().filter(|url| *url == URL).count()
 }
 
-fn over_proxy(stack: &Stack) -> Prefetcher {
+pub(super) fn over_proxy(stack: &Stack) -> Prefetcher {
     let limits = Limits { prefetch_from: 0, prefetch_to: 0, ..Limits::default() };
     let ledger = PrefetchLedger::new(Duration::from_secs(limits.dedupe_window_seconds.into()), limits.dedupe_max_entries as usize);
     Prefetcher::new(Arc::new(ProxyLoader::new(stack.proxy.clone())), &limits, ledger, Arc::new(ManualClock::new(1_000)) as Arc<dyn Clock>)

@@ -35,6 +35,8 @@ mod whole_tests;
 #[cfg(test)]
 mod whole_dedupe_tests;
 #[cfg(test)]
+mod whole_parallel_tests;
+#[cfg(test)]
 mod window_tests;
 #[cfg(test)]
 mod identity_tests;
