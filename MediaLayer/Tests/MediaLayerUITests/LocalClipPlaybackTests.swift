@@ -36,10 +36,12 @@ extension GlobalMedia {
 
     private func open(silent: Bool, fetcher: Fetcher) async throws -> MediaLayer {
       try await MediaLayer.open(
+        defaults: { SpecDefaults(defaults: defaultLimits(), pool: defaultPoolSettings(), namespaceHeaders: []) },
         fetcher: fetcher,
         settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
         directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
-        silent: silent
+        audioFocus: .mix, imageMemoryBytes: MediaImagePipeline.defaultMemoryLimit,
+        onSimulator: silent
       )
     }
 
@@ -117,12 +119,7 @@ extension GlobalMedia {
 
     @Test
     func aClaimToUnmuteReachesASlotOfANonSilentLayer() async throws {
-      let media = try await MediaLayer.open(
-        fetcher: TestFetcher(),
-        settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
-        directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
-        silent: false
-      )
+      let media = try await open(silent: false, fetcher: TestFetcher())
       let item = MediaItem(kind: .video, url: Self.clip, headers: [:], cover: nil, blurHash: nil, looping: true, strategy: .window)
 
       media.visible(source: item, visible: true)

@@ -12,8 +12,7 @@ private func open(fetcher: Fetcher = TestFetcher()) async throws -> MediaLayer {
   try await MediaLayer.open(
     fetcher: fetcher,
     settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
-    directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
-    silent: true
+    directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   )
 }
 

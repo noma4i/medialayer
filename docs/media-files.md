@@ -221,8 +221,7 @@ Every value in the file is a default. The generated `MediaSpecJSON` holds all of
 let media = try await MediaLayer.open(
   spec: specJson,
   fetcher: URLSessionFetcher(),
-  settings: UserDefaultsSettings(),
-  silent: false
+  settings: UserDefaultsSettings()
 )
 ```
 
@@ -232,10 +231,13 @@ let media = try await MediaLayer.open(
 val media: Deferred<MediaLayer> = MediaLayer.open(
   context = this,
   spec = specJson,
-  settings = SharedPreferencesSettings(this),
-  silent = false
+  settings = SharedPreferencesSettings(this)
 )
 ```
+
+## Silence on simulators and emulators
+
+The library keeps every player muted on the iOS Simulator and on an Android emulator. No place and no `Media.muted` can unmute them. `open` has no option for this and the app passes nothing. On a device the players follow the places and `Media.muted`.
 
 ## Options of `open`
 
@@ -246,7 +248,6 @@ val media: Deferred<MediaLayer> = MediaLayer.open(
 | `spec` | the defaults of the core | JSON from `medialayer-gen spec`. Gives the default limits, the pool settings and the namespace headers |
 | `directory` (Swift) | `Caches/MediaLayer` | Folder of the disk cache. The cache folder of the app on Kotlin |
 | `callFactory` (Kotlin) | `null` | Android создаёт общий клиент для стандартного fetcher и плееров. Явное значение заменяет клиент плееров |
-| `silent` | false | All players stay muted until the app quits. No place and no `Media.muted` can unmute them. Use it while you build the app |
 | `audioFocus` | `mix` | What the players do to other apps' music: `exclusive`, `mix` or `duck`. See [audio focus](audio-focus.md) |
 | `imageMemoryBytes` | Swift: 128 MiB, Kotlin: `null` | Android выбирает `min(128 MiB, 25% memoryClass)`. Явное положительное значение заменяет автоматический бюджет кэша |
 

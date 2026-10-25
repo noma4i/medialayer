@@ -10,13 +10,12 @@ extension MediaLayer {
     fetcher: Fetcher = URLSessionFetcher(),
     settings: SettingsStore = UserDefaultsSettings(),
     directory: URL? = nil,
-    silent: Bool = false,
     audioFocus: MediaAudioFocus = .mix,
     imageMemoryBytes: Int = MediaImagePipeline.defaultMemoryLimit
   ) async throws -> MediaLayer {
     try await open(
       defaults: { SpecDefaults(defaults: defaultLimits(), pool: defaultPoolSettings(), namespaceHeaders: []) },
-      fetcher: fetcher, settings: settings, directory: directory, silent: silent, audioFocus: audioFocus, imageMemoryBytes: imageMemoryBytes
+      fetcher: fetcher, settings: settings, directory: directory, audioFocus: audioFocus, imageMemoryBytes: imageMemoryBytes
     )
   }
 
@@ -25,14 +24,21 @@ extension MediaLayer {
     fetcher: Fetcher = URLSessionFetcher(),
     settings: SettingsStore = UserDefaultsSettings(),
     directory: URL? = nil,
-    silent: Bool = false,
     audioFocus: MediaAudioFocus = .mix,
     imageMemoryBytes: Int = MediaImagePipeline.defaultMemoryLimit
   ) async throws -> MediaLayer {
     try await open(
-      defaults: { try specDefaults(json: spec) }, fetcher: fetcher, settings: settings, directory: directory, silent: silent,
+      defaults: { try specDefaults(json: spec) }, fetcher: fetcher, settings: settings, directory: directory,
       audioFocus: audioFocus, imageMemoryBytes: imageMemoryBytes
     )
+  }
+
+  static var runsOnSimulator: Bool {
+    #if targetEnvironment(simulator)
+    true
+    #else
+    false
+    #endif
   }
 
   static func open(
@@ -40,9 +46,9 @@ extension MediaLayer {
     fetcher: Fetcher,
     settings: SettingsStore,
     directory: URL?,
-    silent: Bool,
     audioFocus: MediaAudioFocus,
     imageMemoryBytes: Int,
+    onSimulator: Bool = runsOnSimulator,
     build: @escaping @Sendable (OpenConfig) throws -> MediaLayer = { try MediaLayer.open(config: $0) }
   ) async throws -> MediaLayer {
     guard imageMemoryBytes > 0 else { throw MediaError.InvalidSpec(detail: "imageMemoryBytes must be positive") }
@@ -50,7 +56,7 @@ extension MediaLayer {
     let audio = MediaAudioSession(focus: audioFocus)
     let work = Task.detached(priority: .userInitiated) {
       let (config, factory) = try makeConfig(
-        defaults: try defaults(), fetcher: fetcher, settings: settings, directory: directory, silent: silent, audio: audio, imageCache: imageCache
+        defaults: try defaults(), fetcher: fetcher, settings: settings, directory: directory, silent: onSimulator, audio: audio, imageCache: imageCache
       )
       let resources = config.memoryReleaser as? OpenedResources
       do {

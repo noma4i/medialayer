@@ -358,7 +358,7 @@ MediaAudio(VoiceNote(url = message.audioUrl), rate = 1.5f) { audio ->
 | --------- | ----- | ------- |
 | source | all | A generated type from your `.mdl` file with the URL and optional cover or BlurHash |
 | `playing` | video, audio | True to play, false to stay prepared and paused |
-| `muted` | video, audio | True to silence this place. `Media.muted` silences the whole app. The `silent` option of `open` overrides it |
+| `muted` | video, audio | True to silence this place. `Media.muted` silences the whole app. On a simulator or emulator the library keeps all players muted and this value does not unmute them |
 | `group` | video, audio | Optional name of the place group, for example `chat`. A playback suspension can allow a group and keep its places playing |
 | `loop` | video | True (default) repeats the video. False plays it once and ends in the `ended` state |
 | `onFirstFrame` | video | Runs when the first frame is on screen. Once per load |

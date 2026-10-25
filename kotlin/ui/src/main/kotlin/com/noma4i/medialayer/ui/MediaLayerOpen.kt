@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
 import android.media.AudioManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Trace
@@ -62,12 +63,11 @@ fun MediaLayer.Companion.open(
   fetcher: Fetcher? = null,
   settings: SettingsStore? = null,
   callFactory: Call.Factory? = null,
-  silent: Boolean = false,
   audioFocus: MediaAudioFocus = MediaAudioFocus.Mix,
   imageMemoryBytes: Int? = null,
   videoOutputCounters: VideoOutputCounters? = null
 ): Deferred<MediaLayer> =
-  openMediaLayer(context, fetcher, settings, callFactory, silent = silent, lifecycle = ProcessLifecycleOwner.get().lifecycle, audioFocus = audioFocus, imageMemoryBytes = imageMemoryBytes, videoOutputCounters = videoOutputCounters) { MediaLayer.open(it) }
+  openMediaLayer(context, fetcher, settings, callFactory, lifecycle = ProcessLifecycleOwner.get().lifecycle, audioFocus = audioFocus, imageMemoryBytes = imageMemoryBytes, videoOutputCounters = videoOutputCounters) { MediaLayer.open(it) }
 
 fun MediaLayer.Companion.open(
   context: Context,
@@ -75,12 +75,15 @@ fun MediaLayer.Companion.open(
   fetcher: Fetcher? = null,
   settings: SettingsStore? = null,
   callFactory: Call.Factory? = null,
-  silent: Boolean = false,
   audioFocus: MediaAudioFocus = MediaAudioFocus.Mix,
   imageMemoryBytes: Int? = null,
   videoOutputCounters: VideoOutputCounters? = null
 ): Deferred<MediaLayer> =
-  openMediaLayer(context, fetcher, settings, callFactory, defaults = { specDefaults(spec) }, silent = silent, lifecycle = ProcessLifecycleOwner.get().lifecycle, audioFocus = audioFocus, imageMemoryBytes = imageMemoryBytes, videoOutputCounters = videoOutputCounters) { MediaLayer.open(it) }
+  openMediaLayer(context, fetcher, settings, callFactory, defaults = { specDefaults(spec) }, lifecycle = ProcessLifecycleOwner.get().lifecycle, audioFocus = audioFocus, imageMemoryBytes = imageMemoryBytes, videoOutputCounters = videoOutputCounters) { MediaLayer.open(it) }
+
+internal fun isEmulator(hardware: String = Build.HARDWARE): Boolean = hardware in EMULATOR_HARDWARE
+
+private val EMULATOR_HARDWARE = setOf("goldfish", "ranchu", "cutf_cvm", "vbox86")
 
 private fun platformDefaults(): SpecDefaults = SpecDefaults(defaultLimits(), defaultPoolSettings(), emptyList())
 
@@ -90,7 +93,7 @@ internal fun openMediaLayer(
   settings: SettingsStore? = null,
   callFactory: Call.Factory? = null,
   defaults: () -> SpecDefaults = ::platformDefaults,
-  silent: Boolean = false,
+  emulator: Boolean = isEmulator(),
   lifecycle: Lifecycle,
   audioFocus: MediaAudioFocus = MediaAudioFocus.Mix,
   imageMemoryBytes: Int? = null,
@@ -142,7 +145,7 @@ internal fun openMediaLayer(
     val availableBytes: ULong
     val device: DeviceMemory
     try {
-      slots = ExoPlayerSlotFactory(app, callFactory ?: client, startMuted = silent, audio = audio, videoOutputCounters = videoOutputCounters)
+      slots = ExoPlayerSlotFactory(app, callFactory ?: client, startMuted = emulator, audio = audio, videoOutputCounters = videoOutputCounters)
       synchronized(lock) { factory = slots }
       dir = File(app.cacheDir, "medialayer").apply { mkdirs() }
       availableBytes = android.os.StatFs(dir.path).availableBytes.toULong()
@@ -169,7 +172,7 @@ internal fun openMediaLayer(
       evictImage = resolved.evictImage,
       evictAudio = resolved.evictAudio,
       memoryReleaser = releaser,
-      silent = silent
+      silent = emulator
     )
     ensureActive()
     Trace.beginSection("MediaLayer.open.ffi")
