@@ -427,6 +427,7 @@ impl Stage {
 
     pub async fn close(&self) {
         self.inner.tick.lock().unwrap_or_else(PoisonError::into_inner).take();
+        self.inner.prefetcher.stop_all();
         self.inner.runner.dispose_all();
         let released = {
             let mut state = self.inner.state.lock().unwrap_or_else(PoisonError::into_inner);

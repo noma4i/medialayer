@@ -28,6 +28,7 @@ pub(crate) enum OwnerKind {
     Window,
     Subscription,
     Suspension,
+    Declaration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,6 +111,9 @@ pub(crate) enum Declared {
     ImageWindow { owner: u64, active: u32, pages: Option<Arc<Vec<Vec<MediaItem>>>> },
     WindowReady { owner: u64, listener: Arc<dyn WindowReadyListener> },
     Suspend { owner: u64, groups: Vec<String> },
+    WholeOpen { owner: u64 },
+    WholeAdd { owner: u64, items: Vec<MediaItem> },
+    WholeRemove { owner: u64, items: Vec<MediaItem> },
     Subscribe { owner: u64, subscribing: Subscribing },
     Player(PlayerEvent),
     Lifecycle { foreground: bool },
@@ -185,6 +189,9 @@ impl Declared {
             | Declared::ImageWindow { owner, .. }
             | Declared::WindowReady { owner, .. }
             | Declared::Suspend { owner, .. }
+            | Declared::WholeOpen { owner }
+            | Declared::WholeAdd { owner, .. }
+            | Declared::WholeRemove { owner, .. }
             | Declared::Subscribe { owner, .. } => Some(*owner),
             _ => None,
         }
@@ -205,6 +212,7 @@ impl Declared {
             Declared::WindowOpen { kind: WindowKind::Image(name), .. } => weight::string(name),
             Declared::VideoWindow { sources: Some(sources), .. } => weight::sum([weight::sources(sources), Some(16 + size_of::<Vec<Option<MediaItem>>>() as u64)]),
             Declared::ImageWindow { pages: Some(pages), .. } => weight::sum([weight::pages(pages), Some(16 + size_of::<Vec<Vec<MediaItem>>>() as u64)]),
+            Declared::WholeAdd { items, .. } | Declared::WholeRemove { items, .. } => weight::sum(std::iter::once(weight::slots::<MediaItem>(items.capacity())).chain(items.iter().map(weight::item_heap))),
             Declared::Suspend { groups, .. } => weight::sum(std::iter::once(weight::slots::<String>(groups.capacity())).chain(groups.iter().map(weight::string))),
             Declared::Subscribe { subscribing, .. } => match subscribing {
                 Subscribing::State { key, .. } => weight::string(key),

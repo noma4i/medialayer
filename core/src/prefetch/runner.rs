@@ -23,6 +23,12 @@ use tokio::sync::{broadcast, watch, Notify};
 const EVENT_CAPACITY: usize = 256;
 const WHOLE_MEDIA_PARALLEL: usize = 1;
 const WHOLE_IMAGE_PARALLEL: usize = 2;
+const WINDOW_OWNER: u64 = 0;
+
+struct Held {
+    source: Source,
+    owners: HashSet<u64>,
+}
 
 struct Job {
     id: u64,
@@ -45,7 +51,7 @@ struct State {
     windows: HashMap<WindowKey, Vec<PrefetchJob>>,
     last: HashMap<WindowKey, (Vec<PrefetchJob>, HashMap<String, Source>)>,
     running: HashMap<String, Job>,
-    wholes: HashMap<String, Source>,
+    wholes: HashMap<String, Held>,
     next_id: u64,
     busy: bool,
     suspended: bool,
@@ -246,8 +252,8 @@ impl Prefetcher {
     pub fn cancel(&self, url: &str) {
         let mut state = self.shared.state();
         let mut keys: HashSet<String> = state.running.iter().filter(|(_, job)| job.url == url).map(|(key, _)| key.clone()).collect();
-        state.wholes.retain(|key, source| {
-            if source.url != url { return true; }
+        state.wholes.retain(|key, held| {
+            if held.source.url != url { return true; }
             keys.insert(key.clone());
             false
         });
@@ -317,13 +323,17 @@ impl Prefetcher {
         }
         let now = Duration::from_millis(self.shared.clock.now_ms());
         let mut state = self.shared.state();
-        let wholes: Vec<_> = state.wholes.iter().map(|(key, source)| (key.clone(), source.clone())).collect();
+        let wholes: Vec<_> = state.wholes.iter().map(|(key, held)| (key.clone(), held.source.clone())).collect();
         for (key, source) in wholes {
             self.start_whole(&mut state, key, source, now, false);
         }
     }
 
     pub fn keep_whole(&self, source: Source) {
+        self.hold_whole(WINDOW_OWNER, source);
+    }
+
+    pub fn hold_whole(&self, owner: u64, source: Source) {
         if source.strategy != CacheStrategy::Whole {
             return;
         }
@@ -336,8 +346,35 @@ impl Prefetcher {
             let _ = self.shared.events.send(Settled { url: source.url, outcome: Outcome::Failed("whole queue is full".into()) });
             return;
         }
-        state.wholes.insert(key.clone(), source.clone());
+        state.wholes.entry(key.clone()).or_insert_with(|| Held { source: source.clone(), owners: HashSet::new() }).owners.insert(owner);
         self.start_whole(&mut state, key, source, now, true);
+    }
+
+    pub fn release_whole(&self, owner: u64, source: &Source) {
+        let key = self.shared.loader.cache_key(&source.url, &source.headers);
+        let mut state = self.shared.state();
+        Prefetcher::let_go(&mut state, owner, &key);
+    }
+
+    pub fn release_owner(&self, owner: u64) {
+        let mut state = self.shared.state();
+        let keys: Vec<String> = state.wholes.iter().filter(|(_, held)| held.owners.contains(&owner)).map(|(key, _)| key.clone()).collect();
+        for key in keys {
+            Prefetcher::let_go(&mut state, owner, &key);
+        }
+    }
+
+    fn let_go(state: &mut State, owner: u64, key: &str) {
+        let Some(held) = state.wholes.get_mut(key) else { return };
+        held.owners.remove(&owner);
+        if !held.owners.is_empty() {
+            return;
+        }
+        state.wholes.remove(key);
+        if state.running.get(key).is_some_and(|job| job.whole) && !state.is_wanted(key) {
+            state.cancel_job(key);
+            state.ledger.set_distance(key, usize::MAX);
+        }
     }
 
     fn start_whole(&self, state: &mut State, key: String, source: Source, now: Duration, entering: bool) {

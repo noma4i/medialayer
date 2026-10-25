@@ -109,6 +109,7 @@ pub(crate) struct Book {
     video_applied: Option<(u64, u64)>,
     subscriptions: HashMap<u64, Observed>,
     suspensions: HashMap<u64, Reserve>,
+    declarations: HashMap<u64, Reserve>,
 }
 
 fn rank(input: &PlaceInput) -> u8 {
@@ -117,7 +118,7 @@ fn rank(input: &PlaceInput) -> u8 {
 
 impl Book {
     pub fn new(assembled: Arc<Assembled>, queue: Arc<InputQueue>, handle: Handle) -> Book {
-        Book { assembled, queue, handle, seq: 0, places: HashMap::new(), keys: HashMap::new(), windows: HashMap::new(), video_order: BTreeMap::new(), video_applied: None, subscriptions: HashMap::new(), suspensions: HashMap::new() }
+        Book { assembled, queue, handle, seq: 0, places: HashMap::new(), keys: HashMap::new(), windows: HashMap::new(), video_order: BTreeMap::new(), video_applied: None, subscriptions: HashMap::new(), suspensions: HashMap::new(), declarations: HashMap::new() }
     }
 
     fn next_seq(&mut self) -> u64 {
@@ -152,6 +153,11 @@ impl Book {
                 self.assembled.stage.suspend(owner, &groups);
                 self.suspensions.insert(owner, reserve);
             }
+            Declared::WholeOpen { owner } => {
+                self.declarations.insert(owner, reserve);
+            }
+            Declared::WholeAdd { owner, items } => self.assembled.stage.hold_wholes(owner, items.iter()),
+            Declared::WholeRemove { owner, items } => self.assembled.stage.release_wholes(owner, items.iter()),
             Declared::Subscribe { owner, subscribing } => self.subscribe(owner, subscribing, reserve),
             Declared::Player(event) => self.player(event),
             Declared::Lifecycle { foreground } => {
@@ -217,6 +223,10 @@ impl Book {
             OwnerKind::Place => self.release_place(owner),
             OwnerKind::Window => self.release_window(owner),
             OwnerKind::Subscription => drop(self.subscriptions.remove(&owner)),
+            OwnerKind::Declaration => {
+                self.declarations.remove(&owner);
+                self.assembled.stage.release_wholes_of(owner);
+            }
             OwnerKind::Suspension => {
                 self.assembled.stage.resume(owner);
                 self.suspensions.remove(&owner);

@@ -36,6 +36,10 @@ impl MediaItem {
         is_local_url(&self.url)
     }
 
+    pub fn is_remote(&self) -> bool {
+        self.url.split_once("://").is_some_and(|(scheme, rest)| !rest.is_empty() && (scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")))
+    }
+
     #[cfg(test)]
     pub fn bare_video(url: &str) -> MediaItem {
         MediaItem::bare(url, Kind::Video)

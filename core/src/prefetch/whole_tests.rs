@@ -419,3 +419,63 @@ async fn inv_strategy_01_a_whole_hls_source_lands_in_the_disk_cache_with_every_s
         assert!(stack.cache.contains(key).await, "{key}");
     }
 }
+
+#[tokio::test]
+async fn inv_strategy_17_a_source_held_by_two_owners_loads_once_and_stops_when_the_last_owner_lets_go() {
+    let rig = rig();
+    let clip = whole("https://o.test/clip.mp4", SourceKind::Video);
+    rig.loader.hang_all();
+
+    rig.prefetcher.hold_whole(1, clip.clone());
+    rig.prefetcher.hold_whole(2, clip);
+    eventually(|| rig.loader.active() == 1).await;
+    super::runner_tests::quiet().await;
+    assert_eq!(rig.loader.calls().len(), 1);
+
+    rig.prefetcher.release_owner(1);
+    super::runner_tests::quiet().await;
+    assert_eq!((rig.loader.active(), rig.prefetcher.counters().cancelled), (1, 0));
+
+    rig.prefetcher.release_owner(2);
+    eventually(|| rig.loader.active() == 0).await;
+    assert_eq!(rig.prefetcher.counters().cancelled, 1);
+}
+
+#[tokio::test]
+async fn inv_strategy_17_a_window_load_promoted_by_a_declaration_stops_when_the_declaration_closes_after_the_window_left() {
+    let rig = super::runner_tests::rig_with(|limits| {
+        limits.prefetch_from = 0;
+        limits.prefetch_to = 0;
+    });
+    let clip = "https://o.test/clip.mp4";
+    let mut events = rig.prefetcher.settled();
+    rig.loader.hang(clip);
+    rig.prefetcher.set_window(0, vec![Some(source(clip, SourceKind::Video, CacheStrategy::Window))]);
+    rig.loader.started().await;
+
+    rig.prefetcher.hold_whole(1, whole(clip, SourceKind::Video));
+    rig.prefetcher.set_window(0, vec![]);
+    super::runner_tests::quiet().await;
+    assert_eq!(rig.prefetcher.counters().cancelled, 0);
+
+    rig.prefetcher.release_owner(1);
+    assert_eq!(next(&mut events).await.outcome, Outcome::Cancelled);
+    assert_eq!(rig.loader.urls(), [clip]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_strategy_20_a_declared_source_that_failed_loads_again_on_the_next_declaration_by_the_same_prefetcher() {
+    let rig = rig();
+    let clip = "https://o.test/clip.mp4";
+    let mut events = rig.prefetcher.settled();
+    rig.loader.fail(clip, true);
+    rig.prefetcher.hold_whole(1, whole(clip, SourceKind::Video));
+    assert!(matches!(next(&mut events).await.outcome, Outcome::Failed(_)));
+    assert_eq!(rig.loader.urls().len(), 3);
+
+    rig.loader.fail(clip, false);
+    rig.prefetcher.hold_whole(2, whole(clip, SourceKind::Video));
+
+    assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
+    assert_eq!(rig.loader.urls().len(), 4);
+}

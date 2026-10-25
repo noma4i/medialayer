@@ -141,6 +141,40 @@ impl Drop for MediaWindow {
     }
 }
 
+/// Sources the app wants stored whole: one load per source for all holders, cancelled when the last holder lets go.
+#[derive(uniffi::Object)]
+pub struct MediaWholeDeclaration {
+    queue: Arc<InputQueue>,
+    owner: u64,
+}
+
+impl MediaWholeDeclaration {
+    pub(super) fn new(queue: Arc<InputQueue>, owner: u64) -> MediaWholeDeclaration {
+        MediaWholeDeclaration { queue, owner }
+    }
+}
+
+#[uniffi::export]
+impl MediaWholeDeclaration {
+    pub fn add(&self, items: Vec<MediaItem>) -> Result<(), MediaError> {
+        self.queue.submit(Declared::WholeAdd { owner: self.owner, items })
+    }
+
+    pub fn remove(&self, items: Vec<MediaItem>) -> Result<(), MediaError> {
+        self.queue.submit(Declared::WholeRemove { owner: self.owner, items })
+    }
+
+    pub fn release(&self) {
+        self.queue.release(self.owner);
+    }
+}
+
+impl Drop for MediaWholeDeclaration {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
 #[derive(uniffi::Object)]
 pub struct PlaybackSuspension {
     queue: Arc<InputQueue>,

@@ -4,7 +4,7 @@ use super::fetcher::{Fetcher, ForeignFetcher};
 use super::ingress::{run, Answer, Declared, Admitted, IngressLimits, Finished, OwnerKind, Pause, InputQueue, Query, Subscribing, WindowKind};
 use super::layer_life::LayerLife;
 use super::limits::{DeviceMemory, Evict, ImageWindow, Limits, PoolSettings};
-use super::owned::{MediaPlace, MediaWindow, PlaybackSuspension};
+use super::owned::{MediaPlace, MediaWholeDeclaration, MediaWindow, PlaybackSuspension};
 use super::ready::Ready;
 use crate::analysis::MediaTone;
 use crate::api::TonePreparation;
@@ -484,6 +484,12 @@ impl MediaLayer {
         let owner = self.owner();
         self.closing.queue.open(owner, OwnerKind::Place, Declared::PlaceOpen { owner, item })?;
         Ok(Arc::new(MediaPlace::new(self.closing.queue.clone(), owner)))
+    }
+
+    pub fn open_whole_declaration(&self) -> Result<Arc<MediaWholeDeclaration>, MediaError> {
+        let owner = self.owner();
+        self.closing.queue.open(owner, OwnerKind::Declaration, Declared::WholeOpen { owner })?;
+        Ok(Arc::new(MediaWholeDeclaration::new(self.closing.queue.clone(), owner)))
     }
 
     pub fn open_video_window(&self) -> Result<Arc<MediaWindow>, MediaError> {

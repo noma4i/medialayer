@@ -5,7 +5,7 @@ use crate::api::slots::SlotCall;
 use crate::api::source::MediaItem;
 use crate::api::types::Kind;
 use crate::pages::Sliced;
-use crate::prefetch::CacheStrategy;
+use crate::prefetch::{CacheStrategy, Source};
 use crate::session::{Context, Intent};
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -17,9 +17,25 @@ const MAX_RATE: f32 = 4.0;
 
 impl Stage {
     fn declare_whole<'a>(&self, sources: impl Iterator<Item = &'a MediaItem>) {
-        for source in sources.filter(|source| source.strategy == CacheStrategy::Whole && !source.is_local()) {
+        for source in sources.filter(|source| source.strategy == CacheStrategy::Whole && source.is_remote()) {
             self.inner.prefetcher.keep_whole(source.for_prefetch());
         }
+    }
+
+    pub fn hold_wholes<'a>(&self, owner: u64, sources: impl Iterator<Item = &'a MediaItem>) {
+        for source in sources.filter(|source| source.is_remote()) {
+            self.inner.prefetcher.hold_whole(owner, Source { strategy: CacheStrategy::Whole, ..source.for_prefetch() });
+        }
+    }
+
+    pub fn release_wholes<'a>(&self, owner: u64, sources: impl Iterator<Item = &'a MediaItem>) {
+        for source in sources {
+            self.inner.prefetcher.release_whole(owner, &source.for_prefetch());
+        }
+    }
+
+    pub fn release_wholes_of(&self, owner: u64) {
+        self.inner.prefetcher.release_owner(owner);
     }
 
     pub fn settled(&self) -> tokio::sync::broadcast::Receiver<crate::prefetch::Settled> {

@@ -1152,3 +1152,104 @@ fn inv_window_02_an_image_window_is_ready_when_every_source_of_the_active_page_i
     broken.replace_rows(vec![images(&["x"])]).unwrap();
     caller.block_on(eventually(|| failed.is_ready()));
 }
+
+#[derive(Default)]
+struct Hanging {
+    fetched: Mutex<Vec<String>>,
+    released: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+struct Endless(Arc<std::sync::atomic::AtomicUsize>);
+
+#[async_trait]
+impl BodyReader for Endless {
+    async fn next_chunk(&self) -> Result<Option<Vec<u8>>, MediaError> {
+        std::future::pending().await
+    }
+
+    fn release(&self) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[async_trait]
+impl Fetcher for Hanging {
+    async fn fetch(&self, request: super::FetchRequest) -> Result<super::FetchResponse, MediaError> {
+        self.fetched.lock().unwrap().push(request.url);
+        Ok(super::FetchResponse { status: 200, headers: HashMap::new(), body: Arc::new(Endless(self.released.clone())) })
+    }
+}
+
+impl Hanging {
+    fn fetches(&self, name: &str) -> usize {
+        self.fetched.lock().unwrap().iter().filter(|url| url.contains(name)).count()
+    }
+
+    fn is_released(&self) -> bool {
+        self.released.load(std::sync::atomic::Ordering::SeqCst) > 0
+    }
+}
+
+fn whole_photo(name: &str) -> MediaItem {
+    MediaItem { strategy: crate::prefetch::CacheStrategy::Whole, ..MediaItem::bare(&format!("https://o.test/{name}"), crate::api::Kind::Image) }
+}
+
+fn hanging_layer(dir: &std::path::Path) -> (Arc<MediaLayer>, Arc<Hanging>) {
+    let origin = Arc::new(Hanging::default());
+    (MediaLayer::open(config(dir, origin.clone(), shared::<FakeSettings>(), None)).unwrap(), origin)
+}
+
+#[test]
+fn inv_strategy_16_a_declaration_made_before_the_assembly_downloads_after_it_without_any_place_or_window() {
+    let dir = tempfile::tempdir().unwrap();
+    slow_assembly(dir.path(), SLOW);
+    let origin = Arc::new(Origin::default());
+    let layer = MediaLayer::open(config(dir.path(), origin.clone(), shared::<FakeSettings>(), None)).unwrap();
+
+    let declaration = layer.open_whole_declaration().unwrap();
+    let windowed = MediaItem::bare("https://o.test/c.jpg", crate::api::Kind::Image);
+    declaration.add(vec![whole_photo("a.jpg"), whole_photo("b.jpg"), windowed]).unwrap();
+
+    caller().block_on(eventually(|| {
+        let seen = origin.seen.lock().unwrap();
+        ["a.jpg", "b.jpg", "c.jpg"].iter().all(|name| seen.iter().any(|request| request.url.contains(name)))
+    }));
+}
+
+#[test]
+fn inv_strategy_19_a_declaration_ignores_sources_that_are_not_remote() {
+    let dir = tempfile::tempdir().unwrap();
+    let origin = Arc::new(Origin::default());
+    let layer = MediaLayer::open(config(dir.path(), origin.clone(), shared::<FakeSettings>(), None)).unwrap();
+    let declaration = layer.open_whole_declaration().unwrap();
+    let ignored = ["file:///bundle/local.jpg", "", "ftp://o.test/ftp.jpg", "https://", "o.test/bare.jpg"]
+        .map(|url| MediaItem { url: url.to_string(), ..whole_photo("x") });
+
+    declaration.add(ignored.into_iter().chain([whole_photo("remote.jpg")]).collect()).unwrap();
+
+    let caller = caller();
+    caller.block_on(eventually(|| origin.seen.lock().unwrap().iter().any(|request| request.url.ends_with("remote.jpg"))));
+    caller.block_on(layer.fetch_image("https://o.test/after.jpg".to_string(), HashMap::new())).unwrap();
+    let seen: Vec<String> = origin.seen.lock().unwrap().iter().map(|request| request.url.clone()).collect();
+    assert_eq!(seen.iter().filter(|url| !url.ends_with("remote.jpg") && !url.ends_with("after.jpg")).count(), 0, "{seen:?}");
+}
+
+#[test]
+fn inv_strategy_18_closing_the_declaration_cancels_a_load_nobody_else_holds() {
+    let dir = tempfile::tempdir().unwrap();
+    let (layer, origin) = hanging_layer(dir.path());
+    let first = layer.open_whole_declaration().unwrap();
+    let second = layer.open_whole_declaration().unwrap();
+    first.add(vec![whole_photo("held.jpg")]).unwrap();
+    second.add(vec![whole_photo("held.jpg")]).unwrap();
+    let caller = caller();
+    caller.block_on(eventually(|| origin.fetches("held.jpg") == 1));
+
+    first.release();
+    caller.block_on(layer.stats()).unwrap();
+    assert!(!origin.is_released(), "a source another declaration holds was cancelled");
+
+    second.release();
+    caller.block_on(eventually(|| origin.is_released()));
+    assert!(matches!(second.add(vec![whole_photo("late.jpg")]), Err(MediaError::Closed)));
+}

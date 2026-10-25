@@ -136,3 +136,16 @@ async fn inv_strategy_09_a_default_list_still_reaches_only_the_window() {
 
     assert!(rig.fetcher.calls() < 10, "{}", rig.fetcher.calls());
 }
+
+#[tokio::test]
+async fn inv_strategy_18_closing_the_stage_cancels_the_declared_loads() {
+    let rig = rig().await;
+    let photo = item("https://o.test/hung.jpg", Kind::Image, CacheStrategy::Whole);
+    rig.fetcher.route(&photo.url, Script::ok(vec![5; 100]).hanging());
+    rig.parts.stage.hold_wholes(1, std::iter::once(&photo));
+    eventually(|| rig.fetcher.calls_for(&photo.url) == 1).await;
+
+    rig.parts.stage.close().await;
+
+    assert_eq!(rig.parts.prefetcher.counters().cancelled, 1);
+}
