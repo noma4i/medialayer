@@ -1,12 +1,7 @@
 package com.noma4i.medialayer.ui
 
-import android.graphics.Outline
-import android.os.Build
 import android.os.Trace
-import android.view.SurfaceView
 import android.view.TextureView
-import android.view.View
-import android.view.ViewOutlineProvider
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
 import java.util.WeakHashMap
@@ -15,7 +10,6 @@ class VideoOutputCounters {
   private val totals = mutableMapOf<String, Long>()
   private val attachments = mutableMapOf<UInt, Pair<String?, ULong>>()
   private val textures = WeakHashMap<TextureView, Unit>()
-  private val surfaces = WeakHashMap<SurfaceView, Unit>()
 
   @Synchronized
   internal fun count(event: String) {
@@ -42,57 +36,16 @@ class VideoOutputCounters {
   }
 
   @Synchronized
-  internal fun surface(view: SurfaceView?) {
-    count("setVideoSurfaceView")
-    if (view != null && surfaces.put(view, Unit) == null) count("surfaceCreate")
-  }
-
-  @Synchronized
   fun snapshot(): Map<String, Long> = totals.toMap() + mapOf(
     "livePlayers" to ((totals["create"] ?: 0) - (totals["release"] ?: 0)),
-    "liveTextures" to textures.keys.count { it.isAttachedToWindow }.toLong(),
-    "liveSurfaces" to surfaces.keys.count { it.isAttachedToWindow }.toLong()
+    "liveTextures" to textures.keys.count { it.isAttachedToWindow }.toLong()
   )
 }
 
 internal class VideoOutputPlayer(
   player: Player,
-  private val counters: VideoOutputCounters?,
-  private val cornerRadiusPx: Float = 0f
+  private val counters: VideoOutputCounters?
 ) : ForwardingPlayer(player) {
-  private val outline = object : ViewOutlineProvider() {
-    override fun getOutline(view: View, outline: Outline) {
-      outline.setRoundRect(0, 0, view.width, view.height, cornerRadiusPx)
-    }
-  }
-
-  override fun setVideoSurfaceView(surfaceView: SurfaceView?) {
-    Trace.beginSection("MediaLayer.setVideoSurfaceView")
-    try {
-      surfaceView?.let {
-        it.outlineProvider = outline
-        it.clipToOutline = cornerRadiusPx > 0f
-        if (Build.VERSION.SDK_INT >= 34) {
-          it.setSurfaceLifecycle(SurfaceView.SURFACE_LIFECYCLE_FOLLOWS_ATTACHMENT)
-        }
-      }
-      counters?.surface(surfaceView)
-      super.setVideoSurfaceView(surfaceView)
-    } finally {
-      Trace.endSection()
-    }
-  }
-
-  override fun clearVideoSurfaceView(surfaceView: SurfaceView?) {
-    Trace.beginSection("MediaLayer.clearVideoSurfaceView")
-    try {
-      counters?.count("clearVideoSurfaceView")
-      super.clearVideoSurfaceView(surfaceView)
-    } finally {
-      Trace.endSection()
-    }
-  }
-
   override fun setVideoTextureView(textureView: TextureView?) {
     Trace.beginSection("MediaLayer.setVideoTextureView")
     try {

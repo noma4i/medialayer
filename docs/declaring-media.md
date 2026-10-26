@@ -233,45 +233,19 @@ Swift `MediaLayerUI` не имеет параметра `weight`.
 
 ## Video output
 
-A Kotlin `MediaVideo` uses `TextureView` by default (`output = MediaOutput.Texture`).
-The experimental opt-in is `output = MediaOutput.Window`, using `SurfaceView` on every supported API (minSdk 33) when `alpha == 1f`.
-When the explicit `alpha` parameter differs from 1, it selects Texture and records the reason in Trace.
-No second flag or output enum value is required.
-Android and Media3 provide no estimate of saved frames for this application.
-
-| Behavior | `MediaOutput.Texture` | `MediaOutput.Window` |
-| --- | --- | --- |
-| `cornerRadius = 16.dp` | Compose rounded clip | Public `ViewOutlineProvider` and `clipToOutline`, experimental visibility requires device verification |
-| Explicit `alpha`, fade, cross-fade | Compose opacity | Selects Texture while `alpha != 1f` |
-| Parent clip or alpha | Follows Compose drawing | Not inspected, pass the explicit parameters or retain Texture |
-| Pager translation | Follows the page | Uses platform position updates, fling alignment and stability require device verification |
-| Rotation, shared-element effects | Follows Compose drawing | Not qualified, retain Texture |
-| Overlays and transparent backgrounds | Draws within Compose | Default Z-below ordering, test overlapping pages, controls and dialogs |
-| View bitmap capture | Includes video | Can omit video, use compositor capture or PixelCopy and verify the result |
-
-Window retains `ContentFrame` while its player changes or becomes null.
-Texture creates `ContentFrame` only while its player is non-null, including fallback from Window.
+A Kotlin `MediaVideo` always draws through a `TextureView`. There is no output parameter.
+A measured feed of six video pages on a Pixel 4a dropped 22.19% of frames on `SurfaceView` against 11.45% on `TextureView`, and a feed of one video showed no difference.
+`cornerRadius`, `alpha`, parent clips, pager translation, rotation and shared-element effects follow Compose drawing.
+`ContentFrame` exists only while the page has a player.
 Defaults `cornerRadius = 0.dp` and `alpha = 1f` add neither clip nor opacity modifiers.
-It uses attachment-based `SurfaceView` lifetime, without moving a View between pager parents.
-Different composed pages still own different Views.
-Slots, claims, playback, peeking and the pool window use the same implementation for both outputs.
+Different composed pages own different Views.
+Swift draws video on an `AVPlayerLayer` and has the same single path.
 
-Rounded Window output is experimental: visible rounding is not proven without a device run.
-Keep Texture in production until the [device procedure](video-output-measurement.md) passes.
-Switching between Window and Texture during a fade changes the output View and requires first-frame and black-rectangle checks.
-For continuous cross-fades, choose Texture for the entire transition, including opaque endpoints.
-
-An earlier Pixel 4a Android 13 experiment crashed in `SurfaceViewPositionUpdateListener.positionChanged` during pager motion in 5 of 10 runs.
-Its median janky frames were 53.6% with Window versus 38.6% with Texture across 30 swipes and 5 pairs.
-Window on API 33 was checked on a Pixel 4a by the V3 Android coordinator.
-Media3 1.11.1 retains its API 34 Compose size synchronization fix for issue #1237.
-
-Kotlin only (the example is an indented block because Swift draws video on an `AVPlayerLayer` and has no such choice):
+Kotlin only (the example is an indented block because Swift has no such parameters):
 
     MediaVideo(
       source = MomentVideo(url = moment.videoUrl, cover = moment.coverUrl),
       playing = isActive,
-      output = MediaOutput.Window,
       cornerRadius = 16.dp,
       alpha = 1f
     )

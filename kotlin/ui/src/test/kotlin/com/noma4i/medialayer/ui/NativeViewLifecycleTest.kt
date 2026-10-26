@@ -78,38 +78,33 @@ class NativeViewLifecycleTest {
   }
 
   @Test
-  @Config(sdk = [34])
-  fun inv_output_05_window_keeps_its_view_during_player_handover() {
-    var muted by mutableStateOf(false)
+  fun inv_output_01_video_always_renders_through_texture_views_at_any_alpha_and_page_count() {
+    val alphas = listOf(1f, 0.5f, 0f)
     val events = layer.playerEvents() as RecordingEvents
-    val slot = factory.createSlot(0u)
+    val root = rule.activity.findViewById<ViewGroup>(android.R.id.content)
+    val slots = alphas.indices.map { factory.createSlot(it.toUInt()) }
     rule.setContent {
       MediaLayerProvider(CompletableDeferred(layer), loader, factory.players) {
-        MediaVideo(LifecycleSource("first", Kind.VIDEO), muted = muted,
-          output = MediaOutput.Window, cornerRadius = 16.dp, modifier = Modifier.size(80.dp))
+        Column {
+          alphas.forEachIndexed { index, alpha ->
+            MediaVideo(LifecycleSource("page$index", Kind.VIDEO), alpha = alpha, modifier = Modifier.size(40.dp))
+          }
+        }
       }
     }
-    rule.waitUntil(5000) { looper.idle(); events.calls.any { it.startsWith("attach:first:") } }
-    val token = events.calls.last { it.startsWith("attach:first:") }.substringAfterLast(':').toULong()
-    slot.load("first", PlaybackRoute("file:///bundle/first.mp4", emptyMap(), null, false, false))
-    slot.play()
-    slot.attach(token)
-    rule.waitUntil(5000) { looper.idle(); counters.snapshot()["setVideoSurfaceView"] == 1L }
-    val before = counters.snapshot()
-    rule.runOnIdle { muted = true }
-    rule.waitForIdle()
-    assertEquals(before, counters.snapshot())
-    slot.detach()
-    looper.idle()
-    rule.waitForIdle()
-    slot.attach(token)
-    rule.waitUntil(5000) { looper.idle(); counters.snapshot()["setVideoSurfaceView"] == 2L }
-    val counts = counters.snapshot()
-    assertEquals(1L, counts["surfaceCreate"])
-    assertEquals(1L, counts["liveSurfaces"])
-    assertEquals(1L, counts["create"])
-    assertEquals(1L, counts["prepare"])
-    assertEquals(null, counts["setVideoTextureView"])
+    alphas.indices.forEach { index ->
+      val key = "page$index"
+      rule.waitUntil(5000) { looper.idle(); events.calls.any { it.startsWith("attach:$key:") } }
+      val token = events.calls.last { it.startsWith("attach:$key:") }.substringAfterLast(':').toULong()
+      slots[index].load(key, PlaybackRoute("file:///bundle/$index.mp4", emptyMap(), null, false, false))
+      slots[index].play()
+      slots[index].attach(token)
+    }
+    rule.waitUntil(5000) { looper.idle(); counters.snapshot()["setVideoTextureView"] == alphas.size.toLong() }
+    rule.runOnIdle {
+      assertEquals(alphas.size, root.descendants.count { it is TextureView })
+      assertEquals(0, root.descendants.count { it is android.view.SurfaceView })
+    }
   }
 
   @Test

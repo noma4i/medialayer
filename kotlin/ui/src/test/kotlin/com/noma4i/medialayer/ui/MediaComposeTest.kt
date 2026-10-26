@@ -103,23 +103,6 @@ class MediaComposeTest {
   }
 
   @Test
-  fun theOutputOfAVideoDoesNotChangeWhatItTellsTheCore() {
-    rule.setContent {
-      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
-        Column {
-          MediaVideo(Clip("https://o.test/texture.mp4"), playing = true, muted = true, output = MediaOutput.Texture, modifier = Modifier.size(50.dp))
-          MediaVideo(Clip("https://o.test/window.mp4"), playing = true, muted = true, output = MediaOutput.Window, modifier = Modifier.size(50.dp))
-        }
-      }
-    }
-    settled()
-
-    fun told(name: String) = layer.calls.filter { name in it }.map { it.replace(name, "x") }
-    assertEquals(3, told("texture").size)
-    assertEquals(told("texture"), told("window"))
-  }
-
-  @Test
   fun theAppWideMuteReachesTheCore() {
     rule.setContent { MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { } }
     settled()

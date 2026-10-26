@@ -26,7 +26,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.media3.ui.compose.ContentFrame
-import androidx.media3.ui.compose.SURFACE_TYPE_SURFACE_VIEW
+import androidx.media3.ui.compose.SURFACE_TYPE_TEXTURE_VIEW
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import coil3.compose.AsyncImage
@@ -120,7 +120,6 @@ fun MediaVideo(
   contentScale: ContentScale = ContentScale.Crop,
   loop: Boolean = true,
   group: String? = null,
-  output: MediaOutput = MediaOutput.Texture,
   cornerRadius: Dp = 0.dp,
   alpha: Float = 1f,
   onFirstFrame: () -> Unit = {},
@@ -156,13 +155,7 @@ fun MediaVideo(
   }
   val player by remember(view) { view?.player ?: flowOf(null) }.collectAsState(null)
   val counters = environment.players?.videoOutputCounters
-  val outputType = remember(output, alpha) { output.contentFrameType(alpha) }
-  val cornerRadiusPx = with(LocalDensity.current) { cornerRadius.toPx() }
-  val outputPlayer = remember(player, counters, outputType, cornerRadiusPx) {
-    player?.let {
-      VideoOutputPlayer(it, counters, cornerRadiusPx)
-    }
-  }
+  val outputPlayer = remember(player, counters) { player?.let { VideoOutputPlayer(it, counters) } }
   DisposableEffect(environment, source.url, screen.visible) {
     if (!screen.visible) return@DisposableEffect onDispose { }
     val created = environment.players?.newView()
@@ -175,8 +168,8 @@ fun MediaVideo(
   val clipped = if (cornerRadius > 0.dp) modifier.clip(RoundedCornerShape(cornerRadius)) else modifier
   val faded = if (alpha != 1f) clipped.alpha(alpha) else clipped
   Box(faded.then(screen.modifier)) {
-    if (outputPlayer != null || outputType == SURFACE_TYPE_SURFACE_VIEW) {
-      ContentFrame(outputPlayer, Modifier.fillMaxSize(), outputType, contentScale, true, {})
+    if (outputPlayer != null) {
+      ContentFrame(outputPlayer, Modifier.fillMaxSize(), SURFACE_TYPE_TEXTURE_VIEW, contentScale, true, {})
     }
     if (screen.visible) VideoPlaceholder(source.toItem(), state.isReady, contentScale)
     content(state)
