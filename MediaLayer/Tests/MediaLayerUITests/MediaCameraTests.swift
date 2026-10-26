@@ -51,7 +51,7 @@ private final class FakeBackend: CaptureBackend, @unchecked Sendable {
 
   func takePhoto(flash: Bool, profile: CaptureProfile) async throws -> Data {
     note("photo flash=\(flash)")
-    if photoFails { throw MediaError.Camera(reason: .photoFailed, detail: "fake") }
+    if photoFails { throw MediaError.Camera(reason: .photoFailed, detail: "fake", recordedMs: nil) }
     return Data([0xFF, 0xD8, 0xFF])
   }
 
@@ -210,7 +210,7 @@ struct MediaCameraTests {
     do {
       _ = try await rig.camera.takePhoto()
       Issue.record("a shot above the budget was taken")
-    } catch let MediaError.Camera(reason, _) {
+    } catch let MediaError.Camera(reason, _, _) {
       #expect(reason == .memory)
     }
   }
@@ -243,7 +243,7 @@ struct MediaCameraTests {
     do {
       _ = try await rig.camera.stopRecording()
       Issue.record("a recording of 300 ms was delivered")
-    } catch let MediaError.Camera(reason, detail) {
+    } catch let MediaError.Camera(reason, detail, _) {
       #expect((reason, detail) == (.tooShort, cameraRefusalText(reason: .tooShort)))
     }
     #expect(files(rig) == [delivered.url.lastPathComponent])
@@ -464,6 +464,30 @@ struct MediaCameraTests {
     try await rig.camera.startRecording()
     #expect(rig.backend.recordedProfile?.minTakeMs == 500)
     #expect(rig.backend.recordedProfile?.stabilization == .cinematic)
+  }
+
+  @Test
+  func inv_capture_28_a_too_short_recording_carries_its_length_in_the_error() async throws {
+    let rig = try makeRig(.moment)
+    await ready(rig)
+    rig.counters.info = MediaInfo(durationMs: 400, frame: nil)
+    try await rig.camera.startRecording()
+    do {
+      _ = try await rig.camera.stopRecording()
+      Issue.record("a recording of 400 ms was delivered")
+    } catch let MediaError.Camera(reason, _, recordedMs) {
+      #expect((reason, recordedMs) == (.tooShort, 400))
+    }
+
+    rig.counters.info = nil
+    await eventually("ready again") { rig.camera.state.phase == .ready }
+    try await rig.camera.startRecording()
+    do {
+      _ = try await rig.camera.stopRecording()
+      Issue.record("a recording without a length was delivered")
+    } catch let MediaError.Camera(reason, _, recordedMs) {
+      #expect((reason, recordedMs) == (.recordFailed, nil))
+    }
   }
 
   @Test

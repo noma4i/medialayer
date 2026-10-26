@@ -464,6 +464,22 @@ class MediaCameraTest {
   }
 
   @Test
+  fun inv_capture_28_aTooShortRecordingCarriesItsLengthInTheError() = runBlocking {
+    val rig = rig(moment)
+    ready(rig)
+    rig.counters.info = MediaInfo(400UL, null)
+    rig.camera.startRecording()
+    val tooShort = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
+    assertEquals(CameraRefusal.TOO_SHORT to 400UL, tooShort.reason to tooShort.recordedMs)
+
+    rig.counters.info = null
+    eventually("ready again") { rig.camera.state.value.phase == CameraPhase.READY }
+    rig.camera.startRecording()
+    val failed = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
+    assertEquals(CameraRefusal.RECORD_FAILED to null, failed.reason to failed.recordedMs)
+  }
+
+  @Test
   fun inv_capture_09_aBadProfileMakesNoCamera() {
     val broken = captureProfile(CaptureKind.MOMENT).copy(videoSize = null)
     assertThrows(MediaException::class.java) { MediaCamera(context, broken) }

@@ -159,7 +159,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     try await withCheckedThrowingContinuation { continuation in
       queue.async {
         guard let output = self.photoOutput, self.session.isRunning else {
-          return continuation.resume(throwing: MediaError.Camera(reason: .notReady, detail: cameraRefusalText(reason: .notReady)))
+          return continuation.resume(throwing: MediaError.Camera(reason: .notReady, detail: cameraRefusalText(reason: .notReady), recordedMs: nil))
         }
         let settings = AVCapturePhotoSettings(format: [
           AVVideoCodecKey: AVVideoCodecType.jpeg,
@@ -272,7 +272,7 @@ private final class PhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate, @unc
   func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
     if let error { return done(.failure(error)) }
     guard let data = photo.fileDataRepresentation() else {
-      return done(.failure(MediaError.Camera(reason: .photoFailed, detail: cameraRefusalText(reason: .photoFailed))))
+      return done(.failure(MediaError.Camera(reason: .photoFailed, detail: cameraRefusalText(reason: .photoFailed), recordedMs: nil)))
     }
     done(.success(data))
   }

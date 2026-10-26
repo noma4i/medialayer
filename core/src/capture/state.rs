@@ -12,7 +12,7 @@ pub enum CameraPhase {
     Failed,
 }
 
-/// What the app sees of a camera. `shooting` is true while a photo is taken, `recorded_ms` grows only in `Recording`.
+/// What the app sees of a camera. `shooting` is true while a photo is taken, `recorded_ms` grows only in `Recording`, `refused_ms` is the length of the recording a `TooShort` fault refused.
 #[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
 pub struct CameraState {
     pub phase: CameraPhase,
@@ -25,6 +25,7 @@ pub struct CameraState {
     pub recorded_ms: u64,
     pub shooting: bool,
     pub fault: Option<CameraRefusal>,
+    pub refused_ms: Option<u64>,
 }
 
 /// The state of a camera and what the machine remembers between steps. The platform keeps one run per camera and replaces it with the step result.
@@ -90,7 +91,7 @@ pub struct CaptureStep {
 #[uniffi::export]
 pub fn capture_run(lens: CameraLens) -> CaptureRun {
     CaptureRun {
-        state: CameraState { phase: CameraPhase::Idle, lens, flash: false, has_flash: false, zoom: 1.0, zoom_min: 1.0, zoom_max: 1.0, recorded_ms: 0, shooting: false, fault: None },
+        state: CameraState { phase: CameraPhase::Idle, lens, flash: false, has_flash: false, zoom: 1.0, zoom_min: 1.0, zoom_max: 1.0, recorded_ms: 0, shooting: false, fault: None, refused_ms: None },
         open: false,
         streaming: false,
         starting: false,
@@ -148,6 +149,7 @@ impl Machine {
             CaptureEvent::PhotoDone { ok } if self.run.state.shooting => {
                 self.run.state.shooting = false;
                 self.run.state.fault = (!ok).then_some(CameraRefusal::PhotoFailed);
+                self.run.state.refused_ms = None;
             }
             CaptureEvent::Start => self.start(),
             CaptureEvent::RecordStarted if self.run.starting => {
@@ -176,6 +178,7 @@ impl Machine {
         state.recorded_ms = 0;
         state.shooting = false;
         state.fault = None;
+        state.refused_ms = None;
         self.run = CaptureRun { open: false, streaming: false, starting: false, started: false, discard: false, end: None, pending_lens: None, ..self.run };
     }
 
@@ -264,6 +267,7 @@ impl Machine {
         self.run.end = None;
         self.run.state.recorded_ms = 0;
         self.run.state.fault = None;
+        self.run.state.refused_ms = None;
         self.actions.push(CaptureAction::BeginRecording);
     }
 
@@ -305,6 +309,7 @@ impl Machine {
         };
         self.actions.push(action);
         self.run.state.fault = fault;
+        self.run.state.refused_ms = duration_ms.filter(|_| fault == Some(CameraRefusal::TooShort));
         self.run.state.recorded_ms = 0;
         self.run.starting = false;
         self.run.started = false;

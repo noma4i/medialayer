@@ -133,7 +133,7 @@ public final class MediaCamera: @unchecked Sendable {
     }
   }
 
-  /// Ends the recording and gives the clip. A recording that is too short or failed, or was thrown away, is a `MediaError.Camera`.
+  /// Ends the recording and gives the clip. A recording that is too short or failed, or was thrown away, is a `MediaError.Camera`; a recording that is too short carries its length in `recordedMs`.
   /// After the limit ended the recording, gives the outcome of that recording.
   public func stopRecording() async throws -> CapturedClip {
     try await withCheckedThrowingContinuation { continuation in
@@ -191,8 +191,8 @@ public final class MediaCamera: @unchecked Sendable {
 
   var previewSession: AVCaptureSession { backend.session }
 
-  private static func refusal(_ reason: CameraRefusal) -> MediaError {
-    MediaError.Camera(reason: reason, detail: cameraRefusalText(reason: reason))
+  private static func refusal(_ reason: CameraRefusal, recordedMs: UInt64? = nil) -> MediaError {
+    MediaError.Camera(reason: reason, detail: cameraRefusalText(reason: reason), recordedMs: recordedMs)
   }
 
   private func post(_ event: CaptureEvent) {
@@ -443,7 +443,7 @@ public final class MediaCamera: @unchecked Sendable {
     if let url = recordingURL { try? FileManager.default.removeItem(at: url) }
     recordingURL = nil
     clipInfo = nil
-    ended = .failure(Self.refusal(run.state.fault ?? .notReady))
+    ended = .failure(Self.refusal(run.state.fault ?? .notReady, recordedMs: run.state.refusedMs))
   }
 
   private func installTap() {

@@ -405,3 +405,25 @@ fn inv_capture_27_a_profile_with_a_least_take_of_500_ms_is_valid_for_a_circle() 
     assert_eq!(record_verdict(true, false, false, RecordEnd::Completed, Some(500), circle.min_take_ms), RecordVerdict::TooShort);
     assert_eq!(record_verdict(true, false, false, RecordEnd::Completed, Some(501), circle.min_take_ms), RecordVerdict::Deliver);
 }
+
+#[test]
+fn inv_capture_28_a_too_short_recording_keeps_its_length_in_the_state() {
+    let profile = moment();
+    let recording = drive(profile, ready(profile), &[CaptureEvent::Start, CaptureEvent::RecordStarted]).0;
+    for (name, end, length, refused) in [
+        ("under the least take", RecordEnd::Completed, Some(400), Some(400)),
+        ("at the least take", RecordEnd::Completed, Some(500), Some(500)),
+        ("zero length", RecordEnd::Completed, Some(0), Some(0)),
+        ("above the least take", RecordEnd::Completed, Some(501), None),
+        ("by the limit", RecordEnd::LimitReached, Some(10_000), None),
+        ("no length", RecordEnd::Completed, None, None),
+        ("failed end", RecordEnd::Failed, Some(400), None),
+    ] {
+        let (after, _) = drive(profile, recording, &[CaptureEvent::RecordFinished { end }, CaptureEvent::RecordSettled { duration_ms: length }]);
+        assert_eq!((after.state.refused_ms, after.state.recorded_ms), (refused, 0), "{name}");
+    }
+    let (short, _) = drive(profile, recording, &[CaptureEvent::RecordFinished { end: RecordEnd::Completed }, CaptureEvent::RecordSettled { duration_ms: Some(400) }]);
+    assert_eq!(drive(profile, short, &[CaptureEvent::Start]).0.state.refused_ms, None, "a new recording starts without the old length");
+    let (cancelled, _) = drive(profile, recording, &[CaptureEvent::Cancel, CaptureEvent::RecordFinished { end: RecordEnd::Completed }]);
+    assert_eq!(cancelled.state.refused_ms, None, "a thrown away recording refuses nothing");
+}

@@ -137,7 +137,7 @@ class MediaCamera internal constructor(
   }
 
   /**
-   * Ends the recording and gives the clip. A recording that is too short or failed, or was thrown away, is a [MediaException.Camera].
+   * Ends the recording and gives the clip. A recording that is too short or failed, or was thrown away, is a [MediaException.Camera]; a recording that is too short carries its length in `recordedMs`.
    * After the limit ended the recording, gives the outcome of that recording.
    */
   suspend fun stopRecording(): CapturedClip {
@@ -217,7 +217,7 @@ class MediaCamera internal constructor(
       false
     }
 
-  private fun refusal(reason: CameraRefusal) = MediaException.Camera(reason, cameraRefusalText(reason))
+  private fun refusal(reason: CameraRefusal, recordedMs: ULong? = null) = MediaException.Camera(reason, cameraRefusalText(reason), recordedMs)
 
   private fun post(event: CaptureEvent) {
     if (!queue.isShutdown) enqueue { if (!closed) apply(event) }
@@ -441,7 +441,7 @@ class MediaCamera internal constructor(
     recordingFile?.delete()
     recordingFile = null
     clipInfo = null
-    ended = Result.failure(refusal(run.state.fault ?: CameraRefusal.NOT_READY))
+    ended = Result.failure(refusal(run.state.fault ?: CameraRefusal.NOT_READY, run.state.refusedMs))
   }
 
   private fun installTap() {

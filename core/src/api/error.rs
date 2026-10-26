@@ -19,7 +19,7 @@ pub enum MediaError {
     #[error("voice: {detail}")]
     Voice { detail: String },
     #[error("camera: {detail}")]
-    Camera { reason: crate::capture::CameraRefusal, detail: String },
+    Camera { reason: crate::capture::CameraRefusal, detail: String, recorded_ms: Option<u64> },
     #[error("overloaded: {detail}")]
     Overloaded { detail: String },
     #[error("the media layer is closed")]
