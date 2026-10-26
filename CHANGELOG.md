@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.10.0 - 2026-10-26
+
+### Removed
+- Kotlin `MediaOutput` and the `output` parameter of `MediaVideo`.
+- `VideoOutputCounters` entries `setVideoSurfaceView`, `clearVideoSurfaceView`, `surfaceCreate` and `liveSurfaces`.
+
+### Changed
+- Android video is always drawn through a `TextureView`.
+
 ## 3.9.3 - 2026-10-26
 
 ### Fixed
