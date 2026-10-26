@@ -9,6 +9,7 @@ pub enum Owner {
     Slot(usize),
     ProxyBuffer,
     ImageDecode,
+    Capture,
     Queue,
 }
 

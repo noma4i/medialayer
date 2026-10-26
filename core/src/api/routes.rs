@@ -155,6 +155,10 @@ impl Routes {
         self.proxy.reserve_decode(bytes).await.map_err(|error| MediaError::Overloaded { detail: error.to_string() })
     }
 
+    pub async fn reserve_capture(&self, bytes: u64) -> Result<crate::memory::Reservation, MediaError> {
+        self.proxy.reserve_capture(bytes).await.map_err(|error| MediaError::Overloaded { detail: error.to_string() })
+    }
+
     pub async fn image_size(&self, url: &str, headers: &HashMap<String, String>) -> Result<Option<ImageSize>, MediaError> {
         let local = is_local_url(url);
         let key = if local { url.to_string() } else { self.proxy.key_for(url, headers) };

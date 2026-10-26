@@ -47,6 +47,10 @@ impl Buffers {
         self.reserve_for(Owner::ImageDecode, bytes, bytes).await
     }
 
+    pub async fn reserve_capture(&self, bytes: usize) -> Result<Reservation, Refused> {
+        self.reserve_for(Owner::Capture, bytes, bytes).await
+    }
+
     async fn reserve_for(&self, owner: Owner, floor: usize, wanted: usize) -> Result<Reservation, Refused> {
         let reserved = self.ledger.reserve_between(owner, floor as u64, wanted as u64);
         tokio::time::timeout(self.wait, reserved).await.unwrap_or(Err(Refused::Ceiling { owner, requested: floor as u64, available: 0 }))

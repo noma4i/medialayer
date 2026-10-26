@@ -35,7 +35,7 @@ fn query_of(query: Query) -> Query {
         Query::Placeholder(item, ready) => Query::Placeholder(clean_item(item), ready),
         Query::Image { url, headers } => Query::Image { url: clean_url(&url), headers },
         Query::ImageSize { url, headers } => Query::ImageSize { url: clean_url(&url), headers },
-        other @ (Query::Pool | Query::Decode(_)) => other,
+        other @ (Query::Pool | Query::Decode(_) | Query::Capture(_)) => other,
     }
 }
 

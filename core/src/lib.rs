@@ -4,6 +4,7 @@ pub mod analysis;
 pub mod api;
 pub mod blurhash;
 pub mod cache;
+pub mod capture;
 pub mod change;
 pub mod fetch;
 pub mod ffi;

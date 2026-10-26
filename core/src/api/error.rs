@@ -18,6 +18,8 @@ pub enum MediaError {
     InvalidSuspension { detail: String },
     #[error("voice: {detail}")]
     Voice { detail: String },
+    #[error("camera: {detail}")]
+    Camera { reason: crate::capture::CameraRefusal, detail: String },
     #[error("overloaded: {detail}")]
     Overloaded { detail: String },
     #[error("the media layer is closed")]

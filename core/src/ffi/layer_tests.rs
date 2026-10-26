@@ -1315,3 +1315,18 @@ fn inv_memory_15_the_decode_cost_is_one_rgba_raster_and_refuses_empty_and_oversi
     assert_eq!(crate::ffi::decode_cost(16_385, 1), None);
     assert_eq!(crate::ffi::decode_cost(0, 10), None);
 }
+
+#[test]
+fn inv_capture_13_a_session_hold_shares_the_budget_with_decodes_and_a_release_admits_the_next() {
+    let dir = tempfile::tempdir().unwrap();
+    let layer = decode_layer(dir.path(), 64 << 20);
+    caller().block_on(async {
+        let session = layer.reserve_capture(40 << 20).await.unwrap();
+        assert_eq!(session.bytes(), 40 << 20);
+        let mut decode = Box::pin(layer.reserve_decode(40 << 20));
+        assert!(pending_once(async { let _ = decode.as_mut().await; }).await, "a decode got bytes the capture session holds");
+        session.release();
+        assert_eq!(decode.await.unwrap().bytes(), 40 << 20);
+        assert!(matches!(layer.reserve_capture(1 << 30).await, Err(MediaError::Overloaded { .. })));
+    });
+}
