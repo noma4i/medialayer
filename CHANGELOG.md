@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.18.0 - 2026-10-26
+
+### Fixed
+- `prepareVideo` never returns a file with the location, creation time, device or tags of its source: a file that fits but carries them is copied without encoding and without them (`isNew` is true), a clean file stays as it is. The core names such keys with `videoMetadataToStrip`.
+
 ## 3.17.0 - 2026-10-26
 
 ### Added
