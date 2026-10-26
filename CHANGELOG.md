@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.9.2 - 2026-10-26
+
+### Fixed
+- A seek issued before a place closes reaches the player.
+
 ## 3.9.1 - 2026-10-26
 
 ### Changed
