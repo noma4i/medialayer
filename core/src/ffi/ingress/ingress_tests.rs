@@ -897,3 +897,35 @@ fn inv_ingress_45_a_seek_submitted_just_before_the_release_of_its_place_is_kept_
     let (_, slot) = factory.slot_holding(url).unwrap();
     caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Seek { position_ms: 30_000 })));
 }
+
+#[test]
+fn inv_ingress_46_a_clip_that_is_not_looping_ends_its_place_when_a_window_and_a_place_declare_the_same_url() {
+    struct Seen(std::sync::Mutex<Vec<MediaState>>);
+    impl crate::ffi::StateListener for Seen {
+        fn changed(&self, state: MediaState) {
+            self.0.lock().unwrap().push(state);
+        }
+        fn failed(&self, _: MediaError) {}
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let factory: Arc<MockFactory> = Arc::default();
+    let slots: Arc<dyn PlayerSlotFactory> = factory.clone();
+    let layer = MediaLayer::build(config(dir.path(), Some(slots), None), Pause::new()).unwrap();
+    let caller = caller();
+    let url = "https://o.test/replay.m4v";
+    let once = MediaItem { looping: false, ..MediaItem::bare_video(url) };
+    let seen = Arc::new(Seen(Default::default()));
+    let _subscription = layer.subscribe_state(url.to_string(), seen.clone()).unwrap();
+
+    let window = layer.open_video_window().unwrap();
+    window.replace(0, vec![Some(once.clone())]).unwrap();
+    let place = layer.open_place(once).unwrap();
+    place.update(PlaceInput { visible: true, playing: true, ..PlaceInput::default() }).unwrap();
+    caller.block_on(eventually(|| factory.slot_holding(url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))));
+    let (index, slot) = factory.slot_holding(url).unwrap();
+    layer.player_events().ready(index, slot.generation());
+    layer.player_events().visual_ready(index, slot.generation());
+    layer.player_events().ended(index, slot.generation());
+
+    caller.block_on(eventually(|| seen.0.lock().unwrap().last() == Some(&MediaState::Ended)));
+}
