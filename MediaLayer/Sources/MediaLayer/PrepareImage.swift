@@ -57,9 +57,8 @@ enum ImagePreparation {
     }
     let release = try await admit(plan.cost)
     defer { release() }
-    guard let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw MediaError.Fetch(detail: "\(file.path) is not an image") }
+    var result = try upright(source, plan: plan, path: file.path)
     try Task.checkCancellation()
-    var result = try draw(image, turn: plan.turn)
     if plan.needsDraw { result = try finish(result, plan: plan) }
     try Task.checkCancellation()
     let output = preparedOutput(extension: "jpg", in: directory)
@@ -72,9 +71,27 @@ enum ImagePreparation {
     return PreparedMedia(url: output, isNew: true)
   }
 
-  /// The crop of the plan drawn into the output size, flipped when the plan asks for the mirror.
+  /// The photo decoded upright at the thumbnail side of the plan, so a large crop never holds more pixels than its output asks for.
+  static func upright(_ source: CGImageSource, plan: PhotoPlan, path: String) throws -> CGImage {
+    let options: [CFString: Any] = [
+      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceCreateThumbnailWithTransform: true,
+      kCGImageSourceShouldCacheImmediately: true,
+      kCGImageSourceThumbnailMaxPixelSize: plan.thumbnailSide
+    ]
+    guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { throw MediaError.Fetch(detail: "\(path) is not an image") }
+    return image
+  }
+
+  /// The crop of the plan, moved to the decoded size of `image`, drawn into the output size and flipped when the plan asks for the mirror.
   static func finish(_ image: CGImage, plan: PhotoPlan) throws -> CGImage {
-    let area = CGRect(x: Int(plan.crop.x), y: Int(plan.crop.y), width: Int(plan.crop.width), height: Int(plan.crop.height))
+    let across = Double(image.width) / Double(plan.upright.width)
+    let down = Double(image.height) / Double(plan.upright.height)
+    let left = min(max(Int((Double(plan.crop.x) * across).rounded()), 0), image.width - 1)
+    let top = min(max(Int((Double(plan.crop.y) * down).rounded()), 0), image.height - 1)
+    let right = min(max(Int((Double(plan.crop.x + plan.crop.width) * across).rounded()), left + 1), image.width)
+    let bottom = min(max(Int((Double(plan.crop.y + plan.crop.height) * down).rounded()), top + 1), image.height)
+    let area = CGRect(x: left, y: top, width: right - left, height: bottom - top)
     guard let cropped = image.cropping(to: area) else { throw MediaError.Unexpected(detail: "the photo cannot be cropped") }
     guard let context = CGContext(
       data: nil, width: Int(plan.output.width), height: Int(plan.output.height), bitsPerComponent: 8, bytesPerRow: 0,

@@ -28,6 +28,18 @@ private func halves(_ width: Int, _ height: Int, orientation: UInt32, alpha: Boo
   return data as Data
 }
 
+private func grayJpeg(_ width: Int, _ height: Int) throws -> Data {
+  let context = try #require(CGContext(
+    data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+    space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue
+  ))
+  let data = NSMutableData()
+  let destination = try #require(CGImageDestinationCreateWithData(data, UTType.jpeg.identifier as CFString, 1, nil))
+  CGImageDestinationAddImage(destination, try #require(context.makeImage()), nil)
+  #expect(CGImageDestinationFinalize(destination))
+  return data as Data
+}
+
 private func file(_ data: Data, _ fileExtension: String = "dat") throws -> URL {
   let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).\(fileExtension)")
   try data.write(to: url)
@@ -174,6 +186,41 @@ struct MediaImageEditTests {
     await #expect(throws: MediaError.self) { try await prepared(source, edit(outputSize: PixelSize(width: 0, height: 10)), ledger: ledger) }
 
     #expect(ledger.asked.isEmpty)
+  }
+
+  @Test
+  func inv_send_36_a_fifty_megapixel_photo_is_decoded_below_a_third_of_its_pixels() async throws {
+    let source = try file(try grayJpeg(8160, 6120), "jpg")
+    defer { try? FileManager.default.removeItem(at: source) }
+    let imageSource = try #require(CGImageSourceCreateWithURL(source as CFURL, nil))
+    let fifty = 8160 * 6120
+    let cases = [
+      edit(crop: CropFractions(x: 0, y: 0, width: 0.75, height: 1), outputSize: PixelSize(width: 1080, height: 1080)),
+      edit(maxSize: PixelSize(width: 1080, height: 1920)),
+      edit(outputSize: PixelSize(width: 1080, height: 1080))
+    ]
+
+    for changed in cases {
+      let plan = try #require(photoPlan(width: 8160, height: 6120, exifOrientation: 1, edit: changed))
+      let decoded = try ImagePreparation.upright(imageSource, plan: plan, path: source.path)
+      #expect(decoded.width * decoded.height < fifty / 3, "\(decoded.width)x\(decoded.height)")
+      #expect(max(decoded.width, decoded.height) == Int(plan.thumbnailSide))
+      #expect(UInt64(decoded.width * decoded.height * 4) <= plan.cost)
+    }
+  }
+
+  @Test
+  func inv_send_36_a_sampled_photo_keeps_the_output_size_the_crop_and_asks_the_decoded_raster() async throws {
+    let source = try file(try halves(800, 400, orientation: 1))
+    defer { try? FileManager.default.removeItem(at: source) }
+    let ledger = Ledger()
+
+    let result = try await prepared(source, edit(crop: CropFractions(x: 0, y: 0, width: 0.5, height: 1), outputSize: PixelSize(width: 50, height: 50)), ledger: ledger)
+
+    #expect((result.width, result.height) == (50, 50))
+    #expect(isRed(try rgb(result, 25, 25)))
+    let asked: UInt64 = 100 * 50 * 4 + 50 * 50 * 4
+    #expect(ledger.asked == [asked])
   }
 
   @Test

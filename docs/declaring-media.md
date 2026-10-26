@@ -181,6 +181,8 @@ val photo = media.prepareImage(source, quality = 0.9)
 
 `prepareImage` also edits the photo. `maxSize` fits the result into a rectangle and keeps the proportions, it never enlarges unless `enlarge` is true: then a smaller photo grows to the rectangle (540x960 into 1080x1920 gives 1080x1920), the pixel limit of 16384 per side still applies. `crop` is a rectangle in fractions from 0 to 1 of the upright photo, the origin is the top left corner, a crop past the edge is held inside the photo. `outputSize` gives the exact size and wins over `maxSize`. `mirror` flips the result horizontally, for a front camera. The core plans the sizes in the order turn, crop, mirror, fit. An edit that holds no pixel, such as an empty crop or a size of zero, throws `MediaError.Fetch` (`MediaException.Fetch`).
 
+The photo is decoded no larger than the edit needs. When the crop is larger than the output, the core plans a smaller decode (Android `inSampleSize` as a power of two, iOS an exact long side) that keeps every side of the crop at or above the output, so an 8160x6120 photo cut to 1080 pixels is decoded at about 2040x1530 and not at 50 megapixels. A crop at or below the output size is decoded at full size. The memory asked of the Ledger is the decoded raster, and the limit of 16384 per side still applies to the file.
+
 ```swift
 let chat = try await media.prepareImage(source, quality: 0.7, maxSize: CGSize(width: 1080, height: 1920))
 let story = try await media.prepareImage(source, maxSize: CGSize(width: 1080, height: 1920), enlarge: true)

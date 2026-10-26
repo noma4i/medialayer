@@ -32,8 +32,11 @@ pub struct PixelRect {
 }
 
 /// The whole plan of a photo: turn it upright, take `crop` of the upright pixels, scale to `output`, flip when `mirror`.
-/// `needs_draw` is true when the crop, the mirror or the output size ask for a last draw after the photo is upright. `cost` is the memory asked of the Ledger:
-/// the source raster (twice when the photo is turned) and the output raster when a last draw is needed.
+/// `needs_draw` is true when the crop, the mirror or the output size ask for a last draw after the photo is upright.
+/// The photo is decoded smaller than its file when the crop is larger than the output: `sample` is the power of two for a platform that samples (Android `inSampleSize`),
+/// `decode` is the size that sample gives (the file orientation, rounded up), `thumbnail_side` is the exact long side for a platform that scales while it decodes (iOS `kCGImageSourceThumbnailMaxPixelSize`).
+/// Both keep every side of the crop at or above the output. `cost` is the memory asked of the Ledger: the decoded raster `decode` (twice when the photo is turned)
+/// and the output raster when a last draw is needed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
 pub struct PhotoPlan {
     pub turn: PhotoTurn,
@@ -42,6 +45,9 @@ pub struct PhotoPlan {
     pub mirror: bool,
     pub output: PixelSize,
     pub needs_draw: bool,
+    pub sample: u32,
+    pub decode: PixelSize,
+    pub thumbnail_side: u32,
     pub cost: u64,
 }
 
@@ -71,9 +77,28 @@ pub fn photo_plan(width: u32, height: u32, exif_orientation: u32, edit: PhotoEdi
     }
     let whole = crop.width == upright_width && crop.height == upright_height;
     let needs_draw = !whole || edit.mirror || output.width != crop.width || output.height != crop.height;
-    let kept = if turned { raster * 2 } else { raster };
+    let (sample, thumbnail_side) = sampling(width, height, crop, output);
+    let decode = PixelSize { width: width.div_ceil(sample), height: height.div_ceil(sample) };
+    let decoded = decode_cost(decode.width, decode.height)?;
+    let kept = if turned { decoded * 2 } else { decoded };
     let cost = if needs_draw { kept + decode_cost(output.width, output.height)? } else { kept };
-    Some(PhotoPlan { turn, upright: PixelSize { width: upright_width, height: upright_height }, crop, mirror: edit.mirror, output, needs_draw, cost })
+    Some(PhotoPlan { turn, upright: PixelSize { width: upright_width, height: upright_height }, crop, mirror: edit.mirror, output, needs_draw, sample, decode, thumbnail_side, cost })
+}
+
+/// The largest power of two that keeps the crop at or above the output on both sides, and the long side of the photo that does the same exactly. A crop at or below the output keeps the file size.
+fn sampling(width: u32, height: u32, crop: PixelRect, output: PixelSize) -> (u32, u32) {
+    let mut sample = 1;
+    while crop.width / (sample * 2) >= output.width && crop.height / (sample * 2) >= output.height {
+        sample *= 2;
+    }
+    let (numerator, denominator) = if u64::from(output.width) * u64::from(crop.height) >= u64::from(output.height) * u64::from(crop.width) {
+        (output.width, crop.width)
+    } else {
+        (output.height, crop.height)
+    };
+    let long = u64::from(width.max(height));
+    let side = (long * u64::from(numerator)).div_ceil(u64::from(denominator)).clamp(1, long);
+    (sample, side as u32)
 }
 
 fn span(start: f64, length: f64, total: u32) -> Option<(u32, u32)> {

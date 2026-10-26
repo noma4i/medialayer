@@ -73,7 +73,7 @@ private suspend fun upright(file: File, quality: Double, cache: File, admit: Dec
 }
 
 private suspend fun decodeUpright(file: File, quality: Double, cache: File, matrix: Matrix, plan: PhotoPlan): File {
-  val source = BitmapFactory.decodeFile(file.path) ?: throw MediaException.Fetch("${file.path} is not an image")
+  val source = decodeSampled(file, plan)
   currentCoroutineContext().ensureActive()
   val turned = Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
   val drawn = if (plan.needsDraw) redraw(turned, plan) else turned
@@ -92,14 +92,27 @@ private suspend fun decodeUpright(file: File, quality: Double, cache: File, matr
   }
 }
 
-/** The crop of the plan drawn into the output size, flipped when the plan asks for the mirror. */
+/** The photo decoded at the sample of the plan, so a large crop never holds more pixels than its output asks for. */
+internal fun decodeSampled(file: File, plan: PhotoPlan): Bitmap =
+  BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = plan.sample.toInt() }) ?: throw MediaException.Fetch("${file.path} is not an image")
+
+/** The crop of the plan, moved to the sampled size of [upright], drawn into the output size and flipped when the plan asks for the mirror. */
 internal fun redraw(upright: Bitmap, plan: PhotoPlan): Bitmap {
   val width = plan.output.width.toInt()
   val height = plan.output.height.toInt()
   val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
   val canvas = Canvas(result)
   if (plan.mirror) canvas.scale(-1f, 1f, width / 2f, 0f)
-  val area = Rect(plan.crop.x.toInt(), plan.crop.y.toInt(), (plan.crop.x + plan.crop.width).toInt(), (plan.crop.y + plan.crop.height).toInt())
+  val across = upright.width.toDouble() / plan.upright.width.toInt()
+  val down = upright.height.toDouble() / plan.upright.height.toInt()
+  val left = (plan.crop.x.toInt() * across).roundToInt().coerceIn(0, upright.width - 1)
+  val top = (plan.crop.y.toInt() * down).roundToInt().coerceIn(0, upright.height - 1)
+  val area = Rect(
+    left,
+    top,
+    ((plan.crop.x + plan.crop.width).toInt() * across).roundToInt().coerceIn(left + 1, upright.width),
+    ((plan.crop.y + plan.crop.height).toInt() * down).roundToInt().coerceIn(top + 1, upright.height)
+  )
   canvas.drawBitmap(upright, area, Rect(0, 0, width, height), Paint(Paint.FILTER_BITMAP_FLAG))
   return result
 }

@@ -38,6 +38,12 @@ private fun pngFile(width: Int, height: Int): File {
   return File.createTempFile("edit", ".png").apply { writeBytes(out.toByteArray()); deleteOnExit() }
 }
 
+private fun grayJpegFile(width: Int, height: Int): File =
+  File.createTempFile("gray", ".jpg").apply { ImageIO.write(BufferedImage(width, height, BufferedImage.TYPE_BYTE_GRAY), "jpg", this); deleteOnExit() }
+
+private fun jpegFile(width: Int, height: Int): File =
+  File.createTempFile("edit", ".jpg").apply { ImageIO.write(BufferedImage(width, height, BufferedImage.TYPE_INT_RGB), "jpg", this); deleteOnExit() }
+
 @RunWith(MediaLayerTestRunner::class)
 class MediaImageEditTest {
   private val orientationBefore = photoOrientation
@@ -115,6 +121,39 @@ class MediaImageEditTest {
       val drawn = redraw(source, plan)
       assertEquals(size, drawn.width to drawn.height)
     }
+  }
+
+  @Test
+  fun inv_send_35_aFiftyMegapixelPhotoIsDecodedBelowAThirdOfItsPixelsAndTheLedgerAsksTheDecodedRaster() {
+    val file = grayJpegFile(8160, 6120)
+    val fifty = 8160L * 6120
+    val cases = listOf(
+      edit(crop = CropFractions(0.0, 0.0, 0.75, 1.0), outputSize = PixelSize(1080u, 1080u)),
+      edit(maxSize = PixelSize(1080u, 1920u)),
+      edit(outputSize = PixelSize(1080u, 1080u))
+    )
+
+    for (case in cases) {
+      val plan = photoPlan(8160u, 6120u, 1u, case)!!
+      val decoded = decodeSampled(file, plan)
+      assertTrue("${decoded.width}x${decoded.height}", decoded.width.toLong() * decoded.height < fifty / 3)
+      assertEquals(plan.decode.width.toInt() to plan.decode.height.toInt(), decoded.width to decoded.height)
+      assertTrue(plan.cost.toLong() < fifty * 4 / 3)
+      decoded.recycle()
+    }
+  }
+
+  @Test
+  fun inv_send_35_aSampledPhotoKeepsTheOutputSizeAndAsksTheDecodedRaster() {
+    val ledger = EditLedger()
+    val file = jpegFile(800, 400)
+
+    val prepared = prepare(file, edit(crop = CropFractions(0.0, 0.0, 0.5, 1.0), outputSize = PixelSize(50u, 50u)), ledger)
+    prepared.file.deleteOnExit()
+    val result = android.graphics.BitmapFactory.decodeFile(prepared.file.path)
+
+    assertEquals(50 to 50, result.width to result.height)
+    assertEquals(listOf(100L * 50 * 4 + 50L * 50 * 4), ledger.asked.toList())
   }
 
   @Test

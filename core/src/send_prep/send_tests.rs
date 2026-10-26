@@ -270,9 +270,10 @@ fn inv_send_25_the_mirror_is_carried_and_every_last_draw_adds_the_output_raster_
     let mirrored = photo_plan(400, 200, 1, PhotoEdit { mirror: true, ..edit() }).unwrap();
     assert_eq!((mirrored.mirror, mirrored.cost), (true, raster * 2));
     let scaled = photo_plan(400, 200, 1, PhotoEdit { max_size: Some(size(200, 100)), ..edit() }).unwrap();
-    assert_eq!(scaled.cost, raster + 200 * 100 * 4);
+    assert_eq!(scaled.cost, 200 * 100 * 4 * 2);
     let turned_and_cut = photo_plan(400, 200, 6, PhotoEdit { crop: crop(0.0, 0.0, 1.0, 0.5), ..edit() }).unwrap();
     assert_eq!(turned_and_cut.cost, raster * 2 + 200 * 200 * 4);
+    assert_eq!((turned_and_cut.sample, turned_and_cut.decode), (1, size(400, 200)));
 }
 
 #[test]
@@ -307,4 +308,44 @@ fn inv_send_28_an_encode_plan_counts_one_raster_plus_one_per_redraw_and_flattens
     }
     assert_eq!(image_encode_plan(16_385, 1, 1, false, ImageFormat::Png), None);
     assert_eq!(image_encode_plan(0, 1, 1, false, ImageFormat::Png), None);
+}
+
+#[test]
+fn inv_send_34_a_crop_larger_than_the_output_is_decoded_down_to_it_and_the_ledger_pays_for_the_decoded_raster() {
+    let square = crop(0.0, 0.0, 0.75, 1.0);
+    let upper_half = crop(0.0, 0.0, 1.0, 0.5);
+    let source = (8160, 6120);
+    let fifty = source.0 * source.1;
+    // (name, tag, edit, sample, decode, thumbnail side)
+    let table = [
+        ("visible square, output 1080", 1, PhotoEdit { crop: square, output_size: Some(size(1080, 1080)), ..edit() }, 4, size(2040, 1530), 1440),
+        ("max size 1080x1920", 1, PhotoEdit { max_size: Some(size(1080, 1920)), ..edit() }, 4, size(2040, 1530), 1080),
+        ("output size without crop", 1, PhotoEdit { output_size: Some(size(1080, 1080)), ..edit() }, 4, size(2040, 1530), 1440),
+        ("tag 6: the crop is upright, the decode stays in file orientation", 6, PhotoEdit { crop: upper_half, output_size: Some(size(1080, 1080)), ..edit() }, 2, size(4080, 3060), 2160),
+        ("tag 8", 8, PhotoEdit { crop: upper_half, output_size: Some(size(1080, 1080)), ..edit() }, 2, size(4080, 3060), 2160),
+        ("mirror does not change the decode", 1, PhotoEdit { crop: square, output_size: Some(size(1080, 1080)), mirror: true, ..edit() }, 4, size(2040, 1530), 1440),
+        ("output equal to the crop keeps the file size", 1, PhotoEdit { crop: square, output_size: Some(size(6120, 6120)), ..edit() }, 1, size(8160, 6120), 8160),
+        ("output larger than the crop keeps the file size", 1, PhotoEdit { crop: square, output_size: Some(size(9000, 9000)), ..edit() }, 1, size(8160, 6120), 8160),
+        ("enlarge keeps the file size", 1, PhotoEdit { max_size: Some(size(16_000, 16_000)), enlarge: true, ..edit() }, 1, size(8160, 6120), 8160),
+        ("one output side above the half of the crop stops the sampling", 1, PhotoEdit { output_size: Some(size(4081, 100)), ..edit() }, 1, size(8160, 6120), 4081),
+        ("both output sides at the half of the crop", 1, PhotoEdit { output_size: Some(size(4080, 3060)), ..edit() }, 2, size(4080, 3060), 4080),
+        ("stretched output is held by the larger ratio", 1, PhotoEdit { output_size: Some(size(100, 3000)), ..edit() }, 2, size(4080, 3060), 4000),
+        ("output of one pixel", 1, PhotoEdit { output_size: Some(size(1, 1)), ..edit() }, 4096, size(2, 2), 2),
+    ];
+    for (name, tag, changed, sample, decode, side) in table {
+        let plan = photo_plan(source.0, source.1, tag, changed).unwrap();
+        assert_eq!((plan.sample, plan.decode, plan.thumbnail_side), (sample, decode, side), "{name}");
+        let turned = if tag == 1 { 1 } else { 2 };
+        let draw = if plan.needs_draw { u64::from(plan.output.width) * u64::from(plan.output.height) * 4 } else { 0 };
+        assert_eq!(plan.cost, u64::from(decode.width) * u64::from(decode.height) * 4 * turned + draw, "{name}");
+    }
+    let crop_plan = photo_plan(source.0, source.1, 1, PhotoEdit { crop: square, output_size: Some(size(1080, 1080)), ..edit() }).unwrap();
+    assert!(u64::from(crop_plan.decode.width) * u64::from(crop_plan.decode.height) < u64::from(fifty) / 3);
+}
+
+#[test]
+fn inv_send_34_the_pixel_limit_of_the_source_stays_when_the_decode_is_smaller() {
+    let small = PhotoEdit { output_size: Some(size(128, 5)), ..edit() };
+    assert_eq!(photo_plan(16_384, 10, 1, small).unwrap().decode, size(8192, 5));
+    assert_eq!(photo_plan(16_385, 10, 1, small), None);
 }
