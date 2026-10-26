@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.16.0 - 2026-10-26
+
+### Added
+- `CaptureProfile.stabilization` steadies the recorded video: `.circle` is cinematic, `.moment` and `.photo` are off.
+
 ## 3.15.0 - 2026-10-26
 
 ### Added

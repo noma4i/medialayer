@@ -43,6 +43,7 @@ fn inv_capture_01_the_three_profiles_are_the_table_and_a_bad_profile_is_refused(
         ("photo with a limit", CaptureProfile { max_duration_ms: 5_000, ..photo }),
         ("photo with sound", CaptureProfile { audio: true, ..photo }),
         ("photo with a video size", CaptureProfile { video_size: Some(size(1, 1)), ..photo }),
+        ("photo with a stabilization", CaptureProfile { stabilization: VideoStabilization::Standard, ..photo }),
     ];
     for (name, profile) in broken {
         assert!(matches!(check_capture_profile(profile), Err(MediaError::InvalidSpec { .. })), "{name}");
@@ -374,4 +375,33 @@ fn inv_capture_13_the_costs_are_rasters_of_the_session_and_of_the_shot() {
     for reason in [CameraRefusal::PermissionDenied, CameraRefusal::NoCamera, CameraRefusal::Busy, CameraRefusal::ConfigureFailed, CameraRefusal::NotReady, CameraRefusal::TooShort, CameraRefusal::RecordFailed, CameraRefusal::PhotoFailed, CameraRefusal::Memory] {
         assert!(!camera_refusal_text(reason).is_empty());
     }
+}
+
+#[test]
+fn inv_capture_25_the_stabilization_of_a_profile_is_circle_cinematic_and_the_rest_off() {
+    let stabilization = |kind| capture_profile(kind).stabilization;
+    assert_eq!((stabilization(CaptureKind::Circle), stabilization(CaptureKind::Moment), stabilization(CaptureKind::Photo)), (VideoStabilization::Cinematic, VideoStabilization::Off, VideoStabilization::Off));
+    let own = CaptureProfile { stabilization: VideoStabilization::Standard, ..moment() };
+    assert_eq!(check_capture_profile(own).unwrap().stabilization, VideoStabilization::Standard);
+}
+
+#[test]
+fn inv_capture_26_the_stabilization_is_set_only_when_the_device_offers_it() {
+    use VideoStabilization::{Cinematic, Off, Standard};
+    for (requested, supported, expected) in [
+        (Cinematic, vec![Standard, Cinematic], Some(Cinematic)),
+        (Cinematic, vec![Standard], None),
+        (Standard, vec![], None),
+        (Off, vec![], Some(Off)),
+    ] {
+        assert_eq!(stabilization_mode(requested, supported.clone()), expected, "{requested:?} in {supported:?}");
+    }
+}
+
+#[test]
+fn inv_capture_27_a_profile_with_a_least_take_of_500_ms_is_valid_for_a_circle() {
+    let circle = CaptureProfile { min_take_ms: 500, ..capture_profile(CaptureKind::Circle) };
+    assert_eq!(check_capture_profile(circle).unwrap().min_take_ms, 500);
+    assert_eq!(record_verdict(true, false, false, RecordEnd::Completed, Some(500), circle.min_take_ms), RecordVerdict::TooShort);
+    assert_eq!(record_verdict(true, false, false, RecordEnd::Completed, Some(501), circle.min_take_ms), RecordVerdict::Deliver);
 }

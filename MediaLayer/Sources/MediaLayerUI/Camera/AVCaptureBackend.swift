@@ -190,6 +190,10 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
         }
         let angle = self.rotation?.videoRotationAngleForHorizonLevelCapture ?? 90
         if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+        if let camera = self.camera {
+          let supported = [VideoStabilization.standard, .cinematic].filter { camera.activeFormat.isVideoStabilizationModeSupported($0.avMode) }
+          if let mode = stabilizationMode(requested: profile.stabilization, supported: supported) { connection.preferredVideoStabilizationMode = mode.avMode }
+        }
       }
       output.maxRecordedDuration = CMTime(value: CMTimeValue(profile.maxDurationMs), timescale: 1000)
       let delegate = MovieDelegate(onStart: { [weak self] in self?.emit(.recordStarted) }, onFinish: { [weak self] end in self?.emit(.recordFinished(end: end)) })
@@ -297,6 +301,16 @@ private final class MovieDelegate: NSObject, AVCaptureFileOutputRecordingDelegat
     if failure.code == AVError.maximumDurationReached.rawValue { return .limitReached }
     if failure.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool == true { return .completed }
     return .failed
+  }
+}
+
+private extension VideoStabilization {
+  var avMode: AVCaptureVideoStabilizationMode {
+    switch self {
+    case .off: .off
+    case .standard: .standard
+    case .cinematic: .cinematic
+    }
   }
 }
 #endif

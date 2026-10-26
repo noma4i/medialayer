@@ -43,8 +43,10 @@ import com.noma4i.medialayer.FaultKind
 import com.noma4i.medialayer.FpsRange
 import com.noma4i.medialayer.PixelSize
 import com.noma4i.medialayer.RecordEnd
+import com.noma4i.medialayer.VideoStabilization
 import com.noma4i.medialayer.formatCandidates
 import com.noma4i.medialayer.pickFormat
+import com.noma4i.medialayer.stabilizationMode
 import java.io.File
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -142,6 +144,8 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
       val builder = VideoCapture.Builder(Recorder.Builder().setQualitySelector(QualitySelector.from(quality, FallbackStrategy.lowerQualityOrHigherThan(quality))).build())
         .setMirrorMode(if (profile.mirrorFrontVideo) MirrorMode.MIRROR_MODE_ON_FRONT_ONLY else MirrorMode.MIRROR_MODE_OFF)
       plan?.let { builder.setTargetFrameRate(android.util.Range(it.frameRate.low.toInt(), it.frameRate.high.toInt())) }
+      val offered = if (Recorder.getVideoCapabilities(provider.getCameraInfo(selector)).isStabilizationSupported) listOf(VideoStabilization.STANDARD, VideoStabilization.CINEMATIC) else emptyList()
+      stabilizationMode(profile.stabilization, offered)?.let { builder.setVideoStabilizationEnabled(it != VideoStabilization.OFF) }
       val capture = builder.build()
       movie = capture
       cases += capture

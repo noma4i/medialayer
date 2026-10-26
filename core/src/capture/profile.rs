@@ -25,6 +25,14 @@ pub enum CaptureMode {
     Video,
 }
 
+/// How much the video is steadied. `Cinematic` is the strongest, `Off` asks for none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum VideoStabilization {
+    Off,
+    Standard,
+    Cinematic,
+}
+
 /// What a camera place captures. A `Photo` profile has no video and no limit, a `Video` profile has a video size and a limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
 pub struct CaptureProfile {
@@ -36,11 +44,12 @@ pub struct CaptureProfile {
     pub min_take_ms: u64,
     pub audio: bool,
     pub mirror_front_video: bool,
+    pub stabilization: VideoStabilization,
     pub photo_quality: u32,
     pub reduces_red_eye: bool,
 }
 
-/// The three profiles of the app: `Photo` (target 1080x1920, JPEG 90), `Moment` (1280x720, 10 s, 500 ms least take, sound) and `Circle` (720x1280, 60 s, sound).
+/// The three profiles of the app: `Photo` (target 1080x1920, JPEG 90), `Moment` (1280x720, 10 s, 500 ms least take, sound) and `Circle` (720x1280, 60 s, sound, cinematic stabilization).
 #[uniffi::export]
 pub fn capture_profile(kind: CaptureKind) -> CaptureProfile {
     let base = CaptureProfile {
@@ -52,18 +61,19 @@ pub fn capture_profile(kind: CaptureKind) -> CaptureProfile {
         min_take_ms: 0,
         audio: true,
         mirror_front_video: false,
+        stabilization: VideoStabilization::Off,
         photo_quality: 90,
         reduces_red_eye: false,
     };
     match kind {
         CaptureKind::Photo => CaptureProfile { mode: CaptureMode::Photo, photo_size: Some(PixelSize { width: 1080, height: 1920 }), audio: false, ..base },
         CaptureKind::Moment => CaptureProfile { video_size: Some(PixelSize { width: 1280, height: 720 }), max_duration_ms: 10_000, min_take_ms: 500, ..base },
-        CaptureKind::Circle => CaptureProfile { video_size: Some(PixelSize { width: 720, height: 1280 }), max_duration_ms: 60_000, ..base },
+        CaptureKind::Circle => CaptureProfile { video_size: Some(PixelSize { width: 720, height: 1280 }), max_duration_ms: 60_000, stabilization: VideoStabilization::Cinematic, ..base },
     }
 }
 
 /// The profile itself when it is valid. A side of zero, a frame rate outside 1 to 60, a video without a size, a video limit outside 1 second to 10 minutes,
-/// a photo with a limit or a sound, a least take that is not below the limit and a quality above 100 are `MediaError::InvalidSpec`.
+/// a photo with a limit, a sound or a stabilization, a least take that is not below the limit and a quality above 100 are `MediaError::InvalidSpec`.
 #[uniffi::export]
 pub fn check_capture_profile(profile: CaptureProfile) -> Result<CaptureProfile, MediaError> {
     let refuse = |detail: &str| Err(MediaError::InvalidSpec { detail: format!("capture profile: {detail}") });
@@ -90,10 +100,16 @@ pub fn check_capture_profile(profile: CaptureProfile) -> Result<CaptureProfile, 
             }
         }
         CaptureMode::Photo => {
-            if profile.max_duration_ms != 0 || profile.min_take_ms != 0 || profile.audio || profile.video_size.is_some() {
-                return refuse("a photo has no limit, no least take, no sound and no video size");
+            if profile.max_duration_ms != 0 || profile.min_take_ms != 0 || profile.audio || profile.video_size.is_some() || profile.stabilization != VideoStabilization::Off {
+                return refuse("a photo has no limit, no least take, no sound, no video size and no stabilization");
             }
         }
     }
     Ok(profile)
+}
+
+/// The stabilization to set on the video connection: the requested one when the device offers it (`Off` always), otherwise `None` and the platform keeps its own.
+#[uniffi::export]
+pub fn stabilization_mode(requested: VideoStabilization, supported: Vec<VideoStabilization>) -> Option<VideoStabilization> {
+    (requested == VideoStabilization::Off || supported.contains(&requested)).then_some(requested)
 }

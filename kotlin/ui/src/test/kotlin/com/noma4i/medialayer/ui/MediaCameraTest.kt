@@ -24,6 +24,7 @@ import com.noma4i.medialayer.MediaException
 import com.noma4i.medialayer.MediaInfo
 import com.noma4i.medialayer.PixelSize
 import com.noma4i.medialayer.RecordEnd
+import com.noma4i.medialayer.VideoStabilization
 import com.noma4i.medialayer.cameraRefusalText
 import com.noma4i.medialayer.captureProfile
 import java.io.File
@@ -49,6 +50,7 @@ private class FakeBackend : CaptureBackend {
   @Volatile var recordingFile: File? = null
   @Volatile var photoFails = false
   @Volatile var hasFlash = true
+  @Volatile var recordedProfile: CaptureProfile? = null
   val recordedReads = AtomicInteger()
   override val photoSize: PixelSize? = PixelSize(3000u, 4000u)
 
@@ -83,6 +85,7 @@ private class FakeBackend : CaptureBackend {
 
   override fun beginRecording(file: File, profile: CaptureProfile, lens: CameraLens) {
     note("record $lens")
+    recordedProfile = profile
     recordingFile = file
     file.writeBytes(byteArrayOf(1, 2, 3))
     emit(CaptureEvent.RecordStarted)
@@ -439,6 +442,25 @@ class MediaCameraTest {
     eventually("unbound by close") { rig.backend.count("unbind") == 1 && rig.counters.released.get() == 1 }
     assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.takePhoto() } }
     Unit
+  }
+
+  @Test
+  fun inv_capture_25_aRecordingHandsTheStabilizationOfItsProfileToTheBackend() = runBlocking {
+    for ((profile, expected) in listOf(captureProfile(CaptureKind.CIRCLE) to VideoStabilization.CINEMATIC, moment to VideoStabilization.OFF)) {
+      val rig = rig(profile)
+      ready(rig)
+      rig.camera.startRecording()
+      assertEquals(expected, rig.backend.recordedProfile?.stabilization)
+    }
+  }
+
+  @Test
+  fun inv_capture_27_aCircleProfileWithALeastTakeOf500MsIsBuiltAndReachesTheBackend() = runBlocking {
+    val rig = rig(captureProfile(CaptureKind.CIRCLE).copy(minTakeMs = 500UL))
+    ready(rig)
+    rig.camera.startRecording()
+    assertEquals(500UL, rig.backend.recordedProfile?.minTakeMs)
+    assertEquals(VideoStabilization.CINEMATIC, rig.backend.recordedProfile?.stabilization)
   }
 
   @Test

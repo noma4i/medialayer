@@ -17,6 +17,7 @@ private final class FakeBackend: CaptureBackend, @unchecked Sendable {
   private(set) var recordingURL: URL?
   private(set) var tap: (@Sendable (CVPixelBuffer, UInt64) -> Void)?
   private(set) var recordedReads = 0
+  private(set) var recordedProfile: CaptureProfile?
   var answer = Answer.opens
   var hasFlash = true
   var photoFails = false
@@ -56,7 +57,7 @@ private final class FakeBackend: CaptureBackend, @unchecked Sendable {
 
   func beginRecording(to url: URL, profile: CaptureProfile, lens: CameraLens) {
     note("record \(lens)")
-    lock.withLock { recordingURL = url }
+    lock.withLock { recordingURL = url; recordedProfile = profile }
     try? Data([1, 2, 3]).write(to: url)
     emit(.recordStarted)
   }
@@ -445,8 +446,29 @@ struct MediaCameraTests {
   }
 
   @Test
+  func inv_capture_25_a_recording_hands_the_stabilization_of_its_profile_to_the_backend() async throws {
+    for (profile, expected) in [(CaptureProfile.circle, VideoStabilization.cinematic), (.moment, .off)] {
+      let rig = try makeRig(profile)
+      await ready(rig)
+      try await rig.camera.startRecording()
+      #expect(rig.backend.recordedProfile?.stabilization == expected)
+    }
+  }
+
+  @Test
+  func inv_capture_27_a_circle_profile_with_a_least_take_of_500_ms_is_built_and_reaches_the_backend() async throws {
+    var profile = CaptureProfile.circle
+    profile.minTakeMs = 500
+    let rig = try makeRig(profile)
+    await ready(rig)
+    try await rig.camera.startRecording()
+    #expect(rig.backend.recordedProfile?.minTakeMs == 500)
+    #expect(rig.backend.recordedProfile?.stabilization == .cinematic)
+  }
+
+  @Test
   func inv_capture_09_a_bad_profile_makes_no_camera() {
-    let broken = CaptureProfile(mode: .video, videoSize: nil, photoSize: nil, fps: 30, maxDurationMs: 0, minTakeMs: 0, audio: true, mirrorFrontVideo: false, photoQuality: 90, reducesRedEye: false)
+    let broken = CaptureProfile(mode: .video, videoSize: nil, photoSize: nil, fps: 30, maxDurationMs: 0, minTakeMs: 0, audio: true, mirrorFrontVideo: false, stabilization: .off, photoQuality: 90, reducesRedEye: false)
     #expect(throws: MediaError.self) { _ = try MediaCamera(profile: broken) }
   }
 }

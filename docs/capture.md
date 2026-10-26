@@ -8,14 +8,18 @@ The face search (ML Kit, Vision), the mirror of a photo, the permissions and the
 
 ## Profiles
 
-| Profile | Video | Frame rate | Limit | Least take | Sound |
-| --- | --- | --- | --- | --- | --- |
-| `.photo` | none | 30 | none | none | no |
-| `.moment` | 1280x720 | 30 | 10 s | 500 ms | yes |
-| `.circle` | 720x1280 | 30 | 60 s | 0 | yes |
+| Profile | Video | Frame rate | Limit | Least take | Sound | Stabilization |
+| --- | --- | --- | --- | --- | --- | --- |
+| `.photo` | none | 30 | none | none | no | off |
+| `.moment` | 1280x720 | 30 | 10 s | 500 ms | yes | off |
+| `.circle` | 720x1280 | 30 | 60 s | 0 | yes | cinematic |
 
 A photo is a JPEG of quality 90 (`photoQuality`). `mirrorFrontVideo` mirrors the video of the front camera, `reducesRedEye` asks for red-eye reduction. An invalid profile (a side of zero,
-a frame rate outside 1 to 60, a video without a size or with a limit outside 1 s to 10 min, a photo with a limit or sound) is refused by the initializer with `MediaError.InvalidSpec`.
+a frame rate outside 1 to 60, a video without a size or with a limit outside 1 s to 10 min, a photo with a limit, sound or stabilization) is refused by the initializer with `MediaError.InvalidSpec`.
+
+`stabilization` is `off`, `standard` or `cinematic`. The profile asks, the device answers: a mode the device does not offer is not an error, the video is recorded with the stabilization the platform keeps
+(iOS: the modes of the active format, Android: CameraX video stabilization when the device supports it). A profile is a value, so a different least take is a copy with one field changed
+(`var profile = CaptureProfile.circle; profile.minTakeMs = 500` in Swift, `captureProfile(CaptureKind.CIRCLE).copy(minTakeMs = 500UL)` in Kotlin).
 
 ## Swift
 
