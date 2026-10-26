@@ -7,6 +7,8 @@ import android.media.MediaRecorder
 import android.os.SystemClock
 import com.noma4i.medialayer.MediaException
 import com.noma4i.medialayer.VoiceRefusal
+import com.noma4i.medialayer.VoiceEncoderSettings
+import com.noma4i.medialayer.voiceEncoderSettings
 import com.noma4i.medialayer.voiceLevel
 import com.noma4i.medialayer.voiceLimitMs
 import com.noma4i.medialayer.voiceRefusalText
@@ -143,9 +145,11 @@ internal class SystemVoiceCapture(private val context: Context) : VoiceCapture {
       made.setAudioSource(MediaRecorder.AudioSource.MIC)
       made.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
       made.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-      made.setAudioChannels(1)
-      made.setAudioSamplingRate(SAMPLE_RATE)
-      made.setAudioEncodingBitRate(BIT_RATE)
+      applyVoiceEncoder(object : EncoderTarget {
+        override fun setChannels(count: Int) = made.setAudioChannels(count)
+        override fun setSampleRate(hertz: Int) = made.setAudioSamplingRate(hertz)
+        override fun setBitRate(bitsPerSecond: Int) = made.setAudioEncodingBitRate(bitsPerSecond)
+      })
       made.setMaxDuration(maxDurationMs.toInt())
       made.setOutputFile(file.path)
       made.setOnInfoListener { _, what, _ -> if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED) onLimit() }
@@ -176,8 +180,21 @@ internal class SystemVoiceCapture(private val context: Context) : VoiceCapture {
   }
 
   private companion object {
-    const val SAMPLE_RATE = 44_100
-    const val BIT_RATE = 64_000
     const val MAX_AMPLITUDE = 32_767f
   }
+}
+
+/** The encoder calls of a recorder, so the voice setup of the core can be read without a microphone. */
+internal interface EncoderTarget {
+  fun setChannels(count: Int)
+
+  fun setSampleRate(hertz: Int)
+
+  fun setBitRate(bitsPerSecond: Int)
+}
+
+internal fun applyVoiceEncoder(target: EncoderTarget, settings: VoiceEncoderSettings = voiceEncoderSettings()) {
+  target.setChannels(settings.channels.toInt())
+  target.setSampleRate(settings.sampleRateHz.toInt())
+  target.setBitRate(settings.bitRate.toInt())
 }

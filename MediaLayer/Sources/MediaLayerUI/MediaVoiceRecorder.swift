@@ -159,12 +159,15 @@ final class SystemVoiceCapture: NSObject, VoiceCapture, AVAudioRecorderDelegate,
   private var recorder: AVAudioRecorder?
   private var onLimit: (@Sendable () -> Void)?
 
-  static let settings: [String: Any] = [
-    AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-    AVNumberOfChannelsKey: 1,
-    AVSampleRateKey: 44_100,
-    AVEncoderBitRateKey: 64_000
-  ]
+  static var settings: [String: Any] {
+    let encoder = voiceEncoderSettings()
+    return [
+      AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+      AVNumberOfChannelsKey: Int(encoder.channels),
+      AVSampleRateKey: Int(encoder.sampleRateHz),
+      AVEncoderBitRateKey: Int(encoder.bitRate)
+    ]
+  }
 
   func start(file: URL, maxDurationMs: UInt64, onLimit: @escaping @Sendable () -> Void) async throws {
     guard await Self.permitted() else { throw VoiceRefused(reason: .permissionDenied) }

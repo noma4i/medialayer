@@ -206,7 +206,7 @@ val avatar = MediaImageLoad.loadBitmap(avatarUrl, cacheDirectory, side = 96, cir
 
 ## Recording a voice message
 
-`MediaVoiceRecorder` records the microphone into an m4a file (AAC, one channel). `start` takes the audio focus for recording from `Media.audio` and `stop` gives it back. `levels` gives the wave level from 0 to 1 while the recording runs, from one formula of the core, and nothing at rest. The recording ends by itself at the longest length (default 10 minutes, set between 1 second and 1 hour). A refused microphone permission, a busy microphone and a recording without sound throw `MediaError.Voice` (Swift) or `MediaException.Voice` (Kotlin) with the same text on both platforms.
+`MediaVoiceRecorder` records the microphone into an m4a file (AAC at 44.1 kHz, one channel, 128 kbit/s). `start` takes the audio focus for recording from `Media.audio` and `stop` gives it back. `levels` gives the wave level from 0 to 1 while the recording runs, from one formula of the core, and nothing at rest. The recording ends by itself at the longest length (default 10 minutes, set between 1 second and 1 hour). A refused microphone permission, a busy microphone and a recording without sound throw `MediaError.Voice` (Swift) or `MediaException.Voice` (Kotlin) with the same text on both platforms.
 
 ```swift
 let recorder = MediaVoiceRecorder(maxDuration: 120)

@@ -181,4 +181,11 @@ struct MediaVoiceRecorderTests {
     #expect(SystemVoiceCapture.settings[AVFormatIDKey] as? Int == Int(kAudioFormatMPEG4AAC))
     #expect(SystemVoiceCapture.settings[AVNumberOfChannelsKey] as? Int == 1)
   }
+
+  @Test
+  func inv_voice_12_the_system_capture_records_at_44100_hz_and_128000_bit_per_second() {
+    #expect(SystemVoiceCapture.settings[AVSampleRateKey] as? Int == 44_100)
+    #expect(SystemVoiceCapture.settings[AVNumberOfChannelsKey] as? Int == 1)
+    #expect(SystemVoiceCapture.settings[AVEncoderBitRateKey] as? Int == 128_000)
+  }
 }

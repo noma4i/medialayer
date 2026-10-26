@@ -11,6 +11,20 @@ pub enum VoiceRefusal {
     Empty,
 }
 
+/// How a voice recording is encoded, the same on both platforms: AAC in m4a.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct VoiceEncoderSettings {
+    pub sample_rate_hz: u32,
+    pub channels: u32,
+    pub bit_rate: u32,
+}
+
+/// The one encoder setup of a voice recording: 44100 Hz, one channel, 128000 bit/s.
+#[uniffi::export]
+pub fn voice_encoder_settings() -> VoiceEncoderSettings {
+    VoiceEncoderSettings { sample_rate_hz: 44_100, channels: 1, bit_rate: 128_000 }
+}
+
 /// The text of a refusal, the same on both platforms.
 #[uniffi::export]
 pub fn voice_refusal_text(reason: VoiceRefusal) -> String {

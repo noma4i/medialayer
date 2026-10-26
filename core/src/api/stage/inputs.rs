@@ -169,6 +169,11 @@ impl Stage {
     }
 
     fn set_suspension(&self, id: u64, is_active: bool, allow_groups: Option<&[&str]>) {
+        if is_active {
+            crate::trace!("stage", "suspend {id} allow={:?}", allow_groups.unwrap_or_default());
+        } else {
+            crate::trace!("stage", "resume {id}");
+        }
         let mut state = self.state();
         let orders = state.election.set_suspension(id, is_active, allow_groups).unwrap_or_default();
         let commands = state.commands_for(orders);

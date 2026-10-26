@@ -991,3 +991,32 @@ fn inv_ingress_48_a_play_that_is_not_issued_leaves_a_trace_line_with_its_reason(
     caller.block_on(eventually(|| lines.0.lock().unwrap().iter().any(|line| line.contains("play dropped: ") && line.contains("dropped-play.m4v") && line.contains("the app is in the background"))));
     crate::trace::set_trace_sink(None);
 }
+
+#[test]
+fn inv_trace_04_a_suspension_leaves_a_suspend_line_with_its_id_and_groups_and_a_resume_line_with_the_same_id() {
+    struct Lines(std::sync::Mutex<Vec<String>>);
+    impl crate::trace::TraceSink for Lines {
+        fn line(&self, text: String) {
+            self.0.lock().unwrap().push(text);
+        }
+    }
+    let _owner = crate::trace::sink_test_guard();
+    let dir = tempfile::tempdir().unwrap();
+    let layer = MediaLayer::build(config(dir.path(), None, None), Pause::new()).unwrap();
+    let caller = caller();
+    let lines = Arc::new(Lines(Default::default()));
+    crate::trace::set_trace_sink(Some(lines.clone()));
+    let find = |marker: &str| lines.0.lock().unwrap().iter().find(|line| line.contains(marker)).cloned();
+
+    let suspension = layer.suspend_playback(vec!["chat".to_string(), "voice".to_string()]).unwrap();
+    caller.block_on(eventually(|| find("stage suspend ").is_some()));
+    let suspend = find("stage suspend ").unwrap();
+    let id = suspend.split("stage suspend ").nth(1).unwrap().split(' ').next().unwrap().to_string();
+    suspension.release();
+    caller.block_on(eventually(|| find("stage resume ").is_some()));
+    let resume = find("stage resume ").unwrap();
+    crate::trace::set_trace_sink(None);
+
+    assert!(suspend.contains("allow=[\"chat\", \"voice\"]"), "{suspend}");
+    assert!(resume.ends_with(&format!("stage resume {id}")), "{resume}");
+}

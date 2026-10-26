@@ -161,6 +161,19 @@ class MediaVoiceRecorderTest {
   }
 
   @Test
+  fun inv_voice_12_theEncoderIsSetTo44100HzOneChannelAnd128000BitPerSecond() {
+    val calls = mutableListOf<String>()
+
+    applyVoiceEncoder(object : EncoderTarget {
+      override fun setChannels(count: Int) { calls += "channels $count" }
+      override fun setSampleRate(hertz: Int) { calls += "rate $hertz" }
+      override fun setBitRate(bitsPerSecond: Int) { calls += "bitrate $bitsPerSecond" }
+    })
+
+    assertEquals(listOf("channels 1", "rate 44100", "bitrate 128000"), calls)
+  }
+
+  @Test
   fun inv_voice_09_theLimitEndsTheRecordingByItselfAndStopGivesItsFile() = runBlocking {
     val ticks = VoiceTicks()
     val capture = VoiceFakeCapture()
