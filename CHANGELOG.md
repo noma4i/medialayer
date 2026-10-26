@@ -1,5 +1,60 @@
 # Changelog
 
+## 3.8.0 - 2026-10-26
+
+### Added
+- `MediaLayer.open` takes defaults for `fetcher` and `settings`.
+- `.mediaLayer(opening:)` and `MediaLayerProvider(Deferred)` connect the layer without readiness code.
+- `MediaPlace`, `MediaWindow` and `PlaybackSuspension` objects own input through a bounded queue.
+- `MediaPlaces.seek(key:fraction:)` and `MediaLayer.seek(key, fraction)` seek without a mounted view.
+- `MediaAudio(onEnd:)` rewinds ended audio and reports the end once.
+- `MediaState.isFailed`, `isSounding` and `isBuffering` answer common state questions.
+- `MediaAudioSession.readVolume()` reads the Android volume.
+- `MediaLayer.imageSize(source)` reads the image size from the file header.
+- `MediaImage(_:preview:)` shows a local preview while the remote image loads.
+- Windows report readiness, follow visible rows and support a reversed list.
+- `resetUserData()` clears all data and the saved limits in one call.
+- `MediaImage` reads `file://` sources through the core within the limit.
+- `WithMediaTone` and `rememberMediaTone` observe the tone of a source.
+- `View.mediaPlaybackSuspended` and `SuspendMediaPlayback` suspend playback while a view is mounted.
+- `MediaWholeHold`, `mediaWholeDeclared` and `DeclareMediaWhole` declare sources to load whole.
+- `MediaSourceValue` builds file, remote and bundled sources and cleans their url.
+- Android `android.resource://` and `asset:///` sources load as local files.
+- `MediaLayerTesting` and `:testing` give `TestFetcher` and `PlayerSnapshot` for app tests.
+- `ImageAnimation` plays GIF and WebP with repeats, rest frame and reduced motion.
+- `MediaLayer.mediaInfo(source)` reads duration and frame size of a local file.
+- `prepareVideo` and `prepareImage` prepare media for sending.
+- `MediaImageLoad.load` loads an image without opening a layer.
+- `MediaError.Timeout` and `MediaException.Timeout` report a load that timed out.
+
+### Changed
+- `MediaImage` takes an `animation` argument.
+- `MediaAudio` takes `playing` and `onEnd` instead of an `AudioControl` closure.
+- `Media.setMuted(_:)` throws, and `Media.failure` reports the last open or input failure.
+- Overloaded input reports `MediaError.Overloaded`, and closed objects report `MediaError.Closed`.
+- `ImageWork.cancel` takes no key.
+- Ended audio rewinds to the start and pauses.
+- Android open prepares its resources off the calling thread.
+- Closing the layer cancels declared loads and releases response bodies once.
+- Mute on simulators and emulators comes from the library.
+
+### Fixed
+- Abandoned image decodes and queued waiters cancel at once.
+- BlurHash decode memory stays within the response limit.
+- A stale seek cannot cancel a newer seek.
+- Slot commands run one at a time and ignore events of older loads.
+- A delayed recovery action cannot apply to a newer load.
+- A changed `playing` input reaches a mounted `MediaAudio`.
+- The elected play intent applies when a source materializes.
+- Open resources release when the open is cancelled or fails.
+- Unfinished disk writes open off the polling thread.
+
+### Removed
+- The `silent` parameter of `MediaLayer.open` in Swift and Kotlin.
+- The `key` field of `ImageWork.Cancel`.
+- `AudioControl` of Kotlin `MediaAudio`.
+- `attachView` and `detachView` of `MediaPlaces`, replaced by place objects.
+
 ## 3.7.0 - 2026-10-23
 
 ### Added
