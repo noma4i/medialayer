@@ -2,7 +2,7 @@ use super::geometry::{CropAspect, CropSetup};
 use super::view::{crop_layout, CropView};
 use crate::send_prep::CropFractions;
 
-/// The kind of one finished gesture: `Pinch` when the fingers scaled at any time during it, otherwise `Pan`.
+/// The kind of one report: `Pan` when the touch moved the photo (or dragged a handle), `Pinch` when the fingers scaled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum CropGesture {
     Pan,
@@ -18,8 +18,9 @@ pub struct CropGestureTrack {
     pub max_scale_change: f64,
 }
 
-/// What one finished gesture reports to the app, in the units of the V2 and V3 analytics event.
+/// What one kind of a finished gesture reports to the app, in the units of the V2 and V3 analytics event.
 /// `max_distance` is the largest move in view points for a pan, the largest scale change for a pinch, both rounded to a whole number.
+/// `duration_ms`, `scale_change`, `translate_change` and the `final_*` fields are those of the whole gesture, the same in both reports.
 /// `scale_change` is the scale at the end minus the scale at the start (rounded to 0.01), `translate_change` the length of the move in view points between the start and the end.
 /// `final_scale`, `final_translate_x` and `final_translate_y` are the transform against the first frame after the gesture, as in `CropTelemetry`.
 #[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
@@ -34,11 +35,11 @@ pub struct CropGestureReport {
     pub final_translate_y: i32,
 }
 
-/// What a finished gesture tells the app: `report` is `None` when the gesture moved and scaled nothing.
+/// What a finished gesture tells the app: one report for each kind that took part, `Pan` first, then `Pinch`. Empty when the gesture moved and scaled nothing.
 /// `was_position_changed` stays true once any gesture moved or scaled the crop.
-#[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct CropGestureEnd {
-    pub report: Option<CropGestureReport>,
+    pub reports: Vec<CropGestureReport>,
     pub was_position_changed: bool,
 }
 
@@ -79,16 +80,12 @@ pub fn crop_gesture_end(
     started_ms: u64,
     ended_ms: u64,
 ) -> CropGestureEnd {
-    let kind = match (panned, zoomed) {
-        (_, true) => Some(CropGesture::Pinch),
-        (true, false) => Some(CropGesture::Pan),
-        (false, false) => None,
-    };
-    let report = kind.map(|kind| {
-        let (translate, scale_change) = since_start(track.start, baseline, rect, setup, view);
-        let telemetry = crop_telemetry(baseline, rect, setup, view, true);
-        let largest = if kind == CropGesture::Pinch { track.max_scale_change } else { track.max_translate };
-        CropGestureReport {
+    let (translate, scale_change) = since_start(track.start, baseline, rect, setup, view);
+    let telemetry = crop_telemetry(baseline, rect, setup, view, true);
+    let reports: Vec<CropGestureReport> = [(panned, CropGesture::Pan, track.max_translate), (zoomed, CropGesture::Pinch, track.max_scale_change)]
+        .into_iter()
+        .filter(|(took_part, _, _)| *took_part)
+        .map(|(_, kind, largest)| CropGestureReport {
             kind,
             duration_ms: ended_ms.saturating_sub(started_ms),
             max_distance: largest.round() as i32,
@@ -97,9 +94,9 @@ pub fn crop_gesture_end(
             final_scale: telemetry.final_scale,
             final_translate_x: telemetry.final_translate_x,
             final_translate_y: telemetry.final_translate_y,
-        }
-    });
-    CropGestureEnd { report, was_position_changed: was_position_changed || kind.is_some() }
+        })
+        .collect();
+    CropGestureEnd { was_position_changed: was_position_changed || !reports.is_empty(), reports }
 }
 
 fn round_hundredths(value: f64) -> f64 {

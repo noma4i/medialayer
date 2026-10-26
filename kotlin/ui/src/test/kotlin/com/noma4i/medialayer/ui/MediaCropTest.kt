@@ -167,7 +167,7 @@ class MediaCropTest {
   }
 
   @Test
-  fun inv_crop_19_aFinishedGestureCallsPositionChangeOnceWithItsKind() {
+  fun inv_crop_19_aFinishedGestureCallsPositionChangeOncePerKindThatTookPartPanFirst() {
     val kinds = CopyOnWriteArrayList<CropGestureReport>()
     val fixed = MediaCrop(chat, onPositionChange = { kinds.add(it) }) { }
     fixed.photoReady(2000, 3000)
@@ -192,45 +192,65 @@ class MediaCropTest {
     fixed.zoom(2f, middle)
     now = 2_090
     fixed.gesture(false)
-    val pinch = kinds[1]
+    assertEquals("a pan with a pinch in one gesture gives two calls in a row, pan then pinch", listOf(CropGesture.PAN, CropGesture.PAN, CropGesture.PINCH), kinds.map { it.kind })
+    val both = kinds[1]
+    val pinch = kinds[2]
+    assertTrue("the pan report counts the move, the pinch report the scale: $both", both.durationMs == 90UL && both.finalScale == 2.0 && both.maxDistance >= 5 && both.maxDistance != pinch.maxDistance)
     assertEquals("a pinch measures the distance in scale and counts from the frame where it began: $pinch", listOf(90UL, 1, 1.0, 2.0), listOf(pinch.durationMs, pinch.maxDistance, pinch.scaleChange, pinch.finalScale))
-    assertEquals("a pinch with a pan is a pinch", listOf(CropGesture.PAN, CropGesture.PINCH), kinds.map { it.kind })
+    assertEquals("the length and the final transform are those of the whole gesture", listOf(both.durationMs, both.scaleChange, both.translateChange, both.finalScale, both.finalTranslateX), listOf(pinch.durationMs, pinch.scaleChange, pinch.translateChange, pinch.finalScale, pinch.finalTranslateX))
     fixed.gesture(true)
     fixed.gesture(false)
     fixed.gesture(true)
     fixed.zoom(1f, middle)
     fixed.pan(0f, 0f)
     fixed.gesture(false)
-    assertEquals("a touch that moved nothing gives no call", listOf(CropGesture.PAN, CropGesture.PINCH), kinds.map { it.kind })
+    assertEquals("a touch that moved nothing gives no call", listOf(CropGesture.PAN, CropGesture.PAN, CropGesture.PINCH), kinds.map { it.kind })
 
     val free = MediaCrop(onPositionChange = { kinds.add(it) }) { }
     free.photoReady(2000, 1000)
     free.gesture(true)
     free.drag(CropHandle.RIGHT, -40f, 0f)
     free.gesture(false)
-    assertEquals("a handle drag is a pan", listOf(CropGesture.PAN, CropGesture.PINCH, CropGesture.PAN), kinds.map { it.kind })
+    assertEquals("a handle drag is a pan", listOf(CropGesture.PAN, CropGesture.PAN, CropGesture.PINCH, CropGesture.PAN), kinds.map { it.kind })
   }
 
   @Test
-  fun inv_crop_21_snapshotGivesTheTransformNowAndCancelGivesItToo() {
+  fun inv_crop_21_snapshotGivesTheAreaAndTheTransformNowWithoutFinishingAndCancelGivesItToo() {
     val finished = CopyOnWriteArrayList<MediaCropResult?>()
     val crop = MediaCrop(chat) { finished.add(it) }
     assertNull("before the photo is ready there is nothing to give", crop.snapshot())
     crop.photoReady(2000, 3000)
-    assertEquals(MediaCropSnapshot(1.0, 0, 0, false), crop.snapshot())
+    val first = crop.snapshot()!!
+    assertEquals(listOf(0, 1.0, 0, 0, false), listOf(first.rotation, first.finalScale, first.finalTranslateX, first.finalTranslateY, first.wasPositionChanged))
     crop.gesture(true)
     crop.pan(30f, 0f)
-    assertEquals("inside a gesture", MediaCropSnapshot(1.0, 30, 0, true), crop.snapshot())
+    val inside = crop.snapshot()!!
+    assertEquals("inside a gesture", listOf(1.0, 30, 0, true), listOf(inside.finalScale, inside.finalTranslateX, inside.finalTranslateY, inside.wasPositionChanged))
     crop.zoom(2f, PointF(200f, 400f))
     crop.gesture(false)
-    val now = MediaCropSnapshot(2.0, 60, 0, true)
-    assertEquals(now, crop.snapshot())
+    crop.turnRight()
+    val now = crop.snapshot()!!
+    assertEquals(listOf(90, 2.0, true), listOf(now.rotation, now.finalScale, now.wasPositionChanged))
     assertTrue("the crop stays open", !crop.isFinished)
-    assertEquals(now, crop.cancel())
-    assertEquals(listOf<MediaCropResult?>(null), finished.toList())
-    assertEquals("the transform is still readable after cancel", now, crop.snapshot())
-    assertNull("a second cancel does nothing", crop.cancel())
-    assertEquals(1, finished.size)
+    crop.gesture(true)
+    crop.pan(10f, 0f)
+    crop.gesture(false)
+    val moved = crop.snapshot()!!
+    assertTrue("a gesture after snapshot() still moves the crop: ${moved.crop}", moved.crop != now.crop)
+    val result = crop.confirm()!!
+    assertEquals("confirm() after snapshot() gives the area and the turn of that moment", listOf(moved.crop, moved.rotation, moved.finalScale, moved.finalTranslateX), listOf(result.crop, result.rotation, result.finalScale, result.finalTranslateX))
+    assertEquals(listOf<MediaCropResult?>(result), finished.toList())
+
+    val cancelled = MediaCrop(chat) { finished.add(it) }
+    cancelled.photoReady(2000, 3000)
+    cancelled.gesture(true)
+    cancelled.pan(30f, 0f)
+    cancelled.gesture(false)
+    val before = cancelled.snapshot()!!
+    assertEquals(before, cancelled.cancel())
+    assertEquals("the area is still readable after cancel", before, cancelled.snapshot())
+    assertNull("a second cancel does nothing", cancelled.cancel())
+    assertEquals(listOf<MediaCropResult?>(result, null), finished.toList())
   }
 
   @Test

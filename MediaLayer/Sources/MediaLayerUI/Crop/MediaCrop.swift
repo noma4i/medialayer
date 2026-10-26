@@ -18,9 +18,12 @@ public struct MediaCropResult: Sendable, Equatable {
   public let wasPositionChanged: Bool
 }
 
-/// The transform of the crop now against its first frame, in the units of the result: `finalScale` is 1 for the first frame (rounded to 0.01),
-/// `finalTranslateX` and `finalTranslateY` are whole points, `wasPositionChanged` is true once any pan or pinch moved or scaled the crop.
+/// The crop now without finishing it, in the units of the result: `crop` and `rotation` are what `confirm()` would give at this moment,
+/// `finalScale` is 1 for the first frame (rounded to 0.01), `finalTranslateX` and `finalTranslateY` are whole points,
+/// `wasPositionChanged` is true once any pan or pinch moved or scaled the crop.
 public struct MediaCropSnapshot: Sendable, Equatable {
+  public let crop: CGRect
+  public let rotation: Int
   public let finalScale: Double
   public let finalTranslateX: Int
   public let finalTranslateY: Int
@@ -166,11 +169,10 @@ public final class MediaCrop {
   /// Finishes with the rectangle of the frame and the turn. `nil` when the photo is not ready or the crop is already finished.
   @discardableResult
   public func confirm() -> MediaCropResult? {
-    guard isReady, !isFinished, let done = cropFinish(rect: rect, setup: setup) else { return nil }
-    let now = transform()
+    guard isReady, !isFinished, let now = transform() else { return nil }
     let result = MediaCropResult(
-      crop: CGRect(x: done.x, y: done.y, width: done.width, height: done.height),
-      rotation: rotation,
+      crop: now.crop,
+      rotation: now.rotation,
       finalScale: now.finalScale,
       finalTranslateX: now.finalTranslateX,
       finalTranslateY: now.finalTranslateY,
@@ -181,7 +183,7 @@ public final class MediaCrop {
     return result
   }
 
-  /// The transform of the crop now against its first frame, the crop stays open. `nil` before the photo is ready.
+  /// The frame, the turn and the transform of the crop now, the crop stays open and `confirm()` still works. `nil` before the photo is ready.
   public func snapshot() -> MediaCropSnapshot? {
     isReady ? transform() : nil
   }
@@ -196,9 +198,12 @@ public final class MediaCrop {
     return last
   }
 
-  private func transform() -> MediaCropSnapshot {
+  private func transform() -> MediaCropSnapshot? {
+    guard let done = cropFinish(rect: rect, setup: setup) else { return nil }
     let telemetry = cropTelemetry(baseline: baseline, rect: rect, setup: setup, view: view, wasPositionChanged: positionChanged || panning || zooming)
     return MediaCropSnapshot(
+      crop: CGRect(x: done.x, y: done.y, width: done.width, height: done.height),
+      rotation: rotation,
       finalScale: telemetry.finalScale,
       finalTranslateX: Int(telemetry.finalTranslateX),
       finalTranslateY: Int(telemetry.finalTranslateY),
@@ -218,7 +223,7 @@ public final class MediaCrop {
     panning = false
     zooming = false
     positionChanged = end.wasPositionChanged
-    if let report = end.report { onPositionChange?(report) }
+    for report in end.reports { onPositionChange?(report) }
   }
 
   private func turn(clockwise: Bool) {

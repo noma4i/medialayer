@@ -172,7 +172,7 @@ struct MediaCropTests {
   }
 
   @Test
-  func inv_crop_19_a_finished_gesture_calls_position_change_once_with_its_kind() {
+  func inv_crop_19_a_finished_gesture_calls_position_change_once_per_kind_that_took_part_pan_first() {
     let kinds = Kinds()
     let fixed = MediaCrop(aspect: chat(), onPositionChange: { kinds.items.append($0) }) { _ in }
     ready(fixed, photo: PixelSize(width: 2000, height: 3000))
@@ -197,43 +197,64 @@ struct MediaCropTests {
     fixed.zoom(by: 2, at: middle)
     ticks.now = 2_090
     fixed.gesture(false)
-    let pinch = kinds.items[1]
+    #expect(kinds.items.map(\.kind) == [.pan, .pan, .pinch], "a pan with a pinch in one gesture gives two calls in a row, pan then pinch")
+    let both = kinds.items[1]
+    let pinch = kinds.items[2]
+    #expect((both.durationMs, both.finalScale) == (90, 2) && both.maxDistance >= 5 && both.maxDistance != pinch.maxDistance, "the pan report counts the move, the pinch report the scale: \(both)")
     #expect((pinch.durationMs, pinch.maxDistance, pinch.scaleChange, pinch.finalScale) == (90, 1, 1, 2), "a pinch measures the distance in scale and counts from the frame where it began: \(pinch)")
-    #expect(kinds.items.map(\.kind) == [.pan, .pinch], "a pinch with a pan is a pinch")
+    #expect((both.durationMs, both.scaleChange, both.translateChange, both.finalScale, both.finalTranslateX) == (pinch.durationMs, pinch.scaleChange, pinch.translateChange, pinch.finalScale, pinch.finalTranslateX), "the length and the final transform are those of the whole gesture")
     fixed.gesture(true)
     fixed.gesture(false)
     fixed.gesture(true)
     fixed.zoom(by: 1, at: middle)
     fixed.pan(dx: 0, dy: 0)
     fixed.gesture(false)
-    #expect(kinds.items.map(\.kind) == [.pan, .pinch], "a touch that moved nothing gives no call")
+    #expect(kinds.items.map(\.kind) == [.pan, .pan, .pinch], "a touch that moved nothing gives no call")
 
     let free = MediaCrop(onPositionChange: { kinds.items.append($0) }) { _ in }
     ready(free, photo: PixelSize(width: 2000, height: 1000))
     free.gesture(true)
     free.drag(.right, dx: -40, dy: 0)
     free.gesture(false)
-    #expect(kinds.items.map(\.kind) == [.pan, .pinch, .pan], "a handle drag is a pan")
+    #expect(kinds.items.map(\.kind) == [.pan, .pan, .pinch, .pan], "a handle drag is a pan")
   }
 
   @Test
-  func inv_crop_21_snapshot_gives_the_transform_now_and_cancel_gives_it_too() {
+  func inv_crop_21_snapshot_gives_the_area_and_the_transform_now_without_finishing_and_cancel_gives_it_too() throws {
     let outcome = Outcome()
     let crop = MediaCrop(aspect: chat()) { outcome.calls.append($0) }
     #expect(crop.snapshot() == nil, "before the photo is ready there is nothing to give")
     ready(crop, photo: PixelSize(width: 2000, height: 3000))
-    #expect(crop.snapshot() == MediaCropSnapshot(finalScale: 1, finalTranslateX: 0, finalTranslateY: 0, wasPositionChanged: false))
+    let first = try #require(crop.snapshot())
+    #expect((first.rotation, first.finalScale, first.finalTranslateX, first.finalTranslateY, first.wasPositionChanged) == (0, 1, 0, 0, false))
     crop.gesture(true)
     crop.pan(dx: 30, dy: 0)
-    #expect(crop.snapshot() == MediaCropSnapshot(finalScale: 1, finalTranslateX: 30, finalTranslateY: 0, wasPositionChanged: true), "inside a gesture")
+    let inside = try #require(crop.snapshot())
+    #expect((inside.finalScale, inside.finalTranslateX, inside.finalTranslateY, inside.wasPositionChanged) == (1, 30, 0, true), "inside a gesture")
     crop.zoom(by: 2, at: CGPoint(x: 200, y: 400))
     crop.gesture(false)
-    let now = MediaCropSnapshot(finalScale: 2, finalTranslateX: 60, finalTranslateY: 0, wasPositionChanged: true)
-    #expect(crop.snapshot() == now && !crop.isFinished, "the crop stays open")
-    #expect(crop.cancel() == now)
-    #expect(outcome.calls.count == 1 && outcome.calls[0] == nil)
-    #expect(crop.snapshot() == now, "the transform is still readable after cancel")
-    #expect(crop.cancel() == nil && outcome.calls.count == 1, "a second cancel does nothing")
+    crop.turnRight()
+    let now = try #require(crop.snapshot())
+    #expect((now.rotation, now.finalScale, now.wasPositionChanged) == (90, 2, true))
+    #expect(!crop.isFinished, "the crop stays open")
+    crop.gesture(true)
+    crop.pan(dx: 10, dy: 0)
+    crop.gesture(false)
+    let moved = try #require(crop.snapshot())
+    #expect(moved.crop != now.crop, "a gesture after snapshot() still moves the crop: \(moved.crop)")
+    let result = try #require(crop.confirm())
+    #expect((result.crop, result.rotation, result.finalScale, result.finalTranslateX) == (moved.crop, moved.rotation, moved.finalScale, moved.finalTranslateX), "confirm() after snapshot() gives the area and the turn of that moment")
+    #expect(outcome.calls.count == 1 && outcome.calls[0] == result)
+
+    let cancelled = MediaCrop(aspect: chat()) { outcome.calls.append($0) }
+    ready(cancelled, photo: PixelSize(width: 2000, height: 3000))
+    cancelled.gesture(true)
+    cancelled.pan(dx: 30, dy: 0)
+    cancelled.gesture(false)
+    let before = try #require(cancelled.snapshot())
+    #expect(cancelled.cancel() == before)
+    #expect(cancelled.snapshot() == before, "the area is still readable after cancel")
+    #expect(cancelled.cancel() == nil && outcome.calls.count == 2, "a second cancel does nothing")
   }
 
   @Test

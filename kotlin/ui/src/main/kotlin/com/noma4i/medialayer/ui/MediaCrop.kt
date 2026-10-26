@@ -53,10 +53,17 @@ data class MediaCropResult(
 )
 
 /**
- * The transform of the crop now against its first frame: [finalScale] is 1 for the first frame (rounded to 0.01), [finalTranslateX] and [finalTranslateY] are whole pixels,
- * [wasPositionChanged] is true once any pan or pinch moved or scaled the crop.
+ * The crop now without finishing it: [crop] and [rotation] are what `confirm()` would give at this moment, [finalScale] is 1 for the first frame (rounded to 0.01),
+ * [finalTranslateX] and [finalTranslateY] are whole pixels, [wasPositionChanged] is true once any pan or pinch moved or scaled the crop.
  */
-data class MediaCropSnapshot(val finalScale: Double, val finalTranslateX: Int, val finalTranslateY: Int, val wasPositionChanged: Boolean)
+data class MediaCropSnapshot(
+  val crop: RectF,
+  val rotation: Int,
+  val finalScale: Double,
+  val finalTranslateX: Int,
+  val finalTranslateY: Int,
+  val wasPositionChanged: Boolean
+)
 
 /** The shape of the guide over the photo. The result is a rectangle in both. */
 enum class MediaCropShape { Rect, Circle }
@@ -180,15 +187,17 @@ class MediaCrop(
     panning = false
     zooming = false
     positionChanged = end.wasPositionChanged
-    end.report?.let { onPositionChange?.invoke(it) }
+    end.reports.forEach { onPositionChange?.invoke(it) }
   }
 
-  private fun transform(): MediaCropSnapshot {
+  private fun transform(): MediaCropSnapshot? {
+    val done = cropFinish(rect, setup) ?: return null
     val telemetry = cropTelemetry(baseline, rect, setup, view, positionChanged || panning || zooming)
-    return MediaCropSnapshot(telemetry.finalScale, telemetry.finalTranslateX, telemetry.finalTranslateY, telemetry.wasPositionChanged)
+    val crop = RectF(done.x.toFloat(), done.y.toFloat(), (done.x + done.width).toFloat(), (done.y + done.height).toFloat())
+    return MediaCropSnapshot(crop, rotation, telemetry.finalScale, telemetry.finalTranslateX, telemetry.finalTranslateY, telemetry.wasPositionChanged)
   }
 
-  /** The transform of the crop now against its first frame, the crop stays open. Null before the photo is ready. */
+  /** The frame, the turn and the transform of the crop now, the crop stays open and `confirm()` still works. Null before the photo is ready. */
   fun snapshot(): MediaCropSnapshot? = if (isReady) transform() else null
 
   /** Turns the photo a quarter to the left (counter clockwise). Ignored when [allowsRotation] is false. */
@@ -209,11 +218,10 @@ class MediaCrop(
   /** Finishes with the rectangle of the frame and the turn. Null when the photo is not ready or the crop is already finished. */
   fun confirm(): MediaCropResult? {
     if (!isReady || isFinished) return null
-    val done = cropFinish(rect, setup) ?: return null
-    val now = transform()
+    val now = transform() ?: return null
     val result = MediaCropResult(
-      RectF(done.x.toFloat(), done.y.toFloat(), (done.x + done.width).toFloat(), (done.y + done.height).toFloat()),
-      rotation,
+      now.crop,
+      now.rotation,
       now.finalScale,
       now.finalTranslateX,
       now.finalTranslateY,

@@ -50,13 +50,13 @@ Button(onClick = crop::cancel) { Text("Cancel") }
 
 The app reports how the user moved the crop (an analytics event, a "was the position changed" flag) without writing its own gesture code.
 
-- `onPositionChange` (a parameter of `MediaCrop` and `rememberMediaCrop`) is called once per finished gesture with a `CropGestureReport`. A touch that moved nothing gives no call. The call comes when the gesture ends, not on every step.
-- `kind` is `.pinch` (`PINCH`) when the fingers scaled at any time during the gesture, otherwise `.pan` (`PAN`). A handle drag of a free frame is a pan.
-- `durationMs` is the time from the first to the last event of the gesture on the monotonic clock of the platform.
+- `onPositionChange` (a parameter of `MediaCrop` and `rememberMediaCrop`) is called when a gesture ends, once for each kind that took part, with a `CropGestureReport`. A gesture with a pan and a pinch gives two calls in a row, the pan first, then the pinch. A pure pan or a pure pinch gives one call. A touch that moved nothing gives no call. The calls come when the gesture ends, not on every step.
+- `kind` is `.pan` (`PAN`) for the report of the move and `.pinch` (`PINCH`) for the report of the scale. A handle drag of a free frame is a pan.
+- `durationMs` is the time from the first to the last event of the whole gesture on the monotonic clock of the platform, the same in both reports.
 - `maxDistance` is the largest move during the gesture, counted from the frame at its start, as a whole number: view points of the photo (of the frame when it is free) for a pan, the change of the scale for a pinch.
 - `scaleChange` is the scale at the end minus the scale at the start of the gesture (rounded to 0.01). `translateChange` is the length of the move between the start and the end of the gesture in whole view points on iOS and pixels on Android.
 - `finalScale`, `finalTranslateX` and `finalTranslateY` are the transform against the first frame after the gesture, in the units below.
-- `crop.snapshot()` (`MediaCropSnapshot`, `nil` before the photo is shown) gives `finalScale`, `finalTranslateX`, `finalTranslateY` and `wasPositionChanged` for the frame now without finishing. It is readable after `cancel()`, so a screen that closes can report the final transform.
+- `crop.snapshot()` (`MediaCropSnapshot`, `nil` before the photo is shown) gives `crop` and `rotation` (what `confirm()` would give now) and `finalScale`, `finalTranslateX`, `finalTranslateY` and `wasPositionChanged` for the frame now without finishing. The crop stays open: a gesture and `confirm()` work after it, so a screen can keep the area when an upload fails and the user saves again. It is readable after `cancel()`, which returns the same snapshot.
 - `MediaCropResult` carries `finalScale`, `finalTranslateX`, `finalTranslateY` and `wasPositionChanged`.
 - `finalScale` is 1 for the first frame (the frame of `initial`, or the largest one) and above 1 when the user magnified. A free frame that was resized smaller counts as magnified. It is rounded to 0.01.
 - `finalTranslateX` and `finalTranslateY` are the move of the photo under the fixed frame (of the frame itself when it is free) in whole view points on iOS and pixels on Android, measured against the first frame. Right and down are positive.
