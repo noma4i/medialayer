@@ -331,14 +331,17 @@ impl InputQueue {
         Ok(())
     }
 
-    /// Closes the owner at once and without a free queue place: it only marks the owner, moves its entries to the garbage list and wakes the executor.
+    /// Closes the owner at once and without a free queue place: it only marks the owner, moves its entries to the garbage list (a `PlaceSeek` stays queued in arrival order) and wakes the executor.
     pub fn release(&self, owner: u64) {
         let mut inner = self.inner();
         let Some(record) = inner.owners.get_mut(&owner).filter(|record| !record.is_closed) else { return };
         record.is_closed = true;
         let kind = record.kind;
         for seq in inner.by_owner.remove(&owner).unwrap_or_default() {
-            inner.discard(seq);
+            match inner.entries.get_mut(&seq) {
+                Some(entry) if matches!(entry.command, Declared::PlaceSeek { .. }) => entry.owner = None,
+                _ => inner.discard(seq),
+            }
         }
         let seq = inner.seq;
         inner.seq += 1;

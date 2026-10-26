@@ -48,6 +48,7 @@ struct Loaded {
     recovery: RecoveryState,
     source: MediaItem,
     route: PlaybackRoute,
+    seeked: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -90,7 +91,14 @@ struct Effects {
     actions: Vec<(LoadId, Action)>,
     unloaded: Vec<String>,
     resumed: Vec<(usize, String, u64)>,
-    parked: Vec<(usize, String, u64)>,
+    parked: Vec<Parked>,
+}
+
+struct Parked {
+    slot: usize,
+    key: String,
+    releases: u64,
+    seeked: Option<u64>,
 }
 
 struct State {
@@ -540,7 +548,7 @@ impl Stage {
                 next_action(&mut recovery, Event::Source { key: key.clone(), via_proxy_hls }, self.now());
                 state.slot_keys.insert(*slot, key.clone());
                 let generation = state.next_generation();
-                state.loaded.insert(key.clone(), Loaded { held: held.clone(), slot: *slot, generation, recovery, source, route: route.clone() });
+                state.loaded.insert(key.clone(), Loaded { held: held.clone(), slot: *slot, generation, recovery, source, route: route.clone(), seeked: None });
                 state.pending_wanted.remove(key);
                 let resume = state.positions.take(key);
                 calls.extend(self.load_calls(state, key, resume));
@@ -548,7 +556,8 @@ impl Stage {
             Command::Unload { slot } => {
                 if let Some(key) = state.slot_keys.remove(slot) {
                     if !state.is_playing(&key) {
-                        parked.push((*slot, key.clone(), state.releases));
+                        let seeked = state.loaded.get(&key).and_then(|loaded| loaded.seeked);
+                        parked.push(Parked { slot: *slot, key: key.clone(), releases: state.releases, seeked });
                     }
                     if let Some(unloaded) = state.loaded.remove(&key) {
                         self.forget_seek_hint(state, &unloaded.source.url);
@@ -564,7 +573,8 @@ impl Stage {
             Command::Play { slot } | Command::Pause { slot } => {
                 let event = if matches!(command, Command::Play { .. }) { Event::Play { position_ms: 0 } } else { Event::Pause };
                 if let Some(key) = state.slot_keys.get(slot).cloned() {
-                    if let (Command::Play { .. }, Some(loaded)) = (&command, state.loaded.get(&key)) {
+                    if let (Command::Play { .. }, Some(loaded)) = (&command, state.loaded.get_mut(&key)) {
+                        loaded.seeked = None;
                         self.inner.routes.nudge_window(&loaded.source.url);
                         resumed.push((*slot, key.clone(), loaded.generation));
                     }
@@ -586,19 +596,28 @@ impl Stage {
         Some(SlotCall::Seek { position_ms })
     }
 
-    fn remember_parked(&self, parked: Vec<(usize, String, u64)>) {
-        let positions: Vec<(usize, String, u64, u64)> = parked
+    fn remember_parked(&self, parked: Vec<Parked>) {
+        let positions: Vec<(Parked, u64)> = parked
             .into_iter()
-            .filter_map(|(slot, key, releases)| Some((slot, key, releases, self.inner.runner.sample_now(slot)?.position_ms)))
-            .filter(|(_, _, _, position)| *position > 0)
+            .filter_map(|parked| {
+                let position = match parked.seeked {
+                    Some(seeked) => seeked,
+                    None => self.inner.runner.sample_now(parked.slot)?.position_ms,
+                };
+                Some((parked, position))
+            })
             .collect();
         if positions.is_empty() {
             return;
         }
         let mut state = self.state_quiet();
-        for (slot, key, releases, position) in positions {
+        for (Parked { slot, key, releases, .. }, position) in positions {
             if state.releases == releases && !state.slot_keys.contains_key(&slot) && !state.loaded.contains_key(&key) {
-                state.positions.remember(&key, position);
+                if position > 0 {
+                    state.positions.remember(&key, position);
+                } else {
+                    state.positions.forget(&key);
+                }
             }
         }
     }

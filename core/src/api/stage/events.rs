@@ -124,7 +124,8 @@ impl Stage {
             }
             self.advance(&mut state, &key, Event::Pause, &mut actions);
             state.positions.forget(&key);
-            if let Some(loaded) = state.loaded.get(&key) {
+            if let Some(loaded) = state.loaded.get_mut(&key) {
+                loaded.seeked = Some(0);
                 self.inner.seeks.lock().unwrap_or_else(PoisonError::into_inner).remove(&loaded.source.url);
             }
             let orders = match state.leases.get(&key).copied() {

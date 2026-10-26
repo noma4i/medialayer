@@ -151,12 +151,13 @@ fn inv_ingress_06_an_owner_closes_while_the_queue_is_full_and_frees_its_entries_
     queue.release(1);
 
     let audit = queue.audit();
-    assert_eq!((audit.entries, audit.by_owner, audit.folds, audit.garbage), (0, 0, 0, 4));
-    assert_eq!(audit.counted, 4, "the dropped commands still hold their places until the executor frees them");
+    assert_eq!((audit.entries, audit.by_owner, audit.folds, audit.garbage), (3, 0, 0, 1));
+    assert_eq!(audit.counted, 4, "the dropped command still holds its place until the executor frees it");
     freed(&queue);
-    assert_eq!(queue.audit().counted, 0);
+    assert_eq!(queue.audit().counted, 3);
     assert!(matches!(queue.submit(update(1)), Err(MediaError::Closed)));
-    assert_eq!(queued(&queue), vec!["release"]);
+    assert_eq!(queued(&queue), vec!["seek", "seek", "seek", "release"]);
+    assert_eq!(queue.audit().counted, 0);
 }
 
 #[test]
@@ -200,7 +201,7 @@ fn inv_ingress_08_repeated_create_update_release_cycles_leave_no_index_behind_wi
         queue.submit(update(owner)).unwrap();
         queue.submit(Declared::PlaceSeek { owner, fraction: 0.5 }).unwrap();
         queue.release(owner);
-        assert_eq!(queued(&queue), vec!["release"]);
+        assert_eq!(queued(&queue), vec!["seek", "release"]);
         queue.finish_release(owner);
         freed(&queue);
     }
@@ -831,4 +832,68 @@ fn inv_ingress_41_a_closed_core_refuses_the_key_seek_to_the_caller() {
     let refused = layer.seek("https://o.test/v1.mp4".to_string(), 0.5);
 
     assert!(matches!(refused, Err(MediaError::Closed)), "{refused:?}");
+}
+
+#[test]
+fn inv_ingress_44_a_note_that_ended_and_was_rewound_by_its_closing_place_returns_at_the_start_when_mounted_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let factory: Arc<MockFactory> = Arc::default();
+    let slots: Arc<dyn PlayerSlotFactory> = factory.clone();
+    let layer = MediaLayer::build(config(dir.path(), Some(slots), None), Pause::new()).unwrap();
+    let caller = caller();
+    let url = "https://o.test/note.m4a";
+    let note = MediaItem { looping: false, ..MediaItem::bare(url, crate::api::Kind::Audio) };
+
+    let place = layer.open_place(note.clone()).unwrap();
+    place.update(PlaceInput { playing: true, visible: true, ..PlaceInput::default() }).unwrap();
+    caller.block_on(eventually(|| factory.slot_holding(url).is_some()));
+    let (index, slot) = factory.slot_holding(url).unwrap();
+    {
+        let mut sample = slot.sample.lock().unwrap();
+        sample.position_ms = 60_000;
+        sample.duration_ms = Some(60_000);
+    }
+    layer.player_events().ready(index, slot.generation());
+    layer.player_events().ended(index, slot.generation());
+    caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Seek { position_ms: 0 })));
+
+    place.seek(0.0).unwrap();
+    place.release();
+    caller.block_on(eventually(|| factory.slot_holding(url).is_none()));
+    let again = layer.open_place(note).unwrap();
+    again.update(PlaceInput { playing: true, visible: true, ..PlaceInput::default() }).unwrap();
+
+    caller.block_on(eventually(|| factory.slot_holding(url).is_some()));
+    let (_, slot) = factory.slot_holding(url).unwrap();
+    caller.block_on(eventually(|| layer.queue().audit().counted == 0));
+    let calls = slot.calls();
+    let load = calls.iter().rposition(|call| matches!(call, SlotCall::Load { .. })).unwrap();
+    assert!(!calls[load..].iter().any(|call| matches!(call, SlotCall::Seek { position_ms } if *position_ms > 0)), "{calls:?}");
+}
+
+#[test]
+fn inv_ingress_45_a_seek_submitted_just_before_the_release_of_its_place_is_kept_for_the_next_place_of_the_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let factory: Arc<MockFactory> = Arc::default();
+    let slots: Arc<dyn PlayerSlotFactory> = factory.clone();
+    let layer = MediaLayer::build(config(dir.path(), Some(slots), None), Pause::new()).unwrap();
+    let caller = caller();
+    let url = "https://o.test/note.m4a";
+    let note = MediaItem { looping: false, ..MediaItem::bare(url, crate::api::Kind::Audio) };
+    let place = layer.open_place(note.clone()).unwrap();
+    place.update(PlaceInput { visible: true, ..PlaceInput::default() }).unwrap();
+    caller.block_on(eventually(|| factory.slot_holding(url).is_some()));
+    let (index, slot) = factory.slot_holding(url).unwrap();
+    slot.sample.lock().unwrap().duration_ms = Some(60_000);
+    layer.player_events().ready(index, slot.generation());
+
+    place.seek(0.5).unwrap();
+    place.release();
+    caller.block_on(eventually(|| factory.slot_holding(url).is_none()));
+    let again = layer.open_place(note).unwrap();
+    again.update(PlaceInput { visible: true, ..PlaceInput::default() }).unwrap();
+
+    caller.block_on(eventually(|| factory.slot_holding(url).is_some()));
+    let (_, slot) = factory.slot_holding(url).unwrap();
+    caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Seek { position_ms: 30_000 })));
 }

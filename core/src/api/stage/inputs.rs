@@ -198,7 +198,9 @@ impl Stage {
 
     pub fn seek(&self, key: &str, position_ms: u64) {
         let mut state = self.state();
-        if let Some(loaded) = state.loaded.get(key) {
+        let is_playing = state.is_playing(key);
+        if let Some(loaded) = state.loaded.get_mut(key) {
+            loaded.seeked = (!is_playing).then_some(position_ms);
             self.note_seek(&loaded.source.url, position_ms);
             self.inner.runner.send(loaded.slot, SlotCall::Seek { position_ms });
         } else if position_ms > 0 {
@@ -221,6 +223,10 @@ impl Stage {
             (Some((slot, _)), Some(duration)) if current == load => {
                 state.positions.forget(key);
                 let position_ms = (duration as f64 * fraction) as u64;
+                let is_playing = state.is_playing(key);
+                if let Some(loaded) = state.loaded.get_mut(key) {
+                    loaded.seeked = (!is_playing).then_some(position_ms);
+                }
                 self.note_seek(&state.loaded[key].source.url, position_ms);
                 self.inner.runner.send(slot, SlotCall::Seek { position_ms });
             }

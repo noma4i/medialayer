@@ -546,3 +546,34 @@ async fn inv_api_44_a_stale_action_changes_nothing_of_the_new_load() {
     eventually(|| stage.commands_idle()).await;
     assert_eq!(player.calls(), calls, "a stale action sent commands to the new load");
 }
+
+#[tokio::test]
+async fn inv_api_18_a_note_that_ended_and_was_rewound_before_its_place_closed_returns_at_the_start() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    let key = url_of(0);
+    stage.visible(once(&key), true);
+    stage.set_playing(&key, true, &[]);
+    eventually(|| rig.factory.slot_holding(&key).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
+    let (slot, player) = rig.holder(&key);
+    let slot = slot as usize;
+    let generation = stage.generation_at(slot);
+    stage.ready(slot, generation);
+    {
+        let mut sample = player.sample.lock().unwrap();
+        sample.position_ms = 60_000;
+        sample.duration_ms = Some(60_000);
+    }
+
+    stage.ended(slot, generation);
+    stage.seek_fraction(&key, 0.0);
+    stage.set_playing(&key, false, &[]);
+    stage.visible(once(&key), false);
+    eventually(|| rig.factory.slot_holding(&key).is_none()).await;
+    stage.visible(once(&key), true);
+
+    eventually(|| rig.factory.slot_holding(&key).is_some() && stage.commands_idle()).await;
+    let calls = rig.holder(&key).1.calls();
+    let load = calls.iter().rposition(|call| matches!(call, SlotCall::Load { .. })).unwrap();
+    assert!(!calls[load..].iter().any(|call| matches!(call, SlotCall::Seek { position_ms } if *position_ms > 0)), "{calls:?}");
+}
