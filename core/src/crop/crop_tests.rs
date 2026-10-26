@@ -261,6 +261,9 @@ fn inv_crop_10_the_view_maps_gestures_to_fractions_one_way_for_both_platforms() 
 
 #[test]
 fn inv_crop_16_a_finished_gesture_is_a_pinch_when_it_scaled_a_pan_when_it_only_moved_and_the_change_flag_never_clears() {
+    let fixed = setup(photo(2000, 3000), chat());
+    let first = crop_initial(fixed, None);
+    let track = crop_gesture_begin(first);
     for (name, panned, zoomed, was, kind, now) in [
         ("none", false, false, false, None, false),
         ("pan", true, false, false, Some(CropGesture::Pan), true),
@@ -268,7 +271,8 @@ fn inv_crop_16_a_finished_gesture_is_a_pinch_when_it_scaled_a_pan_when_it_only_m
         ("pan and pinch", true, true, false, Some(CropGesture::Pinch), true),
         ("none after a change", false, false, true, None, true),
     ] {
-        assert_eq!(crop_gesture_end(panned, zoomed, was), CropGestureEnd { kind, was_position_changed: now }, "{name}");
+        let end = crop_gesture_end(track, first, first, fixed, view(), panned, zoomed, was, 0, 0);
+        assert_eq!((end.report.map(|report| report.kind), end.was_position_changed), (kind, now), "{name}");
     }
 }
 
@@ -298,4 +302,47 @@ fn inv_crop_17_the_telemetry_is_the_scale_and_the_move_of_the_frame_against_the_
     }
     let unplaced = crop_telemetry(first, pinched, fixed, CropView { width: 0.0, height: 0.0, inset: 0.0 }, true);
     assert_eq!((unplaced.final_scale, unplaced.final_translate_x, unplaced.final_translate_y), (2.0, 0, 0), "a view that cannot be laid out gives no move");
+}
+
+#[test]
+fn inv_crop_20_a_finished_gesture_reports_its_length_its_largest_move_its_scale_change_and_the_transform_after_it() {
+    let size = photo(2000, 3000);
+    let fixed = setup(size, chat());
+    let first = crop_initial(fixed, None);
+    let layout = crop_layout(first, fixed, view()).unwrap();
+    let (middle_x, middle_y) = (layout.frame.x + layout.frame.width / 2.0, layout.frame.y + layout.frame.height / 2.0);
+    let run = |baseline: CropFractions, start: CropFractions, steps: &[(f64, f64)], panned: bool, zoomed: bool, started: u64, ended: u64| {
+        let mut track = crop_gesture_begin(start);
+        let mut now = start;
+        for &(dx, factor) in steps {
+            now = crop_pan_view(now, fixed, view(), dx, 0.0);
+            now = crop_zoom_view(now, fixed, view(), factor, middle_x, middle_y);
+            track = crop_gesture_move(track, baseline, now, fixed, view());
+        }
+        (now, crop_gesture_end(track, baseline, now, fixed, view(), panned, zoomed, false, started, ended).report)
+    };
+
+    let (_, none) = run(first, first, &[(0.0, 1.0)], false, false, 100, 200);
+    assert_eq!(none, None, "a gesture that moved nothing reports nothing");
+
+    let (_, pan) = run(first, first, &[(30.0, 1.0), (-10.0, 1.0)], true, false, 1_000, 1_350);
+    let pan = pan.unwrap();
+    assert_eq!((pan.kind, pan.duration_ms, pan.max_distance, pan.translate_change), (CropGesture::Pan, 350, 30, 20), "a pan out and partly back: the largest move is the farthest point");
+    assert_eq!((pan.scale_change, pan.final_scale, pan.final_translate_x, pan.final_translate_y), (0.0, 1.0, 20, 0));
+
+    let (pinched, pinch) = run(first, first, &[(0.0, 2.0)], false, true, 0, 80);
+    let pinch = pinch.unwrap();
+    assert_eq!((pinch.kind, pinch.duration_ms, pinch.max_distance, pinch.scale_change, pinch.translate_change), (CropGesture::Pinch, 80, 1, 1.0, 0), "a pinch measures the distance in scale");
+    assert_eq!((pinch.final_scale, pinch.final_translate_x, pinch.final_translate_y), (2.0, 0, 0));
+
+    let (_, both) = run(first, first, &[(30.0, 2.0)], true, true, 5, 5);
+    let both = both.unwrap();
+    assert_eq!((both.kind, both.duration_ms, both.scale_change, both.final_scale, both.translate_change, both.final_translate_x), (CropGesture::Pinch, 0, 1.0, 2.0, 60, 60), "a pan and a pinch in one gesture is a pinch with both changes");
+
+    let (_, next) = run(first, pinched, &[(10.0, 1.0)], true, false, 10, 30);
+    let next = next.unwrap();
+    assert_eq!((next.scale_change, next.translate_change, next.final_scale, next.final_translate_x), (0.0, 10, 2.0, 10), "the second gesture counts from the frame where it began and the final transform from the first frame");
+
+    let (_, backwards) = run(first, first, &[(5.0, 1.0)], true, false, 90, 10);
+    assert_eq!(backwards.unwrap().duration_ms, 0, "a clock that went back gives no negative length");
 }

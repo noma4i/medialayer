@@ -13,7 +13,12 @@ private final class Outcome {
 
 @MainActor
 private final class Kinds {
-  var items: [CropGesture] = []
+  var items: [CropGestureReport] = []
+}
+
+@MainActor
+private final class Ticks {
+  var now: UInt64 = 0
 }
 
 private final class Admission: @unchecked Sendable {
@@ -171,32 +176,64 @@ struct MediaCropTests {
     let kinds = Kinds()
     let fixed = MediaCrop(aspect: chat(), onPositionChange: { kinds.items.append($0) }) { _ in }
     ready(fixed, photo: PixelSize(width: 2000, height: 3000))
+    let ticks = Ticks()
+    fixed.clock = { ticks.now }
     let middle = CGPoint(x: 200, y: 400)
+    ticks.now = 1_000
     fixed.gesture(true)
     fixed.pan(dx: 10, dy: 0)
     fixed.pan(dx: 10, dy: 0)
+    fixed.pan(dx: -5, dy: 0)
     #expect(kinds.items.isEmpty, "the call comes when the gesture ends")
+    ticks.now = 1_400
     fixed.gesture(false)
-    #expect(kinds.items == [.pan])
+    #expect(kinds.items.map(\.kind) == [.pan])
+    let pan = kinds.items[0]
+    #expect((pan.durationMs, pan.maxDistance, pan.translateChange, pan.scaleChange) == (400, 20, 15, 0), "\(pan)")
+    #expect((pan.finalScale, pan.finalTranslateX, pan.finalTranslateY) == (1, 15, 0), "\(pan)")
+    ticks.now = 2_000
     fixed.gesture(true)
     fixed.pan(dx: 5, dy: 0)
-    fixed.zoom(by: 1.5, at: middle)
+    fixed.zoom(by: 2, at: middle)
+    ticks.now = 2_090
     fixed.gesture(false)
-    #expect(kinds.items == [.pan, .pinch], "a pinch with a pan is a pinch")
+    let pinch = kinds.items[1]
+    #expect((pinch.durationMs, pinch.maxDistance, pinch.scaleChange, pinch.finalScale) == (90, 1, 1, 2), "a pinch measures the distance in scale and counts from the frame where it began: \(pinch)")
+    #expect(kinds.items.map(\.kind) == [.pan, .pinch], "a pinch with a pan is a pinch")
     fixed.gesture(true)
     fixed.gesture(false)
     fixed.gesture(true)
     fixed.zoom(by: 1, at: middle)
     fixed.pan(dx: 0, dy: 0)
     fixed.gesture(false)
-    #expect(kinds.items == [.pan, .pinch], "a touch that moved nothing gives no call")
+    #expect(kinds.items.map(\.kind) == [.pan, .pinch], "a touch that moved nothing gives no call")
 
     let free = MediaCrop(onPositionChange: { kinds.items.append($0) }) { _ in }
     ready(free, photo: PixelSize(width: 2000, height: 1000))
     free.gesture(true)
     free.drag(.right, dx: -40, dy: 0)
     free.gesture(false)
-    #expect(kinds.items == [.pan, .pinch, .pan], "a handle drag is a pan")
+    #expect(kinds.items.map(\.kind) == [.pan, .pinch, .pan], "a handle drag is a pan")
+  }
+
+  @Test
+  func inv_crop_21_snapshot_gives_the_transform_now_and_cancel_gives_it_too() {
+    let outcome = Outcome()
+    let crop = MediaCrop(aspect: chat()) { outcome.calls.append($0) }
+    #expect(crop.snapshot() == nil, "before the photo is ready there is nothing to give")
+    ready(crop, photo: PixelSize(width: 2000, height: 3000))
+    #expect(crop.snapshot() == MediaCropSnapshot(finalScale: 1, finalTranslateX: 0, finalTranslateY: 0, wasPositionChanged: false))
+    crop.gesture(true)
+    crop.pan(dx: 30, dy: 0)
+    #expect(crop.snapshot() == MediaCropSnapshot(finalScale: 1, finalTranslateX: 30, finalTranslateY: 0, wasPositionChanged: true), "inside a gesture")
+    crop.zoom(by: 2, at: CGPoint(x: 200, y: 400))
+    crop.gesture(false)
+    let now = MediaCropSnapshot(finalScale: 2, finalTranslateX: 60, finalTranslateY: 0, wasPositionChanged: true)
+    #expect(crop.snapshot() == now && !crop.isFinished, "the crop stays open")
+    #expect(crop.cancel() == now)
+    #expect(outcome.calls.count == 1 && outcome.calls[0] == nil)
+    #expect(crop.snapshot() == now, "the transform is still readable after cancel")
+    #expect(crop.cancel() == nil && outcome.calls.count == 1, "a second cancel does nothing")
   }
 
   @Test

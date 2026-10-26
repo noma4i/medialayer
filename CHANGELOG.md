@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.22.0 - 2026-10-26
+
+### Added
+- `MediaCrop.snapshot()` gives the final scale, move and change flag of the frame now, and `cancel()` returns the same.
+
+### Changed
+- `onPositionChange` receives a `CropGestureReport` with the kind, duration, largest move, scale and move changes and the final transform.
+
 ## 3.21.0 - 2026-10-26
 
 ### Added

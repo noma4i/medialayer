@@ -18,6 +18,15 @@ public struct MediaCropResult: Sendable, Equatable {
   public let wasPositionChanged: Bool
 }
 
+/// The transform of the crop now against its first frame, in the units of the result: `finalScale` is 1 for the first frame (rounded to 0.01),
+/// `finalTranslateX` and `finalTranslateY` are whole points, `wasPositionChanged` is true once any pan or pinch moved or scaled the crop.
+public struct MediaCropSnapshot: Sendable, Equatable {
+  public let finalScale: Double
+  public let finalTranslateX: Int
+  public let finalTranslateY: Int
+  public let wasPositionChanged: Bool
+}
+
 /// The shape of the guide over the photo. The result is a rectangle in both.
 public enum MediaCropShape: Sendable {
   case rect
@@ -26,7 +35,9 @@ public enum MediaCropShape: Sendable {
 
 /// The state of one crop. The app makes it, gives it to `MediaCropper` and calls `confirm()` or `cancel()` from its own buttons.
 /// `aspect` fixes the proportions of the frame (the photo moves under a still frame), without it the frame is free (handles on the frame).
-/// `onPositionChange` is called once per finished gesture with its kind: `.pinch` when the fingers scaled at any time during it, otherwise `.pan` (a handle drag is a pan). A touch that moved nothing gives no call.
+/// `onPositionChange` is called once per finished gesture with its `CropGestureReport`: the kind (`.pinch` when the fingers scaled at any time during it, otherwise `.pan`, a handle drag is a pan),
+/// the length in milliseconds, the largest move, the changes of scale and position and the transform against the first frame. A touch that moved nothing gives no call.
+/// `snapshot()` gives the transform now without finishing, `cancel()` gives it too.
 /// `onFinish` is called once: with the result after `confirm()`, with `nil` after `cancel()`. A command after that, or before the photo is ready, is ignored.
 @MainActor
 @Observable
@@ -46,7 +57,10 @@ public final class MediaCrop {
   private var panning = false
   private var zooming = false
   private var positionChanged = false
-  private let onPositionChange: (@MainActor (CropGesture) -> Void)?
+  private var track: CropGestureTrack?
+  private var gestureStart: UInt64 = 0
+  var clock: () -> UInt64 = { DispatchTime.now().uptimeNanoseconds / 1_000_000 }
+  private let onPositionChange: (@MainActor (CropGestureReport) -> Void)?
   private let limits: CropLimits
   private let onFinish: @MainActor (MediaCropResult?) -> Void
   private var upright = PixelSize(width: 0, height: 0)
@@ -57,7 +71,7 @@ public final class MediaCrop {
     initial: CGRect? = nil,
     allowsRotation: Bool = true,
     limits: CropLimits = defaultCropLimits(),
-    onPositionChange: (@MainActor (CropGesture) -> Void)? = nil,
+    onPositionChange: (@MainActor (CropGestureReport) -> Void)? = nil,
     onFinish: @escaping @MainActor (MediaCropResult?) -> Void
   ) {
     self.aspect = aspect.flatMap { size in
@@ -101,18 +115,21 @@ public final class MediaCrop {
     guard isReady, !isFinished else { return }
     if dx != 0 || dy != 0 { panning = true }
     rect = cropPanView(rect: rect, setup: setup, view: view, dx: Double(dx), dy: Double(dy))
+    follow()
   }
 
   func zoom(by factor: CGFloat, at point: CGPoint) {
     guard isReady, !isFinished else { return }
     if factor.isFinite, factor != 1 { zooming = true }
     rect = cropZoomView(rect: rect, setup: setup, view: view, factor: Double(factor), focalX: Double(point.x), focalY: Double(point.y))
+    follow()
   }
 
   func drag(_ handle: CropHandle, dx: CGFloat, dy: CGFloat) {
     guard isReady, !isFinished else { return }
     if dx != 0 || dy != 0 { panning = true }
     rect = cropDragView(rect: rect, setup: setup, view: view, handle: handle, dx: Double(dx), dy: Double(dy))
+    follow()
   }
 
   func handle(at point: CGPoint, slop: CGFloat) -> CropHandle? {
@@ -123,7 +140,12 @@ public final class MediaCrop {
   func gesture(_ active: Bool) {
     guard isGesturing != active else { return }
     isGesturing = active
-    if !active { endGesture() }
+    if active {
+      track = cropGestureBegin(rect: rect)
+      gestureStart = clock()
+    } else {
+      endGesture()
+    }
   }
 
   /// Turns the photo a quarter to the left (counter clockwise). Ignored when `allowsRotation` is false.
@@ -145,33 +167,58 @@ public final class MediaCrop {
   @discardableResult
   public func confirm() -> MediaCropResult? {
     guard isReady, !isFinished, let done = cropFinish(rect: rect, setup: setup) else { return nil }
-    let telemetry = cropTelemetry(baseline: baseline, rect: rect, setup: setup, view: view, wasPositionChanged: cropGestureEnd(panned: panning, zoomed: zooming, wasPositionChanged: positionChanged).wasPositionChanged)
+    let now = transform()
     let result = MediaCropResult(
       crop: CGRect(x: done.x, y: done.y, width: done.width, height: done.height),
       rotation: rotation,
-      finalScale: telemetry.finalScale,
-      finalTranslateX: Int(telemetry.finalTranslateX),
-      finalTranslateY: Int(telemetry.finalTranslateY),
-      wasPositionChanged: telemetry.wasPositionChanged
+      finalScale: now.finalScale,
+      finalTranslateX: now.finalTranslateX,
+      finalTranslateY: now.finalTranslateY,
+      wasPositionChanged: now.wasPositionChanged
     )
     isFinished = true
     onFinish(result)
     return result
   }
 
-  /// Finishes without a result.
-  public func cancel() {
-    guard !isFinished else { return }
+  /// The transform of the crop now against its first frame, the crop stays open. `nil` before the photo is ready.
+  public func snapshot() -> MediaCropSnapshot? {
+    isReady ? transform() : nil
+  }
+
+  /// Finishes without a result and gives the transform at that moment (`nil` when the photo was not ready or the crop was already finished).
+  @discardableResult
+  public func cancel() -> MediaCropSnapshot? {
+    guard !isFinished else { return nil }
+    let last = snapshot()
     isFinished = true
     onFinish(nil)
+    return last
+  }
+
+  private func transform() -> MediaCropSnapshot {
+    let telemetry = cropTelemetry(baseline: baseline, rect: rect, setup: setup, view: view, wasPositionChanged: positionChanged || panning || zooming)
+    return MediaCropSnapshot(
+      finalScale: telemetry.finalScale,
+      finalTranslateX: Int(telemetry.finalTranslateX),
+      finalTranslateY: Int(telemetry.finalTranslateY),
+      wasPositionChanged: telemetry.wasPositionChanged
+    )
+  }
+
+  private func follow() {
+    guard let open = track else { return }
+    track = cropGestureMove(track: open, baseline: baseline, rect: rect, setup: setup, view: view)
   }
 
   private func endGesture() {
-    let end = cropGestureEnd(panned: panning, zoomed: zooming, wasPositionChanged: positionChanged)
+    guard let open = track else { return }
+    track = nil
+    let end = cropGestureEnd(track: open, baseline: baseline, rect: rect, setup: setup, view: view, panned: panning, zoomed: zooming, wasPositionChanged: positionChanged, startedMs: gestureStart, endedMs: clock())
     panning = false
     zooming = false
     positionChanged = end.wasPositionChanged
-    if let kind = end.kind { onPositionChange?(kind) }
+    if let report = end.report { onPositionChange?(report) }
   }
 
   private func turn(clockwise: Bool) {

@@ -121,7 +121,7 @@ fun rememberMediaCrop(
   aspect: android.util.Size? = null,
   initial: android.graphics.RectF? = null,
   allowsRotation: Boolean = true,
-  onPositionChange: ((com.noma4i.medialayer.CropGesture) -> Unit)? = null,
+  onPositionChange: ((com.noma4i.medialayer.CropGestureReport) -> Unit)? = null,
   onFinish: (MediaCropResult?) -> Unit
 ): MediaCrop {
   val latest by androidx.compose.runtime.rememberUpdatedState(onFinish)

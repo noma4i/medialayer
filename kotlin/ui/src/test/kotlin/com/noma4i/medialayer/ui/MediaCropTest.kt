@@ -5,6 +5,7 @@ import android.graphics.RectF
 import android.util.Size
 import com.noma4i.medialayer.CropFractions
 import com.noma4i.medialayer.CropGesture
+import com.noma4i.medialayer.CropGestureReport
 import com.noma4i.medialayer.CropHandle
 import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaException
@@ -167,35 +168,69 @@ class MediaCropTest {
 
   @Test
   fun inv_crop_19_aFinishedGestureCallsPositionChangeOnceWithItsKind() {
-    val kinds = CopyOnWriteArrayList<CropGesture>()
+    val kinds = CopyOnWriteArrayList<CropGestureReport>()
     val fixed = MediaCrop(chat, onPositionChange = { kinds.add(it) }) { }
     fixed.photoReady(2000, 3000)
+    var now = 0L
+    fixed.clock = { now }
     val middle = PointF(200f, 400f)
+    now = 1_000
     fixed.gesture(true)
     fixed.pan(10f, 0f)
     fixed.pan(10f, 0f)
+    fixed.pan(-5f, 0f)
     assertTrue("the call comes when the gesture ends", kinds.isEmpty())
+    now = 1_400
     fixed.gesture(false)
-    assertEquals(listOf(CropGesture.PAN), kinds.toList())
+    assertEquals(listOf(CropGesture.PAN), kinds.map { it.kind })
+    val pan = kinds[0]
+    assertEquals("$pan", listOf(400UL, 20, 15, 0.0), listOf(pan.durationMs, pan.maxDistance, pan.translateChange, pan.scaleChange))
+    assertEquals("$pan", listOf(1.0, 15, 0), listOf(pan.finalScale, pan.finalTranslateX, pan.finalTranslateY))
+    now = 2_000
     fixed.gesture(true)
     fixed.pan(5f, 0f)
-    fixed.zoom(1.5f, middle)
+    fixed.zoom(2f, middle)
+    now = 2_090
     fixed.gesture(false)
-    assertEquals("a pinch with a pan is a pinch", listOf(CropGesture.PAN, CropGesture.PINCH), kinds.toList())
+    val pinch = kinds[1]
+    assertEquals("a pinch measures the distance in scale and counts from the frame where it began: $pinch", listOf(90UL, 1, 1.0, 2.0), listOf(pinch.durationMs, pinch.maxDistance, pinch.scaleChange, pinch.finalScale))
+    assertEquals("a pinch with a pan is a pinch", listOf(CropGesture.PAN, CropGesture.PINCH), kinds.map { it.kind })
     fixed.gesture(true)
     fixed.gesture(false)
     fixed.gesture(true)
     fixed.zoom(1f, middle)
     fixed.pan(0f, 0f)
     fixed.gesture(false)
-    assertEquals("a touch that moved nothing gives no call", listOf(CropGesture.PAN, CropGesture.PINCH), kinds.toList())
+    assertEquals("a touch that moved nothing gives no call", listOf(CropGesture.PAN, CropGesture.PINCH), kinds.map { it.kind })
 
     val free = MediaCrop(onPositionChange = { kinds.add(it) }) { }
     free.photoReady(2000, 1000)
     free.gesture(true)
     free.drag(CropHandle.RIGHT, -40f, 0f)
     free.gesture(false)
-    assertEquals("a handle drag is a pan", listOf(CropGesture.PAN, CropGesture.PINCH, CropGesture.PAN), kinds.toList())
+    assertEquals("a handle drag is a pan", listOf(CropGesture.PAN, CropGesture.PINCH, CropGesture.PAN), kinds.map { it.kind })
+  }
+
+  @Test
+  fun inv_crop_21_snapshotGivesTheTransformNowAndCancelGivesItToo() {
+    val finished = CopyOnWriteArrayList<MediaCropResult?>()
+    val crop = MediaCrop(chat) { finished.add(it) }
+    assertNull("before the photo is ready there is nothing to give", crop.snapshot())
+    crop.photoReady(2000, 3000)
+    assertEquals(MediaCropSnapshot(1.0, 0, 0, false), crop.snapshot())
+    crop.gesture(true)
+    crop.pan(30f, 0f)
+    assertEquals("inside a gesture", MediaCropSnapshot(1.0, 30, 0, true), crop.snapshot())
+    crop.zoom(2f, PointF(200f, 400f))
+    crop.gesture(false)
+    val now = MediaCropSnapshot(2.0, 60, 0, true)
+    assertEquals(now, crop.snapshot())
+    assertTrue("the crop stays open", !crop.isFinished)
+    assertEquals(now, crop.cancel())
+    assertEquals(listOf<MediaCropResult?>(null), finished.toList())
+    assertEquals("the transform is still readable after cancel", now, crop.snapshot())
+    assertNull("a second cancel does nothing", crop.cancel())
+    assertEquals(1, finished.size)
   }
 
   @Test
