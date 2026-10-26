@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.19.0 - 2026-10-26
+
+### Added
+- `CameraState.refusedMs` gives the length of a recording refused as too short.
+
+### Changed
+- `MediaError.Camera` carries `recordedMs`, the length of a recording that is too short.
+
 ## 3.18.1 - 2026-10-26
 
 ### Changed
