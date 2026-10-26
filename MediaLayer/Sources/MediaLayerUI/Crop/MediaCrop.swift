@@ -6,9 +6,16 @@ import Observation
 
 /// What the user chose: `crop` is a rectangle in fractions 0 to 1 of the photo after `rotation` (origin top left),
 /// `rotation` is the clockwise turn in degrees, 0, 90, 180 or 270. Give both to `MediaLayer.prepareImage(_:crop:rotation:)`.
+/// The rest is the telemetry of the gestures against the first frame: `finalScale` is 1 for the first frame and above 1 when the user magnified (rounded to 0.01),
+/// `finalTranslateX` and `finalTranslateY` are the move of the photo (of the frame when it is free) in whole points, right and down are positive,
+/// `wasPositionChanged` is true once any pan or pinch moved or scaled the crop.
 public struct MediaCropResult: Sendable, Equatable {
   public let crop: CGRect
   public let rotation: Int
+  public let finalScale: Double
+  public let finalTranslateX: Int
+  public let finalTranslateY: Int
+  public let wasPositionChanged: Bool
 }
 
 /// The shape of the guide over the photo. The result is a rectangle in both.
@@ -19,6 +26,7 @@ public enum MediaCropShape: Sendable {
 
 /// The state of one crop. The app makes it, gives it to `MediaCropper` and calls `confirm()` or `cancel()` from its own buttons.
 /// `aspect` fixes the proportions of the frame (the photo moves under a still frame), without it the frame is free (handles on the frame).
+/// `onPositionChange` is called once per finished gesture with its kind: `.pinch` when the fingers scaled at any time during it, otherwise `.pan` (a handle drag is a pan). A touch that moved nothing gives no call.
 /// `onFinish` is called once: with the result after `confirm()`, with `nil` after `cancel()`. A command after that, or before the photo is ready, is ignored.
 @MainActor
 @Observable
@@ -34,6 +42,11 @@ public final class MediaCrop {
   private(set) var rect = CropFractions(x: 0, y: 0, width: 1, height: 1)
   private(set) var photo = PixelSize(width: 0, height: 0)
   private let initial: CropFractions?
+  private var baseline = CropFractions(x: 0, y: 0, width: 1, height: 1)
+  private var panning = false
+  private var zooming = false
+  private var positionChanged = false
+  private let onPositionChange: (@MainActor (CropGesture) -> Void)?
   private let limits: CropLimits
   private let onFinish: @MainActor (MediaCropResult?) -> Void
   private var upright = PixelSize(width: 0, height: 0)
@@ -44,6 +57,7 @@ public final class MediaCrop {
     initial: CGRect? = nil,
     allowsRotation: Bool = true,
     limits: CropLimits = defaultCropLimits(),
+    onPositionChange: (@MainActor (CropGesture) -> Void)? = nil,
     onFinish: @escaping @MainActor (MediaCropResult?) -> Void
   ) {
     self.aspect = aspect.flatMap { size in
@@ -53,6 +67,7 @@ public final class MediaCrop {
     self.initial = initial.map { CropFractions(x: Double($0.minX), y: Double($0.minY), width: Double($0.width), height: Double($0.height)) }
     self.allowsRotation = allowsRotation
     self.limits = limits
+    self.onPositionChange = onPositionChange
     self.onFinish = onFinish
   }
 
@@ -67,6 +82,7 @@ public final class MediaCrop {
     photo = size
     rotation = 0
     rect = cropInitial(setup: setup, initial: initial)
+    baseline = rect
     failure = nil
     isReady = true
   }
@@ -83,16 +99,19 @@ public final class MediaCrop {
 
   func pan(dx: CGFloat, dy: CGFloat) {
     guard isReady, !isFinished else { return }
+    if dx != 0 || dy != 0 { panning = true }
     rect = cropPanView(rect: rect, setup: setup, view: view, dx: Double(dx), dy: Double(dy))
   }
 
   func zoom(by factor: CGFloat, at point: CGPoint) {
     guard isReady, !isFinished else { return }
+    if factor.isFinite, factor != 1 { zooming = true }
     rect = cropZoomView(rect: rect, setup: setup, view: view, factor: Double(factor), focalX: Double(point.x), focalY: Double(point.y))
   }
 
   func drag(_ handle: CropHandle, dx: CGFloat, dy: CGFloat) {
     guard isReady, !isFinished else { return }
+    if dx != 0 || dy != 0 { panning = true }
     rect = cropDragView(rect: rect, setup: setup, view: view, handle: handle, dx: Double(dx), dy: Double(dy))
   }
 
@@ -102,7 +121,9 @@ public final class MediaCrop {
   }
 
   func gesture(_ active: Bool) {
-    if isGesturing != active { isGesturing = active }
+    guard isGesturing != active else { return }
+    isGesturing = active
+    if !active { endGesture() }
   }
 
   /// Turns the photo a quarter to the left (counter clockwise). Ignored when `allowsRotation` is false.
@@ -117,13 +138,22 @@ public final class MediaCrop {
     photo = upright
     rotation = 0
     rect = cropInitial(setup: setup, initial: initial)
+    baseline = rect
   }
 
   /// Finishes with the rectangle of the frame and the turn. `nil` when the photo is not ready or the crop is already finished.
   @discardableResult
   public func confirm() -> MediaCropResult? {
     guard isReady, !isFinished, let done = cropFinish(rect: rect, setup: setup) else { return nil }
-    let result = MediaCropResult(crop: CGRect(x: done.x, y: done.y, width: done.width, height: done.height), rotation: rotation)
+    let telemetry = cropTelemetry(baseline: baseline, rect: rect, setup: setup, view: view, wasPositionChanged: cropGestureEnd(panned: panning, zoomed: zooming, wasPositionChanged: positionChanged).wasPositionChanged)
+    let result = MediaCropResult(
+      crop: CGRect(x: done.x, y: done.y, width: done.width, height: done.height),
+      rotation: rotation,
+      finalScale: telemetry.finalScale,
+      finalTranslateX: Int(telemetry.finalTranslateX),
+      finalTranslateY: Int(telemetry.finalTranslateY),
+      wasPositionChanged: telemetry.wasPositionChanged
+    )
     isFinished = true
     onFinish(result)
     return result
@@ -136,9 +166,18 @@ public final class MediaCrop {
     onFinish(nil)
   }
 
+  private func endGesture() {
+    let end = cropGestureEnd(panned: panning, zoomed: zooming, wasPositionChanged: positionChanged)
+    panning = false
+    zooming = false
+    positionChanged = end.wasPositionChanged
+    if let kind = end.kind { onPositionChange?(kind) }
+  }
+
   private func turn(clockwise: Bool) {
     guard allowsRotation, isReady, !isFinished else { return }
     rect = cropTurn(rect: rect, setup: setup, clockwise: clockwise)
+    baseline = cropTurn(rect: baseline, setup: setup, clockwise: clockwise)
     photo = PixelSize(width: photo.height, height: photo.width)
     rotation = (rotation + (clockwise ? 90 : 270)) % 360
   }

@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.21.0 - 2026-10-26
+
+### Added
+- `MediaCrop` reports gestures through `onPositionChange` and `MediaCropResult` carries the final scale, move and change flag.
+
 ## 3.20.0 - 2026-10-26
 
 ### Added

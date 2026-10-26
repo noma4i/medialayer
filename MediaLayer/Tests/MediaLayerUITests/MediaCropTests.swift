@@ -11,6 +11,11 @@ private final class Outcome {
   var calls: [MediaCropResult?] = []
 }
 
+@MainActor
+private final class Kinds {
+  var items: [CropGesture] = []
+}
+
 private final class Admission: @unchecked Sendable {
   private let lock = NSLock()
   private var items: [UInt64] = []
@@ -135,6 +140,63 @@ struct MediaCropTests {
     ready(still, photo: PixelSize(width: 2000, height: 3000))
     still.turnRight()
     #expect(still.rotation == 0)
+  }
+
+  @Test
+  func inv_crop_18_confirm_gives_the_telemetry_of_the_gestures_against_the_first_frame() throws {
+    func confirmed(aspect: CGSize? = chat(), initial: CGRect? = nil, photo: PixelSize = PixelSize(width: 2000, height: 3000), _ moves: (MediaCrop) -> Void) throws -> MediaCropResult {
+      let crop = MediaCrop(aspect: aspect, initial: initial) { _ in }
+      ready(crop, photo: photo)
+      moves(crop)
+      return try #require(crop.confirm())
+    }
+    let middle = CGPoint(x: 200, y: 400)
+    let table: [(String, MediaCropResult)] = [
+      ("no gesture", try confirmed { _ in }),
+      ("pan", try confirmed { $0.pan(dx: 30, dy: 0) }),
+      ("pinch", try confirmed { $0.zoom(by: 2, at: middle) }),
+      ("pan and pinch", try confirmed { $0.pan(dx: 30, dy: 0); $0.zoom(by: 2, at: middle) }),
+      ("moved back", try confirmed { $0.pan(dx: 30, dy: 0); $0.pan(dx: -30, dy: 0) }),
+      ("turn only", try confirmed { $0.turnRight() }),
+      ("free frame", try confirmed(aspect: nil, initial: CGRect(x: 0.2, y: 0.2, width: 0.5, height: 0.5), photo: PixelSize(width: 2000, height: 1000)) { $0.pan(dx: 40, dy: 20) }),
+    ]
+    let expected: [(Double, Int, Int, Bool)] = [(1, 0, 0, false), (1, 30, 0, true), (2, 0, 0, true), (2, 60, 0, true), (1, 0, 0, true), (1, 0, 0, false), (1, 40, 20, true)]
+    for ((name, result), want) in zip(table, expected) {
+      #expect((result.finalScale, result.finalTranslateX, result.finalTranslateY, result.wasPositionChanged) == want, "\(name) \(result)")
+    }
+  }
+
+  @Test
+  func inv_crop_19_a_finished_gesture_calls_position_change_once_with_its_kind() {
+    let kinds = Kinds()
+    let fixed = MediaCrop(aspect: chat(), onPositionChange: { kinds.items.append($0) }) { _ in }
+    ready(fixed, photo: PixelSize(width: 2000, height: 3000))
+    let middle = CGPoint(x: 200, y: 400)
+    fixed.gesture(true)
+    fixed.pan(dx: 10, dy: 0)
+    fixed.pan(dx: 10, dy: 0)
+    #expect(kinds.items.isEmpty, "the call comes when the gesture ends")
+    fixed.gesture(false)
+    #expect(kinds.items == [.pan])
+    fixed.gesture(true)
+    fixed.pan(dx: 5, dy: 0)
+    fixed.zoom(by: 1.5, at: middle)
+    fixed.gesture(false)
+    #expect(kinds.items == [.pan, .pinch], "a pinch with a pan is a pinch")
+    fixed.gesture(true)
+    fixed.gesture(false)
+    fixed.gesture(true)
+    fixed.zoom(by: 1, at: middle)
+    fixed.pan(dx: 0, dy: 0)
+    fixed.gesture(false)
+    #expect(kinds.items == [.pan, .pinch], "a touch that moved nothing gives no call")
+
+    let free = MediaCrop(onPositionChange: { kinds.items.append($0) }) { _ in }
+    ready(free, photo: PixelSize(width: 2000, height: 1000))
+    free.gesture(true)
+    free.drag(.right, dx: -40, dy: 0)
+    free.gesture(false)
+    #expect(kinds.items == [.pan, .pinch, .pan], "a handle drag is a pan")
   }
 
   @Test

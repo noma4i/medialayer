@@ -45,3 +45,13 @@ Button(onClick = crop::cancel) { Text("Cancel") }
 - `shape: .circle` (`MediaCropShape.Circle`) dims the photo outside a circle for an avatar, the result is still a rectangle.
 - The source is a local file (`file://`). Anything else, a file that is no image, or a refusal of the memory budget is a `MediaError` in `crop.failure` (`MediaException`). The decode takes its raster from the shared memory budget before it allocates and gives it back when it is done.
 - The result passes the core check: the frame is inside the photo, it holds a pixel on both axes and keeps the proportions within one pixel per edge, so `prepareImage` never refuses it.
+
+## Gesture telemetry
+
+The app reports how the user moved the crop (an analytics event, a "was the position changed" flag) without writing its own gesture code.
+
+- `onPositionChange` (a parameter of `MediaCrop` and `rememberMediaCrop`) is called once per finished gesture with a `CropGesture`: `.pinch` (`PINCH`) when the fingers scaled at any time during the gesture, otherwise `.pan` (`PAN`). A handle drag of a free frame is a pan. A touch that moved nothing gives no call. The call comes when the gesture ends, not on every step.
+- `MediaCropResult` carries `finalScale`, `finalTranslateX`, `finalTranslateY` and `wasPositionChanged`.
+- `finalScale` is 1 for the first frame (the frame of `initial`, or the largest one) and above 1 when the user magnified. A free frame that was resized smaller counts as magnified. It is rounded to 0.01.
+- `finalTranslateX` and `finalTranslateY` are the move of the photo under the fixed frame (of the frame itself when it is free) in whole view points on iOS and pixels on Android, measured against the first frame. Right and down are positive.
+- `wasPositionChanged` is true once any pan or pinch moved or scaled the crop. Moving back to the first frame does not clear it. A turn and `reset()` do not change it and a turn alone moves nothing.

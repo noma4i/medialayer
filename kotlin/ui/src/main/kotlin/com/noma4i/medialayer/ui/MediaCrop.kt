@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.noma4i.medialayer.CropAspect
 import com.noma4i.medialayer.CropFractions
+import com.noma4i.medialayer.CropGesture
 import com.noma4i.medialayer.CropHandle
 import com.noma4i.medialayer.CropLayout
 import com.noma4i.medialayer.CropLimits
@@ -19,10 +20,12 @@ import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.PixelSize
 import com.noma4i.medialayer.cropDragView
 import com.noma4i.medialayer.cropFinish
+import com.noma4i.medialayer.cropGestureEnd
 import com.noma4i.medialayer.cropHandleAt
 import com.noma4i.medialayer.cropInitial
 import com.noma4i.medialayer.cropLayout
 import com.noma4i.medialayer.cropPanView
+import com.noma4i.medialayer.cropTelemetry
 import com.noma4i.medialayer.cropTurn
 import com.noma4i.medialayer.cropZoomView
 import com.noma4i.medialayer.defaultCropLimits
@@ -34,7 +37,17 @@ import kotlinx.coroutines.CancellationException
  * What the user chose: [crop] is a rectangle in fractions 0 to 1 of the photo after [rotation] (origin top left),
  * [rotation] is the clockwise turn in degrees, 0, 90, 180 or 270. Give both to `MediaLayer.prepareImage(source, crop = crop, rotation = rotation)`.
  */
-data class MediaCropResult(val crop: RectF, val rotation: Int)
+data class MediaCropResult(
+  val crop: RectF,
+  val rotation: Int,
+  /** 1 for the first frame, above 1 when the user magnified, rounded to 0.01. */
+  val finalScale: Double,
+  /** The move of the photo (of the frame when it is free) in whole pixels, right and down are positive. */
+  val finalTranslateX: Int,
+  val finalTranslateY: Int,
+  /** True once any pan or pinch moved or scaled the crop. */
+  val wasPositionChanged: Boolean
+)
 
 /** The shape of the guide over the photo. The result is a rectangle in both. */
 enum class MediaCropShape { Rect, Circle }
@@ -42,6 +55,7 @@ enum class MediaCropShape { Rect, Circle }
 /**
  * The state of one crop. The app makes it ([rememberMediaCrop]), gives it to [MediaCropper] and calls [confirm] or [cancel] from its own buttons.
  * [aspect] fixes the proportions of the frame (the photo moves under a still frame), without it the frame is free (handles on the frame).
+ * [onPositionChange] is called once per finished gesture with its kind: [CropGesture.PINCH] when the fingers scaled at any time during it, otherwise [CropGesture.PAN] (a handle drag is a pan). A touch that moved nothing gives no call.
  * [onFinish] is called once: with the result after [confirm], with null after [cancel]. A command after that, or before the photo is ready, is ignored.
  * Every call comes from the main thread.
  */
@@ -50,6 +64,7 @@ class MediaCrop(
   initial: RectF? = null,
   val allowsRotation: Boolean = true,
   private val limits: CropLimits = defaultCropLimits(),
+  private val onPositionChange: ((CropGesture) -> Unit)? = null,
   private val onFinish: (MediaCropResult?) -> Unit
 ) {
   var isReady by mutableStateOf(false)
@@ -67,6 +82,10 @@ class MediaCrop(
 
   internal val aspect: CropAspect? = aspect?.takeIf { it.width > 0 && it.height > 0 }?.let { CropAspect(it.width.toUInt(), it.height.toUInt()) }
   private val initial: CropFractions? = initial?.let { CropFractions(it.left.toDouble(), it.top.toDouble(), (it.right - it.left).toDouble(), (it.bottom - it.top).toDouble()) }
+  private var baseline = CropFractions(0.0, 0.0, 1.0, 1.0)
+  private var panning = false
+  private var zooming = false
+  private var positionChanged = false
   private var photo = PixelSize(0u, 0u)
   private var upright = PixelSize(0u, 0u)
   private var view = CropView(0.0, 0.0, 0.0)
@@ -82,6 +101,7 @@ class MediaCrop(
     photo = size
     rotation = 0
     rect = cropInitial(setup, initial)
+    baseline = rect
     failure = null
     isReady = true
   }
@@ -97,15 +117,21 @@ class MediaCrop(
   }
 
   internal fun pan(dx: Float, dy: Float) {
-    if (isReady && !isFinished) rect = cropPanView(rect, setup, view, dx.toDouble(), dy.toDouble())
+    if (!isReady || isFinished) return
+    if (dx != 0f || dy != 0f) panning = true
+    rect = cropPanView(rect, setup, view, dx.toDouble(), dy.toDouble())
   }
 
   internal fun zoom(factor: Float, at: PointF) {
-    if (isReady && !isFinished) rect = cropZoomView(rect, setup, view, factor.toDouble(), at.x.toDouble(), at.y.toDouble())
+    if (!isReady || isFinished) return
+    if (factor.isFinite() && factor != 1f) zooming = true
+    rect = cropZoomView(rect, setup, view, factor.toDouble(), at.x.toDouble(), at.y.toDouble())
   }
 
   internal fun drag(handle: CropHandle, dx: Float, dy: Float) {
-    if (isReady && !isFinished) rect = cropDragView(rect, setup, view, handle, dx.toDouble(), dy.toDouble())
+    if (!isReady || isFinished) return
+    if (dx != 0f || dy != 0f) panning = true
+    rect = cropDragView(rect, setup, view, handle, dx.toDouble(), dy.toDouble())
   }
 
   internal fun handleAt(point: PointF, slop: Float): CropHandle? {
@@ -115,7 +141,17 @@ class MediaCrop(
   }
 
   internal fun gesture(active: Boolean) {
-    if (isGesturing != active) isGesturing = active
+    if (isGesturing == active) return
+    isGesturing = active
+    if (!active) endGesture()
+  }
+
+  private fun endGesture() {
+    val end = cropGestureEnd(panning, zooming, positionChanged)
+    panning = false
+    zooming = false
+    positionChanged = end.wasPositionChanged
+    end.kind?.let { onPositionChange?.invoke(it) }
   }
 
   /** Turns the photo a quarter to the left (counter clockwise). Ignored when [allowsRotation] is false. */
@@ -130,13 +166,22 @@ class MediaCrop(
     photo = upright
     rotation = 0
     rect = cropInitial(setup, initial)
+    baseline = rect
   }
 
   /** Finishes with the rectangle of the frame and the turn. Null when the photo is not ready or the crop is already finished. */
   fun confirm(): MediaCropResult? {
     if (!isReady || isFinished) return null
     val done = cropFinish(rect, setup) ?: return null
-    val result = MediaCropResult(RectF(done.x.toFloat(), done.y.toFloat(), (done.x + done.width).toFloat(), (done.y + done.height).toFloat()), rotation)
+    val telemetry = cropTelemetry(baseline, rect, setup, view, cropGestureEnd(panning, zooming, positionChanged).wasPositionChanged)
+    val result = MediaCropResult(
+      RectF(done.x.toFloat(), done.y.toFloat(), (done.x + done.width).toFloat(), (done.y + done.height).toFloat()),
+      rotation,
+      telemetry.finalScale,
+      telemetry.finalTranslateX,
+      telemetry.finalTranslateY,
+      telemetry.wasPositionChanged
+    )
     isFinished = true
     onFinish(result)
     return result
@@ -152,6 +197,7 @@ class MediaCrop(
   private fun turn(clockwise: Boolean) {
     if (!allowsRotation || !isReady || isFinished) return
     rect = cropTurn(rect, setup, clockwise)
+    baseline = cropTurn(baseline, setup, clockwise)
     photo = PixelSize(photo.height, photo.width)
     rotation = (rotation + if (clockwise) 90 else 270) % 360
   }

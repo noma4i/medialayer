@@ -258,3 +258,44 @@ fn inv_crop_10_the_view_maps_gestures_to_fractions_one_way_for_both_platforms() 
     }
     assert_eq!(crop_layout(first, setup(size, chat()), CropView { width: 10.0, height: 10.0, inset: 8.0 }), None);
 }
+
+#[test]
+fn inv_crop_16_a_finished_gesture_is_a_pinch_when_it_scaled_a_pan_when_it_only_moved_and_the_change_flag_never_clears() {
+    for (name, panned, zoomed, was, kind, now) in [
+        ("none", false, false, false, None, false),
+        ("pan", true, false, false, Some(CropGesture::Pan), true),
+        ("pinch", false, true, false, Some(CropGesture::Pinch), true),
+        ("pan and pinch", true, true, false, Some(CropGesture::Pinch), true),
+        ("none after a change", false, false, true, None, true),
+    ] {
+        assert_eq!(crop_gesture_end(panned, zoomed, was), CropGestureEnd { kind, was_position_changed: now }, "{name}");
+    }
+}
+
+#[test]
+fn inv_crop_17_the_telemetry_is_the_scale_and_the_move_of_the_frame_against_the_first_frame_in_view_points() {
+    let size = photo(2000, 3000);
+    let fixed = setup(size, chat());
+    let first = crop_initial(fixed, None);
+    let layout = crop_layout(first, fixed, view()).unwrap();
+    let (middle_x, middle_y) = (layout.frame.x + layout.frame.width / 2.0, layout.frame.y + layout.frame.height / 2.0);
+    let panned = crop_pan_view(first, fixed, view(), 30.0, 0.0);
+    let pinched = crop_zoom_view(first, fixed, view(), 2.0, middle_x, middle_y);
+    let both = crop_zoom_view(panned, fixed, view(), 2.0, middle_x, middle_y);
+    let free = setup(size, None);
+    let free_first = rect(0.2, 0.2, 0.5, 0.5);
+    let free_panned = crop_pan_view(free_first, free, view(), 40.0, 0.0);
+    for (name, setup, baseline, now, was, expected) in [
+        ("no gesture", fixed, first, first, false, (1.0, 0, 0, false)),
+        ("pan", fixed, first, panned, true, (1.0, 30, 0, true)),
+        ("pinch", fixed, first, pinched, true, (2.0, 0, 0, true)),
+        ("pan and pinch", fixed, first, both, true, (2.0, 60, 0, true)),
+        ("moved back keeps the flag", fixed, first, first, true, (1.0, 0, 0, true)),
+        ("free frame follows the finger", free, free_first, free_panned, true, (1.0, 40, 0, true)),
+    ] {
+        let telemetry = crop_telemetry(baseline, now, setup, view(), was);
+        assert_eq!((telemetry.final_scale, telemetry.final_translate_x, telemetry.final_translate_y, telemetry.was_position_changed), expected, "{name}");
+    }
+    let unplaced = crop_telemetry(first, pinched, fixed, CropView { width: 0.0, height: 0.0, inset: 0.0 }, true);
+    assert_eq!((unplaced.final_scale, unplaced.final_translate_x, unplaced.final_translate_y), (2.0, 0, 0), "a view that cannot be laid out gives no move");
+}
