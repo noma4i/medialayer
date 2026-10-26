@@ -104,3 +104,20 @@ val reading = Media.audio!!.readVolume() ?: return
 val initial = reading.initial
 reading.changes.collect { volume -> /* react */ }
 ```
+
+## React to volume up
+
+`volumeRaises` gives one event for each rise of the system volume, for example to unmute when the user presses volume up. A fall, or a rise of 0.001 or less, gives no event. The core holds this one rule, so both platforms agree. The system observer is on while the stream is read and off when it ends. No polling runs.
+
+### Swift
+
+```swift
+guard let raises = await Media.audio?.volumeRaises() else { return }
+for await _ in raises { Media.muted = false }
+```
+
+### Kotlin
+
+```kotlin
+Media.audio!!.volumeRaises().collect { Media.muted = false }
+```

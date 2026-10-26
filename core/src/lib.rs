@@ -22,6 +22,7 @@ pub mod send_prep;
 pub mod session;
 pub mod spec;
 pub mod trace;
+pub mod volume;
 
 #[uniffi::export]
 pub fn version() -> String {

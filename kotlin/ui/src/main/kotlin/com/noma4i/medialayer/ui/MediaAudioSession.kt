@@ -5,6 +5,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 
 class MediaAudioSession internal constructor(
   val focus: MediaAudioFocus,
@@ -30,6 +32,8 @@ class MediaAudioSession internal constructor(
   }
 
   fun readVolume(): MediaVolumeReading? = volume?.reading()
+
+  fun volumeRaises(): Flow<Unit> = volume?.raises() ?: emptyFlow()
 
   fun deactivateRecording() {
     synchronized(demand) { demand.setRecording(false) }

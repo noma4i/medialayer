@@ -142,4 +142,37 @@ struct MediaAudioSessionTests {
     await session.deactivateRecording()
     #expect(!session.isRecording)
   }
+
+  @Test
+  func inv_audio_10_volumeRaisesEmitsOnARiseOnlyAndEndingTheStreamRemovesTheObserver() async {
+    let port = FakeAudioSessionPort()
+    let session = MediaAudioSession(focus: .mix, port: port, releaseDelay: .zero)
+    let raises = await session.volumeRaises()
+    let count = RaiseCount()
+    let collector = Task { for await _ in raises { count.add() } }
+
+    port.pressVolume(0.7)
+    await eventually("a rise reported") { count.value == 1 }
+    port.pressVolume(0.3)
+    port.pressVolume(0.3005)
+    port.pressVolume(0.5)
+    await eventually("the next rise reported") { count.value >= 2 }
+    try? await Task.sleep(for: .milliseconds(100))
+    #expect(count.value == 2)
+    #expect(!port.volumeStreamEnded)
+    collector.cancel()
+
+    await eventually("port stream ended") { port.volumeStreamEnded }
+  }
+}
+
+private final class RaiseCount: @unchecked Sendable {
+  private let lock = NSLock()
+  private var count = 0
+
+  var value: Int { lock.withLock { count } }
+
+  func add() {
+    lock.withLock { count += 1 }
+  }
 }

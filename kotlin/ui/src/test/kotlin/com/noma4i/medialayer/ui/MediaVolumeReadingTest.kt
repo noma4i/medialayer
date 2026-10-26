@@ -5,6 +5,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.toList
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -57,5 +58,32 @@ class MediaVolumeReadingTest {
     assertEquals(0.9f, reading.changes.first())
     assertNull(session(FakeVolumePort(null)).readVolume())
     assertNull(session(null).readVolume())
+  }
+
+  @Test
+  fun inv_audio_10_volumeRaises_emits_on_a_rise_only_and_cancel_unsubscribes() = runTest(UnconfinedTestDispatcher()) {
+    val port = FakeVolumePort(0.4f)
+    val flow = session(port).volumeRaises()
+    var raises = 0
+
+    assertEquals(0, port.listeners.size)
+    val job = launch { flow.collect { raises += 1 } }
+    assertEquals(1, port.listeners.size)
+    port.change(0.6f)
+    assertEquals(1, raises)
+    port.change(0.3f)
+    port.change(0.3005f)
+    assertEquals(1, raises)
+    port.change(0.5f)
+    assertEquals(2, raises)
+    job.cancel()
+
+    assertEquals(0, port.listeners.size)
+  }
+
+  @Test
+  fun inv_audio_10_volumeRaises_is_empty_without_a_volume_range() = runTest(UnconfinedTestDispatcher()) {
+    assertEquals(emptyList<Unit>(), session(FakeVolumePort(null)).volumeRaises().toList())
+    assertEquals(emptyList<Unit>(), session(null).volumeRaises().toList())
   }
 }
