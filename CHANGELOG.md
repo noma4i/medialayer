@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.13.0 - 2026-10-26
+
+### Added
+- `prepareImage` takes `maxSize` (fits the result into a rectangle, never enlarges), `crop` (a rectangle in fractions of the upright photo), `outputSize` (the exact size) and `mirror` (flips the result horizontally). The core plans every size, the order is turn, crop, mirror, fit. An edit that holds no pixel is refused with `MediaError.Fetch` (`MediaException.Fetch`).
+- `MediaLayer.encodeImage` saves an image in memory (Swift `CGImage` or `UIImage`, Kotlin `Bitmap`) as a JPEG or PNG file, and encodes the bytes of an image (such as WebP) as JPEG or PNG bytes. Both take their memory from the shared budget, a JPEG flattens transparency onto white.
+- `MediaImageDecode.imageSize` gives the size of an image in memory, with the EXIF turn applied, from its header.
+- Core `photo_plan` and `image_encode_plan`.
+
 ## 3.12.1 - 2026-10-26
 
 ### Added

@@ -595,7 +595,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "medialayer"
-version = "3.12.1"
+version = "3.13.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -617,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "medialayer-gen"
-version = "3.12.1"
+version = "3.13.0"
 dependencies = [
  "medialayer",
  "serde_json",
