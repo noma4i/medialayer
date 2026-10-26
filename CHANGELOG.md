@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `MediaCamera` takes photos and records video with a preview on iOS (`AVCaptureSession`) and Android (CameraX). The app declares a profile (`.photo`, `.moment`, `.circle` or its own) and a `MediaCameraPreview`. The camera runs only while the preview is on screen and the app is in front, and the library releases the camera, the microphone focus and the memory budget by itself.
+- The core decides the format of the camera, the limits and verdicts of a recording, the zoom, the flash, the one restart after a reset of the camera service and the state of the camera (`capture_step`).
+- A photo is an upright JPEG, a clip carries its length and frame. `MediaError.Camera` names the reason: permission, no camera, busy, too short, memory.
+- `observeFrames` gives the frames of the preview to the app for a face search.
+
 ## 3.14.0 - 2026-10-26
 
 ### Added
