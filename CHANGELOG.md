@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.17.0 - 2026-10-26
+
+### Added
+- `MediaCropper` lets the user move and scale a photo crop frame with fixed or free proportions on iOS and Android, and `prepareImage` takes the result as `crop` and `rotation`.
+
 ## 3.16.2 - 2026-10-26
 
 ### Fixed
