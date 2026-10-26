@@ -192,7 +192,7 @@ fn size(width: u32, height: u32) -> crate::ffi::PixelSize {
 }
 
 fn edit() -> PhotoEdit {
-    PhotoEdit { max_size: None, crop: None, output_size: None, mirror: false }
+    PhotoEdit { max_size: None, enlarge: false, crop: None, output_size: None, mirror: false }
 }
 
 fn crop(x: f64, y: f64, width: f64, height: f64) -> Option<CropFractions> {
@@ -218,6 +218,25 @@ fn inv_send_22_the_max_size_fits_the_result_into_the_rectangle_and_never_enlarge
 }
 
 #[test]
+fn inv_send_33_enlarge_fits_the_result_into_the_rectangle_with_the_proportions_and_may_grow_it() {
+    for (source, limit, enlarge, expected) in [
+        ((540, 960), (1080, 1920), true, (1080, 1920)),
+        ((540, 960), (1080, 1920), false, (540, 960)),
+        ((4000, 3000), (1080, 1920), true, (1080, 810)),
+        ((4000, 3000), (1080, 1920), false, (1080, 810)),
+        ((500, 500), (1080, 1920), true, (1080, 1080)),
+        ((1000, 100), (500, 500), true, (500, 50)),
+        ((100, 50), (16_384, 16_384), true, (16_384, 8_192)),
+    ] {
+        let plan = photo_plan(source.0, source.1, 1, PhotoEdit { max_size: Some(size(limit.0, limit.1)), enlarge, ..edit() }).unwrap();
+        assert_eq!((plan.output.width, plan.output.height), expected, "{source:?} into {limit:?}, enlarge {enlarge}");
+    }
+    let grown = photo_plan(540, 960, 1, PhotoEdit { max_size: Some(size(1080, 1920)), enlarge: true, ..edit() }).unwrap();
+    assert_eq!((grown.needs_draw, grown.cost), (true, 540 * 960 * 4 + 1080 * 1920 * 4));
+    assert_eq!(photo_plan(100, 50, 1, PhotoEdit { max_size: Some(size(16_385, 16_385)), enlarge: true, ..edit() }), None);
+}
+
+#[test]
 fn inv_send_23_the_crop_is_taken_from_the_upright_photo_and_held_inside_its_bounds() {
     let rect = |x, y, width, height| PixelRect { x, y, width, height };
     for (name, tag, fractions, expected) in [
@@ -238,7 +257,7 @@ fn inv_send_23_the_crop_is_taken_from_the_upright_photo_and_held_inside_its_boun
 #[test]
 fn inv_send_24_the_output_size_is_exact_and_the_max_size_fits_the_crop() {
     let square = crop(0.0, 0.0, 0.5, 1.0);
-    let exact = photo_plan(2000, 1000, 1, PhotoEdit { crop: square, output_size: Some(size(1080, 1080)), max_size: Some(size(10, 10)), mirror: false }).unwrap();
+    let exact = photo_plan(2000, 1000, 1, PhotoEdit { crop: square, output_size: Some(size(1080, 1080)), max_size: Some(size(10, 10)), enlarge: false, mirror: false }).unwrap();
     assert_eq!((exact.crop.width, exact.crop.height, exact.output), (1000, 1000, size(1080, 1080)));
     let fitted = photo_plan(2000, 1000, 1, PhotoEdit { crop: square, max_size: Some(size(100, 100)), ..edit() }).unwrap();
     assert_eq!(fitted.output, size(100, 100));

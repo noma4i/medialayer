@@ -11,11 +11,13 @@ pub struct CropFractions {
 }
 
 /// What the app asks of a photo besides making it upright.
-/// `max_size` fits the result into a rectangle without enlarging, `output_size` gives the exact size and wins over `max_size`.
+/// `max_size` fits the result into a rectangle and keeps the proportions, it enlarges a smaller result only when `enlarge` is set.
+/// `output_size` gives the exact size and wins over `max_size`.
 /// `crop` is taken from the upright photo before `mirror`, `mirror` flips the cropped result horizontally.
 #[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
 pub struct PhotoEdit {
     pub max_size: Option<PixelSize>,
+    pub enlarge: bool,
     pub crop: Option<CropFractions>,
     pub output_size: Option<PixelSize>,
     pub mirror: bool,
@@ -61,7 +63,7 @@ pub fn photo_plan(width: u32, height: u32, exif_orientation: u32, edit: PhotoEdi
     };
     let output = match (edit.output_size, edit.max_size) {
         (Some(exact), _) => exact,
-        (None, Some(limit)) => fitted(crop.width, crop.height, limit)?,
+        (None, Some(limit)) => fitted(crop.width, crop.height, limit, edit.enlarge)?,
         (None, None) => PixelSize { width: crop.width, height: crop.height },
     };
     if output.width == 0 || output.height == 0 {
@@ -83,11 +85,13 @@ fn span(start: f64, length: f64, total: u32) -> Option<(u32, u32)> {
     (last > first).then_some((first, last - first))
 }
 
-fn fitted(width: u32, height: u32, limit: PixelSize) -> Option<PixelSize> {
+fn fitted(width: u32, height: u32, limit: PixelSize, enlarge: bool) -> Option<PixelSize> {
     if limit.width == 0 || limit.height == 0 {
         return None;
     }
-    let scale = (f64::from(limit.width) / f64::from(width)).min(f64::from(limit.height) / f64::from(height)).min(1.0);
+    let fit = (f64::from(limit.width) / f64::from(width)).min(f64::from(limit.height) / f64::from(height));
+    let scale = if enlarge { fit } else { fit.min(1.0) };
     let side = |value: u32, most: u32| ((f64::from(value) * scale).round() as u32).clamp(1, most);
-    Some(PixelSize { width: side(width, limit.width.min(width)), height: side(height, limit.height.min(height)) })
+    let (widest, tallest) = if enlarge { (limit.width, limit.height) } else { (limit.width.min(width), limit.height.min(height)) };
+    Some(PixelSize { width: side(width, widest), height: side(height, tallest) })
 }

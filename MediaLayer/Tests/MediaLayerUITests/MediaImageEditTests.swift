@@ -64,8 +64,8 @@ private final class Ledger: @unchecked Sendable {
   }
 }
 
-private func edit(maxSize: PixelSize? = nil, crop: CropFractions? = nil, outputSize: PixelSize? = nil, mirror: Bool = false) -> PhotoEdit {
-  PhotoEdit(maxSize: maxSize, crop: crop, outputSize: outputSize, mirror: mirror)
+private func edit(maxSize: PixelSize? = nil, enlarge: Bool = false, crop: CropFractions? = nil, outputSize: PixelSize? = nil, mirror: Bool = false) -> PhotoEdit {
+  PhotoEdit(maxSize: maxSize, enlarge: enlarge, crop: crop, outputSize: outputSize, mirror: mirror)
 }
 
 private func isRed(_ pixel: (r: Int, g: Int, b: Int, a: Int)) -> Bool { pixel.r > 200 && pixel.g < 60 && pixel.b < 60 }
@@ -105,6 +105,21 @@ struct MediaImageEditTests {
 
     #expect((fitted.width, fitted.height) == (40, 20))
     #expect((kept.width, kept.height) == (80, 40))
+  }
+
+  @Test
+  func inv_send_33_enlarge_fits_a_small_photo_into_the_rectangle_with_its_proportions() async throws {
+    let source = try file(try halves(540, 960, orientation: 1))
+    defer { try? FileManager.default.removeItem(at: source) }
+    let ledger = Ledger()
+
+    let enlarged = try await prepared(source, edit(maxSize: PixelSize(width: 1080, height: 1920), enlarge: true), ledger: ledger)
+    let kept = try await prepared(source, edit(maxSize: PixelSize(width: 1080, height: 1920)))
+
+    #expect((enlarged.width, enlarged.height) == (1080, 1920))
+    let asked: UInt64 = 540 * 960 * 4 + 1080 * 1920 * 4
+    #expect(ledger.asked == [asked])
+    #expect((kept.width, kept.height) == (540, 960))
   }
 
   @Test

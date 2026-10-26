@@ -52,7 +52,7 @@ class MediaImageEditTest {
     photoOrientation = orientationBefore
   }
 
-  private fun edit(maxSize: PixelSize? = null, crop: CropFractions? = null, outputSize: PixelSize? = null, mirror: Boolean = false) = PhotoEdit(maxSize, crop, outputSize, mirror)
+  private fun edit(maxSize: PixelSize? = null, enlarge: Boolean = false, crop: CropFractions? = null, outputSize: PixelSize? = null, mirror: Boolean = false) = PhotoEdit(maxSize, enlarge, crop, outputSize, mirror)
 
   private fun prepare(file: File, edit: PhotoEdit, ledger: EditLedger) = runBlocking { prepareImageAt(file.parentFile!!, file, 0.9, ledger.admit, edit) }
 
@@ -75,6 +75,18 @@ class MediaImageEditTest {
 
     assertEquals(listOf(80L * 40 * 4 + 40L * 40 * 4), ledger.asked.toList())
     assertEquals(1, ledger.closed.get())
+  }
+
+  @Test
+  fun inv_send_33_enlargeFitsASmallPhotoIntoTheRectangleAndAsksTheEnlargedRaster() {
+    val ledger = EditLedger()
+    val limit = PixelSize(1080u, 1920u)
+
+    assertEquals(PixelSize(1080u, 1920u), photoPlan(540u, 960u, 1u, edit(maxSize = limit, enlarge = true))!!.output)
+    assertEquals(PixelSize(540u, 960u), photoPlan(540u, 960u, 1u, edit(maxSize = limit))!!.output)
+    prepare(pngFile(40, 20), edit(maxSize = PixelSize(80u, 80u), enlarge = true), ledger).file.deleteOnExit()
+
+    assertEquals(listOf(40L * 20 * 4 + 80L * 40 * 4), ledger.asked.toList())
   }
 
   @Test

@@ -30,7 +30,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * A photo made upright by its EXIF orientation and saved as JPEG. No metadata is copied, so the editor tag and every EXIF field are gone.
- * [maxSize] fits the result into the rectangle (never enlarged), [outputSize] gives the exact size and wins over [maxSize],
+ * [maxSize] fits the result into the rectangle and keeps the proportions, a smaller result is enlarged only when [enlarge] is true, [outputSize] gives the exact size and wins over [maxSize],
  * [crop] is a rectangle in fractions 0 to 1 of the upright photo (origin top left), [mirror] flips the cropped result horizontally.
  * An edit that holds no pixel, such as an empty crop or a size of zero, is refused with [MediaException.Fetch]. The core plans every size.
  */
@@ -38,6 +38,7 @@ suspend fun MediaLayer.prepareImage(
   source: MediaSource,
   quality: Double = 0.9,
   maxSize: Size? = null,
+  enlarge: Boolean = false,
   crop: RectF? = null,
   outputSize: Size? = null,
   mirror: Boolean = false
@@ -45,6 +46,7 @@ suspend fun MediaLayer.prepareImage(
   val cache = checkNotNull(binding) { "the layer was not opened with MediaLayer.open(context)" }.factory.appContext.cacheDir
   val edit = PhotoEdit(
     maxSize?.toPixels(),
+    enlarge,
     crop?.let { CropFractions(it.left.toDouble(), it.top.toDouble(), (it.right - it.left).toDouble(), (it.bottom - it.top).toDouble()) },
     outputSize?.toPixels(),
     mirror
@@ -54,7 +56,7 @@ suspend fun MediaLayer.prepareImage(
 
 private fun Size.toPixels() = PixelSize(width.coerceAtLeast(0).toUInt(), height.coerceAtLeast(0).toUInt())
 
-internal val plainPhoto = PhotoEdit(null, null, null, false)
+internal val plainPhoto = PhotoEdit(null, false, null, null, false)
 
 internal suspend fun prepareImageAt(cache: File, file: File, quality: Double, admit: DecodeAdmit, edit: PhotoEdit = plainPhoto): PreparedMedia =
   withContext(prepareDispatcher) { PreparedMedia(upright(file, quality, cache, admit, edit), true) }

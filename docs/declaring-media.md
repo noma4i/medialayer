@@ -179,16 +179,18 @@ val photo = media.prepareImage(source, quality = 0.9)
 - The photo is turned upright by its EXIF orientation and saved as JPEG with your quality (0.0 to 1.0). No metadata is copied, so the editor tag and the EXIF fields are gone.
 - Android reports video progress only while the export runs, with no timer at rest.
 
-`prepareImage` also edits the photo. `maxSize` fits the result into a rectangle and keeps the proportions, it never enlarges. `crop` is a rectangle in fractions from 0 to 1 of the upright photo, the origin is the top left corner, a crop past the edge is held inside the photo. `outputSize` gives the exact size and wins over `maxSize`. `mirror` flips the result horizontally, for a front camera. The core plans the sizes in the order turn, crop, mirror, fit. An edit that holds no pixel, such as an empty crop or a size of zero, throws `MediaError.Fetch` (`MediaException.Fetch`).
+`prepareImage` also edits the photo. `maxSize` fits the result into a rectangle and keeps the proportions, it never enlarges unless `enlarge` is true: then a smaller photo grows to the rectangle (540x960 into 1080x1920 gives 1080x1920), the pixel limit of 16384 per side still applies. `crop` is a rectangle in fractions from 0 to 1 of the upright photo, the origin is the top left corner, a crop past the edge is held inside the photo. `outputSize` gives the exact size and wins over `maxSize`. `mirror` flips the result horizontally, for a front camera. The core plans the sizes in the order turn, crop, mirror, fit. An edit that holds no pixel, such as an empty crop or a size of zero, throws `MediaError.Fetch` (`MediaException.Fetch`).
 
 ```swift
 let chat = try await media.prepareImage(source, quality: 0.7, maxSize: CGSize(width: 1080, height: 1920))
+let story = try await media.prepareImage(source, maxSize: CGSize(width: 1080, height: 1920), enlarge: true)
 let avatar = try await media.prepareImage(source, crop: CGRect(x: 0.1, y: 0.2, width: 0.8, height: 0.45), outputSize: CGSize(width: 1080, height: 1080))
 let selfie = try await media.prepareImage(source, mirror: true)
 ```
 
 ```kotlin
 val chat = media.prepareImage(source, quality = 0.7, maxSize = Size(1080, 1920))
+val story = media.prepareImage(source, maxSize = Size(1080, 1920), enlarge = true)
 val avatar = media.prepareImage(source, crop = RectF(0.1f, 0.2f, 0.9f, 0.65f), outputSize = Size(1080, 1080))
 val selfie = media.prepareImage(source, mirror = true)
 ```

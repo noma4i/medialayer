@@ -5,13 +5,14 @@ import UniformTypeIdentifiers
 
 extension MediaLayer {
   /// A photo made upright by its EXIF orientation and saved as JPEG. No metadata is copied, so the editor tag and every EXIF field are gone.
-  /// `maxSize` fits the result into the rectangle (never enlarged), `outputSize` gives the exact size and wins over `maxSize`,
+  /// `maxSize` fits the result into the rectangle and keeps the proportions, a smaller result is enlarged only when `enlarge` is true, `outputSize` gives the exact size and wins over `maxSize`,
   /// `crop` is a rectangle in fractions 0 to 1 of the upright photo (origin top left), `mirror` flips the cropped result horizontally.
   /// An edit that holds no pixel, such as an empty crop or a size of zero, is refused with `MediaError.Fetch`. The core plans every size.
   public func prepareImage(
     _ source: some MediaSource,
     quality: Double = 0.9,
     maxSize: CGSize? = nil,
+    enlarge: Bool = false,
     crop: CGRect? = nil,
     outputSize: CGSize? = nil,
     mirror: Bool = false
@@ -19,6 +20,7 @@ extension MediaLayer {
     let file = try preparableFile(normalizeItem(item: source.item).url)
     let edit = PhotoEdit(
       maxSize: maxSize.map(pixelSize),
+      enlarge: enlarge,
       crop: crop.map { CropFractions(x: Double($0.minX), y: Double($0.minY), width: Double($0.width), height: Double($0.height)) },
       outputSize: outputSize.map(pixelSize),
       mirror: mirror
@@ -41,7 +43,7 @@ private func pixelSize(_ size: CGSize) -> PixelSize {
 enum ImagePreparation {
   typealias Admit = @Sendable (UInt64) async throws -> @Sendable () -> Void
 
-  static let plain = PhotoEdit(maxSize: nil, crop: nil, outputSize: nil, mirror: false)
+  static let plain = PhotoEdit(maxSize: nil, enlarge: false, crop: nil, outputSize: nil, mirror: false)
 
   static func run(_ file: URL, quality: Double, edit: PhotoEdit = plain, directory: URL = FileManager.default.temporaryDirectory, admit: Admit) async throws -> PreparedMedia {
     guard let source = CGImageSourceCreateWithURL(file as CFURL, nil),
