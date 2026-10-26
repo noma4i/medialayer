@@ -19,6 +19,6 @@ func preparableFile(_ url: String) throws -> URL {
   return file
 }
 
-func preparedOutput(extension fileExtension: String) -> URL {
-  FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).\(fileExtension)")
+func preparedOutput(extension fileExtension: String, in directory: URL = FileManager.default.temporaryDirectory) -> URL {
+  directory.appendingPathComponent("\(UUID().uuidString).\(fileExtension)")
 }

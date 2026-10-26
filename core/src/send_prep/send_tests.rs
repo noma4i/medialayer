@@ -186,3 +186,106 @@ fn inv_voice_12_a_voice_recording_is_encoded_at_44100_hz_in_one_channel_at_12800
 
     assert_eq!((settings.sample_rate_hz, settings.channels, settings.bit_rate), (44_100, 1, 128_000));
 }
+
+fn size(width: u32, height: u32) -> crate::ffi::PixelSize {
+    crate::ffi::PixelSize { width, height }
+}
+
+fn edit() -> PhotoEdit {
+    PhotoEdit { max_size: None, crop: None, output_size: None, mirror: false }
+}
+
+fn crop(x: f64, y: f64, width: f64, height: f64) -> Option<CropFractions> {
+    Some(CropFractions { x, y, width, height })
+}
+
+#[test]
+fn inv_send_21_a_photo_without_an_edit_keeps_the_upright_size_and_the_cost_of_the_plain_prepare() {
+    let plain = photo_plan(400, 200, 1, edit()).unwrap();
+    assert_eq!((plain.output, plain.crop, plain.mirror, plain.cost), (size(400, 200), PixelRect { x: 0, y: 0, width: 400, height: 200 }, false, 400 * 200 * 4));
+    let turned = photo_plan(400, 200, 6, edit()).unwrap();
+    assert_eq!((turned.upright, turned.output, turned.turn.rotation_degrees, turned.cost), (size(200, 400), size(200, 400), 90, 400 * 200 * 4 * 2));
+}
+
+#[test]
+fn inv_send_22_the_max_size_fits_the_result_into_the_rectangle_and_never_enlarges() {
+    for (source, limit, expected) in [((4000, 3000), (1080, 1920), (1080, 810)), ((3000, 4000), (1080, 1920), (1080, 1440)), ((100, 50), (1080, 1920), (100, 50)), ((1000, 100), (500, 500), (500, 50))] {
+        let plan = photo_plan(source.0, source.1, 1, PhotoEdit { max_size: Some(size(limit.0, limit.1)), ..edit() }).unwrap();
+        assert_eq!((plan.output.width, plan.output.height), expected, "{source:?} into {limit:?}");
+    }
+    assert_eq!(photo_plan(400, 200, 6, PhotoEdit { max_size: Some(size(100, 100)), ..edit() }).unwrap().output, size(50, 100));
+    assert_eq!(photo_plan(400, 200, 1, PhotoEdit { max_size: Some(size(0, 100)), ..edit() }), None);
+}
+
+#[test]
+fn inv_send_23_the_crop_is_taken_from_the_upright_photo_and_held_inside_its_bounds() {
+    let rect = |x, y, width, height| PixelRect { x, y, width, height };
+    for (name, tag, fractions, expected) in [
+        ("inside", 1, crop(0.25, 0.5, 0.5, 0.5), rect(250, 250, 500, 250)),
+        ("past the edge", 1, crop(0.8, 0.8, 0.5, 0.5), rect(800, 400, 200, 100)),
+        ("before the start", 1, crop(-0.5, 0.0, 1.0, 1.0), rect(0, 0, 500, 500)),
+        ("after the turn", 6, crop(0.0, 0.0, 1.0, 0.5), rect(0, 0, 500, 500)),
+    ] {
+        let plan = photo_plan(1000, 500, tag, PhotoEdit { crop: fractions, ..edit() }).unwrap();
+        assert_eq!(plan.crop, expected, "{name}");
+        assert_eq!((plan.output.width, plan.output.height), (expected.width, expected.height), "{name}");
+    }
+    for (name, fractions) in [("outside", crop(1.2, 0.0, 0.5, 1.0)), ("empty", crop(0.2, 0.2, 0.0, 0.5)), ("not a number", crop(f64::NAN, 0.0, 1.0, 1.0))] {
+        assert_eq!(photo_plan(1000, 500, 1, PhotoEdit { crop: fractions, ..edit() }), None, "{name}");
+    }
+}
+
+#[test]
+fn inv_send_24_the_output_size_is_exact_and_the_max_size_fits_the_crop() {
+    let square = crop(0.0, 0.0, 0.5, 1.0);
+    let exact = photo_plan(2000, 1000, 1, PhotoEdit { crop: square, output_size: Some(size(1080, 1080)), max_size: Some(size(10, 10)), mirror: false }).unwrap();
+    assert_eq!((exact.crop.width, exact.crop.height, exact.output), (1000, 1000, size(1080, 1080)));
+    let fitted = photo_plan(2000, 1000, 1, PhotoEdit { crop: square, max_size: Some(size(100, 100)), ..edit() }).unwrap();
+    assert_eq!(fitted.output, size(100, 100));
+    assert_eq!(photo_plan(2000, 1000, 1, PhotoEdit { output_size: Some(size(0, 10)), ..edit() }), None);
+}
+
+#[test]
+fn inv_send_25_the_mirror_is_carried_and_every_last_draw_adds_the_output_raster_to_the_cost() {
+    let raster = 400 * 200 * 4;
+    let mirrored = photo_plan(400, 200, 1, PhotoEdit { mirror: true, ..edit() }).unwrap();
+    assert_eq!((mirrored.mirror, mirrored.cost), (true, raster * 2));
+    let scaled = photo_plan(400, 200, 1, PhotoEdit { max_size: Some(size(200, 100)), ..edit() }).unwrap();
+    assert_eq!(scaled.cost, raster + 200 * 100 * 4);
+    let turned_and_cut = photo_plan(400, 200, 6, PhotoEdit { crop: crop(0.0, 0.0, 1.0, 0.5), ..edit() }).unwrap();
+    assert_eq!(turned_and_cut.cost, raster * 2 + 200 * 200 * 4);
+}
+
+#[test]
+fn inv_send_26_a_photo_above_the_pixel_limit_or_an_output_above_it_has_no_plan() {
+    assert_eq!(photo_plan(16_385, 10, 1, edit()), None);
+    assert_eq!(photo_plan(0, 10, 1, edit()), None);
+    assert_eq!(photo_plan(100, 100, 1, PhotoEdit { output_size: Some(size(16_385, 10)), ..edit() }), None);
+}
+
+#[test]
+fn inv_send_27_the_plan_says_when_a_last_draw_is_needed() {
+    assert!(!photo_plan(400, 200, 6, edit()).unwrap().needs_draw);
+    for changed in [PhotoEdit { mirror: true, ..edit() }, PhotoEdit { max_size: Some(size(10, 10)), ..edit() }, PhotoEdit { crop: crop(0.0, 0.0, 0.5, 1.0), ..edit() }, PhotoEdit { output_size: Some(size(400, 201)), ..edit() }] {
+        assert!(photo_plan(400, 200, 1, changed).unwrap().needs_draw, "{changed:?}");
+    }
+    assert!(!photo_plan(400, 200, 1, PhotoEdit { output_size: Some(size(400, 200)), ..edit() }).unwrap().needs_draw);
+}
+
+#[test]
+fn inv_send_28_an_encode_plan_counts_one_raster_plus_one_per_redraw_and_flattens_only_a_jpeg_with_alpha() {
+    let raster = 40 * 20 * 4;
+    for (tag, alpha, format, flatten, cost) in [
+        (1, false, ImageFormat::Png, false, raster),
+        (1, true, ImageFormat::Png, false, raster),
+        (1, true, ImageFormat::Jpeg, true, raster * 2),
+        (1, false, ImageFormat::Jpeg, false, raster),
+        (6, true, ImageFormat::Jpeg, true, raster * 3),
+        (3, false, ImageFormat::Png, false, raster * 2),
+    ] {
+        let plan = image_encode_plan(40, 20, tag, alpha, format).unwrap();
+        assert_eq!((plan.flatten, plan.cost), (flatten, cost), "tag {tag} alpha {alpha} {format:?}");
+    }
+    assert_eq!(image_encode_plan(16_385, 1, 1, false, ImageFormat::Png), None);
+    assert_eq!(image_encode_plan(0, 1, 1, false, ImageFormat::Png), None);
+}

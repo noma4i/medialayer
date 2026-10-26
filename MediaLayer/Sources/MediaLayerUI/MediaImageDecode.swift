@@ -32,6 +32,18 @@ public enum MediaImageDecode {
     return try await decode(maxSide: maxSide, circle: false, admit: admit) { CGImageSourceCreateWithData(data as CFData, nil) }
   }
 
+  /// The size of an image in memory as `decode` would give it (the EXIF turn applied), read from the header without decoding the pixels. `nil` when the bytes are no image.
+  public static func imageSize(data: Data) -> ImageSize? {
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+          let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+          let width = properties[kCGImagePropertyPixelWidth] as? Int,
+          let height = properties[kCGImagePropertyPixelHeight] as? Int,
+          width > 0, height > 0
+    else { return nil }
+    let sideways = photoTurn(exifOrientation: (properties[kCGImagePropertyOrientation] as? UInt32) ?? 1).rotationDegrees % 180 == 90
+    return ImageSize(width: UInt32(clamping: sideways ? height : width), height: UInt32(clamping: sideways ? width : height))
+  }
+
   private static func openedAdmit() throws -> DecodeAdmit {
     guard let layer = Media.current as? MediaLayer else { throw MediaError.Closed }
     return layer.decodeAdmit

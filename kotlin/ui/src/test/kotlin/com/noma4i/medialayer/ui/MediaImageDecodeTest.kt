@@ -18,7 +18,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-private fun exifJpeg(width: Int, height: Int, orientation: Int): ByteArray {
+internal fun exifJpeg(width: Int, height: Int, orientation: Int): ByteArray {
   val out = ByteArrayOutputStream()
   ImageIO.write(BufferedImage(width, height, BufferedImage.TYPE_INT_RGB), "jpg", out)
   val plain = out.toByteArray()

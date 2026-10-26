@@ -9,7 +9,9 @@ import android.graphics.PorterDuffXfermode
 import android.media.ExifInterface
 import android.net.Uri
 import com.noma4i.medialayer.MediaException
+import com.noma4i.medialayer.ImageSize
 import com.noma4i.medialayer.imageDecodePlan
+import com.noma4i.medialayer.photoTurn
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.InputStream
@@ -33,6 +35,18 @@ object MediaImageDecode {
   }
 
   suspend fun decode(bytes: ByteArray, maxSide: Int? = null): Bitmap = decodeImage(ImageInput { ByteArrayInputStream(bytes) }, maxSide, openedAdmit())
+
+  /**
+   * The size of an image in memory as [decode] would give it (the EXIF turn applied), read from the header without decoding the pixels.
+   * Null when the bytes are no image.
+   */
+  fun imageSize(bytes: ByteArray): ImageSize? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }.also { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, it) }
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    val tag = ExifInterface(ByteArrayInputStream(bytes)).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+    val sideways = photoTurn(tag.toUInt()).rotationDegrees % 180u == 90u
+    return if (sideways) ImageSize(bounds.outHeight.toUInt(), bounds.outWidth.toUInt()) else ImageSize(bounds.outWidth.toUInt(), bounds.outHeight.toUInt())
+  }
 
   private fun openedAdmit(): DecodeAdmit = (ProcessMediaEnvironment.current ?: throw MediaException.Closed()).media.decodeAdmit()
 }

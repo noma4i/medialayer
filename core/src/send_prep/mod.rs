@@ -1,10 +1,14 @@
 mod decode;
+mod encode;
 mod photo;
+mod photo_plan;
 mod plan;
 mod voice;
 
 pub use decode::{image_decode_plan, ImageDecodePlan};
+pub use encode::{image_encode_plan, EncodePlan, ImageFormat};
 pub use photo::{jpeg_quality, photo_turn, PhotoTurn};
+pub use photo_plan::{photo_plan, CropFractions, PhotoEdit, PhotoPlan, PixelRect};
 pub use plan::{default_video_limits, plan_video, BitrateStep, VideoLimits, VideoPlan, VideoSource};
 pub use voice::{voice_encoder_settings, voice_level, voice_limit_ms, voice_refusal_text, VoiceEncoderSettings, VoiceRefusal};
 

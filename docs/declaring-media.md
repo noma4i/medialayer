@@ -179,6 +179,38 @@ val photo = media.prepareImage(source, quality = 0.9)
 - The photo is turned upright by its EXIF orientation and saved as JPEG with your quality (0.0 to 1.0). No metadata is copied, so the editor tag and the EXIF fields are gone.
 - Android reports video progress only while the export runs, with no timer at rest.
 
+`prepareImage` also edits the photo. `maxSize` fits the result into a rectangle and keeps the proportions, it never enlarges. `crop` is a rectangle in fractions from 0 to 1 of the upright photo, the origin is the top left corner, a crop past the edge is held inside the photo. `outputSize` gives the exact size and wins over `maxSize`. `mirror` flips the result horizontally, for a front camera. The core plans the sizes in the order turn, crop, mirror, fit. An edit that holds no pixel, such as an empty crop or a size of zero, throws `MediaError.Fetch` (`MediaException.Fetch`).
+
+```swift
+let chat = try await media.prepareImage(source, quality: 0.7, maxSize: CGSize(width: 1080, height: 1920))
+let avatar = try await media.prepareImage(source, crop: CGRect(x: 0.1, y: 0.2, width: 0.8, height: 0.45), outputSize: CGSize(width: 1080, height: 1080))
+let selfie = try await media.prepareImage(source, mirror: true)
+```
+
+```kotlin
+val chat = media.prepareImage(source, quality = 0.7, maxSize = Size(1080, 1920))
+val avatar = media.prepareImage(source, crop = RectF(0.1f, 0.2f, 0.9f, 0.65f), outputSize = Size(1080, 1080))
+val selfie = media.prepareImage(source, mirror = true)
+```
+
+## Encoding an image in memory
+
+`encodeImage` saves an image that is already in memory as a JPEG or PNG file, or encodes the bytes of an image (WebP for example) as JPEG or PNG bytes. The image is turned upright by its orientation, a JPEG has no transparency so it is flattened onto white, `quality` (0.0 to 1.0) is for JPEG only. Both calls take their memory from the shared budget and run off the main thread.
+
+```swift
+let draft = try await media.encodeImage(uiImage, format: .jpeg, quality: 0.9)   // PreparedMedia, a file
+let png = try await media.encodeImage(bytes: webpBytes, format: .png)           // Data
+let size = MediaImageDecode.imageSize(data: webpBytes)                            // ImageSize or nil
+```
+
+```kotlin
+val draft = media.encodeImage(bitmap, ImageFormat.JPEG, quality = 0.9)   // PreparedMedia, a file
+val png = media.encodeImage(webpBytes, ImageFormat.PNG)                  // ByteArray
+val size = MediaImageDecode.imageSize(webpBytes)                         // ImageSize or null
+```
+
+`MediaImageDecode.imageSize` reads the size from the header, with the EXIF turn applied, so it equals the size of the decoded image.
+
 ## Decoding a local picture
 
 `MediaImageDecode.decode` turns a local picture into an upright image for a picker, a crop screen or an editor. The EXIF orientation is applied, the long side is cut to `maxSide` (nil or null keeps the size) and a picture is never enlarged. The decode runs off the main thread and takes its memory from the same budget as the players. When the budget refuses, the call throws `MediaError` (Swift) or `MediaException` (Kotlin). Without an open MediaLayer the call throws `Closed`.

@@ -273,12 +273,13 @@ struct DecodeAdmissionTests {
   func inv_send_20_a_refused_admission_stops_the_photo_before_it_decodes() async throws {
     let file = try png(width: 40, height: 20)
     defer { try? FileManager.default.removeItem(at: file) }
-    let before = (try? FileManager.default.contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path))?.filter { $0.hasSuffix(".jpg") }.count ?? 0
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
     await #expect(throws: MediaError.self) {
-      try await ImagePreparation.run(file, quality: 0.9) { _ in throw MediaError.Overloaded(detail: "no room") }
+      try await ImagePreparation.run(file, quality: 0.9, directory: directory) { _ in throw MediaError.Overloaded(detail: "no room") }
     }
-    let after = (try? FileManager.default.contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path))?.filter { $0.hasSuffix(".jpg") }.count ?? 0
-    #expect(after == before)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
   }
 }
 

@@ -985,6 +985,7 @@ fn inv_ingress_48_a_play_that_is_not_issued_leaves_a_trace_line_with_its_reason(
     let lines = Arc::new(Lines(Default::default()));
     crate::trace::set_trace_sink(Some(lines.clone()));
     layer.player_events().background();
+    caller.block_on(eventually(|| layer.queue().audit().entries == 0));
     let place = layer.open_place(MediaItem::bare_video(url)).unwrap();
     place.update(PlaceInput { visible: true, playing: true, ..PlaceInput::default() }).unwrap();
 
