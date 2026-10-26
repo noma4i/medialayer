@@ -88,7 +88,6 @@ pub(crate) enum Finished {
     Pixels(bool),
     Image(Result<ImageFetchResult, MediaError>),
     ImageSize(Result<Option<ImageSize>, MediaError>),
-    Placeholder(Placeholder),
     Decode(Result<crate::memory::Reservation, MediaError>),
     Capture(Result<crate::memory::Reservation, MediaError>),
 }

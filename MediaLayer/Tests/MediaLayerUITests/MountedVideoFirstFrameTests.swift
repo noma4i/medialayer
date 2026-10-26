@@ -67,6 +67,49 @@ extension GlobalMedia {
 
       #expect(frames.count == 1, "the same source reported its first frame \(frames.count) times across one leave and return")
     }
+
+    @Test
+    func inv_placeholder_10_aReadyPageKeepsItsCoverAndAReturnAfterTheRenderedFrameNeverAsksForItAgain() async throws {
+      let places = RecordingPlaces()
+      let frames = FirstFrames()
+      let host = UIHostingController(rootView: Page(context: MediaContext(places: places, slots: LoadedSlots()), frames: frames))
+      let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 200))
+      let root = UIViewController()
+      window.rootViewController = root
+      root.addChild(host)
+      host.view.frame = CGRect(x: 0, y: 0, width: 80, height: 80)
+      host.safeAreaRegions = []
+      root.view.addSubview(host.view)
+      host.didMove(toParent: root)
+      window.isHidden = false
+      defer {
+        window.isHidden = true
+        window.rootViewController = nil
+      }
+      let url = "file:///page.mp4"
+
+      await eventually("the page asked for its cover") { !places.placeholderReadyAsks.isEmpty }
+      try await Task.sleep(for: .milliseconds(200))
+      places.emit(.loading)
+      places.emit(.ready)
+      try await Task.sleep(for: .milliseconds(300))
+      let beforeFrame = places.placeholderReadyAsks
+      places.emit(.rendered)
+      await eventually("the rendered frame released the cover") { places.placeholderReadyAsks.last == true }
+
+      host.view.isHidden = true
+      await eventually("the hidden page withdrew") { places.visibleCalls(of: url) == [true, false] }
+      host.view.isHidden = false
+      await eventually("the returning page declared itself again") { places.visibleCalls(of: url) == [true, false, true] }
+      try await Task.sleep(for: .milliseconds(200))
+      places.emit(.idle)
+      places.emit(.loading)
+      try await Task.sleep(for: .milliseconds(300))
+
+      let asks = places.placeholderReadyAsks
+      #expect(beforeFrame.allSatisfy { !$0 }, "a ready player released the cover before its first frame: \(beforeFrame)")
+      #expect(asks.drop(while: { !$0 }).allSatisfy { $0 }, "the cover was asked for again after its frame was shown: \(asks)")
+    }
   }
 }
 #endif

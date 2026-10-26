@@ -2,7 +2,7 @@ use super::command::{Answer, Declared, Observer, Finished, OwnerKind, PlaceInput
 use super::queue::{InputQueue, Reserve, EntryPlace};
 use super::readiness::PageReadiness;
 use super::super::layer::WindowReadyListener;
-use crate::api::{placeholder_for, AbortOnDrop, CacheState, Kind, MediaError, MediaItem, MediaState, Subscription};
+use crate::api::{placeholder_for, AbortOnDrop, MediaError, MediaItem, MediaState, Subscription};
 use tokio::runtime::Handle;
 use super::super::assembled::Assembled;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -182,11 +182,7 @@ impl Book {
             Query::PlayUrl(item) => Answer::Route(assembled.routes.play_url(&item)),
             Query::Refresh(item, route) => Answer::Route(assembled.routes.refresh(&item, &route)),
             Query::Pool => Answer::Pool(assembled.pool_stats()),
-            Query::Placeholder(item, ready) if item.kind != Kind::Video || ready => Answer::Placeholder(placeholder_for(item, CacheState::Missing, ready)),
-            Query::Placeholder(item, ready) => self.running(reserve, slot, async move {
-                let cache = if assembled.routes.is_cached(&item.url, &item.headers).await { CacheState::Cached } else { CacheState::Missing };
-                Finished::Placeholder(placeholder_for(item, cache, ready))
-            }),
+            Query::Placeholder(item, ready) => Answer::Placeholder(placeholder_for(item, ready)),
             Query::Cached(item) => self.running(reserve, slot, async move { Finished::Cached(assembled.routes.is_cached(&item.url, &item.headers).await) }),
             Query::Tone(item, band) => self.running(reserve, slot, async move { Finished::Tone(assembled.tones.tone(&item, band).await) }),
             Query::Pixels(item) => self.running(reserve, slot, async move { Finished::Pixels(assembled.tones.pixels_needed(&item).await) }),

@@ -34,7 +34,7 @@ import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.Placeholder
-import com.noma4i.medialayer.isReady
+import com.noma4i.medialayer.isRendered
 import com.noma4i.medialayer.MediaItem
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.toItem
@@ -50,6 +50,21 @@ internal class VideoEdges {
     is MediaState.Rendered -> (!hasRendered).also { hasRendered = true } to false
     is MediaState.Ended -> false to true
     else -> false to false
+  }
+}
+
+/** The first frame of one source: set by Rendered or Ended, it survives the screen visibility and ends with the source. */
+internal class ShownFrame {
+  private var url: String? = null
+  private var shown = false
+
+  fun advance(url: String, state: MediaState): Boolean {
+    if (this.url != url) {
+      this.url = url
+      shown = false
+    }
+    if (state.isRendered) shown = true
+    return shown
   }
 }
 
@@ -136,6 +151,8 @@ fun MediaVideo(
   var view by remember(environment, source.url) { mutableStateOf<ViewHandle?>(null) }
   val state = rememberPlace(source, playing, muted, loop, peeking, screen.visible, group, viewToken = view?.token)
   val edges = remember(source.url) { VideoEdges() }
+  val shownFrame = remember { ShownFrame() }
+  val frameShown = shownFrame.advance(source.url, state)
   val firstFrame by rememberUpdatedState(onFirstFrame)
   val end by rememberUpdatedState(onEnd)
   val progress by rememberUpdatedState(onProgress)
@@ -158,14 +175,15 @@ fun MediaVideo(
   val player by remember(view) { view?.player ?: flowOf(null) }.collectAsState(null)
   val counters = environment.players?.videoOutputCounters
   val outputPlayer = remember(player, counters) { player?.let { VideoOutputPlayer(it, counters) } }
-  DisposableEffect(environment, source.url, screen.visible) {
-    if (!screen.visible) return@DisposableEffect onDispose { }
-    val created = environment.players?.newView()
-    view = created
+  DisposableEffect(environment, source.url) {
     onDispose {
-      created?.let { environment.players?.release(it) }
+      view?.let { environment.players?.release(it) }
       view = null
     }
+  }
+  DisposableEffect(environment, source.url, screen.visible) {
+    if (screen.visible && view == null) view = environment.players?.newView()
+    onDispose { }
   }
   val clipped = if (cornerRadius > 0.dp) modifier.clip(RoundedCornerShape(cornerRadius)) else modifier
   val faded = if (alpha != 1f) clipped.alpha(alpha) else clipped
@@ -173,20 +191,21 @@ fun MediaVideo(
     if (outputPlayer != null) {
       ContentFrame(outputPlayer, Modifier.fillMaxSize(), SURFACE_TYPE_TEXTURE_VIEW, contentScale, true, {})
     }
-    if (screen.visible) VideoPlaceholder(source.toItem(), state.isReady, contentScale)
+    VideoPlaceholder(source.toItem(), frameShown, screen.visible, contentScale)
     content(state)
   }
 }
 
 @Composable
-private fun VideoPlaceholder(item: MediaItem, ready: Boolean, contentScale: ContentScale) {
+private fun VideoPlaceholder(item: MediaItem, ready: Boolean, enabled: Boolean, contentScale: ContentScale) {
   val media = LocalMediaEnvironment.current.media
-  key(media, item) { VideoCover(media, item, ready, contentScale) }
+  key(media, item) { VideoCover(media, item, ready, enabled, contentScale) }
 }
 
 @Composable
-private fun VideoCover(media: MediaLayer, item: MediaItem, ready: Boolean, contentScale: ContentScale) {
-  val placeholder by produceState<Placeholder>(Placeholder.None, ready) {
+private fun VideoCover(media: MediaLayer, item: MediaItem, ready: Boolean, enabled: Boolean, contentScale: ContentScale) {
+  val placeholder by produceState<Placeholder>(Placeholder.None, ready, enabled) {
+    if (!enabled) return@produceState
     val answer = media.placeholder(item, ready)
     ensureActive()
     value = answer

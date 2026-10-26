@@ -23,7 +23,7 @@ pub use controls::{ControlPorts, Controls, LIMITS_KEY};
 pub use error::MediaError;
 pub use guard::AbortOnDrop;
 pub use hub::{Deliver, Hub, Subscription};
-pub use placeholder::{placeholder_for, CacheState, Placeholder};
+pub use placeholder::{placeholder_for, Placeholder};
 pub use places::Places;
 pub use ports::{CacheControl, MemoryRelease, PoolControl, PrefetchControl, SettingsStore, SlotDirectives, Suspendable, TransportControl};
 pub use routes::Routes;

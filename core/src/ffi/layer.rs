@@ -9,7 +9,7 @@ use super::ready::Ready;
 use crate::analysis::MediaTone;
 use crate::api::TonePreparation;
 use crate::api::{
-    assemble, placeholder_for, CacheState, Placeholder, Assembly, Kind, MediaError, MediaItem, MediaState, MediaStats, Parts, PlaybackRoute,
+    assemble, placeholder_for, Placeholder, Assembly, Kind, MediaError, MediaItem, MediaState, MediaStats, Parts, PlaybackRoute,
     PlayerSlotFactory, SettingsStore, Subscription,
 };
 use crate::memory::InputLimits;
@@ -480,18 +480,9 @@ impl MediaLayer {
     }
 
     pub async fn placeholder(&self, source: MediaItem, ready: bool) -> Placeholder {
-        let fallback = || placeholder_for(source.clone(), CacheState::Missing, ready);
-        let Ok((held, answer)) = self.ask(Query::Placeholder(source.clone(), ready)).await else { return fallback() };
-        match answer {
-            Answer::Placeholder(placeholder) => placeholder,
-            Answer::Running(mut task) => match self.until_closed(task.join()).await {
-                Ok(Ok(Finished::Placeholder(placeholder))) => {
-                    drop(held);
-                    placeholder
-                }
-                _ => fallback(),
-            },
-            _ => fallback(),
+        match self.ask(Query::Placeholder(source.clone(), ready)).await {
+            Ok((_, Answer::Placeholder(placeholder))) => placeholder,
+            _ => placeholder_for(source, ready),
         }
     }
 

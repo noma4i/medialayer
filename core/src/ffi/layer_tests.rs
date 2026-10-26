@@ -335,7 +335,7 @@ fn inv_ffi_03_an_image_that_cannot_be_fetched_is_a_fetch_error() {
 }
 
 #[test]
-fn inv_placeholder_02_a_source_is_cached_by_its_first_block_and_the_placeholder_follows_the_cache() {
+fn inv_placeholder_09_a_cached_video_keeps_its_cover_until_the_first_frame_is_shown() {
     let dir = tempfile::tempdir().unwrap();
     let caller = caller();
     let (layer, cache) = caller.block_on(async {
@@ -343,19 +343,18 @@ fn inv_placeholder_02_a_source_is_cached_by_its_first_block_and_the_placeholder_
         let cache = parts.cache.clone();
         (MediaLayer::from_parts(None, Handle::current(), parts, None, Vec::new()), cache)
     });
-    let cached = MediaItem::bare_video("https://o.test/cached.mp4");
-    let missing = MediaItem::bare_video("https://o.test/missing.mp4");
+    let cached = MediaItem { cover: Some("https://o.test/cover.jpg".to_string()), ..MediaItem::bare_video("https://o.test/cached.mp4") };
+    let cover = crate::api::Placeholder::Cover { url: "https://o.test/cover.jpg".to_string() };
 
     caller.block_on(cache.put("https://o.test/cached.mp4#0", crate::cache::Kind::Stream, b"first block")).unwrap();
 
     assert!(caller.block_on(layer.is_cached(cached.clone())));
-    assert!(!caller.block_on(layer.is_cached(missing.clone())));
-    assert_eq!(caller.block_on(layer.placeholder(cached, false)), crate::api::Placeholder::None);
-    assert_eq!(caller.block_on(layer.placeholder(missing, false)), crate::api::Placeholder::FirstFrame);
+    assert_eq!(caller.block_on(layer.placeholder(cached.clone(), false)), cover);
+    assert_eq!(caller.block_on(layer.placeholder(cached, true)), crate::api::Placeholder::None);
 }
 
 #[test]
-fn inv_placeholder_08_only_an_unready_video_reads_the_cache() {
+fn inv_placeholder_08_no_placeholder_reads_the_cache() {
     let dir = tempfile::tempdir().unwrap();
     let caller = caller();
     let (layer, routes) = caller.block_on(async {
@@ -365,16 +364,16 @@ fn inv_placeholder_08_only_an_unready_video_reads_the_cache() {
     });
     let item = |url: &str, kind: crate::api::Kind| MediaItem::bare(url, kind);
     let cases = [
-        ("image", item("https://o.test/a.jpg", crate::api::Kind::Image), false, 0),
-        ("ready image", item("https://o.test/b.jpg", crate::api::Kind::Image), true, 0),
-        ("audio", item("https://o.test/a.mp3", crate::api::Kind::Audio), false, 0),
-        ("ready video", item("https://o.test/a.mp4", crate::api::Kind::Video), true, 0),
-        ("unready video", item("https://o.test/b.mp4", crate::api::Kind::Video), false, 1),
+        ("image", item("https://o.test/a.jpg", crate::api::Kind::Image), false),
+        ("ready image", item("https://o.test/b.jpg", crate::api::Kind::Image), true),
+        ("audio", item("https://o.test/a.mp3", crate::api::Kind::Audio), false),
+        ("ready video", item("https://o.test/a.mp4", crate::api::Kind::Video), true),
+        ("unready video", item("https://o.test/b.mp4", crate::api::Kind::Video), false),
     ];
-    for (name, source, ready, lookups) in cases {
+    for (name, source, ready) in cases {
         let before = routes.storage_lookups();
         caller.block_on(layer.placeholder(source, ready));
-        assert_eq!(routes.storage_lookups() - before, lookups, "{name}");
+        assert_eq!(routes.storage_lookups() - before, 0, "{name}");
     }
 }
 

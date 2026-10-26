@@ -57,3 +57,5 @@ fun MediaLayer.toneFlow(source: MediaItem, band: Float): Flow<ToneUpdate> = call
 val MediaState.isFailed: Boolean get() = this is MediaState.Failed
 
 val MediaState.isReady: Boolean get() = this is MediaState.Ready || this is MediaState.Rendered || this is MediaState.Ended
+
+val MediaState.isRendered: Boolean get() = this is MediaState.Rendered || this is MediaState.Ended

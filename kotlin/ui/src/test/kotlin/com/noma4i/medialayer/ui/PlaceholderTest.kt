@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Looper
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -13,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import com.noma4i.medialayer.ImageFetchResult
@@ -284,11 +286,68 @@ class PlaceholderTest {
     until("red cover on the node") { published("cover", Tint.RED) && nodes("cover") == 1 }
     val gate = held(layer)
 
-    rule.runOnIdle { layer.emit(clip.url, MediaState.Ready) }
-    until("ready ask held") { events.has { it is Event.Ask && it.ready && it.held } }
+    rule.runOnIdle { layer.emit(clip.url, MediaState.Rendered) }
+    until("rendered ask held") { events.has { it is Event.Ask && it.ready && it.held } }
 
     assertEquals(1, nodes("cover"))
     gate.complete(Unit)
-    until("cover gone after the ready answer") { nodes("cover") == 0 }
+    until("cover gone after the rendered answer") { nodes("cover") == 0 }
+  }
+
+  @Test
+  fun inv_placeholder_10_aReadyVideoKeepsItsCoverUntilTheFirstFrameIsRendered() {
+    val layer = ScriptedLayer("A", events)
+    val clip = UrlKeyedClip("https://o.test/frame.mp4", "https://o.test/red-cover.png")
+    show(clip, layer)
+    until("red cover on the node") { published("cover", Tint.RED) && nodes("cover") == 1 }
+
+    rule.runOnIdle { layer.emit(clip.url, MediaState.Ready) }
+    rule.waitForIdle()
+    looper.idleFor(java.time.Duration.ofMillis(300))
+
+    assertEquals(1, nodes("cover"))
+    assertFalse(events.has { it is Event.Ask && it.ready })
+    rule.runOnIdle { layer.emit(clip.url, MediaState.Rendered) }
+    until("cover gone with the rendered frame") { nodes("cover") == 0 }
+  }
+
+  @Test
+  fun inv_placeholder_10_aPageThatLeavesAndReturnsAfterItsFrameWasShownChangesNoCover() {
+    org.robolectric.shadows.ShadowLog.setLoggable(MediaTrace.TAG, android.util.Log.VERBOSE)
+    MediaTrace.install()
+    try {
+      val layer = ScriptedLayer("A", events)
+      val clip = UrlKeyedClip("https://o.test/return.mp4", "https://o.test/red-cover.png")
+      var x by mutableStateOf(0)
+      rule.setContent {
+        CompositionLocalProvider(LocalPlaceholderObserver provides observer) {
+          MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
+            androidx.compose.foundation.layout.Box(Modifier.offset { IntOffset(x, 0) }) { MediaVideo(clip, modifier = Modifier.size(50.dp)) }
+          }
+        }
+      }
+      until("red cover on the node") { published("cover", Tint.RED) && nodes("cover") == 1 }
+      rule.runOnIdle { layer.emit(clip.url, MediaState.Rendered) }
+      until("cover gone with the rendered frame") { nodes("cover") == 0 }
+      val tail = clip.url.takeLast(24)
+      fun changes() = org.robolectric.shadows.ShadowLog.getLogsForTag(MediaTrace.TAG).map { it.msg.substringAfter(' ').substringAfter(' ') }.filter { it.startsWith("view placeholder $tail") }
+      val shown = changes()
+
+      x = 5_000
+      rule.waitForIdle()
+      looper.idleFor(java.time.Duration.ofMillis(300))
+      x = 0
+      rule.waitForIdle()
+      looper.idleFor(java.time.Duration.ofMillis(300))
+      rule.runOnIdle { layer.emit(clip.url, MediaState.Loading) }
+      looper.idleFor(java.time.Duration.ofMillis(300))
+
+      assertEquals(listOf("view placeholder $tail none", "view placeholder $tail cover", "view placeholder $tail none"), shown)
+      assertEquals(shown, changes())
+      assertEquals(0, nodes("cover"))
+    } finally {
+      MediaTrace.reset()
+      org.robolectric.shadows.ShadowLog.reset()
+    }
   }
 }

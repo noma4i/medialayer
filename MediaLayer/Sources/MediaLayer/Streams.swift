@@ -94,4 +94,11 @@ extension MediaState {
     case .idle, .loading, .failed: false
     }
   }
+
+  public var isRendered: Bool {
+    switch self {
+    case .rendered, .ended: true
+    case .idle, .loading, .ready, .failed: false
+    }
+  }
 }

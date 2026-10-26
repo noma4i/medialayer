@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.24.0 - 2026-10-26
+
+### Changed
+- A video cover stays until the first frame renders, and returns show no cover.
+
+### Removed
+- `CacheState` and the cache argument of `placeholderFor`.
+
 ## 3.23.1 - 2026-10-26
 
 ### Fixed

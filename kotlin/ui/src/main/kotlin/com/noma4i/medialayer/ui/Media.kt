@@ -11,7 +11,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onVisibilityChanged
 import androidx.compose.ui.platform.LocalContext
@@ -29,7 +28,6 @@ import com.noma4i.medialayer.stateFlow
 import com.noma4i.medialayer.toItem
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.flow.flowOf
 
 object Media {
   var muted: Boolean by mutableStateOf(false)
@@ -175,8 +173,11 @@ internal fun rememberPlace(
   val failure = remember { mutableStateOf<ScopedFailure?>(null) }
   if (visible) declarePlace(item, playing, muted, peeking, group, rate, viewToken, mounted) { failure.value = ScopedFailure(item, MediaState.Failed(it.toString())) }
   val media = LocalMediaEnvironment.current.media
-  val followed = remember(media, source.url, visible) { if (visible) media.stateFlow(source.url) else flowOf(MediaState.Idle) }.collectAsState(MediaState.Idle).value
-  return failure.value.of(item) ?: followed
+  val followed = remember(media, source.url) { mutableStateOf<MediaState>(MediaState.Idle) }
+  LaunchedEffect(media, source.url, visible) {
+    if (visible) media.stateFlow(source.url).collect { followed.value = it }
+  }
+  return failure.value.of(item) ?: followed.value
 }
 
 @Composable

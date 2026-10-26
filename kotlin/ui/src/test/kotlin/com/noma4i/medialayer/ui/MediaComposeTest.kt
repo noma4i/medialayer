@@ -117,7 +117,7 @@ class MediaComposeTest {
   }
 
   @Test
-  fun theCoreStateReachesTheContentAndTheCoverShowsUntilReady() {
+  fun theCoreStateReachesTheContentAndTheCoverShowsUntilTheFirstFrame() {
     val clip = Clip("https://o.test/a.mp4", cover = "https://o.test/cover.jpg")
     rule.setContent {
       MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
@@ -128,6 +128,9 @@ class MediaComposeTest {
     rule.onNodeWithContentDescription("cover").assertIsDisplayed()
 
     layer.emit(clip.url, MediaState.Ready)
+    rule.waitForIdle()
+    rule.onNodeWithContentDescription("cover").assertIsDisplayed()
+    layer.emit(clip.url, MediaState.Rendered)
     rule.waitUntil(5000) { rule.onAllNodesWithContentDescription("cover").fetchSemanticsNodes().isEmpty() }
 
     layer.emit(clip.url, MediaState.Failed("boom"))

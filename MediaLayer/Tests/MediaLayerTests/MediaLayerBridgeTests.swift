@@ -215,7 +215,7 @@ struct MediaLayerBridgeTests {
     let route = try await media.playUrl(source: source)
 
     #expect(route.url.hasPrefix("http://127.0.0.1:"))
-    #expect(placeholderFor(source: source, cache: .missing, ready: false) == .firstFrame)
+    #expect(placeholderFor(source: source, ready: false) == .firstFrame)
   }
 
   @Test

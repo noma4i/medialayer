@@ -118,7 +118,7 @@ private final class ScriptedPlaces: MediaPlaces, @unchecked Sendable {
     let answer: Placeholder
     switch source.kind {
     case .image: answer = (answerHash ?? source.blurHash).map { .blurHash(hash: $0) } ?? .none
-    case .video: answer = source.cover.map { .cover(url: $0) } ?? .firstFrame
+    case .video: answer = ready ? .none : source.cover.map { .cover(url: $0) } ?? .firstFrame
     default: answer = .none
     }
     let gate = lock.withLock { holds.isEmpty ? nil : holds.removeFirst() }
@@ -187,11 +187,12 @@ private final class Mount {
     window.isHidden = false
   }
 
-  func show(_ item: MediaItem, ready: Bool = false, context: MediaContext) {
+  func show(_ item: MediaItem, ready: Bool = false, enabled: Bool = true, context: MediaContext) {
     let events = events
     host.rootView = AnyView(PlaceholderView(
       item: item,
       ready: ready,
+      enabled: enabled,
       context: context,
       decode: { hash in
         events.add(.decode(hash: hash, onMain: Thread.isMainThread))
@@ -409,6 +410,46 @@ struct PlaceholderViewTests {
     held.open()
     guard await events.wait(atLeast: 2, { $0 == .published(.blur(.red)) }) else { Issue.record("second step never published"); return }
     #expect(mount.shown() == .red)
+  }
+
+  @MainActor
+  @Test
+  func inv_placeholder_10_aVideoCoverStaysAcrossAReturnOfTheSameSourceAfterItsFrameWasShown() async {
+    let events = Events()
+    let (_, context) = environment("A", events)
+    let mount = Mount(events: events)
+    defer { mount.close() }
+    let clip = video("https://o.test/red-cover.png", url: "https://o.test/return.mp4")
+
+    mount.show(clip, context: context)
+    guard await events.wait({ $0 == .published(.cover(.red)) }) else { Issue.record("cover never published"); return }
+    mount.show(clip, ready: true, context: context)
+    guard await events.wait({ $0 == .published(.none) }) else { Issue.record("cover never dropped by the shown frame"); return }
+    mount.show(clip, ready: true, enabled: false, context: context)
+    mount.show(clip, ready: true, enabled: true, context: context)
+    guard await events.wait(atLeast: 2, { $0 == .published(.none) }) else { Issue.record("the return never answered"); return }
+
+    let changes = events.all.compactMap { event -> Shown? in if case .published(let shown) = event { shown } else { nil } }.reduce(into: [Shown]()) { if $0.last != $1 { $0.append($1) } }
+    #expect(changes == [.cover(.red), .none])
+    #expect(mount.shown() == .clear)
+  }
+
+  @MainActor
+  @Test
+  func inv_placeholder_10_aDisabledViewAsksNothingAndKeepsItsPicture() async {
+    let events = Events()
+    let (_, context) = environment("A", events)
+    let mount = Mount(events: events)
+    defer { mount.close() }
+    let clip = video("https://o.test/red-cover.png", url: "https://o.test/disabled.mp4")
+
+    mount.show(clip, context: context)
+    guard await events.wait({ $0 == .published(.cover(.red)) }) else { Issue.record("cover never published"); return }
+    let asked = events.count { if case .ask = $0 { true } else { false } }
+    mount.show(clip, enabled: false, context: context)
+    mount.show(video("https://o.test/blue-cover.png", url: "https://o.test/disabled.mp4"), enabled: false, context: context)
+
+    #expect(events.count { if case .ask = $0 { true } else { false } } == asked)
   }
 }
 #endif

@@ -21,6 +21,25 @@ struct VideoEdges {
   }
 }
 
+/// The first frame of one source. It stays shown while the place leaves and returns, and ends with the source.
+struct ShownFrame {
+  private var url: String?
+  private var shown = false
+
+  func isShown(for url: String) -> Bool { shown && self.url == url }
+
+  mutating func follow(_ url: String) -> Bool {
+    guard self.url != url else { return false }
+    self.url = url
+    shown = false
+    return true
+  }
+
+  mutating func advance(to state: MediaState) {
+    if state.isRendered { shown = true }
+  }
+}
+
 enum VideoProgress {
   static func fraction(positionMs: UInt64, durationMs: UInt64?) -> Double? {
     guard let durationMs, durationMs > 0 else { return nil }
@@ -35,6 +54,8 @@ public struct MediaVideo<Content: View>: View {
   @State private var mount: PlaceMount?
   @State private var host: SurfaceHost?
   @State private var edges = VideoEdges()
+  @State private var shownFrame = ShownFrame()
+  @State private var hostIdentity: MountIdentity?
   @State private var onScreen = false
   @State private var inBackground = false
   private let source: any MediaSource
@@ -78,9 +99,9 @@ public struct MediaVideo<Content: View>: View {
   public var body: some View {
     ZStack {
       Color.clear
-      if active, let context {
-        PlaceholderView(item: item, ready: state.isReady, context: context)
-        if let host { VideoSurface(host: host, gravity: gravity) }
+      if let context {
+        PlaceholderView(item: item, ready: shownFrame.isShown(for: source.url), enabled: active, context: context)
+        if let host, hostIdentity == identity { VideoSurface(host: host, gravity: gravity) }
       }
       if active { content(state) }
     }
@@ -102,7 +123,7 @@ public struct MediaVideo<Content: View>: View {
     .onChange(of: group) { mount?.update(input()) }
     .onChange(of: peeking) { mount?.update(input()) }
     .onChange(of: muted) { mount?.update(input()) }
-    .id(MountIdentity(item: item, context: context))
+    .id(identity)
   }
 
   var item: MediaItem {
@@ -110,6 +131,8 @@ public struct MediaVideo<Content: View>: View {
     item.looping = loop
     return item
   }
+
+  private var identity: MountIdentity { MountIdentity(item: item, context: context) }
 
   private var active: Bool { onScreen && !inBackground }
 
@@ -134,12 +157,13 @@ public struct MediaVideo<Content: View>: View {
     guard visible else {
       mount?.close()
       mount = nil
-      host = nil
       return
     }
     guard mount == nil, let places = context?.places else { return }
-    let surface = SurfaceHost(places: places)
-    host = surface
+    if host == nil || hostIdentity != identity {
+      host = SurfaceHost(places: places)
+      hostIdentity = identity
+    }
     let created = PlaceMount(places: places, item: item) { error in
       Task { @MainActor in state = .failed(detail: String(describing: error)) }
     }
@@ -149,10 +173,11 @@ public struct MediaVideo<Content: View>: View {
 
   private func follow() async {
     guard let places = context?.places else { return }
-    state = .idle
+    if shownFrame.follow(source.url) { state = .idle }
     for await value in places.stateStream(key: source.url) {
       MediaTrace.emit("view", "state \(MediaTrace.tail(source.url)) \(value)")
       state = value
+      shownFrame.advance(to: value)
       let reached = edges.advance(to: value)
       if reached.firstFrame {
         onFirstFrame()

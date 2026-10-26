@@ -18,6 +18,7 @@ enum PlaceholderContent {
 struct PlaceholderView: View {
   let item: MediaItem
   let ready: Bool
+  var enabled = true
   let context: MediaContext
   var decode: @Sendable (String) -> CGImage? = { PlaceholderPixels.blurHash($0)?.cgImage }
   var published: @MainActor (PlaceholderContent) -> Void = { _ in }
@@ -37,8 +38,8 @@ struct PlaceholderView: View {
         }
       }
       .frame(width: geometry.size.width, height: geometry.size.height)
-      .task(id: PlanKey(source: source, ready: ready, points: geometry.size, scale: displayScale)) {
-        guard let content = await resolve(points: geometry.size, scale: displayScale), !Task.isCancelled else { return }
+      .task(id: PlanKey(source: source, ready: ready, enabled: enabled, points: geometry.size, scale: displayScale)) {
+        guard enabled, let content = await resolve(points: geometry.size, scale: displayScale), !Task.isCancelled else { return }
         if current?.source != source || current?.content.label != content.label {
           MediaTrace.emit("view", "placeholder \(MediaTrace.tail(item.url)) \(content.label)")
         }
@@ -97,6 +98,7 @@ struct PlaceholderView: View {
   private struct PlanKey: Hashable {
     let source: Source
     let ready: Bool
+    let enabled: Bool
     let points: CGSize
     let scale: CGFloat
   }

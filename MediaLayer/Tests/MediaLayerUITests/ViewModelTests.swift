@@ -114,7 +114,13 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
     if let bytes = lock.withLock({ bytesByURL[url] }) { return ImageFetchResult(bytes: bytes, source: imageOrigin) }
     return ImageFetchResult(bytes: try imageResult.get(), source: imageOrigin)
   }
-  func placeholder(source: MediaItem, ready: Bool) async -> Placeholder { noteMain("placeholder"); return .none }
+  private var readyAsks: [Bool] = []
+  var placeholderReadyAsks: [Bool] { lock.withLock { readyAsks } }
+  func placeholder(source: MediaItem, ready: Bool) async -> Placeholder {
+    noteMain("placeholder")
+    lock.withLock { readyAsks.append(ready) }
+    return .none
+  }
   func setTonePreparation(preparation: TonePreparation) throws { lock.withLock { self.preparation = preparation } }
   func tonePixelsNeeded(source: MediaItem) async -> Bool { needsTone }
   func playUrl(source: MediaItem) async throws -> PlaybackRoute {
@@ -304,6 +310,29 @@ struct ViewModelTests {
       let reached = edges.advance(to: state)
       #expect((reached.firstFrame, reached.ended) == (firstFrame, ended), "\(state)")
     }
+  }
+
+  @Test
+  func inv_placeholder_10_theCoverWaitsForTheRenderedFrameAndAReturnOfTheSameSourceKeepsItShown() {
+    var frame = ShownFrame()
+    let url = "https://o.test/a.mp4"
+    let steps: [(MediaState, shown: Bool)] = [
+      (.idle, false), (.loading, false), (.ready, false), (.failed(detail: "x"), false), (.rendered, true),
+      (.idle, true), (.loading, true), (.ready, true), (.ended, true)
+    ]
+
+    _ = frame.follow(url)
+    for (state, shown) in steps {
+      frame.advance(to: state)
+      #expect(frame.isShown(for: url) == shown, "\(state)")
+    }
+    let sameSource = frame.follow(url)
+    #expect(!sameSource)
+    #expect(frame.isShown(for: url))
+    #expect(!frame.isShown(for: "https://o.test/b.mp4"))
+    let newSource = frame.follow("https://o.test/b.mp4")
+    #expect(newSource)
+    #expect(!frame.isShown(for: "https://o.test/b.mp4"))
   }
 
   @Test(arguments: [

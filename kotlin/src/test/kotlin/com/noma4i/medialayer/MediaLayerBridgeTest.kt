@@ -370,7 +370,7 @@ class MediaLayerBridgeTest {
     val route = media.playUrl(source)
 
     assertTrue(route.url.startsWith("http://127.0.0.1:"))
-    assertEquals(Placeholder.FirstFrame, placeholderFor(source, CacheState.MISSING, false))
+    assertEquals(Placeholder.FirstFrame, placeholderFor(source, false))
   }
 
   @Test
