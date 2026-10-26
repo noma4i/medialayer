@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.9.3 - 2026-10-26
+
+### Fixed
+- Audio that finished playing starts from the beginning when shown again.
+
 ## 3.9.2 - 2026-10-26
 
 ### Fixed
