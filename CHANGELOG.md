@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.18.1 - 2026-10-26
+
+### Changed
+- The 3.8.0 notes list the private slot commands, async `create` and removed `replaceImageWindow`.
+
 ## 3.18.0 - 2026-10-26
 
 ### Fixed
@@ -157,7 +162,9 @@
 
 ### Changed
 - `MediaImage` takes an `animation` argument.
-- `MediaAudio` takes `playing` and `onEnd` instead of an `AudioControl` closure.
+- `MediaAudio` takes `playing` and `onEnd`, `AudioControl.seek` takes a fraction.
+- Slot commands of `AVQueuePlayerSlot` and `ExoPlayerSlot` are private.
+- `PlayerSlotFactory.create` is async in Swift and suspend in Kotlin and returns `CreatedPlayer`.
 - `Media.setMuted(_:)` throws, and `Media.failure` reports the last open or input failure.
 - Overloaded input reports `MediaError.Overloaded`, and closed objects report `MediaError.Closed`.
 - `ImageWork.cancel` takes no key.
@@ -180,8 +187,8 @@
 ### Removed
 - The `silent` parameter of `MediaLayer.open` in Swift and Kotlin.
 - The `key` field of `ImageWork.Cancel`.
-- `AudioControl` of Kotlin `MediaAudio`.
 - `attachView` and `detachView` of `MediaPlaces`, replaced by place objects.
+- `replaceImageWindow`, replaced by `mediaImageWindow` and `MediaImageWindow`.
 
 ## 3.7.0 - 2026-10-23
 
