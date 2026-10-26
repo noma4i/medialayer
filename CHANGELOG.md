@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.12.1 - 2026-10-26
+
+### Added
+- Trace lines `stage suspend` and `stage resume` name the playback suspensions that hold the groups.
+
+### Fixed
+- Voice recordings use AAC at 44.1 kHz, mono, 128 kbit/s.
+
 ## 3.12.0 - 2026-10-26
 
 ### Added
