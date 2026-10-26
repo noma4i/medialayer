@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.9.0 - 2026-10-26
+
+### Added
+- `MediaAudioSession.volumeRaises()` reports each raise of the device volume.
+
+### Changed
+- A refused memory budget reaches `Media.failure`.
+- `prepareImage` refuses a photo with a side above 16384.
+- Animation decodes share the memory budget of the library.
+
+### Fixed
+- Cancelling an Android rest frame decode stops it between frames.
+- Cancelling an Android video tone read releases the reader at once.
+
 ## 3.8.0 - 2026-10-26
 
 ### Added
