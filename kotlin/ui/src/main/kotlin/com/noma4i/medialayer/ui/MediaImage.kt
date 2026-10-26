@@ -72,7 +72,7 @@ fun MediaImage(
     Box(modifier) { content(MediaState.Idle) }
     return
   }
-  val screen = rememberScreenVisibility(LocalMediaEnvironment.current.stats)
+  val screen = rememberScreenVisibility(source.url, LocalMediaEnvironment.current.stats)
   val item = source.toItem()
   val failure = remember { mutableStateOf<ScopedFailure?>(null) }
   val mount = claimImage(source, item, screen, failure)
@@ -137,7 +137,12 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
       override suspend fun execute(request: ImageRequest): ImageResult =
         // Visibility cancels in-flight decoding without invalidating the image composition.
         snapshotFlow { screen.visible }.onStart { stats.recordLater(ImageWork.Observe) }.onCompletion { stats.recordLater(ImageWork.Unobserve) }.transformLatest { visible ->
-          if (visible) emit(environment.imageLoader.execute(request))
+          if (visible) {
+            MediaTrace.emit("image") { "load ${screen.url.takeLast(24)} start" }
+            val result = environment.imageLoader.execute(request)
+            MediaTrace.emit("image") { "load ${screen.url.takeLast(24)} ${if (result is coil3.request.ErrorResult) "failed" else "done"}" }
+            emit(result)
+          }
         }.first()
     }
   }

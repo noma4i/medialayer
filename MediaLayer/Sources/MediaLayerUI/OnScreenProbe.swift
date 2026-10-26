@@ -28,7 +28,7 @@ private final class VisibilityPass: NSObject {
       let key = ObjectIdentifier(view)
       if let cached = clips[key] { return cached }
       let rect: CGRect
-      if view.isHidden { rect = .null }
+      if view.isHidden || view.alpha == 0 { rect = .null }
       else if let parent = view.superview {
         let inherited = clip(parent, window: window)
         rect = view.clipsToBounds || view is UIScrollView ? inherited.intersection(view.convert(view.bounds, to: window)) : inherited
@@ -57,6 +57,15 @@ private final class VisibilityObservation {
     if observation.tokens.isEmpty {
       observation.ancestor = ancestor
       observation.tokens.append(ancestor.observe(\.isHidden) { [weak observation] _, _ in observation?.schedule() })
+      observation.tokens.append(ancestor.observe(\.alpha) { [weak observation] _, _ in observation?.schedule() })
+      let layer = ancestor.layer
+      observation.tokens.append(layer.observe(\.opacity) { [weak observation] _, _ in observation?.schedule() })
+      observation.tokens.append(layer.observe(\.position) { [weak observation] _, _ in observation?.schedule() })
+      observation.tokens.append(layer.observe(\.bounds) { [weak observation] _, _ in observation?.schedule() })
+      observation.tokens.append(layer.observe(\.transform) { [weak observation] _, _ in observation?.schedule() })
+      observation.tokens.append(layer.observe(\.sublayerTransform) { [weak observation] _, _ in observation?.schedule() })
+      observation.tokens.append(layer.observe(\.masksToBounds) { [weak observation] _, _ in observation?.schedule() })
+      observation.tokens.append(layer.observe(\.isHidden) { [weak observation] _, _ in observation?.schedule() })
       if let scroll = ancestor as? UIScrollView {
         observation.tokens.append(scroll.observe(\.contentOffset) { [weak observation] _, _ in observation?.schedule() })
       }

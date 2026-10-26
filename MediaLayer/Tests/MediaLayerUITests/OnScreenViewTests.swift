@@ -91,4 +91,108 @@ struct OnScreenViewTests {
     #expect(reports == [true, false])
   }
 }
+enum MoveWithoutLayout: String, CaseIterable, CustomTestStringConvertible {
+  case frameOrigin, layerPosition, boundsOrigin, transform, clipsToBounds
+
+  var testDescription: String { rawValue }
+}
+
+enum HideWithoutLayout: String, CaseIterable, CustomTestStringConvertible {
+  case viewHidden, layerHidden, alpha, layerOpacity, frameOrigin, layerPosition, boundsOrigin, transform, clipsToBounds, windowHidden
+
+  var testDescription: String { rawValue }
+}
+
+extension OnScreenViewTests {
+  @Test(arguments: MoveWithoutLayout.allCases)
+  func inv_visibility_03_an_ancestor_move_without_layout_reports_on_screen(_ move: MoveWithoutLayout) async {
+    let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 100))
+    window.isHidden = false
+    let clip = UIView(frame: window.bounds)
+    clip.clipsToBounds = true
+    let mover = UIView(frame: CGRect(x: 300, y: 0, width: 100, height: 100))
+    let probe = OnScreenView(frame: CGRect(x: 0, y: 0, width: 50, height: 50))
+    if move == .clipsToBounds {
+      clip.frame = CGRect(x: 0, y: 0, width: 10, height: 10)
+      mover.frame = CGRect(x: 100, y: 50, width: 100, height: 50)
+    }
+    var reports: [Bool] = []
+    probe.onChange = { reports.append($0) }
+    mover.addSubview(probe)
+    clip.addSubview(mover)
+    window.addSubview(clip)
+    await settle()
+    #expect(reports == [])
+
+    switch move {
+    case .frameOrigin: mover.frame.origin.x = 0
+    case .layerPosition: mover.layer.position = CGPoint(x: 50, y: 50)
+    case .boundsOrigin: mover.bounds.origin.x = 300
+    case .transform: mover.transform = CGAffineTransform(translationX: -300, y: 0)
+    case .clipsToBounds: clip.clipsToBounds = false
+    }
+    await settle(until: { reports == [true] })
+    #expect(reports == [true])
+    probe.finish()
+    window.isHidden = true
+  }
+
+  @Test(arguments: HideWithoutLayout.allCases)
+  func inv_visibility_04_a_hidden_subtree_reports_off_screen_without_layout(_ hide: HideWithoutLayout) async {
+    let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 100))
+    window.isHidden = false
+    let clip = UIView(frame: window.bounds)
+    let parent = UIView(frame: window.bounds)
+    let probe = OnScreenView(frame: CGRect(x: 0, y: 0, width: 50, height: 50))
+    var reports: [Bool] = []
+    probe.onChange = { reports.append($0) }
+    parent.addSubview(probe)
+    clip.addSubview(parent)
+    window.addSubview(clip)
+    await settle(until: { reports == [true] })
+    #expect(reports == [true])
+
+    switch hide {
+    case .viewHidden: parent.isHidden = true
+    case .layerHidden: parent.layer.isHidden = true
+    case .alpha: parent.alpha = 0
+    case .layerOpacity: parent.layer.opacity = 0
+    case .frameOrigin: parent.frame.origin.x = 500
+    case .layerPosition: parent.layer.position = CGPoint(x: 700, y: 50)
+    case .boundsOrigin: parent.bounds.origin.x = 500
+    case .transform: parent.transform = CGAffineTransform(translationX: 500, y: 0)
+    case .clipsToBounds:
+      clip.clipsToBounds = true
+      clip.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
+      parent.frame = CGRect(x: 100, y: 50, width: 100, height: 50)
+      probe.frame = CGRect(x: 0, y: 0, width: 50, height: 50)
+    case .windowHidden: window.isHidden = true
+    }
+    await settle(until: { reports == [true, false] })
+    #expect(reports == [true, false])
+    probe.finish()
+    window.isHidden = true
+  }
+
+  @Test
+  func inv_visibility_04_an_ancestor_shown_again_reports_on_screen() async {
+    let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 100))
+    window.isHidden = false
+    let parent = UIView(frame: window.bounds)
+    parent.alpha = 0
+    let probe = OnScreenView(frame: CGRect(x: 0, y: 0, width: 50, height: 50))
+    var reports: [Bool] = []
+    probe.onChange = { reports.append($0) }
+    parent.addSubview(probe)
+    window.addSubview(parent)
+    await settle()
+    #expect(reports == [])
+
+    parent.alpha = 1
+    await settle(until: { reports == [true] })
+    #expect(reports == [true])
+    probe.finish()
+    window.isHidden = true
+  }
+}
 #endif

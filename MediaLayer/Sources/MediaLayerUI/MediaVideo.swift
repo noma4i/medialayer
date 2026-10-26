@@ -89,6 +89,7 @@ public struct MediaVideo<Content: View>: View {
     }
     .task(id: Sampling(url: source.url, active: onScreen && !inBackground, reports: onProgress != nil)) { await sample() }
     .background(OnScreenProbe { value in
+      MediaTrace.emit("view", "onScreen \(MediaTrace.tail(source.url)) \(value)")
       onScreen = value
       declare(visible: value)
     })

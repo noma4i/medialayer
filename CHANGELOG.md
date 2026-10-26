@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.16.2 - 2026-10-26
+
+### Fixed
+- A `MediaImage` or `MediaVideo` whose ancestor moves without a layout pass (offset, transform, layer position, bounds origin, `clipsToBounds`, hidden layer) now reports its first visibility on iOS without a touch.
+
+### Added
+- `ML_TRACE` and the Android trace print `view onScreen <key tail> <true|false>` and `image load <key tail> start|done|failed`.
+
 ## 3.16.1 - 2026-10-26
 
 ### Fixed

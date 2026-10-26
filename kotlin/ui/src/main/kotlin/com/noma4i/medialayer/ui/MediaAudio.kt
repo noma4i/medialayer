@@ -66,7 +66,7 @@ fun MediaAudio(source: MediaSource, playing: Boolean = false, muted: Boolean = f
     return
   }
   val environment = LocalMediaEnvironment.current
-  val screen = rememberScreenVisibility()
+  val screen = rememberScreenVisibility(source.url)
   val mounted = remember(environment, source.url) { mutableStateOf<PlaceMount?>(null) }
   val control = remember(environment, source.url) { AudioControl(playing) { mounted.value?.seek(it) }.also { it.rate = rate } }
   LaunchedEffect(rate) { control.rate = rate }

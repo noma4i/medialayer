@@ -43,24 +43,35 @@ object Media {
 }
 
 internal class ScreenVisibility {
+  var url = ""
   private var inViewport by mutableStateOf(false)
   var started by mutableStateOf(true)
+    private set
 
   val visible: Boolean get() = inViewport && started
 
-  val modifier: Modifier = Modifier.onVisibilityChanged(minFractionVisible = VISIBLE_FRACTION) { inViewport = it }
+  val modifier: Modifier = Modifier.onVisibilityChanged(minFractionVisible = VISIBLE_FRACTION) { deliver(it, started) }
+
+  fun start(started: Boolean) = deliver(inViewport, started)
+
+  private fun deliver(inViewport: Boolean, started: Boolean) {
+    val before = visible
+    this.inViewport = inViewport
+    this.started = started
+    if (visible != before) MediaTrace.emit("view") { "onScreen ${url.takeLast(24)} $visible" }
+  }
 }
 
 private const val VISIBLE_FRACTION = 0.01f
 
 @Composable
-internal fun rememberScreenVisibility(stats: com.noma4i.medialayer.ImageCounters? = null): ScreenVisibility {
-  val screen = remember { ScreenVisibility() }
+internal fun rememberScreenVisibility(url: String, stats: com.noma4i.medialayer.ImageCounters? = null): ScreenVisibility {
+  val screen = remember { ScreenVisibility() }.also { it.url = url }
   val lifecycle = LocalView.current.findViewTreeLifecycleOwner()?.lifecycle
   DisposableEffect(screen, lifecycle, stats) {
     if (lifecycle == null) return@DisposableEffect onDispose { }
-    val observer = LifecycleEventObserver { _, _ -> screen.started = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }
-    screen.started = lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+    val observer = LifecycleEventObserver { _, _ -> screen.start(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) }
+    screen.start(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
     lifecycle.addObserver(observer)
     stats?.recordLater(com.noma4i.medialayer.ImageWork.Observe)
     onDispose {

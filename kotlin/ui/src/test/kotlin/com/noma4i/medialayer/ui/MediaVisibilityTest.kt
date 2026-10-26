@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -86,6 +87,60 @@ class MediaVisibilityTest {
     assertEquals("started=1 cancelled=1 decodes=0 claims=[visible:$url:true, visible:$url:false]", counters())
     mounted = false
     until { layer.imageStats().snapshot().activeObservers == 0uL }
+  }
+
+  @Test
+  fun inv_visibility_03_aPageMovedByGraphicsLayerTranslationWithoutLayoutChangesItsVisibility() {
+    var x by mutableIntStateOf(FAR)
+    rule.setContent {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
+        Box(Modifier.fillMaxSize()) { Box(Modifier.graphicsLayer { translationX = x.toFloat() }) { MediaImage(page, Modifier.size(50.dp)) } }
+      }
+    }
+    rule.waitForIdle()
+    looper.idleFor(java.time.Duration.ofMillis(1000))
+    assertEquals("started=0 cancelled=0 decodes=0 claims=[]", counters())
+
+    x = 0
+    until { started.get() == 1 && claims() == listOf("visible:$url:true") }
+
+    x = FAR
+    until { left() }
+    assertEquals("started=1 cancelled=1 decodes=0 claims=[visible:$url:true, visible:$url:false]", counters())
+  }
+
+  @Test
+  fun inv_trace_05_aShownImageTracesItsVisibilityAndItsLoad() {
+    org.robolectric.shadows.ShadowLog.setLoggable(MediaTrace.TAG, android.util.Log.VERBOSE)
+    MediaTrace.install()
+    try {
+      rule.setContent {
+        MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { MediaImage(page, Modifier.size(50.dp)) }
+      }
+      rule.waitUntil(5000) { looper.idle(); started.get() == 1 }
+      gate.complete(Unit)
+      val tail = url.takeLast(24)
+      rule.waitUntil(5000) { looper.idle(); org.robolectric.shadows.ShadowLog.getLogsForTag(MediaTrace.TAG).any { it.msg.endsWith(" image load $tail done") } }
+      val seen = org.robolectric.shadows.ShadowLog.getLogsForTag(MediaTrace.TAG).map { it.msg.substringAfter(' ').substringAfter(' ') }
+      assertEquals(listOf("view onScreen $tail true", "image load $tail start", "image load $tail done"), seen.filter { it.startsWith("view ") || it.startsWith("image ") })
+    } finally {
+      MediaTrace.reset()
+      org.robolectric.shadows.ShadowLog.reset()
+    }
+  }
+
+  @Test
+  fun inv_visibility_04_aPagerPageOutsideTheWindowIsNotVisible() {
+    rule.setContent {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
+        androidx.compose.foundation.pager.HorizontalPager(androidx.compose.foundation.pager.rememberPagerState { 2 }, Modifier.fillMaxSize(), beyondViewportPageCount = 1) { index ->
+          if (index == 1) MediaImage(page, Modifier.size(50.dp))
+        }
+      }
+    }
+    rule.waitForIdle()
+    looper.idleFor(java.time.Duration.ofMillis(1000))
+    assertEquals("started=0 cancelled=0 decodes=0 claims=[]", counters())
   }
 
   @Test

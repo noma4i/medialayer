@@ -132,7 +132,7 @@ fun MediaVideo(
     return
   }
   val environment = LocalMediaEnvironment.current
-  val screen = rememberScreenVisibility()
+  val screen = rememberScreenVisibility(source.url)
   var view by remember(environment, source.url) { mutableStateOf<ViewHandle?>(null) }
   val state = rememberPlace(source, playing, muted, loop, peeking, screen.visible, group, viewToken = view?.token)
   val edges = remember(source.url) { VideoEdges() }
