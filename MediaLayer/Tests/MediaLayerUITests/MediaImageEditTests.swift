@@ -320,6 +320,31 @@ struct MediaImageEditTests {
     #expect(MediaImageDecode.imageSize(data: plain).map { ($0.width, $0.height) } ?? (0, 0) == (80, 40))
     #expect(MediaImageDecode.imageSize(data: Data([1, 2, 3])) == nil)
   }
+
+  @Test
+  func inv_send_43_an_encode_without_a_layer_gives_png_and_jpeg_bytes_turned_upright() async throws {
+    let sideways = try halves(80, 40, orientation: 6)
+
+    let png = try await MediaImageEncode.encode(bytes: sideways, format: .png)
+    let jpeg = try await MediaImageEncode.encode(bytes: sideways, format: .jpeg, quality: 0.8)
+
+    #expect(png.prefix(8) == Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))
+    #expect(jpeg.prefix(3) == Data([0xFF, 0xD8, 0xFF]))
+    let turned = try image(png)
+    #expect((turned.width, turned.height) == (40, 80))
+    #expect(isRed(try rgb(turned, 20, 20)))
+  }
+
+  @Test
+  func inv_send_44_an_encode_without_a_layer_refuses_a_raster_above_the_limit_with_a_media_error() async throws {
+    let small = try halves(80, 40, orientation: 1)
+    let large = try halves(2000, 2000, orientation: 6)
+
+    await #expect(throws: MediaError.self) { try await MediaImageEncode.encode(bytes: small, limitBytes: 80 * 40 * 4 - 1) }
+    await #expect(throws: MediaError.self) { try await MediaImageEncode.encode(bytes: large) }
+    await #expect(throws: MediaError.self) { try await MediaImageEncode.encode(bytes: Data([1, 2, 3])) }
+    #expect(try await MediaImageEncode.encode(bytes: small, limitBytes: 80 * 40 * 4).prefix(3) == Data([0xFF, 0xD8, 0xFF]))
+  }
 }
 
 extension GlobalMedia {
@@ -331,6 +356,19 @@ extension GlobalMedia {
         settings: UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!),
         directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
       )
+    }
+
+    @Test
+    func inv_send_43_an_encode_without_a_layer_equals_the_encode_through_the_layer() async throws {
+      let media = try await open()
+      let webp = try Data(contentsOf: Bundle.module.url(forResource: "sticker", withExtension: "webp", subdirectory: "Fixtures/alpha")!)
+      let jpeg = try halves(80, 40, orientation: 6)
+
+      for (bytes, format) in [(webp, ImageFormat.png), (jpeg, .jpeg), (webp, .jpeg)] {
+        let outside = try await MediaImageEncode.encode(bytes: bytes, format: format, quality: 0.7)
+        let inside = try await media.encodeImage(bytes: bytes, format: format, quality: 0.7)
+        #expect(outside == inside)
+      }
     }
 
     @Test

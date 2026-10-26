@@ -271,6 +271,31 @@ class MediaImageEditTest {
   }
 
   @Test
+  fun inv_send_43_anEncodeWithoutALayerGivesPngAndJpegBytesTurnedUprightAndEqualToTheEncodeThroughTheLayerBody() = runBlocking {
+    val sideways = exifJpeg(40, 20, 6)
+
+    val png = MediaImageEncode.encode(sideways, ImageFormat.PNG)
+    val jpeg = MediaImageEncode.encode(sideways, ImageFormat.JPEG, 0.8)
+
+    assertArrayEquals(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A), png.copyOf(8))
+    assertArrayEquals(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte()), jpeg.copyOf(3))
+    val turned = BitmapFactory.decodeByteArray(png, 0, png.size)
+    assertEquals(20 to 40, turned.width to turned.height)
+    assertArrayEquals(encodeBytes(sideways, ImageFormat.PNG, 0.9) { AutoCloseable {} }, png)
+    assertArrayEquals(encodeBytes(sideways, ImageFormat.JPEG, 0.8) { AutoCloseable {} }, jpeg)
+  }
+
+  @Test
+  fun inv_send_44_anEncodeWithoutALayerRefusesARasterAboveTheLimitWithAMediaException() = runBlocking {
+    val small = exifJpeg(40, 20, 1)
+    val large = exifJpeg(2000, 2000, 6)
+
+    assertThrows(MediaException.Overloaded::class.java) { runBlocking { MediaImageEncode.encode(small, limitBytes = 40L * 20 * 4 - 1) } }
+    assertThrows(MediaException.Overloaded::class.java) { runBlocking { MediaImageEncode.encode(large) } }
+    assertArrayEquals(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte()), MediaImageEncode.encode(small, limitBytes = 40L * 20 * 4).copyOf(3))
+  }
+
+  @Test
   fun inv_send_31_theSizeOfBytesEqualsTheSizeOfTheDecodeWithoutDecoding() = runBlocking {
     val turned = exifJpeg(40, 20, 6)
     val plain = exifJpeg(40, 20, 1)

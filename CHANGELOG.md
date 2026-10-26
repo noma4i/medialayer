@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.25.0 - 2026-10-27
+
+### Added
+- `MediaImageEncode.encode` encodes image bytes as JPEG or PNG without an open MediaLayer, for a notification extension or a push service, and refuses a raster above `limitBytes` with `MediaError.Overloaded`.
+
 ## 3.24.0 - 2026-10-26
 
 ### Changed

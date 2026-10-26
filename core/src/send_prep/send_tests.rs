@@ -1,5 +1,6 @@
 use super::*;
 use crate::api::MediaError;
+use crate::memory::InputLimits;
 
 fn source(width: u32, height: u32) -> VideoSource {
     VideoSource { width, height, rotation_degrees: 0, frame_rate: 30.0, bitrate: Some(8_000_000), mp4_h264_aac: true }
@@ -308,6 +309,19 @@ fn inv_send_28_an_encode_plan_counts_one_raster_plus_one_per_redraw_and_flattens
     }
     assert_eq!(image_encode_plan(16_385, 1, 1, false, ImageFormat::Png), None);
     assert_eq!(image_encode_plan(0, 1, 1, false, ImageFormat::Png), None);
+}
+
+#[test]
+fn inv_send_42_an_encode_outside_a_layer_is_admitted_by_its_plan_cost_against_the_limit_and_refused_above_it() {
+    let default = InputLimits::default().encode_bytes;
+    let plan = image_encode_plan(1000, 1000, 6, true, ImageFormat::Jpeg).unwrap();
+    assert_eq!(plan.cost, 12_000_000);
+    assert_eq!(image_encode_outside_admit(plan.cost, None), Ok(()));
+    assert_eq!(image_encode_outside_admit(plan.cost, Some(plan.cost)), Ok(()));
+    let refused = image_encode_outside_admit(plan.cost, Some(plan.cost - 1)).unwrap_err();
+    assert!(matches!(refused, MediaError::Overloaded { .. }), "{refused:?}");
+    let large = image_encode_plan(2000, 2000, 6, true, ImageFormat::Jpeg).unwrap();
+    assert!(large.cost > default && matches!(image_encode_outside_admit(large.cost, None), Err(MediaError::Overloaded { .. })));
 }
 
 #[test]

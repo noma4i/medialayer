@@ -8,6 +8,7 @@ import android.media.ExifInterface
 import com.noma4i.medialayer.ImageFormat
 import com.noma4i.medialayer.MediaException
 import com.noma4i.medialayer.MediaLayer
+import com.noma4i.medialayer.imageEncodeOutsideAdmit
 import com.noma4i.medialayer.imageEncodePlan
 import com.noma4i.medialayer.jpegQuality
 import java.io.ByteArrayInputStream
@@ -31,6 +32,18 @@ suspend fun MediaLayer.encodeImage(bitmap: Bitmap, format: ImageFormat = ImageFo
 /** The bytes of an image (any format the system decodes, such as WebP) encoded again as JPEG or PNG and turned upright by their EXIF orientation. */
 suspend fun MediaLayer.encodeImage(bytes: ByteArray, format: ImageFormat = ImageFormat.JPEG, quality: Double = 0.9): ByteArray =
   encodeBytes(bytes, format, quality, decodeAdmit())
+
+/**
+ * The bytes of an image encoded again as JPEG or PNG without an open layer: no proxy, no cache, one call. The raster the encode needs is checked
+ * against [limitBytes] (the input limit of the library when null) before the bytes are decoded, a size above it is refused with [MediaException.Overloaded].
+ */
+object MediaImageEncode {
+  suspend fun encode(bytes: ByteArray, format: ImageFormat = ImageFormat.JPEG, quality: Double = 0.9, limitBytes: Long? = null): ByteArray =
+    encodeBytes(bytes, format, quality) { cost ->
+      imageEncodeOutsideAdmit(cost.toULong(), limitBytes?.toULong())
+      AutoCloseable {}
+    }
+}
 
 private val MAY_HAVE_ALPHA = setOf("image/png", "image/webp", "image/gif")
 

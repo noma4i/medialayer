@@ -23,21 +23,8 @@ extension MediaLayer {
   /// The bytes of an image (any format ImageIO reads, such as WebP) encoded again as JPEG or PNG and turned upright by their EXIF orientation.
   /// The decoded raster is asked of the memory budget before the bytes are decoded.
   public func encodeImage(bytes: Data, format: ImageFormat = .jpeg, quality: Double = 0.9) async throws -> Data {
-    let work = Task.detached {
-      guard let source = CGImageSourceCreateWithData(bytes as CFData, nil),
-            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-            let width = properties[kCGImagePropertyPixelWidth] as? Int,
-            let height = properties[kCGImagePropertyPixelHeight] as? Int
-      else { throw MediaError.Fetch(detail: "the bytes are not an image") }
-      let tag = (properties[kCGImagePropertyOrientation] as? UInt32) ?? 1
-      let alpha = (properties[kCGImagePropertyHasAlpha] as? Bool) ?? false
-      return try await ImageEncoding.run(
-        width: UInt32(clamping: width), height: UInt32(clamping: height), exifOrientation: tag, hasAlpha: alpha, format: format, quality: quality, admit: self.encodeAdmit
-      ) {
-        guard let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw MediaError.Fetch(detail: "the bytes are not an image") }
-        return image
-      }
-    }
+    let admit = encodeAdmit
+    let work = Task.detached { try await ImageEncoding.run(bytes: bytes, format: format, quality: quality, admit: admit) }
     return try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
   }
 
@@ -49,7 +36,37 @@ extension MediaLayer {
   }
 }
 
+/// The bytes of an image encoded again as JPEG or PNG without an open layer: no proxy, no cache, one call. The raster the encode needs is checked
+/// against `limitBytes` (the input limit of the library when `nil`) before the bytes are decoded, a size above it is refused with `MediaError.Overloaded`.
+public enum MediaImageEncode {
+  public static func encode(bytes: Data, format: ImageFormat = .jpeg, quality: Double = 0.9, limitBytes: UInt64? = nil) async throws -> Data {
+    let work = Task.detached {
+      try await ImageEncoding.run(bytes: bytes, format: format, quality: quality) { cost in
+        try imageEncodeOutsideAdmit(cost: cost, limitBytes: limitBytes)
+        return {}
+      }
+    }
+    return try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+  }
+}
+
 enum ImageEncoding {
+  static func run(bytes: Data, format: ImageFormat, quality: Double, admit: ImagePreparation.Admit) async throws -> Data {
+    guard let source = CGImageSourceCreateWithData(bytes as CFData, nil),
+          let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+          let width = properties[kCGImagePropertyPixelWidth] as? Int,
+          let height = properties[kCGImagePropertyPixelHeight] as? Int
+    else { throw MediaError.Fetch(detail: "the bytes are not an image") }
+    let tag = (properties[kCGImagePropertyOrientation] as? UInt32) ?? 1
+    let alpha = (properties[kCGImagePropertyHasAlpha] as? Bool) ?? false
+    return try await run(
+      width: UInt32(clamping: width), height: UInt32(clamping: height), exifOrientation: tag, hasAlpha: alpha, format: format, quality: quality, admit: admit
+    ) {
+      guard let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw MediaError.Fetch(detail: "the bytes are not an image") }
+      return image
+    }
+  }
+
   static func run(_ image: CGImage, exifOrientation: UInt32, format: ImageFormat, quality: Double, admit: ImagePreparation.Admit) async throws -> Data {
     let alpha: Bool
     switch image.alphaInfo {

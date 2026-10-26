@@ -100,6 +100,10 @@ A process that cannot open MediaLayer, such as an iOS notification extension or 
 - The core keeps a bounded disk cache in `directory`: the key is the URL, `cacheBytes` is the limit, and the least recently used entries leave first. On iOS pass a directory in the app group so the app and the extension share the cache. On Android pass a directory under `cacheDir`.
 - The second load of a URL reads the cache and makes no request.
 - No answer within the timeout throws `MediaError.Timeout`. A status other than 200 or a response above 16 MiB throws `MediaError.Fetch` and stores nothing.
+
+The same process encodes image bytes with `MediaImageEncode.encode(bytes:format:quality:limitBytes:)` (Swift) or `MediaImageEncode.encode(bytes, format, quality, limitBytes)` (Kotlin, `suspend`). It gives JPEG or PNG bytes turned upright by EXIF, the same bytes as `encodeImage(bytes:)` of an open MediaLayer, with no proxy, no cache and no MediaLayer.
+
+- The core checks the raster the encode needs (`image_encode_plan` cost) against `limitBytes` before the bytes are decoded. The default is 16 MiB. A size above it throws `MediaError.Overloaded`, bytes that are not an image throw `MediaError.Fetch`.
 - The call opens no MediaLayer, no proxy and no background task: all work ends before it returns. Defaults are 8 MiB of cache and a 5 second timeout.
 
 ## Repository
