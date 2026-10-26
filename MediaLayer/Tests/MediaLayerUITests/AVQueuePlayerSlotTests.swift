@@ -273,7 +273,7 @@ struct AVQueuePlayerSlotTests {
   func endOfClipIsReportedOnlyWhenNotLooping(looping: Bool, endedEvents: Int) async throws {
     let log = PlayerEventLog()
     let slot = await makeSlot(log)
-    await slot.load(key: "clip", route: route(Self.silentClip, looping: looping))
+    await slot.load(key: "clip", route: route(Self.silentClip, looping: looping), generation: 7)
     await log.wait(for: "ready")
 
     NotificationCenter.default.post(name: .AVPlayerItemDidPlayToEndTime, object: slot.loadedItem)
@@ -281,6 +281,7 @@ struct AVQueuePlayerSlotTests {
     await drainMain()
 
     #expect(log.count("ended") == endedEvents)
+    #expect(log.generations("ended") == (looping ? [] : [7]))
     #expect(slot.sample().isLooping == looping)
     #expect(slot.player.actionAtItemEnd == (looping ? .advance : .pause))
   }

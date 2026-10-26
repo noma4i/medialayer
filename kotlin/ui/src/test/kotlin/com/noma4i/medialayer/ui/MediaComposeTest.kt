@@ -26,6 +26,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
+import com.noma4i.medialayer.toItem
 import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -169,6 +170,27 @@ class MediaComposeTest {
 
     assertEquals(listOf(false), layer.items.filter { it.url == clip.url }.map { it.looping }.distinct())
     assertEquals(1 to 2, firstFrames to ends)
+  }
+
+  @Test
+  fun inv_android_21_a_one_shot_video_next_to_a_window_of_the_same_url_reports_the_end() {
+    var ends = 0
+    val clip = Clip("https://o.test/replay.mp4")
+    rule.setContent {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
+        MediaWindow(data = { listOf(clip) }, source = { it.toItem().copy(looping = false) }, active = 0)
+        MediaVideo(clip, playing = true, loop = false, onEnd = { ends++ }, modifier = Modifier.size(100.dp))
+      }
+    }
+    rule.waitUntil(5000) { layer.listeners.isNotEmpty() }
+
+    listOf(MediaState.Ready, MediaState.Rendered, MediaState.Ended).forEach { state ->
+      layer.emit(clip.url, state)
+      rule.waitForIdle()
+    }
+
+    assertEquals(listOf(false), layer.items.filter { it.url == clip.url }.map { it.looping }.distinct())
+    assertEquals(1, ends)
   }
 
   @Test

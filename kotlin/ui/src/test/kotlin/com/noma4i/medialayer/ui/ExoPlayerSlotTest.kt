@@ -294,6 +294,23 @@ class ExoPlayerSlotTest {
   }
 
   @Test
+  fun inv_android_20_a_clip_that_is_not_looping_reaches_the_end_and_reports_ended_with_the_generation_of_its_load() {
+    val clock = FakeClock(0)
+    val slot = factory().also { it.clock = clock }.createSlot(3u)
+    slot.load("k", route.copy(looping = false), 7uL); idle()
+    slot.play(); idle()
+    playUntilReady(clock, slot)
+    for (step in 0 until 200) {
+      if (slot.player!!.playbackState == Player.STATE_ENDED) break
+      clock.advanceTime(1000); idle(); Thread.sleep(10)
+    }
+
+    assertEquals(Player.REPEAT_MODE_OFF, slot.player!!.repeatMode)
+    assertEquals(Player.STATE_ENDED, slot.player!!.playbackState)
+    assertEquals(listOf("ended:3:7"), events.generations.filter { it.startsWith("ended") })
+  }
+
+  @Test
   fun aPausedAndRewoundSlotThatEndedPlaysAgainFromTheStart() {
     val clock = FakeClock(0)
     val slot = factory().also { it.clock = clock }.createSlot(0u)
