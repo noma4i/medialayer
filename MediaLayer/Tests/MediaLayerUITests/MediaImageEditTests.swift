@@ -231,6 +231,27 @@ struct MediaImageEditTests {
   }
 
   @Test
+  func inv_send_41_prepare_image_reports_the_decoded_raster_to_the_image_counters() async throws {
+    let source = try file(try grayJpeg(8160, 6120), "jpg")
+    defer { try? FileManager.default.removeItem(at: source) }
+    let changed = edit(outputSize: PixelSize(width: 1080, height: 1080))
+    let plan = try #require(photoPlan(width: 8160, height: 6120, exifOrientation: 1, edit: changed))
+    let counters = ImageCounters()
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    _ = try await ImagePreparation.run(source, quality: 0.9, edit: changed, directory: directory, counters: counters, admit: Ledger().admit)
+
+    let snapshot = counters.snapshot()
+    #expect(snapshot.decodes == 1)
+    #expect(snapshot.decodedPixels < UInt64(8160 * 6120 / 3))
+    let raster = try ImagePreparation.upright(try #require(CGImageSourceCreateWithURL(source as CFURL, nil)), plan: plan, path: source.path)
+    #expect(snapshot.decodedPixels == UInt64(raster.width * raster.height))
+    #expect(snapshot.bitmapBytes == snapshot.decodedPixels * 4)
+  }
+
+  @Test
   func inv_send_36_a_sampled_photo_keeps_the_output_size_the_crop_and_asks_the_decoded_raster() async throws {
     let source = try file(try halves(800, 400, orientation: 1))
     defer { try? FileManager.default.removeItem(at: source) }

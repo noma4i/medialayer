@@ -30,7 +30,7 @@ extension MediaLayer {
       rotationDegrees: UInt32(clamping: ((rotation % 360) + 360) % 360)
     )
     let work = Task.detached {
-      try await ImagePreparation.run(file, quality: quality, edit: edit) { bytes in
+      try await ImagePreparation.run(file, quality: quality, edit: edit, counters: self.imageStats()) { bytes in
         let hold = try await self.reserveDecode(bytes: bytes)
         return { hold.release() }
       }
@@ -49,7 +49,7 @@ enum ImagePreparation {
 
   static let plain = PhotoEdit(maxSize: nil, enlarge: false, crop: nil, outputSize: nil, mirror: false, rotationDegrees: 0)
 
-  static func run(_ file: URL, quality: Double, edit: PhotoEdit = plain, directory: URL = FileManager.default.temporaryDirectory, admit: Admit) async throws -> PreparedMedia {
+  static func run(_ file: URL, quality: Double, edit: PhotoEdit = plain, directory: URL = FileManager.default.temporaryDirectory, counters: ImageCounters? = nil, admit: Admit) async throws -> PreparedMedia {
     guard let source = CGImageSourceCreateWithURL(file as CFURL, nil),
           let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
           let width = properties[kCGImagePropertyPixelWidth] as? Int,
@@ -62,6 +62,7 @@ enum ImagePreparation {
     let release = try await admit(plan.cost)
     defer { release() }
     var result = try upright(source, plan: plan, path: file.path)
+    counters?.record(work: .decode(width: UInt32(result.width), height: UInt32(result.height), bytes: UInt64(result.width * result.height * 4)))
     if edit.rotationDegrees % 360 != 0 { result = try draw(result, turn: PhotoTurn(rotationDegrees: edit.rotationDegrees % 360, flipHorizontal: false)) }
     try Task.checkCancellation()
     if plan.needsDraw { result = try finish(result, plan: plan) }

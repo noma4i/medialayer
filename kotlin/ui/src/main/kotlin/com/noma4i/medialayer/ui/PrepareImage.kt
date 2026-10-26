@@ -14,6 +14,8 @@ import android.media.ExifInterface
 import com.noma4i.medialayer.MediaException
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.CropFractions
+import com.noma4i.medialayer.ImageCounters
+import com.noma4i.medialayer.ImageWork
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.PhotoEdit
 import com.noma4i.medialayer.PhotoPlan
@@ -56,29 +58,30 @@ suspend fun MediaLayer.prepareImage(
     mirror,
     Math.floorMod(rotation, 360).toUInt()
   )
-  return prepareImageAt(cache, preparableFile(normalizeItem(source.toItem()).url), quality, decodeAdmit(), edit)
+  return imageStats().use { prepareImageAt(cache, preparableFile(normalizeItem(source.toItem()).url), quality, decodeAdmit(), edit, it) }
 }
 
 private fun Size.toPixels() = PixelSize(width.coerceAtLeast(0).toUInt(), height.coerceAtLeast(0).toUInt())
 
 internal val plainPhoto = PhotoEdit(null, false, null, null, false, 0u)
 
-internal suspend fun prepareImageAt(cache: File, file: File, quality: Double, admit: DecodeAdmit, edit: PhotoEdit = plainPhoto): PreparedMedia =
-  withContext(prepareDispatcher) { PreparedMedia(upright(file, quality, cache, admit, edit), true) }
+internal suspend fun prepareImageAt(cache: File, file: File, quality: Double, admit: DecodeAdmit, edit: PhotoEdit = plainPhoto, counters: ImageCounters? = null): PreparedMedia =
+  withContext(prepareDispatcher) { PreparedMedia(upright(file, quality, cache, admit, edit, counters), true) }
 
 internal var photoOrientation: (File) -> Int = { ExifInterface(it.path).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) }
 
-private suspend fun upright(file: File, quality: Double, cache: File, admit: DecodeAdmit, edit: PhotoEdit): File {
+private suspend fun upright(file: File, quality: Double, cache: File, admit: DecodeAdmit, edit: PhotoEdit, counters: ImageCounters?): File {
   val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }.also { BitmapFactory.decodeFile(file.path, it) }
   if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw MediaException.Fetch("${file.path} is not an image")
   val tag = photoOrientation(file)
   val plan = photoPlan(bounds.outWidth.toUInt(), bounds.outHeight.toUInt(), tag.toUInt(), edit)
     ?: throw MediaException.Fetch("${file.path} is above the pixel limit or the edit holds no pixel")
-  return admit(plan.cost.toLong()).use { decodeUpright(file, quality, cache, turnMatrix(plan.turn), plan) }
+  return admit(plan.cost.toLong()).use { decodeUpright(file, quality, cache, turnMatrix(plan.turn), plan, counters) }
 }
 
-private suspend fun decodeUpright(file: File, quality: Double, cache: File, matrix: Matrix, plan: PhotoPlan): File {
+private suspend fun decodeUpright(file: File, quality: Double, cache: File, matrix: Matrix, plan: PhotoPlan, counters: ImageCounters?): File {
   val source = decodeSampled(file, plan)
+  counters?.record(ImageWork.Decode(source.width.toUInt(), source.height.toUInt(), source.allocationByteCount.toULong()))
   currentCoroutineContext().ensureActive()
   val turned = Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
   val drawn = if (plan.needsDraw) redraw(turned, plan) else turned

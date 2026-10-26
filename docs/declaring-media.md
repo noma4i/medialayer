@@ -286,6 +286,7 @@ Without declared dimensions, it obtains placement constraints through `BoxWithCo
 Read image work explicitly with Kotlin `media.imageStats().snapshot()` or Swift `media.imageStats().snapshot()`.
 The snapshot counts requests, decodes, memory hits, disk hits, decoded pixels, placement pixels, bitmap bytes, active requests, active observers, and cancellations (one total, not per URL).
 Bitmap bytes accumulate decoded allocations, rather than retained memory.
+`prepareImage` adds the raster it actually decodes to the same counters (one decode, width times height of the sampled raster, not the source), so a 50 MP photo prepared for a 1080 side shows about 1 MP in `decodedPixels`.
 Counters update on image events and perform no work while idle.
 `MediaImage.request` and `MediaImage.decode` identify Android async trace sections and Swift signpost intervals.
 `fetchImage` returns `ImageFetchResult`, containing `bytes` and `source` (`Cache`, `Network`, or `Local`).

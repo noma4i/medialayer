@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.20.0 - 2026-10-26
+
+### Added
+- `prepareImage` counts the raster it decodes in `imageStats().snapshot()` (`decodes`, `decodedPixels`, `bitmapBytes`) on iOS and Android.
+
 ## 3.19.0 - 2026-10-26
 
 ### Added

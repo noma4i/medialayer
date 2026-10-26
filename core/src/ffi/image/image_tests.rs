@@ -62,3 +62,14 @@ fn inv_image_37_cancellations_are_one_counter_not_a_map_of_every_url() {
     assert_eq!(snapshot.cancellations, 1000);
     assert_eq!(snapshot.active_requests, 0);
 }
+
+#[test]
+fn inv_send_41_decoded_pixels_add_the_raster_size_of_every_decode_not_its_bytes() {
+    let counters = ImageCounters::new();
+    counters.record(ImageWork::Decode { width: 1020, height: 765, bytes: 1020 * 765 * 4 });
+    counters.record(ImageWork::Decode { width: 100, height: 50, bytes: 100 * 50 * 4 });
+    let snapshot = counters.snapshot();
+
+    assert_eq!((snapshot.decodes, snapshot.decoded_pixels), (2, 1020 * 765 + 100 * 50));
+    assert_eq!(snapshot.bitmap_bytes, (1020 * 765 + 100 * 50) * 4);
+}
