@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.14.0 - 2026-10-26
+
+### Added
+- `prepareImage` takes `enlarge`: with `maxSize` a smaller photo is fitted up into the rectangle with its proportions kept (540x960 into 1080x1920 gives 1080x1920). The default stays without enlarging.
+
 ## 3.13.0 - 2026-10-26
 
 ### Added
