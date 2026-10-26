@@ -63,6 +63,9 @@ extension MediaLayer {
         try Task.checkCancellation()
         let media = try build(config)
         resources?.bind(media)
+        #if os(iOS)
+        CaptureFiles.sweepOrphans()
+        #endif
         if Task.isCancelled {
           media.close()
           throw CancellationError()
