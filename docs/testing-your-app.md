@@ -36,3 +36,7 @@
 `PlayerSnapshot(key, isPlaying, isMuted, positionMs, rate)` читает состояние слота, который держит ключ. `isPlaying` это команда play без pause, не факт кадров. Нет слота у ключа: `nil`. Чтение не требует главного потока.
 
 Swift: `LoadedSlots.of(places).snapshot(for: key)`. Kotlin: `media.slotPlayers?.snapshot(key)`.
+
+## Trace
+
+The core and the player slots can print the order of their events. Android: `adb shell setprop log.tag.MediaLayerTrace VERBOSE`, start the app, then read `adb logcat -s MediaLayerTrace`. The library reads the property when it opens. iOS: start the app with `SIMCTL_CHILD_ML_TRACE=1`. Each line is `ML <ms> <source> <text>`: proxy requests, slot commands, player events and why an `ended` event was dropped. With the property unset the trace does no work.

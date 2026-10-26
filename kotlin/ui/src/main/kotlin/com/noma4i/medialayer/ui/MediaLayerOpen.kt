@@ -154,6 +154,7 @@ internal fun openMediaLayer(
     ensureActive()
     Trace.beginSection("MediaLayer.open.jna")
     try { install() } finally { Trace.endSection() }
+    MediaTrace.install()
     Trace.beginSection("MediaLayer.open.defaults")
     val resolved = try { defaults() } finally { Trace.endSection() }
     val config = OpenConfig(

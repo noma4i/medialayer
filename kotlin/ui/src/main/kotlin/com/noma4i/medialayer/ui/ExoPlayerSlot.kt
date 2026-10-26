@@ -76,6 +76,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
         Player.STATE_BUFFERING -> if (hasBeenReady) host.events?.stalled(id, generation, currentPosition().toULong())
         Player.STATE_ENDED -> if (!looping) host.events?.ended(id, generation)
       }
+      MediaTrace.emit("player") { "slot=$id state=$playbackState generation=$generation looping=$looping key=${key.orEmpty().takeLast(24)}" }
     }
 
     override fun onRenderedFirstFrame() {
@@ -101,6 +102,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     suspendCancellableCoroutine<Unit> { continuation ->
       val posted = commands.post {
         try {
+          MediaTrace.emit("player") { "slot=$id ${command::class.simpleName} key=${key.orEmpty().takeLast(24)}" }
           if (!released && continuation.isActive) perform(command)
         } finally {
           if (continuation.isActive) continuation.resume(Unit)

@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.10.1 - 2026-10-26
+
+### Added
+- Trace on Android: `adb shell setprop log.tag.MediaLayerTrace VERBOSE` writes core and player slot events to logcat under the tag `MediaLayerTrace`.
+
 ## 3.10.0 - 2026-10-26
 
 ### Removed

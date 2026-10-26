@@ -1,10 +1,26 @@
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-static ENABLED: OnceLock<bool> = OnceLock::new();
+static ENV: OnceLock<bool> = OnceLock::new();
+static SINK_ON: AtomicBool = AtomicBool::new(false);
+static SINK: RwLock<Option<Arc<dyn TraceSink>>> = RwLock::new(None);
+
+/// Takes the trace lines of the core where the process has no stderr to read, such as an Android app.
+#[uniffi::export(with_foreign)]
+pub trait TraceSink: Send + Sync {
+    fn line(&self, text: String);
+}
+
+/// Routes every trace line to the sink and turns the trace on, or removes the sink.
+#[uniffi::export]
+pub fn set_trace_sink(sink: Option<Arc<dyn TraceSink>>) {
+    SINK_ON.store(sink.is_some(), Ordering::Release);
+    *SINK.write().unwrap_or_else(std::sync::PoisonError::into_inner) = sink;
+}
 
 pub fn enabled() -> bool {
-    *ENABLED.get_or_init(|| std::env::var_os("ML_TRACE").is_some())
+    SINK_ON.load(Ordering::Acquire) || *ENV.get_or_init(|| std::env::var_os("ML_TRACE").is_some())
 }
 
 pub fn now_ms() -> u128 {
@@ -16,11 +32,49 @@ pub fn tail(url: &str) -> &str {
     &url[start..]
 }
 
+pub fn emit(source: &str, text: &str) {
+    let line = format!("ML {} {source} {text}", now_ms());
+    let sink = SINK.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+    match sink {
+        Some(sink) => sink.line(line),
+        None => eprintln!("{line}"),
+    }
+}
+
 #[macro_export]
 macro_rules! trace {
     ($source:expr, $($argument:tt)*) => {
         if $crate::trace::enabled() {
-            eprintln!("ML {} {} {}", $crate::trace::now_ms(), $source, format!($($argument)*));
+            $crate::trace::emit(&$source.to_string(), &format!($($argument)*));
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    struct Lines(Mutex<Vec<String>>);
+
+    impl TraceSink for Lines {
+        fn line(&self, text: String) {
+            self.0.lock().unwrap().push(text);
+        }
+    }
+
+    #[test]
+    fn inv_trace_01_an_installed_sink_turns_the_trace_on_and_takes_the_lines_without_the_environment() {
+        let lines = Arc::new(Lines(Mutex::default()));
+
+        set_trace_sink(Some(lines.clone()));
+        crate::trace!("probe", "inv_trace_01 slot={}", 4);
+        let seen: Vec<String> = lines.0.lock().unwrap().iter().filter(|line| line.contains("inv_trace_01")).cloned().collect();
+        set_trace_sink(None);
+
+        assert_eq!(seen.len(), 1);
+        let parts: Vec<&str> = seen[0].splitn(4, ' ').collect();
+        assert_eq!((parts[0], parts[2], parts[3]), ("ML", "probe", "inv_trace_01 slot=4"));
+        assert!(parts[1].parse::<u128>().is_ok());
+    }
 }

@@ -118,8 +118,13 @@ impl Stage {
         let mut actions = Vec::new();
         {
             let mut state = self.state();
-            let Some(key) = Self::current_key(&state, slot, generation) else { return };
-            if state.loaded.get(&key).is_some_and(|loaded| loaded.route.looping) || !self.inner.places.ended(&key) {
+            let Some(key) = Self::current_key(&state, slot, generation) else {
+                crate::trace!("event", "ended dropped: slot={slot} generation={generation} is not the current load");
+                return;
+            };
+            let looping = state.loaded.get(&key).is_some_and(|loaded| loaded.route.looping);
+            if looping || !self.inner.places.ended(&key) {
+                crate::trace!("event", "ended dropped: {} looping={looping}", crate::trace::tail(&key));
                 return;
             }
             self.advance(&mut state, &key, Event::Pause, &mut actions);
