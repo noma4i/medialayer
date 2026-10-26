@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.16.1 - 2026-10-26
+
+### Fixed
+- `prepareImage` decodes a photo at the size its crop and output ask for, not at the full size of the file: a 50 MP photo cut to 1080 pixels holds under a third of its pixels, and the Ledger is asked for the decoded raster.
+
 ## 3.16.0 - 2026-10-26
 
 ### Added
