@@ -127,7 +127,7 @@ private fun MediaLayerEnvironment(media: MediaLayer?, imageLoader: ImageLoader?,
       val loader = imageLoader ?: binding?.imageLoader ?: mediaImageLoader(context, ImageBytes { url, headers ->
         val current = reference.get() ?: throw kotlinx.coroutines.CancellationException("MediaLayer was released")
         current.fetchImage(url, headers)
-      }, null, it.imageStats(), pixelSizes)
+      }, null, it.imageStats(), pixelSizes, it.viewDecodeAdmit())
       try {
         it.setTonePreparation(ToneFrames(it, context.applicationContext, loader))
       } catch (error: MediaException) {

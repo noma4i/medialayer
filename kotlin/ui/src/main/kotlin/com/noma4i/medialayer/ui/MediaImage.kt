@@ -196,7 +196,7 @@ internal fun imageRequest(context: Context, source: MediaSource, pixels: PixelSi
     .data(MediaImageData(source.url, source.headers, cacheKey, if (pixels == null) source.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) } else null, pixels, rest, repeats))
     .apply {
       when (rest) {
-        RestFrame.First -> decoderFactory(BitmapFactoryDecoder.Factory())
+        RestFrame.First -> decoderFactory(AdmittedDecoders(admit, BitmapFactoryDecoder.Factory()))
         RestFrame.Last -> decoderFactory(RestFrameDecoder.Factory(admit))
         null -> (repeats as? Repeats.Times)?.let { repeatCount(maxOf(it.count, 1) - 1) }
       }

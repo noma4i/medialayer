@@ -163,6 +163,9 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
   fun emit(key: String, state: MediaState) = listeners.filter { it.first == key }.forEach { it.second.changed(state) }
 
   override suspend fun fetchImage(url: String, headers: Map<String, String>): ImageFetchResult { noteFfi("fetchImage"); calls.add("fetchImage:$url"); return ImageFetchResult(image, ImageOrigin.NETWORK) }
+  override suspend fun reserveDecode(bytes: ULong): com.noma4i.medialayer.DecodeHold = object : com.noma4i.medialayer.DecodeHold(NoHandle) {
+    override fun release() {}
+  }
   override suspend fun placeholder(source: MediaItem, ready: Boolean): Placeholder {
     noteFfi("placeholder")
     placeholders.add(source.url to ready)

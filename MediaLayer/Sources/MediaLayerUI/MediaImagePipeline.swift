@@ -1,6 +1,7 @@
 import Foundation
+import ImageIO
 import MediaLayer
-import Nuke
+@_spi(AsyncImageDecoding) import Nuke
 import SwiftUI
 
 struct CoreDataLoader: DataLoading {
@@ -48,7 +49,8 @@ public enum MediaImagePipeline {
     configuration.dataCache = nil
     configuration.isLocalResourcesSupportEnabled = false
     configuration.imageCache = ImageMemory.cache(for: places)
-    configuration.makeImageDecoder = { context in AnimatedKeepingDecoder(context: context) }
+    let admit = FrameCache.admit(from: places as? MediaLayer)
+    configuration.makeImageDecoder = { context in AnimatedKeepingDecoder(context: context, admit: admit) }
     return ImagePipeline(configuration: configuration, delegate: ImageEvents(stats: places.imageStats()))
   }
 
@@ -81,6 +83,7 @@ public enum MediaImagePipeline {
     } ?? []
     var request = ImageRequest(urlRequest: urlRequest, processors: processors)
     request.userInfo["placementPixels"] = UInt64(max(0, points.width * scale) * max(0, points.height * scale))
+    request.userInfo["decodePixels"] = pixels
     request.thumbnail = pixels.map { ImageRequest.ThumbnailOptions(size: $0, unit: .pixels, contentMode: contentMode == .fill ? .aspectFill : .aspectFit) }
     request.imageID = identity
     return (key, request)
@@ -138,18 +141,39 @@ public final class ImageMemoryReleaser: MemoryReleaser, @unchecked Sendable {
 }
 
 /// The default decoder keeps the bytes of a GIF only; an animated WebP needs its bytes as well to be played frame by frame.
-struct AnimatedKeepingDecoder: ImageDecoding {
+struct AnimatedKeepingDecoder: AsyncImageDecoding {
   private let base: ImageDecoders.Default
+  private let pixels: CGSize?
+  private let admit: FrameCache.Admit
 
-  init?(context: ImageDecodingContext) {
+  init?(context: ImageDecodingContext, admit: @escaping FrameCache.Admit) {
     guard let base = ImageDecoders.Default(context: context) else { return nil }
 
     self.base = base
+    pixels = context.request.userInfo["decodePixels"] as? CGSize
+    self.admit = admit
   }
 
   static func keepsSource(frames: Int) -> Bool { frames > 1 }
 
-  func decode(_ data: Data) throws -> ImageContainer {
+  static func decodeBytes(pixels: CGSize?, data: Data) -> UInt64? {
+    if let pixels { return decodeCost(width: UInt32(clamping: Int(pixels.width)), height: UInt32(clamping: Int(pixels.height))) }
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+          let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+          let width = properties[kCGImagePropertyPixelWidth] as? Int,
+          let height = properties[kCGImagePropertyPixelHeight] as? Int
+    else { return nil }
+
+    return decodeCost(width: UInt32(clamping: width), height: UInt32(clamping: height))
+  }
+
+  func decode(_ data: Data) async throws -> ImageContainer {
+    guard let bytes = Self.decodeBytes(pixels: pixels, data: data) else {
+      throw MediaError.Fetch(detail: "the image size cannot be read or is above the pixel limit")
+    }
+    guard let release = await admit(bytes) else { throw MediaError.Overloaded(detail: "the decode was not admitted") }
+    defer { release() }
+
     var container = try base.decode(data)
     if container.type == .webp, Self.keepsSource(frames: AnimatedFrames.sourceFrameCount(data)) { container.data = data }
     return container

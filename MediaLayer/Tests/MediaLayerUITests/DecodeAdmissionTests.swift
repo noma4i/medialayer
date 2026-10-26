@@ -153,6 +153,62 @@ struct DecodeAdmissionTests {
     #expect(cache.count == 0)
   }
 
+  private func viewDecoder(pixels: CGSize?, admit: @escaping FrameCache.Admit) throws -> (AnimatedKeepingDecoder, Data) {
+    let file = try png(width: 40, height: 20)
+    defer { try? FileManager.default.removeItem(at: file) }
+    let data = try Data(contentsOf: file)
+    var request = ImageRequest(url: URL(string: "https://o.test/a.png"))
+    if let pixels { request.userInfo["decodePixels"] = pixels }
+    let decoder = try #require(AnimatedKeepingDecoder(context: ImageDecodingContext(request: request, data: data), admit: admit))
+    return (decoder, data)
+  }
+
+  @Test
+  func inv_memory_13_a_view_decode_asks_the_ledger_for_the_requested_pixels_and_gives_them_back() async throws {
+    let tally = Tally()
+    let (decoder, data) = try viewDecoder(pixels: CGSize(width: 20, height: 10)) { bytes in
+      await tally.take(bytes)
+      return { tally.give() }
+    }
+
+    _ = try await decoder.decode(data)
+
+    #expect(tally.asked == [20 * 10 * 4])
+    #expect(tally.released == 1)
+  }
+
+  @Test
+  func inv_memory_13_a_view_decode_without_requested_pixels_asks_for_the_size_in_the_header() async throws {
+    let tally = Tally()
+    let (decoder, data) = try viewDecoder(pixels: nil) { bytes in
+      await tally.take(bytes)
+      return { tally.give() }
+    }
+
+    _ = try await decoder.decode(data)
+
+    #expect(tally.asked == [40 * 20 * 4])
+  }
+
+  @Test
+  func inv_memory_13_a_refused_admission_stops_the_view_decode_with_an_error() async throws {
+    let (decoder, data) = try viewDecoder(pixels: CGSize(width: 20, height: 10)) { _ in nil }
+
+    await #expect(throws: MediaError.self) { _ = try await decoder.decode(data) }
+  }
+
+  @Test
+  func inv_memory_13_a_view_decode_above_the_pixel_limit_is_refused_before_any_admission() async throws {
+    let tally = Tally()
+    let (decoder, data) = try viewDecoder(pixels: CGSize(width: 16_385, height: 1)) { bytes in
+      await tally.take(bytes)
+      return { tally.give() }
+    }
+
+    await #expect(throws: MediaError.self) { _ = try await decoder.decode(data) }
+    #expect(tally.asked.isEmpty)
+  }
+
   @Test
   func inv_image_65_a_webp_keeps_its_source_bytes_only_when_it_has_more_than_one_frame() {
     #expect(AnimatedFrames.sourceFrameCount(gif(frames: 1, side: 8)) == 1)

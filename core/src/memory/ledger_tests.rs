@@ -180,3 +180,56 @@ async fn inv_memory_04_reserve_between_refuses_at_once_a_floor_that_can_never_fi
     assert_eq!(refused, Refused::Ceiling { owner: Owner::ProxyBuffer, requested: 101, available: 100 });
     assert_eq!(ledger.waiting(), 0);
 }
+
+#[tokio::test]
+async fn inv_memory_14_a_cancelled_wait_leaves_no_waiter_and_no_bytes() {
+    let ledger = Ledger::new(100);
+    let holder = ledger.reserve(Owner::Slot(0), 70).unwrap();
+    let waiter = tokio::spawn({
+        let ledger = ledger.clone();
+        async move { ledger.reserve_between(Owner::ImageDecode, 40, 40).await.map(|granted| granted.bytes()) }
+    });
+    while ledger.waiting() == 0 {
+        tokio::task::yield_now().await;
+    }
+
+    waiter.abort();
+    assert!(waiter.await.unwrap_err().is_cancelled());
+
+    assert_eq!(ledger.waiting(), 0);
+    assert_eq!((ledger.used(), ledger.used_by(Owner::ImageDecode)), (70, 0));
+    drop(holder);
+    let again = tokio::time::timeout(std::time::Duration::from_secs(5), ledger.reserve_between(Owner::ImageDecode, 100, 100)).await;
+    assert_eq!(again.expect("the bytes stayed reserved").unwrap().bytes(), 100);
+}
+
+#[tokio::test]
+async fn inv_memory_14_a_grant_the_caller_never_took_returns_its_bytes() {
+    let ledger = Ledger::new(100);
+    let holder = ledger.reserve(Owner::Slot(0), 70).unwrap();
+    let task = tokio::spawn({
+        let ledger = ledger.clone();
+        async move { ledger.reserve_between(Owner::ImageDecode, 40, 40).await }
+    });
+    while ledger.waiting() == 0 {
+        tokio::task::yield_now().await;
+    }
+    drop(holder);
+    for _ in 0..1000 {
+        if ledger.used_by(Owner::ImageDecode) != 0 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(ledger.used_by(Owner::ImageDecode), 40, "the waiter was never granted");
+
+    drop(task);
+    for _ in 0..1000 {
+        if ledger.used_by(Owner::ImageDecode) == 0 {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+
+    assert_eq!((ledger.used(), ledger.used_by(Owner::ImageDecode), ledger.waiting()), (0, 0, 0));
+}

@@ -56,7 +56,7 @@ Durations are written `30.seconds`, `5.minutes`, `2.days`. Sizes are written `64
 | `prefetch_budget` | 64 MiB | Hard limit for the bytes of prefetched stream chunks that were never played. 1 to 512 MiB. When a new chunk would go over it, the chunks of the farthest items are removed first. A chunk of the farthest item is not fetched at all, and that item settles as over budget |
 | `namespace headers:` | none | Request headers that become part of the cache key. By default the key is the URL alone. Set it when the same URL returns different bytes for different users. The key then is the URL plus a hash of the listed header values; a request without those headers keeps the plain URL key. `purge(url)` removes every variant |
 
-UNBUILT: `memory` counts players and proxy buffers. Image decoding in Nuke and Coil is not counted in it. The decoder memory has its own limit, `imageMemoryBytes` of `open`.
+`memory` counts players, proxy buffers and the decode of an image in a view for the time of the decode. The decoded image kept in the Nuke or Coil cache has its own limit, `imageMemoryBytes` of `open`.
 
 The cache key is the URL. The cache lives on disk; image memory caches stay with Nuke and Coil. An entry being read or written is never evicted. If new data still does not fit after eviction, the load fails with `NotEnoughSpace`.
 

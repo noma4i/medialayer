@@ -21,7 +21,7 @@ The limit is the smaller of your `memory` option and a share of what the device 
 
 Retention levels: `hot` plays or is next, `warm` keeps metadata, `cold` holds nothing.
 
-UNBUILT: the steps lower the slot count, the reach, the admission share and the chunks ahead of the playing position (down to 1) today. A lower bitrate does not exist. Image decoding in Nuke and Coil does not reserve room in the counter; its memory is limited by `imageMemoryBytes`. A low-memory device gets fewer slots and a shorter reach, not fewer parallel loads.
+UNBUILT: the steps lower the slot count, the reach, the admission share and the chunks ahead of the playing position (down to 1) today. A lower bitrate does not exist. A low-memory device gets fewer slots and a shorter reach, not fewer parallel loads.
 
 ## Opening is enough
 
@@ -84,4 +84,4 @@ println("${stats.slots.hot} ${stats.slots.warm} ${stats.slots.cold} ${stats.memo
 
 ## Decode admission
 
-Decoding an animated image or preparing a photo for sending takes bytes from the same ledger as the players before it allocates. The core exposes `reserveDecode(bytes)`, which waits for free space, refuses at once when the request is above the ceiling, and returns a hold that frees the bytes on `release()`. `decodeCost(width, height)` gives the bytes of one RGBA raster and returns nothing for an empty image or a side above 16384 pixels. `prepareImage` refuses such a photo with a `Fetch` error and does not shrink it.
+Decoding an animated image or preparing a photo for sending takes bytes from the same ledger as the players before it allocates. The core exposes `reserveDecode(bytes)`, which waits for free space, refuses at once when the request is above the ceiling, and returns a hold that frees the bytes on `release()`. `decodeCost(width, height)` gives the bytes of one RGBA raster and returns nothing for an empty image or a side above 16384 pixels. `prepareImage` refuses such a photo with a `Fetch` error and does not shrink it. The decode of an image in a view (Nuke on iOS, Coil on Android) takes the same bytes for the time of the decode; the decoded image kept in the Nuke or Coil memory cache stays under `imageMemoryBytes`.

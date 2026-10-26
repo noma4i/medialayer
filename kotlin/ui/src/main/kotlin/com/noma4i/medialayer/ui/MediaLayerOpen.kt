@@ -183,7 +183,7 @@ internal fun openMediaLayer(
     val loader = mediaImageLoader(app, ImageBytes { url, headers ->
       val media = reference?.get() ?: throw CancellationException("MediaLayer was closed")
       media.fetchImage(url, headers)
-    }, imageMemoryBytes, stats = layer.imageStats())
+    }, imageMemoryBytes, layer.imageStats(), PixelSizeMemo(), layer.viewDecodeAdmit())
     synchronized(lock) { imageLoader = loader }
     layer.setTonePreparation(ToneFrames(layer, app, loader))
     val events = layer.playerEvents()

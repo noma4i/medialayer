@@ -189,6 +189,48 @@ class DecodeAdmissionTest {
     assertEquals(null, Media.failure)
   }
 
+  private fun viewLoad(admit: DecodeAdmit, width: Int, height: Int): ImageResult {
+    val loader = mediaImageLoader(context, ImageBytes { _, _ -> ImageFetchResult(pngBytes(64, 64), ImageOrigin.CACHE) }, null, com.noma4i.medialayer.ImageCounters(), PixelSizeMemo(), admit)
+    val request = ImageRequest.Builder(context).data(MediaImageData("https://o.test/${width}x$height.png", emptyMap(), { "k$width" })).size(width, height).build()
+    var result: ImageResult? = null
+    loader.enqueue(request.newBuilder().listener(onSuccess = { _, success -> result = success }, onError = { _, failure -> result = failure }).build())
+    val deadline = System.nanoTime() + 10_000_000_000L
+    while (result == null) {
+      check(System.nanoTime() < deadline) { "the image request never finished" }
+      shadowOf(Looper.getMainLooper()).idle()
+      Thread.yield()
+    }
+    return result!!
+  }
+
+  @Test
+  fun inv_memory_13_aViewDecodeAsksTheLedgerForTheRequestedPixelsAndGivesThemBack() {
+    val admissions = Admissions()
+
+    val result = viewLoad(admissions.admit, 16, 16)
+
+    assertTrue((result as? coil3.request.ErrorResult)?.throwable?.toString() ?: "", result is coil3.request.SuccessResult)
+    assertEquals(listOf(16L * 16 * 4), admissions.asked.toList())
+    assertEquals(1, admissions.closed.get())
+  }
+
+  @Test
+  fun inv_memory_13_aRefusedAdmissionFailsTheViewRequest() {
+    val result = viewLoad({ throw MediaException.Overloaded("no room") }, 16, 16)
+
+    assertTrue(result is coil3.request.ErrorResult)
+  }
+
+  @Test
+  fun inv_memory_13_aViewDecodeAboveThePixelLimitFailsBeforeAnyAdmission() {
+    val admissions = Admissions()
+
+    val result = viewLoad(admissions.admit, 16_385, 1)
+
+    assertTrue(result is coil3.request.ErrorResult)
+    assertTrue(admissions.asked.isEmpty())
+  }
+
   @Test
   fun inv_send_18_aPhotoTakesOneRasterFromTheLedgerAndGivesItBack() = runBlocking {
     val file = File.createTempFile("photo", ".png").apply { writeBytes(pngHeader(40, 20)); deleteOnExit() }

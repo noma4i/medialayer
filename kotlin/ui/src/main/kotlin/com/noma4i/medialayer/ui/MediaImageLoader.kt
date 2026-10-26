@@ -32,13 +32,14 @@ private const val MAX_IMAGE_MEMORY_BYTES: Int = 128 * 1024 * 1024
 fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: Int? = null, stats: com.noma4i.medialayer.ImageCounters = com.noma4i.medialayer.ImageCounters()): ImageLoader =
   mediaImageLoader(context, bytes, memoryBytes, stats, PixelSizeMemo())
 
-internal fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: Int?, stats: com.noma4i.medialayer.ImageCounters, pixelSizes: PixelSizeMemo): ImageLoader {
+internal fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: Int?, stats: com.noma4i.medialayer.ImageCounters, pixelSizes: PixelSizeMemo, admit: DecodeAdmit? = null): ImageLoader {
   val budget = memoryBytes ?: minOf(MAX_IMAGE_MEMORY_BYTES.toLong(), context.getSystemService(ActivityManager::class.java).memoryClass * 1024L * 1024L / 4).toInt()
   require(budget > 0) { "memoryBytes must be positive" }
   return ImageLoader.Builder(context)
     .eventListenerFactory { ImageEvents(stats) }
     .memoryCache(MemoryCache.Builder().maxSizeBytes(budget.toLong()).build())
     .components {
+      admit?.let { add(AdmittedDecoders(it)) }
       add(coil3.intercept.Interceptor { chain ->
         val data = chain.request.data as? MediaImageData
         if (data == null) return@Interceptor chain.proceed()

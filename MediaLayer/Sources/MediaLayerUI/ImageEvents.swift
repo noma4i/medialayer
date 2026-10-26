@@ -1,6 +1,6 @@
 import Foundation
 import MediaLayer
-import Nuke
+@_spi(AsyncImageDecoding) import Nuke
 import os
 
 final class ImageEvents: ImagePipeline.Delegate {
@@ -10,7 +10,9 @@ final class ImageEvents: ImagePipeline.Delegate {
   init(stats: ImageCounters) { self.stats = stats }
 
   func imageDecoder(for context: ImageDecodingContext, pipeline: ImagePipeline) -> (any ImageDecoding)? {
-    pipeline.configuration.makeImageDecoder(context).map { ImageDecode(decoder: $0, stats: stats) }
+    guard let decoder = pipeline.configuration.makeImageDecoder(context) else { return nil }
+    if let asynchronous = decoder as? any AsyncImageDecoding { return AsyncImageDecode(decoder: asynchronous, stats: stats) }
+    return ImageDecode(decoder: decoder, stats: stats)
   }
 
   func imageTaskCreated(_ task: ImageTask, pipeline: ImagePipeline) {
@@ -50,10 +52,31 @@ private struct ImageDecode: ImageDecoding {
     return image
   }
 
-  private func count(_ image: ImageContainer) {
-    #if canImport(UIKit)
-    guard let pixels = image.image.cgImage else { return }
-    stats.recordLater(work: .decode(width: UInt32(pixels.width), height: UInt32(pixels.height), bytes: UInt64(pixels.bytesPerRow * pixels.height)))
-    #endif
+  private func count(_ image: ImageContainer) { countDecode(image, stats: stats) }
+}
+
+private struct AsyncImageDecode: AsyncImageDecoding {
+  let decoder: any AsyncImageDecoding
+  let stats: ImageCounters
+
+  func decode(_ data: Data) async throws -> ImageContainer {
+    let interval = ImageDecode.trace.beginInterval("MediaImage.decode", id: ImageDecode.trace.makeSignpostID())
+    defer { ImageDecode.trace.endInterval("MediaImage.decode", interval) }
+    let image = try await decoder.decode(data)
+    countDecode(image, stats: stats)
+    return image
   }
+
+  func decodePartiallyDownloadedData(_ data: Data) -> ImageContainer? {
+    let image = decoder.decodePartiallyDownloadedData(data)
+    if let image { countDecode(image, stats: stats) }
+    return image
+  }
+}
+
+private func countDecode(_ image: ImageContainer, stats: ImageCounters) {
+  #if canImport(UIKit)
+  guard let pixels = image.image.cgImage else { return }
+  stats.recordLater(work: .decode(width: UInt32(pixels.width), height: UInt32(pixels.height), bytes: UInt64(pixels.bytesPerRow * pixels.height)))
+  #endif
 }
