@@ -1,11 +1,13 @@
 package com.noma4i.medialayer.ui
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import com.noma4i.medialayer.CropFractions
 import com.noma4i.medialayer.ImageFormat
 import com.noma4i.medialayer.MediaException
 import com.noma4i.medialayer.PhotoEdit
 import com.noma4i.medialayer.PixelSize
+import com.noma4i.medialayer.imageEncodePlan
 import com.noma4i.medialayer.photoPlan
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
@@ -17,6 +19,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -71,6 +74,54 @@ class MediaImageEditTest {
 
     assertEquals(listOf(40L * 20 * 4), ledger.asked.toList())
     assertEquals(1, ledger.closed.get())
+  }
+
+  private fun sizeOf(file: File): Pair<Int, Int> = BitmapFactory.decodeFile(file.path).let { it.width to it.height }
+
+  @Test
+  fun inv_send_23_theCropIsTakenAfterTheTurnAndPastTheEdgeItIsCut() {
+    val file = pngFile(80, 40)
+    photoOrientation = { android.media.ExifInterface.ORIENTATION_ROTATE_90 }
+
+    val top = prepare(file, edit(crop = CropFractions(0.0, 0.0, 1.0, 0.5)), EditLedger()).file.also { it.deleteOnExit() }
+    photoOrientation = { android.media.ExifInterface.ORIENTATION_NORMAL }
+    val pastTheEdge = prepare(file, edit(crop = CropFractions(0.75, 0.0, 1.0, 1.0)), EditLedger()).file.also { it.deleteOnExit() }
+
+    assertEquals(40 to 40, sizeOf(top))
+    assertEquals(20 to 40, sizeOf(pastTheEdge))
+    assertEquals(PixelSize(40u, 40u), photoPlan(80u, 40u, 6u, edit(crop = CropFractions(0.0, 0.0, 1.0, 0.5)))!!.output)
+    assertEquals(null, photoPlan(80u, 40u, 1u, edit(crop = CropFractions(0.0, 0.0, 0.0, 1.0))))
+    assertEquals(null, photoPlan(80u, 40u, 1u, edit(crop = CropFractions(Double.NaN, 0.0, 0.5, 1.0))))
+  }
+
+  @Test
+  fun inv_send_24_theOutputSizeIsExactBeatsTheMaxSizeAndTheMaxSizeFitsTheCroppedRectangle() {
+    val file = pngFile(80, 40)
+    val half = CropFractions(0.0, 0.0, 0.5, 1.0)
+
+    val exact = prepare(file, edit(crop = half, outputSize = PixelSize(30u, 30u)), EditLedger()).file.also { it.deleteOnExit() }
+    val beatsMax = prepare(file, edit(maxSize = PixelSize(10u, 10u), outputSize = PixelSize(30u, 30u)), EditLedger()).file.also { it.deleteOnExit() }
+    val fitted = prepare(file, edit(crop = half, maxSize = PixelSize(20u, 20u)), EditLedger()).file.also { it.deleteOnExit() }
+
+    assertEquals(30 to 30, sizeOf(exact))
+    assertEquals(30 to 30, sizeOf(beatsMax))
+    assertEquals(20 to 20, sizeOf(fitted))
+  }
+
+  @Test
+  fun inv_send_30_anEncodedImageIsUprightByItsExifAndAJpegFlattensTransparencyOntoWhite() = runBlocking {
+    val ledger = EditLedger()
+    val transparent = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply { setHasAlpha(true) }
+    val directory = File.createTempFile("cache", "").let { it.delete(); it.mkdirs(); it }
+
+    val turned = encodeBytes(exifJpeg(80, 40, 6), ImageFormat.PNG, 0.9, ledger.admit).let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+    val flat = encodeBitmapAt(directory, transparent, ImageFormat.JPEG, 0.9, ledger.admit).file.also { it.deleteOnExit() }
+
+    assertEquals(40 to 80, turned.width to turned.height)
+    assertEquals(8 to 8, BitmapFactory.decodeFile(flat.path).let { it.width to it.height })
+    assertTrue(imageEncodePlan(8u, 8u, 1u, true, ImageFormat.JPEG)!!.flatten)
+    assertFalse(imageEncodePlan(8u, 8u, 1u, true, ImageFormat.PNG)!!.flatten)
+    assertEquals(listOf(80L * 40 * 4 * 2, 8L * 8 * 4 * 2), ledger.asked.toList())
   }
 
   @Test

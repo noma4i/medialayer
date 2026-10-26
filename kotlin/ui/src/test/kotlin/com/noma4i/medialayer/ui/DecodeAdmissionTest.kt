@@ -244,6 +244,16 @@ class DecodeAdmissionTest {
   }
 
   @Test
+  fun inv_send_20_aRefusedAdmissionStopsThePhotoBeforeItDecodesAndLeavesNoFile() {
+    val file = File.createTempFile("photo", ".png").apply { writeBytes(pngHeader(40, 20)); deleteOnExit() }
+    val cache = File.createTempFile("cache", "").let { it.delete(); it.mkdirs(); it }
+
+    assertThrows(MediaException.Overloaded::class.java) { runBlocking { prepareImageAt(cache, file, 0.9, { throw MediaException.Overloaded("no room") }) } }
+
+    assertTrue(cache.list()!!.isEmpty())
+  }
+
+  @Test
   fun inv_send_19_aPhotoAboveThePixelLimitIsRefusedBeforeAnyAdmission() {
     val file = File.createTempFile("photo", ".png").apply { writeBytes(pngHeader(16_385, 1)); deleteOnExit() }
     val admissions = Admissions()

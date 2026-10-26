@@ -135,6 +135,20 @@ class ToneFramesTest {
   }
 
   @Test
+  fun inv_native_25_aFileUrlToneIsReadThroughFetchImageExactlyOnce() = runBlocking {
+    layer.needsTone = true
+    layer.image = pngBytes()
+    val imageLoader = mediaImageLoader(context, ImageBytes { url, headers -> layer.fetchImage(url, headers) }).newBuilder().allowHardware(false).build()
+    val url = "file:///tmp/${java.util.UUID.randomUUID()}.png"
+
+    val pixels = ToneFrames(layer, context, imageLoader).prepare(MediaItem(Kind.IMAGE, url, emptyMap(), null, null, strategy = CacheStrategy.WINDOW))
+    imageLoader.shutdown()
+
+    assertEquals(listOf("fetchImage:$url"), layer.calls.filter { it.startsWith("fetchImage:") })
+    assertEquals(64 * 64 * 4, pixels?.rgba?.size)
+  }
+
+  @Test
   fun inv_tone_12_a_failed_decode_submits_nothing() = runBlocking {
     layer.needsTone = true
     val preparation = ToneFrames(layer, context, loader) { null }
