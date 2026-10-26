@@ -26,7 +26,41 @@ private final class Mapped: @unchecked Sendable {
   var count: Int { lock.withLock { calls } }
 }
 
+private final class GatedPlace: PlaceHandle, @unchecked Sendable {
+  let entered = DispatchSemaphore(value: 0)
+  let gate = DispatchSemaphore(value: 0)
+  private let lock = NSLock()
+  private var log: [String] = []
+  var calls: [String] { lock.withLock { log } }
+
+  func update(input: PlaceInput) throws {
+    note("update")
+    entered.signal()
+    gate.wait()
+  }
+  func seek(fraction: Double) throws { note("seek \(fraction)") }
+  func itemState(state: MediaState) throws {}
+  func release() { note("release") }
+  private func note(_ call: String) { lock.withLock { log.append(call) } }
+}
+
 @Suite struct PlatformInputTests {
+  @Test func inv_ingress_43_aSeekAndACloseInOneDrainWindowSeekThePlaceBeforeItIsReleased() async {
+    let place = GatedPlace()
+    let places = RecordingPlaces()
+    places.placeFactory = { _ in place }
+    let mount = PlaceMount(places: places, item: MediaItem(kind: .audio, url: "https://o.test/note.m4a", headers: [:], cover: nil, blurHash: nil, strategy: .window)) { _ in }
+    mount.update(.make(visible: true))
+    place.entered.wait()
+
+    mount.seek(0)
+    mount.close()
+    place.gate.signal()
+
+    await eventually("the place is released") { place.calls.last == "release" }
+    #expect(place.calls == ["update", "seek 0.0", "release"])
+  }
+
   @MainActor
   @Test func aWindowMapsRowsOffTheMainThreadAndAMoveDoesNotPrepareTheList() async {
     let places = RecordingPlaces()

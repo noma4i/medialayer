@@ -30,7 +30,10 @@ internal class PlaceMount(media: MediaLayer, item: MediaItem, failed: (MediaExce
     if (update.closes) {
       closed = true
       place?.let { opened ->
-        try { opened.release() } finally { opened.close() }
+        try {
+          try { update.seek?.let(opened::seek) } catch (error: MediaException) { failed(error) }
+          opened.release()
+        } finally { opened.close() }
       }
       place = null
       return@LatestDrain

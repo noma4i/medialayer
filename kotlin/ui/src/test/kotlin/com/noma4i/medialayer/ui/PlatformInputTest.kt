@@ -162,6 +162,33 @@ class PlatformInputTest {
   }
 
   @Test
+  fun inv_ingress_43_aSeekAndACloseInOneDrainWindowSeekThePlaceBeforeItIsReleased() {
+    val layer = RecordingLayer()
+    val calls = CopyOnWriteArrayList<String>()
+    val entered = CountDownLatch(1)
+    val gate = CountDownLatch(1)
+    layer.placeFactory = {
+      object : com.noma4i.medialayer.MediaPlace(NoHandle) {
+        override fun update(input: com.noma4i.medialayer.PlaceInput) { calls.add("update"); entered.countDown(); gate.await(5, TimeUnit.SECONDS) }
+        override fun seek(fraction: Double) { calls.add("seek $fraction") }
+        override fun itemState(state: com.noma4i.medialayer.MediaState) = Unit
+        override fun release() { calls.add("release") }
+        override fun close() = Unit
+      }
+    }
+    val mount = PlaceMount(layer, clip(1)) { }
+    mount.update(placeInput(visible = true))
+    assertTrue(entered.await(5, TimeUnit.SECONDS))
+
+    mount.seek(0.0)
+    mount.close()
+    gate.countDown()
+
+    eventually("released") { calls.lastOrNull() == "release" }
+    assertEquals(listOf("update", "seek 0.0", "release"), calls.toList())
+  }
+
+  @Test
   fun aCloseBeforeTheFirstMountNeverOpensAPlace() {
     val layer = RecordingLayer()
     val opened = AtomicInteger()

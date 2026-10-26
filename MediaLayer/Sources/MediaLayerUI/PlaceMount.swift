@@ -36,6 +36,9 @@ final class PlaceMount: @unchecked Sendable {
       guard !opened.isClosed else { return }
       if update.closes {
         opened.isClosed = true
+        if let fraction = update.seek {
+          do { try opened.place?.seek(fraction: fraction) } catch { failed(mediaError(error)) }
+        }
         opened.place?.release()
         opened.place = nil
         return
