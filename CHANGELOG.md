@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.15.0 - 2026-10-26
 
 ### Added
 - `MediaCamera` takes photos and records video with a preview on iOS (`AVCaptureSession`) and Android (CameraX). The app declares a profile (`.photo`, `.moment`, `.circle` or its own) and a `MediaCameraPreview`. The camera runs only while the preview is on screen and the app is in front, and the library releases the camera, the microphone focus and the memory budget by itself.
