@@ -2,7 +2,7 @@
 import Foundation
 
 extension MediaLayer {
-  /// A video made to fit the limits: H.264 and AAC in mp4, upright, with even sides. A file that already fits comes back untouched. `progress` gets 0 to 1 from the written samples.
+  /// A video made to fit the limits: H.264 and AAC in mp4, upright, with even sides. A file that already fits comes back untouched, or copied without encoding when it carries location or personal tags. The result never carries them. `progress` gets 0 to 1 from the written samples.
   public func prepareVideo(
     _ source: some MediaSource,
     limits: VideoLimits = defaultVideoLimits(),
@@ -37,12 +37,15 @@ enum VideoPreparation {
       ),
       limits: limits
     )
-    guard plan.reencode else { return PreparedMedia(url: file, isNew: false) }
+    if !plan.reencode {
+      let keys = try await metadataKeys(asset, tracks: [track] + (audioTrack.map { [$0] } ?? []))
+      guard !videoMetadataToStrip(keys: keys).isEmpty else { return PreparedMedia(url: file, isNew: false) }
+    }
     try Task.checkCancellation()
     let output = preparedOutput(extension: "mp4")
     let job = try EncodeJob(
-      asset: asset, track: track, audioTrack: audioTrack, naturalSize: size, transform: transform,
-      duration: duration, plan: plan, limits: limits, output: output, progress: progress
+      asset: asset, track: track, audioTrack: audioTrack, naturalSize: size, transform: transform, duration: duration,
+      encoding: plan.reencode ? (plan, limits) : nil, formats: (formats.first, audioFormats.first), output: output, progress: progress
     )
     do {
       try await withTaskCancellationHandler { try await job.run() } onCancel: { job.cancel() }
@@ -55,12 +58,19 @@ enum VideoPreparation {
   }
 }
 
+private func metadataKeys(_ asset: AVURLAsset, tracks: [AVAssetTrack]) async throws -> [String] {
+  var items: [AVMetadataItem] = []
+  for format in try await asset.load(.availableMetadataFormats) { items += try await asset.loadMetadata(for: format) }
+  for track in tracks { items += try await track.load(.metadata) }
+  return items.compactMap { ($0.identifier?.rawValue ?? ($0.key as? String))?.removingPercentEncoding }
+}
+
 private final class EncodeJob: @unchecked Sendable {
   private let reader: AVAssetReader
   private let writer: AVAssetWriter
-  private let videoOutput: AVAssetReaderVideoCompositionOutput
+  private let videoOutput: AVAssetReaderOutput
   private let videoInput: AVAssetWriterInput
-  private let audioOutput: AVAssetReaderAudioMixOutput?
+  private let audioOutput: AVAssetReaderOutput?
   private let audioInput: AVAssetWriterInput?
   private let duration: Double
   private let progress: (@Sendable (Double) -> Void)?
@@ -71,30 +81,35 @@ private final class EncodeJob: @unchecked Sendable {
 
   init(
     asset: AVURLAsset, track: AVAssetTrack, audioTrack: AVAssetTrack?, naturalSize: CGSize, transform: CGAffineTransform,
-    duration: CMTime, plan: VideoPlan, limits: VideoLimits, output: URL, progress: (@Sendable (Double) -> Void)?
+    duration: CMTime, encoding: (plan: VideoPlan, limits: VideoLimits)?, formats: (video: CMFormatDescription?, audio: CMFormatDescription?),
+    output: URL, progress: (@Sendable (Double) -> Void)?
   ) throws {
     reader = try AVAssetReader(asset: asset)
     writer = try AVAssetWriter(outputURL: output, fileType: .mp4)
     writer.shouldOptimizeForNetworkUse = true
     self.duration = duration.seconds
     self.progress = progress
-    videoOutput = AVAssetReaderVideoCompositionOutput(videoTracks: [track], videoSettings: nil)
-    videoOutput.videoComposition = Self.composition(track: track, naturalSize: naturalSize, transform: transform, duration: duration, plan: plan)
+    if let (plan, limits) = encoding {
+      let composed = AVAssetReaderVideoCompositionOutput(videoTracks: [track], videoSettings: nil)
+      composed.videoComposition = Self.composition(track: track, naturalSize: naturalSize, transform: transform, duration: duration, plan: plan)
+      videoOutput = composed
+      videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: Self.videoSettings(plan))
+      audioOutput = audioTrack.map { AVAssetReaderAudioMixOutput(audioTracks: [$0], audioSettings: Self.decodedAudio(limits)) }
+      audioInput = audioTrack == nil ? nil : AVAssetWriterInput(mediaType: .audio, outputSettings: Self.encodedAudio(limits))
+    } else {
+      videoOutput = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+      videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: nil, sourceFormatHint: formats.video)
+      videoInput.transform = transform
+      audioOutput = audioTrack.map { AVAssetReaderTrackOutput(track: $0, outputSettings: nil) }
+      audioInput = audioTrack == nil ? nil : AVAssetWriterInput(mediaType: .audio, outputSettings: nil, sourceFormatHint: formats.audio)
+    }
     reader.add(videoOutput)
-    videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: Self.videoSettings(plan))
     videoInput.expectsMediaDataInRealTime = false
     writer.add(videoInput)
-    if let audioTrack {
-      let audio = AVAssetReaderAudioMixOutput(audioTracks: [audioTrack], audioSettings: Self.decodedAudio(limits))
-      reader.add(audio)
-      let input = AVAssetWriterInput(mediaType: .audio, outputSettings: Self.encodedAudio(limits))
-      input.expectsMediaDataInRealTime = false
-      writer.add(input)
-      audioOutput = audio
-      audioInput = input
-    } else {
-      audioOutput = nil
-      audioInput = nil
+    if let audioOutput, let audioInput {
+      reader.add(audioOutput)
+      audioInput.expectsMediaDataInRealTime = false
+      writer.add(audioInput)
     }
   }
 

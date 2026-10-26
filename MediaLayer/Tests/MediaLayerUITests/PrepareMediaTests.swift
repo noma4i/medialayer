@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -27,6 +28,41 @@ private func smallLimits() -> VideoLimits {
 private func preparedFiles() -> Set<String> {
   let names = (try? FileManager.default.contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path)) ?? []
   return Set(names.filter { $0.hasSuffix(".mp4") || $0.hasSuffix(".jpg") })
+}
+
+private func clipWithLocation() async throws -> MediaSourceValue {
+  let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).mp4")
+  let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+  writer.metadata = [(AVMetadataIdentifier.quickTimeMetadataLocationISO6709, "+37.3300-122.0300/"), (.iTunesMetadataSongName, "Private title")].map {
+    let item = AVMutableMetadataItem()
+    item.identifier = $0.0
+    item.value = $0.1 as NSString
+    item.dataType = "com.apple.metadata.datatype.UTF-8"
+    return item
+  }
+  let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 64, AVVideoHeightKey: 32])
+  let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: nil)
+  writer.add(input)
+  writer.startWriting()
+  writer.startSession(atSourceTime: .zero)
+  for frame in 0..<30 {
+    while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(5)) }
+    var buffer: CVPixelBuffer?
+    CVPixelBufferCreate(nil, 64, 32, kCVPixelFormatType_32BGRA, nil, &buffer)
+    adaptor.append(try #require(buffer), withPresentationTime: CMTime(value: CMTimeValue(frame), timescale: 30))
+  }
+  input.markAsFinished()
+  await writer.finishWriting()
+  try #require(writer.status == .completed)
+  return .file(url, kind: .video)
+}
+
+private func metadataIdentifiers(_ url: URL) async throws -> [String] {
+  let asset = AVURLAsset(url: url)
+  var items: [AVMetadataItem] = []
+  for format in try await asset.load(.availableMetadataFormats) { items += try await asset.loadMetadata(for: format) }
+  for track in try await asset.load(.tracks) { items += try await track.load(.metadata) }
+  return items.compactMap { $0.identifier?.rawValue.removingPercentEncoding }
 }
 
 private final class Marks: @unchecked Sendable {
@@ -93,6 +129,37 @@ extension GlobalMedia {
       #expect(!prepared.isNew)
       #expect(prepared.url.absoluteString == source.url)
       #expect(preparedFiles() == before)
+    }
+
+    @Test(.timeLimit(.minutes(2)))
+    func inv_send_39_a_video_that_fits_but_carries_location_is_copied_without_encoding_and_without_the_tags() async throws {
+      let media = try await open()
+      let source = try await clipWithLocation()
+      defer { try? FileManager.default.removeItem(at: URL(string: source.url)!) }
+      let before = try await metadataIdentifiers(URL(string: source.url)!)
+      try #require(before.contains { $0.hasSuffix("loci") }, "the fixture must carry a location")
+
+      let prepared = try await media.prepareVideo(source)
+
+      #expect(prepared.isNew)
+      #expect(prepared.url.absoluteString != source.url)
+      #expect(try await metadataIdentifiers(prepared.url).isEmpty)
+      #expect(try await AVURLAsset(url: prepared.url).load(.duration).seconds == 1)
+      try? FileManager.default.removeItem(at: prepared.url)
+    }
+
+    @Test(.timeLimit(.minutes(2)))
+    func inv_send_40_an_encoded_video_does_not_carry_the_location_of_its_source() async throws {
+      let media = try await open()
+      let source = try await clipWithLocation()
+      defer { try? FileManager.default.removeItem(at: URL(string: source.url)!) }
+      try #require(!(try await metadataIdentifiers(URL(string: source.url)!)).isEmpty)
+
+      let prepared = try await media.prepareVideo(source, limits: smallLimits())
+
+      #expect(prepared.isNew)
+      #expect(try await metadataIdentifiers(prepared.url).isEmpty)
+      try? FileManager.default.removeItem(at: prepared.url)
     }
 
     @Test

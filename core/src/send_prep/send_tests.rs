@@ -364,3 +364,27 @@ fn inv_send_37_a_rotation_joins_the_exif_turn_in_one_turn_and_the_crop_is_taken_
     assert_eq!(photo_plan(400, 200, 1, PhotoEdit { rotation_degrees: 360, ..edit() }).unwrap().turn.rotation_degrees, 0);
     assert_eq!(plain.cost, 400 * 200 * 4 * 2);
 }
+
+#[test]
+fn inv_send_38_a_video_with_location_or_personal_tags_must_be_copied_without_them_and_a_clean_one_stays() {
+    let strip = |keys: &[&str]| video_metadata_to_strip(keys.iter().map(|key| key.to_string()).collect());
+    for keys in [
+        &["mdta/com.apple.quicktime.location.ISO6709"][..],
+        &["com.apple.quicktime.location.accuracy.horizontal"],
+        &["udta/©xyz"],
+        &["©XYZ"],
+        &["udta/loci"],
+        &["location"],
+        &["mdta/com.apple.quicktime.creationdate"],
+        &["creation_time"],
+        &["mdta/com.apple.quicktime.make", "mdta/com.apple.quicktime.model", "mdta/com.apple.quicktime.software"],
+        &["udta/©nam", "itsk/©ART", "title", "comment"],
+        &["major_brand", "mdta/com.apple.quicktime.location.ISO6709"],
+    ] {
+        assert!(!strip(keys).is_empty(), "{keys:?}");
+    }
+    assert_eq!(strip(&["major_brand", "mdta/com.apple.quicktime.location.ISO6709", "handler_name"]), ["mdta/com.apple.quicktime.location.ISO6709"]);
+    for keys in [&[][..], &["major_brand", "minor_version", "compatible_brands"], &["udta/handler_name", " Encoder ", ""], &["itsk/©too"], &["TSSE"]] {
+        assert!(strip(keys).is_empty(), "{keys:?}");
+    }
+}

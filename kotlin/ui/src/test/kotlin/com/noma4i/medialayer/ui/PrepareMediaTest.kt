@@ -3,6 +3,10 @@ package com.noma4i.medialayer.ui
 import android.app.Application
 import android.os.Looper
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.container.MdtaMetadataEntry
+import androidx.media3.container.Mp4LocationData
+import androidx.media3.container.Mp4TimestampData
+import com.noma4i.medialayer.videoMetadataToStrip
 import androidx.media3.common.audio.ChannelMixingAudioProcessor
 import androidx.media3.effect.FrameDropEffect
 import androidx.media3.effect.Presentation
@@ -41,12 +45,14 @@ class PrepareMediaTest {
   private val context = ApplicationProvider.getApplicationContext<Application>()
   private val readerBefore = videoReader
   private val exporterBefore = videoExporter
+  private val metadataBefore = metadataReader
   private val dispatcherBefore = prepareDispatcher
 
   @After
   fun restore() {
     videoReader = readerBefore
     videoExporter = exporterBefore
+    metadataReader = metadataBefore
     prepareDispatcher = dispatcherBefore
   }
 
@@ -97,12 +103,49 @@ class PrepareMediaTest {
   fun inv_send_06_aClipThatFitsIsHandedBackAndNeverEncoded() = runBlocking {
     val file = source()
     videoReader = { fittingClip() }
+    metadataReader = { _, _ -> listOf("major_brand", "handler_name") }
     videoExporter = { error("a fitting clip must not be encoded") }
 
     val prepared = prepareVideoAt(context, file, defaultVideoLimits(), null)
 
     assertSame(file, prepared.file)
     assertFalse(prepared.isNew)
+  }
+
+  @Test
+  fun inv_send_39_aClipThatFitsButCarriesLocationIsCopiedWithoutEncodingAndWithoutMetadata() = runBlocking {
+    val file = source()
+    val exports = CopyOnWriteArrayList<VideoExport>()
+    videoReader = { fittingClip() }
+    metadataReader = { _, _ -> listOf("major_brand", "location", "com.apple.quicktime.make") }
+    videoExporter = { request ->
+      exports += request
+      request.output.writeBytes(byteArrayOf(1))
+    }
+
+    val prepared = prepareVideoAt(context, file, defaultVideoLimits(), null)
+
+    val setup = exports.single().setup
+    assertTrue(prepared.isNew)
+    assertEquals(exports.single().output, prepared.file)
+    assertEquals(listOf(null, null), listOf(setup.videoMime, setup.audioMime))
+    assertTrue(setup.videoEffects.isEmpty() && setup.audioProcessors.isEmpty())
+    prepared.file.delete()
+    Unit
+  }
+
+  @Test
+  fun inv_send_40_theMuxerKeepsNoMetadataOfTheSourceAndTheCoreNamesEveryEntryItReads() {
+    val entries = mutableSetOf<androidx.media3.common.Metadata.Entry>(
+      Mp4LocationData(37.33f, -122.03f), Mp4TimestampData(1_700_000_000L, 1_700_000_000L), MdtaMetadataEntry("com.apple.quicktime.make", byteArrayOf(1), 0, 1)
+    )
+    val keys = entries.map(::metadataKeyOf)
+
+    dropSourceMetadata.updateMetadataEntries(entries)
+
+    assertEquals(listOf("location", "creation_time", "com.apple.quicktime.make"), keys)
+    assertEquals(keys, videoMetadataToStrip(keys))
+    assertTrue(entries.isEmpty())
   }
 
   @Test

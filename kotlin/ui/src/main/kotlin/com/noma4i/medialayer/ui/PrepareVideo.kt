@@ -12,6 +12,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Metadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.ChannelMixingAudioProcessor
@@ -19,7 +20,13 @@ import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.FrameDropEffect
+import androidx.media3.container.MdtaMetadataEntry
+import androidx.media3.container.Mp4LocationData
+import androidx.media3.container.Mp4TimestampData
+import androidx.media3.container.XmpData
 import androidx.media3.effect.Presentation
+import androidx.media3.extractor.metadata.id3.Id3Frame
+import androidx.media3.inspector.MetadataRetriever
 import androidx.media3.transformer.AudioEncoderSettings
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.DefaultEncoderFactory
@@ -39,6 +46,7 @@ import com.noma4i.medialayer.VideoPlan
 import com.noma4i.medialayer.VideoSource
 import com.noma4i.medialayer.defaultVideoLimits
 import com.noma4i.medialayer.planVideo
+import com.noma4i.medialayer.videoMetadataToStrip
 import java.io.File
 import java.io.IOException
 import java.util.UUID
@@ -53,7 +61,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 /**
- * A video made to fit the limits: H.264 and AAC in mp4, upright, with even sides. A file that already fits comes back untouched.
+ * A video made to fit the limits: H.264 and AAC in mp4, upright, with even sides. A file that already fits comes back untouched, or copied without encoding when it carries location or personal tags. The result never carries them.
  * `onProgress` gets 0 to 1 while the export runs.
  */
 suspend fun MediaLayer.prepareVideo(
@@ -68,7 +76,7 @@ suspend fun MediaLayer.prepareVideo(
 internal suspend fun prepareVideoAt(context: Context, file: File, limits: VideoLimits, onProgress: ((Double) -> Unit)?): PreparedMedia {
   val facts = withContext(prepareDispatcher) { videoReader(file) }
   val plan = planVideo(facts.toSource(), limits)
-  if (!plan.reencode) return PreparedMedia(file, false)
+  if (!plan.reencode && videoMetadataToStrip(withContext(prepareDispatcher) { metadataReader(context, file) }).isEmpty()) return PreparedMedia(file, false)
   val output = File(context.cacheDir, "prepared-${UUID.randomUUID()}.mp4")
   try {
     videoExporter(VideoExport(context, file, output, transformSetup(plan, limits, facts), onProgress))
@@ -99,16 +107,19 @@ internal class TransformSetup(
   val audioProcessors: List<AudioProcessor>,
   val videoBitrate: Int,
   val audioBitrate: Int,
-  val videoMime: String,
-  val audioMime: String
+  val videoMime: String?,
+  val audioMime: String?
 )
 
 internal var videoReader: (File) -> VideoFacts = ::readVideoFacts
+
+internal var metadataReader: (Context, File) -> List<String> = ::readMetadataKeys
 
 internal var videoExporter: suspend (VideoExport) -> Unit = ::exportWithTransformer
 
 @androidx.annotation.OptIn(UnstableApi::class)
 internal fun transformSetup(plan: VideoPlan, limits: VideoLimits, facts: VideoFacts): TransformSetup {
+  if (!plan.reencode) return TransformSetup(emptyList(), emptyList(), plan.bitrate.toInt(), limits.audioBitrate.toInt(), null, null)
   val turned = plan.rotationDegrees.toInt() % 180 != 0
   val uprightWidth = if (turned) facts.height else facts.width
   val uprightHeight = if (turned) facts.width else facts.height
@@ -126,6 +137,31 @@ internal fun transformSetup(plan: VideoPlan, limits: VideoLimits, facts: VideoFa
   }
   return TransformSetup(video, audio, plan.bitrate.toInt(), limits.audioBitrate.toInt(), MimeTypes.VIDEO_H264, MimeTypes.AUDIO_AAC)
 }
+
+internal fun metadataKeyOf(entry: Metadata.Entry): String = when (entry) {
+  is Mp4LocationData -> "location"
+  is Mp4TimestampData -> "creation_time"
+  is MdtaMetadataEntry -> entry.key
+  is Id3Frame -> entry.id
+  is XmpData -> "xmp"
+  else -> entry.javaClass.simpleName
+}
+
+@androidx.annotation.OptIn(UnstableApi::class)
+internal fun readMetadataKeys(context: Context, file: File): List<String> =
+  MetadataRetriever.Builder(context, MediaItem.fromUri(Uri.fromFile(file))).build().use { retriever ->
+    val groups = retriever.retrieveTrackGroups().get()
+    (0 until groups.length).flatMap { index ->
+      val group = groups[index]
+      (0 until group.length).flatMap { track ->
+        val metadata = group.getFormat(track).metadata
+        (0 until (metadata?.length() ?: 0)).map { metadataKeyOf(metadata!![it]) }
+      }
+    }
+  }
+
+/** The muxer keeps no metadata entry of the source: no location, no creation time, no tag. */
+internal val dropSourceMetadata = InAppMp4Muxer.MetadataProvider { entries -> entries.clear() }
 
 internal fun readVideoFacts(file: File): VideoFacts {
   val extractor = MediaExtractor()
@@ -202,9 +238,9 @@ private suspend fun exportWithTransformer(request: VideoExport) = withContext(Di
   ) {
     suspendCancellableCoroutine { continuation ->
       val transformer = Transformer.Builder(request.context)
-        .setVideoMimeType(setup.videoMime).setAudioMimeType(setup.audioMime)
+        .apply { setup.videoMime?.let(::setVideoMimeType) }.apply { setup.audioMime?.let(::setAudioMimeType) }
         .setEncoderFactory(encoders).setPortraitEncodingEnabled(true)
-        .setMuxerFactory(InAppMp4Muxer.Factory().setAttemptStreamableOutputEnabled(true))
+        .setMuxerFactory(InAppMp4Muxer.Factory(dropSourceMetadata).setAttemptStreamableOutputEnabled(true))
         .addListener(object : Transformer.Listener {
           override fun onCompleted(composition: Composition, exportResult: ExportResult) {
             if (continuation.isActive) continuation.resume(Unit)
