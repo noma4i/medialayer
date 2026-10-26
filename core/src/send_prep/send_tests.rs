@@ -73,7 +73,8 @@ fn inv_send_06_a_file_that_already_fits_is_handed_back_and_any_misfit_is_encoded
     let mut fits = source(1280, 720);
     fits.bitrate = Some(1_500_000);
     assert!(!plan(fits).reencode);
-    let misfits: [(&str, fn(&mut VideoSource)); 7] = [
+    type Misfit = (&'static str, fn(&mut VideoSource));
+    let misfits: [Misfit; 7] = [
         ("high bitrate", |source| source.bitrate = Some(5_000_000)),
         ("unknown bitrate", |source| source.bitrate = None),
         ("turned", |source| source.rotation_degrees = 90),

@@ -368,7 +368,7 @@ struct ViewModelTests {
     ImageCache.shared[ImageCacheKey(request: request)] = ImageContainer(image: PlatformImage())
     #expect(ImageCache.shared[ImageCacheKey(request: request)] != nil)
 
-    ImageMemoryReleaser().dropMemoryCaches()
+    ImageMemoryReleaser(cache: .shared, frames: FrameCache()).dropMemoryCaches()
 
     #expect(ImageCache.shared[ImageCacheKey(request: request)] == nil)
   }
