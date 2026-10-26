@@ -148,6 +148,7 @@ internal fun openMediaLayer(
       slots = ExoPlayerSlotFactory(app, callFactory ?: client, startMuted = emulator, audio = audio, videoOutputCounters = videoOutputCounters)
       synchronized(lock) { factory = slots }
       dir = File(app.cacheDir, "medialayer").apply { mkdirs() }
+      CaptureFiles.sweepOrphans(CaptureFiles.directory(app))
       availableBytes = android.os.StatFs(dir.path).availableBytes.toULong()
       device = deviceMemory(app)
     } finally { Trace.endSection() }

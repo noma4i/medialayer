@@ -31,3 +31,5 @@ panic:spec/types.rs:expect("spec serializes") # MediaSpec is a derived Serialize
 periodic MediaLayer/Sources/MediaLayerTesting/TestFetcher.swift 1 # one-shot configured delay before a response, only for URLs given to delay(_:for:), cancelled with the fetch
 periodic MediaLayer/Sources/MediaLayerUI/MediaVoiceRecorder.swift 1 # wave level read every 50 ms, started by start and cancelled by stop or the limit, 0 wakeups at rest
 periodic kotlin/ui/src/main/kotlin/com/noma4i/medialayer/ui/MediaVoiceRecorder.kt 1 # wave level read every 50 ms, started by start and cancelled by stop or the limit, 0 wakeups at rest
+periodic MediaLayer/Sources/MediaLayerUI/Camera/MediaCamera.swift 1 # length of a running recording read every capture_tick_ms (100 ms), started by RecordStarted and cancelled when the recording leaves Recording or the camera goes, 0 wakeups at rest
+periodic kotlin/ui/src/main/kotlin/com/noma4i/medialayer/ui/MediaCamera.kt 1 # length of a running recording read every capture_tick_ms (100 ms), started by RecordStarted and cancelled when the recording leaves Recording or the camera closes, 0 wakeups at rest
