@@ -88,7 +88,10 @@ public struct MediaVideo<Content: View>: View {
       if active { await follow() }
     }
     .task(id: Sampling(url: source.url, active: onScreen && !inBackground, reports: onProgress != nil)) { await sample() }
-    .background(OnScreenProbe { onScreen = $0 })
+    .background(OnScreenProbe { value in
+      onScreen = value
+      declare(visible: value)
+    })
     .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.background)) { _ in inBackground = true }
     .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
     .onChange(of: onScreen) { _, value in declare(visible: value) }

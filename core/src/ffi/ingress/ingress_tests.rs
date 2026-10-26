@@ -929,3 +929,64 @@ fn inv_ingress_46_a_clip_that_is_not_looping_ends_its_place_when_a_window_and_a_
 
     caller.block_on(eventually(|| seen.0.lock().unwrap().last() == Some(&MediaState::Ended)));
 }
+
+#[test]
+fn inv_ingress_47_a_slot_a_window_prerolled_gets_play_when_a_place_of_the_same_url_shows_and_plays_later() {
+    let cases: Vec<(&str, bool, Option<bool>, Option<u64>, bool, bool)> = vec![
+        ("plain", false, None, None, false, false),
+        ("ready before", true, None, None, false, false),
+        ("muted and view", false, Some(true), Some(1), false, false),
+        ("muted and view, ready before", true, Some(true), Some(1), false, false),
+        ("split update", false, Some(true), Some(1), true, false),
+        ("place loops", false, Some(true), Some(1), true, true),
+    ];
+    for (name, ready_before, muted, token, split, place_loops) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let factory: Arc<MockFactory> = Arc::default();
+        let slots: Arc<dyn PlayerSlotFactory> = factory.clone();
+        let layer = MediaLayer::build(config(dir.path(), Some(slots), None), Pause::new()).unwrap();
+        let caller = caller();
+        let url = "https://o.test/replay.m4v";
+        let once = MediaItem { looping: false, ..MediaItem::bare_video(url) };
+
+        let window = layer.open_video_window().unwrap();
+        window.replace(0, vec![Some(once.clone())]).unwrap();
+        caller.block_on(eventually(|| factory.slot_holding(url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Preroll))));
+        let (index, slot) = factory.slot_holding(url).unwrap();
+        if ready_before {
+            layer.player_events().ready(index, slot.generation());
+        }
+        let place = layer.open_place(MediaItem { looping: place_loops, ..once }).unwrap();
+        if split {
+            place.update(PlaceInput { visible: true, ..PlaceInput::default() }).unwrap();
+        }
+        place.update(PlaceInput { visible: true, playing: true, muted, view_token: token, ..PlaceInput::default() }).unwrap();
+
+        caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Play)));
+        println!("case {name}: play issued");
+    }
+}
+
+#[test]
+fn inv_ingress_48_a_play_that_is_not_issued_leaves_a_trace_line_with_its_reason() {
+    struct Lines(std::sync::Mutex<Vec<String>>);
+    impl crate::trace::TraceSink for Lines {
+        fn line(&self, text: String) {
+            self.0.lock().unwrap().push(text);
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let factory: Arc<MockFactory> = Arc::default();
+    let slots: Arc<dyn PlayerSlotFactory> = factory.clone();
+    let layer = MediaLayer::build(config(dir.path(), Some(slots), None), Pause::new()).unwrap();
+    let caller = caller();
+    let url = "https://o.test/dropped-play.m4v";
+    let lines = Arc::new(Lines(Default::default()));
+    crate::trace::set_trace_sink(Some(lines.clone()));
+    layer.player_events().background();
+    let place = layer.open_place(MediaItem::bare_video(url)).unwrap();
+    place.update(PlaceInput { visible: true, playing: true, ..PlaceInput::default() }).unwrap();
+
+    caller.block_on(eventually(|| lines.0.lock().unwrap().iter().any(|line| line.contains("play dropped: ") && line.contains("dropped-play.m4v") && line.contains("the app is in the background"))));
+    crate::trace::set_trace_sink(None);
+}

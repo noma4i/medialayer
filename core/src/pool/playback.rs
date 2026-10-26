@@ -3,6 +3,9 @@ use super::ring::{Command, Ring};
 impl Ring {
     pub fn set_playing(&mut self, key: &str, playing: bool) -> Vec<Command> {
         let Some(target) = self.slot_of(key) else {
+            if playing {
+                crate::trace!("stage", "play dropped: {} no slot holds the key", crate::trace::tail(key));
+            }
             return Vec::new();
         };
         let mut out = Vec::new();
@@ -23,7 +26,11 @@ impl Ring {
             let was_peeking = std::mem::take(&mut binding.is_peeking);
             if !(playing && was_peeking) {
                 out.push(if playing { Command::Play { slot: target } } else { Command::Pause { slot: target } });
+            } else {
+                crate::trace!("stage", "play dropped: slot {target} was peeking and plays on");
             }
+        } else if playing {
+            crate::trace!("stage", "play dropped: slot {target} is already marked playing");
         }
         out.extend(self.sync_mute());
         out

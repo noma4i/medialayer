@@ -122,7 +122,7 @@ public struct MediaImage<Content: View>: View {
   @State private var loaded: LoadedImage?
   @State private var state: MediaState = .idle
   @State private var failure: ScopedFailure?
-  @State private var mount: PlaceMount?
+  @State private var claim = ClaimedMount()
   @State private var mountedItem: MediaItem?
   @State private var mountedContext: ObjectIdentifier?
   @State private var onScreen = false
@@ -185,7 +185,7 @@ public struct MediaImage<Content: View>: View {
         }
         .id(ImageInputs(url: source.url, headers: source.headers, width: source.size?.width, height: source.size?.height, pixelWidth: pixels?.width, pixelHeight: pixels?.height, contentMode: contentMode, context: ObjectIdentifier(context)))
       }
-      .background(OnScreenProbe { screen($0) })
+      .background(OnScreenProbe(onChange: { screen($0) }, onDismantle: { [claim] in claim.close() }))
       .task(id: ImageFollow(url: source.url, active: isPlaying)) {
         if isPlaying { await follow() }
       }
@@ -193,6 +193,11 @@ public struct MediaImage<Content: View>: View {
       .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.background)) { _ in inBackground = true }
       .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
     }
+  }
+
+  private var mount: PlaceMount? {
+    get { claim.mount }
+    nonmutating set { claim.mount = newValue }
   }
 
   private var isPlaying: Bool { onScreen && !inBackground }
@@ -287,5 +292,15 @@ extension MediaImage where Content == EmptyView {
 
   public init(_ source: some MediaSource, preview: (some MediaSource)?, contentMode: ContentMode = .fill, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation()) {
     self.init(source, preview: preview, contentMode: contentMode, playbackRate: playbackRate, animation: animation) { _ in EmptyView() }
+  }
+}
+
+/// The place claim of an image. A plain object, so the teardown of the view releases it without writing view state.
+final class ClaimedMount {
+  var mount: PlaceMount?
+
+  func close() {
+    mount?.close()
+    mount = nil
   }
 }

@@ -79,6 +79,7 @@ private final class VisibilityObservation {
 
 final class OnScreenView: UIView {
   var onChange: (Bool) -> Void = { _ in }
+  var onDismantle: () -> Void = {}
   private var delivered = false
   private var observations: [VisibilityObservation] = []
 
@@ -103,10 +104,11 @@ final class OnScreenView: UIView {
     VisibilityPass.shared.cancel(self)
     observations.forEach { $0.leave(self) }
     observations = []
-    guard delivered else { return }
-
     delivered = false
-    onChange(false)
+    onChange = { _ in }
+    let release = onDismantle
+    onDismantle = {}
+    release()
   }
 
   private func report() {
@@ -122,16 +124,19 @@ final class OnScreenView: UIView {
 
 struct OnScreenProbe: UIViewRepresentable {
   let onChange: (Bool) -> Void
+  var onDismantle: () -> Void = {}
 
   func makeUIView(context: Context) -> OnScreenView {
     let view = OnScreenView()
     view.isUserInteractionEnabled = false
     view.onChange = onChange
+    view.onDismantle = onDismantle
     return view
   }
 
   func updateUIView(_ view: OnScreenView, context: Context) {
     view.onChange = onChange
+    view.onDismantle = onDismantle
   }
 
   static func dismantleUIView(_ view: OnScreenView, coordinator: ()) {
@@ -143,6 +148,7 @@ import AppKit
 
 final class OnScreenView: NSView {
   var onChange: (Bool) -> Void = { _ in }
+  var onDismantle: () -> Void = {}
   private var delivered = false
   private var scheduled = false
   private var tokens: [NSObjectProtocol] = []
@@ -177,10 +183,11 @@ final class OnScreenView: NSView {
 
   func finish() {
     unwatch()
-    guard delivered else { return }
-
     delivered = false
-    onChange(false)
+    onChange = { _ in }
+    let release = onDismantle
+    onDismantle = {}
+    release()
   }
 
   private func watch() {
@@ -229,15 +236,18 @@ final class OnScreenView: NSView {
 
 struct OnScreenProbe: NSViewRepresentable {
   let onChange: (Bool) -> Void
+  var onDismantle: () -> Void = {}
 
   func makeNSView(context: Context) -> OnScreenView {
     let view = OnScreenView()
     view.onChange = onChange
+    view.onDismantle = onDismantle
     return view
   }
 
   func updateNSView(_ view: OnScreenView, context: Context) {
     view.onChange = onChange
+    view.onDismantle = onDismantle
   }
 
   static func dismantleNSView(_ view: OnScreenView, coordinator: ()) {

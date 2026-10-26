@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.11.1 - 2026-10-26
+
+### Added
+- Trace line `stage play dropped: <key> <reason>` when a play right is asked for and no play reaches the slot.
+
+### Fixed
+- Tearing down an on-screen probe no longer writes view state during the teardown (iOS exclusive-access crash on leaving a screen). `MediaImage` releases its place claim and `MediaVideo` re-declares its place on a source change without that write.
+
 ## 3.11.0 - 2026-10-26
 
 ### Removed

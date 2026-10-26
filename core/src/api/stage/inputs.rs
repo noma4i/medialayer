@@ -5,6 +5,7 @@ use crate::api::slots::SlotCall;
 use crate::api::source::MediaItem;
 use crate::api::types::Kind;
 use crate::pages::Sliced;
+use crate::pool::Command;
 use crate::prefetch::{CacheStrategy, Source};
 use crate::session::{Context, Intent};
 use std::collections::BTreeSet;
@@ -146,7 +147,11 @@ impl Stage {
                 }
                 let mut orders = state.election.set_groups(key, lease, groups);
                 orders.extend(state.election.set_intent(key, lease, Intent::Play));
-                state.commands_for(orders)
+                let commands = state.commands_for(orders);
+                if !commands.iter().any(|command| matches!(command, Command::Play { .. })) {
+                    crate::trace!("stage", "play dropped: {} {}", crate::trace::tail(key), state.election.blocked_reason(lease));
+                }
+                commands
             };
             (state, commands)
         };

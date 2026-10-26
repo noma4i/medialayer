@@ -170,6 +170,22 @@ impl Election {
         out
     }
 
+    /// Why this lease does not hold the play right, in words for a trace line.
+    pub fn blocked_reason(&self, lease: u64) -> &'static str {
+        let Some(session) = self.sessions.iter().find(|session| session.lease == lease) else { return "no session for the lease" };
+        if !self.is_foreground {
+            "the app is in the background"
+        } else if session.intent != Intent::Play {
+            "the intent is not play"
+        } else if !self.suspensions.allows_any(&session.policy.groups) {
+            "a suspension holds the groups of the place"
+        } else if self.active == Some(lease) {
+            "the lease already holds the play right"
+        } else {
+            "another lease holds the play right"
+        }
+    }
+
     pub fn active(&self) -> Option<u64> {
         self.active
     }
