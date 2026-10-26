@@ -8,7 +8,12 @@ final class ToneFrames: TonePreparation, @unchecked Sendable {
   static let longSide = 64
   private weak var places: MediaPlaces?
 
-  init(places: MediaPlaces) { self.places = places }
+  private let thumbnail: @Sendable (Data) -> CGImage?
+
+  init(places: MediaPlaces, thumbnail: @escaping @Sendable (Data) -> CGImage? = ToneFrames.thumbnail) {
+    self.places = places
+    self.thumbnail = thumbnail
+  }
 
   func prepare(source: MediaItem) async -> TonePixels? {
     guard let places, await places.tonePixelsNeeded(source: source), !Task.isCancelled else { return nil }
@@ -30,7 +35,7 @@ final class ToneFrames: TonePreparation, @unchecked Sendable {
     let result = try? await places.fetchImage(url: url.absoluteString, headers: source.headers)
     if result?.source == .cache { stats.record(work: .diskHit) }
     guard !Task.isCancelled, let data = result?.bytes else { return nil }
-    let image = Self.thumbnail(data)
+    let image = thumbnail(data)
     if let image { stats.record(work: .decode(width: UInt32(image.width), height: UInt32(image.height), bytes: UInt64(image.bytesPerRow * image.height))) }
     return image
   }

@@ -1277,3 +1277,41 @@ fn inv_strategy_18_closing_the_declaration_cancels_a_load_nobody_else_holds() {
     caller.block_on(eventually(|| origin.is_released()));
     assert!(matches!(second.add(vec![whole_photo("late.jpg")]), Err(MediaError::Closed)));
 }
+
+fn decode_layer(dir: &std::path::Path, budget: u64) -> Arc<MediaLayer> {
+    let mut open = config(dir, Arc::new(Offline), shared::<FakeSettings>(), None);
+    open.defaults = Limits { memory_budget: budget, ..default_limits() };
+    MediaLayer::open(open).unwrap()
+}
+
+#[test]
+fn inv_memory_14_a_decode_waits_for_the_ledger_and_a_released_hold_admits_the_next() {
+    let dir = tempfile::tempdir().unwrap();
+    let layer = decode_layer(dir.path(), 64 << 20);
+    let caller = caller();
+    caller.block_on(async {
+        let first = layer.reserve_decode(40 << 20).await.unwrap();
+        assert_eq!(first.bytes(), 40 << 20);
+        let mut second = Box::pin(layer.reserve_decode(40 << 20));
+        assert!(pending_once(async { let _ = second.as_mut().await; }).await, "a second decode got bytes the ledger did not have");
+        first.release();
+        assert_eq!(first.bytes(), 0);
+        assert_eq!(second.await.unwrap().bytes(), 40 << 20);
+    });
+}
+
+#[test]
+fn inv_memory_14_a_decode_above_the_ceiling_is_refused_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let layer = decode_layer(dir.path(), 64 << 20);
+    let refused = caller().block_on(layer.reserve_decode(1 << 30));
+    assert!(matches!(refused, Err(MediaError::Overloaded { .. })));
+}
+
+#[test]
+fn inv_memory_15_the_decode_cost_is_one_rgba_raster_and_refuses_empty_and_oversized_sides() {
+    assert_eq!(crate::ffi::decode_cost(100, 50), Some(20_000));
+    assert_eq!(crate::ffi::decode_cost(16_384, 16_384), Some(16_384 * 16_384 * 4));
+    assert_eq!(crate::ffi::decode_cost(16_385, 1), None);
+    assert_eq!(crate::ffi::decode_cost(0, 10), None);
+}

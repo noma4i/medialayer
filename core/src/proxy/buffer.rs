@@ -40,12 +40,16 @@ impl Buffers {
     }
 
     pub async fn reserve_between(&self, floor: usize, wanted: usize) -> Result<Reservation, Refused> {
-        let reserved = self.ledger.reserve_between(Owner::ProxyBuffer, floor as u64, wanted as u64);
-        tokio::time::timeout(self.wait, reserved).await.unwrap_or(Err(Refused::Ceiling {
-            owner: Owner::ProxyBuffer,
-            requested: floor as u64,
-            available: 0,
-        }))
+        self.reserve_for(Owner::ProxyBuffer, floor, wanted).await
+    }
+
+    pub async fn reserve_decode(&self, bytes: usize) -> Result<Reservation, Refused> {
+        self.reserve_for(Owner::ImageDecode, bytes, bytes).await
+    }
+
+    async fn reserve_for(&self, owner: Owner, floor: usize, wanted: usize) -> Result<Reservation, Refused> {
+        let reserved = self.ledger.reserve_between(owner, floor as u64, wanted as u64);
+        tokio::time::timeout(self.wait, reserved).await.unwrap_or(Err(Refused::Ceiling { owner, requested: floor as u64, available: 0 }))
     }
 
     pub fn hold(data: Bytes, reservation: Reservation) -> Bytes {

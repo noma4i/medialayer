@@ -20,20 +20,36 @@ import coil3.request.allowHardware
 import java.lang.ref.WeakReference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
 internal fun interface FrameSource {
-  fun first(route: PlaybackRoute): Bitmap?
+  suspend fun first(route: PlaybackRoute): Bitmap?
+}
+
+internal suspend fun <T> cancellableBlocking(abort: () -> Unit, block: () -> T): T = coroutineScope {
+  val work = async(Dispatchers.IO) { block() }
+  try {
+    work.await()
+  } catch (cancel: CancellationException) {
+    abort()
+    throw cancel
+  }
 }
 
 internal object MetadataFrames : FrameSource {
-  override fun first(route: PlaybackRoute): Bitmap? {
+  override suspend fun first(route: PlaybackRoute): Bitmap? {
     val retriever = MediaMetadataRetriever()
     return try {
-      retriever.setDataSource(route.url, route.headers)
-      retriever.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, ToneFrames.LONG_SIDE, ToneFrames.LONG_SIDE)
-    } catch (_: RuntimeException) {
-      null
+      cancellableBlocking(abort = retriever::release) {
+        try {
+          retriever.setDataSource(route.url, route.headers)
+          retriever.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, ToneFrames.LONG_SIDE, ToneFrames.LONG_SIDE)
+        } catch (_: RuntimeException) {
+          null
+        }
+      }
     } finally {
       retriever.release()
     }

@@ -32,7 +32,7 @@ class MediaImageHardwareTest {
       override val headers = emptyMap<String, String>()
     }
     try {
-      val request = imageRequest(context, source, PixelSize(64u, 64u), Scale.FILL, { source.url })
+      val request = imageRequest(context, source, PixelSize(64u, 64u), Scale.FILL, { source.url }, admit = freeAdmit)
         .newBuilder().decoderFactory(Decoder.Factory { _, options, _ ->
           Decoder {
             config = options.bitmapConfig

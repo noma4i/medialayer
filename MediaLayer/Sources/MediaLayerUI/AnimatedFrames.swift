@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import MediaLayer
 import SwiftUI
 
 final class FrameStream: @unchecked Sendable {
@@ -52,7 +53,7 @@ struct AnimatedFrames {
   let duration: TimeInterval
   let frameEnds: [TimeInterval]
 
-  let decodedBytes: Int
+  let retainedBytes: Int
 
   func loopDuration(rate: Double) -> TimeInterval { rate > 0 ? duration / rate : duration }
 
@@ -75,6 +76,15 @@ struct AnimatedFrames {
 
   func image(at index: Int) -> CGImage? {
     index == 0 ? firstImage : stream.image(at: index)
+  }
+
+  static func decodeBytes(sourceBytes: Int, maxPixel: Int) -> UInt64 {
+    let side = UInt32(min(max(maxPixel, 1), maxPixelLimit))
+    return UInt64(sourceBytes) + 2 * (decodeCost(width: side, height: side) ?? 0)
+  }
+
+  static func sourceFrameCount(_ data: Data) -> Int {
+    CGImageSourceCreateWithData(data as CFData, nil).map { CGImageSourceGetCount($0) } ?? 0
   }
 
   static func load(_ data: Data, maxPixel: Int) async -> AnimatedFrames? {
@@ -101,7 +111,7 @@ struct AnimatedFrames {
       frameEnds.append(duration)
     }
     let stream = FrameStream(source: source, options: options as CFDictionary)
-    return AnimatedFrames(stream: stream, frameCount: count, firstImage: first, duration: duration, frameEnds: frameEnds, decodedBytes: first.bytesPerRow * first.height * FrameStream.window)
+    return AnimatedFrames(stream: stream, frameCount: count, firstImage: first, duration: duration, frameEnds: frameEnds, retainedBytes: first.bytesPerRow * first.height * FrameStream.window + data.count)
   }
 
   private static func delay(source: CGImageSource, index: Int) -> TimeInterval {

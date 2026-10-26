@@ -147,9 +147,11 @@ struct AnimatedKeepingDecoder: ImageDecoding {
     self.base = base
   }
 
+  static func keepsSource(frames: Int) -> Bool { frames > 1 }
+
   func decode(_ data: Data) throws -> ImageContainer {
     var container = try base.decode(data)
-    if container.type == .webp { container.data = data }
+    if container.type == .webp, Self.keepsSource(frames: AnimatedFrames.sourceFrameCount(data)) { container.data = data }
     return container
   }
 

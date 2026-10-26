@@ -451,6 +451,13 @@ impl MediaLayer {
         }
     }
 
+    pub async fn reserve_decode(&self, bytes: u64) -> Result<Arc<super::image::DecodeHold>, MediaError> {
+        match self.outcome(Query::Decode(bytes)).await? {
+            Finished::Decode(reserved) => Ok(Arc::new(super::image::DecodeHold::new(reserved?))),
+            _ => Err(MediaError::Unexpected { detail: "the executor answered with another result".to_string() }),
+        }
+    }
+
     pub async fn image_size(&self, url: String, headers: HashMap<String, String>) -> Result<Option<crate::image_size::ImageSize>, MediaError> {
         match self.outcome(Query::ImageSize { url, headers }).await? {
             Finished::ImageSize(size) => size,

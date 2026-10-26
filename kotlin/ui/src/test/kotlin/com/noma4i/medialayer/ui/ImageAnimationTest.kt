@@ -153,9 +153,9 @@ class ImageAnimationTest {
 
   @Test
   fun inv_image_52_theRepeatsOfAnImageCountOneLessInTheDecoder() {
-    val request = imageRequest(context, page, null, coil3.size.Scale.FIT, { "k" }, 0L, null, Repeats.Times(3))
+    val request = imageRequest(context, page, null, coil3.size.Scale.FIT, { "k" }, 0L, null, Repeats.Times(3), freeAdmit)
     assertTrue(request.extras.asMap().values.contains(2))
-    assertFalse(imageRequest(context, page, null, coil3.size.Scale.FIT, { "k" }).extras.asMap().values.contains(-1))
+    assertFalse(imageRequest(context, page, null, coil3.size.Scale.FIT, { "k" }, admit = freeAdmit).extras.asMap().values.contains(-1))
   }
 
   @Test

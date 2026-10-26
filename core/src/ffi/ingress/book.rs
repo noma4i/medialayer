@@ -191,6 +191,7 @@ impl Book {
             Query::Tone(item, band) => self.running(reserve, slot, async move { Finished::Tone(assembled.tones.tone(&item, band).await) }),
             Query::Pixels(item) => self.running(reserve, slot, async move { Finished::Pixels(assembled.tones.pixels_needed(&item).await) }),
             Query::ImageSize { url, headers } => self.running(reserve, slot, async move { Finished::ImageSize(assembled.routes.image_size(&url, &headers).await) }),
+            Query::Decode(bytes) => self.running(reserve, slot, async move { Finished::Decode(assembled.routes.reserve_decode(bytes).await) }),
             Query::Image { url, headers } => self.running(reserve, slot, async move {
                 let result = assembled.routes.image_bytes(&url, &headers, crate::memory::InputLimits::default().response_bytes).await;
                 assembled.stage.announce_image(&url, result.as_ref().map(|_| ()).map_err(ToString::to_string));

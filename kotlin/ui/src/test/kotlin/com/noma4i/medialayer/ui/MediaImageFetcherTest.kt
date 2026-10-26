@@ -52,7 +52,7 @@ class MediaImageFetcherTest {
           override val kind = Kind.IMAGE
           override val headers = mapOf("Authorization" to account, "X-Ignored" to ignored)
         }
-        val request = imageRequest(context, source, pixels, Scale.FILL, { media.cacheKey(url, source.headers) })
+        val request = imageRequest(context, source, pixels, Scale.FILL, { media.cacheKey(url, source.headers) }, admit = freeAdmit)
         assertTrue(load(request) is SuccessResult)
       }
       assertEquals(listOf("A", "B"), requested.filter { it.first == url }.map { it.second["Authorization"] })

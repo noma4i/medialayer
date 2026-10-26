@@ -1,6 +1,8 @@
 use crate::api::MediaError;
 use crate::blurhash::{decode, BlurHashError};
 mod counters;
+mod hold;
+pub use hold::{decode_cost, DecodeHold};
 pub use counters::{ImageCounters, ImageSnapshot, ImageTotals, ImageWork};
 
 impl From<BlurHashError> for MediaError {

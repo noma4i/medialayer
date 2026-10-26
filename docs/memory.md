@@ -81,3 +81,7 @@ print(stats.slots.hot, stats.slots.warm, stats.slots.cold, stats.memoryBytes)
 val stats = media.stats()
 println("${stats.slots.hot} ${stats.slots.warm} ${stats.slots.cold} ${stats.memoryBytes}")
 ```
+
+## Decode admission
+
+Decoding an animated image or preparing a photo for sending takes bytes from the same ledger as the players before it allocates. The core exposes `reserveDecode(bytes)`, which waits for free space, refuses at once when the request is above the ceiling, and returns a hold that frees the bytes on `release()`. `decodeCost(width, height)` gives the bytes of one RGBA raster and returns nothing for an empty image or a side above 16384 pixels. `prepareImage` refuses such a photo with a `Fetch` error and does not shrink it.

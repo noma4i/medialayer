@@ -16,29 +16,56 @@ import coil3.decode.Decoder
 import coil3.fetch.SourceFetchResult
 import coil3.request.Options
 import coil3.size.Dimension
+import com.noma4i.medialayer.decodeCost
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /** Decodes the last frame of an animated WebP or GIF as a still; any other source goes on to the next decoder. */
-internal class RestFrameDecoder(private val result: SourceFetchResult, private val options: Options) : Decoder {
+internal class RestFrameDecoder(private val result: SourceFetchResult, private val options: Options, private val admit: DecodeAdmit) : Decoder {
   override suspend fun decode(): DecodeResult? {
     val bytes = result.source.source().peek().readByteArray()
-    val last = withContext(Dispatchers.Default) { lastFrame(bytes) } ?: return null
     val width = (options.size.width as? Dimension.Pixels)?.px
     val height = (options.size.height as? Dimension.Pixels)?.px
-    val shown = if (width == null || height == null) last else {
-      val multiplier = DecodeUtils.computeSizeMultiplier(last.width, last.height, width, height, options.scale)
-      if (multiplier >= 1.0) last else Bitmap.createScaledBitmap(last, (last.width * multiplier).toInt().coerceAtLeast(1), (last.height * multiplier).toInt().coerceAtLeast(1), true)
+    val plan = restFramePlan(bytes, width, height, options.scale) ?: return null
+    val hold = admit(plan.bytes)
+    try {
+      val check = coroutineContext
+      val last = withContext(Dispatchers.Default) { lastFrame(bytes, plan.multiplier) { check.ensureActive() } } ?: return null
+      return DecodeResult(last.asImage(), true)
+    } finally {
+      hold.close()
     }
-    return DecodeResult(shown.asImage(), true)
   }
 
-  class Factory : Decoder.Factory {
-    override fun create(result: SourceFetchResult, options: Options, imageLoader: ImageLoader): Decoder = RestFrameDecoder(result, options)
+  class Factory(private val admit: DecodeAdmit) : Decoder.Factory {
+    override fun create(result: SourceFetchResult, options: Options, imageLoader: ImageLoader): Decoder = RestFrameDecoder(result, options, admit)
   }
 }
+
+internal class RestFramePlan(val multiplier: Double, val bytes: Long)
+
+internal fun restFramePlan(bytes: ByteArray, width: Int?, height: Int?, scale: coil3.size.Scale): RestFramePlan? {
+  val format = animatedFormat(bytes) ?: return null
+  val canvas = when (format) {
+    AnimatedFormat.Webp -> WebpAnimation.parse(bytes).let { it.width to it.height }
+    AnimatedFormat.Gif -> if (bytes.size < 10) return null else ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).let { (it.getShort(6).toInt() and 0xFFFF) to (it.getShort(8).toInt() and 0xFFFF) }
+  }
+  val full = decodeCost(canvas.first.toUInt(), canvas.second.toUInt()) ?: throw IllegalArgumentException("the animation is above the pixel limit")
+  val multiplier = if (width == null || height == null) 1.0 else minOf(1.0, DecodeUtils.computeSizeMultiplier(canvas.first, canvas.second, width, height, scale))
+  val shown = scaledSide(canvas.first, multiplier).toLong() * scaledSide(canvas.second, multiplier) * 4
+  val working = when (format) {
+    AnimatedFormat.Webp -> WebpAnimation.parse(bytes).frames.maxOfOrNull { it.width.toLong() * it.height * 4 + it.chunkLength } ?: 0L
+    AnimatedFormat.Gif -> full.toLong()
+  }
+  return RestFramePlan(multiplier, shown + working + bytes.size)
+}
+
+private fun scaledSide(side: Int, multiplier: Double): Int = (side * multiplier).toInt().coerceAtLeast(1)
 
 internal enum class AnimatedFormat { Webp, Gif }
 
@@ -48,19 +75,21 @@ internal fun animatedFormat(bytes: ByteArray): AnimatedFormat? = when {
   else -> null
 }
 
-internal fun lastFrame(bytes: ByteArray): Bitmap? = when (animatedFormat(bytes)) {
-  AnimatedFormat.Webp -> WebpAnimation.parse(bytes).lastFrame()
-  AnimatedFormat.Gif -> gifLastFrame(bytes)
+internal fun lastFrame(bytes: ByteArray, multiplier: Double = 1.0, check: () -> Unit = {}): Bitmap? = when (animatedFormat(bytes)) {
+  AnimatedFormat.Webp -> WebpAnimation.parse(bytes).lastFrame(multiplier, check)
+  AnimatedFormat.Gif -> gifLastFrame(bytes, multiplier, check)
   null -> null
 }
 
-private fun gifLastFrame(bytes: ByteArray): Bitmap? {
+private fun gifLastFrame(bytes: ByteArray, multiplier: Double, check: () -> Unit): Bitmap? {
   @Suppress("DEPRECATION")
   val movie = Movie.decodeByteArray(bytes, 0, bytes.size) ?: return null
   if (movie.width() <= 0 || movie.height() <= 0) return null
+  check()
   movie.setTime(maxOf(movie.duration() - 1, 0))
-  val bitmap = Bitmap.createBitmap(movie.width(), movie.height(), Bitmap.Config.ARGB_8888)
-  movie.draw(Canvas(bitmap), 0f, 0f)
+  val bitmap = Bitmap.createBitmap(scaledSide(movie.width(), multiplier), scaledSide(movie.height(), multiplier), Bitmap.Config.ARGB_8888)
+  check()
+  Canvas(bitmap).apply { scale(multiplier.toFloat(), multiplier.toFloat()) }.let { movie.draw(it, 0f, 0f) }
   return bitmap
 }
 
@@ -69,9 +98,9 @@ internal interface FrameSurface {
   fun draw(still: ByteArray, x: Int, y: Int, blends: Boolean)
 }
 
-private class BitmapSurface(width: Int, height: Int) : FrameSurface {
-  val bitmap: Bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-  private val canvas = Canvas(bitmap)
+private class BitmapSurface(width: Int, height: Int, multiplier: Double) : FrameSurface {
+  val bitmap: Bitmap = Bitmap.createBitmap(scaledSide(width, multiplier), scaledSide(height, multiplier), Bitmap.Config.ARGB_8888)
+  private val canvas = Canvas(bitmap).apply { scale(multiplier.toFloat(), multiplier.toFloat()) }
   private val overwrite = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC) }
   private val erase = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR) }
 
@@ -92,30 +121,37 @@ internal class WebpFrame(
   val durationMs: Int,
   val blends: Boolean,
   val disposesToBackground: Boolean,
-  val chunks: ByteArray
+  private val source: ByteArray,
+  private val chunkStart: Int,
+  val chunkLength: Int
 ) {
   fun stillFile(): ByteArray {
-    val header = ByteBuffer.allocate(18).order(ByteOrder.LITTLE_ENDIAN)
+    val total = STILL_HEADER + chunkLength
+    DecodeCopies.bytes.addAndGet(total.toLong())
+    return ByteBuffer.allocate(total).order(ByteOrder.LITTLE_ENDIAN)
+      .putInt(FOURCC_RIFF).putInt(total - 8).putInt(FOURCC_WEBP)
       .putInt(FOURCC_VP8X).putInt(10).putInt(ALPHA).put24(width - 1).put24(height - 1)
-    val body = ByteBuffer.allocate(4 + header.capacity() + chunks.size).order(ByteOrder.LITTLE_ENDIAN)
-      .putInt(FOURCC_WEBP).put(header.array()).put(chunks)
-    return ByteBuffer.allocate(8 + body.capacity()).order(ByteOrder.LITTLE_ENDIAN)
-      .putInt(FOURCC_RIFF).putInt(body.capacity()).put(body.array()).array()
+      .put(source, chunkStart, chunkLength).array()
   }
+}
+
+internal object DecodeCopies {
+  val bytes = AtomicLong()
 }
 
 internal class WebpAnimation(val width: Int, val height: Int, val frames: List<WebpFrame>) {
   val durationMs: Int get() = frames.sumOf { it.durationMs }
 
   /** Lays the frames one over the other: the dispose of the previous frame first, then the still file of the frame. */
-  fun compose(surface: FrameSurface) {
+  fun compose(surface: FrameSurface, check: () -> Unit = {}) {
     frames.forEachIndexed { index, frame ->
+      check()
       frames.getOrNull(index - 1)?.takeIf { it.disposesToBackground }?.let { surface.clear(it.x, it.y, it.width, it.height) }
       surface.draw(frame.stillFile(), frame.x, frame.y, frame.blends)
     }
   }
 
-  fun lastFrame(): Bitmap = BitmapSurface(width, height).also(::compose).bitmap
+  fun lastFrame(multiplier: Double = 1.0, check: () -> Unit = {}): Bitmap = BitmapSurface(width, height, multiplier).also { compose(it, check) }.bitmap
 
   companion object {
     fun isAnimated(bytes: ByteArray): Boolean = bytes.size > 12 && parseHeader(bytes)?.let { buffer -> chunkTypes(bytes, buffer).contains(FOURCC_ANMF) } == true
@@ -144,7 +180,9 @@ internal class WebpAnimation(val width: Int, val height: Int, val frames: List<W
             durationMs = buffer.get24(data + 12),
             blends = flags and 2 == 0,
             disposesToBackground = flags and 1 == 1,
-            chunks = bytes.copyOfRange(data + ANMF_HEADER, data + size)
+            source = bytes,
+            chunkStart = data + ANMF_HEADER,
+            chunkLength = size - ANMF_HEADER
           )
         }
         position = data + size + (size and 1)
@@ -175,6 +213,7 @@ private const val FOURCC_WEBP = 0x50424557
 private const val FOURCC_VP8X = 0x58385056
 private const val FOURCC_ANMF = 0x464D4E41
 private const val ANMF_HEADER = 16
+private const val STILL_HEADER = 30
 private const val ALPHA = 0x10
 
 private fun ByteBuffer.put24(value: Int): ByteBuffer = put(value.toByte()).put((value shr 8).toByte()).put((value shr 16).toByte())

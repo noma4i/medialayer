@@ -12,7 +12,9 @@ import coil3.key.Keyer
 import coil3.memory.MemoryCache
 import coil3.request.CachePolicy
 import coil3.request.Options
-import okio.Buffer
+import java.io.ByteArrayInputStream
+import okio.buffer
+import okio.source
 
 fun interface ImageBytes {
   suspend fun load(url: String, headers: Map<String, String>): com.noma4i.medialayer.ImageFetchResult
@@ -60,7 +62,7 @@ internal fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: 
               com.noma4i.medialayer.ImageOrigin.CACHE -> DataSource.DISK
               com.noma4i.medialayer.ImageOrigin.LOCAL -> DataSource.MEMORY
             }
-            SourceFetchResult(ImageSource(Buffer().write(result.bytes), options.fileSystem), null, source)
+            SourceFetchResult(ImageSource(ByteArrayInputStream(result.bytes).source().buffer(), options.fileSystem), null, source)
           }
       })
     }

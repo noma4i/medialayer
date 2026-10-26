@@ -117,7 +117,7 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
   val finished = remember(source.url, animation.repeats, animation.playing) { mutableStateOf(false) }
   val rests = animation.rests(reduceMotion) || finished.value
   val resting = if (rests) animation.rest else null
-  val request = remember(media, source, pixels, scale, placementPixels, resting, animation.repeats) { imageRequest(context, source, pixels, scale, { media.cacheKey(source.url, source.headers) }, placementPixels, resting, animation.repeats) }
+  val request = remember(media, source, pixels, scale, placementPixels, resting, animation.repeats) { imageRequest(context, source, pixels, scale, { media.cacheKey(source.url, source.headers) }, placementPixels, resting, animation.repeats, media.viewDecodeAdmit()) }
   val state = remember(item) { mutableStateOf<MediaState>(MediaState.Idle) }
   val animated = remember { mutableStateOf<Animatable?>(null) }
   LaunchedEffect(failure.value, item) { failure.value.of(item)?.let { state.value = it } }
@@ -143,7 +143,7 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
   }
   ImageBlur(item, screen, state, contentScale)
   if (preview != null && screen.visible && state.value != MediaState.Ready) {
-    val previewRequest = remember(media, preview, pixels, scale, placementPixels) { imageRequest(context, preview, pixels, scale, { media.cacheKey(preview.url, preview.headers) }, placementPixels) }
+    val previewRequest = remember(media, preview, pixels, scale, placementPixels) { imageRequest(context, preview, pixels, scale, { media.cacheKey(preview.url, preview.headers) }, placementPixels, admit = media.viewDecodeAdmit()) }
     AsyncImage(model = previewRequest, contentDescription = null, imageLoader = loader, contentScale = contentScale, modifier = Modifier.fillMaxSize().testTag(PREVIEW_TAG))
   }
   AsyncImage(
@@ -191,13 +191,13 @@ internal fun decodePixels(constraints: Constraints, density: Float, source: Medi
   return pixelSizes.size(width, height, density.toDouble(), declared, contentScale.toScale() == Scale.FILL)
 }
 
-internal fun imageRequest(context: Context, source: MediaSource, pixels: PixelSize?, scale: Scale, cacheKey: () -> String, placementPixels: Long = 0, rest: RestFrame? = null, repeats: Repeats = Repeats.Forever): ImageRequest =
+internal fun imageRequest(context: Context, source: MediaSource, pixels: PixelSize?, scale: Scale, cacheKey: () -> String, placementPixels: Long = 0, rest: RestFrame? = null, repeats: Repeats = Repeats.Forever, admit: DecodeAdmit): ImageRequest =
   ImageRequest.Builder(context)
     .data(MediaImageData(source.url, source.headers, cacheKey, if (pixels == null) source.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) } else null, pixels, rest, repeats))
     .apply {
       when (rest) {
         RestFrame.First -> decoderFactory(BitmapFactoryDecoder.Factory())
-        RestFrame.Last -> decoderFactory(RestFrameDecoder.Factory())
+        RestFrame.Last -> decoderFactory(RestFrameDecoder.Factory(admit))
         null -> (repeats as? Repeats.Times)?.let { repeatCount(maxOf(it.count, 1) - 1) }
       }
     }

@@ -7,19 +7,33 @@ extension MediaLayer {
   /// A photo made upright by its EXIF orientation and saved as JPEG. No metadata is copied, so the editor tag and every EXIF field are gone.
   public func prepareImage(_ source: some MediaSource, quality: Double = 0.9) async throws -> PreparedMedia {
     let file = try preparableFile(source.url)
-    let work = Task.detached { try ImagePreparation.run(file, quality: quality) }
+    let work = Task.detached {
+      try await ImagePreparation.run(file, quality: quality) { bytes in
+        let hold = try await self.reserveDecode(bytes: bytes)
+        return { hold.release() }
+      }
+    }
     return try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
   }
 }
 
 enum ImagePreparation {
-  static func run(_ file: URL, quality: Double) throws -> PreparedMedia {
+  typealias Admit = @Sendable (UInt64) async throws -> @Sendable () -> Void
+
+  static func run(_ file: URL, quality: Double, admit: Admit) async throws -> PreparedMedia {
     guard let source = CGImageSourceCreateWithURL(file as CFURL, nil),
-          let image = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+          let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+          let width = properties[kCGImagePropertyPixelWidth] as? Int,
+          let height = properties[kCGImagePropertyPixelHeight] as? Int
     else { throw MediaError.Fetch(detail: "\(file.path) is not an image") }
+    guard let cost = decodeCost(width: UInt32(clamping: width), height: UInt32(clamping: height)) else {
+      throw MediaError.Fetch(detail: "\(file.path) is above the pixel limit")
+    }
+    let release = try await admit(cost)
+    defer { release() }
+    guard let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw MediaError.Fetch(detail: "\(file.path) is not an image") }
     try Task.checkCancellation()
-    let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
-    let tag = (properties?[kCGImagePropertyOrientation] as? UInt32) ?? 1
+    let tag = (properties[kCGImagePropertyOrientation] as? UInt32) ?? 1
     let upright = try draw(image, turn: photoTurn(exifOrientation: tag))
     try Task.checkCancellation()
     let output = preparedOutput(extension: "jpg")

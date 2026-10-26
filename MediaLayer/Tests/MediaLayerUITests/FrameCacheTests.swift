@@ -81,7 +81,7 @@ struct FrameCacheTests {
     let limit = 1 << 20
     let cache = FrameCache(byteLimit: limit)
     let sample = try #require(AnimatedFrames.decode(gif(frames: 40, side: 64, seed: 0), maxPixel: 64))
-    let count = limit / sample.decodedBytes + 1
+    let count = limit / sample.retainedBytes + 1
     for index in 0 ..< count {
       _ = await cache.load(identity: "https://o.test/\(index).gif", data: gif(frames: 40, side: 64, seed: index), maxPixel: 64)
       #expect(cache.bytes <= limit)
@@ -167,6 +167,6 @@ private final class CostReads: @unchecked Sendable {
   var count: Int { lock.withLock { calls } }
   func read(_ frames: AnimatedFrames) -> Int {
     lock.withLock { calls += 1 }
-    return frames.decodedBytes
+    return frames.retainedBytes
   }
 }

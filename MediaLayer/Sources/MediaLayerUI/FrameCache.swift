@@ -1,9 +1,34 @@
 import Foundation
+import MediaLayer
 
 final class FrameCache: @unchecked Sendable {
   struct Key: Hashable {
     let identity: String
     let maxPixel: Int
+  }
+
+  typealias Admit = @Sendable (UInt64) async -> (@Sendable () -> Void)?
+
+  /// The admission of a layer. A refusal of the ledger reaches `Media.failure` and the frames stay as they were; a cancel ends the load quietly. Without a layer there is no ledger to ask.
+  static func admit(from layer: MediaLayer?) -> Admit {
+    guard let layer else { return { _ in {} } }
+    return { bytes in
+      await admit(bytes) {
+        let hold = try await layer.reserveDecode(bytes: $0)
+        return { hold.release() }
+      }
+    }
+  }
+
+  static func admit(_ bytes: UInt64, reserve: (UInt64) async throws -> @Sendable () -> Void) async -> (@Sendable () -> Void)? {
+    do {
+      return try await reserve(bytes)
+    } catch let error as MediaError {
+      await MainActor.run { Media.recordOpenFailure(error) }
+      return nil
+    } catch {
+      return nil
+    }
   }
 
   static let defaultByteLimit = 64 << 20
@@ -43,7 +68,7 @@ final class FrameCache: @unchecked Sendable {
   private var flights: [Key: Flight] = [:]
   private var decodeCount = 0
 
-  init(byteLimit: Int = defaultByteLimit, cost: @escaping @Sendable (AnimatedFrames) -> Int = { $0.decodedBytes }, decode: @escaping @Sendable (Data, Int) async -> AnimatedFrames? = { await AnimatedFrames.load($0, maxPixel: $1) }) {
+  init(byteLimit: Int = defaultByteLimit, cost: @escaping @Sendable (AnimatedFrames) -> Int = { $0.retainedBytes }, decode: @escaping @Sendable (Data, Int) async -> AnimatedFrames? = { await AnimatedFrames.load($0, maxPixel: $1) }) {
     self.byteLimit = byteLimit
     self.cost = cost
     self.decode = decode
@@ -54,9 +79,9 @@ final class FrameCache: @unchecked Sendable {
   var decodes: Int { lock.withLock { decodeCount } }
   var waiters: Int { lock.withLock { flights.values.reduce(0) { $0 + $1.waiters } } }
 
-  func load(identity: String, data: Data, maxPixel: Int) async -> AnimatedFrames? {
+  func load(identity: String, data: Data, maxPixel: Int, admit: @escaping Admit) async -> AnimatedFrames? {
     let key = Key(identity: identity, maxPixel: maxPixel)
-    switch lock.withLock({ join(key, data: data, maxPixel: maxPixel) }) {
+    switch lock.withLock({ join(key, data: data, maxPixel: maxPixel, admit: admit) }) {
     case let .hit(frames): return frames
     case let .flight(flight):
       let waiter = Waiter()
@@ -81,7 +106,7 @@ final class FrameCache: @unchecked Sendable {
     }
   }
 
-  private func join(_ key: Key, data: Data, maxPixel: Int) -> Joined {
+  private func join(_ key: Key, data: Data, maxPixel: Int, admit: @escaping Admit) -> Joined {
     if let hit = touch(key) { return .hit(hit) }
     if let running = flights[key] {
       running.waiters += 1
@@ -91,7 +116,10 @@ final class FrameCache: @unchecked Sendable {
     decodeCount += 1
     let flight = Flight()
     flight.task = Task {
-      let frames = await decode(data, maxPixel)
+      let release = await admit(AnimatedFrames.decodeBytes(sourceBytes: data.count, maxPixel: maxPixel))
+      var frames: AnimatedFrames?
+      if release != nil, !Task.isCancelled { frames = await decode(data, maxPixel) }
+      release?()
       let (result, parked) = lock.withLock { () -> (AnimatedFrames?, [Waiter]) in
         guard flights[key] === flight else { return (nil, []) }
         flights[key] = nil

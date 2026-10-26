@@ -262,7 +262,7 @@ public struct MediaImage<Content: View>: View {
   private func decodeFrames(_ job: FramesJob) async {
     guard job.needed, job.hasAnimation, let loaded, loaded.key == job.key, loaded.frames == nil, let data = loaded.animated, let pixels = job.key.pixels else { return }
 
-    let frames = await FrameCache.shared.load(identity: job.key.identity, data: data, maxPixel: Int(max(pixels.width, pixels.height)))
+    let frames = await FrameCache.shared.load(identity: job.key.identity, data: data, maxPixel: Int(max(pixels.width, pixels.height)), admit: FrameCache.admit(from: context?.places as? MediaLayer))
     guard !Task.isCancelled, self.loaded?.key == job.key else { return }
 
     self.loaded?.frames = frames

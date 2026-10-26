@@ -78,6 +78,7 @@ pub(crate) enum Query {
     Image { url: String, headers: HashMap<String, String> },
     ImageSize { url: String, headers: HashMap<String, String> },
     Placeholder(MediaItem, bool),
+    Decode(u64),
 }
 
 pub(crate) enum Finished {
@@ -87,6 +88,7 @@ pub(crate) enum Finished {
     Image(Result<ImageFetchResult, MediaError>),
     ImageSize(Result<Option<ImageSize>, MediaError>),
     Placeholder(Placeholder),
+    Decode(Result<crate::memory::Reservation, MediaError>),
 }
 
 pub(crate) enum Answer {
@@ -155,7 +157,7 @@ impl Query {
         match self {
             Query::PlayUrl(item) | Query::Cached(item) | Query::Pixels(item) | Query::Tone(item, _) | Query::Placeholder(item, _) => weight::item(item),
             Query::Refresh(item, route) => weight::sum([weight::item(item), weight::string(&route.url), weight::headers(&route.headers)]),
-            Query::Pool => Some(0),
+            Query::Pool | Query::Decode(_) => Some(0),
             Query::Image { url, headers } | Query::ImageSize { url, headers } => weight::sum([weight::string(url), weight::headers(headers)]),
         }
     }

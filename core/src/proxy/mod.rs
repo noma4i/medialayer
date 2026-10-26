@@ -165,6 +165,11 @@ impl Proxy {
         }
     }
 
+    pub async fn reserve_decode(&self, bytes: u64) -> Result<crate::memory::Reservation, ProxyError> {
+        let bytes = usize::try_from(bytes).map_err(|_| ProxyError::Fetch("the decode does not fit the address space".to_string()))?;
+        self.inner.buffers().reserve_decode(bytes).await.map_err(|refused| ProxyError::Fetch(refused.to_string()))
+    }
+
     pub async fn read_stored(&self, url: &str, headers: &HashMap<String, String>, limit: u64) -> Option<Vec<u8>> {
         let key = self.key_for(url, headers);
         let length = self.inner.store.len(&key).await.filter(|length| *length <= limit)?;
