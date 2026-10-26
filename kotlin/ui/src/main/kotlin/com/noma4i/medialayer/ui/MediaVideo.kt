@@ -148,6 +148,7 @@ fun MediaVideo(
     onDispose { release() }
   }
   LaunchedEffect(edges, state) {
+    MediaTrace.emit("view") { "state ${source.url.takeLast(24)} $state" }
     val (isFirstFrame, isEnd) = edges.advance(state)
     if (isFirstFrame) {
       firstFrame()
@@ -190,7 +191,11 @@ private fun VideoCover(media: MediaLayer, item: MediaItem, ready: Boolean, conte
     ensureActive()
     value = answer
   }
-  val cover = placeholder as? Placeholder.Cover ?: return
+  val shown = placeholder as? Placeholder.Cover
+  LaunchedEffect(item.url, shown != null) {
+    MediaTrace.emit("view") { "placeholder ${item.url.takeLast(24)} ${if (shown != null) "cover" else "none"}" }
+  }
+  val cover = shown ?: return
   val observer = LocalPlaceholderObserver.current
   val context = LocalContext.current
   val density = LocalDensity.current.density

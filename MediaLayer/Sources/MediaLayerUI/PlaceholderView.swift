@@ -5,6 +5,14 @@ enum PlaceholderContent {
   case blur(CGImage)
   case cover(PlatformImage)
   case none
+
+  var label: String {
+    switch self {
+    case .blur: "blur"
+    case .cover: "cover"
+    case .none: "none"
+    }
+  }
 }
 
 struct PlaceholderView: View {
@@ -31,6 +39,9 @@ struct PlaceholderView: View {
       .frame(width: geometry.size.width, height: geometry.size.height)
       .task(id: PlanKey(source: source, ready: ready, points: geometry.size, scale: displayScale)) {
         guard let content = await resolve(points: geometry.size, scale: displayScale), !Task.isCancelled else { return }
+        if current?.source != source || current?.content.label != content.label {
+          MediaTrace.emit("view", "placeholder \(MediaTrace.tail(item.url)) \(content.label)")
+        }
         current = Current(source: source, content: content)
         published(content)
       }

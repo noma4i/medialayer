@@ -34,6 +34,7 @@ public struct MediaVideo<Content: View>: View {
   @State private var state: MediaState = .idle
   @State private var mount: PlaceMount?
   @State private var host: SurfaceHost?
+  @State private var edges = VideoEdges()
   @State private var onScreen = false
   @State private var inBackground = false
   private let source: any MediaSource
@@ -149,8 +150,8 @@ public struct MediaVideo<Content: View>: View {
   private func follow() async {
     guard let places = context?.places else { return }
     state = .idle
-    var edges = VideoEdges()
     for await value in places.stateStream(key: source.url) {
+      MediaTrace.emit("view", "state \(MediaTrace.tail(source.url)) \(value)")
       state = value
       let reached = edges.advance(to: value)
       if reached.firstFrame {

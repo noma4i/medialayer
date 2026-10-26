@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.23.1 - 2026-10-26
+
+### Fixed
+- Swift `MediaVideo` keeps its first-frame flag for the same source when the page leaves the screen and returns, as Compose does. `onFirstFrame` no longer fires again on every return.
+
+### Added
+- The trace prints `view state <key tail> <state>` and `view placeholder <key tail> blur|cover|none` for `MediaVideo` on both platforms, so a cover that is shown or removed during a page change can be read next to `view onScreen`.
+
 ## 3.23.0 - 2026-10-26
 
 ### Added
