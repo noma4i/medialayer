@@ -139,7 +139,8 @@ fun MediaVideo(
   val firstFrame by rememberUpdatedState(onFirstFrame)
   val end by rememberUpdatedState(onEnd)
   val progress by rememberUpdatedState(onProgress)
-  val progressPlayer by remember(environment, source.url) { environment.players?.player(source.url) ?: flowOf(null) }.collectAsState(null)
+  val sourceKey = rememberSourceKey(source)
+  val progressPlayer by remember(environment, sourceKey) { sourceKey?.let { environment.players?.player(it) } ?: flowOf(null) }.collectAsState(null)
   DisposableEffect(progressPlayer, screen.visible, onProgress != null) {
     val current = progressPlayer
     if (current == null || !screen.visible || onProgress == null) return@DisposableEffect onDispose { }

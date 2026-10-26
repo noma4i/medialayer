@@ -127,7 +127,7 @@ impl Book {
     }
 
     pub fn apply(&mut self, command: Declared, reserve: Reserve, slot: EntryPlace) {
-        match command {
+        match super::clean::declared(command) {
             Declared::PlaceOpen { owner, item } => self.open_place(owner, item, reserve),
             Declared::PlaceUpdate { owner, input } => self.update_place(owner, input, reserve),
             Declared::PlaceSeek { owner, fraction } => {

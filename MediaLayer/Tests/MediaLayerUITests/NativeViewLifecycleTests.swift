@@ -12,6 +12,15 @@ private struct Source: MediaSource {
   var headers: [String: String] { [:] }
 }
 
+private final class KeyReads: @unchecked Sendable {
+  private let lock = NSLock()
+  private var seen: [(String, Bool)] = []
+
+  func record(_ url: String, onMain: Bool) { lock.withLock { seen.append((url, onMain)) } }
+  var urls: [String] { lock.withLock { seen.map(\.0) } }
+  var onMain: [String] { lock.withLock { seen.filter(\.1).map(\.0) } }
+}
+
 @MainActor
 private final class Inputs: ObservableObject {
   @Published var url = "first"
@@ -50,6 +59,7 @@ private final class Screen {
   let host: UIHostingController<Cell>
 
   init(audio: Bool = false, side: CGFloat = 80) {
+    SourceKey.read = { $0.url }
     host = UIHostingController(rootView: Cell(inputs: inputs, context: MediaContext(places: places, slots: slots), audio: audio, side: side))
     let page = UIViewController()
     window.rootViewController = page
@@ -65,6 +75,7 @@ private final class Screen {
   }
 
   func close() {
+    SourceKey.read = SourceKey.core
     window.isHidden = true
     window.rootViewController = nil
   }
@@ -262,6 +273,31 @@ extension GlobalMedia {
       screen.scroll.contentOffset = .zero
       await screen.settle()
       #expect(screen.inputs.reports > offscreen)
+    }
+    @Test
+    func inv_source_11_aPlaceDeclaredInAnyAcceptedFormFollowsTheProgressOfTheCoreKeyAndReadsItOffTheMainThread() async throws {
+      let forms = [(" https://o.test/a.mp4 ", "https://o.test/a.mp4"), ("/tmp/a b.mp4", "file:///tmp/a%20b.mp4")]
+      let reads = KeyReads()
+      let screen = Screen()
+      defer { screen.close() }
+      SourceKey.read = { item in reads.record(item.url, onMain: Thread.isMainThread); return forms.first { $0.0 == item.url }?.1 ?? item.url }
+      let clip = Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!.absoluteString
+      let factory = AVQueuePlayerSlotFactory(startMuted: true, slots: screen.slots)
+      let first = await factory.makeSlot(0)
+      let second = await factory.makeSlot(1)
+      defer { first.close(); second.close() }
+      let route = PlaybackRoute(url: clip, headers: [:], generation: nil, hls: false, looping: false)
+      await first.load(key: forms[0].1, route: route)
+      await second.load(key: forms[1].1, route: route)
+
+      for (raw, _) in forms {
+        screen.inputs.reports = 0
+        screen.inputs.url = raw
+        await screen.settle(until: { screen.inputs.reports > 0 })
+        #expect(screen.inputs.reports > 0, "\(raw)")
+      }
+      #expect(reads.urls.contains(forms[0].0) && reads.urls.contains(forms[1].0))
+      #expect(reads.onMain == [])
     }
   }
 }

@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.11.0 - 2026-10-26
+
+### Removed
+- Swift `localFileUrl(path:)`, `remoteUrl(text:)` and Kotlin `localFileUrl`, `remoteUrl`. The core applies one rule (`normalizeItem`) when it takes a declaration in.
+
+### Changed
+- `MediaSourceValue` initializers and factories keep the declared text and call nothing native. `MediaSourceValue.url`, `cover` and `blurHash` are the text as declared.
+- A text that is no source url (`remote` with another scheme, `file` with a relative path, any other scheme) gives its place `MediaState.Failed` with `the source has no url`.
+- Android image fetch and decode run outside the main thread by explicit Coil contexts.
+
 ## 3.10.1 - 2026-10-26
 
 ### Added

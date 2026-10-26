@@ -31,6 +31,14 @@ private func pngData(_ side: CGFloat) -> Data {
   UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).pngData { $0.fill(CGRect(x: 0, y: 0, width: side, height: side)) }
 }
 
+private final class DecodeThreads: @unchecked Sendable {
+  private let lock = NSLock()
+  private var onMain: [Bool] = []
+
+  func record(_ value: Bool) { lock.withLock { onMain.append(value) } }
+  var seen: [Bool] { lock.withLock { onMain } }
+}
+
 struct MediaImageMainThreadTests {
   @MainActor
   @Test
@@ -93,6 +101,24 @@ struct MediaImageMainThreadTests {
 
     #expect(places.mainThreadImageStats == 0)
     #expect(places.cacheKeyReads <= 20)
+  }
+
+  @MainActor
+  @Test
+  func inv_image_66_anImageDecodesOffTheMainThread() async throws {
+    let places = RecordingPlaces()
+    places.imageResult = .success(pngData(16))
+    let decodedOnMain = DecodeThreads()
+    var configuration = ImagePipeline.Configuration(dataLoader: CoreDataLoader(places: places))
+    configuration.dataCache = nil
+    configuration.isLocalResourcesSupportEnabled = false
+    configuration.makeImageDecoder = { context in AnimatedKeepingDecoder(context: context, admit: { _ in decodedOnMain.record(Thread.isMainThread); return {} }) }
+    let pipeline = ImagePipeline(configuration: configuration)
+    let request = try #require(MediaImagePipeline.request(places: places, for: PlainImage(url: "https://o.test/decode-thread.png"), points: CGSize(width: 16, height: 16), contentMode: .fill))
+
+    _ = try await pipeline.image(for: request)
+
+    #expect(decodedOnMain.seen == [false])
   }
 }
 #endif

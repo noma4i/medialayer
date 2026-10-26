@@ -1,5 +1,7 @@
 package com.noma4i.medialayer.ui
 
+import com.noma4i.medialayer.normalizeItem
+import com.noma4i.medialayer.toItem
 import android.content.Context
 import android.media.MediaCodecInfo
 import android.media.MediaExtractor
@@ -60,7 +62,7 @@ suspend fun MediaLayer.prepareVideo(
   onProgress: ((Double) -> Unit)? = null
 ): PreparedMedia {
   val context = checkNotNull(binding) { "the layer was not opened with MediaLayer.open(context)" }.factory.appContext
-  return prepareVideoAt(context, preparableFile(source.url), limits, onProgress)
+  return prepareVideoAt(context, preparableFile(normalizeItem(source.toItem()).url), limits, onProgress)
 }
 
 internal suspend fun prepareVideoAt(context: Context, file: File, limits: VideoLimits, onProgress: ((Double) -> Unit)?): PreparedMedia {

@@ -8,7 +8,7 @@ extension MediaLayer {
     limits: VideoLimits = defaultVideoLimits(),
     progress: (@Sendable (Double) -> Void)? = nil
   ) async throws -> PreparedMedia {
-    let file = try preparableFile(source.url)
+    let file = try preparableFile(normalizeItem(item: source.item).url)
     let work = Task.detached { try await VideoPreparation.run(file, limits: limits, progress: progress) }
     return try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
   }

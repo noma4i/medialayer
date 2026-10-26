@@ -42,7 +42,8 @@ fn cache_limits(cache_bytes: u64) -> Result<Limits, MediaError> {
     Ok(limits)
 }
 
-async fn load(request: ImageLoadRequest, fetcher: Arc<dyn fetch::Fetcher>, limits: InputLimits) -> Result<ImageFetchResult, MediaError> {
+async fn load(mut request: ImageLoadRequest, fetcher: Arc<dyn fetch::Fetcher>, limits: InputLimits) -> Result<ImageFetchResult, MediaError> {
+    request.url = crate::api::clean_url(&request.url);
     let cache = Cache::open(request.dir.as_str(), cache_limits(request.cache_bytes)?, u64::MAX);
     let key = cache_key(&request.url);
     let timeout = Duration::from_millis(request.timeout_ms);

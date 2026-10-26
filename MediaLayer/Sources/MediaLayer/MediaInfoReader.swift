@@ -5,7 +5,7 @@ extension MediaLayer {
   /// Length and frame of a local video or audio file, read without a player. A remote source has no metadata without a download and gives `nil`.
   /// A file that is not media gives `nil`, a missing or unreadable file throws `MediaError.Fetch`.
   public func mediaInfo(_ source: some MediaSource) async throws -> MediaInfo? {
-    try await readMediaInfo(url: source.url)
+    try await readMediaInfo(url: normalizeItem(item: source.item).url)
   }
 }
 

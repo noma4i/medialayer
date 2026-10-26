@@ -34,7 +34,7 @@ class MediaInfoTest {
   private fun clip(vararg metadata: Pair<Int, String>): String {
     val file = File.createTempFile("clip", ".mp4").apply { writeBytes(byteArrayOf(0)); deleteOnExit() }
     metadata.forEach { (key, value) -> ShadowMediaMetadataRetriever.addMetadata(file.path, key, value) }
-    return MediaSourceValue.file(file, Kind.VIDEO).url
+    return "file://${file.path}"
   }
 
   @Test

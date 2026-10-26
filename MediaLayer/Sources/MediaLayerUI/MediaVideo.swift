@@ -116,7 +116,9 @@ public struct MediaVideo<Content: View>: View {
 
   private func sample() async {
     guard onScreen && !inBackground, let onProgress, let slots = context?.slots else { return }
-    for await value in slots.progress.stream(for: source.url) { onProgress(value) }
+    let key = await SourceKey.of(source.item)
+    guard !Task.isCancelled else { return }
+    for await value in slots.progress.stream(for: key) { onProgress(value) }
   }
 
   private func input() -> PlaceInput {

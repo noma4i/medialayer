@@ -1,5 +1,7 @@
 package com.noma4i.medialayer.ui
 
+import com.noma4i.medialayer.normalizeItem
+import com.noma4i.medialayer.toItem
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
@@ -20,7 +22,7 @@ import kotlinx.coroutines.withContext
 /** A photo made upright by its EXIF orientation and saved as JPEG. No metadata is copied, so the editor tag and every EXIF field are gone. */
 suspend fun MediaLayer.prepareImage(source: MediaSource, quality: Double = 0.9): PreparedMedia {
   val cache = checkNotNull(binding) { "the layer was not opened with MediaLayer.open(context)" }.factory.appContext.cacheDir
-  return prepareImageAt(cache, preparableFile(source.url), quality, decodeAdmit())
+  return prepareImageAt(cache, preparableFile(normalizeItem(source.toItem()).url), quality, decodeAdmit())
 }
 
 internal suspend fun prepareImageAt(cache: File, file: File, quality: Double, admit: DecodeAdmit): PreparedMedia =

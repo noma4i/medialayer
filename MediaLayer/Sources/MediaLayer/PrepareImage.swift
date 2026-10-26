@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 extension MediaLayer {
   /// A photo made upright by its EXIF orientation and saved as JPEG. No metadata is copied, so the editor tag and every EXIF field are gone.
   public func prepareImage(_ source: some MediaSource, quality: Double = 0.9) async throws -> PreparedMedia {
-    let file = try preparableFile(source.url)
+    let file = try preparableFile(normalizeItem(item: source.item).url)
     let work = Task.detached {
       try await ImagePreparation.run(file, quality: quality) { bytes in
         let hold = try await self.reserveDecode(bytes: bytes)

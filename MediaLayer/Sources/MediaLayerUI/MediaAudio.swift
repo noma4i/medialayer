@@ -179,7 +179,9 @@ public struct MediaAudio<Content: View>: View {
         }
         .task(id: Sampling(url: source.url, active: !inBackground)) {
           guard !inBackground else { return }
-          for await value in context.slots.progress.stream(for: source.url) { audio.refresh(progress: value) }
+          let key = await SourceKey.of(source.item)
+          guard !Task.isCancelled else { return }
+          for await value in context.slots.progress.stream(for: key) { audio.refresh(progress: value) }
         }
         .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.background)) { _ in inBackground = true }
         .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }

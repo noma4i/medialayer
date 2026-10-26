@@ -11,6 +11,8 @@ import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.displayFrameSize
 import com.noma4i.medialayer.isLocalMediaUrl
+import com.noma4i.medialayer.normalizeItem
+import com.noma4i.medialayer.toItem
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -24,9 +26,12 @@ import kotlinx.coroutines.withContext
  * A file that is not media gives `null`, a missing or unreadable file throws `MediaException.Fetch`.
  */
 suspend fun MediaLayer.mediaInfo(source: MediaSource): MediaInfo? {
-  if (!isLocalMediaUrl(source.url)) return null
-  val context = checkNotNull(binding) { "the layer was not opened with MediaLayer.open(context)" }.factory.appContext
-  return withContext(mediaInfoDispatcher) { readMediaInfo(context, source.url.trim()) }
+  return withContext(mediaInfoDispatcher) {
+    val url = normalizeItem(source.toItem()).url
+    if (!isLocalMediaUrl(url)) return@withContext null
+    val context = checkNotNull(binding) { "the layer was not opened with MediaLayer.open(context)" }.factory.appContext
+    readMediaInfo(context, url)
+  }
 }
 
 internal var mediaInfoDispatcher: CoroutineDispatcher = Dispatchers.IO

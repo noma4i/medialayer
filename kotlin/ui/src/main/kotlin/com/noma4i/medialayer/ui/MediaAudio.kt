@@ -73,7 +73,8 @@ fun MediaAudio(source: MediaSource, playing: Boolean = false, muted: Boolean = f
   LaunchedEffect(control, playing) { control.follow(playing) }
   val state = rememberPlace(source, control.isPlaying, muted, group = group, rate = control.rate, mounted = mounted)
   if (control.state != state) control.state = state
-  val player by remember(environment, source.url) { environment.players?.player(source.url) ?: flowOf(null) }.collectAsState(null)
+  val sourceKey = rememberSourceKey(source)
+  val player by remember(environment, sourceKey) { sourceKey?.let { environment.players?.player(it) } ?: flowOf(null) }.collectAsState(null)
   val end by rememberUpdatedState(onEnd)
   LaunchedEffect(state, control) {
     if (state != MediaState.Ended) return@LaunchedEffect

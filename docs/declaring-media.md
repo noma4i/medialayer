@@ -75,7 +75,7 @@ MediaImage(
 
 ## Sources without a class
 
-`MediaSourceValue` is a source declared by value, next to the generated types of the `.mdl` file. The app writes no class and no string glue. The core cleans the text once, through `normalize_item`: the url loses its edge whitespace, a blank cover or blur hash is absent.
+`MediaSourceValue` is a source declared by value, next to the generated types of the `.mdl` file. The app writes no class and no string glue. The constructors and factories keep the text as declared and call nothing native. The core cleans it once when the declaration enters its input queue, off the main thread: the url loses its edge whitespace, a blank cover or blur hash is absent.
 
 ### Swift
 
@@ -96,9 +96,9 @@ MediaSourceValue.asset("welcome.m4v", Kind.VIDEO)                              /
 MediaSourceValue(row.url, Kind.IMAGE, size = 288 to 288, strategy = CacheStrategy.WHOLE)
 ```
 
-- A path or a `file://` text becomes one canonical `file://` url (`local_file_url`). A relative path, a web url or an empty text gives an empty url. `remote` keeps only a valid `http` or `https` text (`remote_url`), anything else gives an empty url.
-- A source with an empty url is still created. Its place fails with `MediaState.failed` (`MediaState.Failed`) and the detail `the source has no url`. No player, no prefetch, no request starts. The place leaves the failed state when the last view of it goes away. A missing bundle resource gives the same result, so the app has no `nil` branch to write.
-- `bundled`, `raw` and `asset` take a video or an audio. An image is a programming error: Swift stops with `preconditionFailure`, Kotlin throws `IllegalArgumentException`, both with the text `a bundled source is a video or an audio, not an image` from the core (`bundled_source_error`).
+- A path or a `file://` text becomes one canonical `file://` url. A relative path, a web url or an empty text gives an empty url. A web url stays only when it is a valid `http` or `https` text with a host, anything else gives an empty url.
+- A source with an empty url, or a text the core refuses (`remote` with another scheme, `file` with a relative path), is still created. Its place fails with `MediaState.failed` (`MediaState.Failed`) and the detail `the source has no url`. No player, no prefetch, no request starts. The place leaves the failed state when the last view of it goes away. A missing bundle resource gives the same result, so the app has no `nil` branch to write.
+- `bundled`, `raw` and `asset` take a video or an audio. An image is a programming error: Swift stops with `preconditionFailure`, Kotlin throws `IllegalArgumentException`, both with the text `a bundled source is a video or an audio, not an image` from the core (`bundled_source_error`, asked only on this error path).
 - iOS reads a bundle resource as a `file://` url. Android `res/raw` is `android.resource://<package>/<id>` and `assets` is `asset:///<name>`. ExoPlayer reads both itself, the core treats them like `file://`: the source counts as cached, stays out of the prefetch window, goes without the proxy and has an empty placeholder (`is_local_url` is the only list of these schemes). `fetch_image` reads only `file://`.
 - `looping` is not a field of a source. `MediaVideo(loop:)` sets it.
 

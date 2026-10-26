@@ -201,6 +201,8 @@ internal fun imageRequest(context: Context, source: MediaSource, pixels: PixelSi
         null -> (repeats as? Repeats.Times)?.let { repeatCount(maxOf(it.count, 1) - 1) }
       }
     }
+    .fetcherCoroutineContext(Dispatchers.IO)
+    .decoderCoroutineContext(Dispatchers.Default)
     .scale(scale)
     .apply {
       extras[PLACEMENT_PIXELS] = placementPixels

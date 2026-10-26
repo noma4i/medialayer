@@ -35,6 +35,10 @@ import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
+@androidx.compose.runtime.Composable
+private fun keyedProvider(opened: kotlinx.coroutines.Deferred<com.noma4i.medialayer.MediaLayer>, imageLoader: coil3.ImageLoader, players: SlotPlayers, content: @androidx.compose.runtime.Composable () -> Unit) =
+  androidx.compose.runtime.CompositionLocalProvider(LocalSourceKey provides { it.url }) { MediaLayerProvider(opened, imageLoader, players, content) }
+
 private data class LifecycleSource(override val url: String, override val kind: Kind) : MediaSource {
   override val headers: Map<String, String> get() = emptyMap()
 }
@@ -58,7 +62,7 @@ class NativeViewLifecycleTest {
     val events = layer.playerEvents() as RecordingEvents
     val root = rule.activity.findViewById<ViewGroup>(android.R.id.content)
     rule.setContent {
-      MediaLayerProvider(CompletableDeferred(layer), loader, factory.players) {
+      keyedProvider(CompletableDeferred(layer), loader, factory.players) {
         MediaVideo(LifecycleSource("first", Kind.VIDEO), modifier = Modifier.size(80.dp))
       }
     }
@@ -84,7 +88,7 @@ class NativeViewLifecycleTest {
     val root = rule.activity.findViewById<ViewGroup>(android.R.id.content)
     val slots = alphas.indices.map { factory.createSlot(it.toUInt()) }
     rule.setContent {
-      MediaLayerProvider(CompletableDeferred(layer), loader, factory.players) {
+      keyedProvider(CompletableDeferred(layer), loader, factory.players) {
         Column {
           alphas.forEachIndexed { index, alpha ->
             MediaVideo(LifecycleSource("page$index", Kind.VIDEO), alpha = alpha, modifier = Modifier.size(40.dp))
@@ -114,7 +118,7 @@ class NativeViewLifecycleTest {
     val slots = (0..2).map { factory.createSlot(it.toUInt()) }
     val events = layer.playerEvents() as RecordingEvents
     rule.setContent {
-      MediaLayerProvider(CompletableDeferred(layer), loader, factory.players) {
+      keyedProvider(CompletableDeferred(layer), loader, factory.players) {
         MediaVideo(LifecycleSource("video$page", Kind.VIDEO), muted = muted, modifier = Modifier.size(80.dp))
       }
     }
@@ -162,7 +166,7 @@ class NativeViewLifecycleTest {
     slot.load("first", PlaybackRoute("https://o.test/a.mp4", emptyMap(), null, false, false))
     slot.play()
     rule.setContent {
-      MediaLayerProvider(CompletableDeferred(layer), loader, factory.players) {
+      keyedProvider(CompletableDeferred(layer), loader, factory.players) {
         Column {
           repeat(2) { MediaVideo(LifecycleSource("first", Kind.VIDEO), modifier = Modifier.size(80.dp), onProgress = { reports++ }) }
         }
@@ -188,7 +192,7 @@ class NativeViewLifecycleTest {
     var newer by mutableStateOf(false)
     val events = layer.playerEvents() as RecordingEvents
     rule.setContent {
-      MediaLayerProvider(CompletableDeferred(layer), loader, factory.players) {
+      keyedProvider(CompletableDeferred(layer), loader, factory.players) {
         Column {
           MediaVideo(LifecycleSource("first", Kind.VIDEO), modifier = Modifier.size(80.dp))
           if (newer) MediaVideo(LifecycleSource("first", Kind.VIDEO), modifier = Modifier.size(80.dp))
@@ -210,7 +214,7 @@ class NativeViewLifecycleTest {
   @Test
   fun inv_native_02_video_defaults_to_playing() {
     rule.setContent {
-      MediaLayerProvider(CompletableDeferred(layer), loader, factory.players) {
+      keyedProvider(CompletableDeferred(layer), loader, factory.players) {
         MediaVideo(LifecycleSource("first", Kind.VIDEO), modifier = Modifier.size(80.dp))
       }
     }
@@ -222,7 +226,7 @@ class NativeViewLifecycleTest {
   fun inv_native_03_video_url_replacement_releases_claim_and_attachment() {
     var url by mutableStateOf("first")
     rule.setContent {
-      MediaLayerProvider(CompletableDeferred(layer), loader, factory.players) {
+      keyedProvider(CompletableDeferred(layer), loader, factory.players) {
         MediaVideo(LifecycleSource(url, Kind.VIDEO), modifier = Modifier.size(80.dp))
       }
     }
@@ -239,7 +243,7 @@ class NativeViewLifecycleTest {
     var url by mutableStateOf("first")
     var control: AudioControl? = null
     rule.setContent {
-      MediaLayerProvider(CompletableDeferred(layer), loader, factory.players) {
+      keyedProvider(CompletableDeferred(layer), loader, factory.players) {
         MediaAudio(LifecycleSource(url, Kind.AUDIO)) { control = it; Box(Modifier.size(80.dp)) }
       }
     }
@@ -261,7 +265,7 @@ class NativeViewLifecycleTest {
     var control: AudioControl? = null
     var offset by mutableStateOf(0.dp)
     rule.setContent {
-      MediaLayerProvider(CompletableDeferred(layer), loader, factory.players) {
+      keyedProvider(CompletableDeferred(layer), loader, factory.players) {
         Box(Modifier.offset(y = offset)) {
           MediaAudio(LifecycleSource("first", Kind.AUDIO)) { control = it; Box(Modifier.size(80.dp)) }
         }
@@ -295,7 +299,7 @@ class NativeViewLifecycleTest {
     slot.play()
     var control: AudioControl? = null
     rule.setContent {
-      MediaLayerProvider(CompletableDeferred(layer), loader, factory.players) {
+      keyedProvider(CompletableDeferred(layer), loader, factory.players) {
         MediaAudio(LifecycleSource("first", Kind.AUDIO)) { control = it; Box(Modifier.size(0.dp)) }
       }
     }
@@ -319,7 +323,7 @@ class NativeViewLifecycleTest {
     slot.play()
     var control: AudioControl? = null
     rule.setContent {
-      MediaLayerProvider(CompletableDeferred(layer), loader, factory.players) {
+      keyedProvider(CompletableDeferred(layer), loader, factory.players) {
         MediaAudio(LifecycleSource("first", Kind.AUDIO)) { control = it; Box(Modifier.size(80.dp)) }
       }
     }
@@ -340,7 +344,7 @@ class NativeViewLifecycleTest {
     var control: AudioControl? = null
     var ends = 0
     rule.setContent {
-      MediaLayerProvider(CompletableDeferred(layer), loader, factory.players) {
+      keyedProvider(CompletableDeferred(layer), loader, factory.players) {
         MediaAudio(LifecycleSource("first", Kind.AUDIO), playing = true, onEnd = { ends++ }) { control = it; Box(Modifier.size(80.dp)) }
       }
     }
@@ -369,7 +373,7 @@ class NativeViewLifecycleTest {
     var offset by mutableStateOf(0.dp)
     var reports = 0
     rule.setContent {
-      MediaLayerProvider(CompletableDeferred(layer), loader, factory.players) {
+      keyedProvider(CompletableDeferred(layer), loader, factory.players) {
         MediaVideo(LifecycleSource("first", Kind.VIDEO), modifier = Modifier.offset(y = offset).size(80.dp), onProgress = { reports++ })
       }
     }

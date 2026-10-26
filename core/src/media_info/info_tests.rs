@@ -22,10 +22,10 @@ fn inv_info_01_a_frame_with_an_empty_side_has_no_size() {
 
 #[test]
 fn inv_info_02_only_the_local_schemes_name_a_file_with_metadata() {
-    for url in ["file:///tmp/a.mp4", "android.resource://app/12", "asset:///clips/a.mp4", "  file:///tmp/a.mp4 "] {
+    for url in ["file:///tmp/a.mp4", "android.resource://app/12", "asset:///clips/a.mp4", "  file:///tmp/a.mp4 ", "/tmp/a.mp4"] {
         assert!(is_local_media_url(url.to_string()), "{url}");
     }
-    for url in ["https://o.test/a.mp4", "http://o.test/a.mp4", "", "/tmp/a.mp4"] {
+    for url in ["https://o.test/a.mp4", "http://o.test/a.mp4", "", "clips/a.mp4"] {
         assert!(!is_local_media_url(url.to_string()), "{url}");
     }
 }

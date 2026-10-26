@@ -37,25 +37,34 @@ fn trimmed(text: &str) -> Option<String> {
     (!text.is_empty()).then(|| text.to_string())
 }
 
-/// The one cleaning rule of a source value: blank text is absent, the url loses its edge whitespace.
+/// The one cleaning rule of a source, applied when the declaration is taken in: the url loses its edge whitespace and only an `http`/`https` url with a host, a file path or `file://` text, an Android resource or an asset stays, any other text is an empty url; blank cover and blur hash are absent.
 #[uniffi::export]
 pub fn normalize_item(item: MediaItem) -> MediaItem {
-    let (cover, blur_hash) = (item.cover.as_deref().and_then(trimmed), item.blur_hash.as_deref().and_then(trimmed));
-    MediaItem { url: item.url.trim().to_string(), cover, blur_hash, ..item }
+    clean_item(item)
 }
 
-/// An absolute path or a `file://` URL as a canonical `file://` URL, or an empty string when the text names no file.
-#[uniffi::export]
-pub fn local_file_url(path: String) -> String {
-    let text = path.trim();
+pub(crate) fn clean_item(item: MediaItem) -> MediaItem {
+    let (cover, blur_hash) = (item.cover.as_deref().and_then(trimmed), item.blur_hash.as_deref().and_then(trimmed));
+    MediaItem { url: clean_url(&item.url), cover, blur_hash, ..item }
+}
+
+pub(crate) fn clean_url(text: &str) -> String {
+    let text = text.trim();
+    if text.starts_with('/') || text.starts_with("file://") {
+        return file_url(text);
+    }
+    if is_local_url(text) {
+        return text.to_string();
+    }
+    remote_url(text)
+}
+
+fn file_url(text: &str) -> String {
     let parsed = if text.starts_with("file://") { Url::parse(text).ok().filter(|url| url.to_file_path().is_ok()) } else { Url::from_file_path(text).ok() };
     parsed.map_or_else(String::new, |url| url.to_string())
 }
 
-/// An `http` or `https` URL without its edge whitespace, or an empty string when the text is not one.
-#[uniffi::export]
-pub fn remote_url(text: String) -> String {
-    let text = text.trim();
+fn remote_url(text: &str) -> String {
     let remote = MediaItem::bare(text, Kind::Video).is_remote() && Url::parse(text).is_ok_and(|url| url.host_str().is_some());
     if remote { text.to_string() } else { String::new() }
 }

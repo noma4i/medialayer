@@ -365,7 +365,7 @@ impl MediaLayer {
     }
 
     pub fn cache_key(&self, url: String, headers: HashMap<String, String>) -> String {
-        crate::identity::namespaced_key(&url, &headers, &self.namespace_headers)
+        crate::identity::namespaced_key(&crate::api::clean_url(&url), &headers, &self.namespace_headers)
     }
 
     pub async fn limits(&self) -> Result<Limits, MediaError> {
@@ -402,6 +402,7 @@ impl MediaLayer {
     }
 
     pub async fn purge(&self, url: String) -> Result<(), MediaError> {
+        let url = crate::api::clean_url(&url);
         self.controlled(|assembled| async move { assembled.controls.purge(&url).await }).await
     }
 
