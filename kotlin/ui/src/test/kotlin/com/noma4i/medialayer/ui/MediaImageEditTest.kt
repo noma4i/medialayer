@@ -58,7 +58,7 @@ class MediaImageEditTest {
     photoOrientation = orientationBefore
   }
 
-  private fun edit(maxSize: PixelSize? = null, enlarge: Boolean = false, crop: CropFractions? = null, outputSize: PixelSize? = null, mirror: Boolean = false) = PhotoEdit(maxSize, enlarge, crop, outputSize, mirror)
+  private fun edit(maxSize: PixelSize? = null, enlarge: Boolean = false, crop: CropFractions? = null, outputSize: PixelSize? = null, mirror: Boolean = false, rotation: UInt = 0u) = PhotoEdit(maxSize, enlarge, crop, outputSize, mirror, rotation)
 
   private fun prepare(file: File, edit: PhotoEdit, ledger: EditLedger) = runBlocking { prepareImageAt(file.parentFile!!, file, 0.9, ledger.admit, edit) }
 
@@ -93,6 +93,25 @@ class MediaImageEditTest {
     prepare(pngFile(40, 20), edit(maxSize = PixelSize(80u, 80u), enlarge = true), ledger).file.deleteOnExit()
 
     assertEquals(listOf(40L * 20 * 4 + 80L * 40 * 4), ledger.asked.toList())
+  }
+
+  @Test
+  fun inv_send_37_aRotationTurnsThePhotoClockwiseAfterTheExifTurnAndTheCropFollowsIt() {
+    val ledger = EditLedger()
+    val file = pngFile(80, 40)
+    fun size(edit: PhotoEdit): Pair<Int, Int> {
+      val result = prepare(file, edit, ledger).file.also { it.deleteOnExit() }
+      val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }.also { android.graphics.BitmapFactory.decodeFile(result.path, it) }
+      return bounds.outWidth to bounds.outHeight
+    }
+
+    assertEquals(40 to 80, size(edit(rotation = 90u)))
+    assertEquals(40 to 40, size(edit(crop = CropFractions(0.0, 0.0, 1.0, 0.5), rotation = 90u)))
+    assertEquals(80 to 40, size(edit(rotation = 180u)))
+    assertEquals(40 to 80, size(edit(rotation = 270u)))
+    photoOrientation = { android.media.ExifInterface.ORIENTATION_ROTATE_90 }
+    assertEquals(80 to 40, size(edit(rotation = 90u)))
+    assertThrows(MediaException.Fetch::class.java) { prepare(file, edit(rotation = 45u), ledger) }
   }
 
   @Test

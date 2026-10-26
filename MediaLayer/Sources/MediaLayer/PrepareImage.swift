@@ -6,7 +6,9 @@ import UniformTypeIdentifiers
 extension MediaLayer {
   /// A photo made upright by its EXIF orientation and saved as JPEG. No metadata is copied, so the editor tag and every EXIF field are gone.
   /// `maxSize` fits the result into the rectangle and keeps the proportions, a smaller result is enlarged only when `enlarge` is true, `outputSize` gives the exact size and wins over `maxSize`,
-  /// `crop` is a rectangle in fractions 0 to 1 of the upright photo (origin top left), `mirror` flips the cropped result horizontally.
+  /// `rotation` turns the upright photo clockwise by a multiple of 90 degrees (negative turns the other way) before `crop`,
+  /// `crop` is a rectangle in fractions 0 to 1 of the turned photo (origin top left), `mirror` flips the cropped result horizontally.
+  /// A rotation that is not a multiple of 90 is refused with `MediaError.Fetch`.
   /// An edit that holds no pixel, such as an empty crop or a size of zero, is refused with `MediaError.Fetch`. The core plans every size.
   public func prepareImage(
     _ source: some MediaSource,
@@ -15,7 +17,8 @@ extension MediaLayer {
     enlarge: Bool = false,
     crop: CGRect? = nil,
     outputSize: CGSize? = nil,
-    mirror: Bool = false
+    mirror: Bool = false,
+    rotation: Int = 0
   ) async throws -> PreparedMedia {
     let file = try preparableFile(normalizeItem(item: source.item).url)
     let edit = PhotoEdit(
@@ -23,7 +26,8 @@ extension MediaLayer {
       enlarge: enlarge,
       crop: crop.map { CropFractions(x: Double($0.minX), y: Double($0.minY), width: Double($0.width), height: Double($0.height)) },
       outputSize: outputSize.map(pixelSize),
-      mirror: mirror
+      mirror: mirror,
+      rotationDegrees: UInt32(clamping: ((rotation % 360) + 360) % 360)
     )
     let work = Task.detached {
       try await ImagePreparation.run(file, quality: quality, edit: edit) { bytes in
@@ -43,7 +47,7 @@ private func pixelSize(_ size: CGSize) -> PixelSize {
 enum ImagePreparation {
   typealias Admit = @Sendable (UInt64) async throws -> @Sendable () -> Void
 
-  static let plain = PhotoEdit(maxSize: nil, enlarge: false, crop: nil, outputSize: nil, mirror: false)
+  static let plain = PhotoEdit(maxSize: nil, enlarge: false, crop: nil, outputSize: nil, mirror: false, rotationDegrees: 0)
 
   static func run(_ file: URL, quality: Double, edit: PhotoEdit = plain, directory: URL = FileManager.default.temporaryDirectory, admit: Admit) async throws -> PreparedMedia {
     guard let source = CGImageSourceCreateWithURL(file as CFURL, nil),
@@ -58,6 +62,7 @@ enum ImagePreparation {
     let release = try await admit(plan.cost)
     defer { release() }
     var result = try upright(source, plan: plan, path: file.path)
+    if edit.rotationDegrees % 360 != 0 { result = try draw(result, turn: PhotoTurn(rotationDegrees: edit.rotationDegrees % 360, flipHorizontal: false)) }
     try Task.checkCancellation()
     if plan.needsDraw { result = try finish(result, plan: plan) }
     try Task.checkCancellation()

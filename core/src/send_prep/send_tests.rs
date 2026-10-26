@@ -192,7 +192,7 @@ fn size(width: u32, height: u32) -> crate::ffi::PixelSize {
 }
 
 fn edit() -> PhotoEdit {
-    PhotoEdit { max_size: None, enlarge: false, crop: None, output_size: None, mirror: false }
+    PhotoEdit { max_size: None, enlarge: false, crop: None, output_size: None, mirror: false, rotation_degrees: 0 }
 }
 
 fn crop(x: f64, y: f64, width: f64, height: f64) -> Option<CropFractions> {
@@ -257,7 +257,7 @@ fn inv_send_23_the_crop_is_taken_from_the_upright_photo_and_held_inside_its_boun
 #[test]
 fn inv_send_24_the_output_size_is_exact_and_the_max_size_fits_the_crop() {
     let square = crop(0.0, 0.0, 0.5, 1.0);
-    let exact = photo_plan(2000, 1000, 1, PhotoEdit { crop: square, output_size: Some(size(1080, 1080)), max_size: Some(size(10, 10)), enlarge: false, mirror: false }).unwrap();
+    let exact = photo_plan(2000, 1000, 1, PhotoEdit { crop: square, output_size: Some(size(1080, 1080)), max_size: Some(size(10, 10)), enlarge: false, mirror: false, rotation_degrees: 0 }).unwrap();
     assert_eq!((exact.crop.width, exact.crop.height, exact.output), (1000, 1000, size(1080, 1080)));
     let fitted = photo_plan(2000, 1000, 1, PhotoEdit { crop: square, max_size: Some(size(100, 100)), ..edit() }).unwrap();
     assert_eq!(fitted.output, size(100, 100));
@@ -348,4 +348,19 @@ fn inv_send_34_the_pixel_limit_of_the_source_stays_when_the_decode_is_smaller() 
     let small = PhotoEdit { output_size: Some(size(128, 5)), ..edit() };
     assert_eq!(photo_plan(16_384, 10, 1, small).unwrap().decode, size(8192, 5));
     assert_eq!(photo_plan(16_385, 10, 1, small), None);
+}
+
+#[test]
+fn inv_send_37_a_rotation_joins_the_exif_turn_in_one_turn_and_the_crop_is_taken_from_the_turned_photo() {
+    let plain = photo_plan(400, 200, 1, PhotoEdit { rotation_degrees: 90, ..edit() }).unwrap();
+    assert_eq!((plain.turn.rotation_degrees, plain.turn.flip_horizontal, plain.upright, plain.needs_draw), (90, false, size(200, 400), false));
+    for (tag, rotation, expected) in [(6, 90, (180, false)), (6, 270, (0, false)), (3, 180, (0, false)), (5, 90, (0, true)), (5, 270, (180, true)), (2, 90, (270, true))] {
+        let plan = photo_plan(400, 200, tag, PhotoEdit { rotation_degrees: rotation, ..edit() }).unwrap();
+        assert_eq!((plan.turn.rotation_degrees, plan.turn.flip_horizontal), expected, "tag {tag} rotation {rotation}");
+    }
+    let cut = photo_plan(1000, 500, 1, PhotoEdit { rotation_degrees: 270, crop: crop(0.0, 0.0, 1.0, 0.5), ..edit() }).unwrap();
+    assert_eq!((cut.upright, cut.crop), (size(500, 1000), PixelRect { x: 0, y: 0, width: 500, height: 500 }));
+    assert_eq!(photo_plan(400, 200, 1, PhotoEdit { rotation_degrees: 45, ..edit() }), None);
+    assert_eq!(photo_plan(400, 200, 1, PhotoEdit { rotation_degrees: 360, ..edit() }).unwrap().turn.rotation_degrees, 0);
+    assert_eq!(plain.cost, 400 * 200 * 4 * 2);
 }

@@ -17,6 +17,7 @@ import com.noma4i.medialayer.CropFractions
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.PhotoEdit
 import com.noma4i.medialayer.PhotoPlan
+import com.noma4i.medialayer.PhotoTurn
 import com.noma4i.medialayer.PixelSize
 import com.noma4i.medialayer.jpegQuality
 import com.noma4i.medialayer.photoPlan
@@ -31,7 +32,9 @@ import kotlinx.coroutines.withContext
 /**
  * A photo made upright by its EXIF orientation and saved as JPEG. No metadata is copied, so the editor tag and every EXIF field are gone.
  * [maxSize] fits the result into the rectangle and keeps the proportions, a smaller result is enlarged only when [enlarge] is true, [outputSize] gives the exact size and wins over [maxSize],
- * [crop] is a rectangle in fractions 0 to 1 of the upright photo (origin top left), [mirror] flips the cropped result horizontally.
+ * [rotation] turns the upright photo clockwise by a multiple of 90 degrees (negative turns the other way) before [crop],
+ * [crop] is a rectangle in fractions 0 to 1 of the turned photo (origin top left), [mirror] flips the cropped result horizontally.
+ * A rotation that is not a multiple of 90 is refused with [MediaException.Fetch].
  * An edit that holds no pixel, such as an empty crop or a size of zero, is refused with [MediaException.Fetch]. The core plans every size.
  */
 suspend fun MediaLayer.prepareImage(
@@ -41,7 +44,8 @@ suspend fun MediaLayer.prepareImage(
   enlarge: Boolean = false,
   crop: RectF? = null,
   outputSize: Size? = null,
-  mirror: Boolean = false
+  mirror: Boolean = false,
+  rotation: Int = 0
 ): PreparedMedia {
   val cache = checkNotNull(binding) { "the layer was not opened with MediaLayer.open(context)" }.factory.appContext.cacheDir
   val edit = PhotoEdit(
@@ -49,14 +53,15 @@ suspend fun MediaLayer.prepareImage(
     enlarge,
     crop?.let { CropFractions(it.left.toDouble(), it.top.toDouble(), (it.right - it.left).toDouble(), (it.bottom - it.top).toDouble()) },
     outputSize?.toPixels(),
-    mirror
+    mirror,
+    Math.floorMod(rotation, 360).toUInt()
   )
   return prepareImageAt(cache, preparableFile(normalizeItem(source.toItem()).url), quality, decodeAdmit(), edit)
 }
 
 private fun Size.toPixels() = PixelSize(width.coerceAtLeast(0).toUInt(), height.coerceAtLeast(0).toUInt())
 
-internal val plainPhoto = PhotoEdit(null, false, null, null, false)
+internal val plainPhoto = PhotoEdit(null, false, null, null, false, 0u)
 
 internal suspend fun prepareImageAt(cache: File, file: File, quality: Double, admit: DecodeAdmit, edit: PhotoEdit = plainPhoto): PreparedMedia =
   withContext(prepareDispatcher) { PreparedMedia(upright(file, quality, cache, admit, edit), true) }
@@ -69,7 +74,7 @@ private suspend fun upright(file: File, quality: Double, cache: File, admit: Dec
   val tag = photoOrientation(file)
   val plan = photoPlan(bounds.outWidth.toUInt(), bounds.outHeight.toUInt(), tag.toUInt(), edit)
     ?: throw MediaException.Fetch("${file.path} is above the pixel limit or the edit holds no pixel")
-  return admit(plan.cost.toLong()).use { decodeUpright(file, quality, cache, turnMatrix(tag), plan) }
+  return admit(plan.cost.toLong()).use { decodeUpright(file, quality, cache, turnMatrix(plan.turn), plan) }
 }
 
 private suspend fun decodeUpright(file: File, quality: Double, cache: File, matrix: Matrix, plan: PhotoPlan): File {
@@ -117,10 +122,10 @@ internal fun redraw(upright: Bitmap, plan: PhotoPlan): Bitmap {
   return result
 }
 
-internal fun turnMatrix(exifOrientation: Int): Matrix {
-  val turn = photoTurn(exifOrientation.toUInt())
-  return Matrix().apply {
+internal fun turnMatrix(exifOrientation: Int): Matrix = turnMatrix(photoTurn(exifOrientation.toUInt()))
+
+internal fun turnMatrix(turn: PhotoTurn): Matrix =
+  Matrix().apply {
     postRotate(turn.rotationDegrees.toFloat())
     if (turn.flipHorizontal) postScale(-1f, 1f)
   }
-}

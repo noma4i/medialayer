@@ -76,8 +76,8 @@ private final class Ledger: @unchecked Sendable {
   }
 }
 
-private func edit(maxSize: PixelSize? = nil, enlarge: Bool = false, crop: CropFractions? = nil, outputSize: PixelSize? = nil, mirror: Bool = false) -> PhotoEdit {
-  PhotoEdit(maxSize: maxSize, enlarge: enlarge, crop: crop, outputSize: outputSize, mirror: mirror)
+private func edit(maxSize: PixelSize? = nil, enlarge: Bool = false, crop: CropFractions? = nil, outputSize: PixelSize? = nil, mirror: Bool = false, rotation: UInt32 = 0) -> PhotoEdit {
+  PhotoEdit(maxSize: maxSize, enlarge: enlarge, crop: crop, outputSize: outputSize, mirror: mirror, rotationDegrees: rotation)
 }
 
 private func isRed(_ pixel: (r: Int, g: Int, b: Int, a: Int)) -> Bool { pixel.r > 200 && pixel.g < 60 && pixel.b < 60 }
@@ -117,6 +117,27 @@ struct MediaImageEditTests {
 
     #expect((fitted.width, fitted.height) == (40, 20))
     #expect((kept.width, kept.height) == (80, 40))
+  }
+
+  @Test
+  func inv_send_37_a_rotation_turns_the_photo_clockwise_after_the_exif_turn_and_the_crop_follows_it() async throws {
+    let source = try file(try halves(80, 40, orientation: 1))
+    let tagged = try file(try halves(80, 40, orientation: 6))
+    defer { try? FileManager.default.removeItem(at: source); try? FileManager.default.removeItem(at: tagged) }
+
+    let turned = try await prepared(source, edit(rotation: 90))
+    let both = try await prepared(tagged, edit(rotation: 90))
+    let cut = try await prepared(source, edit(crop: CropFractions(x: 0, y: 0, width: 1, height: 0.5), rotation: 90))
+
+    #expect((turned.width, turned.height) == (40, 80))
+    #expect(isRed(try rgb(turned, 20, 10)))
+    #expect(isBlue(try rgb(turned, 20, 70)))
+    #expect((both.width, both.height) == (80, 40))
+    #expect(isRed(try rgb(both, 60, 20)))
+    #expect(isBlue(try rgb(both, 20, 20)))
+    #expect((cut.width, cut.height) == (40, 40))
+    #expect(isRed(try rgb(cut, 20, 20)))
+    await #expect(throws: MediaError.self) { try await prepared(source, edit(rotation: 45)) }
   }
 
   @Test
