@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.23.0 - 2026-10-26
+
+### Added
+- `MediaCropSnapshot` carries `crop` and `rotation`, the area `confirm()` would give now, and `snapshot()` leaves the crop open.
+
+### Fixed
+- A gesture with a pan and a pinch calls `onPositionChange` twice, the pan report and then the pinch report, as in V2.
+
 ## 3.22.0 - 2026-10-26
 
 ### Added
