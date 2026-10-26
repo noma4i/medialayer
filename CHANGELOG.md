@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.9.1 - 2026-10-26
+
+### Changed
+- Nuke and Coil image decodes take memory from the shared budget while decoding.
+- A refused memory budget during an image decode gives `MediaState.Failed` and `Media.failure`.
+- An image with a side above 16384 is refused before decoding.
+
 ## 3.9.0 - 2026-10-26
 
 ### Added
