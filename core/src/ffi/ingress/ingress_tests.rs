@@ -975,6 +975,7 @@ fn inv_ingress_48_a_play_that_is_not_issued_leaves_a_trace_line_with_its_reason(
             self.0.lock().unwrap().push(text);
         }
     }
+    let _owner = crate::trace::sink_test_guard();
     let dir = tempfile::tempdir().unwrap();
     let factory: Arc<MockFactory> = Arc::default();
     let slots: Arc<dyn PlayerSlotFactory> = factory.clone();

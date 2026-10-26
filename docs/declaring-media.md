@@ -179,6 +179,49 @@ val photo = media.prepareImage(source, quality = 0.9)
 - The photo is turned upright by its EXIF orientation and saved as JPEG with your quality (0.0 to 1.0). No metadata is copied, so the editor tag and the EXIF fields are gone.
 - Android reports video progress only while the export runs, with no timer at rest.
 
+## Decoding a local picture
+
+`MediaImageDecode.decode` turns a local picture into an upright image for a picker, a crop screen or an editor. The EXIF orientation is applied, the long side is cut to `maxSide` (nil or null keeps the size) and a picture is never enlarged. The decode runs off the main thread and takes its memory from the same budget as the players. When the budget refuses, the call throws `MediaError` (Swift) or `MediaException` (Kotlin). Without an open MediaLayer the call throws `Closed`.
+
+```swift
+let photo = try await MediaImageDecode.decode(file: fileURL, maxSide: 2048)
+let fromBytes = try await MediaImageDecode.decode(data: bytes, maxSide: 2048)
+```
+
+```kotlin
+val photo = MediaImageDecode.decode(file, maxSide = 2048)   // also decode(uri, maxSide) and decode(bytes, maxSide)
+```
+
+The size of a local file without decoding it is `imageSize` on a `file://` source: it reads the head of the file and applies the EXIF turn.
+
+`MediaImageLoad.loadBitmap` loads a picture by URL straight into an upright image of the wanted side. With `circle` the result is a square of `side` pixels cut to a circle, for an avatar. It works without an open MediaLayer.
+
+```swift
+let avatar = try await MediaImageLoad.loadBitmap(url: avatarURL, directory: cacheDirectory, side: 96, circle: true)
+```
+
+```kotlin
+val avatar = MediaImageLoad.loadBitmap(avatarUrl, cacheDirectory, side = 96, circle = true)
+```
+
+## Recording a voice message
+
+`MediaVoiceRecorder` records the microphone into an m4a file (AAC, one channel). `start` takes the audio focus for recording from `Media.audio` and `stop` gives it back. `levels` gives the wave level from 0 to 1 while the recording runs, from one formula of the core, and nothing at rest. The recording ends by itself at the longest length (default 10 minutes, set between 1 second and 1 hour). A refused microphone permission, a busy microphone and a recording without sound throw `MediaError.Voice` (Swift) or `MediaException.Voice` (Kotlin) with the same text on both platforms.
+
+```swift
+let recorder = MediaVoiceRecorder(maxDuration: 120)
+try await recorder.start(to: fileURL)
+for await level in recorder.levels { draw(level) }
+let voice = try await recorder.stop()   // VoiceRecording(url, durationMs)
+```
+
+```kotlin
+val recorder = MediaVoiceRecorder(context, maxDurationMs = 120_000)
+recorder.start(file)
+recorder.levels.collect { level -> draw(level) }
+val voice = recorder.stop()   // VoiceRecording(file, durationMs)
+```
+
 ## Image as a value
 
 To get the decoded image without a view (a share card drawn by `ImageRenderer`, a bitmap for a canvas), call `image` on the media context. It goes through the same loader, the same core cache, the same item state and tone as `MediaImage`, and it does not wait for a window or a lifecycle. It returns `nil` (`null`) when the source fails or the task is cancelled, and a second call for the same source and size reads the cache.

@@ -124,3 +124,58 @@ fn inv_send_09_the_jpeg_quality_stays_between_zero_and_one() {
         assert_eq!(jpeg_quality(given), expected);
     }
 }
+
+#[test]
+fn inv_image_70_a_turned_picture_swaps_its_sides_and_pays_for_two_rasters() {
+    let upright = image_decode_plan(400, 200, 1, None).unwrap();
+    assert_eq!((upright.width, upright.height, upright.cost), (400, 200, 400 * 200 * 4));
+    for (tag, degrees) in [(6, 90), (8, 270)] {
+        let plan = image_decode_plan(400, 200, tag, None).unwrap();
+        assert_eq!((plan.decode_width, plan.decode_height), (400, 200), "tag {tag}");
+        assert_eq!((plan.width, plan.height, plan.turn.rotation_degrees), (200, 400, degrees), "tag {tag}");
+        assert_eq!(plan.cost, 400 * 200 * 4 * 2, "tag {tag}");
+    }
+}
+
+#[test]
+fn inv_image_71_the_long_side_is_cut_to_the_limit_and_a_small_picture_is_not_enlarged() {
+    let cut = image_decode_plan(4000, 3000, 6, Some(1000)).unwrap();
+    assert_eq!((cut.decode_width, cut.decode_height, cut.width, cut.height), (1000, 750, 750, 1000));
+    assert_eq!(cut.cost, 1000 * 750 * 4 * 2);
+    for limit in [Some(5000), Some(0), None] {
+        let whole = image_decode_plan(4000, 3000, 1, limit).unwrap();
+        assert_eq!((whole.decode_width, whole.decode_height), (4000, 3000), "limit {limit:?}");
+    }
+    assert_eq!(image_decode_plan(1, 4000, 1, Some(10)).unwrap().decode_width, 1);
+}
+
+#[test]
+fn inv_image_72_a_picture_without_size_or_above_the_pixel_limit_has_no_plan_unless_the_limit_cuts_it() {
+    assert_eq!(image_decode_plan(0, 10, 1, None), None);
+    assert_eq!(image_decode_plan(16_385, 10, 1, None), None);
+    assert!(image_decode_plan(16_385, 10, 1, Some(2048)).is_some());
+}
+
+#[test]
+fn inv_voice_01_the_level_is_in_zero_to_one_for_any_peak_and_follows_the_decibel_scale() {
+    for (peak, expected) in [(1.0, 1.0), (2.0, 1.0), (0.0, 0.0), (-1.0, 0.0), (f32::NAN, 0.0), (0.001, 0.0), (0.0316228, 0.4)] {
+        let level = voice_level(peak);
+        assert!((0.0..=1.0).contains(&level), "{peak}");
+        assert!((level - expected).abs() < 0.001, "{peak} gave {level}");
+    }
+    assert!(voice_level(0.1) > voice_level(0.05));
+}
+
+#[test]
+fn inv_voice_02_the_recording_limit_has_a_default_and_stays_between_one_second_and_one_hour() {
+    for (requested, expected) in [(None, 600_000), (Some(0), 1_000), (Some(30_000), 30_000), (Some(u64::MAX), 3_600_000)] {
+        assert_eq!(voice_limit_ms(requested), expected, "{requested:?}");
+    }
+}
+
+#[test]
+fn inv_voice_03_every_refusal_has_its_own_text() {
+    let texts = [VoiceRefusal::PermissionDenied, VoiceRefusal::MicrophoneBusy, VoiceRefusal::Empty].map(voice_refusal_text);
+    assert!(texts.iter().all(|text| !text.is_empty()));
+    assert_eq!(texts.iter().collect::<std::collections::HashSet<_>>().len(), 3);
+}

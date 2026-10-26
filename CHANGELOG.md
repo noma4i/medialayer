@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.12.0 - 2026-10-26
+
+### Added
+- `MediaImageDecode.decode` decodes a local file, a `Uri` (Android) or bytes into an upright `Bitmap` (Swift `PlatformImage`): the EXIF turn is applied, the long side is cut to `maxSide`, the work runs off the main thread and takes its raster from the shared memory budget. A refusal is a `MediaException` (Swift `MediaError`).
+- `MediaImageLoad.loadBitmap` loads a picture by URL straight into an upright image of the wanted side, with an optional circle mask. It works without an open layer.
+- `MediaVoiceRecorder` records a voice message to an m4a file (AAC, mono) with its length, a wave level 0 to 1 while recording, the audio focus for recording and a configurable longest length. A refused microphone permission, a busy microphone and an empty recording are `MediaException.Voice` (Swift `MediaError.Voice`) with the same text on both platforms.
+- Core `image_decode_plan`, `voice_level`, `voice_limit_ms` and `voice_refusal_text`.
+
 ## 3.11.1 - 2026-10-26
 
 ### Added

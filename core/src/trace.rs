@@ -19,6 +19,13 @@ pub fn set_trace_sink(sink: Option<Arc<dyn TraceSink>>) {
     *SINK.write().unwrap_or_else(std::sync::PoisonError::into_inner) = sink;
 }
 
+/// Held by a test for as long as it owns the process-wide sink: two tests that install a sink would overwrite each other.
+#[cfg(test)]
+pub(crate) fn sink_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    static OWNER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    OWNER.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 pub fn enabled() -> bool {
     SINK_ON.load(Ordering::Acquire) || *ENV.get_or_init(|| std::env::var_os("ML_TRACE").is_some())
 }
@@ -65,6 +72,7 @@ mod tests {
 
     #[test]
     fn inv_trace_01_an_installed_sink_turns_the_trace_on_and_takes_the_lines_without_the_environment() {
+        let _owner = sink_test_guard();
         let lines = Arc::new(Lines(Mutex::default()));
 
         set_trace_sink(Some(lines.clone()));
