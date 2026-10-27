@@ -1,5 +1,23 @@
 # Changelog
 
+## 3.26.2 - 2026-10-27
+
+### Fixed
+- Window readiness stays true when the active page moves to an already cached page.
+
+## 3.26.1 - 2026-10-27
+
+### Fixed
+- Image requests prepare cache keys and decode sizes outside the main thread.
+
+## 3.26.0 - 2026-10-27
+
+### Added
+- `MediaSourceValue.raw`, `asset` and `bundled` take an image: `MediaImage` opens an Android drawable or asset on `Dispatchers.IO` and decodes it off the main thread with the usual memory admission and memory cache.
+
+### Removed
+- `bundledSourceError` (`bundled_source_error`) and the programming error of a bundled image source.
+
 ## 3.25.0 - 2026-10-27
 
 ### Added
