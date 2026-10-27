@@ -9,8 +9,8 @@ set -euo pipefail
 mode=check
 case "${1:-}" in
   --list) mode=list ;;
-  "") ;;
-  *) echo "usage: check_invariants.sh [--list]" >&2; exit 2 ;;
+  "" | --strict) ;;
+  *) echo "usage: check_invariants.sh [--strict|--list]" >&2; exit 2 ;;
 esac
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -150,27 +150,25 @@ for entry in $doc_paths; do
   [ -e "$root/$entry" ] && mentioned="$mentioned$(grep -rhoE 'INV-[A-Z]+-[0-9]+' "$root/$entry" 2> /dev/null | sort -u | tr '\n' ' ' || true)"
 done
 mentioned="$mentioned$(grep -hoE 'INV-[A-Z]+-[0-9]+' "$spec" | sort -u | tr '\n' ' ' || true)"
-missing_rows=""
 cut -f1 "$work/registry.txt" > "$work/ids.txt"
-for id in $(printf '%s\n' $mentioned | sort -u); do
-  grep -qx "$id" "$work/ids.txt" || missing_rows="$missing_rows$id "
-done
+missing_rows="$(printf '%s\n' $mentioned | sort -u | awk 'NR == FNR { known[$0] = 1; next } !($0 in known) { printf "%s ", $0 }' "$work/ids.txt" -)"
 
 awk -F'\t' '{print tolower($1)}' "$work/registry.txt" | tr '-' '_' > "$work/known.txt"
-orphans=""
-while IFS=$'\t' read -r name _; do
-  [ -z "$name" ] && continue
-  for part in $(printf '%s\n' "$name" | grep -oE 'inv_[a-z]+_[0-9]{2}_' || true); do
-    id="${part%_}"
-    grep -qx "$id" "$work/known.txt" || orphans="$orphans$name (unknown invariant $id)"$'\n'
-  done
-done < "$work/tests.txt"
+orphans="$(awk -F'\t' '
+  NR == FNR { known[$0] = 1; next }
+  { rest = $1
+    while (match(rest, /inv_[a-z]+_[0-9]{2}_/)) {
+      id = substr(rest, RSTART, RLENGTH - 1)
+      if (!(id in known)) print $1 " (unknown invariant " id ")"
+      rest = substr(rest, RSTART + RLENGTH)
+    }
+  }' "$work/known.txt" "$work/tests.txt")"
 
 [ -n "$dups" ] && echo "duplicate invariant ids in registry: $dups"
 [ -n "$missing_rows" ] && echo "named by docs, specs or the registry but without a row: $missing_rows"
 if [ -n "$orphans" ]; then
   echo "tests naming an unknown invariant:"
-  printf '%s' "$orphans"
+  printf '%s\n' "$orphans"
 fi
 
 bad="$(tr -d '[:space:]' < "$work/bad.txt")"

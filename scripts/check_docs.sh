@@ -3,6 +3,7 @@ set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 python3 - "$root" <<'PY'
+import glob
 import os
 import re
 import sys
@@ -10,7 +11,7 @@ from collections import defaultdict
 from pathlib import Path
 
 root = Path(sys.argv[1])
-documents = [root / "README.md", *sorted((root / "docs").glob("*.md"))]
+documents = {path: path.read_text() for path in [root / "README.md", *sorted((root / "docs").glob("*.md"))]}
 problems = []
 
 banned_words = [
@@ -20,8 +21,7 @@ banned_words = [
 status_words = ["in development", "work in progress", "planned", "coming soon", "not finished", "todo", "status:"]
 path_roots = ("core/", "gen/", "fixtures/", "MediaLayer/", "kotlin/", "scripts/", "docs/")
 
-for document in documents:
-    text = document.read_text()
+for document, text in documents.items():
     name = document.relative_to(root)
     lowered = text.lower()
     swift_blocks = len(re.findall(r"^```swift", text, re.M))
@@ -44,8 +44,6 @@ for document in documents:
 
 
 # Examples must use the real API: names, constructors and labels are looked up in the platform sources.
-import glob
-
 def read_all(patterns):
     parts = []
     for pattern in patterns:
@@ -69,7 +67,8 @@ function_declaration = {
 family = re.compile(r"\b(Media[A-Z]\w*|OpenConfig|DeviceMemory|\w+Fetcher|\w+SlotFactory|PlayerEvents|MemoryReleaser|Placeholder|PlaybackRoute)\b")
 free_functions = ["defaultLimits", "defaultPoolSettings", "decodeBlurhash"]
 labelled = ["OpenConfig", "DeviceMemory", "MediaVideo", "MediaImage", "MediaAudio"]
-unpaired_free = set()
+functions = {language: set(function_declaration[language].findall(text)) for language, text in platform.items()}
+types = {language: set(declaration[language].findall(text)) for language, text in platform.items()}
 
 
 def window(text, name, kind, width=4000):
@@ -102,24 +101,21 @@ def top_level_labels(call_text, language):
 
 
 missing_bindings = [language for language, marker in (("swift", "public enum MediaState"), ("kotlin", "sealed class MediaState")) if marker not in platform[language]]
-examples = sum(len(re.findall(r"^```(?:swift|kotlin)\n", document.read_text(), re.M)) for document in documents)
+examples = sum(len(re.findall(r"^```(?:swift|kotlin)\n", text, re.M)) for text in documents.values())
 if not missing_bindings:
-    for document in documents:
-        text = document.read_text()
+    for document, text in documents.items():
         name = document.relative_to(root)
         for language, body in re.findall(r"^```(swift|kotlin)\n(.*?)^```", text, re.M | re.S):
             source_text = platform[language]
             own = set(declaration[language].findall(body))
-            functions = set(function_declaration[language].findall(source_text))
-            types = set(declaration[language].findall(source_text))
             for method in set(re.findall(r"\bmedia\.(\w+)", body)):
-                if method not in functions:
+                if method not in functions[language]:
                     problems.append(f"{name}: example calls media.{method} but no {language} source declares it")
             for token in set(family.findall(body)) - own:
-                if token not in types and token not in functions:
+                if token not in types[language] and token not in functions[language]:
                     problems.append(f"{name}: example uses {token} but no {language} source declares it")
             for function in free_functions:
-                if re.search(r"\b%s\(" % function, body) and function not in functions:
+                if re.search(r"\b%s\(" % function, body) and function not in functions[language]:
                     problems.append(f"{name}: example calls {function} but no {language} source declares it")
             for owner in labelled:
                 for match in re.finditer(r"\b%s\(" % owner, body):
@@ -148,9 +144,9 @@ for line in unbuilt_list.read_text().splitlines():
     if line.strip() and not line.startswith("#"):
         path, invariant = line.split()
         listed[path].append(invariant)
-for document in documents:
+for document, text in documents.items():
     name = str(document.relative_to(root))
-    marked = "UNBUILT" in document.read_text()
+    marked = "UNBUILT" in text
     if marked and name not in listed:
         problems.append(f"{name}: carries UNBUILT but is missing from scripts/docs_unbuilt.txt")
     if name in listed and not marked:

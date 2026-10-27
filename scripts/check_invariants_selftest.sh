@@ -28,7 +28,7 @@ fn inv_t_01_it_holds() {
 RUST
 }
 
-run_check() { bash "$repo/scripts/check_invariants.sh" > "$work/out" 2>&1; }
+run_check() { bash "$repo/scripts/check_invariants.sh" --strict > "$work/out" 2>&1; }
 
 expect_green() {
   run_check || { echo "FAIL expected green: $1"; cat "$work/out"; failed=1; }
@@ -272,7 +272,7 @@ inv_check_07_a_name_without_a_row_is_red() {
 table_repo() {
   repo="$(mktemp -d "$work/table.XXXXXX")"
   mkdir -p "$repo/scripts"
-  cp "$here/check_medialayer.sh" "$here/check_steps.sh" "$here/gradle_host_guard.sh" "$repo/scripts/"
+  cp "$here/check_medialayer.sh" "$here/check_steps.sh" "$repo/scripts/"
   git -C "$repo" init -q -b master
   git -C "$repo" -c user.name=t -c user.email=t@t add -A
   git -C "$repo" -c user.name=t -c user.email=t@t commit -q -m base

@@ -3,8 +3,11 @@
 # runs the command in its own process group and, past the limit, kills the group and every descendant
 # (a test host that left the group included). Returns the command code, or 124 on the limit.
 
-# shellcheck source=gradle_host_guard.sh
-source "$(dirname -- "${BASH_SOURCE[0]}")/gradle_host_guard.sh"
+refuse_gradle_on_darwin() {
+  [ "$(uname -s)" = Darwin ] || return 0
+  echo "gradle runs only on brick: $1 refused on Darwin, nothing was started" >&2
+  return 3
+}
 
 descendants() {
   local child
@@ -116,9 +119,9 @@ run_step() {
 }
 
 run_lane() {
-  local lane="$1" line step_lane name rest
+  local lane="$1" line step_lane
   for line in "${selected[@]}"; do
-    IFS='|' read -r step_lane name rest <<< "$line"
+    step_lane="${line%%|*}"
     [ "$step_lane" = "$lane" ] || continue
     run_step "$line" || return 1
   done

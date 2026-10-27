@@ -42,7 +42,8 @@ def strip_comments(text):
 
 
 production = [path for path in files if not is_test(path)]
-texts = {path: strip_comments(path.read_text()) for path in files}
+raw_texts = {path: path.read_text() for path in files}
+texts = {path: strip_comments(text) for path, text in raw_texts.items()}
 findings = []
 
 # Z1 duplicate public type names in production code.
@@ -146,10 +147,10 @@ for path in production:
     text = texts[path]
     for match in spawn.finditer(text):
         begin = statement_start(text, match.start())
-        statement = text[begin: statement_end(text, match.end() - 1)]
+        end = statement_end(text, match.end() - 1)
+        statement = text[begin: end]
         if any(owner in statement for owner in OWNED_BY):
             continue
-        end = statement_end(text, match.end() - 1)
         if text[end: end + 60].lstrip().startswith(".await"):
             continue
         binding = re.match(r"\s*let (?:mut )?(\w+) =", statement)
@@ -176,7 +177,7 @@ for key in allowed:
 for path in production:
     if rel(path) == "trace.rs":
         continue
-    text = path.read_text()
+    text = raw_texts[path]
     for number, line in enumerate(text.splitlines(), 1):
         if "TEMPORARY" in line or re.search(r"\b(?:dbg|println|eprintln)!\(", strip_comments(line)):
             findings.append(f"Z5 {rel(path)}:{number} temporary or print code in production")
@@ -185,11 +186,13 @@ for path in production:
 PERIODIC = {".swift": re.compile(r"addPeriodicTimeObserver|scheduledTimer|Timer\.publish|Task\.sleep"), ".kt": re.compile(r"postDelayed|(?<![.\w])delay\(|scheduleAtFixedRate|fixedRateTimer")}
 wrapper_roots = [root / "MediaLayer" / "Sources", root / "kotlin" / "src" / "main", root / "kotlin" / "ui" / "src" / "main"]
 periodic = {}
+wrapper_texts = {}
 for base in wrapper_roots:
     for path in sorted(base.rglob("*")) if base.exists() else []:
         if path.suffix not in (".swift", ".kt"):
             continue
-        count = len(PERIODIC[path.suffix].findall(re.sub(r"//[^\n]*", "", path.read_text())))
+        wrapper_texts[path] = strip_comments(path.read_text())
+        count = len(PERIODIC[path.suffix].findall(wrapper_texts[path]))
         if count:
             periodic[str(path.relative_to(root))] = count
 for path, count in sorted(periodic.items()):
@@ -205,7 +208,12 @@ for key in allowed:
 DEAD_BUFFER_NAMES = ["warmBuffer", "coldBuffer", "buffer_seconds", "low_buffer_seconds", "bufferSeconds"]
 wrapper_files = [*(root / "MediaLayer" / "Sources").rglob("*.swift"), *(root / "kotlin").glob("**/src/main/**/*.kt")]
 for path in [*production, *wrapper_files]:
-    text = strip_comments(path.read_text())
+    if path in texts:
+        text = texts[path]
+    elif path in wrapper_texts:
+        text = wrapper_texts[path]
+    else:
+        text = strip_comments(path.read_text())
     place = rel(path) if path in production else str(path.relative_to(root))
     for name in DEAD_BUFFER_NAMES:
         if re.search(rf"\b{name}\b", text):
