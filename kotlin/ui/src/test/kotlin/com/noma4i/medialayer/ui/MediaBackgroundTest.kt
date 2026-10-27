@@ -36,9 +36,11 @@ class MediaBackgroundTest {
   private val started = AtomicInteger()
   private val cancelled = AtomicInteger()
   private val gate = CompletableDeferred<Unit>()
+  private val fetchJob = java.util.concurrent.atomic.AtomicReference<kotlinx.coroutines.Job>()
   private val url = "https://o.test/back.gif"
   private val loader by lazy {
     mediaImageLoader(context, ImageBytes { _, _ ->
+      fetchJob.set(kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job])
       started.incrementAndGet()
       try { gate.await() } catch (e: CancellationException) { cancelled.incrementAndGet(); throw e }
       com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK)
@@ -47,12 +49,26 @@ class MediaBackgroundTest {
 
   private fun claims() = layer.calls.filter { it.startsWith("visible:$url:") }
 
-  private fun until(condition: () -> Boolean) = rule.waitUntil(5000) { looper.idleFor(java.time.Duration.ofMillis(50)); condition() }
+  private fun until(advance: () -> Unit = { looper.idleFor(java.time.Duration.ofMillis(50)) }, condition: () -> Boolean) {
+    try {
+      rule.waitUntil(5000) { advance(); condition() }
+    } catch (error: Throwable) {
+      reportComposeTimeout(error, "lifecycle=${rule.activityRule.scenario.state} started=${started.get()} cancelled=${cancelled.get()} claims=${claims()} fetchActive=${fetchJob.get()?.isActive} fetchCancelled=${fetchJob.get()?.isCancelled} trace=${org.robolectric.shadows.ShadowLog.getLogsForTag(MediaTrace.TAG).map { it.msg }}")
+    }
+  }
+
+  @org.junit.After
+  fun resetTrace() {
+    MediaTrace.reset()
+    org.robolectric.shadows.ShadowLog.reset()
+  }
 
   @Test
   fun aStoppedActivityReleasesTheKeyAndCancelsTheRequestAndARestartAsksAgain() {
+    org.robolectric.shadows.ShadowLog.setLoggable(MediaTrace.TAG, android.util.Log.VERBOSE)
+    MediaTrace.install()
     rule.setContent { MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { MediaImage(Backdrop(url), Modifier.size(50.dp)) } }
-    rule.waitUntil(5000) { looper.idle(); started.get() == 1 }
+    until({ looper.idle() }) { started.get() == 1 }
 
     rule.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
     until { cancelled.get() == 1 && claims().lastOrNull() == "visible:$url:false" }
@@ -61,7 +77,7 @@ class MediaBackgroundTest {
     rule.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
     until { started.get() == 2 }
     gate.complete(Unit)
-    rule.waitUntil(5000) { looper.idle(); layer.calls.any { it == "itemState:$url:Ready" } }
+    until({ looper.idle() }) { layer.calls.any { it == "itemState:$url:Ready" } }
 
     assertEquals("started=2 cancelled=1 claims=[visible:$url:true, visible:$url:false, visible:$url:true]", "started=${started.get()} cancelled=${cancelled.get()} claims=${claims()}")
   }

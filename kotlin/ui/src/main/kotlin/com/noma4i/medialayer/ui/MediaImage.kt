@@ -39,6 +39,7 @@ import coil3.request.ImageResult
 import coil3.request.ImageRequest
 import coil3.size.Scale
 import com.noma4i.medialayer.MediaItem
+import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.ImageWork
 import com.noma4i.medialayer.MediaState
@@ -81,10 +82,9 @@ fun MediaImage(
     return
   }
   val density = LocalDensity.current.density
-  val pixelSizes = LocalMediaEnvironment.current.pixelSizes
   BoxWithConstraints(modifier.then(screen.modifier)) {
     val placementPixels = if (constraints.hasBoundedWidth && constraints.hasBoundedHeight) constraints.maxWidth.toLong() * constraints.maxHeight else 0L
-    ImageBody(source, preview, item, mount, failure, decodePixels(constraints, density, source, contentScale, pixelSizes), placementPixels, screen, contentScale, animation, content)
+    ImageBody(source, preview, item, mount, failure, null, placementPixels, screen, contentScale, animation, content, decodeInput(constraints, density, source, contentScale))
   }
 }
 
@@ -107,7 +107,7 @@ private fun claimImage(source: MediaSource, item: MediaItem, screen: ScreenVisib
 
 @Composable
 @OptIn(ExperimentalCoroutinesApi::class)
-private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaItem, mount: PlaceMount, failure: State<ScopedFailure?>, pixels: PixelSize?, placementPixels: Long, screen: ScreenVisibility, contentScale: ContentScale, animation: ImageAnimation, content: @Composable (MediaState) -> Unit) {
+private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaItem, mount: PlaceMount, failure: State<ScopedFailure?>, pixels: PixelSize?, placementPixels: Long, screen: ScreenVisibility, contentScale: ContentScale, animation: ImageAnimation, content: @Composable (MediaState) -> Unit, dimensions: PixelSizeMemo.Args? = null) {
   val context = LocalContext.current
   val environment = LocalMediaEnvironment.current
   val media = environment.media
@@ -117,7 +117,7 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
   val finished = remember(source.url, animation.repeats, animation.playing) { mutableStateOf(false) }
   val rests = animation.rests(reduceMotion) || finished.value
   val resting = if (rests) animation.rest else null
-  val request = remember(media, source, pixels, scale, placementPixels, resting, animation.repeats) { imageRequest(context, source, pixels, scale, { media.cacheKey(source.url, source.headers) }, placementPixels, resting, animation.repeats, media.viewDecodeAdmit()) }
+  val request = remember(media, source, pixels, scale, placementPixels, resting, animation.repeats, dimensions) { imageRequest(context, source, pixels, scale, media, placementPixels, resting, animation.repeats, media.viewDecodeAdmit(), dimensions) }
   val state = remember(item) { mutableStateOf<MediaState>(MediaState.Idle) }
   val animated = remember { mutableStateOf<Animatable?>(null) }
   LaunchedEffect(failure.value, item) { failure.value.of(item)?.let { state.value = it } }
@@ -148,7 +148,7 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
   }
   ImageBlur(item, screen, state, contentScale)
   if (preview != null && screen.visible && state.value != MediaState.Ready) {
-    val previewRequest = remember(media, preview, pixels, scale, placementPixels) { imageRequest(context, preview, pixels, scale, { media.cacheKey(preview.url, preview.headers) }, placementPixels, admit = media.viewDecodeAdmit()) }
+    val previewRequest = remember(media, preview, pixels, scale, placementPixels, dimensions) { imageRequest(context, preview, pixels, scale, media, placementPixels, admit = media.viewDecodeAdmit(), dimensions = dimensions?.copy(declared = preview.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) })) }
     AsyncImage(model = previewRequest, contentDescription = null, imageLoader = loader, contentScale = contentScale, modifier = Modifier.fillMaxSize().testTag(PREVIEW_TAG))
   }
   AsyncImage(
@@ -189,16 +189,16 @@ private fun ImageBlur(item: MediaItem, screen: ScreenVisibility, state: State<Me
   }
 }
 
-internal fun decodePixels(constraints: Constraints, density: Float, source: MediaSource, contentScale: ContentScale, pixelSizes: PixelSizeMemo): PixelSize? {
+internal fun decodeInput(constraints: Constraints, density: Float, source: MediaSource, contentScale: ContentScale): PixelSizeMemo.Args {
   val declared = source.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) }
   val width = if (constraints.hasBoundedWidth) constraints.maxWidth / density.toDouble() else 0.0
   val height = if (constraints.hasBoundedHeight) constraints.maxHeight / density.toDouble() else 0.0
-  return pixelSizes.size(width, height, density.toDouble(), declared, contentScale.toScale() == Scale.FILL)
+  return PixelSizeMemo.Args(width, height, density.toDouble(), declared, contentScale.toScale() == Scale.FILL)
 }
 
-internal fun imageRequest(context: Context, source: MediaSource, pixels: PixelSize?, scale: Scale, cacheKey: () -> String, placementPixels: Long = 0, rest: RestFrame? = null, repeats: Repeats = Repeats.Forever, admit: DecodeAdmit): ImageRequest =
+internal fun imageRequest(context: Context, source: MediaSource, pixels: PixelSize?, scale: Scale, media: MediaLayer, placementPixels: Long = 0, rest: RestFrame? = null, repeats: Repeats = Repeats.Forever, admit: DecodeAdmit, dimensions: PixelSizeMemo.Args? = null): ImageRequest =
   ImageRequest.Builder(context)
-    .data(MediaImageData(source.url, source.headers, cacheKey, if (pixels == null) source.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) } else null, pixels, rest, repeats))
+    .data(MediaImageData(source.url, source.headers.toMap(), media, if (pixels == null) source.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) } else null, pixels, rest, repeats, dimensions))
     .apply {
       when (rest) {
         RestFrame.First -> decoderFactory(AdmittedDecoders(admit, BitmapFactoryDecoder.Factory()))

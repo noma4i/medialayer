@@ -26,10 +26,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
 
-private data class SizedImage(override val url: String) : MediaSource {
+private data class SizedImage(override val url: String, override val size: Pair<Int, Int>? = 24 to 24) : MediaSource {
   override val kind = Kind.IMAGE
   override val headers = emptyMap<String, String>()
-  override val size = 24 to 24
 }
 
 @RunWith(MediaLayerTestRunner::class)
@@ -42,6 +41,14 @@ class MediaImageCompositionTest {
   private val loader by lazy { mediaImageLoader(context, ImageBytes { _, _ -> pending.await(); com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) }) }
   private val looper = shadowOf(android.os.Looper.getMainLooper())
 
+  private fun waitUntil(timeoutMillis: Long, condition: () -> Boolean) {
+    try {
+      rule.waitUntil(timeoutMillis, condition)
+    } catch (error: androidx.compose.ui.test.ComposeTimeoutException) {
+      reportComposeTimeout(error, "cacheKeyReads=${layer.cacheKeyReads.get()} calls=${layer.calls} pending=${pending.isCompleted}")
+    }
+  }
+
   @Test
   fun inv_image_35_returningImageDoesNotRepeatReady() {
     val offset = mutableStateOf(0)
@@ -52,11 +59,11 @@ class MediaImageCompositionTest {
       }
     }
     pending.complete(Unit)
-    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("itemState:$url:Ready") }
+    waitUntil(5000) { looper.idle(); layer.calls.contains("itemState:$url:Ready") }
     rule.runOnIdle { offset.value = 10000 }
-    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("visible:$url:false") }
+    waitUntil(5000) { looper.idle(); layer.calls.contains("visible:$url:false") }
     rule.runOnIdle { offset.value = 0 }
-    rule.waitUntil(5000) { looper.idle(); layer.calls.count { it == "visible:$url:true" } == 2 }
+    waitUntil(5000) { looper.idle(); layer.calls.count { it == "visible:$url:true" } == 2 }
     rule.waitForIdle()
     assertEquals(1, layer.calls.count { it == "itemState:$url:Ready" })
   }
@@ -83,7 +90,7 @@ class MediaImageCompositionTest {
           }
         }
       }
-      rule.waitUntil(5000) { looper.idle(); layer.calls.count { it.startsWith("visible:") && it.endsWith(":true") } == 1 }
+      waitUntil(5000) { looper.idle(); layer.calls.count { it.startsWith("visible:") && it.endsWith(":true") } == 1 }
       rule.waitForIdle()
 
       assertEquals(listOf(1, 1), counts.toList())
@@ -100,13 +107,13 @@ class MediaImageCompositionTest {
         Column { for (index in 0 until count.value) MediaImage(SizedImage("https://o.test/ffi-$index.png"), Modifier.size(10.dp)) }
       }
     }
-    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("visible:https://o.test/ffi-0.png:true") }
+    waitUntil(5000) { looper.idle(); layer.calls.contains("visible:https://o.test/ffi-0.png:true") }
     layer.mainThreadFfi.clear()
     rule.runOnIdle { count.value = 20 }
-    rule.waitUntil(5000) { looper.idle(); layer.calls.count { it.startsWith("visible:") && it.endsWith(":true") } == 20 }
+    waitUntil(5000) { looper.idle(); layer.calls.count { it.startsWith("visible:") && it.endsWith(":true") } == 20 }
     rule.waitForIdle()
     assertEquals(0, layer.mainThreadFfi.count { it == "imageStats" })
-    assertEquals(true, layer.mainThreadFfi.count { it == "cacheKey" } <= 19)
+    assertEquals(0, layer.mainThreadFfi.count { it == "cacheKey" })
   }
 
   @Test
@@ -119,7 +126,7 @@ class MediaImageCompositionTest {
         Column { for (index in 0 until tiles) MediaImage(SizedImage("https://o.test/tile-$index.png"), Modifier.size(10.dp)) }
       }
     }
-    rule.waitUntil(5000) { looper.idle(); layer.calls.count { it.startsWith("visible:") && it.endsWith(":true") } == tiles }
+    waitUntil(5000) { looper.idle(); layer.calls.count { it.startsWith("visible:") && it.endsWith(":true") } == tiles }
     rule.waitForIdle()
 
     fun painters(group: CompositionGroup): Int =
@@ -132,10 +139,18 @@ class MediaImageCompositionTest {
     val total = 10
     val urls = (0 until total).map { "https://o.test/inv40-$it.png" }
     val shown = mutableStateOf(0)
-    val counting = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) }, stats = layer.imageStats())
+    val generation = mutableStateOf(0)
+    val pixelMainCalls = java.util.concurrent.atomic.AtomicInteger()
+    val pixelCalls = java.util.concurrent.atomic.AtomicInteger()
+    val sizes = PixelSizeMemo { width, height, scale, declared, crop ->
+      pixelCalls.incrementAndGet()
+      if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) pixelMainCalls.incrementAndGet()
+      com.noma4i.medialayer.imagePixelSize(width, height, scale, declared, crop)
+    }
+    val counting = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) }, null, layer.imageStats(), sizes)
     rule.setContent {
       MediaLayerProvider(CompletableDeferred(layer), counting) {
-        Column { for (index in 0 until shown.value) MediaImage(SizedImage(urls[index]), Modifier.size(10.dp)) }
+        Column { for (index in 0 until shown.value) MediaImage(SizedImage(if (generation.value == 0) urls[index] else "${urls[index]}?changed", if (index % 2 == 0) 24 to 24 else null), Modifier.size(10.dp)) }
       }
     }
     layer.mainThreadFfi.clear()
@@ -143,15 +158,20 @@ class MediaImageCompositionTest {
     fun settled(visible: Boolean, round: Int) = urls.all { count("visible:$it:$visible") == round }
     for (round in 1..2) {
       rule.runOnIdle { shown.value = total }
-      rule.waitUntil(10000) { looper.idle(); settled(true, round) && urls.all { count("itemState:$it:Ready") == round } }
+      waitUntil(10000) { looper.idle(); settled(true, round) && urls.all { count("itemState:$it:Ready") == round } }
       rule.runOnIdle { shown.value = 0 }
-      rule.waitUntil(10000) { looper.idle(); settled(false, round) }
+      waitUntil(10000) { looper.idle(); settled(false, round) }
     }
-    rule.waitUntil(10000) { looper.idle(); drainFfi(); layer.counterWork.isNotEmpty() && layer.counterObserved == 0L }
+    waitUntil(10000) { looper.idle(); drainFfi(); layer.counterWork.isNotEmpty() && layer.counterObserved == 0L }
 
-    assertEquals(emptyList<String>(), layer.mainThreadFfi.filter { it != "cacheKey" })
-    assertEquals(true, layer.mainThreadFfi.size <= total * 2)
-    for (url in urls) assertEquals(listOf("visible:$url:true", "visible:$url:false", "visible:$url:true", "visible:$url:false"), layer.calls.filter { it.startsWith("visible:$url:") })
+    rule.runOnIdle { shown.value = total }
+    waitUntil(10000) { looper.idle(); urls.all { count("itemState:$it:Ready") == 3 } }
+    rule.runOnIdle { generation.value = 1 }
+    waitUntil(10000) { looper.idle(); urls.all { count("itemState:$it?changed:Ready") == 1 } }
+    assertEquals(emptyList<String>(), layer.mainThreadFfi.toList())
+    assertEquals(true, pixelCalls.get() > 0)
+    assertEquals(0, pixelMainCalls.get())
+    for (url in urls) assertEquals(listOf("visible:$url:true", "visible:$url:false", "visible:$url:true", "visible:$url:false", "visible:$url:true", "visible:$url:false"), layer.calls.filter { it.startsWith("visible:$url:") })
   }
 
   @Test
@@ -159,20 +179,25 @@ class MediaImageCompositionTest {
     val shown = mutableStateOf(true)
     val url = "https://o.test/memory-hit.png"
     val fetches = java.util.concurrent.atomic.AtomicInteger()
-    val counting = mediaImageLoader(context, ImageBytes { _, _ -> fetches.incrementAndGet(); com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) })
+    val sizes = PixelSizeMemo()
+    val counting = mediaImageLoader(context, ImageBytes { _, _ -> fetches.incrementAndGet(); com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) }, null, layer.imageStats(), sizes)
     rule.setContent {
       MediaLayerProvider(CompletableDeferred(layer), counting) {
         if (shown.value) MediaImage(SizedImage(url), Modifier.size(50.dp))
       }
     }
-    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("itemState:$url:Ready") }
+    waitUntil(5000) { looper.idle(); layer.calls.contains("itemState:$url:Ready") }
     rule.runOnIdle { shown.value = false }
     rule.waitForIdle()
+    kotlinx.coroutines.runBlocking {
+      for (index in 0 until 70) sizes.prepare(PixelSizeMemo.Input(PixelSizeMemo.Source("https://o.test/metadata-$index.png", emptyMap(), layer), null, null)) { "metadata-$index" }
+    }
     rule.runOnIdle { shown.value = true }
     rule.waitForIdle()
     drainFfi()
     assertEquals(2, layer.calls.count { it == "itemState:$url:Ready" })
     assertEquals(1, fetches.get())
+    assertEquals(1, layer.cacheKeyReads.get())
   }
 
   @Test

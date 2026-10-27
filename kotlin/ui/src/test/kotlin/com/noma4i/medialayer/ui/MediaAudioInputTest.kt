@@ -145,7 +145,15 @@ class MediaAudioInputTest {
   private var group by mutableStateOf("ring")
   private var unrelated by mutableIntStateOf(0)
 
-  private fun waitForPlaying(key: String, expected: Boolean = true) = rule.waitUntil(10_000) { looper.idle(); slot.playing(key) == expected }
+  private fun waitUntil(timeoutMillis: Long, condition: () -> Boolean) {
+    try {
+      rule.waitUntil(timeoutMillis, condition)
+    } catch (error: androidx.compose.ui.test.ComposeTimeoutException) {
+      reportComposeTimeout(error, "source=$url playing=$playing seen=${seen.size} slots=${slot.all}")
+    }
+  }
+
+  private fun waitForPlaying(key: String, expected: Boolean = true) = waitUntil(10_000) { looper.idle(); slot.playing(key) == expected }
 
   private fun mount(): AudioControl {
     rule.setContent {
@@ -162,7 +170,7 @@ class MediaAudioInputTest {
         }
       }
     }
-    rule.waitUntil(10_000) { seen.isNotEmpty() }
+    waitUntil(10_000) { seen.isNotEmpty() }
     return seen.last()
   }
 
@@ -172,7 +180,7 @@ class MediaAudioInputTest {
     looper.idle()
     val before = slot.count("rate")
     rule.runOnIdle { rate = 3f + before }
-    rule.waitUntil(10_000) { looper.idle(); slot.count("rate") > before }
+    waitUntil(10_000) { looper.idle(); slot.count("rate") > before }
   }
 
   @Test
@@ -240,7 +248,7 @@ class MediaAudioInputTest {
       url = "file:///second.mp4"
       playing = false
     }
-    rule.waitUntil(10_000) { looper.idle(); seen.last() !== first }
+    waitUntil(10_000) { looper.idle(); seen.last() !== first }
     rule.runOnIdle { assertFalse(seen.last().isPlaying) }
 
     rule.runOnIdle {

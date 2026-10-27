@@ -116,9 +116,10 @@ private class RecordingPlace(private val layer: RecordingLayer, private val item
 }
 
 internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents()) : MediaLayer(NoHandle) {
+  val cacheKeyReads = java.util.concurrent.atomic.AtomicInteger()
   val mainThreadFfi = CopyOnWriteArrayList<String>()
   private fun noteFfi(call: String) { noteMainThreadFfi(mainThreadFfi, call) }
-  override fun cacheKey(url: String, headers: Map<String, String>): String { noteFfi("cacheKey"); return url }
+  override fun cacheKey(url: String, headers: Map<String, String>): String { cacheKeyReads.incrementAndGet(); noteFfi("cacheKey"); return url }
   val calls = CopyOnWriteArrayList<String>()
   val listeners = CopyOnWriteArrayList<Pair<String, StateListener>>()
   var closed = false

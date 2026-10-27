@@ -49,7 +49,7 @@ class MediaBundledImageTest {
   private fun loader(admit: DecodeAdmit = this.admit) =
     mediaImageLoader(context, ImageBytes { url, _ -> error("the core must not be asked for the bundled $url") }, null, stats, PixelSizeMemo(), admit)
 
-  private fun request(source: MediaSource) = imageRequest(context, source, PixelSize(16u, 16u), Scale.FILL, { source.url }, admit = admit)
+  private fun request(source: MediaSource) = imageRequest(context, source, PixelSize(16u, 16u), Scale.FILL, RecordingLayer(), admit = admit)
 
   private fun load(request: coil3.request.ImageRequest, with: coil3.ImageLoader = loader()): ImageResult {
     var result: ImageResult? = null

@@ -72,9 +72,26 @@ public enum MediaImagePipeline {
   }
 
   static func prepare(places: MediaPlaces, for source: some MediaSource, url: String? = nil, points: CGSize, scale: CGFloat, contentMode: ContentMode) -> (key: ImageKey, request: ImageRequest?) {
-    let pixels = decodeSize(places: places, for: source, points: points, scale: scale, contentMode: contentMode)
-    let identity = places.cacheKey(url: url ?? source.url, headers: source.headers)
-    let key = ImageKey(identity: identity, pixels: pixels, contentMode: contentMode)
+    let declared = source.size.map { PixelSize(width: UInt32(clamping: $0.width), height: UInt32(clamping: $0.height)) }
+    let prepared = PixelSizeMemo.of(places).prepare(url: url ?? source.url, headers: source.headers, width: Double(points.width), height: Double(points.height), scale: Double(scale), declared: declared, crop: contentMode == .fill) { places.cacheKey(url: url ?? source.url, headers: source.headers) }
+    return makeRequest(for: source, url: url, points: points, scale: scale, contentMode: contentMode, prepared: prepared)
+  }
+
+  static func cachedPreparation(places: MediaPlaces, for source: some MediaSource, points: CGSize, scale: CGFloat, contentMode: ContentMode) -> (key: ImageKey, request: ImageRequest?)? {
+    let memo = PixelSizeMemo.of(places)
+    let declared = source.size.map { PixelSize(width: UInt32(clamping: $0.width), height: UInt32(clamping: $0.height)) }
+    guard let prepared = memo.cachedPreparation(url: source.url, headers: source.headers, width: Double(points.width), height: Double(points.height), scale: Double(scale), declared: declared, crop: contentMode == .fill) else { return nil }
+    return makeRequest(for: source, points: points, scale: scale, contentMode: contentMode, prepared: prepared)
+  }
+
+  @concurrent
+  static func prepareOffMain(places: MediaPlaces, for source: some MediaSource, points: CGSize, scale: CGFloat, contentMode: ContentMode = .fill) async -> (key: ImageKey, request: ImageRequest?) {
+    prepare(places: places, for: source, points: points, scale: scale, contentMode: contentMode)
+  }
+
+  private static func makeRequest(for source: some MediaSource, url: String? = nil, points: CGSize, scale: CGFloat, contentMode: ContentMode, prepared: PixelSizeMemo.Prepared) -> (key: ImageKey, request: ImageRequest?) {
+    let pixels = prepared.pixels.map { CGSize(width: Int($0.width), height: Int($0.height)) }
+    let key = ImageKey(identity: prepared.identity, pixels: pixels, contentMode: contentMode)
     guard let address = URL(string: url ?? source.url) else { return (key, nil) }
     var urlRequest = URLRequest(url: address)
     for (name, value) in source.headers { urlRequest.setValue(value, forHTTPHeaderField: name) }
@@ -85,7 +102,8 @@ public enum MediaImagePipeline {
     request.userInfo["placementPixels"] = UInt64(max(0, points.width * scale) * max(0, points.height * scale))
     request.userInfo["decodePixels"] = pixels
     request.thumbnail = pixels.map { ImageRequest.ThumbnailOptions(size: $0, unit: .pixels, contentMode: contentMode == .fill ? .aspectFill : .aspectFit) }
-    request.imageID = identity
+    request.userInfo["imagePreparation"] = prepared
+    request.imageID = prepared.identity
     return (key, request)
   }
 }
@@ -145,12 +163,14 @@ struct AnimatedKeepingDecoder: AsyncImageDecoding {
   private let base: ImageDecoders.Default
   private let pixels: CGSize?
   private let admit: FrameCache.Admit
+  private let prepared: PixelSizeMemo.Prepared?
 
   init?(context: ImageDecodingContext, admit: @escaping FrameCache.Admit) {
     guard let base = ImageDecoders.Default(context: context) else { return nil }
 
     self.base = base
     pixels = context.request.userInfo["decodePixels"] as? CGSize
+    prepared = context.request.userInfo["imagePreparation"] as? PixelSizeMemo.Prepared
     self.admit = admit
   }
 
@@ -175,6 +195,7 @@ struct AnimatedKeepingDecoder: AsyncImageDecoding {
     defer { release() }
 
     var container = try base.decode(data)
+    container.userInfo["imagePreparation"] = prepared
     if container.type == .webp, Self.keepsSource(frames: AnimatedFrames.sourceFrameCount(data)) { container.data = data }
     return container
   }

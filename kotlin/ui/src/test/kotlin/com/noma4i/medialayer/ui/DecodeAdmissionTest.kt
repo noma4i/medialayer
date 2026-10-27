@@ -138,7 +138,7 @@ class DecodeAdmissionTest {
       }
     }
     val loader = mediaImageLoader(context, ImageBytes { _, _ -> ImageFetchResult(payload, ImageOrigin.CACHE) })
-    val request = ImageRequest.Builder(context).data(MediaImageData("https://o.test/a.png", emptyMap(), { "a" })).decoderFactory(spy).size(16, 16).build()
+    val request = ImageRequest.Builder(context).data(MediaImageData("https://o.test/a.png", emptyMap(), RecordingLayer())).decoderFactory(spy).size(16, 16).build()
 
     var result: ImageResult? = null
     loader.enqueue(request.newBuilder().listener(onSuccess = { _, success -> result = success }, onError = { _, failure -> result = failure }).build())
@@ -191,7 +191,7 @@ class DecodeAdmissionTest {
 
   private fun viewLoad(admit: DecodeAdmit, width: Int, height: Int): ImageResult {
     val loader = mediaImageLoader(context, ImageBytes { _, _ -> ImageFetchResult(pngBytes(64, 64), ImageOrigin.CACHE) }, null, com.noma4i.medialayer.ImageCounters(), PixelSizeMemo(), admit)
-    val request = ImageRequest.Builder(context).data(MediaImageData("https://o.test/${width}x$height.png", emptyMap(), { "k$width" })).size(width, height).build()
+    val request = ImageRequest.Builder(context).data(MediaImageData("https://o.test/${width}x$height.png", emptyMap(), RecordingLayer())).size(width, height).build()
     var result: ImageResult? = null
     loader.enqueue(request.newBuilder().listener(onSuccess = { _, success -> result = success }, onError = { _, failure -> result = failure }).build())
     val deadline = System.nanoTime() + 10_000_000_000L

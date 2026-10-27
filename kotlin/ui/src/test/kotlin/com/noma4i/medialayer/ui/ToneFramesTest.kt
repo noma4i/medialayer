@@ -146,6 +146,7 @@ class ToneFramesTest {
 
     assertEquals(listOf("fetchImage:$url"), layer.calls.filter { it.startsWith("fetchImage:") })
     assertEquals(64 * 64 * 4, pixels?.rgba?.size)
+    assertEquals(0, layer.mainThreadFfi.count { it == "cacheKey" })
   }
 
   @Test

@@ -28,20 +28,22 @@ suspend fun MediaLayer.image(
   imageLoader: ImageLoader = checkNotNull(binding?.imageLoader) { "Open the layer with MediaLayer.open or pass an imageLoader" }
 ): Bitmap? {
   if (!currentCoroutineContext().isActive) return null
+  return try { withContext(Dispatchers.Default) {
   val declared = source.size?.let { (w, h) -> PixelSize(w.toUInt(), h.toUInt()) }
   val pixels = imagePixelSize(width.toDouble(), height.toDouble(), density.toDouble(), declared, true)
   val placement = (width * density).toLong() * (height * density).toLong()
-  val request = imageRequest(context, source, pixels, Scale.FILL, { cacheKey(source.url, source.headers) }, placement, admit = viewDecodeAdmit()).newBuilder().allowHardware(false).build()
+  val request = imageRequest(context, source, pixels, Scale.FILL, this@image, placement, admit = viewDecodeAdmit()).newBuilder().allowHardware(false).build()
   pixels?.let { imageLoader.memoryCache?.get(imageMemoryKey(cacheKey(source.url, source.headers), it, Scale.FILL)) }?.let { hit ->
     imageStats().record(com.noma4i.medialayer.ImageWork.Request(placement.toULong()))
     imageStats().record(com.noma4i.medialayer.ImageWork.Finish(true))
-    return (hit.image as? BitmapImage)?.bitmap?.softwareCopy()
+    return@withContext (hit.image as? BitmapImage)?.bitmap?.softwareCopy()
   }
-  val result = try { imageLoader.execute(request) } catch (_: CancellationException) { return null }
-  return when (result) {
+  val result = try { imageLoader.execute(request) } catch (_: CancellationException) { return@withContext null }
+  when (result) {
     is SuccessResult -> result.image.toBitmap()
     is ErrorResult -> null
   }
+  } } catch (_: CancellationException) { null }
 }
 
 internal suspend fun Bitmap.softwareCopy(copy: (Bitmap) -> Bitmap? = { it.copy(Bitmap.Config.ARGB_8888, false) }): Bitmap? =

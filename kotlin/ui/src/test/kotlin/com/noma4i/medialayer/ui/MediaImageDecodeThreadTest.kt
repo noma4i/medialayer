@@ -36,7 +36,7 @@ class MediaImageDecodeThreadTest {
     }
     val loader = mediaImageLoader(context, ImageBytes { _, _ -> fetchedOn.add(Thread.currentThread()); ImageFetchResult(ByteArray(64) { 7 }, ImageOrigin.CACHE) })
     val source = MediaSourceValue.remote("https://o.test/decode-thread.png", Kind.IMAGE)
-    val request = imageRequest(context, source, null, Scale.FILL, { "decode-thread" }, admit = freeAdmit).newBuilder().decoderFactory(spy).size(16, 16).build()
+    val request = imageRequest(context, source, null, Scale.FILL, RecordingLayer(), admit = freeAdmit).newBuilder().decoderFactory(spy).size(16, 16).build()
 
     var result: ImageResult? = null
     loader.enqueue(request.newBuilder().listener(onSuccess = { _, success -> result = success }, onError = { _, failure -> result = failure }).build())

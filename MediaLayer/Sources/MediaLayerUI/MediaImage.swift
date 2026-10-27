@@ -52,7 +52,7 @@ private struct PreviewImage: View {
     ImageRequestView(source: source, context: context, points: points, scale: scale, contentMode: contentMode) { key, request in
       PreviewFrame(source: source, context: context, key: key, request: request, contentMode: contentMode)
     }
-    .id(PreviewInputs(url: source.url, headers: source.headers, pixelWidth: points.width * scale, pixelHeight: points.height * scale, contentMode: contentMode))
+    .id(ImageInputs(url: source.url, headers: source.headers, width: source.size?.width, height: source.size?.height, contentMode: contentMode, context: ObjectIdentifier(context)))
   }
 }
 
@@ -75,31 +75,53 @@ private struct ImageInputs: Hashable {
   let headers: [String: String]
   let width: Int?
   let height: Int?
-  let pixelWidth: CGFloat?
-  let pixelHeight: CGFloat?
   let contentMode: ContentMode
   let context: ObjectIdentifier
 }
 
 private final class PreparedImage: ObservableObject {
-  let key: ImageKey
-  let request: ImageRequest?
+  @Published private(set) var value: (key: ImageKey, request: ImageRequest?)?
 
   init(source: any MediaSource, context: MediaContext, points: CGSize, scale: CGFloat, contentMode: ContentMode) {
-    (key, request) = MediaImagePipeline.prepare(places: context.places, for: source, points: points, scale: scale, contentMode: contentMode)
+    value = MediaImagePipeline.cachedPreparation(places: context.places, for: source, points: points, scale: scale, contentMode: contentMode)
+  }
+
+  @MainActor
+  func load(source: any MediaSource, context: MediaContext, points: CGSize, scale: CGFloat, contentMode: ContentMode) async {
+    let next = await MediaImagePipeline.prepareOffMain(places: context.places, for: source, points: points, scale: scale, contentMode: contentMode)
+    guard !Task.isCancelled else { return }
+    if value?.key != next.key { value = next }
   }
 }
 
 private struct ImageRequestView<Content: View>: View {
   @StateObject private var prepared: PreparedImage
+  private let source: any MediaSource
+  private let context: MediaContext
+  private let points: CGSize
+  private let scale: CGFloat
+  private let contentMode: ContentMode
   private let content: (ImageKey, ImageRequest?) -> Content
 
   init(source: any MediaSource, context: MediaContext, points: CGSize, scale: CGFloat, contentMode: ContentMode, @ViewBuilder content: @escaping (ImageKey, ImageRequest?) -> Content) {
     _prepared = StateObject(wrappedValue: PreparedImage(source: source, context: context, points: points, scale: scale, contentMode: contentMode))
+    self.source = source
+    self.context = context
+    self.points = points
+    self.scale = scale
+    self.contentMode = contentMode
     self.content = content
   }
 
-  var body: some View { content(prepared.key, prepared.request) }
+  var body: some View {
+    Group {
+      if let value = prepared.value { content(value.key, value.request) }
+      else { Color.clear }
+    }
+    .task(id: PreviewInputs(url: source.url, headers: source.headers, pixelWidth: points.width * scale, pixelHeight: points.height * scale, contentMode: contentMode)) {
+      await prepared.load(source: source, context: context, points: points, scale: scale, contentMode: contentMode)
+    }
+  }
 }
 
 private struct ReduceMotionOverrideKey: EnvironmentKey {
@@ -159,7 +181,6 @@ public struct MediaImage<Content: View>: View {
   @ViewBuilder private var mounted: some View {
     if let context {
       GeometryReader { geometry in
-        let pixels = MediaImagePipeline.decodeSize(places: context.places, for: source, points: geometry.size, scale: displayScale, contentMode: contentMode)
         ImageRequestView(source: source, context: context, points: geometry.size, scale: displayScale, contentMode: contentMode) { key, request in
           let shown = shownImage(for: key, request: request)
           ZStack {
@@ -183,7 +204,7 @@ public struct MediaImage<Content: View>: View {
           }
           .task(id: framesJob(for: key)) { [job = framesJob(for: key)] in await decodeFrames(job) }
         }
-        .id(ImageInputs(url: source.url, headers: source.headers, width: source.size?.width, height: source.size?.height, pixelWidth: pixels?.width, pixelHeight: pixels?.height, contentMode: contentMode, context: ObjectIdentifier(context)))
+        .id(ImageInputs(url: source.url, headers: source.headers, width: source.size?.width, height: source.size?.height, contentMode: contentMode, context: ObjectIdentifier(context)))
       }
       .background(OnScreenProbe(onChange: { screen($0) }, onDismantle: { [claim] in claim.close() }))
       .task(id: ImageFollow(url: source.url, active: isPlaying)) {

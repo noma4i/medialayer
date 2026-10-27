@@ -82,6 +82,7 @@ extension GlobalMedia {
       await until("the main image replaces the preview") { let pixel = centerPixel(of: host.view); return pixel[2] > 200 && pixel[0] < 60 }
       #expect(places.visibleCalls(of: local.url).isEmpty)
       #expect(places.visibleCalls(of: main.url) == [true])
+      #expect(!places.mainThreadCalls.contains("cacheKey"))
     }
   }
 }

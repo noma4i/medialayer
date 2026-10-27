@@ -64,5 +64,6 @@ class MediaPreviewTest {
     assertTrue(layer.calls.toString(), layer.calls.none { local.url in it })
     drainFfi()
     assertEquals(2uL, layer.imageStats().snapshot().decodes)
+    assertEquals(0, layer.mainThreadFfi.count { it == "cacheKey" })
   }
 }

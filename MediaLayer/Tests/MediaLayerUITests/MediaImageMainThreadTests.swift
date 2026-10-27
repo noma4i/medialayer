@@ -10,17 +10,18 @@ private struct PlainImage: MediaSource {
   let url: String
   var kind: Kind { .image }
   var headers: [String: String] { [:] }
-  var size: MediaSize? { MediaSize(width: 16, height: 16) }
+  var size: MediaSize? = MediaSize(width: 16, height: 16)
 }
 
 private struct ImageColumn: View {
   let count: Int
   let context: MediaContext
+  var generation = 0
 
   var body: some View {
     VStack(spacing: 0) {
       ForEach(0 ..< count, id: \.self) { index in
-        MediaImage(PlainImage(url: "https://o.test/main-thread-\(index).png")).frame(width: 10, height: 10)
+        MediaImage(PlainImage(url: "https://o.test/main-thread-\(generation)-\(index).png", size: index.isMultiple(of: 2) ? MediaSize(width: 16, height: 16) : nil)).frame(width: 10, height: 10)
       }
     }
     .environment(\.mediaContext, context)
@@ -46,6 +47,11 @@ struct MediaImageMainThreadTests {
     let total = 10
     let places = RecordingPlaces()
     places.imageResult = .success(pngData(16))
+    let pixelCalls = DecodeThreads()
+    PixelSizeMemo.install(PixelSizeMemo { width, height, scale, declared, crop in
+      pixelCalls.record(Thread.isMainThread)
+      return imagePixelSize(width: width, height: height, scale: scale, declared: declared, crop: crop)
+    }, on: places)
     ImageMemory.install(ImageCache(), on: places)
     let context = MediaContext(places: places)
     _ = context.pipeline
@@ -55,7 +61,7 @@ struct MediaImageMainThreadTests {
     window.rootViewController = host
     window.isHidden = false
     defer { window.isHidden = true }
-    let urls = (0 ..< total).map { "https://o.test/main-thread-\($0).png" }
+    let urls = (0 ..< total).map { "https://o.test/main-thread-0-\($0).png" }
 
     func settle(_ condition: String, _ holds: () -> Bool) async {
       let end = Date().addingTimeInterval(5)
@@ -74,9 +80,20 @@ struct MediaImageMainThreadTests {
       await settle("released \(round)") { urls.allSatisfy { places.visibleCalls(of: $0).filter { !$0 }.count == round } }
     }
 
-    #expect(places.mainThreadCalls.filter { $0 != "cacheKey" } == [])
-    #expect(places.mainThreadCalls.count <= total * 2)
-    for url in urls { #expect(places.visibleCalls(of: url) == [true, false, true, false]) }
+    host.rootView = ImageColumn(count: total, context: context)
+    await settle("return ready") { places.recorded.filter { $0 == "state ready" }.count == total * 3 }
+    host.rootView = ImageColumn(count: total, context: context, generation: 1)
+    await settle("changed ready") { places.recorded.filter { $0 == "state ready" }.count == total * 4 }
+    let video = PlainImage(url: "https://o.test/video.mp4")
+    let cover = await PlaceholderView.loadCover("https://o.test/cover.png", for: video.item, context: context, points: CGSize(width: 10, height: 10), scale: 1)
+    let exported = await context.image(for: PlainImage(url: "https://o.test/export.png"), points: CGSize(width: 10, height: 10), scale: 1)
+    places.needsTone = true
+    let tone = await ToneFrames(places: places).prepare(source: PlainImage(url: "https://o.test/tone.png").item)
+    #expect(cover != nil && exported != nil && tone != nil)
+    #expect(places.mainThreadCalls == [])
+    #expect(!pixelCalls.seen.isEmpty)
+    #expect(!pixelCalls.seen.contains(true))
+    for url in urls { #expect(places.visibleCalls(of: url) == [true, false, true, false, true, false]) }
   }
 
   @MainActor

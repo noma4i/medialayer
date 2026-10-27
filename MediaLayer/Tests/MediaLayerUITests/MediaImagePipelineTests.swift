@@ -273,15 +273,25 @@ extension GlobalMedia {
         let view = MediaImage(source).environment(\.mediaContext, context).environment(\.displayScale, 2).frame(width: 50, height: 50)
         return centerPixel(firstFrame(of: view, size: CGSize(width: 50, height: 50)))
       }
-      let request = try #require(MediaImagePipeline.request(places: places, for: source, points: CGSize(width: 50, height: 50), scale: 2))
-
       let held = Latch()
       places.fetchLatch = held
       let cold = shownFirstFrame()
       held.open()
-      _ = try await context.pipeline.image(for: request)
+      func fillMemory() async throws {
+        let request = try #require(MediaImagePipeline.request(places: places, for: source, points: CGSize(width: 50, height: 50), scale: 2))
+        _ = try await context.pipeline.image(for: request)
+      }
+      try await fillMemory()
+      for index in 0 ..< 70 {
+        _ = MediaImagePipeline.request(places: places, for: TestImage(url: "https://o.test/metadata-\(index).png"), points: CGSize(width: 50, height: 50), scale: 2)
+      }
+      places.resetMainThreadCalls()
+      let reads = places.cacheKeyReads
       let warm = shownFirstFrame()
+      #expect(places.mainThreadCalls.isEmpty)
+      #expect(places.cacheKeyReads == reads)
 
+      let request = try #require(MediaImagePipeline.request(places: places, for: source, points: CGSize(width: 50, height: 50), scale: 2))
       let larger = try #require(MediaImagePipeline.request(places: places, for: source, points: CGSize(width: 80, height: 80), scale: 2))
       #expect(MediaImagePipeline.cachedImage(for: request, in: context.pipeline) != nil)
       #expect(MediaImagePipeline.cachedImage(for: larger, in: context.pipeline) == nil)

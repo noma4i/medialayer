@@ -56,7 +56,7 @@ class MediaImageExportTest {
 
   private fun export(imageLoader: ImageLoader, url: String, cancelled: Boolean = false): Bitmap? {
     val result = CompletableDeferred<Bitmap?>()
-    scope.launch {
+    scope.launch(Dispatchers.Main.immediate) {
       if (cancelled) coroutineContext[Job]!!.cancel()
       result.complete(layer.image(context, ExportSource(url), 8f, 8f, 1f, imageLoader))
     }
@@ -80,6 +80,7 @@ class MediaImageExportTest {
     export(loader(failing = true), "https://o.test/bad.png")
 
     assertEquals(emptyList<String>(), layer.calls.filter { it.startsWith("itemState") })
+    assertEquals(emptyList<String>(), layer.mainThreadFfi.toList())
   }
 
   @Test

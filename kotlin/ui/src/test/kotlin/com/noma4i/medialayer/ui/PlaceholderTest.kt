@@ -69,6 +69,7 @@ private class Events {
 }
 
 private class ScriptedLayer(val label: String, private val events: Events, private val answerFor: (MediaItem) -> String? = { it.blurHash }) : MediaLayer(NoHandle) {
+  val mainCacheKeys = java.util.concurrent.atomic.AtomicInteger()
   val holds = ConcurrentLinkedQueue<CompletableDeferred<Unit>>()
   val listeners = CopyOnWriteArrayList<Pair<String, StateListener>>()
   private val recordingEvents = RecordingEvents()
@@ -89,7 +90,10 @@ private class ScriptedLayer(val label: String, private val events: Events, priva
     return answer
   }
 
-  override fun cacheKey(url: String, headers: Map<String, String>): String = url
+  override fun cacheKey(url: String, headers: Map<String, String>): String {
+    if (Looper.myLooper() == Looper.getMainLooper()) mainCacheKeys.incrementAndGet()
+    return url
+  }
   override fun imageStats(): com.noma4i.medialayer.ImageCounters = counters
   override fun playerEvents() = recordingEvents
   override fun openPlace(item: MediaItem): com.noma4i.medialayer.MediaPlace = NullPlace()
@@ -132,17 +136,23 @@ class PlaceholderTest {
   private val events = Events()
   private val never = CompletableDeferred<Unit>()
   private val looper = shadowOf(Looper.getMainLooper())
+  private val mainPixelSizes = java.util.concurrent.atomic.AtomicInteger()
   private val loader by lazy {
     mediaImageLoader(context, ImageBytes { url, _ ->
       events.add(Event.Fetch(url))
       if (url.contains("cover")) ImageFetchResult(solidPng(if (url.contains("red")) Color.RED else if (url.contains("blue")) Color.BLUE else Color.GREEN), ImageOrigin.NETWORK)
       else { never.await(); ImageFetchResult(solidPng(Color.BLACK), ImageOrigin.NETWORK) }
+    }, null, com.noma4i.medialayer.ImageCounters(), PixelSizeMemo { width, height, scale, declared, crop ->
+      if (Looper.myLooper() == Looper.getMainLooper()) mainPixelSizes.incrementAndGet()
+      com.noma4i.medialayer.imagePixelSize(width, height, scale, declared, crop)
     })
   }
   private val slots by lazy { ExoPlayerSlotFactory(context, startMuted = true).onMainLooper() }
 
   private fun until(what: String, condition: () -> Boolean) {
-    try { rule.waitUntil(15000) { looper.idle(); condition() } } catch (error: androidx.compose.ui.test.ComposeTimeoutException) { org.junit.Assert.fail("never became true: $what; events=${events.all}; nodes blurhash=${nodes("blurhash")} cover=${nodes("cover")}") }
+    try { rule.waitUntil(15000) { looper.idle(); condition() } } catch (error: androidx.compose.ui.test.ComposeTimeoutException) {
+      reportComposeTimeout(AssertionError("never became true: $what; events=${events.all}; nodes blurhash=${nodes("blurhash")} cover=${nodes("cover")}", error), "placeholder events=${events.all} mainPixelSizes=${mainPixelSizes.get()}")
+    }
   }
 
   /** Robolectric legacy bitmaps keep the RGBA bytes of the decoder as one big-endian int, so the channels are read as RGBA here. */
@@ -236,6 +246,8 @@ class PlaceholderTest {
 
     assertEquals("old input worked after replacement", 0, oldWork(oldInput))
     assertFalse("old picture published", published(kind, Tint.RED))
+    assertEquals(0, a.mainCacheKeys.get() + b.mainCacheKeys.get())
+    assertEquals(0, mainPixelSizes.get())
   }
 
   @Test

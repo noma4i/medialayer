@@ -221,9 +221,9 @@ private fun VideoCover(media: MediaLayer, item: MediaItem, ready: Boolean, enabl
   val scale = contentScale.toScale()
   val image = remember(cover.url, item.headers) { CoverSource(cover.url, item.headers) }
   BoxWithConstraints(Modifier.fillMaxSize()) {
-    val pixels = decodePixels(constraints, density, image, contentScale, LocalMediaEnvironment.current.pixelSizes)
+    val dimensions = decodeInput(constraints, density, image, contentScale)
     val placementPixels = if (constraints.hasBoundedWidth && constraints.hasBoundedHeight) constraints.maxWidth.toLong() * constraints.maxHeight else 0L
-    val request = remember(media, cover.url, pixels, scale, placementPixels) { imageRequest(context, image, pixels, scale, { media.cacheKey(cover.url, item.headers) }, placementPixels, admit = media.viewDecodeAdmit()) }
+    val request = remember(media, cover.url, dimensions, scale, placementPixels) { imageRequest(context, image, null, scale, media, placementPixels, admit = media.viewDecodeAdmit(), dimensions = dimensions) }
     AsyncImage(
       model = request,
       contentDescription = "cover",

@@ -20,6 +20,7 @@ class ImagePixelsTest {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val bytes = pngBytes(1080, 1920)
     val stats = com.noma4i.medialayer.ImageCounters()
+    val media = RecordingLayer()
     val loader = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(bytes, com.noma4i.medialayer.ImageOrigin.NETWORK) }, stats = stats).newBuilder().allowHardware(false).build()
     var decodedPixels = 0L
     val placementPixels = 64L * 352 * 352
@@ -31,7 +32,7 @@ class ImagePixelsTest {
           override val headers = emptyMap<String, String>()
           override val size = 1080 to 1920
         }
-        val request = imageRequest(context, source, null, Scale.FILL, { source.url }, 352L * 352, admit = freeAdmit).newBuilder().size(352, 352).build()
+        val request = imageRequest(context, source, null, Scale.FILL, media, 352L * 352, admit = freeAdmit).newBuilder().size(352, 352).build()
         var result: ImageResult? = null
         loader.enqueue(request.newBuilder().listener(onSuccess = { _, value -> result = value }, onError = { _, value -> result = value }).build())
         val deadline = System.nanoTime() + 10_000_000_000L

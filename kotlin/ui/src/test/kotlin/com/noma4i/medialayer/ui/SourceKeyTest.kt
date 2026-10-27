@@ -79,7 +79,11 @@ class SourceKeyTest {
     forms.forEachIndexed { index, (raw, _) ->
       if (index > 0) reports = 0
       rule.runOnIdle { declared = raw }
-      rule.waitUntil(5000) { looper.idle(); reports >= 1 }
+      try {
+        rule.waitUntil(5000) { looper.idle(); reports >= 1 }
+      } catch (error: androidx.compose.ui.test.ComposeTimeoutException) {
+        reportComposeTimeout(error, "source=$declared reports=$reports readOn=$readOn cacheKeyReads=${layer.cacheKeyReads.get()} calls=${layer.calls}")
+      }
       assertTrue("$raw: no progress reached the place", reports >= 1)
     }
     assertEquals(forms.map { it.first }, readOn.map { it.first }.distinct())

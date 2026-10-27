@@ -105,7 +105,7 @@ struct PlaceholderView: View {
 
   static func loadCover(_ url: String, for item: MediaItem, context: MediaContext, points: CGSize, scale: CGFloat) async -> PlatformImage? {
     let source = CoverSource(url: url, headers: item.headers)
-    guard let request = MediaImagePipeline.request(places: context.places, for: source, points: points, scale: scale, contentMode: .fill) else { return nil }
+    guard let request = await MediaImagePipeline.prepareOffMain(places: context.places, for: source, points: points, scale: scale).request else { return nil }
     guard let image = try? await context.pipeline.image(for: request) else { return nil }
 
     return image

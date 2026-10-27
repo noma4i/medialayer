@@ -80,7 +80,7 @@ internal fun rememberScreenVisibility(url: String, stats: com.noma4i.medialayer.
   return screen
 }
 
-internal class MediaEnvironment(val media: MediaLayer, val players: SlotPlayers?, val imageLoader: ImageLoader, val stats: com.noma4i.medialayer.ImageCounters, val pixelSizes: PixelSizeMemo)
+internal class MediaEnvironment(val media: MediaLayer, val players: SlotPlayers?, val imageLoader: ImageLoader, val stats: com.noma4i.medialayer.ImageCounters)
 
 private val EnvironmentLocal = staticCompositionLocalOf<MediaEnvironment?> { null }
 
@@ -142,7 +142,7 @@ private fun MediaLayerEnvironment(media: MediaLayer?, imageLoader: ImageLoader?,
       } catch (error: MediaException) {
         Media.failure = error
       }
-      MediaEnvironment(it, players ?: binding?.factory?.players, loader, it.imageStats(), pixelSizes)
+      MediaEnvironment(it, players ?: binding?.factory?.players, loader, it.imageStats())
     }
   }
   val muted = Media.muted

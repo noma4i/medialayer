@@ -8,10 +8,10 @@ import coil3.decode.ImageSource
 import coil3.gif.AnimatedImageDecoder
 import coil3.fetch.Fetcher
 import coil3.fetch.SourceFetchResult
-import coil3.key.Keyer
 import coil3.memory.MemoryCache
 import coil3.request.CachePolicy
 import coil3.request.Options
+import coil3.request.SuccessResult
 import java.io.ByteArrayInputStream
 import okio.buffer
 import okio.source
@@ -20,9 +20,7 @@ fun interface ImageBytes {
   suspend fun load(url: String, headers: Map<String, String>): com.noma4i.medialayer.ImageFetchResult
 }
 
-internal data class MediaImageData(val url: String, val headers: Map<String, String>, private val keyOf: () -> String, val declared: com.noma4i.medialayer.PixelSize? = null, val pixels: com.noma4i.medialayer.PixelSize? = null, val rest: RestFrame? = null, val repeats: Repeats = Repeats.Forever) {
-  val cacheKey: String by lazy(keyOf)
-}
+internal data class MediaImageData(val url: String, val headers: Map<String, String>, val media: com.noma4i.medialayer.MediaLayer, val declared: com.noma4i.medialayer.PixelSize? = null, val pixels: com.noma4i.medialayer.PixelSize? = null, val rest: RestFrame? = null, val repeats: Repeats = Repeats.Forever, val dimensions: PixelSizeMemo.Args? = null)
 
 internal fun imageMemoryKey(cacheKey: String, pixels: com.noma4i.medialayer.PixelSize, scale: coil3.size.Scale, rest: RestFrame? = null, repeats: Repeats = Repeats.Forever): MemoryCache.Key =
   MemoryCache.Key("$cacheKey|${pixels.width}x${pixels.height}|$scale" + (rest?.let { "|rest:$it" } ?: if (repeats == Repeats.Forever) "" else "|repeats:$repeats"))
@@ -43,17 +41,21 @@ internal fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: 
       add(coil3.intercept.Interceptor { chain ->
         val data = chain.request.data as? MediaImageData
         if (data == null) return@Interceptor chain.proceed()
-        val declared = data.declared
-        val pixels = declared?.let {
+        val dimensions = data.dimensions ?: data.declared?.let {
           val width = (chain.size.width as? coil3.size.Dimension.Pixels)?.px?.toDouble() ?: 0.0
           val height = (chain.size.height as? coil3.size.Dimension.Pixels)?.px?.toDouble() ?: 0.0
-          pixelSizes.size(width, height, 1.0, it, chain.request.scale == coil3.size.Scale.FILL)
-        } ?: data.pixels ?: return@Interceptor chain.proceed()
-        val keyed = chain.withRequest(chain.request.newBuilder().memoryCacheKey(imageMemoryKey(data.cacheKey, pixels, chain.request.scale, data.rest, data.repeats)).build())
-        if (declared == null) keyed.proceed() else keyed.withSize(coil3.size.Size(pixels.width.toInt(), pixels.height.toInt())).proceed()
+          PixelSizeMemo.Args(width, height, 1.0, it, chain.request.scale == coil3.size.Scale.FILL)
+        }
+        val prepared = pixelSizes.prepare(PixelSizeMemo.Input(PixelSizeMemo.Source(data.url, data.headers, data.media), dimensions, data.pixels)) { data.media.cacheKey(data.url, data.headers) }
+        val pixels = prepared.pixels
+        val request = chain.request.newBuilder()
+        request.memoryCacheKey(if (pixels == null) MemoryCache.Key(prepared.identity) else imageMemoryKey(prepared.identity, pixels, chain.request.scale, data.rest, data.repeats))
+        val keyed = chain.withRequest(request.build())
+        val result = if (pixels == null) keyed.proceed() else keyed.withSize(coil3.size.Size(pixels.width.toInt(), pixels.height.toInt())).proceed()
+        (result as? SuccessResult)?.let { pixelSizes.retain(it.image, prepared) }
+        result
       })
       add(AnimatedImageDecoder.Factory())
-      add(Keyer<MediaImageData> { data, _ -> data.cacheKey })
       add(object : Fetcher.Factory<MediaImageData> {
         override fun create(data: MediaImageData, options: Options, imageLoader: ImageLoader): Fetcher =
           Fetcher {

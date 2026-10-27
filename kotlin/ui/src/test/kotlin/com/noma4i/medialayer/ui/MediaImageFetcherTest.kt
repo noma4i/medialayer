@@ -52,7 +52,7 @@ class MediaImageFetcherTest {
           override val kind = Kind.IMAGE
           override val headers = mapOf("Authorization" to account, "X-Ignored" to ignored)
         }
-        val request = imageRequest(context, source, pixels, Scale.FILL, { media.cacheKey(url, source.headers) }, admit = freeAdmit)
+        val request = imageRequest(context, source, pixels, Scale.FILL, media, admit = freeAdmit)
         assertTrue(load(request) is SuccessResult)
       }
       assertEquals(listOf("A", "B"), requested.filter { it.first == url }.map { it.second["Authorization"] })
@@ -85,7 +85,7 @@ class MediaImageFetcherTest {
     val core = mediaImageLoader(context, ImageBytes { url, headers -> fetched.add(url); media.fetchImage(url, headers) })
     val small = Files.createTempFile("small", ".png").also { Files.write(it, pngBytes(8, 8)) }
     val huge = Files.createTempFile("huge", ".png").also { Files.write(it, ByteArray(16 * 1024 * 1024 + 1)) }
-    fun request(file: java.nio.file.Path) = ImageRequest.Builder(context).data(MediaImageData(file.toUri().toString(), emptyMap(), { file.toUri().toString() })).size(8, 8).build()
+    fun request(file: java.nio.file.Path) = ImageRequest.Builder(context).data(MediaImageData(file.toUri().toString(), emptyMap(), media)).size(8, 8).build()
 
     val loaded = load(request(small), core)
     val refused = load(request(huge), core)
@@ -100,7 +100,7 @@ class MediaImageFetcherTest {
 
   @Test
   fun inv_image_12_imageBytesComeFromTheCoreSourceDecodeAtTheDeclaredSizeAndCoilKeepsNoDisk() {
-    val data = MediaImageData("https://o.test/a.png", mapOf("Authorization" to "token"), { "https://o.test/a.png" })
+    val data = MediaImageData("https://o.test/a.png", mapOf("Authorization" to "token"), RecordingLayer())
 
     val result = load(ImageRequest.Builder(context).data(data).size(16, 16).build())
 
@@ -113,7 +113,7 @@ class MediaImageFetcherTest {
 
   @Test
   fun inv_image_13_aSecondRequestForTheSameUrlIsServedFromCoilMemoryWithoutTheCore() {
-    val request = ImageRequest.Builder(context).data(MediaImageData("https://o.test/b.png", emptyMap(), { "https://o.test/b.png" }, PixelSize(64u, 64u))).apply { extras[PLACEMENT_PIXELS] = 256L }.size(16, 16).build()
+    val request = ImageRequest.Builder(context).data(MediaImageData("https://o.test/b.png", emptyMap(), RecordingLayer(), PixelSize(64u, 64u))).apply { extras[PLACEMENT_PIXELS] = 256L }.size(16, 16).build()
 
     load(request)
     assertEquals(256uL, stats.snapshot().placementPixels)

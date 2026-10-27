@@ -80,7 +80,7 @@ internal class ToneFrames(media: MediaLayer, private val context: Context, priva
   private suspend fun image(media: MediaLayer, source: MediaItem): Bitmap? {
     val url = source.cover ?: source.url
     val request = ImageRequest.Builder(context)
-      .data(MediaImageData(url, source.headers, { media.cacheKey(url, source.headers) }))
+      .data(MediaImageData(url, source.headers, media))
       .size(LONG_SIDE, LONG_SIDE)
       .scale(Scale.FIT)
       .precision(Precision.EXACT)
