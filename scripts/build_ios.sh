@@ -2,10 +2,7 @@
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN)}" RUST_TEST_THREADS="${RUST_TEST_THREADS:-$(getconf _NPROCESSORS_ONLN)}"
-# shellcheck source=cargo_artifact.sh
-source "$root/scripts/cargo_artifact.sh"
+source "$root/scripts/build_common.sh"
 bridge="$root/MediaLayer"
 build="$root/target/ios-build"
 targets=(aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim)

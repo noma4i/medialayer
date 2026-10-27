@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Sourced by the build scripts. reported_artifact <bin|kind> <name> reads `cargo build --message-format=json-render-diagnostics` from stdin
-# and prints the path cargo reports for the artifact, wherever CARGO_TARGET_DIR puts it.
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN)}" RUST_TEST_THREADS="${RUST_TEST_THREADS:-$(getconf _NPROCESSORS_ONLN)}"
 reported_artifact() {
   python3 -c 'import json, sys
 kind, name = sys.argv[1:]

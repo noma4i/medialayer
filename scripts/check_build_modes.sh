@@ -2,6 +2,30 @@
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+source "$root/scripts/build_common.sh"
+
+artifact_cases() {
+  local kind expected filenames out code failed=0
+  while IFS=' ' read -r kind expected filenames; do
+    code=0
+    out="$(printf '{"reason":"compiler-artifact","target":{"name":"medialayer","kind":["lib","cdylib","staticlib"]},"filenames":[%s]}' "$filenames" | reported_artifact "$kind" medialayer 2>/dev/null)" || code=$?
+    if { [ "$expected" = FAIL ] && [ "$code" -ne 0 ] && [ -z "$out" ]; } ||
+       { [ "$expected" != FAIL ] && [ "$code" -eq 0 ] && [ "$out" = "$expected" ]; }; then
+      echo "ok $kind artifact $expected"
+    else
+      echo "FAIL $kind artifact: rc=$code out=[$out] expected=[$expected]"
+      failed=1
+    fi
+  done <<'CASES'
+staticlib /t/libmedialayer.a "/t/libmedialayer.rlib","/t/libmedialayer.dylib","/t/libmedialayer.a"
+staticlib /t/libmedialayer.a "/t/libmedialayer.a","/t/libmedialayer.rlib","/t/libmedialayer.dylib"
+cdylib /t/libmedialayer.dylib "/t/libmedialayer.rlib","/t/libmedialayer.dylib","/t/libmedialayer.a"
+cdylib /t/libmedialayer.so "/t/libmedialayer.a","/t/libmedialayer.rlib","/t/libmedialayer.so"
+staticlib FAIL "/t/libmedialayer.rlib","/t/libmedialayer.dylib"
+cdylib FAIL "/t/libmedialayer.rlib","/t/libmedialayer.a"
+CASES
+  return "$failed"
+}
 expect_green() {
   "$@" || return 1
 }
@@ -220,6 +244,7 @@ inv_build_04_ios_artifacts_follow_the_cargo_target_dir() {
   expect_green check_modes targetdir
 }
 
+artifact_cases
 inv_build_01_selected_targets_and_bindings
 inv_build_02_release_removes_stale_x86_libraries
 inv_build_04_ios_artifacts_follow_the_cargo_target_dir

@@ -2,10 +2,7 @@
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN)}" RUST_TEST_THREADS="${RUST_TEST_THREADS:-$(getconf _NPROCESSORS_ONLN)}"
-# shellcheck source=cargo_artifact.sh
-source "$root/scripts/cargo_artifact.sh"
+source "$root/scripts/build_common.sh"
 module="$root/kotlin"
 part="${1:-all}"
 case "$part" in --host | --abis | --release | all) ;; *) echo "usage: build_kotlin.sh [--host | --abis | --release]" >&2; exit 2 ;; esac
