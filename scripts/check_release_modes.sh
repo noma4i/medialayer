@@ -23,7 +23,7 @@ def run_case(publish):
         (root / "scripts/release.sh").chmod(0o755)
         for name in ("check_docs.sh", "check_invariants.sh", "check_zoo.sh"):
             (root / "scripts" / name).write_text("#!/bin/sh\nexit 0\n")
-        (root / "scripts/build_ios.sh").write_text("#!/bin/sh\nmkdir -p MediaLayer/MediaLayerFFI.xcframework/ios-arm64 MediaLayer/MediaLayerFFI.xcframework/ios-arm64_x86_64-simulator MediaLayer/Sources/MediaLayer\nprintf bridge > MediaLayer/Sources/MediaLayer/medialayer.swift\nprintf info > MediaLayer/MediaLayerFFI.xcframework/Info.plist\nprintf binary > MediaLayer/MediaLayerFFI.xcframework/ios-arm64/libmedialayer.a\nprintf binary > MediaLayer/MediaLayerFFI.xcframework/ios-arm64_x86_64-simulator/libmedialayer.a\n")
+        (root / "scripts/build_ios.sh").write_text("#!/bin/sh\nmkdir -p MediaLayer/MediaLayerFFI.xcframework/ios-arm64 MediaLayer/MediaLayerFFI.xcframework/ios-arm64-simulator MediaLayer/Sources/MediaLayer\nprintf bridge > MediaLayer/Sources/MediaLayer/medialayer.swift\nprintf info > MediaLayer/MediaLayerFFI.xcframework/Info.plist\nprintf binary > MediaLayer/MediaLayerFFI.xcframework/ios-arm64/libmedialayer.a\nprintf binary > MediaLayer/MediaLayerFFI.xcframework/ios-arm64-simulator/libmedialayer.a\n")
         (root / "scripts/build_ios.sh").chmod(0o755)
         (root / "MediaLayer/Sources/MediaLayerUI").mkdir(parents=True)
         (root / "MediaLayer/Sources/MediaLayerTesting").mkdir(parents=True)
@@ -71,7 +71,7 @@ with open(os.environ["TEST_EVENTS"],"a") as f: f.write("lipo " + " ".join(a) + "
 if a[0]=="-create": pathlib.Path(a[a.index("-output")+1]).write_text("universal")
 elif a[0]=="-archs":
  p=a[-1]
- print("arm64 x86_64" if "simulator" in p or "universal" in p else "arm64")
+ print("arm64 x86_64" if "universal" in p else "arm64")
 ''',
             "zip": '''#!/usr/bin/env python3
 import os, pathlib, sys
@@ -83,10 +83,10 @@ pathlib.Path(a[-2]).write_text("archive")
 import os, pathlib, sys
 a=sys.argv[1:]
 with open(os.environ["TEST_EVENTS"],"a") as f: f.write("unzip " + " ".join(a) + "\\n")
-if "-Z1" in a: print("MediaLayerFFI.xcframework/Info.plist\\nMediaLayerFFI.xcframework/ios-arm64/libmedialayer.a\\nMediaLayerFFI.xcframework/ios-arm64_x86_64-simulator/libmedialayer.a")
+if "-Z1" in a: print("MediaLayerFFI.xcframework/Info.plist\\nMediaLayerFFI.xcframework/ios-arm64/libmedialayer.a\\nMediaLayerFFI.xcframework/ios-arm64-simulator/libmedialayer.a")
 elif "-d" in a:
  d=pathlib.Path(a[a.index("-d")+1])
- for n in ("Info.plist","ios-arm64/libmedialayer.a","ios-arm64_x86_64-simulator/libmedialayer.a"):
+ for n in ("Info.plist","ios-arm64/libmedialayer.a","ios-arm64-simulator/libmedialayer.a"):
   p=d/"MediaLayerFFI.xcframework"/n; p.parent.mkdir(parents=True,exist_ok=True); p.write_text("binary")
 ''',
             "swift": '''#!/usr/bin/env python3

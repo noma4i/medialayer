@@ -43,18 +43,18 @@ unzip -q "$stage/MediaLayerFFI.xcframework.zip" -d "$tmp/archive"
 archive_entries="$(unzip -Z1 "$stage/MediaLayerFFI.xcframework.zip")"
 grep -Fxq 'MediaLayerFFI.xcframework/Info.plist' <<< "$archive_entries" || fail 'xcframework archive is missing Info.plist'
 grep -Fq 'MediaLayerFFI.xcframework/ios-arm64/' <<< "$archive_entries" || fail 'xcframework archive is missing the iOS device slice'
-grep -Fq 'MediaLayerFFI.xcframework/ios-arm64_x86_64-simulator/' <<< "$archive_entries" || fail 'xcframework archive is missing the iOS simulator slice'
+grep -Fq 'MediaLayerFFI.xcframework/ios-arm64-simulator/' <<< "$archive_entries" || fail 'xcframework archive is missing the iOS simulator slice'
 check_archs() {
   local file="$1" expected="$2" actual
   actual="$(lipo -archs "$file" | tr ' ' '\n' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
   [ "$actual" = "$expected" ] || fail "unexpected architectures in $file: $actual"
 }
 device_binary="$tmp/archive/MediaLayerFFI.xcframework/ios-arm64/libmedialayer.a"
-simulator_binary="$tmp/archive/MediaLayerFFI.xcframework/ios-arm64_x86_64-simulator/libmedialayer.a"
+simulator_binary="$tmp/archive/MediaLayerFFI.xcframework/ios-arm64-simulator/libmedialayer.a"
 [ -s "$device_binary" ] || fail 'xcframework archive is missing the device library'
 [ -s "$simulator_binary" ] || fail 'xcframework archive is missing the simulator library'
 check_archs "$device_binary" 'arm64'
-check_archs "$simulator_binary" 'arm64 x86_64'
+check_archs "$simulator_binary" 'arm64'
 check_archs "$stage/medialayer-gen-macos-universal" 'arm64 x86_64'
 for file in "${attachments[@]}"; do [ -s "$stage/$file" ] || fail "missing release attachment: $file"; done
 checksum="$(swift package compute-checksum "$stage/MediaLayerFFI.xcframework.zip")"
