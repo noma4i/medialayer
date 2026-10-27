@@ -6,9 +6,13 @@ import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.Opcodes
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.DefaultTestLifecycle
+import org.robolectric.TestLifecycle
 import org.robolectric.internal.bytecode.InstrumentationConfiguration
 
 class MediaLayerTestRunner(testClass: Class<*>) : RobolectricTestRunner(testClass) {
+  override fun getTestLifecycleClass(): Class<out TestLifecycle> = MediaLayerTestLifecycle::class.java
+
   override fun createClassLoaderConfig(method: FrameworkMethod): InstrumentationConfiguration =
     InstrumentationConfiguration.Builder(super.createClassLoaderConfig(method)).apply {
       bridgeClasses.forEach { doNotAcquireClass(it) }
@@ -29,5 +33,12 @@ class MediaLayerTestRunner(testClass: Class<*>) : RobolectricTestRunner(testClas
       }.map { it.name }.also {
         check(it.isNotEmpty()) { "No classes found for generated UniFFI SourceFile medialayer.kt" }
       }
+  }
+}
+
+class MediaLayerTestLifecycle : DefaultTestLifecycle() {
+  override fun afterTest(method: java.lang.reflect.Method) {
+    super.afterTest(method)
+    org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
   }
 }
