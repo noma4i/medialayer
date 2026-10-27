@@ -4,6 +4,16 @@ Images, video and audio for Swift and Kotlin. You describe your media sources on
 
 One Rust core serves iOS and Android. It contains a local caching HTTP proxy, a single disk cache with a configurable eviction strategy, prefetch and the policy for a pool of players. Swift and Kotlin only get thin bindings and a typed API generated from your media files.
 
+## Use a release
+
+`.package(url: "https://github.com/noma4i/medialayer.git", exact: "X.Y.Z")`
+
+| File | What | Where |
+| --- | --- | --- |
+| `MediaLayerFFI.xcframework.zip` | iOS device and simulator libraries | SwiftPM binary target |
+| `medialayer.swift` | Generated Swift bridge | Tagged source at `MediaLayer/Sources/MediaLayer/medialayer.swift` |
+| `medialayer-gen-macos-universal` | Generator for macOS arm64 and x86_64 | Run as `medialayer-gen` |
+
 ## Highlights
 
 - **One fetch path.** Images, video (HLS and files) and audio go through the same core. You never see the proxy, its port, cache keys, deduplication or prefetch.

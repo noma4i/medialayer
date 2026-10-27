@@ -1,5 +1,15 @@
 # Getting started
 
+## Use a release
+
+`.package(url: "https://github.com/noma4i/medialayer.git", exact: "X.Y.Z")`
+
+| File | What | Where |
+| --- | --- | --- |
+| `MediaLayerFFI.xcframework.zip` | iOS device and simulator libraries | SwiftPM binary target |
+| `medialayer.swift` | Generated Swift bridge | Tagged source at `MediaLayer/Sources/MediaLayer/medialayer.swift` |
+| `medialayer-gen-macos-universal` | Generator for macOS arm64 and x86_64 | Run as `medialayer-gen` |
+
 ## Requirements
 
 | Tool | Why |
