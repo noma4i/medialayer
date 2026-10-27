@@ -24,12 +24,17 @@ impl Sink {
     fn begin(&self) -> u64 {
         let mut shown = self.shown();
         shown.epoch += 1;
-        if std::mem::take(&mut shown.ready) {
-            if let Some(listener) = &shown.listener {
-                listener.changed(false);
-            }
-        }
         shown.epoch
+    }
+
+    fn pending(&self, epoch: u64) {
+        let mut shown = self.shown();
+        if shown.epoch != epoch || !std::mem::take(&mut shown.ready) {
+            return;
+        }
+        if let Some(listener) = &shown.listener {
+            listener.changed(false);
+        }
     }
 
     fn ready(&self, epoch: u64) {
@@ -82,6 +87,9 @@ impl PageReadiness {
             return;
         }
         let epoch = self.sink.begin();
+        if page.is_none() {
+            self.sink.pending(epoch);
+        }
         self._task = page.clone().map(|items| AbortOnDrop::new(handle.spawn(prepare(assembled.clone(), items, self.sink.clone(), epoch))));
         self.watched = Some(page);
     }
@@ -94,6 +102,12 @@ impl Drop for PageReadiness {
 }
 
 async fn prepare(assembled: Arc<Assembled>, items: Vec<MediaItem>, sink: Arc<Sink>, epoch: u64) {
+    // A page whose sources are already shown or cached keeps the window ready: the report never dips to false between two ready pages.
+    if all_available(&assembled, &items).await {
+        sink.ready(epoch);
+        return;
+    }
+    sink.pending(epoch);
     // Every receiver exists before the first wait: an outcome that lands while an earlier source is awaited stays queued for its own.
     let receivers: Vec<_> = items.iter().map(|_| assembled.stage.settled()).collect();
     for (item, settled) in items.iter().zip(receivers) {
@@ -115,6 +129,16 @@ async fn first_frame_or_cached(assembled: &Assembled, item: &MediaItem, mut sett
         _ = async { rendered.wait_for(|state| matches!(state, MediaState::Rendered | MediaState::Ended)).await.is_ok() } => {}
         _ = cached(assembled, item, &mut settled) => {}
     }
+}
+
+async fn all_available(assembled: &Assembled, items: &[MediaItem]) -> bool {
+    for item in items {
+        let local = item.kind != Kind::Video && (item.is_local() || item.strategy == CacheStrategy::OnDemand);
+        if !local && !assembled.routes.is_cached(&item.url, &item.headers).await {
+            return false;
+        }
+    }
+    true
 }
 
 /// Ends when the source is in the cache: at once, or when a load of that url ends.

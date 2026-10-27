@@ -1132,6 +1132,31 @@ fn inv_window_01_a_video_window_is_ready_by_the_first_frame_or_the_cache_and_a_p
 }
 
 #[test]
+fn inv_window_07_a_move_between_cached_pages_never_reports_not_ready() {
+    let dir = tempfile::tempdir().unwrap();
+    let caller = caller();
+    let factory: Arc<MockFactory> = Arc::default();
+    let (layer, cache) = caller.block_on(async {
+        let parts = crate::api::assemble(assembly(dir.path(), Arc::new(MockFetcher::default()), factory.clone())).await.unwrap();
+        let cache = parts.cache.clone();
+        (MediaLayer::from_parts(None, Handle::current(), parts, None, Vec::new()), cache)
+    });
+    let (first, second, loading) = ("https://o.test/first.mp4", "https://o.test/second.mp4", "https://o.test/loading.mp4");
+    for url in [first, second] {
+        caller.block_on(cache.put(&format!("{url}#0"), crate::cache::Kind::Stream, b"first block")).unwrap();
+    }
+    let seen = Arc::new(ReadySeen::default());
+    let window = ring(&layer, 0, [first, second, loading].map(|url| Some(MediaItem::bare_video(url))).to_vec());
+    window.subscribe_ready(seen.clone()).unwrap();
+    caller.block_on(eventually(|| seen.is_ready()));
+    window.move_to(1).unwrap();
+    caller.block_on(async { tokio::time::sleep(SETTLE).await });
+    assert_eq!(*seen.0.lock().unwrap(), vec![true], "the report dipped between two cached pages");
+    window.move_to(2).unwrap();
+    caller.block_on(eventually(|| !seen.is_ready()));
+}
+
+#[test]
 fn inv_window_02_an_image_window_is_ready_when_every_source_of_the_active_page_is_cached_or_failed_and_a_move_resets_it() {
     let dir = tempfile::tempdir().unwrap();
     let origin = Arc::new(Gated::default());
