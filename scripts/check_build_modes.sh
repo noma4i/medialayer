@@ -50,7 +50,7 @@ tool = p(sys.argv[0]).name
 base = p(os.environ.get("CARGO_TARGET_DIR", str(root / "target")))
 args = sys.argv[1:]
 with (root / "calls").open("a") as log:
-    log.write(json.dumps([tool, *args]) + "\\n")
+    log.write(json.dumps([tool, os.getcwd(), *args]) + "\\n")
 def write(name, data="artifact"):
     path = root / name
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -151,7 +151,7 @@ for platform, modes, host_os, target_dir, custom_library in cases:
             if target_dir: env["CARGO_TARGET_DIR"] = str(work / target_dir)
             env.pop("CARGO_BUILD_JOBS", None)
             env.pop("RUST_TEST_THREADS", None)
-            result = subprocess.run(["bash", str(script), *([mode] if mode else [])], env=env, capture_output=True, text=True)
+            result = subprocess.run(["bash", str(script), *([mode] if mode else [])], cwd=work, env=env, capture_output=True, text=True)
             try:
                 assert result.returncode == 0, result.stderr
                 if cleanup:
@@ -162,22 +162,27 @@ for platform, modes, host_os, target_dir, custom_library in cases:
                 calls = [json.loads(line) for line in (work / "calls").read_text().splitlines()]
                 assert not any(call[0] in ("sysctl", "nproc") for call in calls), calls
                 assert set((work / "jobs").read_text().splitlines()) == {"2 2"}, (work / "jobs").read_text()
-                builds = [call[1:] for call in calls if call[0] == "cargo"]
-                generators = [call for call in calls if call[0] == "uniffi-bindgen"]
+                builds = [call[2:] for call in calls if call[0] == "cargo"]
+                generators = [call[2:] for call in calls if call[0] == "uniffi-bindgen"]
                 if platform == "ios":
+                    assert all(call[1] == str(work / "core") for call in calls if call[0] == "uniffi-bindgen"), calls
                     actual = [call[call.index("--target") + 1] for call in builds if "--target" in call]
                     assert actual == targets, actual
                     assert all("--release" in call for call in builds if "--target" in call)
+                    assert all(call[call.index("--manifest-path") + 1] == str(work / "core/Cargo.toml") for call in builds if "--target" in call), builds
                     host = [call for call in builds if "--target" not in call]
                     assert len(host) == 1 and "--bin" in host[0], host
                     assert str(work / "bindgen/Cargo.toml") in host[0], host
                     assert len(generators) == 1 and generators[0][generators[0].index("--library") + 1].endswith(f"/{targets[0]}/release/libmedialayer.a"), generators
-                    packaging = [call for call in calls if call[0] == "xcodebuild"]
+                    packaging = [call[2:] for call in calls if call[0] == "xcodebuild"]
                     libraries = [packaging[0][i + 1] for i, arg in enumerate(packaging[0]) if arg == "-library"]
                     built = work / (target_dir or "target")
                     assert libraries == [str(built / f"{target}/release/libmedialayer.a") for target in targets], libraries
                     assert generators[0][generators[0].index("--library") + 1] == libraries[0], generators
                 else:
+                    assert all(call[1] == str(work / "core") for call in calls if call[0] == "uniffi-bindgen" or call[0] == "cargo" and len(call) > 2 and call[2] == "ndk"), calls
+                    core_builds = [call for call in builds if call[0] != "ndk" and "--bin" not in call]
+                    assert all(call[call.index("--manifest-path") + 1] == str(work / "core/Cargo.toml") for call in core_builds), core_builds
                     ndk = [call for call in builds if call[0] == "ndk"]
                     actual = [call[i + 1] for call in ndk for i, arg in enumerate(call) if arg == "-t"]
                     assert actual == targets, actual
