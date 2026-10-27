@@ -29,7 +29,7 @@ pub use ports::{CacheControl, MemoryRelease, PoolControl, PrefetchControl, Setti
 pub use routes::Routes;
 pub use signals::{SignalPorts, Signals};
 pub use slots::{CreatedPlayer, PlayerSlot, PlayerSlotFactory, SlotCall, SlotRunner, SlotSample};
-pub use source::{bundled_source_error, is_local_url, normalize_item, MediaItem, PlaybackRoute};
+pub use source::{is_local_url, normalize_item, MediaItem, PlaybackRoute};
 pub(crate) use source::{clean_item, clean_url};
 pub use stage::{Stage, StageParts};
 pub use stats_feed::follow_stats;

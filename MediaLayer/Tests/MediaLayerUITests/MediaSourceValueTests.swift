@@ -75,10 +75,13 @@ struct MediaSourceValueTests {
   }
 
   @Test
-  func inv_source_04_aBundledImageIsRefusedWithTheTextOfTheCore() {
-    #expect(bundledSourceError(kind: .image) == "a bundled source is a video or an audio, not an image")
-    #expect(bundledSourceError(kind: .video) == nil)
-    #expect(bundledSourceError(kind: .audio) == nil)
+  func inv_source_04_aBundledImageBecomesAFileUrlOfImageKind() throws {
+    let found = MediaSourceValue.bundled("exif6_editor", extension: "jpg", subdirectory: "Fixtures", bundle: .module, kind: .image)
+
+    #expect(found.url.hasPrefix("file:///"))
+    #expect(found.url.hasSuffix("/Fixtures/exif6_editor.jpg"))
+    #expect(found.kind == .image)
+    #expect(MediaSourceValue.bundled("missing", extension: "jpg", bundle: .module, kind: .image).url == "")
   }
 
   @Test

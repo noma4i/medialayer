@@ -69,12 +69,6 @@ fn remote_url(text: &str) -> String {
     if remote { text.to_string() } else { String::new() }
 }
 
-/// The refusal of a bundled source of this kind, the same text on both platforms.
-#[uniffi::export]
-pub fn bundled_source_error(kind: Kind) -> Option<String> {
-    (kind == Kind::Image).then(|| "a bundled source is a video or an audio, not an image".to_string())
-}
-
 impl MediaItem {
     pub fn bare(url: &str, kind: Kind) -> MediaItem {
         MediaItem { kind, url: url.to_string(), headers: HashMap::new(), cover: None, blur_hash: None, looping: true, strategy: CacheStrategy::Window }

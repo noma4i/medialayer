@@ -77,7 +77,7 @@ public struct MediaSourceValue: MediaSource, Hashable {
     remote(url.absoluteString, kind: kind, headers: headers, cover: cover, blurHash: blurHash, size: size, strategy: strategy)
   }
 
-  /// A video or an audio resource of a bundle. An image is a programming error, the text comes from the core. A missing resource gives a source without a url.
+  /// A file resource of a bundle, a video, an audio or an image. `MediaImage` decodes an image file off the main thread. A missing resource gives a source without a url. An asset catalog name has no file, use `Image(_:)` for it.
   public static func bundled(
     _ name: String,
     extension fileExtension: String,
@@ -89,7 +89,6 @@ public struct MediaSourceValue: MediaSource, Hashable {
     size: MediaSize? = nil,
     strategy: CacheStrategy = .window
   ) -> MediaSourceValue {
-    if kind == .image { preconditionFailure(bundledSourceError(kind: kind) ?? "") }
     let located = bundle.url(forResource: name, withExtension: fileExtension, subdirectory: subdirectory)
     return file(located?.absoluteString ?? "", kind: kind, cover: cover, blurHash: blurHash, size: size, strategy: strategy)
   }

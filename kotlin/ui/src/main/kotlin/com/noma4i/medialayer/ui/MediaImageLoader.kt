@@ -57,6 +57,7 @@ internal fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: 
       add(object : Fetcher.Factory<MediaImageData> {
         override fun create(data: MediaImageData, options: Options, imageLoader: ImageLoader): Fetcher =
           Fetcher {
+            if (isBundledUrl(data.url)) return@Fetcher SourceFetchResult(ImageSource(openBundled(context, data.url).source().buffer(), options.fileSystem), null, DataSource.MEMORY)
             val result = bytes.load(data.url, data.headers)
             val source = when (result.source) {
               com.noma4i.medialayer.ImageOrigin.NETWORK -> DataSource.NETWORK

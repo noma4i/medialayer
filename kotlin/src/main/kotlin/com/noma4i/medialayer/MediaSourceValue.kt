@@ -40,16 +40,12 @@ class MediaSourceValue(
     fun remote(url: String, kind: Kind, headers: Map<String, String> = emptyMap(), cover: String? = null, blurHash: String? = null, size: Pair<Int, Int>? = null, strategy: CacheStrategy = CacheStrategy.WINDOW): MediaSourceValue =
       MediaSourceValue(url, kind, headers, cover, blurHash, size, strategy)
 
-    /** A video or an audio in `res/raw`. An image is a programming error, the text comes from the core. */
-    fun raw(context: Context, id: Int, kind: Kind, cover: String? = null, blurHash: String? = null, size: Pair<Int, Int>? = null, strategy: CacheStrategy = CacheStrategy.WINDOW): MediaSourceValue {
-      if (kind == Kind.IMAGE) throw IllegalArgumentException(bundledSourceError(kind))
-      return MediaSourceValue("android.resource://${context.packageName}/$id", kind, cover = cover, blurHash = blurHash, size = size, strategy = strategy)
-    }
+    /** A video or an audio in `res/raw`, or a raster image in `res/drawable`. `MediaImage` reads and decodes an image off the main thread. */
+    fun raw(context: Context, id: Int, kind: Kind, cover: String? = null, blurHash: String? = null, size: Pair<Int, Int>? = null, strategy: CacheStrategy = CacheStrategy.WINDOW): MediaSourceValue =
+      MediaSourceValue("android.resource://${context.packageName}/$id", kind, cover = cover, blurHash = blurHash, size = size, strategy = strategy)
 
-    /** A video or an audio in `assets`. An image is a programming error, the text comes from the core. */
-    fun asset(name: String, kind: Kind, cover: String? = null, blurHash: String? = null, size: Pair<Int, Int>? = null, strategy: CacheStrategy = CacheStrategy.WINDOW): MediaSourceValue {
-      if (kind == Kind.IMAGE) throw IllegalArgumentException(bundledSourceError(kind))
-      return MediaSourceValue("asset:///${name.trim().trimStart('/')}", kind, cover = cover, blurHash = blurHash, size = size, strategy = strategy)
-    }
+    /** A video or an audio, or a raster image, in `assets`. */
+    fun asset(name: String, kind: Kind, cover: String? = null, blurHash: String? = null, size: Pair<Int, Int>? = null, strategy: CacheStrategy = CacheStrategy.WINDOW): MediaSourceValue =
+      MediaSourceValue("asset:///${name.trim().trimStart('/')}", kind, cover = cover, blurHash = blurHash, size = size, strategy = strategy)
   }
 }

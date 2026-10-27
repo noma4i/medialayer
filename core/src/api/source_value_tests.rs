@@ -1,4 +1,4 @@
-use super::source::{bundled_source_error, clean_item, clean_url, is_local_url, MediaItem};
+use super::source::{clean_item, clean_url, is_local_url, MediaItem};
 use super::types::Kind;
 
 #[test]
@@ -32,13 +32,6 @@ fn inv_source_02_03_only_a_web_url_a_file_or_a_resource_is_a_source_url() {
     for (name, text, expected) in cases {
         assert_eq!(clean_url(text), expected, "{name}");
     }
-}
-
-#[test]
-fn inv_source_04_a_bundled_image_is_refused_with_one_text() {
-    assert_eq!(bundled_source_error(Kind::Image).as_deref(), Some("a bundled source is a video or an audio, not an image"));
-    assert_eq!(bundled_source_error(Kind::Video), None);
-    assert_eq!(bundled_source_error(Kind::Audio), None);
 }
 
 #[test]

@@ -11,13 +11,11 @@ import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.PlaceInput
 import com.noma4i.medialayer.StateListener
-import com.noma4i.medialayer.bundledSourceError
 import com.noma4i.medialayer.toItem
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import org.junit.Assert.assertNull
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.MethodVisitor
@@ -27,7 +25,6 @@ import android.app.ActivityManager
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -111,14 +108,14 @@ class MediaSourceValueTest {
   }
 
   @Test
-  fun inv_source_04_a_bundled_image_is_refused_with_the_text_of_the_core() {
-    val text = "a bundled source is a video or an audio, not an image"
+  fun inv_source_04_a_bundled_image_keeps_its_resource_url_and_kind() {
+    val drawable = MediaSourceValue.raw(context, R.drawable.medialayer_test_image, Kind.IMAGE)
+    val asset = MediaSourceValue.asset("/art/a.webp", Kind.IMAGE)
 
-    assertEquals(text, bundledSourceError(Kind.IMAGE))
-    assertNull(bundledSourceError(Kind.VIDEO))
-    assertNull(bundledSourceError(Kind.AUDIO))
-    assertEquals(text, assertThrows(IllegalArgumentException::class.java) { MediaSourceValue.raw(context, 1, Kind.IMAGE) }.message)
-    assertEquals(text, assertThrows(IllegalArgumentException::class.java) { MediaSourceValue.asset("a.jpg", Kind.IMAGE) }.message)
+    assertEquals("android.resource://${context.packageName}/${R.drawable.medialayer_test_image}", drawable.url)
+    assertEquals(Kind.IMAGE, drawable.kind)
+    assertEquals("asset:///art/a.webp", asset.url)
+    assertEquals(Kind.IMAGE, asset.kind)
   }
 
   @Test
