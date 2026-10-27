@@ -4,7 +4,7 @@
 
 | Tool | Why |
 | ---- | --- |
-| Xcode (iOS 17+, macOS 14+) | Swift package and iOS simulator build |
+| Xcode (iOS 17+) | Swift package and iOS simulator build |
 | Homebrew `rustup` with the iOS and Android targets | Rust core for every platform |
 | `cargo-ndk` and Android NDK | Android libraries |
 | JDK 17 and Gradle 9, on brick only | Kotlin module |
@@ -14,7 +14,7 @@ export PATH=/opt/homebrew/opt/rustup/bin:$PATH
 bash scripts/check_medialayer.sh
 ```
 
-On macOS the Kotlin lane and every Gradle step stop at once with `gradle runs only on brick` and a nonzero code. Run them on brick. `scripts/build_kotlin.sh` starts no Gradle and runs on any host.
+On Darwin the Kotlin lane and every Gradle step stop at once with `gradle runs only on brick` and a nonzero code. Run them on brick. `scripts/build_kotlin.sh` starts no Gradle and runs on any host.
 
 ## Build modes
 
@@ -22,8 +22,8 @@ On macOS the Kotlin lane and every Gradle step stop at once with `gradle runs on
 | ------- | ------ |
 | `bash scripts/build_ios.sh --device` | Release XCFramework containing only `aarch64-apple-ios`, for App Store archives |
 | `bash scripts/build_ios.sh --ios` | Release iOS device and arm64 simulator slices |
-| `bash scripts/build_ios.sh --check` | Release macOS arm64 and iOS arm64 simulator slices |
-| `bash scripts/build_ios.sh` | Release macOS arm64, iOS device and arm64 simulator slices |
+| `bash scripts/build_ios.sh --check` | Release iOS arm64 simulator slice |
+| `bash scripts/build_ios.sh` | Release iOS device and arm64 simulator slices |
 | `bash scripts/build_kotlin.sh --release` | Release `arm64-v8a` and `armeabi-v7a` libraries and Kotlin bindings, for Android AAB builds |
 | `bash scripts/build_kotlin.sh --abis` | All 4 Android ABIs, including `x86` and `x86_64`, without regenerating bindings |
 | `bash scripts/build_kotlin.sh --host` | Linux debug library and Kotlin bindings for JNA tests |

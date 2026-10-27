@@ -5,9 +5,9 @@ root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "$root/scripts/build_common.sh"
 bridge="$root/MediaLayer"
 build="$root/target/ios-build"
-targets=(aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim)
+targets=(aarch64-apple-ios aarch64-apple-ios-sim)
 case "${1:-}" in
-  --check) targets=(aarch64-apple-darwin aarch64-apple-ios-sim) ;;
+  --check) targets=(aarch64-apple-ios-sim) ;;
   --ios) targets=(aarch64-apple-ios aarch64-apple-ios-sim) ;;
   --device) targets=(aarch64-apple-ios) ;;
   "") ;;
