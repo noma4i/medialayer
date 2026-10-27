@@ -16,6 +16,17 @@ source = Path(__import__("sys").argv[1])
 script = source / "scripts/release.sh"
 failed = []
 
+def check_android_build_arguments():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "scripts").mkdir()
+        shutil.copy2(source / "scripts/release_android.sh", root / "scripts/release_android.sh")
+        (root / "scripts/build_kotlin.sh").write_text('#!/bin/bash\nprintf "%s\\n" "$#" "$@" > "$(dirname "$0")/arguments"\nexit 73\n')
+        result = subprocess.run(["bash", str(root / "scripts/release_android.sh"), "3.26.2", str(root / "out")], capture_output=True, text=True)
+        assert result.returncode == 73, f"build stub was not reached: {result.stderr}"
+        assert (root / "scripts/arguments").read_text() == "0\n", "Android build must regenerate bindings"
+        print("ok Android distribution regenerates bindings")
+
 def run_case(publish):
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -187,6 +198,10 @@ if a[:2]==["release","download"]:
         if "checksum: \"" + hashlib.sha256(b"archive").hexdigest() not in manifest:
             raise AssertionError("generated package checksum missing")
 
+try:
+    check_android_build_arguments()
+except AssertionError as error:
+    failed.append(str(error))
 for publish in (False, True):
     try:
         run_case(publish)

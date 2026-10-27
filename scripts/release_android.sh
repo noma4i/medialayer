@@ -11,7 +11,7 @@ if [ -n "$(find "$out_dir" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
   fail "output directory is not empty: $out_dir"
 fi
 
-bash "$root/scripts/build_kotlin.sh" --abis
+bash "$root/scripts/build_kotlin.sh"
 gradle="${GRADLE:-$(ls -d "${HOME:?}"/.gradle/wrapper/dists/gradle-9.*-bin/*/gradle-9.*/bin/gradle 2>/dev/null | sort -V | tail -1)}"
 [ -x "$gradle" ] || fail 'Gradle 9 not found: set GRADLE'
 staging="$out_dir/maven"
