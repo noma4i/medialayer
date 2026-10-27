@@ -8,10 +8,15 @@ One Rust core serves iOS and Android. It contains a local caching HTTP proxy, a 
 
 `.package(url: "https://github.com/noma4i/medialayer.git", exact: "X.Y.Z")`
 
+Gradle repository: `repositories { maven { url = uri("https://raw.githubusercontent.com/noma4i/medialayer/maven") } }`
+
+Gradle dependencies: `implementation("com.noma4i:medialayer:X.Y.Z")` and `implementation("com.noma4i:medialayer-ui:X.Y.Z")`.
+
 | File | What | Where |
 | --- | --- | --- |
 | `MediaLayerFFI.xcframework.zip` | iOS device and simulator libraries | SwiftPM binary target |
 | `medialayer.swift` | Generated Swift bridge | Tagged source at `MediaLayer/Sources/MediaLayer/medialayer.swift` |
+| `medialayer-android.zip` | Android libraries for four ABIs and generated Kotlin bindings | Unzip into `kotlin/` |
 | `medialayer-gen-macos-universal` | Generator for macOS arm64 and x86_64 | Run as `medialayer-gen` |
 
 ## Highlights

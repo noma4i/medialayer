@@ -1,7 +1,10 @@
 plugins {
   id("com.android.library") version "9.4.1"
   id("org.jetbrains.kotlin.plugin.compose") version "2.4.21"
+  id("maven-publish")
 }
+
+group = "com.noma4i"
 
 android {
   namespace = "com.noma4i.medialayer.ui"
@@ -9,6 +12,10 @@ android {
 
   defaultConfig {
     minSdk = 33
+  }
+
+  publishing {
+    singleVariant("release")
   }
 
   buildFeatures {
@@ -22,6 +29,27 @@ android {
         val hostLibrary = file("../host-library.path")
         if (!hostLibrary.exists()) throw GradleException("host-library.path is missing: run scripts/build_kotlin.sh --host")
         it.systemProperty("jna.library.path", hostLibrary.readText().trim())
+      }
+    }
+  }
+}
+
+if (providers.gradleProperty("releaseVersion").isPresent && providers.gradleProperty("stagingRepo").isPresent) {
+  afterEvaluate {
+    publishing {
+      publications {
+        register<MavenPublication>("release") {
+          groupId = "com.noma4i"
+          artifactId = "medialayer-ui"
+          version = providers.gradleProperty("releaseVersion").get()
+          from(components["release"])
+        }
+      }
+      repositories {
+        maven {
+          name = "staging"
+          url = uri(providers.gradleProperty("stagingRepo").get())
+        }
       }
     }
   }

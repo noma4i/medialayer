@@ -4,11 +4,21 @@ set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$root"
 fail() { printf 'release: %s\n' "$*" >&2; exit 1; }
-[ "$#" -ge 1 ] && [ "$#" -le 2 ] || fail 'usage: release.sh <version> [--publish]'
+[ "$#" -ge 3 ] || fail 'usage: release.sh <version> [--publish] --android <result-dir>'
 version="$1"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'version must be x.y.z'
-publish="${2:-}"
-[ -z "$publish" ] || [ "$publish" = --publish ] || fail 'usage: release.sh <version> [--publish]'
+publish=""
+android_dir=""
+shift
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --publish) [ -z "$publish" ] || fail 'duplicate --publish'; publish=--publish; shift ;;
+    --android) [ -z "$android_dir" ] && [ "$#" -ge 2 ] || fail 'usage: release.sh <version> [--publish] --android <result-dir>'; android_dir="$2"; shift 2 ;;
+    *) fail 'usage: release.sh <version> [--publish] --android <result-dir>' ;;
+  esac
+done
+[ -n "$android_dir" ] || fail 'Android release result is required: pass --android <result-dir>'
+android_dir="$(cd -- "$android_dir" && pwd -P)" || fail 'Android release result directory not found'
 [ -z "$(git status --porcelain)" ] || fail 'working tree is not clean'
 [ "$(git branch --show-current)" = master ] || fail 'branch must be master'
 previous_tag="$(git describe --tags --abbrev=0 --exclude "$version")" || fail 'previous tag not found'
@@ -17,17 +27,46 @@ subjects="$(git log --format=%s "$previous_tag"..HEAD)" || fail 'cannot read com
 [ "$(sed -n '/^\[package\]/,/^\[/s/^version = "\([^"]*\)"$/\1/p' core/Cargo.toml)" = "$version" ] || fail 'core version does not match'
 grep -Fq "## $version - " CHANGELOG.md || fail 'changelog heading missing'
 for check in check_docs check_invariants check_zoo; do bash "scripts/$check.sh" || fail "$check failed"; done
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+android_archive="$android_dir/medialayer-android.zip"
+[ -s "$android_archive" ] || fail 'Android release archive is missing'
+for artifact in medialayer medialayer-ui; do
+  artifact_dir="$android_dir/maven/com/noma4i/$artifact/$version"
+  for extension in aar pom module; do
+    [ -s "$artifact_dir/$artifact-$version.$extension" ] || fail "Android Maven $artifact $extension is missing"
+  done
+done
+mkdir "$tmp/android-archive"
+(cd "$tmp/android-archive" && unzip -q "$android_archive")
+for entry in \
+  src/main/jniLibs/arm64-v8a/libmedialayer.so \
+  src/main/jniLibs/armeabi-v7a/libmedialayer.so \
+  src/main/jniLibs/x86_64/libmedialayer.so \
+  src/main/jniLibs/x86/libmedialayer.so \
+  src/main/kotlin/com/noma4i/medialayer/medialayer.kt; do
+  [ -s "$tmp/android-archive/$entry" ] || fail "Android archive missing $entry"
+done
+mkdir "$tmp/android-aar"
+(cd "$tmp/android-aar" && unzip -q "$android_dir/maven/com/noma4i/medialayer/$version/medialayer-$version.aar")
+for abi in arm64-v8a armeabi-v7a x86_64 x86; do [ -s "$tmp/android-aar/jni/$abi/libmedialayer.so" ] || fail "medialayer AAR missing ABI $abi"; done
+[ -s "$tmp/android-aar/classes.jar" ] || fail 'medialayer AAR missing classes.jar'
+unzip -Z1 "$tmp/android-aar/classes.jar" > "$tmp/android-classes.list"
+grep -Eq '^com/noma4i/medialayer/[^/]+\.class$' "$tmp/android-classes.list" || fail 'medialayer AAR missing Kotlin classes'
+grep -Fq '<artifactId>medialayer</artifactId>' "$android_dir/maven/com/noma4i/medialayer-ui/$version/medialayer-ui-$version.pom" || fail 'medialayer-ui POM missing medialayer dependency'
+printf 'Android artifacts checked: %s\n' "$android_dir"
+
 bash scripts/build_ios.sh
 
 stage="$root/target/release-$version"
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-attachments=(MediaLayerFFI.xcframework.zip medialayer.swift medialayer-gen-macos-universal)
+attachments=(MediaLayerFFI.xcframework.zip medialayer.swift medialayer-android.zip medialayer-gen-macos-universal)
 if [ -d "$stage" ]; then
   for file in "${attachments[@]}" SHA256SUMS; do [ -s "$stage/$file" ] || fail "incomplete existing output: $stage/$file"; done
   (cd "$stage" && shasum -a 256 -c SHA256SUMS)
 else
   mkdir -p "$stage"
+  cp "$android_archive" "$stage/medialayer-android.zip"
   (cd MediaLayer && zip -qry "$stage/MediaLayerFFI.xcframework.zip" MediaLayerFFI.xcframework)
   cp MediaLayer/Sources/MediaLayer/medialayer.swift "$stage/medialayer.swift"
   for target in aarch64-apple-darwin x86_64-apple-darwin; do
@@ -118,6 +157,33 @@ awk -v heading="## $version - " 'index($0, heading)==1 {found=1; next} found && 
 stage_files="$(find "$stage" -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort)"
 expected_stage_files="$(printf '%s\n' "${attachments[@]}" SHA256SUMS NOTES.md | LC_ALL=C sort)"
 [ "$stage_files" = "$expected_stage_files" ] || fail "unexpected files in release stage: $stage_files"
+
+maven_checkout="$tmp/maven-branch"
+maven_remote=""
+if [ "$publish" = --publish ]; then
+  maven_remote="$(git remote get-url origin)"
+  if [ -n "$(git ls-remote --heads "$maven_remote" maven | awk 'NR == 1 {print $1}')" ]; then
+    git clone --branch maven --single-branch "$maven_remote" "$maven_checkout"
+  else
+    git -C "$tmp" init -b maven maven-branch
+    git -C "$maven_checkout" remote add origin "$maven_remote"
+  fi
+  for artifact in medialayer medialayer-ui; do
+    source_dir="$android_dir/maven/com/noma4i/$artifact/$version"
+    destination_dir="$maven_checkout/com/noma4i/$artifact/$version"
+    if [ -d "$destination_dir" ]; then
+      diff -qr "$source_dir" "$destination_dir" || fail "Maven $artifact $version already exists with different files"
+    else
+      mkdir -p "$(dirname "$destination_dir")"
+      cp -R "$source_dir" "$destination_dir"
+      git -C "$maven_checkout" add "com/noma4i/$artifact/$version"
+    fi
+  done
+  if ! git -C "$maven_checkout" diff --cached --quiet; then
+    git -C "$maven_checkout" commit -m "Maven $version"
+  fi
+fi
+
 if [ "$publish" = --publish ]; then
   package_commits="$(git log --format=%s "$previous_tag"..HEAD | grep -Fxc "Package release $version" || true)"
   if [ "$package_commits" = 0 ]; then
@@ -139,13 +205,14 @@ if [ "$publish" = --publish ]; then
 else
   printf '%s\n' 'Package.swift to be written:'
   cat "$tmp/Package.swift"
-  printf 'Dry run: would write Package release %s, tag %s, push master and tag, and publish 3 attachments.\n' "$version" "$version"
+  printf 'Dry run: would write Package release %s, tag %s, push master and tag, publish Maven artifacts, and publish 4 attachments.\n' "$version" "$version"
 fi
 
 printf 'release artifacts: %s\n' "$stage"
 if [ "$publish" = --publish ]; then
   git push origin master
   git push origin "$version"
+  git -C "$maven_checkout" push -u origin maven
   if ! gh release view "$version" >/dev/null 2>&1; then
     gh release create "$version" --title "$version" --notes-file "$notes" "${attachments[@]/#/$stage/}"
   fi

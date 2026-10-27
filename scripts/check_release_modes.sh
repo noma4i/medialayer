@@ -10,6 +10,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import zipfile
 
 source = Path(__import__("sys").argv[1])
 script = source / "scripts/release.sh"
@@ -35,6 +36,22 @@ def run_case(publish):
         (root / "gen/Cargo.toml").write_text('[package]\nname = "medialayer-gen"\nversion = "3.26.2"\n')
         (root / "CHANGELOG.md").write_text('## 3.26.2 - 2026-10-27\n\n### Fixed\n- Release check.\n\n## Unreleased\n')
         (root / "target/bin").mkdir(parents=True)
+        android = root / "android-result"
+        archive_root = android / "maven/com/noma4i/medialayer/3.26.2"
+        ui_root = android / "maven/com/noma4i/medialayer-ui/3.26.2"
+        archive_root.mkdir(parents=True)
+        ui_root.mkdir(parents=True)
+        with zipfile.ZipFile(android / "medialayer-android.zip", "w") as archive:
+            for name in ("src/main/jniLibs/arm64-v8a/libmedialayer.so", "src/main/jniLibs/armeabi-v7a/libmedialayer.so", "src/main/jniLibs/x86_64/libmedialayer.so", "src/main/jniLibs/x86/libmedialayer.so", "src/main/kotlin/com/noma4i/medialayer/medialayer.kt"):
+                archive.writestr(name, "artifact")
+        for directory, name, pom in ((archive_root, "medialayer", "<project/>"), (ui_root, "medialayer-ui", "<dependency><artifactId>medialayer</artifactId></dependency>")):
+            with zipfile.ZipFile(directory / f"{name}-3.26.2.aar", "w") as aar:
+                aar.writestr("classes.jar", "jar")
+                if name == "medialayer":
+                    for abi in ("arm64-v8a", "armeabi-v7a", "x86_64", "x86"):
+                        aar.writestr(f"jni/{abi}/libmedialayer.so", "so")
+            (directory / f"{name}-3.26.2.pom").write_text(pom)
+            (directory / f"{name}-3.26.2.module").write_text("{}")
         event_file = root / "events"
         env = dict(os.environ, PATH=f"{root}/target/bin:{os.environ['PATH']}", TEST_ROOT=str(root), TEST_EVENTS=str(event_file))
         stubs = {
@@ -43,6 +60,13 @@ import os, pathlib, shutil, sys
 a=sys.argv[1:]
 with open(os.environ["TEST_EVENTS"],"a") as f: f.write("git " + " ".join(a) + "\\n")
 root=pathlib.Path(os.environ["TEST_ROOT"])
+if a[:2]==["-C", str(root/"maven-branch")]:
+ b=a[2:]
+ if b[:2]==["init","-b"]: pathlib.Path(b[-1]).mkdir(exist_ok=True)
+ elif b[:2]==["diff","--cached"]: sys.exit(1)
+ elif b[:2]==["remote","get-url"]: print("https://example.invalid/medialayer.git")
+elif a[:2]==["remote","get-url"]: print("https://example.invalid/medialayer.git")
+elif a[:2]==["ls-remote","--heads"]: pass
 if a[0]=="add":
  with open(root/"staged", "a") as f: f.write(a[-1] + "\\n")
 elif a[:3]==["commit", "-m", "Package release 3.26.2"]:
@@ -55,6 +79,9 @@ elif a[:2]==["branch","--show-current"]: print("master")
 elif a[:2]==["describe","--tags"]: print("3.26.1")
 elif a[:2]==["log","--format=%s"]: print("Release 3.26.2")
 elif a[:2]==["log","-1"]: print("Release 3.26.2")
+if a[:2]==["-C", str(root/"maven-branch")]:
+ b=a[2:]
+ if b[:2]==["commit","-m"] or b[:2]==["push","-u"]: pass
 ''',
             "cargo": '''#!/usr/bin/env python3
 import os, pathlib, sys
@@ -83,11 +110,21 @@ pathlib.Path(a[-2]).write_text("archive")
 import os, pathlib, sys
 a=sys.argv[1:]
 with open(os.environ["TEST_EVENTS"],"a") as f: f.write("unzip " + " ".join(a) + "\\n")
-if "-Z1" in a: print("MediaLayerFFI.xcframework/Info.plist\\nMediaLayerFFI.xcframework/ios-arm64/libmedialayer.a\\nMediaLayerFFI.xcframework/ios-arm64-simulator/libmedialayer.a")
+if "-Z1" in a:
+ if a[-1].endswith("classes.jar"): print("com/noma4i/medialayer/Media.class")
+ else: print("MediaLayerFFI.xcframework/Info.plist\\nMediaLayerFFI.xcframework/ios-arm64/libmedialayer.a\\nMediaLayerFFI.xcframework/ios-arm64-simulator/libmedialayer.a")
 elif "-d" in a:
  d=pathlib.Path(a[a.index("-d")+1])
  for n in ("Info.plist","ios-arm64/libmedialayer.a","ios-arm64-simulator/libmedialayer.a"):
   p=d/"MediaLayerFFI.xcframework"/n; p.parent.mkdir(parents=True,exist_ok=True); p.write_text("binary")
+elif a[0]=="-q" and a[-1].endswith("medialayer-android.zip"):
+ for n in ("src/main/jniLibs/arm64-v8a/libmedialayer.so","src/main/jniLibs/armeabi-v7a/libmedialayer.so","src/main/jniLibs/x86_64/libmedialayer.so","src/main/jniLibs/x86/libmedialayer.so","src/main/kotlin/com/noma4i/medialayer/medialayer.kt"):
+  p=pathlib.Path(n); p.parent.mkdir(parents=True,exist_ok=True); p.write_text("artifact")
+elif a[0]=="-q":
+ pathlib.Path("classes.jar").write_text("jar")
+ if a[-1].endswith(".aar"):
+  for abi in ("arm64-v8a","armeabi-v7a","x86_64","x86"):
+   p=pathlib.Path("jni")/abi/"libmedialayer.so"; p.parent.mkdir(parents=True,exist_ok=True); p.write_text("so")
 ''',
             "swift": '''#!/usr/bin/env python3
 import hashlib, os, pathlib, sys
@@ -101,18 +138,23 @@ import os, pathlib, shutil, sys
 a=sys.argv[1:]
 with open(os.environ["TEST_EVENTS"],"a") as f: f.write("gh " + " ".join(a) + "\\n")
 if a[:2]==["release","view"] and "--json" not in a: sys.exit(1)
-if a[:2]==["release","view"]: print("MediaLayerFFI.xcframework.zip\\nmedialayer.swift\\nmedialayer-gen-macos-universal")
+if a[:2]==["release","view"]: print("MediaLayerFFI.xcframework.zip\\nmedialayer.swift\\nmedialayer-android.zip\\nmedialayer-gen-macos-universal")
 if a[:2]==["release","download"]:
  d=pathlib.Path(a[a.index("--dir")+1]); d.mkdir(exist_ok=True)
  stage=pathlib.Path(os.environ["TEST_ROOT"])/"target/release-3.26.2"
- for n in ("MediaLayerFFI.xcframework.zip","medialayer.swift","medialayer-gen-macos-universal"): shutil.copy2(stage/n,d/n)
+ for n in ("MediaLayerFFI.xcframework.zip","medialayer.swift","medialayer-android.zip","medialayer-gen-macos-universal"): shutil.copy2(stage/n,d/n)
 ''',
         }
         for name, text in stubs.items():
             path = root / "target/bin" / name
             path.write_text(text)
             path.chmod(0o755)
-        cmd = ["bash", str(root / "scripts/release.sh"), "3.26.2"] + (["--publish"] if publish else [])
+        missing = subprocess.run(["bash", str(root / "scripts/release.sh"), "3.26.2"], cwd="/", env=env, capture_output=True, text=True)
+        if missing.returncode == 0 or "usage:" not in missing.stderr:
+            raise AssertionError("release accepted a missing --android argument")
+        if event_file.exists() and "gh " in event_file.read_text():
+            raise AssertionError("gh ran without Android artifacts")
+        cmd = ["bash", str(root / "scripts/release.sh"), "3.26.2"] + (["--publish"] if publish else []) + ["--android", str(android)]
         result = subprocess.run(cmd, cwd="/", env=env, capture_output=True, text=True)
         if result.returncode:
             raise AssertionError(f"rc={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}")
@@ -122,9 +164,14 @@ if a[:2]==["release","download"]:
             manifest = (root / "committed/Package.swift").read_text()
             if (root / "committed/MediaLayer/Sources/MediaLayer/medialayer.swift").read_text() != "bridge":
                 raise AssertionError("committed Swift bindings differ from release artifact")
-            sequence = [next(i for i, e in enumerate(events) if e.startswith(prefix)) for prefix in ("git commit ", "git tag ", "git push origin master", "git push origin 3.26.2", "gh release create ")]
+            sequence = [next(i for i, e in enumerate(events) if e.startswith(prefix)) for prefix in ("git commit ", "git tag ", "git push origin master", "git push origin 3.26.2")]
+            sequence.append(next(i for i, e in enumerate(events) if e.startswith("git -C ") and e.endswith("push -u origin maven")))
+            sequence.append(next(i for i, e in enumerate(events) if e.startswith("gh release create ")))
             if sequence != sorted(sequence):
                 raise AssertionError(f"publication order is wrong: {sequence}")
+            android_check = next(i for i, e in enumerate(events) if e.startswith("unzip -q ") and e.endswith("medialayer-android.zip"))
+            if android_check >= sequence[0]:
+                raise AssertionError("Android artifacts were checked after the package commit")
             gh_index = next(i for i, e in enumerate(events) if e.startswith("gh "))
             last_archive_check = max(i for i, e in enumerate(events) if e.startswith("lipo "))
             if gh_index <= last_archive_check:
