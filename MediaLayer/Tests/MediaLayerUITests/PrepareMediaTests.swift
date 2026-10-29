@@ -107,7 +107,7 @@ extension GlobalMedia {
       let media = try await open()
       for (name, ext, kind) in [("exif6_editor", "jpg", Kind.image), ("silent", "mp4", Kind.video)] {
         let source = Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "Fixtures")!
-        let imported = try await media.importMedia(source, kind: kind)
+        let imported = try await media.importMedia(source)
         defer { try? FileManager.default.removeItem(at: imported.url) }
         #expect(imported.isNew)
         #expect(imported.url != source)

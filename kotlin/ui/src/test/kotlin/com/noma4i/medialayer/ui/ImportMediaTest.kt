@@ -111,8 +111,8 @@ class ImportMediaTest {
         }
         picked.files.putAll(mapOf("photo" to photo, "video" to clip))
         photoOrientation = { android.media.ExifInterface.ORIENTATION_ROTATE_90 }
-        val image = media.importMedia(uri("photo"), Kind.IMAGE)
-        val video = media.importMedia(uri("video"), Kind.VIDEO)
+        val image = media.importMedia(uri("photo"))
+        val video = media.importMedia(uri("video"))
         try {
           assertTrue(image.isNew && video.isNew)
           assertEquals("jpeg", image.file.extension)

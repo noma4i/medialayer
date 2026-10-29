@@ -3,7 +3,6 @@ package com.noma4i.medialayer.ui
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
-import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaException
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.importExtension
@@ -17,8 +16,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 
-@Suppress("UNUSED_PARAMETER")
-suspend fun MediaLayer.importMedia(uri: Uri, kind: Kind): PreparedMedia {
+suspend fun MediaLayer.importMedia(uri: Uri): PreparedMedia {
   val context = checkNotNull(binding) { "the layer was not opened with MediaLayer.open(context)" }.factory.appContext
   return importMediaAt(context, uri)
 }

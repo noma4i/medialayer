@@ -2,7 +2,7 @@ import Foundation
 import UniformTypeIdentifiers
 
 extension MediaLayer {
-  public func importMedia(_ source: URL, kind: Kind) async throws -> PreparedMedia {
+  public func importMedia(_ source: URL) async throws -> PreparedMedia {
     let work = Task.detached { try importMediaFile(source) }
     return try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
   }

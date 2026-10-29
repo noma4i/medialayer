@@ -259,10 +259,9 @@ A source with a `file://` URL, such as a clip in the app bundle or a temporary f
 
 ## Importing picked media
 
-`MediaLayer.importMedia(uri, kind)` on Kotlin and `MediaLayer.importMedia(url, kind:)` on Swift copy picked media without re-encoding.
+`MediaLayer.importMedia(uri)` on Kotlin and `MediaLayer.importMedia(url)` on Swift copy picked media without re-encoding.
 Android uses the context passed to `open` and accepts content URIs.
 Swift accepts readable file URLs, including security-scoped URLs.
-The declared kind identifies the selection without changing its bytes.
 The result is a new `PreparedMedia` with `isNew` true, stored in the app's temporary directory.
 The caller owns this file and deletes it after use.
 Pass its file URL to `MediaSourceValue.file` for `prepareImage`, `prepareVideo` or `MediaCropper`.
