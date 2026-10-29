@@ -35,7 +35,7 @@ def run_case(publish):
         (root / "scripts/release.sh").chmod(0o755)
         for name in ("check_docs.sh", "check_invariants.sh", "check_zoo.sh"):
             (root / "scripts" / name).write_text("#!/bin/sh\nexit 0\n")
-        (root / "scripts/build_ios.sh").write_text("#!/bin/sh\nmkdir -p MediaLayer/MediaLayerFFI.xcframework/ios-arm64 MediaLayer/MediaLayerFFI.xcframework/ios-arm64-simulator MediaLayer/Sources/MediaLayer\nprintf bridge > MediaLayer/Sources/MediaLayer/medialayer.swift\nprintf info > MediaLayer/MediaLayerFFI.xcframework/Info.plist\nprintf binary > MediaLayer/MediaLayerFFI.xcframework/ios-arm64/libmedialayer.a\nprintf binary > MediaLayer/MediaLayerFFI.xcframework/ios-arm64-simulator/libmedialayer.a\n")
+        (root / "scripts/build_ios.sh").write_text("#!/bin/sh\nmkdir -p MediaLayer/MediaLayerFFI.xcframework/ios-arm64 MediaLayer/MediaLayerFFI.xcframework/ios-arm64-simulator MediaLayer/MediaLayerFFI.xcframework/macos-arm64 MediaLayer/Sources/MediaLayer\nprintf bridge > MediaLayer/Sources/MediaLayer/medialayer.swift\nprintf '<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>AvailableLibraries</key><array><dict><key>LibraryIdentifier</key><string>ios-arm64</string><key>SupportedArchitectures</key><array><string>arm64</string></array><key>SupportedPlatform</key><string>ios</string></dict><dict><key>LibraryIdentifier</key><string>ios-arm64-simulator</string><key>SupportedArchitectures</key><array><string>arm64</string></array><key>SupportedPlatform</key><string>ios</string><key>SupportedPlatformVariant</key><string>simulator</string></dict><dict><key>LibraryIdentifier</key><string>macos-arm64</string><key>SupportedArchitectures</key><array><string>arm64</string></array><key>SupportedPlatform</key><string>macos</string></dict></array></dict></plist>\n' > MediaLayer/MediaLayerFFI.xcframework/Info.plist\nprintf binary > MediaLayer/MediaLayerFFI.xcframework/ios-arm64/libmedialayer.a\nprintf binary > MediaLayer/MediaLayerFFI.xcframework/ios-arm64-simulator/libmedialayer.a\nprintf binary > MediaLayer/MediaLayerFFI.xcframework/macos-arm64/libmedialayer.a\n")
         (root / "scripts/build_ios.sh").chmod(0o755)
         (root / "MediaLayer/Sources/MediaLayerUI").mkdir(parents=True)
         (root / "MediaLayer/Sources/MediaLayerTesting").mkdir(parents=True)
@@ -67,7 +67,7 @@ def run_case(publish):
         env = dict(os.environ, PATH=f"{root}/target/bin:{os.environ['PATH']}", TEST_ROOT=str(root), TEST_EVENTS=str(event_file))
         stubs = {
             "git": '''#!/usr/bin/env python3
-import os, pathlib, shutil, sys
+import os, pathlib, sys
 a=sys.argv[1:]
 with open(os.environ["TEST_EVENTS"],"a") as f: f.write("git " + " ".join(a) + "\\n")
 root=pathlib.Path(os.environ["TEST_ROOT"])
@@ -95,7 +95,7 @@ if a[:2]==["-C", str(root/"maven-branch")]:
  if b[:2]==["commit","-m"] or b[:2]==["push","-u"]: pass
 ''',
             "cargo": '''#!/usr/bin/env python3
-import os, pathlib, sys
+import os, pathlib, shutil, sys
 a=sys.argv[1:]
 with open(os.environ["TEST_EVENTS"],"a") as f: f.write("cargo " + " ".join(a) + "\\n")
 t=a[a.index("--target")+1]
@@ -118,16 +118,18 @@ with open(os.environ["TEST_EVENTS"],"a") as f: f.write("zip\\n")
 pathlib.Path(a[-2]).write_text("archive")
 ''',
             "unzip": '''#!/usr/bin/env python3
-import os, pathlib, sys
+import os, pathlib, shutil, sys
 a=sys.argv[1:]
 with open(os.environ["TEST_EVENTS"],"a") as f: f.write("unzip " + " ".join(a) + "\\n")
 if "-Z1" in a:
  if a[-1].endswith("classes.jar"): print("com/noma4i/medialayer/Media.class")
- else: print("MediaLayerFFI.xcframework/Info.plist\\nMediaLayerFFI.xcframework/ios-arm64/libmedialayer.a\\nMediaLayerFFI.xcframework/ios-arm64-simulator/libmedialayer.a")
+ else: print("MediaLayerFFI.xcframework/Info.plist\\nMediaLayerFFI.xcframework/ios-arm64/libmedialayer.a\\nMediaLayerFFI.xcframework/ios-arm64-simulator/libmedialayer.a\\nMediaLayerFFI.xcframework/macos-arm64/libmedialayer.a")
 elif "-d" in a:
  d=pathlib.Path(a[a.index("-d")+1])
- for n in ("Info.plist","ios-arm64/libmedialayer.a","ios-arm64-simulator/libmedialayer.a"):
-  p=d/"MediaLayerFFI.xcframework"/n; p.parent.mkdir(parents=True,exist_ok=True); p.write_text("binary")
+ for n in ("Info.plist","ios-arm64/libmedialayer.a","ios-arm64-simulator/libmedialayer.a","macos-arm64/libmedialayer.a"):
+  p=d/"MediaLayerFFI.xcframework"/n; p.parent.mkdir(parents=True,exist_ok=True)
+  if n == "Info.plist": shutil.copy2(pathlib.Path(os.environ["TEST_ROOT"])/"MediaLayer/MediaLayerFFI.xcframework/Info.plist", p)
+  else: p.write_text("binary")
 elif a[0]=="-q" and a[-1].endswith("medialayer-android.zip"):
  for n in ("src/main/jniLibs/arm64-v8a/libmedialayer.so","src/main/jniLibs/armeabi-v7a/libmedialayer.so","src/main/jniLibs/x86_64/libmedialayer.so","src/main/jniLibs/x86/libmedialayer.so","src/main/kotlin/com/noma4i/medialayer/medialayer.kt"):
   p=pathlib.Path(n); p.parent.mkdir(parents=True,exist_ok=True); p.write_text("artifact")

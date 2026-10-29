@@ -100,9 +100,9 @@ elif tool == "xcodebuild":
 import json
 ios = {
     "--device": ["aarch64-apple-ios"],
-    "--check": ["aarch64-apple-ios-sim"],
+    "--check": ["aarch64-apple-darwin", "aarch64-apple-ios-sim"],
     "--ios": ["aarch64-apple-ios", "aarch64-apple-ios-sim"],
-    "": ["aarch64-apple-ios", "aarch64-apple-ios-sim"],
+    "": ["aarch64-apple-darwin", "aarch64-apple-ios", "aarch64-apple-ios-sim"],
 }
 android = {
     "--release": ["arm64-v8a", "armeabi-v7a"],
@@ -207,12 +207,12 @@ PY
 targets_with_ambient_target_dir() {
   local outer file status=0
   outer="$(mktemp -d)"
-  for file in aarch64-apple-ios/release/libmedialayer.a aarch64-apple-ios-sim/release/libmedialayer.a debug/uniffi-bindgen; do
+  for file in aarch64-apple-ios/release/libmedialayer.a aarch64-apple-ios-sim/release/libmedialayer.a aarch64-apple-darwin/release/libmedialayer.a debug/uniffi-bindgen; do
     mkdir -p "$outer/$(dirname "$file")"
     printf sentinel > "$outer/$file"
   done
   CARGO_TARGET_DIR="$outer" check_modes targets || status=$?
-  for file in aarch64-apple-ios/release/libmedialayer.a aarch64-apple-ios-sim/release/libmedialayer.a debug/uniffi-bindgen; do
+  for file in aarch64-apple-ios/release/libmedialayer.a aarch64-apple-ios-sim/release/libmedialayer.a aarch64-apple-darwin/release/libmedialayer.a debug/uniffi-bindgen; do
     [ "$(cat "$outer/$file")" = sentinel ] || { echo "FAIL ambient CARGO_TARGET_DIR overwritten: $file"; status=1; }
   done
   rm -rf "$outer"

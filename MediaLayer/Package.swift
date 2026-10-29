@@ -5,7 +5,8 @@ import PackageDescription
 let package = Package(
   name: "MediaLayer",
   platforms: [
-    .iOS(.v17)
+    .iOS(.v17),
+    .macOS(.v14)
   ],
   products: [
     .library(name: "MediaLayer", targets: ["MediaLayer"]),

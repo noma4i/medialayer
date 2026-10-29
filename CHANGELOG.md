@@ -6,9 +6,6 @@
 - Android releases provide `medialayer` and `medialayer-ui` Maven modules.
 - Releases provide a root SwiftPM package manifest for the published binary.
 
-### Removed
-- macOS library slices are excluded from distribution.
-
 ## 3.26.2 - 2026-10-27
 
 ### Fixed

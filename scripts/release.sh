@@ -83,6 +83,24 @@ archive_entries="$(unzip -Z1 "$stage/MediaLayerFFI.xcframework.zip")"
 grep -Fxq 'MediaLayerFFI.xcframework/Info.plist' <<< "$archive_entries" || fail 'xcframework archive is missing Info.plist'
 grep -Fq 'MediaLayerFFI.xcframework/ios-arm64/' <<< "$archive_entries" || fail 'xcframework archive is missing the iOS device slice'
 grep -Fq 'MediaLayerFFI.xcframework/ios-arm64-simulator/' <<< "$archive_entries" || fail 'xcframework archive is missing the iOS simulator slice'
+macos_slice="$(python3 - "$tmp/archive/MediaLayerFFI.xcframework/Info.plist" <<'PY'
+import plistlib
+import sys
+
+with open(sys.argv[1], "rb") as manifest:
+    libraries = plistlib.load(manifest)["AvailableLibraries"]
+matches = [
+    item["LibraryIdentifier"]
+    for item in libraries
+    if item.get("SupportedPlatform") == "macos"
+    and "arm64" in item.get("SupportedArchitectures", [])
+]
+if len(matches) != 1:
+    raise SystemExit("xcframework archive must contain one macOS arm64 slice")
+print(matches[0])
+PY
+)" || fail 'xcframework archive is missing the macOS arm64 slice'
+grep -Fq "MediaLayerFFI.xcframework/$macos_slice/" <<< "$archive_entries" || fail 'xcframework archive is missing the macOS slice'
 check_archs() {
   local file="$1" expected="$2" actual
   actual="$(lipo -archs "$file" | tr ' ' '\n' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
@@ -90,10 +108,13 @@ check_archs() {
 }
 device_binary="$tmp/archive/MediaLayerFFI.xcframework/ios-arm64/libmedialayer.a"
 simulator_binary="$tmp/archive/MediaLayerFFI.xcframework/ios-arm64-simulator/libmedialayer.a"
+macos_binary="$tmp/archive/MediaLayerFFI.xcframework/$macos_slice/libmedialayer.a"
 [ -s "$device_binary" ] || fail 'xcframework archive is missing the device library'
 [ -s "$simulator_binary" ] || fail 'xcframework archive is missing the simulator library'
+[ -s "$macos_binary" ] || fail 'xcframework archive is missing the macOS library'
 check_archs "$device_binary" 'arm64'
 check_archs "$simulator_binary" 'arm64'
+check_archs "$macos_binary" 'arm64'
 check_archs "$stage/medialayer-gen-macos-universal" 'arm64 x86_64'
 for file in "${attachments[@]}"; do [ -s "$stage/$file" ] || fail "missing release attachment: $file"; done
 checksum="$(swift package compute-checksum "$stage/MediaLayerFFI.xcframework.zip")"
@@ -106,7 +127,7 @@ import PackageDescription
 
 let package = Package(
   name: "MediaLayer",
-  platforms: [.iOS(.v17)],
+  platforms: [.iOS(.v17), .macOS(.v14)],
   products: [
     .library(name: "MediaLayer", targets: ["MediaLayer"]),
     .library(name: "MediaLayerUI", targets: ["MediaLayerUI"]),
