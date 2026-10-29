@@ -67,7 +67,7 @@ def run_case(publish):
         env = dict(os.environ, PATH=f"{root}/target/bin:{os.environ['PATH']}", TEST_ROOT=str(root), TEST_EVENTS=str(event_file))
         stubs = {
             "git": '''#!/usr/bin/env python3
-import os, pathlib, sys
+import os, pathlib, shutil, sys
 a=sys.argv[1:]
 with open(os.environ["TEST_EVENTS"],"a") as f: f.write("git " + " ".join(a) + "\\n")
 root=pathlib.Path(os.environ["TEST_ROOT"])
