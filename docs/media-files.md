@@ -256,3 +256,19 @@ Android разрешает ExoPlayer выбрать следующий дост�
 ## Local files
 
 A source with a `file://` URL, such as a clip in the app bundle or a temporary file, plays from its own path. The core does not fetch it, store it in the cache or prefetch it. It counts as cached, so it plays at once, and it shows no placeholder even when a cover is given. The same applies to the `loop`, `onFirstFrame` and `onEnd` options of the place. An image with a `file://` URL is read from its file by `fetchImage`: it is never copied to the disk cache or prefetched. The read goes through the core on both platforms and stays within the response limit (16 MiB): a larger file fails like any other load. One mounted `MediaVideo` or `MediaImage` with a `file://` URL loads, renders and plays without a declared window.
+
+## Importing picked media
+
+`MediaLayer.importMedia(uri, kind)` on Kotlin and `MediaLayer.importMedia(url, kind:)` on Swift copy picked media without re-encoding.
+Android uses the context passed to `open` and accepts content URIs.
+Swift accepts readable file URLs, including security-scoped URLs.
+The declared kind identifies the selection without changing its bytes.
+The result is a new `PreparedMedia` with `isNew` true, stored in the app's temporary directory.
+The caller owns this file and deletes it after use.
+Pass its file URL to `MediaSourceValue.file` for `prepareImage`, `prepareVideo` or `MediaCropper`.
+
+Copies read at most 64 KiB per chunk, outside the main thread.
+Open, read and write errors throw `MediaException` on Kotlin or `MediaError` on Swift.
+Cancellation closes streams and deletes the incomplete copy.
+A finished copy remains until the caller deletes it.
+The extension uses the display name first, then a known media MIME type, and stays empty when neither identifies it.

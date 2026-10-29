@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Import readable media into a caller-owned file without re-encoding.
+
 ## 3.26.3 - 2026-10-29
 
 ### Added
