@@ -4,3 +4,6 @@ members = ["core", "gen", "bindgen"]
 
 [profile.release]
 codegen-units = 1
+
+[patch.crates-io]
+proc-macro-error2 = { path = "third_party/proc-macro-error2" }
