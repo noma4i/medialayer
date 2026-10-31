@@ -13983,6 +13983,15 @@ public func imageEncodePlan(width: UInt32, height: UInt32, exifOrientation: UInt
     )
 })
 }
+public func importExtension(name: String?, mime: String?) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_func_import_extension(
+        FfiConverterOptionString.lower(name),
+        FfiConverterOptionString.lower(mime),uniffiCallStatus
+    )
+})
+}
 /**
  * The JPEG quality in 0.0 to 1.0. A value that is not a number gives 0.9.
  */
@@ -14276,6 +14285,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_image_encode_plan() != 48519) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_medialayer_checksum_func_import_extension() != 54132) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_jpeg_quality() != 2157) {
