@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.27.0 - 2026-10-31
 
 ### Added
 - `importMedia(source)` copies picked media into a caller-owned file without re-encoding.
