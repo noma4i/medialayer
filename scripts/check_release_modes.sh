@@ -71,7 +71,7 @@ import os, pathlib, shutil, sys
 a=sys.argv[1:]
 with open(os.environ["TEST_EVENTS"],"a") as f: f.write("git " + " ".join(a) + "\\n")
 root=pathlib.Path(os.environ["TEST_ROOT"])
-if a[:2]==["-C", str(root/"maven-branch")]:
+if a[0]=="-C" and pathlib.Path(a[1]).name in ("maven-branch","artifacts-branch"):
  b=a[2:]
  if b[:2]==["init","-b"]: pathlib.Path(b[-1]).mkdir(exist_ok=True)
  elif b[:2]==["diff","--cached"]: sys.exit(1)
@@ -90,9 +90,9 @@ elif a[:2]==["branch","--show-current"]: print("master")
 elif a[:2]==["describe","--tags"]: print("3.26.1")
 elif a[:2]==["log","--format=%s"]: print("Release 3.26.2")
 elif a[:2]==["log","-1"]: print("Release 3.26.2")
-if a[:2]==["-C", str(root/"maven-branch")]:
+if a[0]=="-C" and pathlib.Path(a[1]).name in ("maven-branch","artifacts-branch"):
  b=a[2:]
- if b[:2]==["commit","-m"] or b[:2]==["push","-u"]: pass
+ if b[:2]==["commit","--quiet"] or b[:2]==["commit","-m"] or b[:2]==["push","-u"]: pass
 ''',
             "cargo": '''#!/usr/bin/env python3
 import os, pathlib, shutil, sys
@@ -179,7 +179,10 @@ if a[:2]==["release","download"]:
                 raise AssertionError("committed Swift bindings differ from release artifact")
             sequence = [next(i for i, e in enumerate(events) if e.startswith(prefix)) for prefix in ("git commit ", "git tag ", "git push origin master", "git push origin 3.26.2")]
             sequence.append(next(i for i, e in enumerate(events) if e.startswith("git -C ") and e.endswith("push -u origin maven")))
+            sequence.append(next(i for i, e in enumerate(events) if e.startswith("git -C ") and e.endswith("push -u origin artifacts")))
             sequence.append(next(i for i, e in enumerate(events) if e.startswith("gh release create ")))
+            if "git tag 3.26.2" not in events:
+                raise AssertionError(f"release tag must be lightweight: {[e for e in events if e.startswith('git tag')]}")
             if sequence != sorted(sequence):
                 raise AssertionError(f"publication order is wrong: {sequence}")
             android_check = next(i for i, e in enumerate(events) if e.startswith("unzip -q ") and e.endswith("medialayer-android.zip"))
@@ -200,6 +203,103 @@ if a[:2]==["release","download"]:
         if "checksum: \"" + hashlib.sha256(b"archive").hexdigest() not in manifest:
             raise AssertionError("generated package checksum missing")
 
+ARTIFACT_NAMES = ("MediaLayerFFI.xcframework.zip", "medialayer.swift", "medialayer-gen-macos-universal", "medialayer-android.zip")
+
+def git(*args, cwd=None):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, env=dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@e", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@e"))
+
+def write_stage(stage, payload, skip=None, big=None):
+    stage.mkdir(exist_ok=True)
+    lines = []
+    for name in ARTIFACT_NAMES:
+        path = stage / name
+        if name == big:
+            with open(path, "wb") as handle:
+                handle.truncate(104857601)
+        else:
+            path.write_text(payload + name)
+        lines.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {name}\n")
+    (stage / "SHA256SUMS").write_text("".join(lines))
+    if skip is not None:
+        (stage / skip).unlink()
+
+def check_artifacts_branch():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "scripts").mkdir()
+        shutil.copy2(script, root / "scripts/release.sh")
+        remote = root / "remote.git"
+        git("init", "--bare", "-b", "artifacts", str(remote))
+        url = f"file://{remote}"
+        def run(version, mode, stage):
+            return subprocess.run(["bash", str(root / "scripts/release.sh"), version, "--artifacts", mode, "--stage", str(stage), "--remote", url], capture_output=True, text=True, env=dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@e", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@e"))
+        def branch_tree():
+            return git("--git-dir", str(remote), "ls-tree", "-r", "--name-only", "artifacts").stdout.split()
+        def head():
+            return git("--git-dir", str(remote), "rev-parse", "artifacts").stdout.strip()
+        expected_tree = sorted(f"1.0.0/{name}" for name in ARTIFACT_NAMES)
+
+        write_stage(root / "s1", "a")
+        dry = run("1.0.0", "dry", root / "s1")
+        assert dry.returncode == 0 and "= SHA256SUMS" in dry.stdout and "!=" not in dry.stdout, f"dry run failed: {dry.stdout}{dry.stderr}"
+        assert git("--git-dir", str(remote), "rev-parse", "--verify", "artifacts").returncode != 0, "dry run pushed"
+        pushed = run("1.0.0", "push", root / "s1")
+        assert pushed.returncode == 0, f"push failed: {pushed.stderr}"
+        assert sorted(branch_tree()) == expected_tree, f"unexpected tree {branch_tree()}"
+        assert git("--git-dir", str(remote), "rev-list", "--max-parents=0", "artifacts").stdout.split() == [head()], "branch is not an orphan root"
+        print("ok artifacts branch publishes the four files")
+
+        first = head()
+        repeat = run("1.0.0", "push", root / "s1")
+        assert repeat.returncode == 0 and head() == first and "nothing to push" in repeat.stdout, "equal repeat pushed or failed"
+        print("ok artifacts repeat with equal bytes pushes nothing")
+
+        write_stage(root / "s1b", "changed")
+        different = run("1.0.0", "push", root / "s1b")
+        assert different.returncode != 0 and "different bytes" in different.stderr and head() == first, "different bytes were accepted"
+        print("ok artifacts repeat with different bytes fails")
+
+        write_stage(root / "s2", "b")
+        assert run("1.0.1", "push", root / "s2").returncode == 0
+        assert sorted(branch_tree()) == sorted(expected_tree + [f"1.0.1/{name}" for name in ARTIFACT_NAMES]), "previous version was dropped"
+        print("ok artifacts keep previous versions")
+
+        before = head()
+        write_stage(root / "big", "c", big="medialayer-android.zip")
+        oversize = run("1.0.2", "push", root / "big")
+        assert oversize.returncode != 0 and "above 100 MB" in oversize.stderr and head() == before, "oversize file was accepted"
+        write_stage(root / "gone", "d", skip="medialayer.swift")
+        missing = run("1.0.2", "push", root / "gone")
+        assert missing.returncode != 0 and "missing release file" in missing.stderr and head() == before, "missing file was accepted"
+        write_stage(root / "bad", "e")
+        (root / "bad/medialayer.swift").write_text("tampered")
+        mismatch = run("1.0.2", "push", root / "bad")
+        assert mismatch.returncode != 0 and "differs from SHA256SUMS" in mismatch.stderr and head() == before, "hash mismatch was accepted"
+        print("ok artifacts reject oversize, missing and mismatching files")
+
+def check_lightweight_tag_clone():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        remote = root / "remote.git"
+        git("init", "--bare", str(remote))
+        work = root / "work"
+        git("init", "-b", "master", str(work))
+        (work / "file").write_text("x")
+        git("add", "file", cwd=work)
+        git("commit", "-m", "Package release 1.0.0", cwd=work)
+        git("tag", "1.0.0", cwd=work)
+        git("remote", "add", "origin", f"file://{remote}", cwd=work)
+        assert git("push", "origin", "master", "1.0.0", cwd=work).returncode == 0
+        assert git("cat-file", "-t", "1.0.0", cwd=work).stdout.strip() == "commit", "tag is not lightweight"
+        clone = git("clone", "--branch", "1.0.0", "--depth", "1", f"file://{remote}", str(root / "clone"))
+        assert clone.returncode == 0 and "is not a commit" not in clone.stderr, f"clone warned: {clone.stderr}"
+        print("ok lightweight tag clones without a warning")
+
+try:
+    check_artifacts_branch()
+    check_lightweight_tag_clone()
+except AssertionError as error:
+    failed.append(str(error))
 try:
     check_android_build_arguments()
 except AssertionError as error:
@@ -208,7 +308,7 @@ for publish in (False, True):
     try:
         run_case(publish)
     except (AssertionError, StopIteration) as error:
-        failed.append(str(error))
+        failed.append(f"release publish={publish}: {error!r}")
 if failed:
     raise SystemExit("\n".join(failed))
 PY
