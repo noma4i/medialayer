@@ -4,7 +4,6 @@
 
 ### Added
 - `importMedia(source)` copies picked media into a caller-owned file without re-encoding.
-- Release files are also published to the `artifacts` branch.
 
 ## 3.26.3 - 2026-10-29
 

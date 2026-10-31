@@ -4,94 +4,9 @@ set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$root"
 fail() { printf 'release: %s\n' "$*" >&2; exit 1; }
-[ "$#" -ge 2 ] || fail 'usage: release.sh <version> [--publish] --android <result-dir> | release.sh <version> --artifacts dry|push [--stage <dir>] [--remote <url>]'
+[ "$#" -ge 3 ] || fail 'usage: release.sh <version> [--publish] --android <result-dir>'
 version="$1"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'version must be x.y.z'
-
-artifact_names=(MediaLayerFFI.xcframework.zip medialayer.swift medialayer-gen-macos-universal medialayer-android.zip)
-artifact_size_limit=104857600
-
-check_artifact_files() {
-  local stage="$1" name size expected actual
-  [ -s "$stage/SHA256SUMS" ] || fail "missing $stage/SHA256SUMS"
-  for name in "${artifact_names[@]}"; do
-    [ -s "$stage/$name" ] || fail "missing release file: $stage/$name"
-    size="$(wc -c < "$stage/$name" | tr -d ' ')"
-    [ "$size" -le "$artifact_size_limit" ] || fail "release file is above 100 MB: $name ($size bytes)"
-    expected="$(awk -v name="$name" '$2 == name {print $1}' "$stage/SHA256SUMS")"
-    [ -n "$expected" ] || fail "SHA256SUMS has no entry for $name"
-    actual="$(shasum -a 256 "$stage/$name" | awk '{print $1}')"
-    [ "$actual" = "$expected" ] || fail "sha256 of $name differs from SHA256SUMS"
-  done
-}
-
-artifacts_changed=""
-prepare_artifacts_branch() {
-  local stage="$1" remote="$2" checkout="$3" name destination
-  check_artifact_files "$stage"
-  if [ -n "$(git ls-remote --heads "$remote" artifacts | awk 'NR == 1 {print $1}')" ]; then
-    git clone --quiet --branch artifacts --single-branch "$remote" "$checkout"
-  else
-    git init --quiet -b artifacts "$checkout"
-    git -C "$checkout" remote add origin "$remote"
-  fi
-  for name in "${artifact_names[@]}"; do
-    destination="$checkout/$version/$name"
-    if [ -e "$destination" ]; then
-      cmp -s "$stage/$name" "$destination" || fail "artifacts $version/$name already exists with different bytes"
-    else
-      mkdir -p "$(dirname "$destination")"
-      cp "$stage/$name" "$destination"
-      git -C "$checkout" add "$version/$name"
-    fi
-  done
-  if ! git -C "$checkout" diff --cached --quiet; then
-    git -C "$checkout" commit --quiet -m "Artifacts $version"
-    artifacts_changed=1
-  fi
-}
-
-print_artifacts_tree() {
-  local stage="$1" checkout="$2" path hash expected status
-  printf 'artifacts branch commit %s (%s)\n' "$(git -C "$checkout" rev-parse --short HEAD)" "$([ -n "$artifacts_changed" ] && echo 'new' || echo 'unchanged, nothing to push')"
-  git -C "$checkout" ls-tree -r --name-only HEAD | while IFS= read -r path; do
-    hash="$(shasum -a 256 "$checkout/$path" | awk '{print $1}')"
-    status=""
-    if [ "$(dirname "$path")" = "$version" ]; then
-      expected="$(awk -v name="$(basename "$path")" '$2 == name {print $1}' "$stage/SHA256SUMS")"
-      if [ "$hash" = "$expected" ]; then status='  = SHA256SUMS'; else status='  != SHA256SUMS'; fi
-    fi
-    printf '%s  %s%s\n' "$hash" "$path" "$status"
-  done
-}
-
-if [ "$2" = --artifacts ]; then
-  [ "$#" -ge 3 ] || fail 'usage: release.sh <version> --artifacts dry|push [--stage <dir>] [--remote <url>]'
-  artifacts_mode="$3"
-  case "$artifacts_mode" in dry|push) ;; *) fail 'artifacts mode must be dry or push' ;; esac
-  shift 3
-  artifacts_stage="$root/target/release-$version"
-  artifacts_remote=""
-  while [ "$#" -gt 0 ]; do
-    case "$1" in
-      --stage) [ "$#" -ge 2 ] || fail '--stage needs a directory'; artifacts_stage="$2"; shift 2 ;;
-      --remote) [ "$#" -ge 2 ] || fail '--remote needs a url'; artifacts_remote="$2"; shift 2 ;;
-      *) fail 'usage: release.sh <version> --artifacts dry|push [--stage <dir>] [--remote <url>]' ;;
-    esac
-  done
-  artifacts_stage="$(cd -- "$artifacts_stage" && pwd -P)" || fail 'release stage directory not found'
-  [ -n "$artifacts_remote" ] || artifacts_remote="$(git remote get-url origin)"
-  artifacts_tmp="$(mktemp -d)"
-  trap 'rm -rf "$artifacts_tmp"' EXIT
-  prepare_artifacts_branch "$artifacts_stage" "$artifacts_remote" "$artifacts_tmp/artifacts-branch"
-  print_artifacts_tree "$artifacts_stage" "$artifacts_tmp/artifacts-branch"
-  if [ "$artifacts_mode" = push ] && [ -n "$artifacts_changed" ]; then
-    git -C "$artifacts_tmp/artifacts-branch" push -u origin artifacts
-  fi
-  exit 0
-fi
-
-[ "$#" -ge 3 ] || fail 'usage: release.sh <version> [--publish] --android <result-dir>'
 publish=""
 android_dir=""
 shift
@@ -145,7 +60,7 @@ printf 'Android artifacts checked: %s\n' "$android_dir"
 bash scripts/build_ios.sh
 
 stage="$root/target/release-$version"
-attachments=("${artifact_names[@]}")
+attachments=(MediaLayerFFI.xcframework.zip medialayer.swift medialayer-android.zip medialayer-gen-macos-universal)
 if [ -d "$stage" ]; then
   for file in "${attachments[@]}" SHA256SUMS; do [ -s "$stage/$file" ] || fail "incomplete existing output: $stage/$file"; done
   (cd "$stage" && shasum -a 256 -c SHA256SUMS)
@@ -263,7 +178,6 @@ awk -v heading="## $version - " 'index($0, heading)==1 {found=1; next} found && 
 stage_files="$(find "$stage" -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort)"
 expected_stage_files="$(printf '%s\n' "${attachments[@]}" SHA256SUMS NOTES.md | LC_ALL=C sort)"
 [ "$stage_files" = "$expected_stage_files" ] || fail "unexpected files in release stage: $stage_files"
-check_artifact_files "$stage"
 
 maven_checkout="$tmp/maven-branch"
 maven_remote=""
@@ -289,8 +203,6 @@ if [ "$publish" = --publish ]; then
   if ! git -C "$maven_checkout" diff --cached --quiet; then
     git -C "$maven_checkout" commit -m "Maven $version"
   fi
-  artifacts_checkout="$tmp/artifacts-branch"
-  prepare_artifacts_branch "$stage" "$maven_remote" "$artifacts_checkout"
 fi
 
 if [ "$publish" = --publish ]; then
@@ -314,7 +226,7 @@ if [ "$publish" = --publish ]; then
 else
   printf '%s\n' 'Package.swift to be written:'
   cat "$tmp/Package.swift"
-  printf 'Dry run: would write Package release %s, tag %s, push master and tag, publish Maven artifacts, publish the artifacts branch, and publish 4 attachments.\n' "$version" "$version"
+  printf 'Dry run: would write Package release %s, tag %s, push master and tag, publish Maven artifacts, and publish 4 attachments.\n' "$version" "$version"
 fi
 
 printf 'release artifacts: %s\n' "$stage"
@@ -322,9 +234,6 @@ if [ "$publish" = --publish ]; then
   git push origin master
   git push origin "$version"
   git -C "$maven_checkout" push -u origin maven
-  if [ -n "$artifacts_changed" ]; then
-    git -C "$artifacts_checkout" push -u origin artifacts
-  fi
   if ! gh release view "$version" >/dev/null 2>&1; then
     gh release create "$version" --title "$version" --notes-file "$notes" "${attachments[@]/#/$stage/}"
   fi
