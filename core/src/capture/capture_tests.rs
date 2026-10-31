@@ -64,7 +64,7 @@ fn inv_capture_02_the_format_is_picked_by_one_table_of_penalties() {
     assert_eq!(pick(&[full, sd.clone(), hd.clone()], moment()), Some(2), "the area nearest to the target wins among formats of one aspect");
     assert_eq!(pick(&[sd.clone(), hd.clone()], moment()), Some(1), "a 4:3 format pays the aspect penalty");
     assert_eq!(pick(&[no_photo.clone(), hd.clone()], photo_profile()), Some(1), "a photo profile skips a format without photo sizes");
-    assert_eq!(pick(&[no_photo.clone()], photo_profile()), None);
+    assert_eq!(pick(std::slice::from_ref(&no_photo), photo_profile()), None);
     assert_eq!(pick(&[no_photo], moment()), Some(0), "a video profile does not need photo sizes");
     assert_eq!(pick(&[], moment()), None);
     let choice = pick_format(vec![hd.clone(), tall.clone()], photo_profile()).unwrap();

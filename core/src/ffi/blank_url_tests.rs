@@ -94,7 +94,7 @@ fn inv_source_10_every_entry_by_key_cleans_the_text_before_the_lookup() {
         let mirrored = layer.open_place(MediaItem::bare(form, Kind::Video)).unwrap();
         mirrored.release();
     }
-    assert_eq!(factory.slot_holding(canonical).is_some(), true);
+    assert!(factory.slot_holding(canonical).is_some());
     place.release();
 }
 

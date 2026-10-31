@@ -57,7 +57,7 @@ pub struct PhotoPlan {
 /// a rotation that is not a multiple of 90, a crop that is not a number or holds no pixel, a size of zero or an output above the pixel limit.
 #[uniffi::export]
 pub fn photo_plan(width: u32, height: u32, exif_orientation: u32, edit: PhotoEdit) -> Option<PhotoPlan> {
-    let raster = decode_cost(width, height)?;
+    decode_cost(width, height)?;
     if !edit.rotation_degrees.is_multiple_of(90) {
         return None;
     }

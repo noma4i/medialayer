@@ -52,8 +52,7 @@ fn inv_crop_01_the_first_frame_is_the_largest_frame_of_the_proportions_in_the_mi
     ] {
         let first = crop_initial(setup(size, aspect), None);
         near(first, expected, name);
-        if aspect.is_some() {
-            let shape = aspect.unwrap();
+        if let Some(shape) = aspect {
             assert!((pixels_wide_per_high(first, size) - f64::from(shape.width) / f64::from(shape.height)).abs() < 1e-9, "{name}");
         }
     }

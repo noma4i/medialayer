@@ -932,7 +932,8 @@ fn inv_ingress_46_a_clip_that_is_not_looping_ends_its_place_when_a_window_and_a_
 
 #[test]
 fn inv_ingress_47_a_slot_a_window_prerolled_gets_play_when_a_place_of_the_same_url_shows_and_plays_later() {
-    let cases: Vec<(&str, bool, Option<bool>, Option<u64>, bool, bool)> = vec![
+    type Case = (&'static str, bool, Option<bool>, Option<u64>, bool, bool);
+    let cases: Vec<Case> = vec![
         ("plain", false, None, None, false, false),
         ("ready before", true, None, None, false, false),
         ("muted and view", false, Some(true), Some(1), false, false),
