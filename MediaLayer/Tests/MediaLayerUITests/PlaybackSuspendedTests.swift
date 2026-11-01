@@ -58,6 +58,24 @@ private struct SuspendProbeCell: View {
   }
 }
 
+@Observable
+private final class TabLifecycleProbe {
+  var tab = 0
+  var appeared = 0
+  var disappeared = 0
+}
+
+private struct TabLifecycleCell: View {
+  let probe: TabLifecycleProbe
+
+  var body: some View {
+    TabView(selection: Binding(get: { probe.tab }, set: { probe.tab = $0 })) {
+      Color.clear.onAppear { probe.appeared += 1 }.onDisappear { probe.disappeared += 1 }.tag(0)
+      Color.clear.tag(1)
+    }
+  }
+}
+
 private let probeClip = "file:///clip.mp4"
 
 @MainActor
@@ -164,6 +182,22 @@ extension GlobalMedia {
       unopened.isHidden = true
       unopened.rootViewController = nil
       #expect(rig.slot.transport == ["play", "pause", "play", "pause", "play"])
+    }
+
+    @Test
+    func inv_session_18_aTabSwitchDeliversTheDisappearToPlainContentInTheHarnessWindow() async throws {
+      let probe = TabLifecycleProbe()
+      let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+      window.rootViewController = UIHostingController(rootView: TabLifecycleCell(probe: probe))
+      window.isHidden = false
+      defer {
+        window.isHidden = true
+        window.rootViewController = nil
+      }
+      #expect(await waits { probe.appeared == 1 })
+
+      probe.tab = 1
+      #expect(await waits { probe.disappeared == 1 }, "appeared=\(probe.appeared) disappeared=\(probe.disappeared)")
     }
 
     @Test

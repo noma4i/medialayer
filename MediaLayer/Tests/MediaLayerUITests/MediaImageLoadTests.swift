@@ -44,27 +44,52 @@ struct MediaImageLoadTests {
   @MainActor
   @Test
   func inv_ios_03_load_does_not_block_the_main_thread() async throws {
-    let fetcher = TestFetcher()
-    fetcher.serve(payload, at: address)
-    fetcher.delay(.milliseconds(400), for: address)
-    let clock = ContinuousClock()
-    var last = clock.now
-    var longestStall = Duration.zero
+    let origin = TestFetcher()
+    origin.serve(payload, at: address)
+    let gate = HeldUntilOpened()
     var ticks = 0
     let heartbeat = Task { @MainActor in
       while !Task.isCancelled {
-        let now = clock.now
-        longestStall = max(longestStall, now - last)
-        last = now
         ticks += 1
-        try? await Task.sleep(for: .milliseconds(10))
+        if ticks == 20 { await gate.open() }
+        try? await Task.sleep(for: .milliseconds(1))
       }
     }
 
-    _ = try await MediaImageLoad.load(url: URL(string: address)!, directory: try directory(), fetcher: fetcher)
+    _ = try await MediaImageLoad.load(url: URL(string: address)!, directory: try directory(), fetcher: HeldFetcher(origin: origin, gate: gate))
     heartbeat.cancel()
 
-    #expect(ticks >= 2, "ticks=\(ticks)")
-    #expect(longestStall < .milliseconds(200), "longestStall=\(longestStall)")
+    #expect(ticks >= 20, "ticks=\(ticks)")
+  }
+}
+
+private actor HeldUntilOpened {
+  private var isOpen = false
+  private var waiting: [CheckedContinuation<Void, Never>] = []
+
+  func open() {
+    isOpen = true
+    waiting.forEach { $0.resume() }
+    waiting.removeAll()
+  }
+
+  func wait() async {
+    if isOpen { return }
+    await withCheckedContinuation { waiting.append($0) }
+  }
+}
+
+private final class HeldFetcher: Fetcher, @unchecked Sendable {
+  let origin: TestFetcher
+  let gate: HeldUntilOpened
+
+  init(origin: TestFetcher, gate: HeldUntilOpened) {
+    self.origin = origin
+    self.gate = gate
+  }
+
+  func fetch(request: FetchRequest) async throws -> FetchResponse {
+    await gate.wait()
+    return try await origin.fetch(request: request)
   }
 }

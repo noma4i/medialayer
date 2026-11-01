@@ -62,7 +62,23 @@ private func metadataKeys(_ asset: AVURLAsset, tracks: [AVAssetTrack]) async thr
   var items: [AVMetadataItem] = []
   for format in try await asset.load(.availableMetadataFormats) { items += try await asset.loadMetadata(for: format) }
   for track in tracks { items += try await track.load(.metadata) }
-  return items.compactMap { ($0.identifier?.rawValue ?? ($0.key as? String))?.removingPercentEncoding }
+  return items.compactMap { ($0.identifier?.rawValue ?? ($0.key as? String)).map(decodedMetadataKey) }
+}
+
+/// AVFoundation escapes the bytes of a four-character key, so ©too arrives as `%A9too`, which is no UTF-8 and decodes to nothing or to U+FFFD with `removingPercentEncoding`.
+func decodedMetadataKey(_ identifier: String) -> String {
+  var bytes: [UInt8] = []
+  var rest = Array(identifier.utf8)[...]
+  while let byte = rest.popFirst() {
+    let escaped = byte == UInt8(ascii: "%") ? rest.prefix(2).compactMap { Character(UnicodeScalar($0)).hexDigitValue } : []
+    if escaped.count == 2 {
+      bytes.append(UInt8(escaped[0] * 16 + escaped[1]))
+      rest = rest.dropFirst(2)
+    } else {
+      bytes.append(byte)
+    }
+  }
+  return String(bytes: bytes, encoding: .utf8) ?? String(String.UnicodeScalarView(bytes.map(UnicodeScalar.init)))
 }
 
 private final class EncodeJob: @unchecked Sendable {

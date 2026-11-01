@@ -63,7 +63,7 @@ private func metadataIdentifiers(_ url: URL) async throws -> [String] {
   var items: [AVMetadataItem] = []
   for format in try await asset.load(.availableMetadataFormats) { items += try await asset.loadMetadata(for: format) }
   for track in try await asset.load(.tracks) { items += try await track.load(.metadata) }
-  return items.compactMap { $0.identifier?.rawValue.removingPercentEncoding }
+  return items.compactMap { $0.identifier.map { decodedMetadataKey($0.rawValue) } }
 }
 
 private final class Marks: @unchecked Sendable {
@@ -226,6 +226,15 @@ extension GlobalMedia {
       #expect(abs(Int(try #require(info.durationMs)) - 1500) <= 300)
       #expect(marks.all.last == 1)
       #expect(marks.all == marks.all.sorted())
+    }
+
+    @Test
+    func inv_send_06_a_metadata_key_escaped_as_a_latin_byte_keeps_its_character_and_stays_technical() {
+      #expect(decodedMetadataKey("itsk/%A9too") == "itsk/\u{A9}too")
+      #expect(decodedMetadataKey("udta/%C2%A9xyz") == "udta/\u{A9}xyz")
+      #expect(decodedMetadataKey("mdta/com.apple.quicktime.location.ISO6709") == "mdta/com.apple.quicktime.location.ISO6709")
+      #expect(videoMetadataToStrip(keys: [decodedMetadataKey("itsk/%A9too")]).isEmpty)
+      #expect(videoMetadataToStrip(keys: [decodedMetadataKey("udta/%A9xyz")]) == ["udta/\u{A9}xyz"])
     }
 
     @Test
