@@ -16,6 +16,7 @@ import coil3.decode.Decoder
 import coil3.fetch.SourceFetchResult
 import coil3.request.Options
 import coil3.size.Dimension
+import coil3.size.Size
 import com.noma4i.medialayer.decodeCost
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -56,7 +57,7 @@ internal fun restFramePlan(bytes: ByteArray, width: Int?, height: Int?, scale: c
     AnimatedFormat.Gif -> if (bytes.size < 10) return null else ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).let { (it.getShort(6).toInt() and 0xFFFF) to (it.getShort(8).toInt() and 0xFFFF) }
   }
   val full = decodeCost(canvas.first.toUInt(), canvas.second.toUInt()) ?: throw IllegalArgumentException("the animation is above the pixel limit")
-  val multiplier = if (width == null || height == null) 1.0 else minOf(1.0, DecodeUtils.computeSizeMultiplier(canvas.first, canvas.second, width, height, scale))
+  val multiplier = if (width == null || height == null) 1.0 else minOf(1.0, DecodeUtils.computeSizeMultiplier(canvas.first, canvas.second, width, height, scale, Size.ORIGINAL))
   val shown = scaledSide(canvas.first, multiplier).toLong() * scaledSide(canvas.second, multiplier) * 4
   val working = when (format) {
     AnimatedFormat.Webp -> WebpAnimation.parse(bytes).frames.maxOfOrNull { it.width.toLong() * it.height * 4 + it.chunkLength } ?: 0L
@@ -81,8 +82,8 @@ internal fun lastFrame(bytes: ByteArray, multiplier: Double = 1.0, check: () -> 
   null -> null
 }
 
+@Suppress("DEPRECATION")
 private fun gifLastFrame(bytes: ByteArray, multiplier: Double, check: () -> Unit): Bitmap? {
-  @Suppress("DEPRECATION")
   val movie = Movie.decodeByteArray(bytes, 0, bytes.size) ?: return null
   if (movie.width() <= 0 || movie.height() <= 0) return null
   check()

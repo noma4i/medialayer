@@ -132,7 +132,7 @@ extension MediaLayer {
 
   func followSystem(events: PlayerEventsProtocol, link: PlayerEventsLink, center: NotificationCenter, names: SystemSignalNames) {
     link.bind(events)
-    let signals = SystemSignals(events: events, center: center, names: names) { link.bind(nil) }
+    let signals = SystemSignals(events: events, center: center, names: names, onRelease: { link.bind(nil) })
     objc_setAssociatedObject(self, &lifetimeKey, signals, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
   }
 

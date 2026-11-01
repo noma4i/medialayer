@@ -86,7 +86,7 @@ final class WindowFollower<Row: Sendable> {
     let opened = OpenedWindow()
     let expected = generation
     let relay = report.map { _ in ReadyRelay { [weak self] ready in self?.reported(ready, expected) } }
-    drain = LatestDrain(merge: WindowUpdate.merged) { update in
+    drain = LatestDrain(merge: { WindowUpdate.merged($0, $1) }) { update in
       WindowFollower.apply(update, places: places, layout: box.current, opened: opened, relay: relay, failed: failed)
     }
     drain?.submit(WindowUpdate(active: tracksRows ? nil : active, isActive: enabled))
@@ -258,7 +258,7 @@ private struct WindowModifier<Row: Sendable>: ViewModifier {
       follower.close()
       return
     }
-    follower.mount(places: places, layout: layout, data: data, active: placement.page ?? 0, enabled: enabled, tracksRows: placement.tracksRows, failed: failed)
+    follower.mount(places: places, layout: layout, data: data, active: placement.page ?? 0, enabled: enabled, tracksRows: placement.tracksRows, failed: { failed($0) })
     if placement.tracksRows {
       let follower = follower
       visibleRows.attach { follower.show($0) }

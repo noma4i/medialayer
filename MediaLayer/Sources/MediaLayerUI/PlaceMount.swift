@@ -32,7 +32,7 @@ final class PlaceMount: @unchecked Sendable {
 
   init(places: MediaPlaces, item: MediaItem, failed: @escaping @Sendable (MediaError) -> Void) {
     let opened = OpenedPlace()
-    drain = LatestDrain(merge: PlaceUpdate.merged) { update in
+    drain = LatestDrain(merge: { PlaceUpdate.merged($0, $1) }) { update in
       guard !opened.isClosed else { return }
       if update.closes {
         opened.isClosed = true

@@ -46,12 +46,14 @@ internal class AudioFocusOwner(
     job.start()
   }
 
-  private fun release(self: Job) = synchronized(lock) {
-    if (pending !== self) return
-    pending = null
-    if (want() != null || held == null) return
+  private fun release(self: Job) {
+    synchronized(lock) {
+      if (pending !== self) return
+      pending = null
+      if (want() != null || held == null) return
 
-    port.abandon()
-    held = null
+      port.abandon()
+      held = null
+    }
   }
 }

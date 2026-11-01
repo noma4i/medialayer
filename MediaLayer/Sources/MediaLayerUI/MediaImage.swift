@@ -273,7 +273,7 @@ public struct MediaImage<Content: View>: View {
     let isCold = MediaImagePipeline.cachedContainer(for: request, in: context.pipeline) == nil
     let tail = MediaTrace.tail(source.url)
     MediaTrace.emit("image", "load \(tail) start")
-    let report: (@Sendable (MediaState) -> Void)? = mount.map { mount in { state in mount.report(state) } }
+    let report: (@Sendable (MediaState) -> Void)? = mount.map { mount in { @Sendable state in mount.report(state) } }
     let container = await MediaImagePipeline.load(source, request: request, pipeline: context.pipeline, report: report)
     MediaTrace.emit("image", "load \(tail) \(container == nil ? "failed" : "done")")
     let next = container.map { LoadedImage(key: key, image: $0.image, animated: $0.type == .gif || $0.type == .webp ? $0.data : nil) }

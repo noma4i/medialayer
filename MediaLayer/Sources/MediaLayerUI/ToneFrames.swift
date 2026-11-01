@@ -10,7 +10,7 @@ final class ToneFrames: TonePreparation, @unchecked Sendable {
 
   private let thumbnail: @Sendable (Data) -> CGImage?
 
-  init(places: MediaPlaces, thumbnail: @escaping @Sendable (Data) -> CGImage? = ToneFrames.thumbnail) {
+  init(places: MediaPlaces, thumbnail: @escaping @Sendable (Data) -> CGImage? = { ToneFrames.thumbnail($0) }) {
     self.places = places
     self.thumbnail = thumbnail
   }
