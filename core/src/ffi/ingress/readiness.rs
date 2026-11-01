@@ -90,7 +90,11 @@ impl PageReadiness {
         if page.is_none() {
             self.sink.pending(epoch);
         }
-        self._task = page.clone().map(|items| AbortOnDrop::new(handle.spawn(prepare(assembled.clone(), items, self.sink.clone(), epoch))));
+        self._task = page.clone().map(|items| {
+            // Every receiver exists before the task runs: an outcome that lands while the cache is checked or an earlier source is awaited stays queued for its own.
+            let receivers = items.iter().map(|_| assembled.stage.settled()).collect();
+            AbortOnDrop::new(handle.spawn(prepare(assembled.clone(), items, receivers, self.sink.clone(), epoch)))
+        });
         self.watched = Some(page);
     }
 }
@@ -101,15 +105,13 @@ impl Drop for PageReadiness {
     }
 }
 
-async fn prepare(assembled: Arc<Assembled>, items: Vec<MediaItem>, sink: Arc<Sink>, epoch: u64) {
+async fn prepare(assembled: Arc<Assembled>, items: Vec<MediaItem>, receivers: Vec<broadcast::Receiver<Settled>>, sink: Arc<Sink>, epoch: u64) {
     // A page whose sources are already shown or cached keeps the window ready: the report never dips to false between two ready pages.
     if all_available(&assembled, &items).await {
         sink.ready(epoch);
         return;
     }
     sink.pending(epoch);
-    // Every receiver exists before the first wait: an outcome that lands while an earlier source is awaited stays queued for its own.
-    let receivers: Vec<_> = items.iter().map(|_| assembled.stage.settled()).collect();
     for (item, settled) in items.iter().zip(receivers) {
         if item.kind == Kind::Video {
             first_frame_or_cached(&assembled, item, settled).await;

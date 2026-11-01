@@ -1022,3 +1022,29 @@ fn inv_trace_04_a_suspension_leaves_a_suspend_line_with_its_id_and_groups_and_a_
     assert!(suspend.contains("allow=[\"chat\", \"voice\"]"), "{suspend}");
     assert!(resume.ends_with(&format!("stage resume {id}")), "{resume}");
 }
+
+#[derive(Default)]
+struct ReadyLog(std::sync::Mutex<Vec<bool>>);
+
+impl crate::ffi::layer::WindowReadyListener for ReadyLog {
+    fn changed(&self, ready: bool) {
+        self.0.lock().unwrap().push(ready);
+    }
+}
+
+#[test]
+fn inv_window_02_a_failure_that_lands_before_the_followed_page_first_runs_still_makes_the_window_ready() {
+    let dir = tempfile::tempdir().unwrap();
+    let layer = MediaLayer::open(config(dir.path(), None, None)).unwrap();
+    let caller = caller();
+    let assembled = caller.block_on(layer.controlled(|assembled| async move { assembled })).unwrap();
+    let url = "https://o.test/x.jpg";
+    let log = Arc::new(ReadyLog::default());
+    let mut readiness = readiness::PageReadiness::new();
+    readiness.listen(log.clone());
+
+    readiness.follow(&assembled, caller.handle(), Some(vec![MediaItem::bare(url, crate::api::Kind::Image)]));
+    assembled.stage.announce_image(url, Err("offline".to_string()));
+
+    caller.block_on(eventually(|| log.0.lock().unwrap().last() == Some(&true)));
+}

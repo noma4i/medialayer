@@ -405,8 +405,8 @@ impl Book {
         if window.is_active {
             self.video_order.insert(intent, owner);
         }
-        self.resolve_video();
         self.follow_ready(owner);
+        self.resolve_video();
     }
 
     fn window_ready(&mut self, owner: u64, listener: Arc<dyn WindowReadyListener>) {
@@ -465,8 +465,15 @@ impl Book {
             drop(std::mem::replace(&mut window.pages, pages));
             window.held = reserve;
         }
-        if replaced { self.apply_image(owner) } else if window.is_active { self.assembled.stage.move_image_window(&window.scoped, active as usize) }
         self.follow_ready(owner);
+        if replaced { self.apply_image(owner) } else { self.move_image(owner, active) }
+    }
+
+    fn move_image(&self, owner: u64, active: u32) {
+        let Some(Window::Image(window)) = self.windows.get(&owner) else { return };
+        if window.is_active {
+            self.assembled.stage.move_image_window(&window.scoped, active as usize);
+        }
     }
 
     fn apply_image(&self, owner: u64) {
