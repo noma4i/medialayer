@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.27.1 - 2026-11-02
 
 ### Fixed
 - iOS `prepareVideo` returns a clean video untouched when its container tag is escaped as a Latin byte (such as `%A9too`), instead of copying it.
