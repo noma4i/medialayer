@@ -189,6 +189,7 @@ internal fun openMediaLayer(
     synchronized(lock) { imageLoader = loader }
     layer.setTonePreparation(ToneFrames(layer, app, loader))
     val events = layer.playerEvents()
+    ensureActive()
     slots.bind(events)
     val registered = SystemSignals(app, events, lifecycle).also { it.register() }
     synchronized(lock) { signals = registered }

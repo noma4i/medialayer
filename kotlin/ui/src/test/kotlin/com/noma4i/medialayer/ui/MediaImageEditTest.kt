@@ -215,9 +215,9 @@ class MediaImageEditTest {
 
   @Test
   fun inv_send_41_prepareImageReportsTheDecodedRasterToTheImageCounters() {
-    val file = grayJpegFile(8160, 6120)
+    val file = grayJpegFile(4080, 3060)
     val changed = edit(outputSize = PixelSize(1080u, 1080u))
-    val plan = photoPlan(8160u, 6120u, 1u, changed)!!
+    val plan = photoPlan(4080u, 3060u, 1u, changed)!!
     val counters = com.noma4i.medialayer.ImageCounters()
 
     val prepared = runBlocking { prepareImageAt(file.parentFile!!, file, 0.9, EditLedger().admit, changed, counters) }
@@ -225,7 +225,7 @@ class MediaImageEditTest {
 
     val snapshot = counters.snapshot()
     assertEquals(1uL, snapshot.decodes)
-    assertTrue("${snapshot.decodedPixels}", snapshot.decodedPixels < (8160uL * 6120uL) / 3uL)
+    assertTrue("${snapshot.decodedPixels}", snapshot.decodedPixels < (4080uL * 3060uL) / 3uL)
     assertEquals(plan.decode.width.toULong() * plan.decode.height.toULong(), snapshot.decodedPixels)
   }
 
