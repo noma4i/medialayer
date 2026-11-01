@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- iOS `prepareVideo` returns a clean video untouched when its container tag is escaped as a Latin byte (such as `%A9too`), instead of copying it.
+- An image window becomes ready when a source of its page failed before the window started following the page.
+
 ## 3.27.0 - 2026-10-31
 
 ### Added
