@@ -1,4 +1,4 @@
-use super::{LoadId, Stage, StateGuard, Work};
+use super::{LoadId, Stage, StageGuard, Work};
 use crate::api::slots::{SlotCall, SlotSample};
 use crate::api::types::MediaState;
 use crate::proxy::Readiness;
@@ -48,7 +48,7 @@ impl Stage {
         state.slot_keys.get(&slot).and_then(|key| state.loaded.get(key)).map_or(0, |loaded| loaded.generation)
     }
 
-    fn current_key(state: &super::State, slot: usize, generation: u64) -> Option<String> {
+    fn current_key(state: &super::StageState, slot: usize, generation: u64) -> Option<String> {
         let key = state.slot_keys.get(&slot)?;
         state.is_loaded_as(key, slot, generation).then(|| key.clone())
     }
@@ -165,7 +165,7 @@ impl Stage {
         true
     }
 
-    pub(super) fn with_id<R>(&self, id: &LoadId, work: impl FnOnce(&mut StateGuard<'_>) -> R) -> Option<R> {
+    pub(super) fn with_id<R>(&self, id: &LoadId, work: impl FnOnce(&mut StageGuard<'_>) -> R) -> Option<R> {
         let mut state = self.state();
         if !state.is_loaded_as(&id.key, id.slot, id.generation) {
             return None;

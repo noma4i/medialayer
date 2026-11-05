@@ -73,7 +73,7 @@ impl Stage {
         self.move_window_from(self.state(), active);
     }
 
-    fn move_window_from<'a>(&'a self, mut state: super::StateGuard<'a>, active: usize) {
+    fn move_window_from<'a>(&'a self, mut state: super::StageGuard<'a>, active: usize) {
         let playing = if state.window.is_empty() { state.playing_slots() } else { Vec::new() };
         if !playing.is_empty() {
             drop(state);

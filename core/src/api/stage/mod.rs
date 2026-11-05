@@ -3,30 +3,27 @@ mod inputs;
 mod lifecycle;
 mod playhead;
 mod positions;
+mod dispatch;
+mod state;
 
 use self::positions::ResumePositions;
 use super::places::Places;
 use super::routes::Routes;
-use super::slots::{SlotCall, SlotRunner};
-use super::source::{MediaItem, PlaybackRoute};
-use super::types::Kind;
+use super::slots::SlotRunner;
 use crate::cache::Clock;
 use crate::change::Change;
-use crate::hls::is_manifest_url;
-use crate::memory::{Held, Ledger};
-use crate::pages::PageKeys;
-use crate::pool::{Command, Ring};
+use crate::memory::Ledger;
+use crate::pool::Ring;
 use crate::prefetch::Prefetcher;
-use crate::session::{self, next_action, Action, Context, Election, Event, RecoveryState, WatchdogConfig};
+use crate::session::{self, Election, WatchdogConfig};
 use std::collections::{HashMap, HashSet};
-use std::ops::Range;
-use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, PoisonError};
 use tokio::runtime::Handle;
 use tokio::sync::watch;
 use super::guard::AbortOnDrop;
+use self::dispatch::tick_loop;
+use self::state::{Armed, Declaration, LoadId, StageState, StageGuard, Work};
 
 pub struct StageParts {
     pub ring: Ring,
@@ -41,94 +38,8 @@ pub struct StageParts {
     pub ledger: Ledger,
 }
 
-struct Loaded {
-    held: Held,
-    slot: usize,
-    generation: u64,
-    recovery: RecoveryState,
-    source: MediaItem,
-    route: PlaybackRoute,
-    seeked: Option<u64>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(super) struct LoadId {
-    key: String,
-    slot: usize,
-    generation: u64,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Work {
-    Watchdog,
-    Retry,
-    Foreground,
-    Repair,
-    Purge,
-}
-
-impl Work {
-    fn is_timer(self) -> bool {
-        matches!(self, Work::Watchdog | Work::Retry | Work::Foreground)
-    }
-}
-
-struct Armed {
-    generation: u64,
-    work: Work,
-    token: u64,
-    _task: AbortOnDrop,
-}
-
-struct Declaration {
-    token: Arc<()>,
-    check: Option<AbortOnDrop>,
-}
-
-#[derive(Default)]
-struct Effects {
-    calls: Vec<(usize, SlotCall)>,
-    actions: Vec<(LoadId, Action)>,
-    unloaded: Vec<String>,
-    resumed: Vec<(usize, String, u64)>,
-    parked: Vec<Parked>,
-}
-
-struct Parked {
-    slot: usize,
-    key: String,
-    releases: u64,
-    seeked: Option<u64>,
-}
-
-struct State {
-    ring: Ring,
-    election: Election,
-    leases: HashMap<String, u64>,
-    keys_by_lease: HashMap<u64, String>,
-    loaded: HashMap<String, Loaded>,
-    slot_keys: HashMap<usize, String>,
-    tasks: HashMap<String, Vec<Armed>>,
-    foreground: Option<(u64, AbortOnDrop)>,
-    catalog: HashMap<String, MediaItem>,
-    sliced: HashSet<String>,
-    views: HashMap<String, u64>,
-    shown: HashMap<String, usize>,
-    declarations: HashMap<String, Declaration>,
-    rates: HashMap<String, f32>,
-    positions: ResumePositions,
-    window: Vec<Option<MediaItem>>,
-    image_windows: HashMap<String, Vec<Vec<MediaItem>>>,
-    is_restore_requested: bool,
-    is_room_wanted: bool,
-    refusal_room: u64,
-    pending_wanted: HashSet<String>,
-    loads: u64,
-    releases: u64,
-}
-
 struct Inner {
-    state: Mutex<State>,
+    state: Mutex<StageState>,
     runner: Arc<SlotRunner>,
     routes: Arc<Routes>,
     places: Arc<Places>,
@@ -154,134 +65,9 @@ pub struct Stage {
     inner: Arc<Inner>,
 }
 
-impl State {
-    fn leave(&mut self, key: &str) -> bool {
-        match self.shown.get_mut(key) {
-            Some(count) if *count > 1 => {
-                *count -= 1;
-                true
-            }
-            _ => {
-                self.shown.remove(key);
-                false
-            }
-        }
-    }
-
-    fn lease_for(&mut self, key: &str) -> u64 {
-        if let Some(lease) = self.leases.get(key) {
-            return *lease;
-        }
-        let lease = self.election.register(key, Context::Ring.policy());
-        self.leases.insert(key.to_string(), lease);
-        self.keys_by_lease.insert(lease, key.to_string());
-        self.refresh_pending(key);
-        lease
-    }
-
-    fn forget_lease(&mut self, key: &str) -> Vec<Command> {
-        let Some(lease) = self.leases.get(key).copied() else {
-            return Vec::new();
-        };
-        let orders = self.election.unregister(key, lease);
-        let commands = self.commands_for(orders);
-        self.leases.remove(key);
-        self.keys_by_lease.remove(&lease);
-        self.pending_wanted.remove(key);
-        self.retire(key);
-        commands
-    }
-
-    fn next_generation(&mut self) -> u64 {
-        self.loads += 1;
-        self.loads
-    }
-
-    fn retire(&mut self, key: &str) {
-        let is_owned = self.sliced.contains(key)
-            || self.loaded.contains_key(key)
-            || self.leases.contains_key(key)
-            || self.views.contains_key(key)
-            || self.declarations.contains_key(key);
-        if !is_owned {
-            self.catalog.remove(key);
-            self.pending_wanted.remove(key);
-        }
-    }
-
-    fn refresh_pending(&mut self, key: &str) {
-        if self.leases.contains_key(key) && self.catalog.contains_key(key) && !self.loaded.contains_key(key) {
-            self.pending_wanted.insert(key.to_string());
-        } else {
-            self.pending_wanted.remove(key);
-        }
-    }
-
-    fn has_pending_restore(&self) -> bool {
-        self.ring.is_restoring() || self.ring.has_refused() || (!self.ring.is_background() && !self.pending_wanted.is_empty())
-    }
-
-    fn next_due(&self) -> Option<u64> {
-        let attempt = (self.is_restore_requested && self.has_pending_restore()).then_some(0);
-        self.ring.next_due().into_iter().chain(attempt).min()
-    }
-
-    fn restore_wanted(&mut self, now: u64) -> (Vec<Command>, bool) {
-        let wanted: Vec<String> = self.pending_wanted.iter().cloned().collect();
-        let mut commands = Vec::new();
-        let mut is_refused = false;
-        for key in wanted {
-            let touched = self.ring.touch(now, &key);
-            is_refused |= !touched.iter().any(|command| matches!(command, Command::Load { .. }));
-            commands.extend(touched);
-            if self.is_playing(&key) {
-                commands.extend(self.ring.set_playing(&key, true));
-            }
-        }
-        (commands, is_refused)
-    }
-
-    fn playing_key(&self) -> Option<String> {
-        self.keys_by_lease.get(&self.election.active()?).cloned()
-    }
-
-    fn is_playing(&self, key: &str) -> bool {
-        self.leases.get(key).is_some_and(|lease| self.election.active() == Some(*lease))
-    }
-
-    fn playing_slots(&self) -> Vec<(usize, String, u64)> {
-        self.slot_keys
-            .iter()
-            .filter(|(_, key)| self.is_playing(key))
-            .filter_map(|(slot, key)| Some((*slot, key.clone(), self.loaded.get(key)?.generation)))
-            .collect()
-    }
-
-    fn is_loaded_as(&self, key: &str, slot: usize, generation: u64) -> bool {
-        self.loaded.get(key).is_some_and(|loaded| loaded.slot == slot && loaded.generation == generation)
-    }
-
-    fn playing_page(&self, keys: &impl PageKeys, pages: Range<usize>) -> Option<usize> {
-        let lease = self.election.active()?;
-        let playing = self.keys_by_lease.get(&lease)?;
-        pages.into_iter().find(|page| keys.key(*page) == Some(playing.as_str()))
-    }
-
-    fn commands_for(&mut self, orders: Vec<session::LeaseOrder>) -> Vec<Command> {
-        let mut commands = Vec::new();
-        for directive in orders {
-            let Some(key) = self.keys_by_lease.get(&directive.lease).cloned() else {
-                continue;
-            };
-            commands.extend(self.ring.set_playing(&key, directive.order == session::Order::Play));
-        }
-        commands
-    }
-}
-
 impl Stage {
     pub fn new(handle: Handle, parts: StageParts) -> Stage {
-        let state = State {
+        let state = StageState {
             ring: parts.ring,
             election: Election::new(),
             leases: HashMap::new(),
@@ -457,308 +243,16 @@ impl Stage {
         self.inner.runner.disposed().await;
     }
 
-    fn state(&self) -> StateGuard<'_> {
-        StateGuard { guard: self.inner.state.lock().unwrap_or_else(PoisonError::into_inner), inner: &self.inner, is_changed: false, is_quiet: false }
+    fn state(&self) -> StageGuard<'_> {
+        StageGuard { guard: self.inner.state.lock().unwrap_or_else(PoisonError::into_inner), inner: &self.inner, is_changed: false, is_quiet: false }
     }
 
-    fn state_quiet(&self) -> StateGuard<'_> {
-        StateGuard { guard: self.inner.state.lock().unwrap_or_else(PoisonError::into_inner), inner: &self.inner, is_changed: false, is_quiet: true }
+    fn state_quiet(&self) -> StageGuard<'_> {
+        StageGuard { guard: self.inner.state.lock().unwrap_or_else(PoisonError::into_inner), inner: &self.inner, is_changed: false, is_quiet: true }
     }
 
     fn now(&self) -> u64 {
         self.inner.clock.now_ms()
-    }
-
-    fn dispatch(&self, state: StateGuard<'_>, commands: Vec<Command>) {
-        self.dispatch_with(state, commands, true, Vec::new());
-    }
-
-    fn dispatch_with(&self, mut state: StateGuard<'_>, commands: Vec<Command>, is_remembering: bool, follow: Vec<(usize, SlotCall)>) {
-        if commands.is_empty() && follow.is_empty() {
-            return;
-        }
-        let (disposals, mut commands): (Vec<Command>, Vec<Command>) = commands.into_iter().partition(|command| matches!(command, Command::Dispose { .. }));
-        let loads: Vec<(usize, String)> = commands
-            .iter()
-            .filter_map(|command| if let Command::Load { slot, key, .. } = command { Some((*slot, key.clone())) } else { None })
-            .collect();
-        for (slot, key) in loads {
-            if state.is_playing(&key) && !commands.iter().any(|command| matches!(command, Command::Play { slot: playing } if *playing == slot)) {
-                commands.extend(state.ring.set_playing(&key, true));
-            }
-        }
-        let mut effects = Effects::default();
-        for command in commands {
-            crate::trace!("stage", "command {command:?}");
-            self.translate(&mut state, command, &mut effects);
-        }
-        let Effects { calls, actions, unloaded, resumed, parked } = effects;
-        for (slot, call) in calls.into_iter().chain(follow) {
-            self.send_call(&state, slot, call);
-        }
-        for command in disposals {
-            if let Command::Dispose { slot } = command {
-                self.inner.runner.dispose(slot);
-            }
-        }
-        for key in unloaded {
-            self.inner.places.unloaded(&key);
-            if !self.inner.places.is_declared(&key) && !state.loaded.contains_key(&key) {
-                state.rates.remove(&key);
-                state.ring.forget_mute(&key);
-            }
-        }
-        for (_, key, _) in &resumed {
-            self.inner.places.resumed(key);
-        }
-        drop(state);
-        if is_remembering {
-            self.remember_parked(parked);
-        }
-        for (slot, key, generation) in resumed {
-            self.apply_pending_fraction(slot, &key, generation, true);
-        }
-        self.refresh_hints();
-        for (id, action) in actions {
-            self.perform(id, action);
-        }
-    }
-
-    fn send_call(&self, state: &State, slot: usize, call: SlotCall) {
-        let held = match &call {
-            SlotCall::Load { key, .. } => state.loaded.get(key).map(|loaded| loaded.held.clone()),
-            _ => None,
-        };
-        self.inner.runner.send_held(slot, call, held);
-    }
-
-    fn translate(
-        &self,
-        state: &mut State,
-        command: Command,
-        effects: &mut Effects,
-    ) {
-        let Effects { calls, actions, unloaded, resumed, parked } = effects;
-        match &command {
-            Command::Load { slot, key, held } => {
-                let source = state.catalog.get(key).cloned().unwrap_or_else(|| MediaItem::bare(key, Kind::Video));
-                let route = self.inner.routes.play_url(&source);
-                let via_proxy_hls = route.generation.is_some() && is_manifest_url(&source.url);
-                let mut recovery = RecoveryState::new(self.inner.watchdog.clone());
-                next_action(&mut recovery, Event::Source { key: key.clone(), via_proxy_hls }, self.now());
-                state.slot_keys.insert(*slot, key.clone());
-                let generation = state.next_generation();
-                state.loaded.insert(key.clone(), Loaded { held: held.clone(), slot: *slot, generation, recovery, source, route: route.clone(), seeked: None });
-                state.pending_wanted.remove(key);
-                let resume = state.positions.take(key);
-                calls.extend(self.load_calls(state, key, resume));
-            }
-            Command::Unload { slot } => {
-                if let Some(key) = state.slot_keys.remove(slot) {
-                    if !state.is_playing(&key) {
-                        let seeked = state.loaded.get(&key).and_then(|loaded| loaded.seeked);
-                        parked.push(Parked { slot: *slot, key: key.clone(), releases: state.releases, seeked });
-                    }
-                    if let Some(unloaded) = state.loaded.remove(&key) {
-                        self.forget_seek_hint(state, &unloaded.source.url);
-                    }
-                    state.retire(&key);
-                    state.refresh_pending(&key);
-                    state.tasks.remove(&key);
-                    unloaded.push(key);
-                }
-                calls.extend(SlotCall::from_command(command));
-            }
-            Command::Dispose { .. } => {}
-            Command::Play { slot } | Command::Pause { slot } => {
-                let event = if matches!(command, Command::Play { .. }) { Event::Play { position_ms: 0 } } else { Event::Pause };
-                if let Some(key) = state.slot_keys.get(slot).cloned() {
-                    if let (Command::Play { .. }, Some(loaded)) = (&command, state.loaded.get_mut(&key)) {
-                        loaded.seeked = None;
-                        self.inner.routes.nudge_window(&loaded.source.url);
-                        resumed.push((*slot, key.clone(), loaded.generation));
-                    }
-                    self.advance(state, &key, event, actions);
-                }
-                calls.extend(SlotCall::from_command(command.clone()));
-            }
-            Command::Unmute { slot } if self.inner.silent => calls.push((*slot, SlotCall::Mute)),
-            _ => calls.extend(SlotCall::from_command(command)),
-        }
-    }
-
-    fn fraction_seek(&self, state: &mut State, key: &str, duration_ms: Option<u64>) -> Option<SlotCall> {
-        let duration = duration_ms.filter(|duration| *duration > 0)?;
-        let loaded = state.loaded.get(key)?;
-        let fraction = state.positions.take_fraction(key)?;
-        let position_ms = (duration as f64 * fraction) as u64;
-        self.note_seek(&loaded.source.url, position_ms);
-        Some(SlotCall::Seek { position_ms })
-    }
-
-    fn remember_parked(&self, parked: Vec<Parked>) {
-        let positions: Vec<(Parked, u64)> = parked
-            .into_iter()
-            .filter_map(|parked| {
-                let position = match parked.seeked {
-                    Some(seeked) => seeked,
-                    None => self.inner.runner.sample_now(parked.slot)?.position_ms,
-                };
-                Some((parked, position))
-            })
-            .collect();
-        if positions.is_empty() {
-            return;
-        }
-        let mut state = self.state_quiet();
-        for (Parked { slot, key, releases, .. }, position) in positions {
-            if state.releases == releases && !state.slot_keys.contains_key(&slot) && !state.loaded.contains_key(&key) {
-                if position > 0 {
-                    state.positions.remember(&key, position);
-                } else {
-                    state.positions.forget(&key);
-                }
-            }
-        }
-    }
-
-    fn load_calls(&self, state: &State, key: &str, resume: Option<u64>) -> Vec<(usize, SlotCall)> {
-        let loaded = &state.loaded[key];
-        let slot = loaded.slot;
-        let mut calls = vec![(slot, SlotCall::Load { key: key.to_string(), route: loaded.route.clone(), generation: loaded.generation })];
-        self.inner.hints.lock().unwrap_or_else(PoisonError::into_inner).remove(&slot);
-        if self.inner.silent {
-            calls.push((slot, SlotCall::Mute));
-        }
-        if let Some(rate) = state.rates.get(key) {
-            calls.push((slot, SlotCall::Rate { rate: *rate }));
-        }
-        if let Some(position_ms) = resume {
-            self.note_seek(&loaded.source.url, position_ms);
-            calls.push((slot, SlotCall::Seek { position_ms }));
-        }
-        if let Some(view_token) = state.views.get(key) {
-            calls.push((slot, SlotCall::Attach { view_token: *view_token }));
-        }
-        calls
-    }
-
-    fn advance(&self, state: &mut State, key: &str, event: Event, actions: &mut Vec<(LoadId, Action)>) {
-        let now = self.now();
-        let Some(loaded) = state.loaded.get_mut(key) else { return };
-        let action = next_action(&mut loaded.recovery, event, now);
-        if action != Action::None {
-            actions.push((LoadId { key: key.to_string(), slot: loaded.slot, generation: loaded.generation }, action));
-        }
-    }
-}
-
-async fn tick_loop(inner: Weak<Inner>, mut due: watch::Receiver<Option<u64>>, ledger: Ledger) {
-    let freed = ledger.freed().notified();
-    tokio::pin!(freed);
-    freed.as_mut().enable();
-    loop {
-        let wait = match *due.borrow_and_update() {
-            Some(at) => {
-                let Some(inner) = inner.upgrade() else { return };
-                Some(Duration::from_millis(at.saturating_sub(inner.clock.now_ms())))
-            }
-            None => None,
-        };
-        let wake = tokio::select! {
-            () = async { tokio::time::sleep(wait.unwrap_or_default()).await }, if wait.is_some() => Wake::Due,
-            changed = due.changed() => {
-                if changed.is_err() {
-                    return;
-                }
-                Wake::Changed
-            }
-            () = freed.as_mut() => Wake::Freed,
-        };
-        let Some(inner) = inner.upgrade() else { return };
-        inner.wakes.fetch_add(1, Ordering::Relaxed);
-        let stage = Stage { inner };
-        match wake {
-            Wake::Changed => continue,
-            Wake::Freed => {
-                freed.set(ledger.freed().notified());
-                freed.as_mut().enable();
-                let mut state = stage.state_quiet();
-                let room = ledger.ceiling().saturating_sub(ledger.used());
-                if state.is_room_wanted && room > state.refusal_room && state.has_pending_restore() {
-                    state.is_restore_requested = true;
-                }
-                continue;
-            }
-            Wake::Due => {}
-        }
-        let (state, commands) = {
-            let now = stage.now();
-            let mut state = stage.state_quiet();
-            let room = ledger.ceiling().saturating_sub(ledger.used());
-            let is_requested = std::mem::take(&mut state.is_restore_requested);
-            let queued = state.ring.restore_len();
-            let mut commands = state.ring.tick(now);
-            let drained = queued.saturating_sub(state.ring.restore_len());
-            let mut is_refused = state.ring.is_restoring() && drained == 0 && queued > 0;
-            if is_requested {
-                let (restored, refused) = state.restore_wanted(now);
-                commands.extend(restored);
-                is_refused |= refused;
-                let playing = state.playing_key();
-                commands.extend(state.ring.retry_refused(now, playing.as_deref()));
-                is_refused |= state.ring.has_refused();
-            }
-            state.is_restore_requested = state.ring.is_restoring() && drained > 0;
-            if is_requested || queued > 0 {
-                state.is_room_wanted = is_refused;
-                state.refusal_room = room;
-            }
-            (state, commands)
-        };
-        stage.dispatch(state, commands);
-    }
-}
-
-enum Wake {
-    Due,
-    Changed,
-    Freed,
-}
-
-struct StateGuard<'a> {
-    guard: MutexGuard<'a, State>,
-    inner: &'a Inner,
-    is_changed: bool,
-    is_quiet: bool,
-}
-
-impl Deref for StateGuard<'_> {
-    type Target = State;
-
-    fn deref(&self) -> &State {
-        &self.guard
-    }
-}
-
-impl DerefMut for StateGuard<'_> {
-    fn deref_mut(&mut self) -> &mut State {
-        self.is_changed = true;
-        &mut self.guard
-    }
-}
-
-impl Drop for StateGuard<'_> {
-    fn drop(&mut self) {
-        if !self.is_changed {
-            return;
-        }
-        self.inner.change.mark();
-        if !self.is_quiet && self.guard.has_pending_restore() {
-            self.guard.is_restore_requested = true;
-        }
-        let next = self.guard.next_due();
-        self.inner.due.send_if_modified(|due| std::mem::replace(due, next) != next);
     }
 }
 
