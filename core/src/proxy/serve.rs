@@ -1,26 +1,21 @@
+use http_body_util::BodyExt;
 use super::cursor::{next_direct, next_store, DirectCursor, Resume, StoreCursor};
-use super::flight::{collect_limited, FlightOutcome, Rejection, FlightSubscription};
+use super::flight::{collect_limited, FlightOutcome, FlightSubscription};
 use super::inner::ProxyShared;
-use super::route::{
-    answered_length, block_key, content_range_total, content_type_for, parse_range, resolve_range, target_url, ByteRange,
-    RangeOutcome,
-};
+use super::route::{answered_length, block_key, content_type_for, parse_range, resolve_range, target_url, ByteRange, RangeOutcome};
 use super::playlists::StoredPlaylist;
 use super::slots::Priority;
-use crate::fetch::{header_value, FetchError, Request};
+use crate::fetch::header_value;
 use crate::hls::{is_manifest_url, Playlist};
 use bytes::Bytes;
-use futures_util::{stream, Stream, StreamExt};
-use http_body_util::combinators::UnsyncBoxBody;
-use http_body_util::{BodyExt, Empty, Full, StreamBody};
-use hyper::body::{Frame, Incoming};
-use hyper::header::{HeaderName, HeaderValue};
-use hyper::{Method, Response, StatusCode};
-use std::collections::HashMap;
-use std::io;
+use futures_util::stream;
+use hyper::body::Incoming;
+use hyper::{Method, Response};
 use std::sync::Arc;
+use super::serve_blocks::*;
+use super::serve_origin::*;
+use super::serve_reply::*;
 
-const ATTEMPTS: usize = 3;
 const PLAYLIST_TYPE: &str = "application/vnd.apple.mpegurl";
 
 #[cfg(test)]
@@ -35,11 +30,6 @@ mod playlist_work_tests;
 #[path = "register_tests.rs"]
 mod register_tests;
 
-pub(super) type ProxyBody = UnsyncBoxBody<Bytes, io::Error>;
-
-type Headers = Vec<(&'static str, String)>;
-type Upstream = HashMap<String, String>;
-type Failure = Box<Response<ProxyBody>>;
 
 enum Step {
     Done(Response<ProxyBody>),
@@ -246,7 +236,7 @@ fn needs_blocks(range: Option<ByteRange>) -> bool {
     matches!(range, Some(ByteRange::Suffix(_)) | Some(ByteRange::From { start: 1.., .. }))
 }
 
-async fn stored_response(
+pub(super) async fn stored_response(
     inner: &Arc<ProxyShared>,
     target: &str,
     key: &str,
@@ -384,299 +374,4 @@ async fn head_from_origin(inner: &ProxyShared, target: &str, headers: Upstream) 
         }
         Err(failure) => *failure,
     }
-}
-
-struct Probe {
-    total: Option<u64>,
-    origin_type: Option<String>,
-    ignored_range: bool,
-}
-
-async fn probe_total(inner: &ProxyShared, target: &str, headers: Upstream) -> Result<Probe, Failure> {
-    let response = origin_fetch(inner, target, headers, Some((0, Some(0)))).await?;
-    let total = content_range_total(&response.headers)
-        .or_else(|| {
-            let whole = response.status == 200;
-            header_value(&response.headers, "content-length").filter(|_| whole).and_then(|value| value.trim().parse().ok())
-        });
-    let origin_type = header_value(&response.headers, "content-type").map(str::to_string);
-    match (response.status, total) {
-        (200, total) => Ok(Probe { total, origin_type, ignored_range: true }),
-        (206, Some(total)) => Ok(Probe { total: Some(total), origin_type, ignored_range: false }),
-        (206, None) => Err(Box::new(text(502, "origin did not report a size"))),
-        (status, _) => Err(Box::new(text(status, "origin refused the request"))),
-    }
-}
-
-async fn probe_sized(inner: &ProxyShared, target: &str, headers: Upstream) -> Result<(u64, Option<String>), Failure> {
-    let probe = probe_total(inner, target, headers).await?;
-    match probe.total {
-        Some(total) => Ok((total, probe.origin_type)),
-        None => Err(Box::new(text(502, "origin did not report a size"))),
-    }
-}
-
-pub(super) async fn origin_fetch(
-    inner: &ProxyShared,
-    target: &str,
-    headers: Upstream,
-    range: Option<(u64, Option<u64>)>,
-) -> Result<crate::fetch::Response, Failure> {
-    let Ok(permit) = inner.slots.acquire(Priority::Playback).await else {
-        return Err(Box::new(text(503, "busy")));
-    };
-    let request = Request { url: target.to_string(), headers, range };
-    crate::trace!("origin", "fetch {} range={range:?}", crate::trace::tail(target));
-    match tokio::time::timeout(inner.timeout(), inner.fetcher.fetch(request)).await {
-        Err(_) => Err(Box::new(text(502, "origin timed out"))),
-        Ok(Err(FetchError::Status(status))) => Err(Box::new(text(status, "origin refused the request"))),
-        Ok(Err(error)) => Err(Box::new(text(502, &error.to_string()))),
-        Ok(Ok(response)) => Ok(crate::fetch::Response { body: permit.hold(response.body), ..response }),
-    }
-}
-
-fn media_headers(content_type: &str, length: u64, content_range: Option<String>) -> Headers {
-    let mut headers: Headers = vec![
-        ("content-type", content_type.to_string()),
-        ("accept-ranges", "bytes".to_string()),
-        ("content-length", length.to_string()),
-    ];
-    if let Some(value) = content_range {
-        headers.push(("content-range", value));
-    }
-    headers
-}
-
-fn unsatisfiable(total: u64) -> Response<ProxyBody> {
-    respond(416, vec![("content-range", format!("bytes */{total}")), ("content-length", "0".to_string())], empty(), false)
-}
-
-fn rejected(rejection: &Rejection, head_only: bool) -> Response<ProxyBody> {
-    let mut headers: Headers = vec![("content-length", rejection.body.len().to_string())];
-    if let Some(content_type) = &rejection.content_type {
-        headers.push(("content-type", content_type.clone()));
-    }
-    respond(rejection.status, headers, full(rejection.body.clone()), head_only)
-}
-
-fn text(status: u16, message: &str) -> Response<ProxyBody> {
-    let headers = vec![("content-type", "text/plain; charset=utf-8".to_string()), ("content-length", message.len().to_string())];
-    respond(status, headers, full(Bytes::from(message.to_string())), false)
-}
-
-fn respond(status: u16, headers: Headers, body: ProxyBody, head_only: bool) -> Response<ProxyBody> {
-    let mut response = Response::new(if head_only { empty() } else { body });
-    *response.status_mut() = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY);
-    for (name, value) in headers {
-        if let Ok(value) = HeaderValue::from_str(&value) {
-            response.headers_mut().insert(HeaderName::from_static(name), value);
-        }
-    }
-    response
-}
-
-fn full(bytes: Bytes) -> ProxyBody {
-    Full::new(bytes).map_err(|never| match never {}).boxed_unsync()
-}
-
-fn empty() -> ProxyBody {
-    Empty::<Bytes>::new().map_err(|never| match never {}).boxed_unsync()
-}
-
-fn streamed(source: impl Stream<Item = Result<Bytes, io::Error>> + Send + 'static) -> ProxyBody {
-    StreamBody::new(source.map(|chunk| chunk.map(Frame::data))).boxed_unsync()
-}
-
-enum OpenFailure {
-    Rejected(Arc<Rejection>),
-    Failed(String),
-}
-
-struct BlockCursor {
-    inner: Arc<ProxyShared>,
-    target: String,
-    key: String,
-    headers: Upstream,
-    total: u64,
-    position: u64,
-    end: u64,
-    block_end: u64,
-    source: Option<StoreCursor>,
-    finished: bool,
-}
-
-impl BlockCursor {
-    async fn open(&mut self) -> Result<Option<String>, OpenFailure> {
-        let size = self.inner.config.chunk_size;
-        let block = self.position / size;
-        let block_start = block * size;
-        self.block_end = self.end.min(block_start + size).min(self.total);
-        let stored_key = block_key(&self.key, block);
-        let offset = self.position - block_start;
-        let offset_end = self.block_end - block_start;
-        let chunk = self.inner.config.stream_chunk as u64;
-        let mut cursor = StoreCursor {
-            reader: None,
-            subscription: None,
-            store: self.inner.store.clone(),
-            key: stored_key.clone(),
-            position: offset,
-            end: Some(offset_end),
-            chunk,
-            finished: false,
-            resumed: false,
-            resume: Resume::new(&self.inner, &self.target, &self.headers, block_start),
-            pending: Bytes::new(),
-        };
-        let whole_block = (block_start + size).min(self.total) - block_start;
-        for _ in 0..ATTEMPTS {
-            let stored = self.inner.store.len(&stored_key).await;
-            if stored.is_some_and(|length| length != whole_block) {
-                crate::trace!("cache", "bad block {} stored={stored:?} expected={whole_block}", crate::trace::tail(&stored_key));
-                self.inner.store.remove(&stored_key).await;
-            } else if stored.is_some() {
-                let content_type = self.inner.store.meta(&stored_key).await.and_then(|meta| meta.content_type);
-                self.source = Some(cursor);
-                return Ok(content_type);
-            }
-            let mut subscription =
-                self.inner.get_or_start_block(&self.target, block, Some(self.total), self.headers.clone(), Priority::Playback);
-            subscription.linger();
-            let progress = subscription.wait_started().await;
-            match (progress.outcome, progress.head) {
-                (FlightOutcome::Rejected(rejection), _) => return Err(OpenFailure::Rejected(rejection)),
-                (FlightOutcome::Failed(message), _) => return Err(OpenFailure::Failed(message)),
-                (FlightOutcome::Unstorable, _) => {
-                    cursor.resumed = true;
-                    self.source = Some(cursor);
-                    return Ok(None);
-                }
-                (FlightOutcome::Cancelled | FlightOutcome::QueueFull, _) | (_, None) => {}
-                (_, Some(head)) => {
-                    cursor.subscription = Some(subscription);
-                    self.source = Some(cursor);
-                    return Ok(head.content_type.clone());
-                }
-            }
-        }
-        Err(OpenFailure::Failed("block unavailable".to_string()))
-    }
-}
-
-async fn next_block(mut cursor: BlockCursor) -> Option<(Result<Bytes, io::Error>, BlockCursor)> {
-    loop {
-        if cursor.finished || cursor.position >= cursor.end {
-            return None;
-        }
-        let Some(source) = cursor.source.take() else {
-            if cursor.open().await.is_err() {
-                return Some(fail_blocks(cursor));
-            }
-            continue;
-        };
-        let step = next_store(source).await;
-        match step {
-            None if cursor.position < cursor.block_end => return Some(fail_blocks(cursor)),
-            None => {}
-            Some((Err(error), _)) => {
-                cursor.finished = true;
-                return Some((Err(error), cursor));
-            }
-            Some((Ok(bytes), rest)) => {
-                cursor.position += bytes.len() as u64;
-                cursor.source = Some(rest);
-                return Some((Ok(bytes), cursor));
-            }
-        }
-    }
-}
-
-fn fail_blocks(mut cursor: BlockCursor) -> (Result<Bytes, io::Error>, BlockCursor) {
-    cursor.finished = true;
-    (Err(io::Error::other("block download failed")), cursor)
-}
-
-async fn block_range_response(
-    inner: &Arc<ProxyShared>,
-    target: &str,
-    headers: Upstream,
-    range: Option<ByteRange>,
-) -> Option<Response<ProxyBody>> {
-    let key = inner.key(target, &headers);
-    let total = match known_total(inner, target, &key, &headers, range).await {
-        Ok(Some(total)) => total,
-        Ok(None) => return None,
-        Err(failure) => return Some(*failure),
-    };
-    if let Some(length) = inner.store.len(&key).await {
-        return Some(stored_response(inner, target, &key, length, range, &headers, false).await);
-    }
-    let (start, end) = match resolve_range(range, total) {
-        RangeOutcome::Partial { start, end } => (start, end),
-        _ => return Some(unsatisfiable(total)),
-    };
-    let mut cursor = BlockCursor {
-        inner: inner.clone(),
-        target: target.to_string(),
-        key,
-        headers: headers.clone(),
-        total,
-        position: start,
-        end: end + 1,
-        block_end: start,
-        source: None,
-        finished: false,
-    };
-    let origin_type = match cursor.open().await {
-        Ok(content_type) => content_type,
-        Err(OpenFailure::Rejected(rejection)) => return Some(rejected(&rejection, false)),
-        Err(OpenFailure::Failed(_)) if inner.ignores_range(&inner.key(target, &headers)) => return None,
-        Err(OpenFailure::Failed(message)) => return Some(text(502, &message)),
-    };
-    let content_type = content_type_for(target, origin_type.as_deref());
-    let response_headers = media_headers(&content_type, end - start + 1, Some(format!("bytes {start}-{end}/{total}")));
-    Some(respond(206, response_headers, streamed(stream::unfold(cursor, next_block)), false))
-}
-
-async fn known_total(
-    inner: &ProxyShared,
-    target: &str,
-    key: &str,
-    headers: &Upstream,
-    range: Option<ByteRange>,
-) -> Result<Option<u64>, Failure> {
-    if let Some(total) = inner.known_total(key) {
-        return Ok(Some(total));
-    }
-    if let Some(ByteRange::From { start, .. }) = range {
-        let first = block_key(key, start / inner.config.chunk_size);
-        if let Some(total) = inner.store.meta(&first).await.and_then(|meta| meta.total_length) {
-            inner.remember_total(key, total);
-            return Ok(Some(total));
-        }
-    }
-    let lock = inner.probe_lock(key);
-    probe_once(inner, target, key, headers, &lock.lock).await
-}
-
-async fn probe_once(
-    inner: &ProxyShared,
-    target: &str,
-    key: &str,
-    headers: &Upstream,
-    lock: &tokio::sync::Mutex<()>,
-) -> Result<Option<u64>, Failure> {
-    let _turn = lock.lock().await;
-    if inner.ignores_range(key) {
-        return Ok(None);
-    }
-    if let Some(total) = inner.known_total(key) {
-        return Ok(Some(total));
-    }
-    let probe = probe_total(inner, target, headers.clone()).await?;
-    if probe.ignored_range {
-        inner.mark_ignores_range(key);
-        return Ok(None);
-    }
-    Ok(probe.total.inspect(|total| inner.remember_total(key, *total)))
 }

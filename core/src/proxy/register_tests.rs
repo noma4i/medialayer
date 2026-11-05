@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashMap;
 use crate::proxy::memory_store::MemoryStore;
 use crate::proxy::Proxy;
 

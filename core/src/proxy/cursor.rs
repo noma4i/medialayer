@@ -3,7 +3,7 @@ use super::byte_store::ByteStore;
 use super::flight::{FlightOutcome, FlightSubscription};
 use super::inner::ProxyShared;
 use super::route::answered_length;
-use super::serve::origin_fetch;
+use super::serve_origin::origin_fetch;
 use crate::fetch::BodyStream;
 use bytes::Bytes;
 use futures_util::StreamExt;

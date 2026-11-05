@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashMap;
 
 #[tokio::test(start_paused = true)]
 async fn inv_proxy_15_prefetch_refreshes_expired_live_plans() {

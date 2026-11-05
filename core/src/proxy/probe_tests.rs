@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashMap;
 use crate::fetch::mock::{MockFetcher, Script};
 use crate::proxy::{memory_store::MemoryStore, Config, Proxy};
 
