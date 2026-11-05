@@ -1,4 +1,7 @@
 mod book;
+mod book_keys;
+mod book_types;
+mod book_windows;
 mod clean;
 mod command;
 mod executor;
@@ -25,3 +28,6 @@ mod ingress_queue_tests;
 mod ingress_seek_tests;
 #[cfg(test)]
 mod ingress_window_tests;
+
+#[cfg(test)]
+mod book_keys_tests;
