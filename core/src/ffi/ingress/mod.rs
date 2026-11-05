@@ -14,4 +14,14 @@ pub use limits::IngressLimits;
 pub(crate) use queue::{Admitted, InputQueue};
 
 #[cfg(test)]
-mod ingress_tests;
+mod ingress_harness;
+#[cfg(test)]
+mod ingress_close_tests;
+#[cfg(test)]
+mod ingress_places_tests;
+#[cfg(test)]
+mod ingress_queue_tests;
+#[cfg(test)]
+mod ingress_seek_tests;
+#[cfg(test)]
+mod ingress_window_tests;

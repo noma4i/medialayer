@@ -1,5 +1,5 @@
 use super::memory_store::MemoryStore;
-use super::test_client::{request, Reply};
+use super::test_client::Reply;
 use super::*;
 use crate::fetch::mock::{MockFetcher, Script};
 use std::future::Future;
