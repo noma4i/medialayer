@@ -27,7 +27,19 @@ mod layer_life_tests;
 #[cfg(test)]
 mod blank_url_tests;
 #[cfg(test)]
-mod layer_tests;
+mod layer_harness;
+#[cfg(test)]
+mod layer_open_tests;
+#[cfg(test)]
+mod layer_image_tests;
+#[cfg(test)]
+mod layer_assembly_tests;
+#[cfg(test)]
+mod layer_close_tests;
+#[cfg(test)]
+mod layer_window_tests;
+#[cfg(test)]
+mod layer_whole_tests;
 #[cfg(test)]
 mod limits_tests;
 #[cfg(test)]
