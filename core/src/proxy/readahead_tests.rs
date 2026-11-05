@@ -1,5 +1,5 @@
 use super::memory_store::MemoryStore;
-use super::proxy_tests::follow;
+use super::proxy_harness::follow;
 use super::test_client::{get, Reply};
 use super::*;
 use crate::fetch::mock::{MockFetcher, Script};

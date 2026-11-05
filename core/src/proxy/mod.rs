@@ -411,7 +411,19 @@ mod limits_tests;
 #[cfg(test)]
 mod namespace_tests;
 #[cfg(test)]
-mod proxy_tests;
+mod proxy_harness;
+#[cfg(test)]
+mod proxy_blocks_tests;
+#[cfg(test)]
+mod proxy_ignored_range_tests;
+#[cfg(test)]
+mod proxy_lifecycle_tests;
+#[cfg(test)]
+mod proxy_playlist_tests;
+#[cfg(test)]
+mod proxy_store_tests;
+#[cfg(test)]
+mod proxy_stream_tests;
 #[cfg(test)]
 mod range_origin_tests;
 #[cfg(test)]

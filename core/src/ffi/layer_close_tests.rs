@@ -4,7 +4,7 @@ use super::ingress::{IngressLimits, Pause, PlaceInput};
 use crate::api::test_support::{eventually, shared, slow_assembly, FakeSettings, MockFactory, MockSlot};
 use crate::api::{MediaError, MediaItem, PlayerSlotFactory, SlotCall};
 use async_trait::async_trait;
-use std::sync::{Arc};
+use std::sync::Arc;
 
 #[derive(Default)]
 struct ClosingReleaser {

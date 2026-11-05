@@ -1,6 +1,6 @@
 use super::*;
 use super::layer_harness::*;
-use super::ingress::{PlaceInput};
+use super::ingress::PlaceInput;
 use crate::api::test_support::{assembly, eventually, shared, FakeSettings, MockFactory};
 use crate::api::{MediaError, MediaItem, MediaState, PlayerSlotFactory, SlotCall};
 use crate::fetch::mock::MockFetcher;

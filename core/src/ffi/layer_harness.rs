@@ -1,6 +1,6 @@
 use super::*;
-use super::ingress::{PlaceInput};
-use crate::api::test_support::{FakeSettings};
+use super::ingress::PlaceInput;
+use crate::api::test_support::FakeSettings;
 use crate::api::{MediaError, MediaItem, MediaState, MediaStats, PlayerSlotFactory};
 use async_trait::async_trait;
 use std::collections::HashMap;
