@@ -765,7 +765,13 @@ impl Drop for StateGuard<'_> {
 #[cfg(test)]
 mod events_tests;
 #[cfg(test)]
-mod inputs_tests;
+mod inputs_move_tests;
+#[cfg(test)]
+mod inputs_place_tests;
+#[cfg(test)]
+mod inputs_suspension_tests;
+#[cfg(test)]
+mod inputs_window_tests;
 #[cfg(test)]
 mod lifetime_tests;
 #[cfg(test)]
