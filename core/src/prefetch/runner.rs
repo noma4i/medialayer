@@ -1,163 +1,27 @@
-use super::gate::{Gate, LoadPermit};
-use super::ledger::{Counters, Evicted, NextLoad, PrefetchLedger};
-use super::load_source::{bounded, is_hls, load_unit, read_plan};
-use super::whole::load_whole;
-use crate::hls::Chunk;
+use super::gate::Gate;
+use super::ledger::{Counters, PrefetchLedger};
 use super::loader::Loader;
-use crate::proxy::Priority;
 use super::settled::{Outcome, Settled};
-use super::source::{Source, SourceKind};
+use super::source::Source;
 use super::strategy::CacheStrategy;
-use super::window::{diff_window, wanted_jobs, wanted_page_jobs, PageWindow, PrefetchJob, PrefetchWindow};
+use super::window::{diff_window, wanted_jobs, wanted_page_jobs, PageWindow, PrefetchJob};
 use crate::cache::Clock;
-use crate::limits::{LeadingChunks, Limits, MIB};
+use crate::limits::Limits;
 use crate::pages::Sliced;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, watch, Notify};
-
-const EVENT_CAPACITY: usize = 256;
-const WHOLE_MEDIA_PARALLEL: usize = 1;
-const WHOLE_IMAGE_PARALLEL: usize = 2;
-const WINDOW_OWNER: u64 = 0;
-
-struct Held {
-    source: Source,
-    owners: HashSet<u64>,
-}
-
-struct Job {
-    id: u64,
-    url: String,
-    cancel: Arc<Notify>,
-    active: Arc<AtomicBool>,
-    goal: watch::Sender<usize>,
-    distance: Arc<AtomicUsize>,
-    whole: bool,
-}
-
-#[derive(Clone, PartialEq, Eq, Hash)]
-enum WindowKey {
-    Stage,
-    Image(String),
-}
-
-struct State {
-    ledger: PrefetchLedger,
-    windows: HashMap<WindowKey, Vec<PrefetchJob>>,
-    last: HashMap<WindowKey, (Vec<PrefetchJob>, HashMap<String, Source>)>,
-    running: HashMap<String, Job>,
-    wholes: HashMap<String, Held>,
-    next_id: u64,
-    busy: bool,
-    suspended: bool,
-}
-
-impl State {
-    fn owns(&self, key: &str, id: u64) -> bool {
-        self.running.get(key).is_some_and(|job| job.id == id)
-    }
-
-    fn cancel_job(&mut self, key: &str) {
-        let Some(job) = self.running.remove(key) else { return };
-        self.ledger.cancel(key, job.active.load(Ordering::SeqCst));
-        job.cancel.notify_one();
-    }
-
-    fn finish_job(&mut self, key: &str, id: u64) {
-        if self.running.get(key).is_some_and(|job| job.id == id) {
-            self.running.remove(key);
-        }
-    }
-
-    fn is_wanted(&self, key: &str) -> bool {
-        self.windows.values().any(|jobs| jobs.iter().any(|job| job.key == key))
-    }
-}
-
-#[derive(Clone)]
-struct Tuning {
-    window: PrefetchWindow,
-    leading: LeadingChunks,
-    budget: u64,
-    timeout: Duration,
-    max_entries: usize,
-}
-
-impl Tuning {
-    fn from_limits(limits: &Limits) -> Tuning {
-        Tuning {
-            window: PrefetchWindow { from: limits.prefetch_from as usize, to: limits.prefetch_to as usize },
-            leading: limits.leading_chunks,
-            budget: u64::from(limits.prefetch_budget_mib) * MIB,
-            timeout: Duration::from_secs(limits.timeout_seconds.into()),
-            max_entries: limits.dedupe_max_entries as usize,
-        }
-    }
-
-    fn target(&self, source: &Source, distance: usize) -> usize {
-        if is_hls(source) {
-            self.leading.for_distance(distance)
-        } else {
-            1
-        }
-    }
-}
-
-struct Shared {
-    loader: Arc<dyn Loader>,
-    tuning: Mutex<Tuning>,
-    image_windows: Mutex<HashMap<String, PageWindow>>,
-    gate: Arc<Gate>,
-    whole_gates: [Arc<Gate>; 2],
-    clock: Arc<dyn Clock>,
-    state: Mutex<State>,
-    live: AtomicUsize,
-    events: broadcast::Sender<Settled>,
-    handle: Handle,
-}
-
-impl Shared {
-    fn state(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn tuning(&self) -> Tuning {
-        self.tuning.lock().unwrap_or_else(PoisonError::into_inner).clone()
-    }
-}
-
-struct LiveTask(Arc<Shared>);
-
-impl LiveTask {
-    fn new(shared: &Arc<Shared>) -> LiveTask {
-        shared.live.fetch_add(1, Ordering::SeqCst);
-        LiveTask(shared.clone())
-    }
-}
-
-impl Drop for LiveTask {
-    fn drop(&mut self) {
-        self.0.live.fetch_sub(1, Ordering::SeqCst);
-    }
-}
-
-struct Owner(Arc<Shared>);
-
-impl Drop for Owner {
-    fn drop(&mut self) {
-        Prefetcher::cancel_everything(&self.0);
-    }
-}
+use super::runner_types::*;
+use super::runner_load::run_job;
 
 #[derive(Clone)]
 pub struct Prefetcher {
     shared: Arc<Shared>,
-    _owner: Arc<Owner>,
+    _owner: Arc<PrefetchOwner>,
 }
 
 impl Prefetcher {
@@ -169,13 +33,13 @@ impl Prefetcher {
             gate: Gate::new(limits.max_concurrent as usize),
             whole_gates: [Gate::new(WHOLE_MEDIA_PARALLEL), Gate::new(WHOLE_IMAGE_PARALLEL)],
             clock,
-            state: Mutex::new(State { ledger, windows: HashMap::new(), last: HashMap::new(), running: HashMap::new(), wholes: HashMap::new(), next_id: 0, busy: false, suspended: false }),
+            state: Mutex::new(PrefetchState { ledger, windows: HashMap::new(), last: HashMap::new(), running: HashMap::new(), wholes: HashMap::new(), next_id: 0, busy: false, suspended: false }),
             live: AtomicUsize::new(0),
             events: broadcast::channel(EVENT_CAPACITY).0,
             handle: Handle::current(),
         };
         let shared = Arc::new(shared);
-        Prefetcher { _owner: Arc::new(Owner(shared.clone())), shared }
+        Prefetcher { _owner: Arc::new(PrefetchOwner(shared.clone())), shared }
     }
 
     pub fn set_limits(&self, limits: &Limits) {
@@ -346,7 +210,7 @@ impl Prefetcher {
             let _ = self.shared.events.send(Settled { url: source.url, outcome: Outcome::Failed("whole queue is full".into()) });
             return;
         }
-        state.wholes.entry(key.clone()).or_insert_with(|| Held { source: source.clone(), owners: HashSet::new() }).owners.insert(owner);
+        state.wholes.entry(key.clone()).or_insert_with(|| WholeHold { source: source.clone(), owners: HashSet::new() }).owners.insert(owner);
         self.start_whole(&mut state, key, source, now, true);
     }
 
@@ -364,7 +228,7 @@ impl Prefetcher {
         }
     }
 
-    fn let_go(state: &mut State, owner: u64, key: &str) {
+    fn let_go(state: &mut PrefetchState, owner: u64, key: &str) {
         let Some(held) = state.wholes.get_mut(key) else { return };
         held.owners.remove(&owner);
         if !held.owners.is_empty() {
@@ -377,7 +241,7 @@ impl Prefetcher {
         }
     }
 
-    fn start_whole(&self, state: &mut State, key: String, source: Source, now: Duration, entering: bool) {
+    fn start_whole(&self, state: &mut PrefetchState, key: String, source: Source, now: Duration, entering: bool) {
         if state.suspended {
             return;
         }
@@ -412,7 +276,7 @@ impl Prefetcher {
         state.wholes.clear();
     }
 
-    fn cancel_everything(shared: &Shared) {
+    pub(super) fn cancel_everything(shared: &Shared) {
         let mut state = shared.state();
         let running: Vec<String> = state.running.keys().cloned().collect();
         for url in running {
@@ -446,7 +310,7 @@ impl Prefetcher {
         self.shared.live.load(Ordering::SeqCst)
     }
 
-    fn start(&self, state: &mut State, job: StartJob, now: Duration, tuning: &Tuning) {
+    fn start(&self, state: &mut PrefetchState, job: StartJob, now: Duration, tuning: &Tuning) {
         let StartJob { key, source, distance, entering } = job;
         if state.busy || state.suspended {
             return;
@@ -479,7 +343,7 @@ impl Prefetcher {
         self.launch(state, key, source, distance, false);
     }
 
-    fn launch(&self, state: &mut State, key: String, source: Source, distance: usize, whole: bool) {
+    fn launch(&self, state: &mut PrefetchState, key: String, source: Source, distance: usize, whole: bool) {
         let tuning = self.shared.tuning();
         let id = state.next_id;
         state.next_id += 1;
@@ -491,203 +355,4 @@ impl Prefetcher {
         self.shared.handle.spawn(run_job(live, run));
         state.running.insert(key, job);
     }
-}
-
-struct StartJob {
-    key: String,
-    source: Source,
-    distance: usize,
-    entering: bool,
-}
-
-struct Run {
-    key: String,
-    source: Source,
-    id: u64,
-    cancel: Arc<Notify>,
-    active: Arc<AtomicBool>,
-    distance: Arc<AtomicUsize>,
-    goal: watch::Receiver<usize>,
-    tuning: Tuning,
-    whole: bool,
-}
-
-async fn run_job(live: LiveTask, mut run: Run) {
-    let shared = live.0.clone();
-    shared.state().ledger.begin(&run.key);
-    let mut outcome = {
-        let cancel = run.cancel.clone();
-        tokio::select! {
-            biased;
-            _ = cancel.notified() => Outcome::Cancelled,
-            outcome = load(&shared, &mut run) => outcome,
-        }
-    };
-    loop {
-        {
-            let mut state = shared.state();
-            let promoted = state.running.get(&run.key).is_some_and(|job| job.id == run.id && job.whole);
-            if run.whole || !promoted || outcome != Outcome::Loaded {
-                settle(&mut state, &run.key, run.id, &outcome);
-                break;
-            }
-            run.whole = true;
-        }
-        outcome = tokio::select! {
-            biased;
-            _ = run.cancel.notified() => Outcome::Cancelled,
-            outcome = load_whole_source(&shared, &run) => outcome,
-        };
-    }
-    drop(live);
-    let _ = shared.events.send(Settled { url: run.source.url, outcome });
-}
-
-async fn load_whole_source(shared: &Arc<Shared>, run: &Run) -> Outcome {
-    let gate = &shared.whole_gates[usize::from(run.source.kind == SourceKind::Image)];
-    let _permit = gate.acquire(None, &run.distance, 0).await;
-    mark_started(shared, &run.active);
-    let outcome = load_whole(shared.loader.as_ref(), &run.source, run.tuning.timeout).await;
-    if outcome == Outcome::Loaded {
-        let mut state = shared.state();
-        if !state.owns(&run.key, run.id) {
-            return Outcome::Cancelled;
-        }
-        state.ledger.record_complete(&run.key);
-    }
-    outcome
-}
-
-async fn load(shared: &Arc<Shared>, run: &mut Run) -> Outcome {
-    if run.whole {
-        return load_whole_source(shared, run).await;
-    }
-    if is_hls(&run.source) {
-        return load_chunks(shared, run).await;
-    }
-    let _permit = shared.gate.acquire(None, &run.distance, 0).await;
-    mark_started(shared, &run.active);
-    let outcome = load_unit(shared.loader.as_ref(), &run.source, run.tuning.timeout).await;
-    if outcome == Outcome::Loaded {
-        let mut state = shared.state();
-        if !state.owns(&run.key, run.id) {
-            return Outcome::Cancelled;
-        }
-        state.ledger.record_unit(&run.key);
-    }
-    outcome
-}
-
-fn mark_started(shared: &Shared, active: &AtomicBool) {
-    if !active.swap(true, Ordering::SeqCst) {
-        shared.state().ledger.counters.started += 1;
-    }
-}
-
-async fn load_chunks(shared: &Arc<Shared>, run: &mut Run) -> Outcome {
-    let source = &run.source;
-    let mut permit: Option<LoadPermit> = None;
-    loop {
-        let step = {
-            shared.state().ledger.step(&run.key, *run.goal.borrow())
-        };
-        match step {
-            NextLoad::Done => return Outcome::Loaded,
-            NextLoad::NeedPlan => {
-                permit = Some(shared.gate.acquire(permit.take(), &run.distance, 0).await);
-                mark_started(shared, &run.active);
-                match read_plan(shared.loader.as_ref(), source, run.tuning.timeout, LeadingChunks::MAX_CHUNKS).await {
-                    Ok(plan) => {
-                        let mut state = shared.state();
-                        if !state.owns(&run.key, run.id) {
-                            return Outcome::Cancelled;
-                        }
-                        state.ledger.set_plan(&run.key, plan);
-                    }
-                    Err(outcome) => return outcome,
-                }
-            }
-            NextLoad::Chunk { index, chunk, init_loaded } => {
-                let room = shared.state().ledger.make_room(&run.key, run.distance.load(Ordering::SeqCst), run.tuning.budget);
-                let Some(evicted) = room else { return Outcome::OverBudget };
-                evict(shared, evicted).await;
-                permit = Some(shared.gate.acquire(permit.take(), &run.distance, index).await);
-                mark_started(shared, &run.active);
-                let loading = load_chunk(shared.loader.as_ref(), source, &chunk, init_loaded, run.tuning.timeout);
-                let loaded = tokio::select! {
-                    biased;
-                    shrunk = run.goal.wait_for(|goal| *goal <= index) => {
-                        if shrunk.is_err() {
-                            return Outcome::Cancelled;
-                        }
-                        shared.state().ledger.counters.cancelled += 1;
-                        continue;
-                    }
-                    loaded = loading => loaded,
-                };
-                let (parts, init) = match loaded {
-                    Ok(loaded) => loaded,
-                    Err(outcome) => return outcome,
-                };
-                let (evicted, itself) = {
-                    let mut state = shared.state();
-                    if !state.owns(&run.key, run.id) {
-                        return Outcome::Cancelled;
-                    }
-                    state.ledger.record_chunk(&run.key, index, parts, init, run.tuning.budget)
-                };
-                evict(shared, evicted).await;
-                if itself {
-                    return Outcome::OverBudget;
-                }
-            }
-        }
-    }
-}
-
-async fn load_chunk(
-    loader: &dyn Loader,
-    source: &Source,
-    chunk: &Chunk,
-    init_loaded: bool,
-    timeout: Duration,
-) -> Result<(Vec<(String, u64)>, Option<String>), Outcome> {
-    let mut parts = Vec::new();
-    let mut init = None;
-    if let Some(url) = chunk.init.as_ref().filter(|_| !init_loaded) {
-        let progress = Notify::new();
-        parts.push((url.clone(), bounded(timeout, &progress, loader.load(url, &source.headers, Priority::Prefetch, &progress)).await?));
-        init = Some(url.clone());
-    }
-    let progress = Notify::new();
-    parts.push((chunk.segment.clone(), bounded(timeout, &progress, loader.load(&chunk.segment, &source.headers, Priority::Prefetch, &progress)).await?));
-    Ok((parts, init))
-}
-
-async fn evict(shared: &Shared, evicted: Vec<Evicted>) {
-    for entry in evicted {
-        for url in entry.urls {
-            shared.loader.evict(&url, &entry.headers).await;
-        }
-    }
-}
-
-fn settle(state: &mut State, url: &str, id: u64, outcome: &Outcome) {
-    if !state.owns(url, id) {
-        return;
-    }
-    match outcome {
-        Outcome::Loaded => {
-            state.ledger.counters.completed += 1;
-            state.wholes.remove(url);
-        }
-        Outcome::Failed(_) | Outcome::TimedOut => {
-            state.ledger.counters.failed += 1;
-            for jobs in state.windows.values_mut() {
-                jobs.retain(|job| job.key != url);
-            }
-        }
-        Outcome::Cancelled | Outcome::OverBudget => {}
-    }
-    state.finish_job(url, id);
 }

@@ -15,7 +15,7 @@ use crate::change::Change;
 use crate::memory::Ledger;
 use crate::pool::Ring;
 use crate::prefetch::Prefetcher;
-use crate::session::{self, Election, WatchdogConfig};
+use crate::session::{Election, WatchdogConfig};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};

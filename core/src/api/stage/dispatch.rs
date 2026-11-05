@@ -4,7 +4,7 @@ use crate::api::types::Kind;
 use crate::hls::is_manifest_url;
 use crate::memory::Ledger;
 use crate::pool::Command;
-use crate::session::{self, next_action, Action, Event, RecoveryState};
+use crate::session::{next_action, Action, Event, RecoveryState};
 use std::sync::atomic::Ordering;
 use std::sync::{PoisonError, Weak};
 use std::time::Duration;

@@ -4,6 +4,8 @@ mod load_source;
 mod loader;
 mod plan;
 mod runner;
+mod runner_load;
+mod runner_types;
 mod settled;
 mod source;
 mod strategy;
