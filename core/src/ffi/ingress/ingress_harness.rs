@@ -1,17 +1,10 @@
 use super::*;
 use crate::api::test_support::{shared, FakeSettings};
-use crate::api::{MediaError, MediaItem, PlayerSlotFactory};
-use crate::ffi::{default_limits, default_pool_settings, DeviceMemory, FetchRequest, FetchResponse, Fetcher, OpenConfig};
+use crate::api::{MediaItem, PlayerSlotFactory};
+use crate::ffi::layer_harness::Offline;
+use crate::ffi::{default_limits, default_pool_settings, DeviceMemory, OpenConfig};
 use std::sync::Arc;
 
-pub(super) struct Offline;
-
-#[async_trait::async_trait]
-impl Fetcher for Offline {
-    async fn fetch(&self, _request: FetchRequest) -> Result<FetchResponse, MediaError> {
-        Err(MediaError::Fetch { detail: "offline".to_string() })
-    }
-}
 
 pub(super) fn config(dir: &std::path::Path, slots: Option<Arc<dyn PlayerSlotFactory>>, limits: Option<IngressLimits>) -> OpenConfig {
     OpenConfig {
