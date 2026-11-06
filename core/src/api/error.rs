@@ -22,6 +22,8 @@ pub enum MediaError {
     Camera { reason: crate::capture::CameraRefusal, detail: String, recorded_ms: Option<u64> },
     #[error("overloaded: {detail}")]
     Overloaded { detail: String },
+    #[error("a call is running, there is no playback")]
+    InCall,
     #[error("the media layer is closed")]
     Closed,
     #[error("unexpected: {detail}")]

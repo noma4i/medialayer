@@ -11,7 +11,7 @@ use super::book_types::*;
 
 impl Book {
     pub fn new(assembled: Arc<Assembled>, queue: Arc<InputQueue>, handle: Handle) -> Book {
-        Book { assembled, queue, handle, seq: 0, places: HashMap::new(), keys: HashMap::new(), windows: HashMap::new(), video_order: BTreeMap::new(), video_applied: None, subscriptions: HashMap::new(), suspensions: HashMap::new(), declarations: HashMap::new() }
+        Book { assembled, queue, handle, seq: 0, places: HashMap::new(), keys: HashMap::new(), windows: HashMap::new(), video_order: BTreeMap::new(), video_applied: None, subscriptions: HashMap::new(), suspensions: HashMap::new(), calls: HashMap::new(), declarations: HashMap::new() }
     }
 
     pub(super) fn next_seq(&mut self) -> u64 {
@@ -46,6 +46,7 @@ impl Book {
                 self.assembled.stage.suspend(owner, &groups);
                 self.suspensions.insert(owner, reserve);
             }
+            Declared::CallHold { owner } => self.hold_call(owner, reserve),
             Declared::WholeOpen { owner } => {
                 self.declarations.insert(owner, reserve);
             }
@@ -72,6 +73,7 @@ impl Book {
     pub(super) fn answer(&self, query: Query, reserve: Reserve, slot: EntryPlace) -> Answer {
         let assembled = self.assembled.clone();
         match query {
+            Query::PlayUrl(_) if !self.calls.is_empty() => Answer::Failed(MediaError::InCall),
             Query::PlayUrl(item) => Answer::Route(assembled.routes.play_url(&item)),
             Query::Refresh(item, route) => Answer::Route(assembled.routes.refresh(&item, &route)),
             Query::Pool => Answer::Pool(assembled.pool_stats()),
@@ -118,6 +120,7 @@ impl Book {
                 self.declarations.remove(&owner);
                 self.assembled.stage.release_wholes_of(owner);
             }
+            OwnerKind::Call => drop(self.calls.remove(&owner)),
             OwnerKind::Suspension => {
                 self.assembled.stage.resume(owner);
                 self.suspensions.remove(&owner);
@@ -163,6 +166,21 @@ impl Book {
         self.flush(&key);
     }
 
+    /// The first hold of a call pauses every playing key and forgets the opinions: nothing plays again until an owner declares play after the last release.
+    fn hold_call(&mut self, owner: u64, reserve: Reserve) {
+        let first = self.calls.is_empty();
+        self.calls.insert(owner, reserve);
+        if !first {
+            return;
+        }
+        let stage = &self.assembled.stage;
+        for (key, keyed) in self.keys.iter_mut().filter(|(_, keyed)| keyed.applied.playing) {
+            stage.set_playing(key, false, &[]);
+            keyed.applied.playing = false;
+            keyed.applied.groups.clear();
+        }
+    }
+
     pub(super) fn release_place(&mut self, owner: u64) {
         let Some(place) = self.places.remove(&owner) else { return };
         let key = place.item.url.clone();
@@ -200,7 +218,7 @@ impl Book {
             }
             (None, _) => {}
         }
-        let playing = keyed.playing > 0;
+        let playing = keyed.playing > 0 && self.calls.is_empty();
         let groups: Vec<Option<String>> = keyed.groups.keys().cloned().collect();
         let token = keyed.token_owner().and_then(|owner| self.places.get(&owner)).and_then(|place| place.input.view_token);
         if playing != keyed.applied.playing || (playing && groups != keyed.applied.groups) {

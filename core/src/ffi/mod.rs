@@ -13,7 +13,7 @@ mod spec_defaults;
 
 pub use events::PlayerEvents;
 pub use ingress::{IngressLimits, PlaceInput};
-pub use owned::{MediaPlace, MediaWholeDeclaration, MediaWindow, PlaybackSuspension};
+pub use owned::{CallHold, MediaPlace, MediaWholeDeclaration, MediaWindow, PlaybackSuspension};
 pub use image::{decode_blurhash, decode_cost, DecodeHold, image_pixel_size, ImageCounters, ImageSnapshot, ImageTotals, ImageWork, PixelSize};
 pub use fetcher::{BodyReader, FetchRequest, FetchResponse, Fetcher, ForeignFetcher};
 pub use layer::{MediaLayer, MemoryReleaser, OpenConfig, StateListener, StatsListener, ToneListener, WindowReadyListener};

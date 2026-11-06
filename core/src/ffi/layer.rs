@@ -4,7 +4,7 @@ use super::fetcher::{Fetcher, ForeignFetcher};
 use super::ingress::{run, Answer, Declared, Admitted, IngressLimits, Finished, OwnerKind, Pause, InputQueue, Query, Subscribing, WindowKind};
 use super::layer_life::LayerLife;
 use super::limits::{DeviceMemory, Evict, ImageWindow, Limits, PoolSettings};
-use super::owned::{MediaPlace, MediaWholeDeclaration, MediaWindow, PlaybackSuspension};
+use super::owned::{CallHold, MediaPlace, MediaWholeDeclaration, MediaWindow, PlaybackSuspension};
 use super::ready::Ready;
 use crate::analysis::MediaTone;
 use crate::api::TonePreparation;
@@ -518,6 +518,12 @@ impl MediaLayer {
         let owner = self.owner();
         self.closing.queue.open(owner, OwnerKind::Suspension, Declared::Suspend { owner, groups: allow_groups })?;
         Ok(Arc::new(PlaybackSuspension::new(self.closing.queue.clone(), owner)))
+    }
+
+    pub fn hold_call(&self) -> Result<Arc<CallHold>, MediaError> {
+        let owner = self.owner();
+        self.closing.queue.open(owner, OwnerKind::Call, Declared::CallHold { owner })?;
+        Ok(Arc::new(CallHold::new(self.closing.queue.clone(), owner)))
     }
 
     pub fn seek(&self, key: String, fraction: f64) -> Result<(), MediaError> {

@@ -176,9 +176,9 @@ fn inv_voice_02_the_recording_limit_has_a_default_and_stays_between_one_second_a
 
 #[test]
 fn inv_voice_03_every_refusal_has_its_own_text() {
-    let texts = [VoiceRefusal::PermissionDenied, VoiceRefusal::MicrophoneBusy, VoiceRefusal::Empty].map(voice_refusal_text);
+    let texts = [VoiceRefusal::PermissionDenied, VoiceRefusal::MicrophoneBusy, VoiceRefusal::Empty, VoiceRefusal::InCall].map(voice_refusal_text);
     assert!(texts.iter().all(|text| !text.is_empty()));
-    assert_eq!(texts.iter().collect::<std::collections::HashSet<_>>().len(), 3);
+    assert_eq!(texts.iter().collect::<std::collections::HashSet<_>>().len(), 4);
 }
 
 #[test]

@@ -38,6 +38,8 @@ object Media {
 
   var audio: MediaAudioSession? = null
     internal set
+
+  internal val calls = CallGate()
 }
 
 internal class ScreenVisibility {

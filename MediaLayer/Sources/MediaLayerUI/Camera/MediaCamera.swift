@@ -38,6 +38,8 @@ public final class MediaCamera: @unchecked Sendable {
   private let profile: CaptureProfile
   private let services: CameraServices
   private let backend: CaptureBackend
+  private let calls: CallGate
+  private let callId = UUID()
   private let queue = DispatchQueue(label: "com.noma4i.medialayer.camera")
   private let lock = NSLock()
   private var published: CameraState
@@ -64,13 +66,14 @@ public final class MediaCamera: @unchecked Sendable {
   private var observers: [UUID: (rate: Double, last: UInt64?, handler: @Sendable (CameraFrame) -> Void)] = [:]
 
   public convenience init(profile: CaptureProfile, lens: CameraLens = .back) throws {
-    try self.init(profile: profile, lens: lens, backend: AVCaptureBackend(), services: .live)
+    try self.init(profile: profile, lens: lens, backend: AVCaptureBackend(), services: .live, calls: Media.calls)
   }
 
-  init(profile: CaptureProfile, lens: CameraLens, backend: CaptureBackend, services: CameraServices) throws {
+  init(profile: CaptureProfile, lens: CameraLens, backend: CaptureBackend, services: CameraServices, calls: CallGate = Media.calls) throws {
     self.profile = try checkCaptureProfile(profile: profile)
     self.services = services
     self.backend = backend
+    self.calls = calls
     run = captureRun(lens: lens)
     published = run.state
     backend.setSink { [weak self] event in self?.post(event) }
@@ -123,6 +126,7 @@ public final class MediaCamera: @unchecked Sendable {
 
   /// Returns after the hardware started the recording. `NotReady` when the camera is not ready or the profile holds no video.
   public func startRecording() async throws {
+    if calls.inCall { throw Self.refusal(.inCall) }
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
       queue.async {
         guard self.startWaiter == nil else { return continuation.resume(throwing: Self.refusal(.notReady)) }
@@ -287,6 +291,8 @@ public final class MediaCamera: @unchecked Sendable {
       recordingURL = url
       clipInfo = nil
       backend.beginRecording(to: url, profile: profile, lens: run.state.lens)
+      let callId = callId
+      if !calls.register(callId, { [weak self] in self?.post(.callStarted) }) { post(.callStarted) }
     case .endRecording:
       backend.endRecording()
     case .readClip:
@@ -304,6 +310,7 @@ public final class MediaCamera: @unchecked Sendable {
 
   private func teardownHardware() {
     backend.unbind()
+    calls.unregister(callId)
     reading?.cancel()
     if let url = recordingURL { try? FileManager.default.removeItem(at: url) }
     recordingURL = nil
@@ -436,10 +443,12 @@ public final class MediaCamera: @unchecked Sendable {
     }
     recordingURL = nil
     clipInfo = nil
+    calls.unregister(callId)
     ended = .success(CapturedClip(url: url, durationMs: length, frame: info.frame, lens: run.state.lens))
   }
 
   private func discard() {
+    calls.unregister(callId)
     if let url = recordingURL { try? FileManager.default.removeItem(at: url) }
     recordingURL = nil
     clipInfo = nil

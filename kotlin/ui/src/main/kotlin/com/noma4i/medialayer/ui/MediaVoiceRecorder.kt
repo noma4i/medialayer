@@ -52,7 +52,8 @@ class MediaVoiceRecorder internal constructor(
   private val audio: () -> MediaAudioSession? = { Media.audio },
   private val clock: () -> Long = SystemClock::elapsedRealtime,
   private val levelIntervalMs: Long = LEVEL_INTERVAL_MS,
-  private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+  private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+  private val calls: CallGate = Media.calls
 ) {
   constructor(context: Context, maxDurationMs: Long? = null) : this(SystemVoiceCapture(context.applicationContext), voiceLimitMs(maxDurationMs?.toULong()).toLong())
 
@@ -61,6 +62,7 @@ class MediaVoiceRecorder internal constructor(
   private var running: Running? = null
   private var ended: Result<VoiceRecording>? = null
   private var heldAudio: MediaAudioSession? = null
+  private val callListener = CallListener(::callBegan)
 
   private class Running(val file: File, val startedAt: Long, var poll: Job? = null)
 
@@ -73,6 +75,7 @@ class MediaVoiceRecorder internal constructor(
       check(running == null) { "a recording is already running" }
       ended = null
     }
+    if (calls.inCall) throw inCall()
     val session = audio()
     if (session != null && !session.activateRecording()) throw MediaException.Voice(voiceRefusalText(VoiceRefusal.MICROPHONE_BUSY))
     try {
@@ -82,10 +85,24 @@ class MediaVoiceRecorder internal constructor(
       file.delete()
       throw MediaException.Voice(voiceRefusalText(refused.reason))
     }
-    synchronized(lock) {
+    val current = synchronized(lock) {
       heldAudio = session
-      running = Running(file, clock()).also { it.poll = scope.launch { pollLevels() } }
+      Running(file, clock()).also {
+        running = it
+        it.poll = scope.launch { pollLevels() }
+      }
     }
+    if (!calls.register(callListener)) {
+      finish(current, inCall())
+      throw inCall()
+    }
+  }
+
+  private fun inCall() = MediaException.Voice(voiceRefusalText(VoiceRefusal.IN_CALL))
+
+  private fun callBegan() {
+    val current = synchronized(lock) { running } ?: return
+    scope.launch(Dispatchers.IO) { finish(current, inCall()) }
   }
 
   /** Ends the recording and gives the file. After the limit ended it, gives the outcome of that recording. */
@@ -100,9 +117,10 @@ class MediaVoiceRecorder internal constructor(
     scope.launch(Dispatchers.IO) { finish(current) }
   }
 
-  private fun finish(current: Running): Result<VoiceRecording> = synchronized(lock) {
+  private fun finish(current: Running, interrupted: MediaException? = null): Result<VoiceRecording> = synchronized(lock) {
     if (running !== current) return@synchronized checkNotNull(ended)
     running = null
+    calls.unregister(callListener)
     current.poll?.cancel()
     val session = heldAudio
     heldAudio = null
@@ -111,10 +129,11 @@ class MediaVoiceRecorder internal constructor(
       try {
         capture.stop()
       } catch (refused: VoiceRefused) {
-        throw MediaException.Voice(voiceRefusalText(refused.reason))
+        if (interrupted == null) throw MediaException.Voice(voiceRefusalText(refused.reason))
       } finally {
         session?.deactivateRecording()
       }
+      if (interrupted != null) throw interrupted
       if (length <= 0 || !current.file.isFile || current.file.length() == 0L) throw MediaException.Voice(voiceRefusalText(VoiceRefusal.EMPTY))
       VoiceRecording(current.file, length)
     }

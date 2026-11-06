@@ -62,5 +62,6 @@ pub(crate) struct Book {
     pub(super) video_applied: Option<(u64, u64)>,
     pub(super) subscriptions: HashMap<u64, Observed>,
     pub(super) suspensions: HashMap<u64, Reserve>,
+    pub(super) calls: HashMap<u64, Reserve>,
     pub(super) declarations: HashMap<u64, Reserve>,
 }

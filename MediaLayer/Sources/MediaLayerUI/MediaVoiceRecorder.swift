@@ -38,6 +38,8 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
   private let audio: @Sendable () -> MediaAudioSession?
   private let clock: @Sendable () -> UInt64
   private let levelInterval: Duration
+  private let calls: CallGate
+  private let callId = UUID()
   private let lock = NSLock()
   private var running: Running?
   private var ended: Result<VoiceRecording, Error>?
@@ -53,13 +55,15 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     maxDurationMs: UInt64,
     audio: @escaping @Sendable () -> MediaAudioSession? = { Media.audio },
     clock: @escaping @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds / 1_000_000 },
-    levelInterval: Duration = .milliseconds(50)
+    levelInterval: Duration = .milliseconds(50),
+    calls: CallGate = Media.calls
   ) {
     self.capture = capture
     self.maxDurationMs = maxDurationMs
     self.audio = audio
     self.clock = clock
     self.levelInterval = levelInterval
+    self.calls = calls
   }
 
   public var isRecording: Bool { lock.withLock { running != nil } }
@@ -78,6 +82,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
       guard running == nil else { throw MediaError.Unexpected(detail: "a recording is already running") }
       ended = nil
     }
+    if calls.inCall { throw Self.inCall() }
     let session = audio()
     if let session, !(await session.activateRecording()) {
       throw MediaError.Voice(detail: voiceRefusalText(reason: .microphoneBusy))
@@ -95,6 +100,19 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
       held = session
       running = current
     }
+    if !calls.register(callId, { [weak self] in self?.callBegan() }) {
+      _ = await finish(current, interrupted: Self.inCall())
+      throw Self.inCall()
+    }
+  }
+
+  private static func inCall() -> MediaError {
+    MediaError.Voice(detail: voiceRefusalText(reason: .inCall))
+  }
+
+  private func callBegan() {
+    guard let current = lock.withLock({ running }) else { return }
+    Task { _ = await finish(current, interrupted: Self.inCall()) }
   }
 
   /// Ends the recording and gives the file. After the limit ended it, gives the outcome of that recording.
@@ -111,10 +129,11 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     Task { _ = await finish(current) }
   }
 
-  private func finish(_ current: Running) async -> Result<VoiceRecording, Error> {
+  private func finish(_ current: Running, interrupted: MediaError? = nil) async -> Result<VoiceRecording, Error> {
     let taken: (session: MediaAudioSession?, outcome: Result<VoiceRecording, Error>?) = lock.withLock {
       guard running === current else { return (nil, ended) }
       running = nil
+      calls.unregister(callId)
       current.poll?.cancel()
       let session = held
       held = nil
@@ -124,7 +143,10 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     let length = clock() &- current.startedAt
     var outcome: Result<VoiceRecording, Error>
     do {
-      try capture.stop()
+      do {
+        try capture.stop()
+      } catch where interrupted != nil {}
+      if let interrupted { throw interrupted }
       let size = (try? FileManager.default.attributesOfItem(atPath: current.file.path)[.size] as? Int) ?? 0
       if length == 0 || size == 0 { throw MediaError.Voice(detail: voiceRefusalText(reason: .empty)) }
       outcome = .success(VoiceRecording(url: current.file, durationMs: length))

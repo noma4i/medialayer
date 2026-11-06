@@ -261,6 +261,30 @@ struct MediaCameraTests {
   }
 
   @Test
+  func inv_call_13_a_call_throws_a_running_video_recording_away_with_the_in_call_refusal_and_refuses_a_new_one() async throws {
+    let rig = try makeRig(.moment)
+    await ready(rig)
+    try await rig.camera.startRecording()
+
+    Media.calls.hold()
+    defer { Media.calls.release() }
+    do {
+      _ = try await rig.camera.stopRecording()
+      Issue.record("a recording survived the call")
+    } catch let MediaError.Camera(reason, detail, _) {
+      #expect((reason, detail) == (.inCall, cameraRefusalText(reason: .inCall)))
+    }
+    #expect(files(rig).isEmpty)
+    await eventually("ready after the call") { rig.camera.state.phase == .ready }
+    do {
+      try await rig.camera.startRecording()
+      Issue.record("a recording started during a call")
+    } catch let MediaError.Camera(reason, _, _) {
+      #expect(reason == .inCall)
+    }
+  }
+
+  @Test
   func inv_capture_14_the_orphans_of_an_earlier_run_are_removed_and_other_files_stay() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("sweep-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

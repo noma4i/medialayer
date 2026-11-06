@@ -271,6 +271,26 @@ class MediaCameraTest {
   }
 
   @Test
+  fun inv_call_13_aCallThrowsARunningVideoRecordingAwayWithTheInCallRefusalAndRefusesANewOne() = runBlocking {
+    val rig = rig(moment)
+    ready(rig)
+    rig.camera.startRecording()
+
+    Media.calls.hold()
+    try {
+      val ended = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
+      assertEquals(CameraRefusal.IN_CALL to cameraRefusalText(CameraRefusal.IN_CALL), ended.reason to ended.detail)
+      assertTrue(rig.files().isEmpty())
+      eventually("ready after the call") { rig.camera.state.value.phase == CameraPhase.READY }
+
+      val refused = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.startRecording() } }
+      assertEquals(CameraRefusal.IN_CALL, refused.reason)
+    } finally {
+      Media.calls.release()
+    }
+  }
+
+  @Test
   fun inv_capture_14_theOrphansOfAnEarlierRunAreRemovedAndOtherFilesStay() {
     val directory = File(context.cacheDir, "sweep-${System.nanoTime()}").apply { mkdirs() }
     listOf("capture-a.jpg", "capture-b.mp4", "keep.txt", "voice-a.m4a").forEach { File(directory, it).writeBytes(byteArrayOf(1)) }

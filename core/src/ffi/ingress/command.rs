@@ -29,6 +29,7 @@ pub(crate) enum OwnerKind {
     Subscription,
     Suspension,
     Declaration,
+    Call,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,6 +115,7 @@ pub(crate) enum Declared {
     ImageWindow { owner: u64, active: u32, pages: Option<Arc<Vec<Vec<MediaItem>>>> },
     WindowReady { owner: u64, listener: Arc<dyn WindowReadyListener> },
     Suspend { owner: u64, groups: Vec<String> },
+    CallHold { owner: u64 },
     WholeOpen { owner: u64 },
     WholeAdd { owner: u64, items: Vec<MediaItem> },
     WholeRemove { owner: u64, items: Vec<MediaItem> },
@@ -192,6 +194,7 @@ impl Declared {
             | Declared::ImageWindow { owner, .. }
             | Declared::WindowReady { owner, .. }
             | Declared::Suspend { owner, .. }
+            | Declared::CallHold { owner }
             | Declared::WholeOpen { owner }
             | Declared::WholeAdd { owner, .. }
             | Declared::WholeRemove { owner, .. }

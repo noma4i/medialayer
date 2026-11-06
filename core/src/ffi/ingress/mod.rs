@@ -19,6 +19,8 @@ pub(crate) use queue::{Admitted, InputQueue};
 #[cfg(test)]
 mod ingress_harness;
 #[cfg(test)]
+mod ingress_call_tests;
+#[cfg(test)]
 mod ingress_close_tests;
 #[cfg(test)]
 mod ingress_places_tests;

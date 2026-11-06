@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- `callHold()` stops playback and recording while a call runs and restores nothing on release.
+
 ## 3.27.1 - 2026-11-02
 
 ### Fixed

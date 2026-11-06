@@ -526,3 +526,27 @@ SuspendMediaPlayback(active = isShareSheetOpen, allowGroups = listOf("chat"))
 MediaLayer owns the sound policy of the players: you pass an `audioFocus` policy to `open` (default `mix`), and the app writes no audio session or audio focus code for playback: [audio focus](audio-focus.md).
 
 You report only whether a place is visible or active. Prefetch, preroll, handoff and release follow from that. Several views can show the same url at once (a chat row and its message preview). The place keeps its state until the last of them reports that it left, so a view that stays on screen never falls back to idle because another view of the same url disappeared.
+
+## Calls
+
+While a call runs, MediaLayer plays nothing and records nothing. Take a call hold when the call starts and release it when the call ends. While at least one hold is alive, every player is paused, a place that declares play gets no play, `playUrl` fails with `MediaError.InCall`, a running `MediaVoiceRecorder` and a running video recording of `MediaCamera` stop with the in-call refusal and delete their file, and a new recording is refused with the same refusal before it touches the microphone. A photo is not a recording and is not refused.
+
+Releasing the last hold restores nothing. A place plays again when its owner declares play after the release: an update of a place that still says `playing` does it. Suspensions and calls are independent: a suspension released during a call restores nothing.
+
+### Swift
+
+```swift
+let call = try media.callHold()
+// the call runs
+call.release()
+```
+
+### Kotlin
+
+```kotlin
+val call = media.callHold()
+// the call runs
+call.release()
+```
+
+The hold also releases when it is deallocated (Swift) or closed (Kotlin `use`).

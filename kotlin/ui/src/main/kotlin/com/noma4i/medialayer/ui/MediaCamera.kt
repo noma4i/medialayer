@@ -65,7 +65,8 @@ class MediaCamera internal constructor(
   lens: CameraLens,
   private val backend: CaptureBackend,
   private val services: CameraServices,
-  private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+  private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+  private val calls: CallGate = Media.calls
 ) : AutoCloseable {
   constructor(context: Context, profile: CaptureProfile, lens: CameraLens = CameraLens.BACK) :
     this(profile, lens, CameraXBackend(context.applicationContext), CameraServices.live(context.applicationContext))
@@ -92,6 +93,7 @@ class MediaCamera internal constructor(
   private var stopWaiter: CompletableDeferred<CapturedClip>? = null
   private val observers = ConcurrentHashMap<String, Observer>()
   private var frameTapOn = false
+  private val callListener = CallListener { post(CaptureEvent.CallStarted) }
 
   private class Observer(val perSecond: Double, val analyzer: ImageAnalysis.Analyzer, @Volatile var last: ULong? = null)
 
@@ -122,6 +124,7 @@ class MediaCamera internal constructor(
 
   /** Returns after the hardware started the recording. `NOT_READY` when the camera is not ready or the profile holds no video. */
   suspend fun startRecording() {
+    if (calls.inCall) throw refusal(CameraRefusal.IN_CALL)
     val waiter = CompletableDeferred<Unit>()
     val queued = enqueue {
       if (startWaiter != null || closed) {
@@ -299,6 +302,7 @@ class MediaCamera internal constructor(
         recordingFile = file
         clipInfo = null
         backend.beginRecording(file, profile, run.state.lens)
+        if (!calls.register(callListener)) post(CaptureEvent.CallStarted)
       }
       is CaptureAction.EndRecording -> backend.endRecording()
       CaptureAction.ReadClip -> readClip()
@@ -311,6 +315,7 @@ class MediaCamera internal constructor(
 
   private fun teardownHardware() {
     backend.unbind()
+    calls.unregister(callListener)
     reading?.cancel()
     recordingFile?.delete()
     recordingFile = null
@@ -434,10 +439,12 @@ class MediaCamera internal constructor(
     if (file == null || info == null || length == null) return discard()
     recordingFile = null
     clipInfo = null
+    calls.unregister(callListener)
     ended = Result.success(CapturedClip(file, length.toLong(), info.frame, run.state.lens))
   }
 
   private fun discard() {
+    calls.unregister(callListener)
     recordingFile?.delete()
     recordingFile = null
     clipInfo = null

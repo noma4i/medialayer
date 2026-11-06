@@ -58,6 +58,8 @@ pub enum CaptureEvent {
     Tick { recorded_ms: u64 },
     Stop,
     Cancel,
+    /// A call began: a recording that runs is thrown away and ends with `InCall`.
+    CallStarted,
     RecordFinished { end: RecordEnd },
     RecordSettled { duration_ms: Option<u64> },
     SetLens { lens: CameraLens },
@@ -162,6 +164,10 @@ impl Machine {
             CaptureEvent::Tick { recorded_ms } if phase == CameraPhase::Recording => self.run.state.recorded_ms = recorded_ms,
             CaptureEvent::Stop if phase == CameraPhase::Recording => self.end_recording(false),
             CaptureEvent::Cancel => self.cancel(),
+            CaptureEvent::CallStarted if self.recording_in_progress() => {
+                self.run.state.fault = Some(CameraRefusal::InCall);
+                self.cancel();
+            }
             CaptureEvent::RecordFinished { end } if self.recording_in_progress() => self.record_finished(end),
             CaptureEvent::RecordSettled { duration_ms } if phase == CameraPhase::Stopping && self.run.end.is_some() => self.settle(duration_ms),
             CaptureEvent::SetLens { lens } => self.set_lens(lens),
@@ -302,7 +308,7 @@ impl Machine {
         let verdict = record_verdict(self.run.started, false, self.run.discard, end, duration_ms, self.profile.min_take_ms);
         let (action, fault) = match verdict {
             RecordVerdict::Deliver => (CaptureAction::Deliver, None),
-            RecordVerdict::Skip => (CaptureAction::Discard, None),
+            RecordVerdict::Skip => (CaptureAction::Discard, self.run.state.fault.filter(|fault| *fault == CameraRefusal::InCall)),
             RecordVerdict::TooShort => (CaptureAction::Discard, Some(CameraRefusal::TooShort)),
             RecordVerdict::CameraNotReady => (CaptureAction::Discard, Some(CameraRefusal::NotReady)),
             RecordVerdict::Failed => (CaptureAction::Discard, Some(CameraRefusal::RecordFailed)),

@@ -12,6 +12,7 @@ pub enum CameraRefusal {
     RecordFailed,
     PhotoFailed,
     Memory,
+    InCall,
 }
 
 /// The text of a refusal, the same on both platforms.
@@ -27,6 +28,7 @@ pub fn camera_refusal_text(reason: CameraRefusal) -> String {
         CameraRefusal::RecordFailed => "the recording failed",
         CameraRefusal::PhotoFailed => "the photo could not be taken",
         CameraRefusal::Memory => "there is not enough memory for the camera",
+        CameraRefusal::InCall => "a call is running, there is no recording",
     }
     .to_string()
 }

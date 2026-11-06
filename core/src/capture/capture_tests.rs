@@ -372,7 +372,7 @@ fn inv_capture_13_the_costs_are_rasters_of_the_session_and_of_the_shot() {
     assert_eq!(capture_cost(photo_profile()), px(1080, 1920) * 2);
     assert_eq!(shot_cost(4000, 3000), Some(px(4000, 3000) * 2));
     assert_eq!((shot_cost(0, 10), shot_cost(16_385, 1)), (None, None));
-    for reason in [CameraRefusal::PermissionDenied, CameraRefusal::NoCamera, CameraRefusal::Busy, CameraRefusal::ConfigureFailed, CameraRefusal::NotReady, CameraRefusal::TooShort, CameraRefusal::RecordFailed, CameraRefusal::PhotoFailed, CameraRefusal::Memory] {
+    for reason in [CameraRefusal::PermissionDenied, CameraRefusal::NoCamera, CameraRefusal::Busy, CameraRefusal::ConfigureFailed, CameraRefusal::NotReady, CameraRefusal::TooShort, CameraRefusal::RecordFailed, CameraRefusal::PhotoFailed, CameraRefusal::Memory, CameraRefusal::InCall] {
         assert!(!camera_refusal_text(reason).is_empty());
     }
 }
@@ -426,4 +426,17 @@ fn inv_capture_28_a_too_short_recording_keeps_its_length_in_the_state() {
     assert_eq!(drive(profile, short, &[CaptureEvent::Start]).0.state.refused_ms, None, "a new recording starts without the old length");
     let (cancelled, _) = drive(profile, recording, &[CaptureEvent::Cancel, CaptureEvent::RecordFinished { end: RecordEnd::Completed }]);
     assert_eq!(cancelled.state.refused_ms, None, "a thrown away recording refuses nothing");
+}
+
+#[test]
+fn inv_call_08_a_call_throws_a_running_recording_away_and_ends_it_with_the_in_call_refusal() {
+    let profile = moment();
+    let recording = drive(profile, ready(profile), &[CaptureEvent::Start, CaptureEvent::RecordStarted]).0;
+
+    let (ended, actions) = drive(profile, recording, &[CaptureEvent::CallStarted, CaptureEvent::RecordFinished { end: RecordEnd::Completed }]);
+    assert_eq!((actions, ended.state.fault, phase(&ended)), (vec![CaptureAction::EndRecording { discard: true }, CaptureAction::Discard], Some(CameraRefusal::InCall), CameraPhase::Ready));
+
+    let idle = ready(profile);
+    let (untouched, actions) = drive(profile, idle, &[CaptureEvent::CallStarted]);
+    assert_eq!((actions, untouched.state.fault, phase(&untouched)), (Vec::new(), None, CameraPhase::Ready), "a call without a recording changes nothing");
 }
