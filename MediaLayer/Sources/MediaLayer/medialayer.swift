@@ -942,6 +942,128 @@ public func FfiConverterTypeBodyReader_lower(_ value: BodyReader) -> UInt64 {
 
 
 
+/**
+ * While at least one hold lives, a call runs: nothing plays, `play_url` is refused, and releasing restores nothing.
+ */
+public protocol CallHoldProtocol: AnyObject, Sendable {
+    
+    func release() 
+    
+}
+/**
+ * While at least one hold lives, a call runs: nothing plays, `play_url` is refused, and releasing restores nothing.
+ */
+open class CallHold: CallHoldProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_medialayer_fn_clone_callhold(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_medialayer_fn_free_callhold(handle, $0) }
+    }
+
+    
+
+    
+open func release()  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_method_callhold_release(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+}
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCallHold: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = CallHold
+
+    public static func lift(_ handle: UInt64) throws -> CallHold {
+        return CallHold(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: CallHold) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CallHold {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: CallHold, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCallHold_lift(_ handle: UInt64) throws -> CallHold {
+    return try FfiConverterTypeCallHold.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCallHold_lower(_ value: CallHold) -> UInt64 {
+    return FfiConverterTypeCallHold.lower(value)
+}
+
+
+
+
+
+
 public protocol DecodeHoldProtocol: AnyObject, Sendable {
     
     func bytes()  -> UInt64
@@ -1453,6 +1575,8 @@ public protocol MediaLayerProtocol: AnyObject, Sendable {
     
     func fetchImage(url: String, headers: [String: String]) async throws  -> ImageFetchResult
     
+    func holdCall() throws  -> CallHold
+    
     func imageSize(url: String, headers: [String: String]) async throws  -> ImageSize?
     
     func imageStats()  -> ImageCounters
@@ -1654,6 +1778,15 @@ open func fetchImage(url: String, headers: [String: String])async throws  -> Ima
             liftFunc: FfiConverterTypeImageFetchResult_lift,
             errorHandler: FfiConverterTypeMediaError_lift
         )
+}
+    
+open func holdCall()throws  -> CallHold  {
+    return try  FfiConverterTypeCallHold_lift(try rustCallWithError(FfiConverterTypeMediaError_lift) {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_method_medialayer_hold_call(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
 }
     
 open func imageSize(url: String, headers: [String: String])async throws  -> ImageSize?  {
@@ -9706,6 +9839,7 @@ public enum CameraRefusal: Equatable, Hashable {
     case recordFailed
     case photoFailed
     case memory
+    case inCall
 
 
 
@@ -9744,6 +9878,8 @@ public struct FfiConverterTypeCameraRefusal: FfiConverterRustBuffer {
         case 8: return .photoFailed
         
         case 9: return .memory
+        
+        case 10: return .inCall
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -9787,6 +9923,10 @@ public struct FfiConverterTypeCameraRefusal: FfiConverterRustBuffer {
         
         case .memory:
             writeInt(&buf, Int32(9))
+        
+        
+        case .inCall:
+            writeInt(&buf, Int32(10))
         
         }
     }
@@ -9979,6 +10119,10 @@ public enum CaptureEvent: Equatable, Hashable {
     )
     case stop
     case cancel
+    /**
+     * A call began: a recording that runs is thrown away and ends with `InCall`.
+     */
+    case callStarted
     case recordFinished(end: RecordEnd
     )
     case recordSettled(durationMs: UInt64?
@@ -10044,19 +10188,21 @@ public struct FfiConverterTypeCaptureEvent: FfiConverterRustBuffer {
         
         case 14: return .cancel
         
-        case 15: return .recordFinished(end: try FfiConverterTypeRecordEnd.read(from: &buf)
+        case 15: return .callStarted
+        
+        case 16: return .recordFinished(end: try FfiConverterTypeRecordEnd.read(from: &buf)
         )
         
-        case 16: return .recordSettled(durationMs: try FfiConverterOptionUInt64.read(from: &buf)
+        case 17: return .recordSettled(durationMs: try FfiConverterOptionUInt64.read(from: &buf)
         )
         
-        case 17: return .setLens(lens: try FfiConverterTypeCameraLens.read(from: &buf)
+        case 18: return .setLens(lens: try FfiConverterTypeCameraLens.read(from: &buf)
         )
         
-        case 18: return .setFlash(on: try FfiConverterBool.read(from: &buf)
+        case 19: return .setFlash(on: try FfiConverterBool.read(from: &buf)
         )
         
-        case 19: return .zoomBy(factor: try FfiConverterFloat.read(from: &buf)
+        case 20: return .zoomBy(factor: try FfiConverterFloat.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -10131,28 +10277,32 @@ public struct FfiConverterTypeCaptureEvent: FfiConverterRustBuffer {
             writeInt(&buf, Int32(14))
         
         
-        case let .recordFinished(end):
+        case .callStarted:
             writeInt(&buf, Int32(15))
+        
+        
+        case let .recordFinished(end):
+            writeInt(&buf, Int32(16))
             FfiConverterTypeRecordEnd.write(end, into: &buf)
             
         
         case let .recordSettled(durationMs):
-            writeInt(&buf, Int32(16))
+            writeInt(&buf, Int32(17))
             FfiConverterOptionUInt64.write(durationMs, into: &buf)
             
         
         case let .setLens(lens):
-            writeInt(&buf, Int32(17))
+            writeInt(&buf, Int32(18))
             FfiConverterTypeCameraLens.write(lens, into: &buf)
             
         
         case let .setFlash(on):
-            writeInt(&buf, Int32(18))
+            writeInt(&buf, Int32(19))
             FfiConverterBool.write(on, into: &buf)
             
         
         case let .zoomBy(factor):
-            writeInt(&buf, Int32(19))
+            writeInt(&buf, Int32(20))
             FfiConverterFloat.write(factor, into: &buf)
             
         }
@@ -11066,6 +11216,7 @@ enum MediaError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
     )
     case Overloaded(detail: String
     )
+    case InCall
     case Closed
     case Unexpected(detail: String
     )
@@ -11130,8 +11281,9 @@ public struct FfiConverterTypeMediaError: FfiConverterRustBuffer {
         case 10: return .Overloaded(
             detail: try FfiConverterString.read(from: &buf)
             )
-        case 11: return .Closed
-        case 12: return .Unexpected(
+        case 11: return .InCall
+        case 12: return .Closed
+        case 13: return .Unexpected(
             detail: try FfiConverterString.read(from: &buf)
             )
 
@@ -11198,12 +11350,16 @@ public struct FfiConverterTypeMediaError: FfiConverterRustBuffer {
             FfiConverterString.write(detail, into: &buf)
             
         
-        case .Closed:
+        case .InCall:
             writeInt(&buf, Int32(11))
         
         
-        case let .Unexpected(detail):
+        case .Closed:
             writeInt(&buf, Int32(12))
+        
+        
+        case let .Unexpected(detail):
+            writeInt(&buf, Int32(13))
             FfiConverterString.write(detail, into: &buf)
             
         }
@@ -12008,6 +12164,7 @@ public enum VoiceRefusal: Equatable, Hashable {
     case permissionDenied
     case microphoneBusy
     case empty
+    case inCall
 
 
 
@@ -12035,6 +12192,8 @@ public struct FfiConverterTypeVoiceRefusal: FfiConverterRustBuffer {
         
         case 3: return .empty
         
+        case 4: return .inCall
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -12053,6 +12212,10 @@ public struct FfiConverterTypeVoiceRefusal: FfiConverterRustBuffer {
         
         case .empty:
             writeInt(&buf, Int32(3))
+        
+        
+        case .inCall:
+            writeInt(&buf, Int32(4))
         
         }
     }
@@ -14413,6 +14576,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_medialayer_checksum_method_medialayer_fetch_image() != 31267) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_medialayer_checksum_method_medialayer_hold_call() != 17283) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_medialayer_checksum_method_medialayer_image_size() != 34246) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -14528,6 +14694,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_method_windowreadylistener_changed() != 13370) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_medialayer_checksum_method_callhold_release() != 12699) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_method_mediaplace_item_state() != 46247) {
