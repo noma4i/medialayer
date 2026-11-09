@@ -149,7 +149,6 @@ public struct MediaImage<Content: View>: View {
   @State private var mountedContext: ObjectIdentifier?
   @State private var onScreen = false
   @State private var inBackground = false
-  private static var coldFadeDuration: Double { 0.22 }
   private let source: any MediaSource
   private let preview: (any MediaSource)?
   private let contentMode: ContentMode
@@ -184,7 +183,7 @@ public struct MediaImage<Content: View>: View {
         ImageRequestView(source: source, context: context, points: geometry.size, scale: displayScale, contentMode: contentMode) { key, request in
           let shown = shownImage(for: key, request: request)
           ZStack {
-            if isPlaying && shown == nil {
+            if ImagePass.drawsPlaceholder(playing: isPlaying, shown: shown != nil) {
               PlaceholderView(item: source.item, ready: false, context: context)
               if let preview, loaded.flatMap({ $0.key == key ? $0.frames : nil }) == nil {
                 PreviewImage(source: preview, context: context, points: geometry.size, scale: displayScale, contentMode: contentMode)
@@ -193,9 +192,9 @@ public struct MediaImage<Content: View>: View {
             if let frames = loaded.flatMap({ $0.key == key ? $0.frames : nil }) {
               AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isPlaying, playbackRate: playbackRate, animation: animation, rests: animation.rests(reduceMotion: reduceMotion))
             } else if let shown {
-              Image(platform: shown).resizable().aspectRatio(contentMode: contentMode).transition(.opacity)
+              Image(platform: shown).resizable().aspectRatio(contentMode: contentMode)
             }
-            if isPlaying { content(failure?.of(source.item) ?? state) }
+            if isPlaying { content(ImagePass.contentState(shown: shown != nil, state: state, failure: failure?.of(source.item))) }
           }
           .frame(width: geometry.size.width, height: geometry.size.height)
           .clipped()
@@ -270,18 +269,13 @@ public struct MediaImage<Content: View>: View {
 
   private func load(key: ImageKey, request: ImageRequest?) async {
     guard loaded?.key != key, let context, key.pixels != nil, let request else { return }
-    let isCold = MediaImagePipeline.cachedContainer(for: request, in: context.pipeline) == nil
     let tail = MediaTrace.tail(source.url)
     MediaTrace.emit("image", "load \(tail) start")
     let report: (@Sendable (MediaState) -> Void)? = mount.map { mount in { @Sendable state in mount.report(state) } }
     let container = await MediaImagePipeline.load(source, request: request, pipeline: context.pipeline, report: report)
     MediaTrace.emit("image", "load \(tail) \(container == nil ? "failed" : "done")")
     let next = container.map { LoadedImage(key: key, image: $0.image, animated: $0.type == .gif || $0.type == .webp ? $0.data : nil) }
-    if isCold, preview == nil {
-      withAnimation(.easeOut(duration: Self.coldFadeDuration)) { loaded = next }
-    } else {
-      loaded = next
-    }
+    loaded = next
   }
 
   private func framesJob(for key: ImageKey) -> FramesJob {
@@ -307,6 +301,20 @@ public struct MediaImage<Content: View>: View {
     defer { stats.recordLater(work: .unobserve) }
     let stream = await Task.detached { places.stateStream(key: url) }.value
     for await value in stream { state = value }
+  }
+}
+
+/// What one render pass of `MediaImage` draws: the image and a loading state or a placeholder never share a pass.
+enum ImagePass {
+  static func drawsPlaceholder(playing: Bool, shown: Bool) -> Bool { playing && !shown }
+
+  static func contentState(shown: Bool, state: MediaState, failure: MediaState?) -> MediaState {
+    if let failure { return failure }
+    guard shown else { return state }
+    switch state {
+    case .idle, .loading: return .ready
+    default: return state
+    }
   }
 }
 

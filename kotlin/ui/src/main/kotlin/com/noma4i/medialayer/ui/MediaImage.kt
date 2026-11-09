@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -167,10 +168,12 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
         mount.report(reached)
       }
     },
-    modifier = Modifier.fillMaxSize()
+    modifier = Modifier.fillMaxSize().drawWithContent { if (state.value.drawsImage()) drawContent() }
   )
   ImageContent(screen, state, content)
 }
+
+internal fun MediaState.drawsImage(): Boolean = this != MediaState.Idle && this != MediaState.Loading
 
 @Composable
 private fun ImageContent(screen: ScreenVisibility, state: State<MediaState>, content: @Composable (MediaState) -> Unit) {

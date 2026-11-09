@@ -108,6 +108,8 @@ MediaSourceValue(row.url, Kind.IMAGE, size = 288 to 288, strategy = CacheStrateg
 
 `preview` puts a second source in the place of one image. It shows while the main source has no frame, usually a local `file://` copy of a picture that is still uploading. The first frame of the main source replaces it in the same frame, with no empty frame and no timer. The preview takes no place of its own and is never prefetched. The cache key of the main source stays its URL.
 
+The placeholder and the image are never drawn together, and there is no cross-fade: in the frame that draws the first image frame the placeholder is gone and the `content` closure gets a ready state. A failure still reaches `content` as `failed`.
+
 ### Swift
 
 ```swift

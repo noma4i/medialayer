@@ -5,6 +5,10 @@
 ### Added
 - Kotlin `MediaImage` plays animated images at a given playback rate.
 
+### Changed
+- `MediaImage` content gets the ready state in the frame the image is drawn.
+- Swift `MediaImage` no longer cross-fades the placeholder into a cold image.
+
 ### Fixed
 - A video window without sources no longer takes the stage from the active window.
 
