@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Kotlin `MediaImage` plays animated images at a given playback rate.
+
 ## 3.28.0 - 2026-11-06
 
 ### Added

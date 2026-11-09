@@ -20,10 +20,10 @@ fun interface ImageBytes {
   suspend fun load(url: String, headers: Map<String, String>): com.noma4i.medialayer.ImageFetchResult
 }
 
-internal data class MediaImageData(val url: String, val headers: Map<String, String>, val media: com.noma4i.medialayer.MediaLayer, val declared: com.noma4i.medialayer.PixelSize? = null, val pixels: com.noma4i.medialayer.PixelSize? = null, val rest: RestFrame? = null, val repeats: Repeats = Repeats.Forever, val dimensions: PixelSizeMemo.Args? = null)
+internal data class MediaImageData(val url: String, val headers: Map<String, String>, val media: com.noma4i.medialayer.MediaLayer, val declared: com.noma4i.medialayer.PixelSize? = null, val pixels: com.noma4i.medialayer.PixelSize? = null, val rest: RestFrame? = null, val repeats: Repeats = Repeats.Forever, val dimensions: PixelSizeMemo.Args? = null, val rated: Boolean = false)
 
-internal fun imageMemoryKey(cacheKey: String, pixels: com.noma4i.medialayer.PixelSize, scale: coil3.size.Scale, rest: RestFrame? = null, repeats: Repeats = Repeats.Forever): MemoryCache.Key =
-  MemoryCache.Key("$cacheKey|${pixels.width}x${pixels.height}|$scale" + (rest?.let { "|rest:$it" } ?: if (repeats == Repeats.Forever) "" else "|repeats:$repeats"))
+internal fun imageMemoryKey(cacheKey: String, pixels: com.noma4i.medialayer.PixelSize, scale: coil3.size.Scale, rest: RestFrame? = null, repeats: Repeats = Repeats.Forever, rated: Boolean = false): MemoryCache.Key =
+  MemoryCache.Key("$cacheKey|${pixels.width}x${pixels.height}|$scale" + (rest?.let { "|rest:$it" } ?: if (repeats == Repeats.Forever) "" else "|repeats:$repeats") + if (rated) "|rated" else "")
 
 private const val MAX_IMAGE_MEMORY_BYTES: Int = 128 * 1024 * 1024
 
@@ -49,7 +49,7 @@ internal fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: 
         val prepared = pixelSizes.prepare(PixelSizeMemo.Input(PixelSizeMemo.Source(data.url, data.headers, data.media), dimensions, data.pixels)) { data.media.cacheKey(data.url, data.headers) }
         val pixels = prepared.pixels
         val request = chain.request.newBuilder()
-        request.memoryCacheKey(if (pixels == null) MemoryCache.Key(prepared.identity) else imageMemoryKey(prepared.identity, pixels, chain.request.scale, data.rest, data.repeats))
+        request.memoryCacheKey(if (pixels == null) MemoryCache.Key(prepared.identity + if (data.rated) "|rated" else "") else imageMemoryKey(prepared.identity, pixels, chain.request.scale, data.rest, data.repeats, data.rated))
         val keyed = chain.withRequest(request.build())
         val result = if (pixels == null) keyed.proceed() else keyed.withSize(coil3.size.Size(pixels.width.toInt(), pixels.height.toInt())).proceed()
         (result as? SuccessResult)?.let { pixelSizes.retain(it.image, prepared) }

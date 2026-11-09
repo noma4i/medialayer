@@ -23,7 +23,16 @@ An image that is off screen, in a hidden window or in the background draws no fr
 ## Decoding
 
 - iOS decodes frames from the bytes the core delivered (`FrameStream`). A GIF or WebP over the byte budget keeps a window of three frames. Decoding runs off the main thread and ends when the view leaves.
-- Android decodes through the Coil animated decoder and plays it with `AnimatedImageDrawable`.
+- Android decodes through the Coil animated decoder and plays it with `AnimatedImageDrawable`. At a playback rate other than 1 it paints the frames off the main thread (a GIF with `Movie`, a WebP frame by frame) and shows each frame at the scaled time, because the platform drawable has no speed control.
+
+## Playback rate
+
+`MediaImage` plays an animated GIF or WebP at a given speed. The app passes `playbackRate`, a number above 0: 2 plays twice as fast and 0.5 half as fast. A value that is not above 0 plays at 1. A still image and a resting image ignore it.
+
+Swift: `MediaImage(source, playbackRate: 0.5)`.
+Compose: `MediaImage(source, playbackRate = 0.5)`.
+
+The rate scales the clock only. Frame order, frame delays, `repeats`, the rest frame, the reduce-motion rest and the pause off screen stay as at rate 1. A new rate changes the speed of the playing image from the frame it shows. On Android a change between two rates other than 1 loads nothing again. A change between 1 and another rate decodes the image again from the library cache, because rate 1 plays the platform drawable and any other rate plays the library clock.
 
 ## Rest frame on Android
 

@@ -48,7 +48,7 @@ internal class RestFrameDecoder(private val result: SourceFetchResult, private v
   }
 }
 
-internal class RestFramePlan(val multiplier: Double, val bytes: Long)
+internal class RestFramePlan(val multiplier: Double, val bytes: Long, val shown: Long)
 
 internal fun restFramePlan(bytes: ByteArray, width: Int?, height: Int?, scale: coil3.size.Scale): RestFramePlan? {
   val format = animatedFormat(bytes) ?: return null
@@ -63,10 +63,10 @@ internal fun restFramePlan(bytes: ByteArray, width: Int?, height: Int?, scale: c
     AnimatedFormat.Webp -> WebpAnimation.parse(bytes).frames.maxOfOrNull { it.width.toLong() * it.height * 4 + it.chunkLength } ?: 0L
     AnimatedFormat.Gif -> full.toLong()
   }
-  return RestFramePlan(multiplier, shown + working + bytes.size)
+  return RestFramePlan(multiplier, shown + working + bytes.size, shown)
 }
 
-private fun scaledSide(side: Int, multiplier: Double): Int = (side * multiplier).toInt().coerceAtLeast(1)
+internal fun scaledSide(side: Int, multiplier: Double): Int = (side * multiplier).toInt().coerceAtLeast(1)
 
 internal enum class AnimatedFormat { Webp, Gif }
 
@@ -99,8 +99,10 @@ internal interface FrameSurface {
   fun draw(still: ByteArray, x: Int, y: Int, blends: Boolean)
 }
 
-private class BitmapSurface(width: Int, height: Int, multiplier: Double) : FrameSurface {
+internal class BitmapSurface(width: Int, height: Int, multiplier: Double) : FrameSurface {
   val bitmap: Bitmap = Bitmap.createBitmap(scaledSide(width, multiplier), scaledSide(height, multiplier), Bitmap.Config.ARGB_8888)
+
+  fun reset() = bitmap.eraseColor(android.graphics.Color.TRANSPARENT)
   private val canvas = Canvas(bitmap).apply { scale(multiplier.toFloat(), multiplier.toFloat()) }
   private val overwrite = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC) }
   private val erase = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR) }
@@ -145,11 +147,16 @@ internal class WebpAnimation(val width: Int, val height: Int, val frames: List<W
 
   /** Lays the frames one over the other: the dispose of the previous frame first, then the still file of the frame. */
   fun compose(surface: FrameSurface, check: () -> Unit = {}) {
-    frames.forEachIndexed { index, frame ->
+    frames.indices.forEach { index ->
       check()
-      frames.getOrNull(index - 1)?.takeIf { it.disposesToBackground }?.let { surface.clear(it.x, it.y, it.width, it.height) }
-      surface.draw(frame.stillFile(), frame.x, frame.y, frame.blends)
+      composeFrame(surface, index)
     }
+  }
+
+  fun composeFrame(surface: FrameSurface, index: Int) {
+    frames.getOrNull(index - 1)?.takeIf { it.disposesToBackground }?.let { surface.clear(it.x, it.y, it.width, it.height) }
+    val frame = frames[index]
+    surface.draw(frame.stillFile(), frame.x, frame.y, frame.blends)
   }
 
   fun lastFrame(multiplier: Double = 1.0, check: () -> Unit = {}): Bitmap = BitmapSurface(width, height, multiplier).also { compose(it, check) }.bitmap
