@@ -29,6 +29,8 @@ mod ingress_queue_tests;
 #[cfg(test)]
 mod ingress_seek_tests;
 #[cfg(test)]
+mod ingress_window_owner_tests;
+#[cfg(test)]
 mod ingress_window_tests;
 
 #[cfg(test)]

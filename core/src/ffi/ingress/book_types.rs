@@ -28,6 +28,12 @@ pub(super) struct VideoWindowState {
     pub(super) held: Reserve,
 }
 
+impl VideoWindowState {
+    pub(super) fn declares_source(&self) -> bool {
+        self.sources.iter().any(Option::is_some)
+    }
+}
+
 pub(super) struct ImageWindowState {
     pub(super) scoped: String,
     pub(super) pages: Arc<Vec<Vec<MediaItem>>>,

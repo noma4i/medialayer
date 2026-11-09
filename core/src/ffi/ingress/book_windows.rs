@@ -24,7 +24,7 @@ impl Book {
                 window.is_active = is_active;
                 self.video_order.remove(&window.intent);
                 window.intent = intent;
-                if is_active {
+                if is_active && (self.video_applied.is_some_and(|(applied, _)| applied == owner) || window.declares_source()) {
                     self.video_order.insert(intent, owner);
                 }
                 self.resolve_video();
@@ -49,7 +49,7 @@ impl Book {
         }
         self.video_order.remove(&window.intent);
         window.intent = intent;
-        if window.is_active {
+        if window.is_active && (self.video_applied.is_some_and(|(applied, _)| applied == owner) || window.declares_source()) {
             self.video_order.insert(intent, owner);
         }
         self.follow_ready(owner);

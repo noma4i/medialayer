@@ -5,6 +5,9 @@
 ### Added
 - Kotlin `MediaImage` plays animated images at a given playback rate.
 
+### Fixed
+- A video window without sources no longer takes the stage from the active window.
+
 ## 3.28.0 - 2026-11-06
 
 ### Added
