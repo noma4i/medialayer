@@ -7,7 +7,7 @@
 | Платформа | Где подключить | Что даёт |
 | --------- | -------------- | -------- |
 | Swift | Продукт `MediaLayerTesting` в тестовой цели | `TestFetcher` |
-| Kotlin | `testImplementation(project(":testing"))` | `TestFetcher` (`com.noma4i.medialayer.testing`) |
+| Kotlin | `testImplementation(project(":testing"))` or `androidTestImplementation("com.noma4i:medialayer-testing:X.Y.Z")` | `TestFetcher` (`com.noma4i.medialayer.testing`) |
 | Swift | `MediaLayerUI` | `LoadedSlots.snapshot(for:)`, `PlayerSnapshot` |
 | Kotlin | `kotlin/ui` | `MediaLayer.slotPlayers?.snapshot(key)`, `PlayerSnapshot` |
 

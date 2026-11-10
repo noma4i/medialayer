@@ -32,7 +32,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 android_archive="$android_dir/medialayer-android.zip"
 [ -s "$android_archive" ] || fail 'Android release archive is missing'
-for artifact in medialayer medialayer-ui; do
+for artifact in medialayer medialayer-ui medialayer-testing; do
   artifact_dir="$android_dir/maven/com/noma4i/$artifact/$version"
   for extension in aar pom module; do
     [ -s "$artifact_dir/$artifact-$version.$extension" ] || fail "Android Maven $artifact $extension is missing"
@@ -55,6 +55,7 @@ for abi in arm64-v8a armeabi-v7a x86_64 x86; do [ -s "$tmp/android-aar/jni/$abi/
 unzip -Z1 "$tmp/android-aar/classes.jar" > "$tmp/android-classes.list"
 grep -Eq '^com/noma4i/medialayer/[^/]+\.class$' "$tmp/android-classes.list" || fail 'medialayer AAR missing Kotlin classes'
 grep -Fq '<artifactId>medialayer</artifactId>' "$android_dir/maven/com/noma4i/medialayer-ui/$version/medialayer-ui-$version.pom" || fail 'medialayer-ui POM missing medialayer dependency'
+grep -Fq '<artifactId>medialayer</artifactId>' "$android_dir/maven/com/noma4i/medialayer-testing/$version/medialayer-testing-$version.pom" || fail 'medialayer-testing POM missing medialayer dependency'
 printf 'Android artifacts checked: %s\n' "$android_dir"
 
 bash scripts/build_ios.sh
@@ -189,7 +190,7 @@ if [ "$publish" = --publish ]; then
     git -C "$tmp" init -b maven maven-branch
     git -C "$maven_checkout" remote add origin "$maven_remote"
   fi
-  for artifact in medialayer medialayer-ui; do
+  for artifact in medialayer medialayer-ui medialayer-testing; do
     source_dir="$android_dir/maven/com/noma4i/$artifact/$version"
     destination_dir="$maven_checkout/com/noma4i/$artifact/$version"
     if [ -d "$destination_dir" ]; then

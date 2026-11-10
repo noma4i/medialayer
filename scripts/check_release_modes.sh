@@ -50,12 +50,14 @@ def run_case(publish):
         android = root / "android-result"
         archive_root = android / "maven/com/noma4i/medialayer/3.26.2"
         ui_root = android / "maven/com/noma4i/medialayer-ui/3.26.2"
+        testing_root = android / "maven/com/noma4i/medialayer-testing/3.26.2"
         archive_root.mkdir(parents=True)
         ui_root.mkdir(parents=True)
+        testing_root.mkdir(parents=True)
         with zipfile.ZipFile(android / "medialayer-android.zip", "w") as archive:
             for name in ("src/main/jniLibs/arm64-v8a/libmedialayer.so", "src/main/jniLibs/armeabi-v7a/libmedialayer.so", "src/main/jniLibs/x86_64/libmedialayer.so", "src/main/jniLibs/x86/libmedialayer.so", "src/main/kotlin/com/noma4i/medialayer/medialayer.kt"):
                 archive.writestr(name, "artifact")
-        for directory, name, pom in ((archive_root, "medialayer", "<project/>"), (ui_root, "medialayer-ui", "<dependency><artifactId>medialayer</artifactId></dependency>")):
+        for directory, name, pom in ((archive_root, "medialayer", "<project/>"), (ui_root, "medialayer-ui", "<dependency><artifactId>medialayer</artifactId></dependency>"), (testing_root, "medialayer-testing", "<dependency><artifactId>medialayer</artifactId></dependency>")):
             with zipfile.ZipFile(directory / f"{name}-3.26.2.aar", "w") as aar:
                 aar.writestr("classes.jar", "jar")
                 if name == "medialayer":
@@ -162,6 +164,13 @@ if a[:2]==["release","download"]:
             path = root / "target/bin" / name
             path.write_text(text)
             path.chmod(0o755)
+        if not publish:
+            hidden = root / "testing-hidden"
+            shutil.move(str(android / "maven/com/noma4i/medialayer-testing"), str(hidden))
+            refused = subprocess.run(["bash", str(root / "scripts/release.sh"), "3.26.2", "--android", str(android)], cwd="/", env=env, capture_output=True, text=True)
+            shutil.move(str(hidden), str(android / "maven/com/noma4i/medialayer-testing"))
+            if refused.returncode == 0 or "medialayer-testing" not in refused.stderr:
+                raise AssertionError("release accepted a stage without medialayer-testing")
         missing = subprocess.run(["bash", str(root / "scripts/release.sh"), "3.26.2"], cwd="/", env=env, capture_output=True, text=True)
         if missing.returncode == 0 or "usage:" not in missing.stderr:
             raise AssertionError("release accepted a missing --android argument")

@@ -16,9 +16,9 @@ gradle="${GRADLE:-$(ls -d "${HOME:?}"/.gradle/wrapper/dists/gradle-9.*-bin/*/gra
 [ -x "$gradle" ] || fail 'Gradle 9 not found: set GRADLE'
 staging="$out_dir/maven"
 mkdir -p "$staging"
-"$gradle" -p "$root/kotlin" --no-watch-fs -PreleaseVersion="$version" -PstagingRepo="$staging" :publishReleasePublicationToStagingRepository :ui:publishReleasePublicationToStagingRepository
+"$gradle" -p "$root/kotlin" --no-watch-fs -PreleaseVersion="$version" -PstagingRepo="$staging" :publishReleasePublicationToStagingRepository :ui:publishReleasePublicationToStagingRepository :testing:publishReleasePublicationToStagingRepository
 
-for artifact in medialayer medialayer-ui; do
+for artifact in medialayer medialayer-ui medialayer-testing; do
   artifact_dir="$staging/com/noma4i/$artifact/$version"
   for extension in aar pom module; do
     [ -s "$artifact_dir/$artifact-$version.$extension" ] || fail "missing $artifact $extension artifact"
@@ -27,7 +27,7 @@ done
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-mkdir "$tmp/core-aar" "$tmp/core-classes" "$tmp/ui-aar"
+mkdir "$tmp/core-aar" "$tmp/core-classes" "$tmp/ui-aar" "$tmp/testing-aar"
 (cd "$tmp/core-aar" && unzip -q "$staging/com/noma4i/medialayer/$version/medialayer-$version.aar")
 for abi in arm64-v8a armeabi-v7a x86_64 x86; do
   [ -s "$tmp/core-aar/jni/$abi/libmedialayer.so" ] || fail "medialayer AAR missing ABI $abi"
@@ -38,6 +38,11 @@ done
 (cd "$tmp/ui-aar" && unzip -q "$staging/com/noma4i/medialayer-ui/$version/medialayer-ui-$version.aar")
 [ -s "$tmp/ui-aar/classes.jar" ] || fail 'medialayer-ui AAR missing classes.jar'
 grep -Fq '<artifactId>medialayer</artifactId>' "$staging/com/noma4i/medialayer-ui/$version/medialayer-ui-$version.pom" || fail 'medialayer-ui POM missing medialayer dependency'
+(cd "$tmp/testing-aar" && unzip -q "$staging/com/noma4i/medialayer-testing/$version/medialayer-testing-$version.aar")
+[ -s "$tmp/testing-aar/classes.jar" ] || fail 'medialayer-testing AAR missing classes.jar'
+unzip -Z1 "$tmp/testing-aar/classes.jar" > "$tmp/testing-classes.list"
+grep -Fxq 'com/noma4i/medialayer/testing/TestFetcher.class' "$tmp/testing-classes.list" || fail 'medialayer-testing AAR missing TestFetcher'
+grep -Fq '<artifactId>medialayer</artifactId>' "$staging/com/noma4i/medialayer-testing/$version/medialayer-testing-$version.pom" || fail 'medialayer-testing POM missing medialayer dependency'
 
 archive="$out_dir/medialayer-android.zip"
 (cd "$root/kotlin" && zip -q -r "$archive" \

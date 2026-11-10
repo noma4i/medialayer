@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Publish `com.noma4i:medialayer-testing` with `TestFetcher` for Android tests.
 - Kotlin `MediaImage` plays animated images at a given playback rate.
 
 ### Changed
