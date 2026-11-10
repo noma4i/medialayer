@@ -14,6 +14,7 @@ import com.noma4i.medialayer.jpegQuality
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.OutputStream
 import java.util.UUID
 import kotlin.math.roundToInt
 import kotlinx.coroutines.currentCoroutineContext
@@ -49,10 +50,9 @@ private val MAY_HAVE_ALPHA = setOf("image/png", "image/webp", "image/gif")
 
 internal suspend fun encodeBitmapAt(cache: File, bitmap: Bitmap, format: ImageFormat, quality: Double, admit: DecodeAdmit): PreparedMedia =
   withContext(prepareDispatcher) {
-    val data = encodeBitmap(bitmap, ExifInterface.ORIENTATION_NORMAL, format, quality, admit)
     val output = File(cache, "encoded-${UUID.randomUUID()}.${if (format == ImageFormat.PNG) "png" else "jpg"}")
     try {
-      output.writeBytes(data)
+      output.outputStream().use { encodeBitmap(bitmap, ExifInterface.ORIENTATION_NORMAL, format, quality, admit, it) }
     } catch (error: Throwable) {
       output.delete()
       throw error
@@ -70,31 +70,29 @@ internal suspend fun encodeBytes(bytes: ByteArray, format: ImageFormat, quality:
     admit(plan.cost.toLong()).use {
       val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: throw MediaException.Fetch("the bytes are not an image")
       try {
-        encodeOwn(decoded, tag, format, quality, plan.flatten)
+        ByteArrayOutputStream().also { encodeOwn(decoded, tag, format, quality, plan.flatten, it) }.toByteArray()
       } finally {
         decoded.recycle()
       }
     }
   }
 
-private suspend fun encodeBitmap(bitmap: Bitmap, tag: Int, format: ImageFormat, quality: Double, admit: DecodeAdmit): ByteArray {
+private suspend fun encodeBitmap(bitmap: Bitmap, tag: Int, format: ImageFormat, quality: Double, admit: DecodeAdmit, out: OutputStream) {
   val plan = imageEncodePlan(bitmap.width.toUInt(), bitmap.height.toUInt(), tag.toUInt(), bitmap.hasAlpha(), format)
     ?: throw MediaException.Fetch("the image has no pixel or is above the pixel limit")
-  return admit(plan.cost.toLong()).use { encodeOwn(bitmap, tag, format, quality, plan.flatten) }
+  admit(plan.cost.toLong()).use { encodeOwn(bitmap, tag, format, quality, plan.flatten, out) }
 }
 
-private suspend fun encodeOwn(source: Bitmap, tag: Int, format: ImageFormat, quality: Double, flatten: Boolean): ByteArray {
+private suspend fun encodeOwn(source: Bitmap, tag: Int, format: ImageFormat, quality: Double, flatten: Boolean, out: OutputStream) {
   currentCoroutineContext().ensureActive()
   val matrix = turnMatrix(tag)
   val turned = if (matrix.isIdentity) source else Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
   val flat = if (flatten) onWhite(turned) else turned
   try {
     currentCoroutineContext().ensureActive()
-    val out = ByteArrayOutputStream()
     val compressed = if (format == ImageFormat.PNG) flat.compress(Bitmap.CompressFormat.PNG, 100, out)
     else flat.compress(Bitmap.CompressFormat.JPEG, (jpegQuality(quality) * 100).roundToInt(), out)
     check(compressed) { "the image does not encode" }
-    return out.toByteArray()
   } finally {
     if (flat !== turned) flat.recycle()
     if (turned !== source) turned.recycle()

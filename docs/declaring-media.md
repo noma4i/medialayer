@@ -165,7 +165,7 @@ val info = media.mediaInfo(MediaSourceValue.file(clipFile, Kind.VIDEO))   // Med
 
 ## Preparing media for sending
 
-`prepareVideo` and `prepareImage` make a local file ready to upload. Both take a `file://` source and run off the main thread. Cancelling the call stops the work and leaves no output file.
+`prepareVideo` and `prepareImage` make a local file ready to upload. Both take a `file://` source and run off the main thread. Cancelling the call stops the work and leaves no output file. `prepareImage` and `encodeImage` write the encoded photo to the file as it is encoded, never as one block in memory.
 
 ```swift
 let video = try await media.prepareVideo(source, limits: defaultVideoLimits(), progress: { fraction in })

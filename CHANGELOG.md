@@ -7,6 +7,7 @@
 - Kotlin `MediaImage` plays animated images at a given playback rate.
 
 ### Changed
+- prepareImage and encodeImage write the encoded photo to the file as it is encoded.
 - `MediaImage` content gets the ready state in the frame the image is drawn.
 - Swift `MediaImage` no longer cross-fades the placeholder into a cold image.
 

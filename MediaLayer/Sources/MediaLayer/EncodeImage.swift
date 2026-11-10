@@ -7,13 +7,14 @@ extension MediaLayer {
   /// `quality` (0 to 1) is for JPEG only. The file belongs to the caller.
   public func encodeImage(_ image: CGImage, exifOrientation: UInt32 = 1, format: ImageFormat = .jpeg, quality: Double = 0.9) async throws -> PreparedMedia {
     let work = Task.detached {
-      let data = try await ImageEncoding.run(image, exifOrientation: exifOrientation, format: format, quality: quality, admit: self.encodeAdmit)
       let output = preparedOutput(extension: format == .png ? "png" : "jpg")
       do {
-        try data.write(to: output)
+        try await ImageEncoding.run(image, exifOrientation: exifOrientation, format: format, quality: quality, admit: self.encodeAdmit) {
+          try ImagePreparation.encode($0, format: format, quality: quality, to: output)
+        }
       } catch {
         try? FileManager.default.removeItem(at: output)
-        throw MediaError.Unexpected(detail: "the image cannot be written")
+        throw error
       }
       return PreparedMedia(url: output, isNew: true)
     }
@@ -60,14 +61,18 @@ enum ImageEncoding {
     let tag = (properties[kCGImagePropertyOrientation] as? UInt32) ?? 1
     let alpha = (properties[kCGImagePropertyHasAlpha] as? Bool) ?? false
     return try await run(
-      width: UInt32(clamping: width), height: UInt32(clamping: height), exifOrientation: tag, hasAlpha: alpha, format: format, quality: quality, admit: admit
-    ) {
-      guard let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw MediaError.Fetch(detail: "the bytes are not an image") }
-      return image
-    }
+      width: UInt32(clamping: width), height: UInt32(clamping: height), exifOrientation: tag, hasAlpha: alpha, format: format, quality: quality, admit: admit,
+      makeImage: {
+        guard let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw MediaError.Fetch(detail: "the bytes are not an image") }
+        return image
+      },
+      sink: { try ImagePreparation.encoded($0, format: format, quality: quality) }
+    )
   }
 
-  static func run(_ image: CGImage, exifOrientation: UInt32, format: ImageFormat, quality: Double, admit: ImagePreparation.Admit) async throws -> Data {
+  static func run<Result>(
+    _ image: CGImage, exifOrientation: UInt32, format: ImageFormat, quality: Double, admit: ImagePreparation.Admit, sink: (CGImage) throws -> Result
+  ) async throws -> Result {
     let alpha: Bool
     switch image.alphaInfo {
     case .none, .noneSkipFirst, .noneSkipLast: alpha = false
@@ -75,15 +80,15 @@ enum ImageEncoding {
     }
     return try await run(
       width: UInt32(clamping: image.width), height: UInt32(clamping: image.height), exifOrientation: exifOrientation,
-      hasAlpha: alpha, format: format, quality: quality, admit: admit
-    ) { image }
+      hasAlpha: alpha, format: format, quality: quality, admit: admit, makeImage: { image }, sink: sink
+    )
   }
 
-  /// The memory is asked of the budget first, `makeImage` runs after the admission.
-  static func run(
+  /// The memory is asked of the budget first, `makeImage` runs after the admission, `sink` takes the finished image inside it.
+  static func run<Result>(
     width: UInt32, height: UInt32, exifOrientation: UInt32, hasAlpha: Bool, format: ImageFormat, quality: Double,
-    admit: ImagePreparation.Admit, makeImage: () throws -> CGImage
-  ) async throws -> Data {
+    admit: ImagePreparation.Admit, makeImage: () throws -> CGImage, sink: (CGImage) throws -> Result
+  ) async throws -> Result {
     guard let plan = imageEncodePlan(width: width, height: height, exifOrientation: exifOrientation, hasAlpha: hasAlpha, format: format) else {
       throw MediaError.Fetch(detail: "the image has no pixel or is above the pixel limit")
     }
@@ -94,7 +99,7 @@ enum ImageEncoding {
     if plan.turn.rotationDegrees != 0 || plan.turn.flipHorizontal { result = try ImagePreparation.draw(result, turn: plan.turn) }
     if plan.flatten { result = try onWhite(result) }
     try Task.checkCancellation()
-    return try ImagePreparation.encoded(result, format: format, quality: quality)
+    return try sink(result)
   }
 
   private static func onWhite(_ image: CGImage) throws -> CGImage {

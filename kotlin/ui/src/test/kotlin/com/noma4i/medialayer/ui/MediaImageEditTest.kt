@@ -8,6 +8,7 @@ import com.noma4i.medialayer.MediaException
 import com.noma4i.medialayer.PhotoEdit
 import com.noma4i.medialayer.PixelSize
 import com.noma4i.medialayer.imageEncodePlan
+import com.noma4i.medialayer.jpegQuality
 import com.noma4i.medialayer.photoPlan
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
@@ -15,6 +16,8 @@ import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import javax.imageio.ImageIO
+import kotlin.math.roundToInt
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -306,5 +309,48 @@ class MediaImageEditTest {
     assertEquals(decoded.width to decoded.height, size.width.toInt() to size.height.toInt())
     assertEquals(20u to 40u, size.width to size.height)
     assertEquals(40u to 20u, MediaImageDecode.imageSize(plain)!!.let { it.width to it.height })
+  }
+
+  private fun photo(): Bitmap = Bitmap.createBitmap(24, 16, Bitmap.Config.ARGB_8888).apply {
+    eraseColor(android.graphics.Color.RED)
+    for (x in 12 until 24) for (y in 0 until 16) setPixel(x, y, android.graphics.Color.BLUE)
+  }
+
+  @Test
+  fun inv_send_45_theEncodedPhotoFileHoldsTheBytesOfTheCompressedBitmap() = runBlocking {
+    val cache = kotlin.io.path.createTempDirectory("encoded").toFile()
+    val bitmap = photo()
+    val ledger = EditLedger()
+
+    for ((format, expected) in listOf(
+      ImageFormat.PNG to ByteArrayOutputStream().also { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }.toByteArray(),
+      ImageFormat.JPEG to ByteArrayOutputStream().also { assertTrue(bitmap.compress(Bitmap.CompressFormat.JPEG, (jpegQuality(0.7) * 100).roundToInt(), it)) }.toByteArray()
+    )) {
+      val prepared = encodeBitmapAt(cache, bitmap, format, 0.7, ledger.admit)
+
+      assertTrue(prepared.isNew)
+      assertEquals(cache, prepared.file.parentFile)
+      assertTrue(prepared.file.name.startsWith("encoded-"))
+      assertArrayEquals("$format", expected, prepared.file.readBytes())
+    }
+    assertEquals(2, cache.listFiles()!!.size)
+  }
+
+  @Test
+  fun inv_send_46_aFailedOrCancelledEncodeLeavesNoFile() = runBlocking {
+    val cache = kotlin.io.path.createTempDirectory("encoded").toFile()
+    val refused: DecodeAdmit = { throw MediaException.Fetch("refused") }
+    assertThrows(MediaException::class.java) { runBlocking { encodeBitmapAt(cache, photo(), ImageFormat.JPEG, 0.9, refused) } }
+    assertEquals(0, cache.listFiles()!!.size)
+
+    val missing = File(cache, "absent")
+    assertThrows(java.io.IOException::class.java) { runBlocking { encodeBitmapAt(missing, photo(), ImageFormat.PNG, 0.9, EditLedger().admit) } }
+    assertFalse(missing.exists())
+
+    val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Job())
+    val cancelling: DecodeAdmit = { scope.coroutineContext[kotlinx.coroutines.Job]!!.cancel(); AutoCloseable {} }
+    val running = scope.async { encodeBitmapAt(cache, photo(), ImageFormat.JPEG, 0.9, cancelling) }
+    assertThrows(java.util.concurrent.CancellationException::class.java) { runBlocking { running.await() } }
+    assertEquals(0, cache.listFiles()!!.size)
   }
 }

@@ -69,7 +69,7 @@ enum ImagePreparation {
     try Task.checkCancellation()
     let output = preparedOutput(extension: "jpg", in: directory)
     do {
-      try encoded(result, format: .jpeg, quality: quality).write(to: output)
+      try encode(result, format: .jpeg, quality: quality, to: output)
     } catch {
       try? FileManager.default.removeItem(at: output)
       throw error as? MediaError ?? MediaError.Unexpected(detail: "the JPEG cannot be written")
@@ -115,14 +115,27 @@ enum ImagePreparation {
 
   static func encoded(_ image: CGImage, format: ImageFormat, quality: Double) throws -> Data {
     let data = NSMutableData()
-    let type = format == .png ? UTType.png : UTType.jpeg
-    guard let destination = CGImageDestinationCreateWithData(data, type.identifier as CFString, 1, nil) else {
+    guard let destination = CGImageDestinationCreateWithData(data, imageType(format).identifier as CFString, 1, nil) else {
       throw MediaError.Unexpected(detail: "the image destination cannot be created")
     }
+    try finalize(destination, image, format: format, quality: quality)
+    return data as Data
+  }
+
+  /// The encoder writes into `output` as it goes, the encoded file is never held whole in memory.
+  static func encode(_ image: CGImage, format: ImageFormat, quality: Double, to output: URL) throws {
+    guard let destination = CGImageDestinationCreateWithURL(output as CFURL, imageType(format).identifier as CFString, 1, nil) else {
+      throw MediaError.Unexpected(detail: "the image destination cannot be created")
+    }
+    try finalize(destination, image, format: format, quality: quality)
+  }
+
+  private static func imageType(_ format: ImageFormat) -> UTType { format == .png ? .png : .jpeg }
+
+  private static func finalize(_ destination: CGImageDestination, _ image: CGImage, format: ImageFormat, quality: Double) throws {
     let options: CFDictionary? = format == .png ? nil : [kCGImageDestinationLossyCompressionQuality: jpegQuality(quality: quality)] as CFDictionary
     CGImageDestinationAddImage(destination, image, options)
     guard CGImageDestinationFinalize(destination) else { throw MediaError.Unexpected(detail: "the image cannot be encoded") }
-    return data as Data
   }
 
   static func draw(_ image: CGImage, turn: PhotoTurn) throws -> CGImage {

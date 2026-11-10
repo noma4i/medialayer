@@ -270,8 +270,8 @@ struct MediaImageEditTests {
     let source = try image(try halves(80, 40, orientation: 1))
     let ledger = Ledger()
 
-    let png = try await ImageEncoding.run(source, exifOrientation: 1, format: .png, quality: 0.9, admit: ledger.admit)
-    let jpeg = try await ImageEncoding.run(source, exifOrientation: 1, format: .jpeg, quality: 0.9, admit: ledger.admit)
+    let png = try await ImageEncoding.run(source, exifOrientation: 1, format: .png, quality: 0.9, admit: ledger.admit, sink: { try ImagePreparation.encoded($0, format: .png, quality: 0.9) })
+    let jpeg = try await ImageEncoding.run(source, exifOrientation: 1, format: .jpeg, quality: 0.9, admit: ledger.admit, sink: { try ImagePreparation.encoded($0, format: .jpeg, quality: 0.9) })
 
     #expect(png.prefix(8) == Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]))
     #expect(jpeg.prefix(3) == Data([0xFF, 0xD8, 0xFF]))
@@ -286,8 +286,8 @@ struct MediaImageEditTests {
     let transparent = try image(try halves(8, 8, orientation: 1, alpha: true))
     let ledger = Ledger()
 
-    let turned = try image(try await ImageEncoding.run(sideways, exifOrientation: 6, format: .png, quality: 0.9, admit: ledger.admit))
-    let flat = try image(try await ImageEncoding.run(transparent, exifOrientation: 1, format: .jpeg, quality: 0.9, admit: ledger.admit))
+    let turned = try image(try await ImageEncoding.run(sideways, exifOrientation: 6, format: .png, quality: 0.9, admit: ledger.admit, sink: { try ImagePreparation.encoded($0, format: .png, quality: 0.9) }))
+    let flat = try image(try await ImageEncoding.run(transparent, exifOrientation: 1, format: .jpeg, quality: 0.9, admit: ledger.admit, sink: { try ImagePreparation.encoded($0, format: .jpeg, quality: 0.9) }))
 
     #expect((turned.width, turned.height) == (40, 80))
     #expect(isRed(try rgb(turned, 20, 20)))
@@ -302,7 +302,7 @@ struct MediaImageEditTests {
     let source = try image(try halves(80, 40, orientation: 1))
 
     await #expect(throws: MediaError.self) {
-      try await ImageEncoding.run(source, exifOrientation: 1, format: .png, quality: 0.9) { _ in throw MediaError.Overloaded(detail: "no room") }
+      try await ImageEncoding.run(source, exifOrientation: 1, format: .png, quality: 0.9, admit: { _ in throw MediaError.Overloaded(detail: "no room") }, sink: { _ in () })
     }
   }
 
@@ -390,6 +390,44 @@ extension GlobalMedia {
       defer { try? FileManager.default.removeItem(at: upright.url) }
       let turned = try image(Data(contentsOf: upright.url))
       #expect((turned.width, turned.height) == (40, 80))
+    }
+
+    @Test
+    func inv_send_45_the_encoded_photo_file_holds_the_bytes_of_the_data_encode() async throws {
+      let media = try await open()
+      let picture = try image(try halves(80, 40, orientation: 1))
+
+      for (format, type) in [(ImageFormat.png, UTType.png), (.jpeg, .jpeg)] {
+        let expected = NSMutableData()
+        let destination = try #require(CGImageDestinationCreateWithData(expected, type.identifier as CFString, 1, nil))
+        let options: CFDictionary? = format == .png ? nil : [kCGImageDestinationLossyCompressionQuality: jpegQuality(quality: 0.7)] as CFDictionary
+        CGImageDestinationAddImage(destination, picture, options)
+        #expect(CGImageDestinationFinalize(destination))
+
+        let prepared = try await media.encodeImage(picture, format: format, quality: 0.7)
+        defer { try? FileManager.default.removeItem(at: prepared.url) }
+
+        #expect(prepared.isNew)
+        #expect(prepared.url.pathExtension == (format == .png ? "png" : "jpg"))
+        #expect(try Data(contentsOf: prepared.url) == expected as Data)
+      }
+    }
+
+    @Test
+    func inv_send_46_a_failed_or_cancelled_encode_leaves_no_file() async throws {
+      let source = try file(try halves(80, 40, orientation: 1), "jpg")
+      defer { try? FileManager.default.removeItem(at: source) }
+      let missing = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+      await #expect(throws: MediaError.self) { try await ImagePreparation.run(source, quality: 0.9, directory: missing, admit: Ledger().admit) }
+      #expect(!FileManager.default.fileExists(atPath: missing.path))
+
+      let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      defer { try? FileManager.default.removeItem(at: directory) }
+      let task = Task { try await ImagePreparation.run(source, quality: 0.9, directory: directory, admit: Ledger().admit) }
+      task.cancel()
+      await #expect(throws: CancellationError.self) { try await task.value }
+      #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
     }
   }
 }
