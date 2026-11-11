@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.29.0 - 2026-11-11
 
 ### Added
 - `failureStream()` on Swift and `failureFlow()` on Kotlin report every load and store failure.
@@ -11,11 +11,11 @@
 - prepareImage and encodeImage write the encoded photo to the file as it is encoded.
 - `MediaImage` content gets the ready state in the frame the image is drawn.
 - Swift `MediaImage` no longer cross-fades the placeholder into a cold image.
+- The cache budget is the configured budget, a full phone no longer blanks images and video.
+- Image loads fall back to a direct fetch when the disk cache refuses to store them.
 
 ### Fixed
 - A video window without sources no longer takes the stage from the active window.
-- The cache budget is the configured budget, a full phone no longer blanks images and video.
-- Images and video are delivered when the disk cache cannot store them.
 
 ### Removed
 - The `free_space` cache option, `Limits.freeSpaceFraction` and `OpenConfig.availableBytes`.
