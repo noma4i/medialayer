@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.29.1 - 2026-11-11
+
+### Fixed
+- Cancelling `prepareVideo` no longer crashes while a frame is being encoded.
+
 ## 3.29.0 - 2026-11-11
 
 ### Added
