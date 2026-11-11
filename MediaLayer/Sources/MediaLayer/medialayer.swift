@@ -1191,6 +1191,204 @@ public func FfiConverterTypeDecodeHold_lower(_ value: DecodeHold) -> UInt64 {
 
 
 
+public protocol FailureListener: AnyObject, Sendable {
+    
+    func failed(failure: MediaFailure) 
+    
+}
+open class FailureListenerImpl: FailureListener, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_medialayer_fn_clone_failurelistener(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_medialayer_fn_free_failurelistener(handle, $0) }
+    }
+
+    
+
+    
+open func failed(failure: MediaFailure)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_method_failurelistener_failed(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeMediaFailure_lower(failure),uniffiCallStatus
+    )
+}
+}
+    
+
+    
+}
+
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceFailureListener {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // Store the vtable directly.
+    static let vtable: UniffiVTableCallbackInterfaceFailureListener = UniffiVTableCallbackInterfaceFailureListener(
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            do {
+                try FfiConverterTypeFailureListener.handleMap.remove(handle: uniffiHandle)
+            } catch {
+                print("Uniffi callback interface FailureListener: handle missing in uniffiFree")
+            }
+        },
+        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
+            do {
+                return try FfiConverterTypeFailureListener.handleMap.clone(handle: uniffiHandle)
+            } catch {
+                fatalError("Uniffi callback interface FailureListener: handle missing in uniffiClone")
+            }
+        },
+        failed: { (
+            uniffiHandle: UInt64,
+            failure: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterTypeFailureListener.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.failed(
+                     failure: try FfiConverterTypeMediaFailure_lift(failure)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        }
+    )
+
+    // Rust stores this pointer for future callback invocations, so it must live
+    // for the process lifetime (not just for the init function call).
+    //
+    // `nonisolated(unsafe)` is needed under Swift 6 strict concurrency.
+    // This is safe because the pointee is initialized once during static init
+    // and never mutated by either side of the FFI.  Its fields are C function pointers.
+    nonisolated(unsafe) static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceFailureListener> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceFailureListener>.allocate(capacity: 1)
+        ptr.initialize(to: vtable)
+        return UnsafePointer(ptr)
+    }()
+}
+
+private func uniffiCallbackInitFailureListener() {
+    uniffi_medialayer_fn_init_callback_vtable_failurelistener(UniffiCallbackInterfaceFailureListener.vtablePtr)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFailureListener: FfiConverter {
+    fileprivate static let handleMap = UniffiHandleMap<FailureListener>()
+
+    typealias FfiType = UInt64
+    typealias SwiftType = FailureListener
+
+    public static func lift(_ handle: UInt64) throws -> FailureListener {
+        if ((handle & 1) == 0) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return FailureListenerImpl(unsafeFromHandle: handle)
+        } else {
+            // Swift-generated handle, get the object from the handle map
+            return try handleMap.remove(handle: handle)
+        }
+    }
+
+    public static func lower(_ value: FailureListener) -> UInt64 {
+         if let rustImpl = value as? FailureListenerImpl {
+             // Rust-implemented object.  Clone the handle and return it
+            return rustImpl.uniffiCloneHandle()
+         } else {
+            // Swift object, generate a new vtable handle and return that.
+            return handleMap.insert(obj: value)
+         }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FailureListener {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: FailureListener, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFailureListener_lift(_ handle: UInt64) throws -> FailureListener {
+    return try FfiConverterTypeFailureListener.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFailureListener_lower(_ value: FailureListener) -> UInt64 {
+    return FfiConverterTypeFailureListener.lower(value)
+}
+
+
+
+
+
+
 public protocol Fetcher: AnyObject, Sendable {
     
     func fetch(request: FetchRequest) async throws  -> FetchResponse
@@ -1624,6 +1822,8 @@ public protocol MediaLayerProtocol: AnyObject, Sendable {
     func close() 
     
     func stats() async throws  -> MediaStats
+    
+    func subscribeFailures(listener: FailureListener)  -> Subscription
     
     func subscribeState(key: String, listener: StateListener) throws  -> Subscription
     
@@ -2112,6 +2312,16 @@ open func stats()async throws  -> MediaStats  {
             liftFunc: FfiConverterTypeMediaStats_lift,
             errorHandler: FfiConverterTypeMediaError_lift
         )
+}
+    
+open func subscribeFailures(listener: FailureListener) -> Subscription  {
+    return try!  FfiConverterTypeSubscription_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_method_medialayer_subscribe_failures(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeFailureListener_lower(listener),uniffiCallStatus
+    )
+})
 }
     
 open func subscribeState(key: String, listener: StateListener)throws  -> Subscription  {
@@ -7793,7 +8003,6 @@ public func FfiConverterTypeKindUsage_lower(_ value: KindUsage) -> RustBuffer {
 
 public struct Limits: Equatable, Hashable {
     public var budget: UInt64
-    public var freeSpaceFraction: Double
     public var minBudget: UInt64
     public var shrinkTo: Double
     public var memoryBudget: UInt64
@@ -7811,9 +8020,8 @@ public struct Limits: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(budget: UInt64, freeSpaceFraction: Double, minBudget: UInt64, shrinkTo: Double, memoryBudget: UInt64, slots: UInt32, prefetchFrom: UInt32, prefetchTo: UInt32, leadingChunks: [UInt32], prefetchBudgetMib: UInt32, timeoutSeconds: UInt32, maxConcurrent: UInt32, dedupeWindowSeconds: UInt32, dedupeMaxEntries: UInt32, playbackChunksAhead: UInt32, evict: Evict) {
+    public init(budget: UInt64, minBudget: UInt64, shrinkTo: Double, memoryBudget: UInt64, slots: UInt32, prefetchFrom: UInt32, prefetchTo: UInt32, leadingChunks: [UInt32], prefetchBudgetMib: UInt32, timeoutSeconds: UInt32, maxConcurrent: UInt32, dedupeWindowSeconds: UInt32, dedupeMaxEntries: UInt32, playbackChunksAhead: UInt32, evict: Evict) {
         self.budget = budget
-        self.freeSpaceFraction = freeSpaceFraction
         self.minBudget = minBudget
         self.shrinkTo = shrinkTo
         self.memoryBudget = memoryBudget
@@ -7847,7 +8055,6 @@ public struct FfiConverterTypeLimits: FfiConverterRustBuffer {
         return
             try Limits(
                 budget: FfiConverterUInt64.read(from: &buf), 
-                freeSpaceFraction: FfiConverterDouble.read(from: &buf), 
                 minBudget: FfiConverterUInt64.read(from: &buf), 
                 shrinkTo: FfiConverterDouble.read(from: &buf), 
                 memoryBudget: FfiConverterUInt64.read(from: &buf), 
@@ -7867,7 +8074,6 @@ public struct FfiConverterTypeLimits: FfiConverterRustBuffer {
 
     public static func write(_ value: Limits, into buf: inout [UInt8]) {
         FfiConverterUInt64.write(value.budget, into: &buf)
-        FfiConverterDouble.write(value.freeSpaceFraction, into: &buf)
         FfiConverterUInt64.write(value.minBudget, into: &buf)
         FfiConverterDouble.write(value.shrinkTo, into: &buf)
         FfiConverterUInt64.write(value.memoryBudget, into: &buf)
@@ -7898,6 +8104,68 @@ public func FfiConverterTypeLimits_lift(_ buf: RustBuffer) throws -> Limits {
 #endif
 public func FfiConverterTypeLimits_lower(_ value: Limits) -> RustBuffer {
     return FfiConverterTypeLimits.lower(value)
+}
+
+
+public struct MediaFailure: Equatable, Hashable {
+    public var kind: Kind
+    public var url: String
+    public var stage: FailureStage
+    public var reason: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(kind: Kind, url: String, stage: FailureStage, reason: String) {
+        self.kind = kind
+        self.url = url
+        self.stage = stage
+        self.reason = reason
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension MediaFailure: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMediaFailure: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MediaFailure {
+        return
+            try MediaFailure(
+                kind: FfiConverterTypeKind.read(from: &buf), 
+                url: FfiConverterString.read(from: &buf), 
+                stage: FfiConverterTypeFailureStage.read(from: &buf), 
+                reason: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: MediaFailure, into buf: inout [UInt8]) {
+        FfiConverterTypeKind.write(value.kind, into: &buf)
+        FfiConverterString.write(value.url, into: &buf)
+        FfiConverterTypeFailureStage.write(value.stage, into: &buf)
+        FfiConverterString.write(value.reason, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMediaFailure_lift(_ buf: RustBuffer) throws -> MediaFailure {
+    return try FfiConverterTypeMediaFailure.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMediaFailure_lower(_ value: MediaFailure) -> RustBuffer {
+    return FfiConverterTypeMediaFailure.lower(value)
 }
 
 
@@ -8198,7 +8466,6 @@ public func FfiConverterTypeMediaTone_lower(_ value: MediaTone) -> RustBuffer {
 
 public struct OpenConfig {
     public var dir: String
-    public var availableBytes: UInt64
     public var fetcher: Fetcher
     public var settings: SettingsStore
     public var slots: PlayerSlotFactory?
@@ -8217,9 +8484,8 @@ public struct OpenConfig {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(dir: String, availableBytes: UInt64, fetcher: Fetcher, settings: SettingsStore, slots: PlayerSlotFactory?, device: DeviceMemory, defaults: Limits, pool: PoolSettings, namespaceHeaders: [String] = [], imageWindows: [ImageWindow] = [], forwardHeaders: [String]? = nil, evictVideo: Evict? = nil, evictImage: Evict? = nil, evictAudio: Evict? = nil, memoryReleaser: MemoryReleaser? = nil, silent: Bool = false, ingress: IngressLimits? = nil) {
+    public init(dir: String, fetcher: Fetcher, settings: SettingsStore, slots: PlayerSlotFactory?, device: DeviceMemory, defaults: Limits, pool: PoolSettings, namespaceHeaders: [String] = [], imageWindows: [ImageWindow] = [], forwardHeaders: [String]? = nil, evictVideo: Evict? = nil, evictImage: Evict? = nil, evictAudio: Evict? = nil, memoryReleaser: MemoryReleaser? = nil, silent: Bool = false, ingress: IngressLimits? = nil) {
         self.dir = dir
-        self.availableBytes = availableBytes
         self.fetcher = fetcher
         self.settings = settings
         self.slots = slots
@@ -8254,7 +8520,6 @@ public struct FfiConverterTypeOpenConfig: FfiConverterRustBuffer {
         return
             try OpenConfig(
                 dir: FfiConverterString.read(from: &buf), 
-                availableBytes: FfiConverterUInt64.read(from: &buf), 
                 fetcher: FfiConverterTypeFetcher.read(from: &buf), 
                 settings: FfiConverterTypeSettingsStore.read(from: &buf), 
                 slots: FfiConverterOptionTypePlayerSlotFactory.read(from: &buf), 
@@ -8275,7 +8540,6 @@ public struct FfiConverterTypeOpenConfig: FfiConverterRustBuffer {
 
     public static func write(_ value: OpenConfig, into buf: inout [UInt8]) {
         FfiConverterString.write(value.dir, into: &buf)
-        FfiConverterUInt64.write(value.availableBytes, into: &buf)
         FfiConverterTypeFetcher.write(value.fetcher, into: &buf)
         FfiConverterTypeSettingsStore.write(value.settings, into: &buf)
         FfiConverterOptionTypePlayerSlotFactory.write(value.slots, into: &buf)
@@ -10794,6 +11058,72 @@ public func FfiConverterTypeEvict_lift(_ buf: RustBuffer) throws -> Evict {
 #endif
 public func FfiConverterTypeEvict_lower(_ value: Evict) -> RustBuffer {
     return FfiConverterTypeEvict.lower(value)
+}
+
+
+
+
+public enum FailureStage: Equatable, Hashable {
+    
+    case load
+    case store
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension FailureStage: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFailureStage: FfiConverterRustBuffer {
+    typealias SwiftType = FailureStage
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FailureStage {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .load
+        
+        case 2: return .store
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FailureStage, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .load:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .store:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFailureStage_lift(_ buf: RustBuffer) throws -> FailureStage {
+    return try FfiConverterTypeFailureStage.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFailureStage_lower(_ value: FailureStage) -> RustBuffer {
+    return FfiConverterTypeFailureStage.lower(value)
 }
 
 
@@ -14513,6 +14843,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_medialayer_checksum_method_tonepreparation_prepare() != 25399) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_medialayer_checksum_method_failurelistener_failed() != 25217) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_medialayer_checksum_method_playerevents_background() != 39331) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -14651,6 +14984,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_medialayer_checksum_method_medialayer_stats() != 60713) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_medialayer_checksum_method_medialayer_subscribe_failures() != 13543) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_medialayer_checksum_method_medialayer_subscribe_state() != 24285) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -14758,6 +15094,7 @@ private let initializationResult: InitializationResult = {
     }
 
     uniffiCallbackInitBodyReader()
+    uniffiCallbackInitFailureListener()
     uniffiCallbackInitFetcher()
     uniffiCallbackInitMemoryReleaser()
     uniffiCallbackInitPlayerSlot()
