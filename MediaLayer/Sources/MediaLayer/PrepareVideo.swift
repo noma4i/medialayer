@@ -15,7 +15,9 @@ extension MediaLayer {
 }
 
 enum VideoPreparation {
-  static func run(_ file: URL, limits: VideoLimits, progress: (@Sendable (Double) -> Void)?) async throws -> PreparedMedia {
+  static func run(
+    _ file: URL, limits: VideoLimits, progress: (@Sendable (Double) -> Void)?, tornDown: (@Sendable () -> Void)? = nil
+  ) async throws -> PreparedMedia {
     let asset = AVURLAsset(url: file)
     guard let track = try await asset.loadTracks(withMediaType: .video).first else {
       throw MediaError.Fetch(detail: "\(file.path) has no video track")
@@ -45,7 +47,7 @@ enum VideoPreparation {
     let output = preparedOutput(extension: "mp4")
     let job = try EncodeJob(
       asset: asset, track: track, audioTrack: audioTrack, naturalSize: size, transform: transform, duration: duration,
-      encoding: plan.reencode ? (plan, limits) : nil, formats: (formats.first, audioFormats.first), output: output, progress: progress
+      encoding: plan.reencode ? (plan, limits) : nil, formats: (formats.first, audioFormats.first), output: output, progress: progress, tornDown: tornDown
     )
     do {
       try await withTaskCancellationHandler { try await job.run() } onCancel: { job.cancel() }
@@ -92,14 +94,17 @@ private final class EncodeJob: @unchecked Sendable {
   private let progress: (@Sendable (Double) -> Void)?
   private let queue = DispatchQueue(label: "MediaLayer.prepareVideo")
   private let lock = NSLock()
+  private let tornDown: (@Sendable () -> Void)?
+  private let stopped = PumpGate()
   private var cancelled = false
   private var gates: [PumpGate] = []
 
   init(
     asset: AVURLAsset, track: AVAssetTrack, audioTrack: AVAssetTrack?, naturalSize: CGSize, transform: CGAffineTransform,
     duration: CMTime, encoding: (plan: VideoPlan, limits: VideoLimits)?, formats: (video: CMFormatDescription?, audio: CMFormatDescription?),
-    output: URL, progress: (@Sendable (Double) -> Void)?
+    output: URL, progress: (@Sendable (Double) -> Void)?, tornDown: (@Sendable () -> Void)?
   ) throws {
+    self.tornDown = tornDown
     reader = try AVAssetReader(asset: asset)
     writer = try AVAssetWriter(outputURL: output, fileType: .mp4)
     writer.shouldOptimizeForNetworkUse = true
@@ -134,9 +139,13 @@ private final class EncodeJob: @unchecked Sendable {
       cancelled = true
       return gates
     }
-    reader.cancelReading()
-    writer.cancelWriting()
     waiting.forEach { $0.finish() }
+    queue.async { [self] in
+      reader.cancelReading()
+      writer.cancelWriting()
+      tornDown?()
+      stopped.finish()
+    }
   }
 
   func run() async throws {
@@ -148,13 +157,19 @@ private final class EncodeJob: @unchecked Sendable {
     async let video: Void = pump(input: videoInput, output: videoOutput, reportsProgress: true)
     async let audio: Void = pumpAudio()
     _ = try await (video, audio)
-    if lock.withLock({ cancelled }) { throw CancellationError() }
+    if lock.withLock({ cancelled }) {
+      await withCheckedContinuation { stopped.wait($0) }
+      throw CancellationError()
+    }
     guard reader.status != .failed else {
       writer.cancelWriting()
       throw MediaError.Unexpected(detail: "the video cannot be read")
     }
     await writer.finishWriting()
-    if lock.withLock({ cancelled }) { throw CancellationError() }
+    if lock.withLock({ cancelled }) {
+      await withCheckedContinuation { stopped.wait($0) }
+      throw CancellationError()
+    }
     guard writer.status == .completed else { throw MediaError.Unexpected(detail: "the video cannot be written") }
   }
 
@@ -172,6 +187,10 @@ private final class EncodeJob: @unchecked Sendable {
       gate.wait(continuation)
       input.requestMediaDataWhenReady(on: queue) { [self] in
         while input.isReadyForMoreMediaData {
+          if lock.withLock({ cancelled }) {
+            gate.finish()
+            return
+          }
           guard let buffer = output.copyNextSampleBuffer(), input.append(buffer) else {
             if writer.status == .writing { input.markAsFinished() }
             gate.finish()

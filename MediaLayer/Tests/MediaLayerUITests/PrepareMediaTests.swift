@@ -85,6 +85,29 @@ private final class Marks: @unchecked Sendable {
   }
 }
 
+private final class TeardownProbe: @unchecked Sendable {
+  private let lock = NSLock()
+  private var task: Task<PreparedMedia, Error>?
+  private var inside = false
+  private var cancelled = false
+  private var count = 0
+  private var insideAtTeardown = false
+  var tearDownCount: Int { lock.withLock { count } }
+  var tearDownRanInsideCallback: Bool { lock.withLock { insideAtTeardown } }
+  func hold(_ task: Task<PreparedMedia, Error>) { lock.withLock { self.task = task } }
+  func cancelInsideCallback() {
+    let target: Task<PreparedMedia, Error>? = lock.withLock {
+      guard !cancelled, let task else { return nil }
+      cancelled = true
+      inside = true
+      return task
+    }
+    target?.cancel()
+    lock.withLock { inside = false }
+  }
+  func tornDown() { lock.withLock { count += 1; insideAtTeardown = insideAtTeardown || inside } }
+}
+
 private func pixel(_ url: URL, x: Int, y: Int) throws -> (r: Int, g: Int, b: Int, width: Int, height: Int) {
   let source = try #require(CGImageSourceCreateWithURL(url as CFURL, nil))
   let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
@@ -327,6 +350,22 @@ extension GlobalMedia {
 
       await #expect(throws: CancellationError.self) { try await task.value }
       #expect(preparedFiles() == before)
+    }
+
+    @Test(.timeLimit(.minutes(2)))
+    func inv_send_13_a_cancel_from_the_progress_callback_tears_down_after_the_callback_returns() async throws {
+      let probe = TeardownProbe()
+      let file = Bundle.module.url(forResource: "rotated90", withExtension: "mp4", subdirectory: "Fixtures")!
+      let task = Task {
+        try await VideoPreparation.run(
+          file, limits: smallLimits(), progress: { _ in probe.cancelInsideCallback() }, tornDown: { probe.tornDown() }
+        )
+      }
+      probe.hold(task)
+
+      await #expect(throws: CancellationError.self) { try await task.value }
+      #expect(probe.tearDownCount == 1)
+      #expect(probe.tearDownRanInsideCallback == false, "the reader was torn down inside the sample callback")
     }
 
     @Test(.timeLimit(.minutes(1)))
