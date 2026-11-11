@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.30.4 - 2026-11-12
 
 ### Fixed
 - Android `MediaVideo` keeps its video frame size when the player leaves the view, so the outgoing feed video is not resized and does not flash black at swipe start.
