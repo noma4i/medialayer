@@ -53,7 +53,7 @@ class MountedGroupTest {
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val slot = TransportSlot()
   private val loader = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) })
-  private val layer = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
+  private val layer = MediaLayer.open(OpenConfig(
     dir = Files.createTempDirectory("mounted-group").toString(),
     fetcher = TestFetcher(),
     settings = SharedPreferencesSettings(context, "mounted-group"), slots = slot,

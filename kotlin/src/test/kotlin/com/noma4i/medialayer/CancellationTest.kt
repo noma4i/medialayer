@@ -31,7 +31,7 @@ class CancellationTest {
       override fun write(key: String, value: String) {}
       override fun remove(key: String) {}
     }
-    val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
+    val media = MediaLayer.open(OpenConfig(
       dir = Files.createTempDirectory("medialayer-cancel").toString(),
       fetcher = fetcher, settings = settings, slots = null,
       device = DeviceMemory(4096u, null, false),

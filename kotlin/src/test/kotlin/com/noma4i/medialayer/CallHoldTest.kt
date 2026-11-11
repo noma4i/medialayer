@@ -34,7 +34,7 @@ private const val CLIP = "file:///clip.mp4"
 private val ITEM = MediaItem(Kind.VIDEO, CLIP, emptyMap(), null, null, strategy = CacheStrategy.WINDOW)
 
 private suspend fun openPlaying(slot: CallSlot): MediaLayer {
-  val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
+  val media = MediaLayer.open(OpenConfig(
     dir = Files.createTempDirectory("call").toString(),
     fetcher = TestFetcher(), settings = CallSettings(), slots = slot,
     device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings()

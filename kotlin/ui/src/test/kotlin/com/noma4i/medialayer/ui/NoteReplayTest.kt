@@ -54,7 +54,7 @@ class NoteReplayTest {
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val slot = NoteSlot()
   private val loader = mediaImageLoader(context, ImageBytes { _, _ -> ImageFetchResult(pngBytes(), ImageOrigin.NETWORK) })
-  private val layer = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
+  private val layer = MediaLayer.open(OpenConfig(
     dir = Files.createTempDirectory("note-replay").toString(),
     fetcher = TestFetcher(),
     settings = SharedPreferencesSettings(context, "note-replay"), slots = slot,

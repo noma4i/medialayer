@@ -32,7 +32,7 @@ private class SeekSettings : SettingsStore {
 
 private const val CLIP = "file:///clip.mp4"
 
-private fun open(slot: SeekSlot) = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
+private fun open(slot: SeekSlot) = MediaLayer.open(OpenConfig(
   dir = Files.createTempDirectory("seek").toString(),
   fetcher = TestFetcher(), settings = SeekSettings(), slots = slot,
   device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings()

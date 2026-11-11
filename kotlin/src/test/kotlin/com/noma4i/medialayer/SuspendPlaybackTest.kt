@@ -34,7 +34,7 @@ private class QuietSettings : SettingsStore {
 
 private const val CLIP = "file:///clip.mp4"
 
-private fun open(slot: TransportSlot?) = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
+private fun open(slot: TransportSlot?) = MediaLayer.open(OpenConfig(
   dir = Files.createTempDirectory("suspend").toString(),
   fetcher = TestFetcher(), settings = QuietSettings(), slots = slot,
   device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings()

@@ -37,7 +37,7 @@ class MediaImageFetcherTest {
 
   @Test
   fun selectedHeadersSeparateDecodedImagesAndUnselectedHeadersReuseThem() {
-    val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
+    val media = MediaLayer.open(OpenConfig(
       dir = Files.createTempDirectory("image-identity").toString(),
       fetcher = TestFetcher(),
       settings = SharedPreferencesSettings(context, "image-identity"),
@@ -74,7 +74,7 @@ class MediaImageFetcherTest {
 
   @Test
   fun inv_image_49_aFileImageGoesThroughTheCoreAndAFileAboveTheResponseLimitFails() {
-    val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
+    val media = MediaLayer.open(OpenConfig(
       dir = Files.createTempDirectory("local-image").toString(),
       fetcher = TestFetcher(),
       settings = SharedPreferencesSettings(context, "local-image"),

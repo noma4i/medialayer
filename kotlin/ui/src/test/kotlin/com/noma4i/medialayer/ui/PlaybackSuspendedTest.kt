@@ -45,7 +45,7 @@ class PlaybackSuspendedTest {
   private val loader = mediaImageLoader(context, ImageBytes { _, _ -> ImageFetchResult(pngBytes(), ImageOrigin.NETWORK) })
 
   private fun openLayer(ingress: IngressLimits? = null): MediaLayer {
-    val layer = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
+    val layer = MediaLayer.open(OpenConfig(
       dir = Files.createTempDirectory("suspended").toString(),
       fetcher = TestFetcher(),
       settings = SharedPreferencesSettings(context, "suspended"), slots = slot,

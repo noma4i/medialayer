@@ -70,7 +70,7 @@ class ToneFramesTest {
           decodes.incrementAndGet()
         }
       }).build()
-    val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
+    val media = MediaLayer.open(OpenConfig(
       dir = Files.createTempDirectory("tone-demand").toString(),
       fetcher = TestFetcher(),
       settings = SharedPreferencesSettings(context, "tone-demand"), slots = null,

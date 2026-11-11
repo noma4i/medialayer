@@ -40,7 +40,7 @@ class ReloadTest {
   @Test
   fun inv_api_06_reload_restores_the_attached_view_before_playing() = runBlocking {
     val slot = ReloadSlot()
-    val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
+    val media = MediaLayer.open(OpenConfig(
       dir = Files.createTempDirectory("reload").toString(),
       fetcher = TestFetcher(), settings = ReloadSettings(), slots = slot,
       device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings()

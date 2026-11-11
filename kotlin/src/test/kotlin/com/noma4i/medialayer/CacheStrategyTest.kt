@@ -58,7 +58,7 @@ class CacheStrategyTest {
   fun inv_strategy_15_a_whole_source_downloads_every_block_after_it_is_declared_and_hidden() {
     val origin = RangeOrigin()
     val media = MediaLayer.open(
-      OpenConfig(availableBytes = ULong.MAX_VALUE,
+      OpenConfig(
         dir = Files.createTempDirectory("medialayer").toString(),
         fetcher = origin,
         settings = StrategySettings(),

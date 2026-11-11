@@ -56,7 +56,7 @@ class NativeCallbackThreadTest {
   fun inv_ffi_08_a_continuation_that_resumes_inline_on_a_runtime_thread_never_detaches_the_thread_under_its_own_frames() {
     NativeCallbacks.install()
     val media = MediaLayer.open(
-      OpenConfig(availableBytes = ULong.MAX_VALUE,
+      OpenConfig(
         dir = Files.createTempDirectory("medialayer").toString(),
         fetcher = TestFetcher(),
         settings = IdleSettings(),

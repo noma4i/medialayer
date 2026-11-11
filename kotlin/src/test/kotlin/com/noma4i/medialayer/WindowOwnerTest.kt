@@ -36,7 +36,7 @@ class WindowOwnerTest {
   @Test
   fun inv_ingress_49_a_new_window_without_sources_leaves_the_stage_to_the_window_that_has_them() = runBlocking {
     val slot = OwnerSlot()
-    val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
+    val media = MediaLayer.open(OpenConfig(
       dir = Files.createTempDirectory("owner").toString(),
       fetcher = TestFetcher(), settings = OwnerSettings(), slots = slot,
       device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings()

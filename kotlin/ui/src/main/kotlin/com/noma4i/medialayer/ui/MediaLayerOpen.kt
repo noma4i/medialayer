@@ -142,14 +142,12 @@ internal fun openMediaLayer(
     Trace.beginSection("MediaLayer.open.platform")
     val slots: ExoPlayerSlotFactory
     val dir: File
-    val availableBytes: ULong
     val device: DeviceMemory
     try {
       slots = ExoPlayerSlotFactory(app, callFactory ?: client, startMuted = emulator, audio = audio, videoOutputCounters = videoOutputCounters)
       synchronized(lock) { factory = slots }
       dir = File(app.cacheDir, "medialayer").apply { mkdirs() }
       CaptureFiles.sweepOrphans(CaptureFiles.directory(app))
-      availableBytes = android.os.StatFs(dir.path).availableBytes.toULong()
       device = deviceMemory(app)
     } finally { Trace.endSection() }
     ensureActive()
@@ -160,7 +158,6 @@ internal fun openMediaLayer(
     val resolved = try { defaults() } finally { Trace.endSection() }
     val config = OpenConfig(
       dir = dir.path,
-      availableBytes = availableBytes,
       fetcher = fetcher ?: OkHttpFetcher(client),
       settings = settings ?: SharedPreferencesSettings(app),
       slots = slots,

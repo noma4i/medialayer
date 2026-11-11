@@ -48,7 +48,7 @@ class WholeHoldTest {
   @Test
   fun inv_strategy_21_a_hold_opens_adds_and_closes_the_declaration() = runBlocking {
     val origin = HeldOrigin()
-    val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
+    val media = MediaLayer.open(OpenConfig(
       dir = Files.createTempDirectory("whole-hold").toString(),
       fetcher = origin,
       settings = object : SettingsStore {

@@ -30,7 +30,7 @@ class MemoryWarningTest {
     val loader = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) })
     val cache = checkNotNull(loader.memoryCache)
     val dropped = CompletableDeferred<Unit>()
-    val media = MediaLayer.open(OpenConfig(availableBytes = ULong.MAX_VALUE,
+    val media = MediaLayer.open(OpenConfig(
       dir = Files.createTempDirectory("memory-warning").toString(),
       fetcher = TestFetcher(),
       settings = SharedPreferencesSettings(context, "memory-warning"), slots = null,
