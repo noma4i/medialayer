@@ -16,8 +16,8 @@ let package = Package(
   targets: [
     .binaryTarget(
       name: "medialayerFFI",
-      url: "https://github.com/noma4i/medialayer/releases/download/3.30.0/MediaLayerFFI.xcframework.zip",
-      checksum: "d0e2cfdbb22cc9de5ab5f185add2611af038242fdaeff194c0321e24b51749e6"
+      url: "https://github.com/noma4i/medialayer/releases/download/3.30.1/MediaLayerFFI.xcframework.zip",
+      checksum: "abec3a3aaedf2c629aab59e6e1abf1ec1fcbcc5d631d25c706ee0e40158cdfac"
     ),
     .target(
       name: "MediaLayer",
