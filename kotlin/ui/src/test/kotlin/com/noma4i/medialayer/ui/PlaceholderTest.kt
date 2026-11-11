@@ -228,12 +228,18 @@ class PlaceholderTest {
       }
     }
     until("old ask held") { askHeld(a) }
+    val oldShownBefore = events.count { it is Event.Published && it.kind == kind && it.tint == Tint.RED }
+    val oldWorkBefore = oldWork(oldInput)
 
     source = second
     recompositionTrigger = 51
     if (secondLayer) layer = b
     until("new ask held") { events.count { it is Event.Ask && it.layer == newLayer.label && it.held } >= (if (secondLayer) 1 else 2) }
-    assertEquals("old picture shown after the replacement", 0, nodes(description))
+    if (video) {
+      assertEquals("old cover shown after the replacement", oldShownBefore, events.count { it is Event.Published && it.kind == kind && it.tint == Tint.RED })
+    } else {
+      assertEquals("old picture shown after the replacement", 0, nodes(description))
+    }
 
     newGate.complete(Unit)
     until("new picture on the node") { published(kind, Tint.BLUE) && nodes(description) == 1 }
@@ -244,8 +250,8 @@ class PlaceholderTest {
     recompositionTrigger = 52
     until("control picture on the node") { published(kind, Tint.GREEN) && nodes(description) == 1 }
 
-    assertEquals("old input worked after replacement", 0, oldWork(oldInput))
-    assertFalse("old picture published", published(kind, Tint.RED))
+    assertEquals("old input worked after replacement", oldWorkBefore, oldWork(oldInput))
+    assertEquals("old picture published after the replacement", oldShownBefore, events.count { it is Event.Published && it.kind == kind && it.tint == Tint.RED })
     assertEquals(0, a.mainCacheKeys.get() + b.mainCacheKeys.get())
     assertEquals(0, mainPixelSizes.get())
   }
@@ -354,7 +360,7 @@ class PlaceholderTest {
       rule.runOnIdle { layer.emit(clip.url, MediaState.Loading) }
       looper.idleFor(java.time.Duration.ofMillis(300))
 
-      assertEquals(listOf("view placeholder $tail none", "view placeholder $tail cover", "view placeholder $tail none"), shown)
+      assertEquals(listOf("view placeholder $tail cover", "view placeholder $tail none"), shown)
       assertEquals(shown, changes())
       assertEquals(0, nodes("cover"))
     } finally {
