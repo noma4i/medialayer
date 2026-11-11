@@ -476,6 +476,8 @@ mod proxy_playlist_tests;
 #[cfg(test)]
 mod proxy_store_tests;
 #[cfg(test)]
+mod failure_tests;
+#[cfg(test)]
 mod proxy_stream_tests;
 #[cfg(test)]
 mod range_origin_tests;
