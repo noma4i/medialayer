@@ -58,6 +58,7 @@ public struct MediaVideo<Content: View>: View {
   @State private var hostIdentity: MountIdentity?
   @State private var onScreen = false
   @State private var inBackground = false
+  @Environment(\.mediaShape) private var shape
   private let source: any MediaSource
   private let playing: Bool
   private let peeking: Bool
@@ -101,7 +102,7 @@ public struct MediaVideo<Content: View>: View {
       Color.clear
       if let context {
         PlaceholderView(item: item, ready: shownFrame.isShown(for: source.url), enabled: active, context: context)
-        if let host, hostIdentity == identity { VideoSurface(host: host, gravity: gravity) }
+        if let host, hostIdentity == identity { VideoSurface(host: host, gravity: gravity, shape: shape) }
       }
       if active { content(state) }
     }

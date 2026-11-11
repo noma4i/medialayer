@@ -2,11 +2,13 @@ import AVFoundation
 import QuartzCore
 import SwiftUI
 
-func layoutHosted(_ layer: CALayer?, bounds: CGRect, gravity: AVLayerVideoGravity = .resizeAspectFill) {
+func layoutHosted(_ layer: CALayer?, bounds: CGRect, gravity: AVLayerVideoGravity = .resizeAspectFill, shape: MediaShape = .rectangle) {
   CATransaction.begin()
   CATransaction.setDisableActions(true)
   layer?.sublayers?.forEach {
     $0.frame = bounds
+    $0.cornerRadius = shape.radius(in: bounds.size)
+    $0.masksToBounds = $0.cornerRadius > 0
     ($0 as? AVPlayerLayer)?.videoGravity = gravity
   }
   CATransaction.commit()
@@ -31,17 +33,19 @@ import UIKit
 final class SurfaceView: UIView {
   var host: SurfaceHost?
   var gravity = AVLayerVideoGravity.resizeAspectFill
+  var shape = MediaShape.rectangle
 
   override func layoutSubviews() {
     super.layoutSubviews()
     host?.layer.frame = bounds
-    layoutHosted(host?.layer, bounds: bounds, gravity: gravity)
+    layoutHosted(host?.layer, bounds: bounds, gravity: gravity, shape: shape)
   }
 }
 
 struct VideoSurface: UIViewRepresentable {
   let host: SurfaceHost
   var gravity = AVLayerVideoGravity.resizeAspectFill
+  var shape = MediaShape.rectangle
 
   func makeUIView(context: Context) -> SurfaceView {
     let view = SurfaceView()
@@ -51,8 +55,9 @@ struct VideoSurface: UIViewRepresentable {
   }
 
   func updateUIView(_ view: SurfaceView, context: Context) {
-    if view.gravity != gravity {
+    if view.gravity != gravity || view.shape != shape {
       view.gravity = gravity
+      view.shape = shape
       view.setNeedsLayout()
     }
     if view.host !== host {
@@ -85,6 +90,7 @@ final class SurfaceView: NSView {
 struct VideoSurface: NSViewRepresentable {
   let host: SurfaceHost
   var gravity = AVLayerVideoGravity.resizeAspectFill
+  var shape = MediaShape.rectangle
 
   func makeNSView(context: Context) -> SurfaceView {
     let view = SurfaceView()
