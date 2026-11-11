@@ -127,17 +127,114 @@ struct AnimatedFrames {
 #if canImport(UIKit)
 import UIKit
 
-final class FrameImageView: UIImageView {
-  var windowChanged: (() -> Void)?
-  private(set) var framesShown = 0
+/// Frames decoded off the main thread, waiting for the display link to put them on the layer.
+final class PreparedFrames: @unchecked Sendable {
+  static let window = 3
 
-  override var image: UIImage? {
-    didSet { framesShown += 1 }
+  private let lock = NSLock()
+  private var order: [Int] = []
+  private var images: [Int: CGImage] = [:]
+
+  func image(at index: Int) -> CGImage? { lock.withLock { images[index] } }
+
+  func put(_ image: CGImage, at index: Int) {
+    lock.withLock {
+      if images.updateValue(image, forKey: index) == nil { order.append(index) }
+      while order.count > Self.window { images[order.removeFirst()] = nil }
+    }
   }
+}
+
+/// The view that owns the animation contents: frames go to `layer.contents` on a display-link tick, never through a `UIImageView`.
+final class FrameLayerView: UIView {
+  struct Presentation {
+    let frames: AnimatedFrames
+    let prepared: PreparedFrames
+    let rate: Double
+    let start: ContinuousClock.Instant
+    let limit: Int?
+  }
+
+  private final class LinkTarget: NSObject {
+    weak var view: FrameLayerView?
+
+    @objc func tick(_ link: CADisplayLink) {
+      guard let view else { return link.invalidate() }
+
+      view.tick()
+    }
+  }
+
+  var windowChanged: (() -> Void)?
+  var shape = MediaShape.rectangle {
+    didSet { if shape != oldValue { setNeedsLayout() } }
+  }
+  /// Main-thread writes of `layer.contents`.
+  private(set) var framesShown = 0
+  private var link: CADisplayLink?
+  private var presentation: Presentation?
+  private var presentedIndex = -1
+
+  var isPresenting: Bool { link != nil }
+  var shownContents: CGImage? {
+    guard let contents = layer.contents else { return nil }
+
+    return (contents as! CGImage)
+  }
+
+  override init(frame: CGRect) {
+    super.init(frame: frame)
+    isOpaque = false
+    backgroundColor = .clear
+    layer.masksToBounds = true
+  }
+
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
   override func didMoveToWindow() {
     super.didMoveToWindow()
     windowChanged?()
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    layer.cornerRadius = shape.radius(in: bounds.size)
+  }
+
+  func show(_ image: CGImage) {
+    layer.contents = image
+    framesShown += 1
+  }
+
+  func present(_ presentation: Presentation) {
+    stopPresenting()
+    self.presentation = presentation
+    presentedIndex = -1
+    let target = LinkTarget()
+    target.view = self
+    let link = CADisplayLink(target: target, selector: #selector(LinkTarget.tick(_:)))
+    link.add(to: .main, forMode: .common)
+    self.link = link
+  }
+
+  func stopPresenting() {
+    link?.invalidate()
+    link = nil
+    presentation = nil
+  }
+
+  private func tick() {
+    guard let presentation else { return }
+
+    let parts = (ContinuousClock.now - presentation.start).components
+    let tick = presentation.frames.frameTick(elapsed: Double(parts.seconds) + Double(parts.attoseconds) * 1e-18, rate: presentation.rate)
+    if let limit = presentation.limit, tick >= limit { return }
+
+    let index = tick % presentation.frames.frameCount
+    guard index != presentedIndex, let image = presentation.prepared.image(at: index) else { return }
+
+    presentedIndex = index
+    show(image)
   }
 }
 
@@ -148,9 +245,10 @@ struct AnimatedFramesView: UIViewRepresentable {
     let rate: Double
     var repeats: ImageAnimation.Repeats = .forever
     var rest: ImageAnimation.RestFrame = .first
+    var grayscale = false
 
     var interval: TimeInterval { frames.loopDuration(rate: rate) / Double(frames.frameCount) }
-    var key: PlanKey { PlanKey(interval: interval, repeats: repeats, rest: rest) }
+    var key: PlanKey { PlanKey(interval: interval, repeats: repeats, rest: rest, grayscale: grayscale) }
     var restIndex: Int { rest == .last ? frames.frameCount - 1 : 0 }
   }
 
@@ -158,20 +256,29 @@ struct AnimatedFramesView: UIViewRepresentable {
     let interval: TimeInterval
     let repeats: ImageAnimation.Repeats
     let rest: ImageAnimation.RestFrame
+    var grayscale = false
+  }
+
+  struct Appearance: Equatable {
+    let token: UUID
+    let grayscale: Bool
   }
 
   final class Playback {
     var token: UUID?
+    var appearance: Appearance?
     var plan: StreamPlan?
     private var task: Task<Void, Never>?
     private var restTask: Task<Void, Never>?
     private var runningKey: PlanKey?
     private var shownRest: RestShown?
+    private weak var presenter: FrameLayerView?
     private(set) var finished: PlanKey?
 
     private struct RestShown: Equatable {
       let token: UUID?
       let rest: ImageAnimation.RestFrame
+      let grayscale: Bool
     }
 
     deinit {
@@ -179,7 +286,7 @@ struct AnimatedFramesView: UIViewRepresentable {
       restTask?.cancel()
     }
 
-    func sync(_ view: UIImageView) {
+    func sync(_ view: FrameLayerView) {
       guard let plan, view.window != nil else { return stop() }
       guard finished != plan.key else { return }
       guard task == nil || runningKey != plan.key else { return }
@@ -188,12 +295,14 @@ struct AnimatedFramesView: UIViewRepresentable {
       shownRest = nil
       finished = nil
       runningKey = plan.key
+      presenter = view
       task = AnimatedFramesView.play(plan, on: view, finish: { [weak self] key in self?.finished = key })
     }
 
     func stop() {
       task?.cancel()
       task = nil
+      presenter?.stopPresenting()
     }
 
     func reset() {
@@ -206,26 +315,27 @@ struct AnimatedFramesView: UIViewRepresentable {
     }
 
     /// Shows the rest frame once per source and rest choice; the last frame is decoded off the main thread.
-    func rest(_ rest: ImageAnimation.RestFrame, of frames: AnimatedFrames, on view: UIImageView) {
+    func rest(_ rest: ImageAnimation.RestFrame, of frames: AnimatedFrames, grayscale: Bool, on view: FrameLayerView) {
       plan = nil
       stop()
       finished = nil
       runningKey = nil
-      let shown = RestShown(token: token, rest: rest)
+      let shown = RestShown(token: token, rest: rest, grayscale: grayscale)
       guard shownRest != shown else { return }
 
       shownRest = shown
       restTask?.cancel()
       guard rest == .last else {
         restTask = nil
-        view.image = UIImage(cgImage: frames.firstImage)
+        view.show(AnimatedFramesView.displayed(frames.firstImage, grayscale: grayscale))
         return
       }
       restTask = Task.detached { [weak view] in
         guard let image = frames.image(at: frames.frameCount - 1), !Task.isCancelled else { return }
 
+        let ready = AnimatedFramesView.displayed(image, grayscale: grayscale)
         await MainActor.run { [weak view] in
-          if !Task.isCancelled { view?.image = UIImage(cgImage: image) }
+          if !Task.isCancelled { view?.show(ready) }
         }
       }
     }
@@ -237,86 +347,88 @@ struct AnimatedFramesView: UIViewRepresentable {
   let playbackRate: Double
   var animation = ImageAnimation()
   var rests = false
+  var grayscale = false
+  var shape = MediaShape.rectangle
 
   func makeCoordinator() -> Playback { Playback() }
 
-  func makeUIView(context: Context) -> UIImageView {
-    let view = FrameImageView()
-    view.isOpaque = false
-    view.backgroundColor = .clear
-    view.clipsToBounds = true
-    return view
-  }
+  func makeUIView(context: Context) -> FrameLayerView { FrameLayerView() }
 
-  func updateUIView(_ view: UIImageView, context: Context) {
+  func updateUIView(_ view: FrameLayerView, context: Context) {
     update(view, playback: context.coordinator)
   }
 
-  func update(_ view: UIImageView, playback: Playback) {
-    view.contentMode = contentMode == .fill ? .scaleAspectFill : .scaleAspectFit
-    (view as? FrameImageView)?.windowChanged = { [weak playback, weak view] in
+  func update(_ view: FrameLayerView, playback: Playback) {
+    view.layer.contentsGravity = contentMode == .fill ? .resizeAspectFill : .resizeAspect
+    view.shape = shape
+    view.windowChanged = { [weak playback, weak view] in
       if let playback, let view { playback.sync(view) }
     }
-    if playback.token != frames.token {
+    let appearance = Appearance(token: frames.token, grayscale: grayscale)
+    if playback.appearance != appearance {
+      playback.appearance = appearance
       playback.token = frames.token
       playback.reset()
-      view.stopAnimating()
-      view.image = UIImage(cgImage: frames.firstImage)
+      view.show(Self.displayed(frames.firstImage, grayscale: grayscale))
     }
     if rests {
-      playback.rest(animation.rest, of: frames, on: view)
+      playback.rest(animation.rest, of: frames, grayscale: grayscale, on: view)
       return
     }
-    playback.plan = isPlaying ? StreamPlan(stream: frames.stream, frames: frames, rate: playbackRate, repeats: animation.repeats, rest: animation.rest) : nil
+    playback.plan = isPlaying ? StreamPlan(stream: frames.stream, frames: frames, rate: playbackRate, repeats: animation.repeats, rest: animation.rest, grayscale: grayscale) : nil
     playback.sync(view)
   }
 
-  static func dismantleUIView(_ view: UIImageView, coordinator: Playback) {
+  static func dismantleUIView(_ view: FrameLayerView, coordinator: Playback) {
     coordinator.plan = nil
     coordinator.reset()
+    view.stopPresenting()
   }
 
-  private static func play(_ plan: StreamPlan, on view: UIImageView, finish: @escaping @MainActor (PlanKey) -> Void) -> Task<Void, Never> {
+  nonisolated static func displayed(_ image: CGImage, grayscale: Bool) -> CGImage {
+    grayscale ? GrayscaleImage.convert(image) : image
+  }
+
+  /// Decodes and converts frames off the main thread, the display link of `view` puts them on the layer.
+  private static func play(_ plan: StreamPlan, on view: FrameLayerView, finish: @escaping @MainActor (PlanKey) -> Void) -> Task<Void, Never> {
     plan.stream.preparedTask()
+    let clock = ContinuousClock()
+    let start = clock.now
+    let prepared = PreparedFrames()
+    let limit: Int? = if case .times(let count) = plan.repeats { max(count, 1) * plan.frames.frameCount } else { nil }
+    view.present(FrameLayerView.Presentation(frames: plan.frames, prepared: prepared, rate: plan.rate, start: start, limit: limit))
     return Task.detached { [weak view] in
-      let clock = ContinuousClock()
-      let start = clock.now
-      var shown = -1
-      let limit: Int? = if case .times(let count) = plan.repeats { max(count, 1) * plan.frames.frameCount } else { nil }
+      func prepare(_ index: Int) {
+        guard prepared.image(at: index) == nil, let image = plan.frames.image(at: index) else { return }
+
+        prepared.put(displayed(image, grayscale: plan.grayscale), at: index)
+      }
       while !Task.isCancelled {
         let parts = (clock.now - start).components
         let tick = plan.frames.frameTick(elapsed: Double(parts.seconds) + Double(parts.attoseconds) * 1e-18, rate: plan.rate)
         if let limit, tick >= limit {
-          let resting = plan.frames.image(at: plan.restIndex)
+          let resting = plan.frames.image(at: plan.restIndex).map { displayed($0, grayscale: plan.grayscale) }
           guard !Task.isCancelled else { return }
 
           await MainActor.run { [weak view] in
             if !Task.isCancelled {
-              if let resting { view?.image = UIImage(cgImage: resting) }
+              view?.stopPresenting()
+              if let resting { view?.show(resting) }
               finish(plan.key)
             }
           }
           return
         }
-        let index = tick % plan.frames.frameCount
-        if index != shown {
-          let image = plan.frames.image(at: index)
-          guard !Task.isCancelled else { return }
-
-          await MainActor.run { [weak view] in
-            if !Task.isCancelled, let image { view?.image = UIImage(cgImage: image) }
-          }
-          shown = index
-        }
-        let upcoming = (tick + 1) % plan.frames.frameCount
+        prepare(tick % plan.frames.frameCount)
         guard !Task.isCancelled else { return }
-        _ = plan.frames.image(at: upcoming)
+
+        prepare((tick + 1) % plan.frames.frameCount)
         try? await clock.sleep(until: start + .seconds(plan.frames.frameEnd(tick: tick, rate: plan.rate)))
       }
     }
   }
 
-  func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIImageView, context: Context) -> CGSize? {
+  func sizeThatFits(_ proposal: ProposedViewSize, uiView: FrameLayerView, context: Context) -> CGSize? {
     proposal.replacingUnspecifiedDimensions()
   }
 }
@@ -326,6 +438,10 @@ struct AnimatedFramesView: View {
   let contentMode: ContentMode
   let isPlaying: Bool
   let playbackRate: Double
+  var animation = ImageAnimation()
+  var rests = false
+  var grayscale = false
+  var shape = MediaShape.rectangle
 
   var body: some View {
     Image(decorative: frames.firstImage, scale: 1).resizable().aspectRatio(contentMode: contentMode)

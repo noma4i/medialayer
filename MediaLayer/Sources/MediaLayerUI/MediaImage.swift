@@ -141,6 +141,8 @@ public struct MediaImage<Content: View>: View {
   @Environment(\.displayScale) private var displayScale
   @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
   @Environment(\.mediaReduceMotionOverride) private var reduceMotionOverride
+  @Environment(\.mediaGrayscale) private var grayscale
+  @Environment(\.mediaShape) private var shape
   @State private var loaded: LoadedImage?
   @State private var state: MediaState = .idle
   @State private var failure: ScopedFailure?
@@ -190,9 +192,9 @@ public struct MediaImage<Content: View>: View {
               }
             }
             if let frames = loaded.flatMap({ $0.key == key ? $0.frames : nil }) {
-              AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isPlaying, playbackRate: playbackRate, animation: animation, rests: animation.rests(reduceMotion: reduceMotion))
+              AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isPlaying, playbackRate: playbackRate, animation: animation, rests: animation.rests(reduceMotion: reduceMotion), grayscale: grayscale, shape: shape)
             } else if let shown {
-              Image(platform: shown).resizable().aspectRatio(contentMode: contentMode)
+              still(shown)
             }
             if isPlaying { content(ImagePass.contentState(shown: shown != nil, state: state, failure: failure?.of(source.item))) }
           }
@@ -213,6 +215,18 @@ public struct MediaImage<Content: View>: View {
       .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.background)) { _ in inBackground = true }
       .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
     }
+  }
+
+  @ViewBuilder private func still(_ image: PlatformImage) -> some View {
+    #if canImport(UIKit)
+    if grayscale || shape != .rectangle {
+      StillLayerView(image: image, contentMode: contentMode, grayscale: grayscale, shape: shape)
+    } else {
+      Image(platform: image).resizable().aspectRatio(contentMode: contentMode)
+    }
+    #else
+    Image(platform: image).resizable().aspectRatio(contentMode: contentMode)
+    #endif
   }
 
   private var mount: PlaceMount? {
