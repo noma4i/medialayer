@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 pub(super) fn config(dir: &std::path::Path, slots: Option<Arc<dyn PlayerSlotFactory>>, limits: Option<IngressLimits>) -> OpenConfig {
     OpenConfig {
-        available_bytes: u64::MAX,
         dir: dir.to_string_lossy().to_string(),
         fetcher: Arc::new(Offline),
         settings: shared::<FakeSettings>(),

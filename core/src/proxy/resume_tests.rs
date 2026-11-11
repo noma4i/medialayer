@@ -22,7 +22,7 @@ struct Rig {
 
 async fn rig() -> Rig {
     let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::open(dir.path(), Limits { budget: 8 * 1024 * 1024, min_budget: 1, ..Limits::default() }, u64::MAX);
+    let cache = Cache::open(dir.path(), Limits { budget: 8 * 1024 * 1024, min_budget: 1, ..Limits::default() });
     cache.ready().await;
     let fetcher = Arc::new(MockFetcher::new());
     fetcher.route(URL, Script::ok(pattern()));

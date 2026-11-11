@@ -1,7 +1,6 @@
 cache do
   budget 3.gib, min: 96.mib
   shrink_to 75.percent
-  free_space 15.percent
   evict expire_after 2.days
   memory 192.mib
   timeout 3.minutes

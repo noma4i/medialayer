@@ -4,9 +4,10 @@ use std::path::PathBuf;
 use medialayer::prefetch::CacheStrategy;
 
 #[test]
-fn inv_limits_01_dsl_configures_the_free_space_fraction() {
-    let spec = crate::parse_spec("cache do\n  free_space 25.percent\nend\n").expect("valid disk share");
-    assert!(spec.limits().encode().contains("free_space_fraction=0.25\n"));
+fn inv_limits_12_dsl_has_no_free_space_word() {
+    assert!(crate::parse_spec("cache do\n  free_space 25.percent\nend\n").is_err());
+    let spec = crate::parse_spec("cache do\n  budget 2.gib\nend\n").expect("valid budget");
+    assert!(spec.limits().encode().starts_with("budget=2147483648\n"));
 }
 use medialayer::spec::{AudioSpec, CacheSpec, Evict, ImageSpec, MediaSpec, PlaybackSpec, PoolSpec, PrefetchSpec, VideoSpec};
 
@@ -152,7 +153,6 @@ pub(crate) fn runtime_spec() -> MediaSpec {
             dedupe_entries: 250,
             prefetch_budget_mib: 80,
             namespace_headers: vec!["Authorization".into(), "Cookie".into()],
-            free_space: 15,
         },
         videos: vec![video, VideoSpec::new("plain_video")],
         images: vec![

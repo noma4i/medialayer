@@ -46,7 +46,6 @@ pub struct CacheShared {
     #[cfg(test)]
     pub save_pause: Mutex<Option<(tokio::sync::oneshot::Sender<()>, tokio::sync::oneshot::Receiver<()>)>>,
     pub dir: PathBuf,
-    pub available_bytes: u64,
     pub clock: Arc<dyn Clock>,
     pub overrides: HashMap<Kind, EvictionStrategy>,
     pub chunk_size: usize,
@@ -68,8 +67,8 @@ pub struct CacheShared {
 }
 
 impl CacheShared {
-    pub fn new(dir: PathBuf, limits: Limits, options: super::options::Options, handle: Handle, available_bytes: u64) -> CacheShared {
-        let mut state = State::new(super::reservation::limits_for_disk(limits, available_bytes));
+    pub fn new(dir: PathBuf, limits: Limits, options: super::options::Options, handle: Handle) -> CacheShared {
+        let mut state = State::new(limits);
         state.configure_order(&options.overrides);
         CacheShared {
             #[cfg(test)]
@@ -101,7 +100,6 @@ impl CacheShared {
             #[cfg(test)]
             save_pause: Mutex::new(None),
             dir,
-            available_bytes,
             clock: options.clock,
             overrides: options.overrides,
             chunk_size: options.chunk_size.max(1),

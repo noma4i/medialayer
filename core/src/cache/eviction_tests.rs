@@ -293,7 +293,7 @@ async fn inv_cache_08_mixed_strategies_evict_by_kind_priority_then_kind_strategy
     for round in 0..20 {
         let dir = tempfile::tempdir().unwrap();
         let clock = std::sync::Arc::new(super::clock::ManualClock::new(1_000));
-        let cache = Cache::open_with(dir.path(), limits(100, 0.8, EvictionStrategy::Lru), mixed_priority_options(clock.clone()), u64::MAX);
+        let cache = Cache::open_with(dir.path(), limits(100, 0.8, EvictionStrategy::Lru), mixed_priority_options(clock.clone()));
         cache.ready().await;
         for (key, kind, len) in [("i1", Kind::Image, 20), ("i2", Kind::Image, 20), ("a1", Kind::Audio, 10), ("a2", Kind::Audio, 30)] {
             let key = format!("{key}-{round}");
@@ -317,7 +317,7 @@ async fn inv_cache_08_kinds_sharing_a_strategy_are_ranked_together() {
         let dir = tempfile::tempdir().unwrap();
         let clock = std::sync::Arc::new(super::clock::ManualClock::new(1_000));
         let options = Options { kind_priority: [Kind::Audio, Kind::Image, Kind::Stream], ..options(clock.clone(), &[]) };
-        let cache = Cache::open_with(dir.path(), limits(100, 0.8, EvictionStrategy::Lru), options, u64::MAX);
+        let cache = Cache::open_with(dir.path(), limits(100, 0.8, EvictionStrategy::Lru), options);
         cache.ready().await;
         for (key, kind) in [("i1", Kind::Image), ("a1", Kind::Audio), ("s1", Kind::Stream)] {
             clock.advance_ms(10);

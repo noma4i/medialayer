@@ -41,7 +41,6 @@ pub struct CacheSpec {
     pub dedupe_entries: u32,
     pub prefetch_budget_mib: u32,
     pub namespace_headers: Vec<String>,
-    pub free_space: u32,
 }
 
 impl Default for CacheSpec {
@@ -59,7 +58,6 @@ impl Default for CacheSpec {
             dedupe_entries: limits.dedupe_max_entries,
             prefetch_budget_mib: limits.prefetch_budget_mib,
             namespace_headers: Vec::new(),
-            free_space: (limits.free_space_fraction * 100.0) as u32,
         }
     }
 }
@@ -217,7 +215,6 @@ impl MediaSpec {
         let playback = video.map(|video| video.playback.clone()).unwrap_or_default();
         Limits {
             budget: self.cache.budget,
-            free_space_fraction: f64::from(self.cache.free_space) / 100.0,
             min_budget: self.cache.min,
             shrink_to: f64::from(self.cache.shrink_to) / 100.0,
             memory_budget: self.cache.memory,

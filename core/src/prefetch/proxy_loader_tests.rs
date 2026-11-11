@@ -16,7 +16,7 @@ const SEGMENT_1: &str = "https://o.test/hls/v0/s1.m4s";
 #[tokio::test]
 async fn inv_prefetch_06_an_hls_source_lands_in_the_disk_cache_through_the_proxy_up_to_the_chunks_of_its_distance() {
     let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::open(dir.path(), Limits::default(), u64::MAX);
+    let cache = Cache::open(dir.path(), Limits::default());
     cache.ready().await;
     let store: Arc<dyn ByteStore> = Arc::new(CacheStore::new(cache.clone(), Arc::new(classify_kind)));
     let fetcher = Arc::new(MockFetcher::new());
@@ -54,7 +54,7 @@ async fn inv_prefetch_06_an_hls_source_lands_in_the_disk_cache_through_the_proxy
 #[tokio::test]
 async fn inv_prefetch_06_the_first_block_of_an_mp4_lands_as_one_ranged_block_not_the_whole_file() {
     let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::open(dir.path(), Limits::default(), u64::MAX);
+    let cache = Cache::open(dir.path(), Limits::default());
     cache.ready().await;
     let store: Arc<dyn ByteStore> = Arc::new(CacheStore::new(cache.clone(), Arc::new(classify_kind)));
     let fetcher = Arc::new(MockFetcher::new());
@@ -73,7 +73,7 @@ async fn inv_prefetch_06_the_first_block_of_an_mp4_lands_as_one_ranged_block_not
 #[tokio::test]
 async fn inv_proxy_05_a_prefetch_of_a_chunk_the_player_is_reading_joins_its_flight_and_downloads_it_once() {
     let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::open(dir.path(), Limits::default(), u64::MAX);
+    let cache = Cache::open(dir.path(), Limits::default());
     cache.ready().await;
     let store: Arc<dyn ByteStore> = Arc::new(CacheStore::new(cache.clone(), Arc::new(classify_kind)));
     let fetcher = Arc::new(MockFetcher::new());

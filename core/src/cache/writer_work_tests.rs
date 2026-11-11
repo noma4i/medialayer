@@ -37,7 +37,7 @@ async fn inv_cache_25_chunks_flush_only_at_commit() {
     const BYTES: usize = 256 * 1024;
     for chunk in [1024, 64 * 1024] {
         let directory = tempfile::tempdir().unwrap();
-        let cache = crate::cache::Cache::open(directory.path(), crate::limits::Limits::default(), u64::MAX);
+        let cache = crate::cache::Cache::open(directory.path(), crate::limits::Limits::default());
         cache.ready().await;
         let body = Arc::new(Body { remaining: AtomicUsize::new(BYTES), chunk, calls: AtomicUsize::new(0) });
         let fetcher = ForeignFetcher::new(Arc::new(Origin(body.clone())), crate::memory::InputLimits::default());

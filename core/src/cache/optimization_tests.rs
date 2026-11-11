@@ -56,7 +56,7 @@ async fn inv_cache_07_last_owner_drop_saves_changes_after_the_snapshot() {
     drop(f.cache);
     resume.send(()).unwrap();
     wait_until(|| owner.upgrade().is_none()).await;
-    let reopened = Cache::open(f.dir.path(), Limits::default(), u64::MAX);
+    let reopened = Cache::open(f.dir.path(), Limits::default());
     reopened.ready().await;
     assert_eq!(reopened.get(keys[1]).await.as_deref(), Some(b"a".as_slice()));
     assert_eq!(reopened.get(keys[0]).await.as_deref(), Some(b"b".as_slice()));
@@ -79,25 +79,21 @@ async fn inv_cache_03_old_reader_drop_does_not_unpin_a_replacement() {
 }
 
 #[tokio::test]
-async fn inv_cache_10_available_space_caps_reservations_and_live_limit_changes() {
+async fn inv_cache_10_budget_is_the_configured_value_and_live_limit_changes_apply() {
     let dir = tempfile::tempdir().unwrap();
-    let configured = Limits { budget: 1000, min_budget: 1, free_space_fraction: 0.25, ..Limits::default() };
-    let cache = Cache::open(dir.path(), configured, 100);
+    let cache = Cache::open(dir.path(), Limits::default());
     cache.ready().await;
+    assert_eq!(cache.inner.state().limits.budget, Limits::default().budget);
+    let configured = Limits { budget: 1000, min_budget: 1, ..Limits::default() };
+    cache.set_limits(configured).await.unwrap();
     let mut writer = cache.begin_write("clip", Kind::Stream).await.unwrap();
-    writer.write(&[0; 25]).await.unwrap();
-    assert_eq!(cache.inner.state().reserved, 25);
+    writer.write(&[0; 1000]).await.unwrap();
     assert_eq!(writer.write(&[0]).await, Err(CacheError::NotEnoughSpace));
     drop(writer);
-    cache.set_limits(Limits { free_space_fraction: 0.5, ..configured }).await.unwrap();
+    cache.set_limits(Limits { budget: 500, ..configured }).await.unwrap();
     let mut writer = cache.begin_write("clip", Kind::Stream).await.unwrap();
-    writer.write(&[0; 50]).await.unwrap();
+    writer.write(&[0; 500]).await.unwrap();
     assert_eq!(writer.write(&[0]).await, Err(CacheError::NotEnoughSpace));
-    drop(writer);
-    let empty = tempfile::tempdir().unwrap();
-    let cache = Cache::open(empty.path(), configured, 0);
-    cache.ready().await;
-    assert_eq!(cache.put("clip", Kind::Image, b"x").await, Err(CacheError::NotEnoughSpace));
 }
 
 #[tokio::test]
@@ -106,7 +102,7 @@ async fn inv_cache_17_cold_read_reuses_the_file_opened_for_verification() {
     let f = fixture(Limits::default(), &[]).await;
     f.cache.put("clip", Kind::Image, b"data").await.unwrap();
     f.cache.flush().await.unwrap();
-    let cache = Cache::open(f.dir.path(), Limits::default(), u64::MAX);
+    let cache = Cache::open(f.dir.path(), Limits::default());
     cache.ready().await;
     for _ in 0..2 {
         let reader = cache.open_reader("clip").await.unwrap();
@@ -143,7 +139,7 @@ async fn inv_idle_01_failed_index_save_waits_for_an_event() {
     std::fs::remove_dir(f.dir.path().join(super::naming::INDEX_TMP_FILE)).unwrap();
     f.cache.flush().await.unwrap();
     assert!(!f.cache.inner.dirty.load(Ordering::SeqCst));
-    let reopened = Cache::open(f.dir.path(), Limits::default(), u64::MAX);
+    let reopened = Cache::open(f.dir.path(), Limits::default());
     reopened.ready().await;
     assert_eq!(reopened.get("clip").await.as_deref(), Some(b"data".as_slice()));
 }

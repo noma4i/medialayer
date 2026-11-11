@@ -290,7 +290,7 @@ pub struct ProxyRig {
 
 pub async fn proxy_rig() -> ProxyRig {
     let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::open(dir.path(), Limits::default(), u64::MAX);
+    let cache = Cache::open(dir.path(), Limits::default());
     cache.ready().await;
     let store: Arc<dyn ByteStore> = Arc::new(CacheStore::new(cache.clone(), Arc::new(classify_kind)));
     let fetcher = Arc::new(MockFetcher::new());
@@ -490,7 +490,6 @@ pub fn fast_watchdog() -> WatchdogConfig {
 
 pub fn assembly(dir: &Path, fetcher: Arc<MockFetcher>, factory: Arc<MockFactory>) -> Assembly {
     Assembly {
-        available_bytes: u64::MAX,
         dir: dir.to_path_buf(),
         fetcher,
         settings: shared::<FakeSettings>(),

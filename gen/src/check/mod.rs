@@ -72,7 +72,6 @@ const STRATEGY: Rule = Rule { word: "strategy", args: &[Want::Strategy], keys: &
 const CACHE: &[Rule] = &[
     Rule { word: "budget", args: &[Want::Size], keys: &[("min", Want::Size)] },
     Rule { word: "shrink_to", args: &[Want::Percent], keys: &[] },
-    Rule { word: "free_space", args: &[Want::Percent], keys: &[] },
     EVICT,
     Rule { word: "memory", args: &[Want::Size], keys: &[] },
     Rule { word: "timeout", args: &[Want::Duration], keys: &[] },

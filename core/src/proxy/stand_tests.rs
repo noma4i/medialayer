@@ -250,7 +250,7 @@ async fn inv_proxy_02_inv_proxy_03_inv_proxy_06_inv_proxy_11_clients_ranges_cuts
 
     let dir = tempfile::tempdir().unwrap();
     let limits = Limits { budget: 120_000, min_budget: 1, shrink_to: 0.5, strategy: EvictionStrategy::Lru, ..Limits::default() };
-    let cache = Cache::open_with(dir.path(), limits, Options { persist_delay: std::time::Duration::from_millis(20), ..Options::default() }, u64::MAX);
+    let cache = Cache::open_with(dir.path(), limits, Options { persist_delay: std::time::Duration::from_millis(20), ..Options::default() });
     cache.ready().await;
     let store = Arc::new(FlakyStore {
         inner: Arc::new(CacheStore::new(cache.clone(), Arc::new(classify_kind))),

@@ -16,7 +16,6 @@ pub enum Evict {
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct Limits {
     pub budget: u64,
-    pub free_space_fraction: f64,
     pub min_budget: u64,
     pub shrink_to: f64,
     pub memory_budget: u64,
@@ -130,7 +129,6 @@ impl From<CoreLimits> for Limits {
     fn from(limits: CoreLimits) -> Self {
         Limits {
             budget: limits.budget,
-            free_space_fraction: limits.free_space_fraction,
             min_budget: limits.min_budget,
             shrink_to: limits.shrink_to,
             memory_budget: limits.memory_budget,
@@ -155,7 +153,6 @@ impl TryFrom<Limits> for CoreLimits {
     fn try_from(limits: Limits) -> Result<Self, LimitsError> {
         Ok(CoreLimits {
             budget: limits.budget,
-            free_space_fraction: limits.free_space_fraction,
             min_budget: limits.min_budget,
             shrink_to: limits.shrink_to,
             memory_budget: limits.memory_budget,

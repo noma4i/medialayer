@@ -45,7 +45,7 @@ fn expected_span(range: &str) -> (usize, usize) {
 
 async fn answer(shape: Shape, range: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::open(dir.path(), Limits { budget: 64 * 1024 * 1024, min_budget: 1, ..Limits::default() }, u64::MAX);
+    let cache = Cache::open(dir.path(), Limits { budget: 64 * 1024 * 1024, min_budget: 1, ..Limits::default() });
     cache.ready().await;
     let fetcher = Arc::new(MockFetcher::new());
     fetcher.route(VIDEO, script(shape));

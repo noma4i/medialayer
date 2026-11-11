@@ -58,7 +58,6 @@ impl Default for PoolSettings {
 
 pub struct Assembly {
     pub dir: PathBuf,
-    pub available_bytes: u64,
     pub fetcher: Arc<dyn Fetcher>,
     pub settings: Arc<dyn SettingsStore>,
     pub factory: Option<Arc<dyn PlayerSlotFactory>>,
@@ -178,7 +177,7 @@ impl PrefetchControl for Prefetcher {
 }
 
 pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
-    let Assembly { dir, available_bytes, fetcher, settings, factory, device, defaults, pool, namespace_headers, image_windows, forward_headers, eviction_overrides, silent, watchdog } = config;
+    let Assembly { dir, fetcher, settings, factory, device, defaults, pool, namespace_headers, image_windows, forward_headers, eviction_overrides, silent, watchdog } = config;
     #[cfg(test)]
     if let Some(delay) = super::test_support::assembly_delay(&dir) {
         tokio::time::sleep(delay).await;
@@ -192,7 +191,7 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
     let (limits, rejected) = crate::limits::resolve(defaults, saved.as_deref());
     let rejected = rejected.map(|error| format!("saved limits rejected: {error}"));
     let ledger = ledger_for(&limits, device);
-    let cache = Cache::open_with(dir, limits, CacheOptions { change: change.clone(), overrides: eviction_overrides, ..CacheOptions::default() }, available_bytes);
+    let cache = Cache::open_with(dir, limits, CacheOptions { change: change.clone(), overrides: eviction_overrides, ..CacheOptions::default() });
     let store: Arc<dyn ByteStore> = Arc::new(CacheStore::new(cache.clone(), Arc::new(classify_kind)));
     let mut proxy_config = ProxyConfig { ledger: ledger.clone(), namespace_headers, ..ProxyConfig::from_limits(&limits) };
     if let Some(headers) = forward_headers {

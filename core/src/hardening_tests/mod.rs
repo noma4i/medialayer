@@ -19,7 +19,7 @@ fn limits(budget: u64) -> Limits {
 
 async fn cache(budget: u64) -> (tempfile::TempDir, Cache) {
     let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::open(dir.path(), limits(budget), u64::MAX);
+    let cache = Cache::open(dir.path(), limits(budget));
     cache.ready().await;
     (dir, cache)
 }

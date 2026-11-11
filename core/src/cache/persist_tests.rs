@@ -31,7 +31,7 @@ async fn inv_cache_24_unknown_index_version_discards_entries() {
     let path = f.dir.path().join(super::naming::INDEX_FILE);
     let text = std::fs::read_to_string(&path).unwrap();
     std::fs::write(&path, format!("unknown-version\n{text}")).unwrap();
-    let reopened = Cache::open(f.dir.path(), crate::limits::Limits::default(), u64::MAX);
+    let reopened = Cache::open(f.dir.path(), crate::limits::Limits::default());
     reopened.ready().await;
     assert!(!reopened.contains("clip").await);
 }
@@ -97,7 +97,7 @@ fn inv_tone_08_a_line_carries_the_tone_and_a_damaged_tone_field_keeps_the_entry_
 async fn inv_cache_07_failed_index_save_preserves_dirty_state() {
     use std::sync::atomic::Ordering;
     let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::open(dir.path(), crate::limits::Limits::default(), u64::MAX);
+    let cache = Cache::open(dir.path(), crate::limits::Limits::default());
     cache.ready().await;
     std::fs::create_dir(dir.path().join(super::naming::INDEX_TMP_FILE)).unwrap();
     cache.inner.dirty.store(false, Ordering::SeqCst);
@@ -113,7 +113,7 @@ async fn inv_cache_07_failed_index_save_preserves_dirty_state() {
 async fn inv_strategy_12_clear_and_purge_remove_keep_history() {
     for purge in [false, true] {
         let dir = tempfile::tempdir().unwrap();
-        let cache = Cache::open(dir.path(), crate::limits::Limits::default(), u64::MAX);
+        let cache = Cache::open(dir.path(), crate::limits::Limits::default());
         cache.ready().await;
         cache.put("clip#0", Kind::Stream, b"data").await.unwrap();
         cache.keep("clip");

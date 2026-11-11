@@ -11,7 +11,7 @@ async fn inv_cache_22_startup_defers_file_metadata_until_read() {
     let f = fixture(roomy(), &[]).await;
     f.put("k", Kind::Stream, 30).await;
     f.cache.flush().await.unwrap();
-    let cache = Cache::open(f.dir.path(), roomy(), u64::MAX);
+    let cache = Cache::open(f.dir.path(), roomy());
     cache.ready().await;
     assert_eq!(cache.inner.load_stats.load(std::sync::atomic::Ordering::Relaxed), 0);
     assert_eq!(cache.get("k").await, Some(payload(30)));
@@ -22,7 +22,7 @@ async fn inv_cache_07_index_survives_a_reopen() {
     let f = fixture(roomy(), &[]).await;
     f.put("k", Kind::Audio, 25).await;
     f.cache.flush().await.unwrap();
-    let reopened = Cache::open(f.dir.path(), roomy(), u64::MAX);
+    let reopened = Cache::open(f.dir.path(), roomy());
     reopened.ready().await;
     assert_eq!(reopened.get("k").await, Some(payload(25)));
     let stats = reopened.stats().await;
@@ -33,7 +33,7 @@ async fn inv_cache_07_index_survives_a_reopen() {
 async fn inv_cache_07_part_files_are_removed_on_open() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join(format!("{}.7.part", crate::identity::key_file_name("ab"))), b"partial").unwrap();
-    let cache = Cache::open(dir.path(), roomy(), u64::MAX);
+    let cache = Cache::open(dir.path(), roomy());
     cache.ready().await;
     wait_until(|| files_with_suffix(dir.path(), ".part") == 0).await;
 }
@@ -42,7 +42,7 @@ async fn inv_cache_07_part_files_are_removed_on_open() {
 async fn inv_cache_07_orphan_files_without_an_index_entry_are_removed() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join(format!("{}.bin", crate::identity::key_file_name("ab"))), b"orphan").unwrap();
-    let cache = Cache::open(dir.path(), roomy(), u64::MAX);
+    let cache = Cache::open(dir.path(), roomy());
     cache.ready().await;
     assert!(!cache.contains("ab").await);
     wait_until(|| files_with_suffix(dir.path(), ".bin") == 0).await;
@@ -54,7 +54,7 @@ async fn inv_cache_07_index_entries_without_a_file_are_dropped() {
     f.put("k", Kind::Image, 10).await;
     f.cache.flush().await.unwrap();
     std::fs::remove_file(f.dir.path().join(format!("{}.bin", crate::identity::key_file_name("k")))).unwrap();
-    let reopened = Cache::open(f.dir.path(), roomy(), u64::MAX);
+    let reopened = Cache::open(f.dir.path(), roomy());
     reopened.ready().await;
     assert!(!reopened.contains("k").await);
     assert_eq!(reopened.stats().await.file_count, 0);
@@ -63,7 +63,7 @@ async fn inv_cache_07_index_entries_without_a_file_are_dropped() {
 #[tokio::test]
 async fn inv_cache_07_live_writer_part_survives_recovery() {
     let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::open(dir.path(), roomy(), u64::MAX);
+    let cache = Cache::open(dir.path(), roomy());
     let mut writer = cache.begin_write("k", Kind::Stream).await.unwrap();
     writer.write(b"abc").await.unwrap();
     cache.ready().await;
@@ -80,7 +80,7 @@ async fn inv_cache_07_entries_over_budget_after_load_are_evicted() {
         f.put(key, Kind::Image, 30).await;
     }
     f.cache.flush().await.unwrap();
-    let reopened = Cache::open(f.dir.path(), limits(60, 0.5, EvictionStrategy::Lru), u64::MAX);
+    let reopened = Cache::open(f.dir.path(), limits(60, 0.5, EvictionStrategy::Lru));
     reopened.ready().await;
     wait_for_file_count(&reopened, 1).await;
 }
@@ -98,7 +98,7 @@ async fn reopened_after(damage: impl Fn(&mut Vec<u8>)) -> (tempfile::TempDir, Ca
     let mut bytes = std::fs::read(&path).unwrap();
     damage(&mut bytes);
     std::fs::write(&path, bytes).unwrap();
-    let reopened = Cache::open(f.dir.path(), roomy(), u64::MAX);
+    let reopened = Cache::open(f.dir.path(), roomy());
     reopened.ready().await;
     (f.dir, reopened)
 }
@@ -131,7 +131,7 @@ async fn inv_cache_24_unversioned_entries_are_discarded() {
         index.push_str(&format!("{}\t{indexed}\tstream\t1\t2\t3\t\t\n", super::naming::hex_encode(key)));
     }
     std::fs::write(dir.path().join("index.tsv"), index).unwrap();
-    let cache = Cache::open(dir.path(), roomy(), u64::MAX);
+    let cache = Cache::open(dir.path(), roomy());
     cache.ready().await;
 
     assert!(cache.get("fine").await.is_none());

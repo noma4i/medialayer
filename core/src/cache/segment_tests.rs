@@ -16,7 +16,7 @@ async fn stored_then_reopened() -> (tempfile::TempDir, Cache) {
     let f = fixture(limits(ROOMY, 0.9, EvictionStrategy::Lru), &[]).await;
     f.cache.put(KEY, Kind::Stream, &blob()).await.unwrap();
     f.cache.flush().await.unwrap();
-    let cache = Cache::open(f.dir.path(), limits(ROOMY, 0.9, EvictionStrategy::Lru), u64::MAX);
+    let cache = Cache::open(f.dir.path(), limits(ROOMY, 0.9, EvictionStrategy::Lru));
     cache.ready().await;
     (f.dir, cache)
 }

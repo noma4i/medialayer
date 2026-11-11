@@ -55,7 +55,7 @@ async fn inv_cache_11_put_and_get_of_50_mib_do_not_stall_other_tasks() {
 async fn inv_cache_11_open_on_20000_files_returns_fast_and_reads_miss_until_ready() {
     let dir = tempfile::tempdir().unwrap();
     write_prepared_dir(dir.path(), OPEN_FILES, "hot");
-    let cache = Cache::open(dir.path(), limits(u64::MAX / 2, 0.9, EvictionStrategy::Lru), u64::MAX);
+    let cache = Cache::open(dir.path(), limits(u64::MAX / 2, 0.9, EvictionStrategy::Lru));
     assert!(!cache.is_ready());
     assert_eq!(cache.get("hot").await, None);
     assert!(!cache.contains("hot").await);
@@ -68,7 +68,7 @@ async fn inv_cache_11_open_on_20000_files_returns_fast_and_reads_miss_until_read
 async fn inv_cache_11_evicting_10000_entries_gives_other_tasks_a_turn_at_least_every_128_removals() {
     let dir = tempfile::tempdir().unwrap();
     write_prepared_dir(dir.path(), EVICTED_ENTRIES, "hot");
-    let cache = Cache::open(dir.path(), limits(500, 0.5, EvictionStrategy::Lru), u64::MAX);
+    let cache = Cache::open(dir.path(), limits(500, 0.5, EvictionStrategy::Lru));
     cache.ready().await;
     let stop = Arc::new(AtomicBool::new(false));
     let turns = Arc::new(std::sync::atomic::AtomicU64::new(0));

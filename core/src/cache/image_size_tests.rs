@@ -8,7 +8,7 @@ const LARGE: ImageSize = ImageSize { width: 4000, height: 3000 };
 #[tokio::test]
 async fn inv_image_44_a_stored_image_size_survives_a_restart_and_leaves_with_its_entry() {
     let dir = tempfile::tempdir().unwrap();
-    let cache = Cache::open(dir.path(), Limits::default(), u64::MAX);
+    let cache = Cache::open(dir.path(), Limits::default());
     cache.ready().await;
     cache.put("image-key", Kind::Image, b"first bytes").await.unwrap();
 
@@ -18,7 +18,7 @@ async fn inv_image_44_a_stored_image_size_survives_a_restart_and_leaves_with_its
     cache.flush().await.unwrap();
     drop(cache);
 
-    let reopened = Cache::open(dir.path(), Limits::default(), u64::MAX);
+    let reopened = Cache::open(dir.path(), Limits::default());
     reopened.ready().await;
     assert_eq!(reopened.image_size("image-key"), Some(SMALL));
     assert!(reopened.set_image_size("image-key", LARGE));

@@ -15,7 +15,7 @@ const MIB: u64 = 1024 * 1024;
 async fn inv_cache_26_saved_budget_applies_before_startup_eviction() {
     let dir = tempfile::tempdir().unwrap();
     let saved = Limits { budget: 100, min_budget: 1, ..Limits::default() };
-    let cache = Cache::open(dir.path(), saved, u64::MAX);
+    let cache = Cache::open(dir.path(), saved);
     cache.ready().await;
     for key in ["a", "b", "c"] {
         cache.put(key, cache::Kind::Image, &[1; 30]).await.unwrap();
@@ -75,7 +75,7 @@ fn inv_api_09_the_default_memory_holds_the_default_pool() {
 async fn inv_api_09_purge_removes_the_entry_of_the_url_and_its_ranged_blocks() {
     let dir = tempfile::tempdir().unwrap();
     let url = "https://cdn.test/a.mp4";
-    let cache = Cache::open(dir.path(), Limits::default(), u64::MAX);
+    let cache = Cache::open(dir.path(), Limits::default());
     for key in [cache_key(url), format!("{}#0", cache_key(url)), format!("{}#1", cache_key(url)), "https://cdn.test/b.mp4".to_string()] {
         cache.put(&key, cache::Kind::Stream, b"bytes").await.unwrap();
     }

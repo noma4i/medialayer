@@ -26,13 +26,13 @@ pub struct Cache {
 }
 
 impl Cache {
-    pub fn open(dir: impl Into<PathBuf>, limits: Limits, available_bytes: u64) -> Cache {
-        Cache::open_with(dir, limits, Options::default(), available_bytes)
+    pub fn open(dir: impl Into<PathBuf>, limits: Limits) -> Cache {
+        Cache::open_with(dir, limits, Options::default())
     }
 
-    pub fn open_with(dir: impl Into<PathBuf>, limits: Limits, options: Options, available_bytes: u64) -> Cache {
+    pub fn open_with(dir: impl Into<PathBuf>, limits: Limits, options: Options) -> Cache {
         let handle = tokio::runtime::Handle::current();
-        let inner = Arc::new(CacheShared::new(dir.into(), limits, options, handle.clone(), available_bytes));
+        let inner = Arc::new(CacheShared::new(dir.into(), limits, options, handle.clone()));
         handle.spawn(load(inner.clone()));
         Cache { inner }
     }
@@ -169,7 +169,7 @@ impl Cache {
         limits.validate()?;
         {
             let mut state = self.inner.state();
-            state.limits = super::reservation::limits_for_disk(limits, self.inner.available_bytes);
+            state.limits = limits;
             state.configure_order(&self.inner.overrides);
         }
         evict_if_needed(&self.inner).await;
