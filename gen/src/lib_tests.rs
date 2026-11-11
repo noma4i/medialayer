@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use medialayer::prefetch::CacheStrategy;
 
 #[test]
-fn inv_limits_12_dsl_has_no_free_space_word() {
+fn inv_limits_09_dsl_has_no_free_space_word() {
     assert!(crate::parse_spec("cache do\n  free_space 25.percent\nend\n").is_err());
     let spec = crate::parse_spec("cache do\n  budget 2.gib\nend\n").expect("valid budget");
     assert!(spec.limits().encode().starts_with("budget=2147483648\n"));

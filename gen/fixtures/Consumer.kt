@@ -49,7 +49,6 @@ class GeneratedSourcesTest {
     assertEquals(3UL * 1024UL * 1024UL * 1024UL, limits.budget)
     assertEquals(96UL * 1024UL * 1024UL, limits.minBudget)
     assertEquals(0.75, limits.shrinkTo, 0.0)
-    assertEquals(0.15, limits.freeSpaceFraction, 0.0)
     assertEquals(Evict.ExpireAfter(2u * 86400u), limits.evict)
     assertEquals(192UL * 1024UL * 1024UL, limits.memoryBudget)
     assertEquals(180u, limits.timeoutSeconds)

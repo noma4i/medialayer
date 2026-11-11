@@ -47,7 +47,6 @@ struct GeneratedSourcesTests {
     #expect(limits.budget == 3 * 1024 * 1024 * 1024)
     #expect(limits.minBudget == 96 * 1024 * 1024)
     #expect(limits.shrinkTo == 0.75)
-    #expect(limits.freeSpaceFraction == 0.15)
     #expect(limits.evict == .expireAfter(seconds: 2 * 86400))
     #expect(limits.memoryBudget == 192 * 1024 * 1024)
     #expect(limits.timeoutSeconds == 180)

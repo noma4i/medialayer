@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- `failureStream()` on Swift and `failureFlow()` on Kotlin report every load and store failure.
 - Publish `com.noma4i:medialayer-testing` with `TestFetcher` for Android tests.
 - Kotlin `MediaImage` plays animated images at a given playback rate.
 
@@ -13,6 +14,11 @@
 
 ### Fixed
 - A video window without sources no longer takes the stage from the active window.
+- The cache budget is the configured budget, a full phone no longer blanks images and video.
+- Images and video are delivered when the disk cache cannot store them.
+
+### Removed
+- The `free_space` cache option, `Limits.freeSpaceFraction` and `OpenConfig.availableBytes`.
 
 ## 3.28.0 - 2026-11-06
 
