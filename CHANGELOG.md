@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Swift `.mediaShape(_:)` with `MediaShape` (`.rectangle`, `.circle`, `.rounded(_:)`) rounds the `CALayer` that owns the contents of `MediaImage` and `MediaVideo`.
+- Swift `.mediaGrayscale(_:)` draws `MediaImage`, still and animated, in grayscale: each frame is converted once, off the main thread for animations.
+
+### Changed
+- Swift visibility runs one pass per display frame for all observed views, and a frame without a change runs no pass.
+- Swift animated images set `CALayer.contents` on a display-link tick with frames prepared off the main thread, no `UIImageView.image` write per frame.
+
 ## 3.29.1 - 2026-11-11
 
 ### Fixed

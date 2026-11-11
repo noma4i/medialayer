@@ -62,3 +62,7 @@ Every declaration enters the core through one typed, bounded input and one execu
 - **Subscriptions.** `subscribe_state`, `subscribe_stats` and `subscribe_tone` return a result and reserve their place before returning. A listener receives at most one terminal `failed(error)`: when the assembly fails, when the input overflows, or when the library closes. A cancelled subscription gets none.
 - **Native events.** A flood of player events that exceeds admission closes the library with `Overloaded` and tells the observers; it never loses an event silently.
 - **Closing.** Closing cancels and awaits the executor, signal work, tone preparation, the stats feed and the platform slots. A tone preparation that is still running is cancelled and its result is never delivered after `Closed`.
+
+## Visibility on iOS
+
+`MediaImage` and `MediaVideo` learn their visibility from one pass per display frame for every observed view. A scroll, a transform or a layout of any ancestor marks its observation changed in constant time; the next display-link tick runs one pass over the views of all changed observations and evaluates each view once. A frame with no change runs no pass and creates no display link.

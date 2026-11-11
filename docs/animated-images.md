@@ -23,6 +23,7 @@ An image that is off screen, in a hidden window or in the background draws no fr
 ## Decoding
 
 - iOS decodes frames from the bytes the core delivered (`FrameStream`). A GIF or WebP over the byte budget keeps a window of three frames. Decoding runs off the main thread and ends when the view leaves.
+- iOS presents a frame by setting `CALayer.contents` of the animation view on a display-link tick, one write per frame change on the main thread. A frame that is not decoded yet leaves the previous frame on screen. The display link runs only while the image plays, so an image that is off screen, rested or in the background has no link. There is no `UIImageView.image` write per frame.
 - Android decodes through the Coil animated decoder and plays it with `AnimatedImageDrawable`. At a playback rate other than 1 it paints the frames off the main thread (a GIF with `Movie`, a WebP frame by frame) and shows each frame at the scaled time, because the platform drawable has no speed control.
 
 ## Playback rate

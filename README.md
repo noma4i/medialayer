@@ -90,6 +90,7 @@ A source can declare how the library caches it: `strategy :whole` downloads it f
 - [Threading and performance](docs/threading.md)
 - [Placeholders](docs/placeholders.md)
 - [Tone](docs/tone.md)
+- [Shape and grayscale](docs/appearance.md)
 - [Declaring media](docs/declaring-media.md)
 - [Player pool](docs/player-pool.md)
 - [Audio focus](docs/audio-focus.md)
