@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.30.3 - 2026-11-12
 
 ### Fixed
 - Android `MediaVideo` with `ContentScale.Crop` fills its box like the cover does (same scale, same centre), no letterbox around a landscape video in a portrait box. `Fit` letterboxes both.
