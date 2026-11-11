@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.30.1 - 2026-11-12
+
+### Changed
+- Android `MediaImage` reads one process-wide reduce-motion observer instead of registering a `ContentObserver` per image.
+
 ## 3.30.0 - 2026-11-11
 
 ### Added
