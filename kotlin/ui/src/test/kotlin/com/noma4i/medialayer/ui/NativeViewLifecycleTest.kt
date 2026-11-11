@@ -75,10 +75,6 @@ class NativeViewLifecycleTest {
     slot.attach(token)
     rule.waitUntil(5000) { looper.idle(); counters.snapshot()["setVideoTextureView"] == 1L }
     rule.runOnIdle { assertEquals(1, root.descendants.count { it is TextureView }) }
-    slot.detach()
-    looper.idle()
-    rule.waitForIdle()
-    rule.runOnIdle { assertEquals(0, root.descendants.count { it is TextureView }) }
   }
 
   @Test
@@ -392,5 +388,41 @@ class NativeViewLifecycleTest {
     assertEquals(offscreen, reports)
     rule.runOnIdle { offset = 0.dp }
     rule.waitUntil(5000) { looper.idle(); reports > offscreen }
+  }
+
+  // mutation: drop the TextureView when the slot leaves a view that is still composed (ViewHandle.show(null) removes
+  // ContentFrame) -> the outgoing feed video goes plain black while it still slides out (Samsung A16, Android 2026-11-12,
+  // feed-jank report-step2 "Outgoing video black frames"), or keep it after the page changes source (stale frame on B)
+  @Test
+  fun inv_output_06_aVideoKeepsItsLastFrameUntilItsPageChangesWhenItsPlayerLeaves() {
+    var url by mutableStateOf("outgoing")
+    val events = layer.playerEvents() as RecordingEvents
+    val root = rule.activity.findViewById<ViewGroup>(android.R.id.content)
+    rule.setContent {
+      keyedProvider(CompletableDeferred(layer), loader, factory.players) {
+        MediaVideo(LifecycleSource(url, Kind.VIDEO), modifier = Modifier.size(80.dp))
+      }
+    }
+    rule.waitUntil(5000) { looper.idle(); events.calls.any { it.startsWith("attach:outgoing:") } }
+    val token = events.calls.last { it.startsWith("attach:outgoing:") }.substringAfterLast(':').toULong()
+    val slot = factory.createSlot(0u)
+    slot.load("outgoing", PlaybackRoute("file:///bundle/outgoing.mp4", emptyMap(), null, false, false))
+    slot.play()
+    slot.attach(token)
+    rule.waitUntil(5000) { looper.idle(); counters.snapshot()["setVideoTextureView"] == 1L }
+    val shown = rule.runOnIdle { root.descendants.filterIsInstance<TextureView>().single() }
+
+    slot.detach()
+    looper.idle()
+    rule.waitForIdle()
+    rule.runOnIdle {
+      val kept = root.descendants.filterIsInstance<TextureView>().toList()
+      assertEquals("the page lost its video surface while still on screen", listOf(shown), kept)
+      assertTrue("the kept surface left the window", shown.isAttachedToWindow)
+    }
+
+    rule.runOnIdle { url = "next" }
+    rule.waitForIdle()
+    rule.runOnIdle { assertEquals("the old frame stayed on the next source", 0, root.descendants.count { it === shown }) }
   }
 }
