@@ -145,7 +145,7 @@ fn manifest_path(dir: &Path) -> PathBuf {
 async fn open_cache(dir: &Path, budget: u64) -> (Cache, Duration) {
     let limits = Limits { budget, min_budget: MIB, ..Limits::default() };
     let started = Instant::now();
-    let cache = Cache::open_with(dir, limits, Options::default(), free_gib() * GIB);
+    let cache = Cache::open_with(dir, limits, Options::default());
     cache.ready().await;
     (cache, started.elapsed())
 }
