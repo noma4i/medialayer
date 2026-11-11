@@ -241,4 +241,36 @@ class ImageAnimationTest {
     x = 0
     until { animation.isRunning }
   }
+
+  // mutation: register the reduce-motion observer per MediaImage again -> one binder call per image on the main
+  // thread, ~3 ms each, ~100 ms per 10 feed swipes on Samsung A16 (Android feed profile 2026-11-12)
+  @Test
+  fun inv_image_54_aFeedOfImagesFollowsTheSystemSettingThroughOneObserver() {
+    val uri = Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE)
+    val observers = { shadowOf(context.contentResolver).getContentObservers(uri).size }
+    var shown by mutableStateOf((0 until 20).map { "https://o.test/feed-$it.webp" })
+    rule.setContent {
+      MediaLayerProvider(CompletableDeferred(layer), loader) {
+        Box(Modifier.fillMaxSize()) {
+          shown.forEach { url ->
+            MediaImage(
+              object : MediaSource {
+                override val url = url
+                override val kind = Kind.IMAGE
+                override val headers = emptyMap<String, String>()
+                override val size = 24 to 24
+              },
+              Modifier.size(10.dp)
+            )
+          }
+        }
+      }
+    }
+    until { rests.size + repeats.size > 0 }
+    assertTrue("20 composed images hold ${observers()} observers", observers() <= 1)
+
+    shown = emptyList()
+    rule.waitForIdle()
+    assertTrue("removed images left ${observers()} observers", observers() <= 1)
+  }
 }
