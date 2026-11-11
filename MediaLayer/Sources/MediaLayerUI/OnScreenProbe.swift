@@ -3,26 +3,46 @@ import SwiftUI
 #if canImport(UIKit)
 import UIKit
 
-private final class VisibilityPass: NSObject {
+/// One visibility pass per display frame for every observed view; a frame without a change runs no pass.
+final class VisibilityPass: NSObject {
   static let shared = VisibilityPass()
   private let pending = NSHashTable<OnScreenView>.weakObjects()
+  private let changed = NSHashTable<VisibilityObservation>.weakObjects()
   private var displayLink: CADisplayLink?
+  private(set) var passes = 0
+  private(set) var evaluations = 0
 
   func schedule(_ view: OnScreenView) {
     pending.add(view)
+    arm()
+  }
+
+  func schedule(_ observation: VisibilityObservation) {
+    changed.add(observation)
+    arm()
+  }
+
+  func cancel(_ view: OnScreenView) { pending.remove(view) }
+
+  private func arm() {
     guard displayLink == nil else { return }
     let link = CADisplayLink(target: self, selector: #selector(flush))
     displayLink = link
     link.add(to: .main, forMode: .common)
   }
 
-  func cancel(_ view: OnScreenView) { pending.remove(view) }
-
   @objc private func flush() {
     displayLink?.invalidate()
     displayLink = nil
-    let views = pending.allObjects
+    var seen = Set<ObjectIdentifier>()
+    var views: [OnScreenView] = []
+    for view in pending.allObjects + changed.allObjects.flatMap({ $0.observed }) where seen.insert(ObjectIdentifier(view)).inserted {
+      views.append(view)
+    }
     pending.removeAllObjects()
+    changed.removeAllObjects()
+    passes += 1
+    evaluations += views.count
     var clips: [ObjectIdentifier: CGRect] = [:]
     func clip(_ view: UIView, window: UIWindow) -> CGRect {
       let key = ObjectIdentifier(view)
@@ -44,7 +64,7 @@ private final class VisibilityPass: NSObject {
   }
 }
 
-private final class VisibilityObservation {
+final class VisibilityObservation {
   static let entries = NSMapTable<UIView, VisibilityObservation>(keyOptions: .weakMemory, valueOptions: .strongMemory)
   private let views = NSHashTable<OnScreenView>.weakObjects()
   private var tokens: [NSKeyValueObservation] = []
@@ -81,8 +101,10 @@ private final class VisibilityObservation {
     }
   }
 
+  var observed: [OnScreenView] { views.allObjects }
+
   private func schedule() {
-    views.allObjects.forEach { VisibilityPass.shared.schedule($0) }
+    VisibilityPass.shared.schedule(self)
   }
 }
 
