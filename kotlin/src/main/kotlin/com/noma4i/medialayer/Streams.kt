@@ -1,11 +1,21 @@
 package com.noma4i.medialayer
 
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.conflate
 
 suspend fun MediaLayer.imageSize(source: MediaSource): ImageSize? = imageSize(source.url, source.headers)
+
+/** Every load failure and every cache store failure, one value each. Cancelling the collection cancels the watch. */
+fun MediaLayer.failureFlow(): Flow<MediaFailure> = callbackFlow {
+  val subscription = subscribeFailures(object : FailureListener {
+    override fun failed(failure: MediaFailure) { trySend(failure) }
+  })
+  awaitClose { subscription.close() }
+}.buffer(Channel.UNLIMITED)
 
 fun MediaLayer.statsFlow(): Flow<MediaStats> = callbackFlow {
   val subscription = try {

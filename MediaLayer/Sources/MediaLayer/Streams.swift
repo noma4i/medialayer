@@ -23,6 +23,14 @@ private final class StateRelay: StateListener, @unchecked Sendable {
   }
 }
 
+private final class FailureRelay: FailureListener, @unchecked Sendable {
+  private let continuation: AsyncStream<MediaFailure>.Continuation
+
+  init(_ continuation: AsyncStream<MediaFailure>.Continuation) { self.continuation = continuation }
+
+  func failed(failure: MediaFailure) { continuation.yield(failure) }
+}
+
 public enum ToneUpdate: Sendable {
   case tone(MediaTone?)
   case failed(MediaError)
@@ -44,6 +52,14 @@ private final class ToneRelay: ToneListener, @unchecked Sendable {
 extension MediaLayer {
   public func imageSize(_ source: some MediaSource) async throws -> ImageSize? {
     try await imageSize(url: source.url, headers: source.headers)
+  }
+
+  /// Every load failure and every cache store failure, one value each. Ending the iteration cancels the watch.
+  public func failureStream() -> AsyncStream<MediaFailure> {
+    AsyncStream(bufferingPolicy: .unbounded) { continuation in
+      let subscription = subscribeFailures(listener: FailureRelay(continuation))
+      continuation.onTermination = { _ in withExtendedLifetime(subscription) {} }
+    }
   }
 
   public func statsStream() -> AsyncStream<MediaStats> {
