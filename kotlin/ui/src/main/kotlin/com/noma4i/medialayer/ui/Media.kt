@@ -132,6 +132,7 @@ private fun MediaLayerEnvironment(media: MediaLayer?, imageLoader: ImageLoader?,
   val context = LocalContext.current
   val environment = remember(media, imageLoader, players) {
     media?.let {
+      SystemReduceMotion.install(context)
       val binding = it.binding
       val pixelSizes = PixelSizeMemo()
       val reference = java.lang.ref.WeakReference(it)

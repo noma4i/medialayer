@@ -9,12 +9,8 @@ import android.graphics.drawable.Drawable
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.ui.platform.LocalContext
 
 enum class RestFrame { First, Last }
 
@@ -60,18 +56,25 @@ private class DrawableRepeats(private val drawable: AnimatedImageDrawable) : Rep
 internal fun animatorsDisabled(context: Context): Boolean =
   Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
 
-/** The system "remove animations" setting, read once and followed while the caller is composed. */
-@Composable
-internal fun rememberReduceMotion(): State<Boolean> {
-  val context = LocalContext.current
-  val state = remember(context) { mutableStateOf(animatorsDisabled(context)) }
-  DisposableEffect(context) {
-    val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-      override fun onChange(selfChange: Boolean) { state.value = animatorsDisabled(context) }
+/** The system "remove animations" setting: one process-wide registration, shared by every [MediaImage]. */
+internal object SystemReduceMotion {
+  private val flag = mutableStateOf(false)
+  private var observer: ContentObserver? = null
+  private var owner: Context? = null
+  val state: State<Boolean> get() = flag
+
+  @Synchronized
+  fun install(context: Context) {
+    val app = context.applicationContext
+    if (owner === app) return
+
+    owner?.let { previous -> observer?.let { previous.contentResolver.unregisterContentObserver(it) } }
+    val registered = object : ContentObserver(Handler(Looper.getMainLooper())) {
+      override fun onChange(selfChange: Boolean) { flag.value = animatorsDisabled(app) }
     }
-    context.contentResolver.registerContentObserver(Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE), false, observer)
-    state.value = animatorsDisabled(context)
-    onDispose { context.contentResolver.unregisterContentObserver(observer) }
+    app.contentResolver.registerContentObserver(Settings.Global.getUriFor(Settings.Global.ANIMATOR_DURATION_SCALE), false, registered)
+    flag.value = animatorsDisabled(app)
+    observer = registered
+    owner = app
   }
-  return state
 }

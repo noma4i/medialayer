@@ -226,6 +226,7 @@ internal class SystemSignals(
   }
 
   fun register() {
+    SystemReduceMotion.install(context)
     context.registerComponentCallbacks(this)
     ContextCompat.registerReceiver(context, outputLost, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), ContextCompat.RECEIVER_NOT_EXPORTED)
     onMain { lifecycle.addObserver(this) }

@@ -115,7 +115,7 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
   val media = environment.media
   val scale = contentScale.toScale()
   val stats = environment.stats
-  val reduceMotion by rememberReduceMotion()
+  val reduceMotion by SystemReduceMotion.state
   val finished = remember(source.url, animation.repeats, animation.playing) { mutableStateOf(false) }
   val rests = animation.rests(reduceMotion) || finished.value
   val resting = if (rests) animation.rest else null
