@@ -175,6 +175,8 @@ fun MediaVideo(
   val player by remember(view) { view?.player ?: flowOf(null) }.collectAsState(null)
   val counters = environment.players?.videoOutputCounters
   val outputPlayer = remember(player, counters) { player?.let { VideoOutputPlayer(it, counters) } }
+  val surfaceHeld = remember(view) { BooleanArray(1) }
+  if (outputPlayer != null) surfaceHeld[0] = true
   DisposableEffect(environment, source.url) {
     onDispose {
       view?.let { environment.players?.release(it) }
@@ -188,7 +190,7 @@ fun MediaVideo(
   val clipped = if (cornerRadius > 0.dp) modifier.clip(RoundedCornerShape(cornerRadius)) else modifier
   val faded = if (alpha != 1f) clipped.alpha(alpha) else clipped
   Box(faded.then(screen.modifier)) {
-    if (outputPlayer != null) {
+    if (surfaceHeld[0]) {
       ContentFrame(outputPlayer, Modifier.fillMaxSize(), SURFACE_TYPE_TEXTURE_VIEW, contentScale, true, {})
     }
     VideoPlaceholder(source.toItem(), frameShown, screen.visible, contentScale)
