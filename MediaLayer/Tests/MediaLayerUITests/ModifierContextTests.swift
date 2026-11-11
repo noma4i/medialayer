@@ -70,7 +70,7 @@ extension GlobalMedia {
     func inv_native_31_rebuildingTheModifierKeepsOneContext() async throws {
       let media = try MediaLayer.open(config: OpenConfig(
         dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-        availableBytes: UInt64.max, fetcher: TestFetcher(), settings: QuietSettings(), slots: IdleSlot(),
+        fetcher: TestFetcher(), settings: QuietSettings(), slots: IdleSlot(),
         device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
         defaults: defaultLimits(), pool: defaultPoolSettings()
       ))

@@ -135,7 +135,7 @@ private struct InputCell: View {
 private func openInputCore(_ slot: InputSlot) throws -> MediaLayer {
   try MediaLayer.open(config: OpenConfig(
     dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-    availableBytes: UInt64.max, fetcher: TestFetcher(), settings: QuietSettings(), slots: slot,
+    fetcher: TestFetcher(), settings: QuietSettings(), slots: slot,
     device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
     defaults: defaultLimits(), pool: defaultPoolSettings()
   ))

@@ -33,7 +33,7 @@ private func openPlaying(groups: [String?] = [nil]) async throws -> (MediaLayer,
   let slot = TransportSlot()
   let media = try MediaLayer.open(config: OpenConfig(
     dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-    availableBytes: UInt64.max, fetcher: TestFetcher(), settings: QuietSettings(), slots: slot,
+    fetcher: TestFetcher(), settings: QuietSettings(), slots: slot,
     device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
     defaults: defaultLimits(), pool: defaultPoolSettings()
   ))
@@ -79,7 +79,7 @@ struct SuspendPlaybackTests {
   func inv_session_13_a_blank_allow_group_throws() throws {
     let media = try MediaLayer.open(config: OpenConfig(
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-      availableBytes: UInt64.max, fetcher: TestFetcher(), settings: QuietSettings(), slots: nil,
+      fetcher: TestFetcher(), settings: QuietSettings(), slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
       defaults: defaultLimits(), pool: defaultPoolSettings()
     ))

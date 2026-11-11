@@ -42,7 +42,7 @@ struct CallHoldTests {
     let slot = CallSlot()
     let media = try MediaLayer.open(config: OpenConfig(
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-      availableBytes: UInt64.max, fetcher: TestFetcher(), settings: CallSettings(), slots: slot,
+      fetcher: TestFetcher(), settings: CallSettings(), slots: slot,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
       defaults: defaultLimits(), pool: defaultPoolSettings()
     ))

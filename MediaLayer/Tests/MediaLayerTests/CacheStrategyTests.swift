@@ -68,7 +68,7 @@ struct CacheStrategyTests {
     let origin = RangeOrigin()
     let media = try MediaLayer.open(config: OpenConfig(
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-      availableBytes: UInt64.max, fetcher: origin,
+      fetcher: origin,
       settings: MemorySettings(),
       slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),

@@ -64,7 +64,7 @@ struct MediaLayerBridgeTests {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     return try MediaLayer.open(config: OpenConfig(
       dir: directory.path,
-      availableBytes: UInt64.max, fetcher: TestFetcher(),
+      fetcher: TestFetcher(),
       settings: settings,
       slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
@@ -78,7 +78,7 @@ struct MediaLayerBridgeTests {
     let fetcher = TestFetcher()
     let media = try MediaLayer.open(config: OpenConfig(
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-      availableBytes: UInt64.max, fetcher: fetcher,
+      fetcher: fetcher,
       settings: MemorySettings(),
       slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
@@ -135,7 +135,7 @@ struct MediaLayerBridgeTests {
     let settings = MemorySettings()
     let media = try MediaLayer.open(config: OpenConfig(
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-      availableBytes: UInt64.max, fetcher: RangeIgnoringOrigin(),
+      fetcher: RangeIgnoringOrigin(),
       settings: settings,
       slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
@@ -222,7 +222,7 @@ struct MediaLayerBridgeTests {
   func aPlatformHttpClientReadsTheFetcherBytesThroughTheLoopbackProxy() async throws {
     let media = try MediaLayer.open(config: OpenConfig(
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-      availableBytes: UInt64.max, fetcher: RangeIgnoringOrigin(),
+      fetcher: RangeIgnoringOrigin(),
       settings: MemorySettings(),
       slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
