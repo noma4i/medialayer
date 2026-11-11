@@ -10,6 +10,12 @@
 - Swift visibility runs one pass per display frame for all observed views, and a frame without a change runs no pass.
 - Swift animated images set `CALayer.contents` on a display-link tick with frames prepared off the main thread, no `UIImageView.image` write per frame.
 
+### Migration
+- iOS app: replace `.grayscale(1)` over `ChatGif` (`VideoNoteGifPreviewComponent`) with `.mediaGrayscale()` on the `MediaImage`.
+- iOS app: replace `.clipShape(Circle())` over the video note with `.mediaShape(.circle)` on the `MediaVideo` (and on the `MediaImage` of its preview).
+- Android: no equivalent in this release, iOS only. The Kotlin `MediaImage` and `MediaVideo` keep their current drawing, the Android app keeps its own clip and colour filter until a Kotlin option is asked for.
+- `FrameImageView` is an internal type and is gone. App code does not use it, tests of the library use `FrameLayerView`.
+
 ## 3.29.1 - 2026-11-11
 
 ### Fixed
