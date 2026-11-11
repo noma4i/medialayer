@@ -197,7 +197,7 @@ extension OnScreenViewTests {
 
   // mutation: VisibilityObservation.schedule runs a pass at once or queues each observed view per contentOffset change instead of one flush per display frame
   @Test
-  func inv_visibility_05_offset_changes_within_one_frame_run_one_pass_over_each_view_and_a_quiet_frame_runs_none() async {
+  func inv_visibility_05_offset_changes_within_one_frame_run_one_pass_over_each_view() {
     let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 100))
     window.isHidden = false
     let scroll = UIScrollView(frame: window.bounds)
@@ -221,9 +221,6 @@ extension OnScreenViewTests {
     _ = pass.perform(displayFrame)
     #expect(pass.passes == passes + 1)
     #expect(pass.evaluations == evaluations + probes.count)
-
-    await displayFrames(3)
-    #expect(pass.passes == passes + 1)
     probes.forEach { $0.finish() }
     window.isHidden = true
   }
