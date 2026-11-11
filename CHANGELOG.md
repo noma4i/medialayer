@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.30.0 - 2026-11-11
 
 ### Added
 - Swift `.mediaShape(_:)` with `MediaShape` (`.rectangle`, `.circle`, `.rounded(_:)`) rounds the `CALayer` that owns the contents of `MediaImage` and `MediaVideo`.
