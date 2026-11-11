@@ -167,9 +167,11 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
   override suspend fun reserveDecode(bytes: ULong): com.noma4i.medialayer.DecodeHold = object : com.noma4i.medialayer.DecodeHold(NoHandle) {
     override fun release() {}
   }
+  @Volatile var placeholderGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
   override suspend fun placeholder(source: MediaItem, ready: Boolean): Placeholder {
     noteFfi("placeholder")
     placeholders.add(source.url to ready)
+    placeholderGate?.await()
     return when {
       ready -> Placeholder.None
       source.kind == Kind.IMAGE -> source.blurHash?.let { Placeholder.BlurHash(it) } ?: Placeholder.None

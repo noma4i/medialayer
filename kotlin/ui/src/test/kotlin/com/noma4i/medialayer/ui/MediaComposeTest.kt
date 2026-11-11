@@ -349,6 +349,23 @@ class MediaComposeTest {
     rule.waitUntil { layer.calls.any { it.startsWith("seek") } }
     assertEquals(listOf("seek:https://o.test/n.m4a:0.5"), layer.calls.filter { it.startsWith("seek") })
   }
+
+  // mutation: start the video cover at None until the core answers the placeholder -> the TextureView shows black
+  // between the output bind and the first frame (Android feed, owner complaint 2026-11-12, feed-cover rec-1)
+  @Test
+  fun aVideoShowsItsCoverFromTheFirstCompositionWhileTheCoreHasNotAnsweredYet() {
+    layer.placeholderGate = CompletableDeferred()
+    val clip = Clip("https://o.test/a.mp4", cover = "https://o.test/cover.jpg")
+    rule.setContent {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { MediaVideo(clip, modifier = Modifier.size(100.dp)) }
+    }
+    rule.waitForIdle()
+    assertEquals("the cover waited for the core", 1, rule.onAllNodesWithContentDescription("cover").fetchSemanticsNodes().size)
+
+    layer.placeholderGate!!.complete(Unit)
+    layer.emit(clip.url, MediaState.Rendered)
+    rule.waitUntil(5000) { rule.onAllNodesWithContentDescription("cover").fetchSemanticsNodes().isEmpty() }
+  }
 }
 
 private fun androidx.compose.ui.test.junit4.ComposeContentTestRule.onAllNodesWithTextCount(text: String): Int =

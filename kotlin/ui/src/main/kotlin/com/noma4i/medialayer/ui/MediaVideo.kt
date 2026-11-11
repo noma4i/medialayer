@@ -20,6 +20,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.geometry.isSpecified
+import androidx.media3.ui.compose.state.rememberPresentationState
+import kotlin.math.roundToInt
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -191,11 +199,52 @@ fun MediaVideo(
   val faded = if (alpha != 1f) clipped.alpha(alpha) else clipped
   Box(faded.then(screen.modifier)) {
     if (surfaceHeld[0]) {
-      ContentFrame(outputPlayer, Modifier.fillMaxSize(), SURFACE_TYPE_TEXTURE_VIEW, contentScale, true, {})
+      VideoSurface(outputPlayer, contentScale)
     }
     VideoPlaceholder(source.toItem(), frameShown, screen.visible, contentScale)
     content(state)
   }
+}
+
+/** Where the video sits in a box, box-local pixels: the one framing both the surface and the cover follow. Crop overflows the box, Fit letterboxes it. */
+internal fun videoFrame(box: Size, media: Size, contentScale: ContentScale): Rect {
+  if (!(media.width > 0f && media.height > 0f && box.width > 0f && box.height > 0f)) return Rect(0f, 0f, box.width, box.height)
+  val factor = contentScale.computeScaleFactor(media, box)
+  val width = media.width * factor.scaleX
+  val height = media.height * factor.scaleY
+  val left = (box.width - width) / 2f
+  val top = (box.height - height) / 2f
+  return Rect(left, top, left + width, top + height)
+}
+
+@Composable
+private fun VideoSurface(player: Player?, contentScale: ContentScale) {
+  val presentation = rememberPresentationState(player)
+  val density = LocalDensity.current.density
+  val size = presentation.videoSizeDp
+  val media = if (size != null && size.isSpecified) Size(size.width * density, size.height * density) else Size.Zero
+  Box(Modifier.fillMaxSize().clipToBounds()) {
+    Box(
+      Modifier.layout { measurable, constraints ->
+        if (!constraints.hasBoundedWidth || !constraints.hasBoundedHeight) {
+          val placeable = measurable.measure(constraints)
+          return@layout layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+        }
+        val frame = videoFrame(Size(constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat()), media, contentScale)
+        val placeable = measurable.measure(Constraints.fixed(frame.width.roundToInt().coerceAtLeast(0), frame.height.roundToInt().coerceAtLeast(0)))
+        layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(frame.left.roundToInt(), frame.top.roundToInt()) }
+      }
+    ) {
+      ContentFrame(player, Modifier.fillMaxSize(), SURFACE_TYPE_TEXTURE_VIEW, ContentScale.Fit, true, {})
+    }
+  }
+}
+
+/** The cover the core will answer for a remote video that has not shown a frame, known at first composition so the surface is never bare. */
+internal fun provisionalCover(item: MediaItem, ready: Boolean): Placeholder {
+  val cover = item.cover?.trim()?.takeIf { it.isNotEmpty() }
+  val remote = item.url.trim().let { it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true) }
+  return if (!ready && cover != null && remote) Placeholder.Cover(cover) else Placeholder.None
 }
 
 @Composable
@@ -206,13 +255,13 @@ private fun VideoPlaceholder(item: MediaItem, ready: Boolean, enabled: Boolean, 
 
 @Composable
 private fun VideoCover(media: MediaLayer, item: MediaItem, ready: Boolean, enabled: Boolean, contentScale: ContentScale) {
-  val placeholder by produceState<Placeholder>(Placeholder.None, ready, enabled) {
+  val placeholder by produceState<Placeholder?>(null, ready, enabled) {
     if (!enabled) return@produceState
     val answer = media.placeholder(item, ready)
     ensureActive()
     value = answer
   }
-  val shown = placeholder as? Placeholder.Cover
+  val shown = (placeholder ?: provisionalCover(item, ready)) as? Placeholder.Cover
   LaunchedEffect(item.url, shown != null) {
     MediaTrace.emit("view") { "placeholder ${item.url.takeLast(24)} ${if (shown != null) "cover" else "none"}" }
   }
