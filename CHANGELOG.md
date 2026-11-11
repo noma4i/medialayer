@@ -5,6 +5,9 @@
 ### Changed
 - Android fills the media3 decoder lists for H.264, H.265 and AAC once per process on a background thread when the library opens, so the first feed video no longer pays that lookup on the playback thread.
 
+### Fixed
+- Android `MediaVideo` keeps its last video frame on screen after the player leaves the view, until the view changes source. An outgoing feed video no longer goes black while it slides out.
+
 ## 3.30.1 - 2026-11-12
 
 ### Changed
