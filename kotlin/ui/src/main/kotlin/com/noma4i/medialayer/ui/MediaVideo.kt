@@ -76,16 +76,6 @@ internal class ShownFrame {
   }
 }
 
-/** The last video size a surface was framed to: it outlives the player, so the kept frame keeps its crop frame. */
-internal class KeptVideoSize {
-  private var kept = Size.Zero
-
-  fun advance(size: Size): Size {
-    if (size.width > 0f && size.height > 0f) kept = size
-    return kept
-  }
-}
-
 internal object VideoProgress {
   const val INTERVAL_MS = 100L
 
@@ -229,11 +219,10 @@ internal fun videoFrame(box: Size, media: Size, contentScale: ContentScale): Rec
 
 @Composable
 private fun VideoSurface(player: Player?, contentScale: ContentScale) {
-  val presentation = rememberPresentationState(player)
+  val presentation = rememberPresentationState(player, keepContentOnReset = true)
   val density = LocalDensity.current.density
   val size = presentation.videoSizeDp
-  val kept = remember { KeptVideoSize() }
-  val media = kept.advance(if (size != null && size.isSpecified) Size(size.width * density, size.height * density) else Size.Zero)
+  val media = if (size != null && size.isSpecified) Size(size.width * density, size.height * density) else Size.Zero
   Box(Modifier.fillMaxSize().clipToBounds()) {
     Box(
       Modifier.layout { measurable, constraints ->
