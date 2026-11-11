@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.30.2 - 2026-11-12
 
 ### Changed
 - Android fills the media3 decoder lists for H.264, H.265 and AAC once per process on a background thread when the library opens, so the first feed video no longer pays that lookup on the playback thread.
