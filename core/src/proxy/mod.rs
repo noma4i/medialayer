@@ -94,6 +94,10 @@ impl Proxy {
         Ok(proxy)
     }
 
+    pub fn failures(&self) -> Arc<crate::failures::Failures> {
+        self.inner.config.failures.clone()
+    }
+
     pub fn port(&self) -> u16 {
         self.inner.port.load(Ordering::SeqCst)
     }
@@ -157,15 +161,61 @@ impl Proxy {
     }
 
     pub async fn fetch_bytes(&self, url: &str, headers: &HashMap<String, String>, limit: u64) -> Result<ImageFetchResult, ProxyError> {
-        let source = self.fetch_into_store(url, headers, Priority::Image, None).await?;
+        let source = match self.fetch_into_store(url, headers, Priority::Image, None).await {
+            Ok(source) => source,
+            Err(ProxyError::StoreRefused) => return self.fetch_direct(url, headers, limit).await,
+            Err(error) => return Err(error),
+        };
         let key = self.key_for(url, headers);
         match self.inner.store.len(&key).await {
             Some(length) if length > limit => {
                 self.inner.store.remove(&key).await;
                 Err(ProxyError::Fetch(format!("response of {length} bytes exceeds the limit of {limit}")))
             }
-            _ => self.read_stored(url, headers, limit).await.map(|bytes| ImageFetchResult { bytes, source }).ok_or_else(|| ProxyError::Fetch("the response vanished from the cache".to_string())),
+            _ => match self.read_stored(url, headers, limit).await {
+                Some(bytes) => Ok(ImageFetchResult { bytes, source }),
+                None => {
+                    self.inner.config.failures.report(crate::failures::MediaFailure {
+                        kind: crate::api::Kind::Image,
+                        url: url.to_string(),
+                        stage: crate::failures::FailureStage::Store,
+                        reason: "the stored response could not be read".to_string(),
+                    });
+                    self.fetch_direct(url, headers, limit).await
+                }
+            },
         }
+    }
+
+    async fn fetch_direct(&self, url: &str, headers: &HashMap<String, String>, limit: u64) -> Result<ImageFetchResult, ProxyError> {
+        let upstream = self.inner.upstream_headers(url, headers);
+        let Ok(permit) = self.inner.gate(Priority::Image).acquire(Priority::Image).await else {
+            return Err(ProxyError::QueueFull);
+        };
+        let timeout = self.inner.timeout();
+        let request = crate::fetch::Request { url: url.to_string(), headers: upstream, range: None };
+        let outcome = match tokio::time::timeout(timeout, self.inner.fetcher.fetch(request)).await {
+            Err(_) => Err(ProxyError::Fetch("origin timed out".to_string())),
+            Ok(Err(crate::fetch::FetchError::Status(status))) => Err(ProxyError::Status(status)),
+            Ok(Err(error)) => Err(ProxyError::Fetch(error.to_string())),
+            Ok(Ok(response)) if response.status != 200 => Err(ProxyError::Status(response.status)),
+            Ok(Ok(response)) => {
+                let body = permit.hold(response.body);
+                match flight::collect_limited(body, limit as usize, timeout, &self.inner.buffers()).await {
+                    Some(bytes) => Ok(ImageFetchResult { bytes, source: ImageOrigin::Network }),
+                    None => Err(ProxyError::Fetch(format!("response is incomplete or exceeds the limit of {limit}"))),
+                }
+            }
+        };
+        if let Err(error) = &outcome {
+            self.inner.config.failures.report(crate::failures::MediaFailure {
+                kind: crate::api::Kind::Image,
+                url: url.to_string(),
+                stage: crate::failures::FailureStage::Load,
+                reason: error.to_string(),
+            });
+        }
+        outcome
     }
 
     pub async fn reserve_decode(&self, bytes: u64) -> Result<crate::memory::Reservation, ProxyError> {

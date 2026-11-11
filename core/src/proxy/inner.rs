@@ -275,6 +275,9 @@ impl ProxyShared {
         if matches!(outcome, FlightOutcome::Complete) && is_manifest_url(&flight.url) {
             self.stamp_playlist(&flight.key);
         }
+        if let Some(failure) = flight.failure(&outcome) {
+            self.config.failures.report(failure);
+        }
         flight.finish(outcome);
     }
 

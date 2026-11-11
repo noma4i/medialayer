@@ -7,6 +7,7 @@ pub mod cache;
 pub mod capture;
 pub mod change;
 pub mod crop;
+pub mod failures;
 pub mod fetch;
 pub mod ffi;
 pub mod hls;

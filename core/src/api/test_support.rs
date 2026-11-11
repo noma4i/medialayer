@@ -490,6 +490,7 @@ pub fn fast_watchdog() -> WatchdogConfig {
 
 pub fn assembly(dir: &Path, fetcher: Arc<MockFetcher>, factory: Arc<MockFactory>) -> Assembly {
     Assembly {
+        failures: Arc::default(),
         dir: dir.to_path_buf(),
         fetcher,
         settings: shared::<FakeSettings>(),

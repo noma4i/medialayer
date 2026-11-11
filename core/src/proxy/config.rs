@@ -32,6 +32,7 @@ pub struct Config {
     pub chunks_ahead: u32,
     pub hold_ceiling: Duration,
     pub probe_limit: Duration,
+    pub failures: std::sync::Arc<crate::failures::Failures>,
 }
 
 impl Config {
@@ -53,6 +54,7 @@ impl Config {
             chunks_ahead: limits.playback_chunks_ahead,
             hold_ceiling: HOLD_CEILING,
             probe_limit: PROBE_LIMIT,
+            failures: std::sync::Arc::default(),
         }
     }
 }

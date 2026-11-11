@@ -15,6 +15,7 @@ use crate::api::{
 use crate::memory::InputLimits;
 use crate::api::AbortOnDrop;
 use crate::session::WatchdogConfig;
+use crate::failures::{FailureListener, Failures};
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -151,6 +152,7 @@ pub struct MediaLayer {
     closing: Arc<Closing>,
     namespace_headers: Vec<String>,
     image_stats: Arc<super::image::ImageCounters>,
+    failures: Arc<Failures>,
     next_owner: AtomicU64,
     controls: tokio::sync::Mutex<()>,
 }
@@ -158,7 +160,8 @@ pub struct MediaLayer {
 impl MediaLayer {
     /// With an external `Handle` the caller keeps the runtime alive until `await_closed` returns.
     pub fn from_parts(runtime: Option<Runtime>, handle: Handle, parts: Parts, releaser: Option<Arc<dyn MemoryReleaser>>, namespace_headers: Vec<String>) -> Arc<MediaLayer> {
-        let layer = MediaLayer::pending(runtime, handle.clone(), namespace_headers, releaser.clone(), IngressLimits::default(), Pause::new());
+        let failures = parts.proxy.failures();
+        let layer = MediaLayer::pending(runtime, handle.clone(), namespace_headers, releaser.clone(), IngressLimits::default(), Pause::new(), failures);
         if layer.closing.life().installed() {
             let _ = layer.closing.ready.install(Arc::new(Assembled::new(&handle, parts, releaser)));
         }
@@ -166,8 +169,12 @@ impl MediaLayer {
     }
 
     pub(crate) fn assembling(runtime: Runtime, assembling: impl Future<Output = Result<Parts, MediaError>> + Send + 'static, releaser: Option<Arc<dyn MemoryReleaser>>, namespace_headers: Vec<String>, limits: IngressLimits, pause: Pause) -> Arc<MediaLayer> {
+        MediaLayer::assembling_with(runtime, assembling, releaser, namespace_headers, limits, pause, Arc::default())
+    }
+
+    pub(crate) fn assembling_with(runtime: Runtime, assembling: impl Future<Output = Result<Parts, MediaError>> + Send + 'static, releaser: Option<Arc<dyn MemoryReleaser>>, namespace_headers: Vec<String>, limits: IngressLimits, pause: Pause, failures: Arc<Failures>) -> Arc<MediaLayer> {
         let handle = runtime.handle().clone();
-        let layer = MediaLayer::pending(Some(runtime), handle.clone(), namespace_headers, releaser.clone(), limits, pause);
+        let layer = MediaLayer::pending(Some(runtime), handle.clone(), namespace_headers, releaser.clone(), limits, pause, failures);
         let (closing, ready) = (layer.closing.clone(), layer.closing.ready.clone());
         let mut slot = layer.closing.assembling.lock().unwrap_or_else(PoisonError::into_inner);
         let task = handle.clone().spawn(async move {
@@ -193,7 +200,7 @@ impl MediaLayer {
         layer
     }
 
-    fn pending(runtime: Option<Runtime>, handle: Handle, namespace_headers: Vec<String>, releaser: Option<Arc<dyn MemoryReleaser>>, limits: IngressLimits, pause: Pause) -> Arc<MediaLayer> {
+    fn pending(runtime: Option<Runtime>, handle: Handle, namespace_headers: Vec<String>, releaser: Option<Arc<dyn MemoryReleaser>>, limits: IngressLimits, pause: Pause, failures: Arc<Failures>) -> Arc<MediaLayer> {
         let ready = Ready::new();
         let queue = InputQueue::new(limits);
         let executor = AbortOnDrop::new(handle.spawn(run(queue.clone(), ready.clone(), pause)));
@@ -209,7 +216,7 @@ impl MediaLayer {
             late: Mutex::new(None),
             closed: watch::channel(false).0,
         });
-        Arc::new(MediaLayer { handle, closing, namespace_headers, image_stats: super::image::ImageCounters::new(), next_owner: AtomicU64::new(1), controls: tokio::sync::Mutex::new(()) })
+        Arc::new(MediaLayer { handle, closing, namespace_headers, image_stats: super::image::ImageCounters::new(), failures, next_owner: AtomicU64::new(1), controls: tokio::sync::Mutex::new(()) })
     }
 
     #[cfg(test)]
@@ -239,7 +246,9 @@ impl MediaLayer {
             .build()
             .map_err(|error| MediaError::Unexpected { detail: error.to_string() })?;
         let namespace_headers = config.namespace_headers.clone();
+        let failures = Arc::new(Failures::default());
         let assembly = Assembly {
+            failures: failures.clone(),
             dir: config.dir.into(),
             fetcher: Arc::new(ForeignFetcher::new(config.fetcher, InputLimits::default())),
             settings: config.settings,
@@ -258,7 +267,7 @@ impl MediaLayer {
             silent: config.silent,
             watchdog: WatchdogConfig::default(),
         };
-        Ok(MediaLayer::assembling(runtime, assemble(assembly), config.memory_releaser, namespace_headers, ingress, pause))
+        Ok(MediaLayer::assembling_with(runtime, assemble(assembly), config.memory_releaser, namespace_headers, ingress, pause, failures))
     }
 
     fn open_window(&self, kind: WindowKind) -> Result<Arc<MediaWindow>, MediaError> {
@@ -406,6 +415,10 @@ impl MediaLayer {
 
     pub async fn evict_now(&self) -> Result<(), MediaError> {
         self.controlled(|assembled| async move { assembled.controls.evict_now().await }).await
+    }
+
+    pub fn subscribe_failures(&self, listener: Arc<dyn FailureListener>) -> Arc<Subscription> {
+        Arc::new(self.failures.subscribe(listener))
     }
 
     pub fn subscribe_stats(&self, listener: Arc<dyn StatsListener>) -> Result<Arc<Subscription>, MediaError> {

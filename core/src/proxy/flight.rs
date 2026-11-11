@@ -87,6 +87,19 @@ impl Flight {
         self.progress.borrow().written
     }
 
+    pub fn failure(&self, outcome: &FlightOutcome) -> Option<crate::failures::MediaFailure> {
+        use crate::failures::{FailureStage, MediaFailure};
+        let (stage, reason) = match outcome {
+            FlightOutcome::Failed(message) => (FailureStage::Load, message.clone()),
+            FlightOutcome::Rejected(rejection) => (FailureStage::Load, format!("origin answered status {}", rejection.status)),
+            FlightOutcome::Unstorable => (FailureStage::Store, "the cache refused the write".to_string()),
+            _ => return None,
+        };
+        let content_type = self.progress.borrow().head.as_ref().and_then(|head| head.content_type.clone());
+        let kind = crate::cache::classify_kind(&self.url, &Meta { content_type, total_length: None }).into();
+        Some(MediaFailure { kind, url: self.url.clone(), stage, reason })
+    }
+
     pub fn promote(&self) {
         if !self.promoted.swap(true, Ordering::SeqCst) {
             self.promote.notify_one();
