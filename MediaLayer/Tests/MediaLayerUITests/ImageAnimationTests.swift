@@ -43,13 +43,13 @@ private func attached(_ view: UIView) -> UIWindow {
 }
 
 @MainActor
-private func update(_ view: UIImageView, _ playback: AnimatedFramesView.Playback, _ frames: AnimatedFrames, animation: ImageAnimation = ImageAnimation(), rests: Bool = false) {
+private func update(_ view: FrameLayerView, _ playback: AnimatedFramesView.Playback, _ frames: AnimatedFrames, animation: ImageAnimation = ImageAnimation(), rests: Bool = false) {
   AnimatedFramesView(frames: frames, contentMode: .fill, isPlaying: true, playbackRate: 1, animation: animation, rests: rests).update(view, playback: playback)
 }
 
 @MainActor
-private func frameView(in view: UIView) -> FrameImageView? {
-  if let found = view as? FrameImageView { return found }
+private func frameView(in view: UIView) -> FrameLayerView? {
+  if let found = view as? FrameLayerView { return found }
   for child in view.subviews { if let found = frameView(in: child) { return found } }
   return nil
 }
@@ -82,12 +82,12 @@ extension GlobalMedia {
     @Test
     func inv_image_51_a_resting_animation_shows_its_first_frame_starts_no_playback_and_plays_again_when_released() async throws {
       let frames = try stepGif()
-      let view = FrameImageView()
+      let view = FrameLayerView()
       let playback = AnimatedFramesView.Playback()
       let window = attached(view)
 
       update(view, playback, frames, rests: true)
-      #expect(signature(view.image?.cgImage) == signature(frames.firstImage))
+      #expect(signature(view.shownContents) == signature(frames.firstImage))
       #expect(frames.stream.preparations == 0)
       #expect(frames.stream.decodes == 0)
 
@@ -100,7 +100,7 @@ extension GlobalMedia {
     @Test(arguments: [ImageAnimation.RestFrame.first, .last])
     func inv_image_52_an_animation_with_repeats_stops_after_them_on_its_rest_frame(rest: ImageAnimation.RestFrame) async throws {
       let frames = try stepGif()
-      let view = FrameImageView()
+      let view = FrameLayerView()
       let playback = AnimatedFramesView.Playback()
       let window = attached(view)
       let animation = ImageAnimation(repeats: .times(2), rest: rest)
@@ -108,7 +108,7 @@ extension GlobalMedia {
       update(view, playback, frames, animation: animation)
       await eventually("the repeats ended") { playback.finished != nil }
       let expected = signature(frames.image(at: rest == .last ? 2 : 0))
-      #expect(signature(view.image?.cgImage) == expected)
+      #expect(signature(view.shownContents) == expected)
 
       let shown = view.framesShown
       update(view, playback, frames, animation: animation)
@@ -120,17 +120,17 @@ extension GlobalMedia {
     @Test
     func inv_image_53_a_resting_animation_shows_the_frame_it_rests_on() async throws {
       let frames = try stepGif()
-      let view = FrameImageView()
+      let view = FrameLayerView()
       let playback = AnimatedFramesView.Playback()
       let window = attached(view)
 
       update(view, playback, frames, animation: ImageAnimation(rest: .last), rests: true)
-      await eventually("the last frame is shown") { signature(view.image?.cgImage) == signature(frames.image(at: 2)) }
-      #expect(signature(view.image?.cgImage) != signature(frames.firstImage))
+      await eventually("the last frame is shown") { signature(view.shownContents) == signature(frames.image(at: 2)) }
+      #expect(signature(view.shownContents) != signature(frames.firstImage))
       #expect(frames.stream.preparations == 0)
 
       update(view, playback, frames, animation: ImageAnimation(rest: .first), rests: true)
-      #expect(signature(view.image?.cgImage) == signature(frames.firstImage))
+      #expect(signature(view.shownContents) == signature(frames.firstImage))
       withExtendedLifetime(window) {}
     }
 
@@ -159,7 +159,7 @@ extension GlobalMedia {
       await eventually("the animation moves") { (frameView(in: host.view)?.framesShown ?? 0) > 3 }
       host.rootView = MotionCell(url: url, context: context, reduceMotion: true)
       let references = try (0 ..< 3).map { signature(try stepGif().image(at: $0)) }
-      await eventually("the animation rests on its first frame") { nearest(frameView(in: host.view)?.image?.cgImage, to: references) == 0 }
+      await eventually("the animation rests on its first frame") { nearest(frameView(in: host.view)?.shownContents, to: references) == 0 }
       try? await Task.sleep(for: .milliseconds(350))
       let resting = try #require(frameView(in: host.view)).framesShown
       try? await Task.sleep(for: .milliseconds(350))
