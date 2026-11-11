@@ -168,6 +168,7 @@ impl MediaLayer {
         layer
     }
 
+    #[cfg(test)]
     pub(crate) fn assembling(runtime: Runtime, assembling: impl Future<Output = Result<Parts, MediaError>> + Send + 'static, releaser: Option<Arc<dyn MemoryReleaser>>, namespace_headers: Vec<String>, limits: IngressLimits, pause: Pause) -> Arc<MediaLayer> {
         MediaLayer::assembling_with(runtime, assembling, releaser, namespace_headers, limits, pause, Arc::default())
     }
