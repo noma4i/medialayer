@@ -98,6 +98,7 @@ internal fun openMediaLayer(
   audioFocus: MediaAudioFocus = MediaAudioFocus.Mix,
   imageMemoryBytes: Int? = null,
   videoOutputCounters: VideoOutputCounters? = null,
+  codecWarmup: CodecWarmup = CodecWarmup.process,
   install: () -> Unit = NativeCallbacks::install,
   open: (OpenConfig) -> MediaLayer
 ): Deferred<MediaLayer> {
@@ -144,6 +145,7 @@ internal fun openMediaLayer(
     val dir: File
     val device: DeviceMemory
     try {
+      codecWarmup.start()
       slots = ExoPlayerSlotFactory(app, callFactory ?: client, startMuted = emulator, audio = audio, videoOutputCounters = videoOutputCounters)
       synchronized(lock) { factory = slots }
       dir = File(app.cacheDir, "medialayer").apply { mkdirs() }
