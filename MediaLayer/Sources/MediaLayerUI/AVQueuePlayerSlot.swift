@@ -427,7 +427,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   func itemEnded(_ finished: AVPlayerItem, generation: UInt64) {
     guard finished === item, generation == loadGeneration, !looping else { return }
 
-    refreshSample()
+    refreshSample(atEnd: true)
     events.with { $0.ended(slot: id, generation: generation) }
   }
 
@@ -539,11 +539,11 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     return seconds.isFinite && seconds > 0 ? UInt64(seconds * 1000) : 0
   }
 
-  private func refreshSample() {
+  private func refreshSample(atEnd: Bool = false) {
     var duration: UInt64?
     if itemReady, let seconds = item?.duration.seconds, seconds.isFinite, seconds > 0 { duration = UInt64(seconds * 1000) }
     let sample = SlotSample(
-      positionMs: item == nil ? 0 : positionMs(),
+      positionMs: atEnd ? duration ?? positionMs() : item == nil ? 0 : positionMs(),
       durationMs: duration,
       isLooping: looping,
       viewAttached: layer.superlayer != nil,

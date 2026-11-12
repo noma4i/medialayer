@@ -286,6 +286,26 @@ struct AVQueuePlayerSlotTests {
     #expect(slot.player.actionAtItemEnd == (looping ? .advance : .pause))
   }
 
+  @Test
+  func theProgressIsOneWhenTheEndIsReportedWhereverThePlayheadStopped() async throws {
+    let log = PlayerEventLog()
+    let slots = LoadedSlots()
+    let slot = await makeSlot(log, slots: slots)
+    await slot.load(key: "clip", route: route(Self.silentClip))
+    await log.wait(for: "ready")
+    let values = ProgressValues()
+    let stream = await MainActor.run { slots.progress.stream(for: "clip") }
+    let collecting = Task { for await value in stream { values.append(value) } }
+
+    NotificationCenter.default.post(name: .AVPlayerItemDidPlayToEndTime, object: slot.loadedItem)
+    await log.wait(for: "ended")
+    await drainMain()
+    await drainMain()
+    collecting.cancel()
+
+    #expect(values.all.last == 1)
+  }
+
   @Test(arguments: [(true, 2), (false, 1)])
   func aLoopingClipKeepsTheNextRoundQueued(looping: Bool, queued: Int) async throws {
     let log = PlayerEventLog()
@@ -465,4 +485,13 @@ struct AVQueuePlayerSlotTests {
 
     #expect(audio.progress == 0.5)
   }
+}
+
+private final class ProgressValues: @unchecked Sendable {
+  private let lock = NSLock()
+  private var recorded: [Double] = []
+
+  var all: [Double] { lock.withLock { recorded } }
+
+  func append(_ value: Double) { lock.withLock { recorded.append(value) } }
 }
