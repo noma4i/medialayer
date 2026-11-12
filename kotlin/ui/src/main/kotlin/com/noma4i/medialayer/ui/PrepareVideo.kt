@@ -78,9 +78,10 @@ internal suspend fun prepareVideoAt(context: Context, file: File, limits: VideoL
   val facts = withContext(prepareDispatcher) { videoReader(file) }
   val plan = planVideo(facts.toSource(), limits)
   if (!plan.reencode && videoMetadataToStrip(withContext(prepareDispatcher) { metadataReader(context, file) }).isEmpty()) return PreparedMedia(file, false)
+  if (plan.reencode) withContext(prepareDispatcher) { decoderRefusal(facts, decoderReader(facts.mime)) }?.let { throw MediaException.Fetch(it) }
   val output = File(context.cacheDir, "prepared-${UUID.randomUUID()}.mp4")
   try {
-    videoExporter(VideoExport(context, file, output, transformSetup(plan, limits, facts), facts, onProgress))
+    videoExporter(VideoExport(context, file, output, transformSetup(plan, limits, facts), onProgress))
   } catch (error: Throwable) {
     withContext(NonCancellable + prepareDispatcher) { output.delete() }
     throw error
@@ -103,7 +104,7 @@ internal class VideoFacts(
   fun toSource() = VideoSource(width.toUInt(), height.toUInt(), rotation, frameRate, bitrate?.toUInt(), mp4H264Aac)
 }
 
-internal class VideoExport(val context: Context, val source: File, val output: File, val setup: TransformSetup, val facts: VideoFacts, val onProgress: ((Double) -> Unit)?)
+internal class VideoExport(val context: Context, val source: File, val output: File, val setup: TransformSetup, val onProgress: ((Double) -> Unit)?)
 
 internal class TransformSetup(
   val videoEffects: List<Effect>,
@@ -138,6 +139,8 @@ internal fun decoderRefusal(facts: VideoFacts, decoders: List<DecoderAbility>): 
 internal var videoReader: (File) -> VideoFacts = ::readVideoFacts
 
 internal var metadataReader: (Context, File) -> List<String> = ::readMetadataKeys
+
+internal var decoderReader: (String) -> List<DecoderAbility> = ::readDecoders
 
 internal var videoExporter: suspend (VideoExport) -> Unit = ::exportWithTransformer
 
@@ -245,13 +248,7 @@ internal suspend fun <T> whileExporting(
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)
-private suspend fun exportWithTransformer(request: VideoExport) {
-  withContext(prepareDispatcher) { decoderRefusal(request.facts, readDecoders(request.facts.mime)) }?.let { throw MediaException.Fetch(it) }
-  exportOnMain(request)
-}
-
-@androidx.annotation.OptIn(UnstableApi::class)
-private suspend fun exportOnMain(request: VideoExport) = withContext(Dispatchers.Main.immediate) {
+private suspend fun exportWithTransformer(request: VideoExport) = withContext(Dispatchers.Main.immediate) {
   val setup = request.setup
   val item = EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(request.source))).setEffects(Effects(setup.audioProcessors, setup.videoEffects)).build()
   val encoders = DefaultEncoderFactory.Builder(request.context)

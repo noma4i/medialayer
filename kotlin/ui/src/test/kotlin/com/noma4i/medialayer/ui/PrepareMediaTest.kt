@@ -29,6 +29,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
+import org.junit.Before
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -46,13 +47,20 @@ class PrepareMediaTest {
   private val readerBefore = videoReader
   private val exporterBefore = videoExporter
   private val metadataBefore = metadataReader
+  private val decoderBefore = decoderReader
   private val dispatcherBefore = prepareDispatcher
+
+  @Before
+  fun everyDecoderTakesEverySource() {
+    decoderReader = { listOf(decoder(Int.MAX_VALUE, Int.MAX_VALUE)) }
+  }
 
   @After
   fun restore() {
     videoReader = readerBefore
     videoExporter = exporterBefore
     metadataReader = metadataBefore
+    decoderReader = decoderBefore
     prepareDispatcher = dispatcherBefore
   }
 
@@ -103,12 +111,36 @@ class PrepareMediaTest {
     DecoderAbility({ width, height -> width <= maxWidth && height <= maxHeight }, profiles.toSet(), maxWidth, maxHeight)
 
   @Test
-  fun inv_send_48_aSourceLargerThanEveryDecoderOfTheDeviceIsRefusedWithTheDecoderMaximum() {
-    val decoders = listOf(decoder(2560, 1440, 8), decoder(1920, 1088, 8))
-    val clip = VideoFacts(3840, 2160, 0, 30f, 2_000_000, 2, false, "video/avc", 8)
+  fun inv_send_48_aSourceLargerThanEveryDecoderIsRefusedWithTheDecoderMaximumBeforeTheExport() = runBlocking {
+    val exports = CopyOnWriteArrayList<VideoExport>()
+    videoReader = { VideoFacts(3840, 2160, 0, 30f, 2_000_000, 2, false, "video/avc", 8) }
+    decoderReader = { listOf(decoder(2560, 1440, 8), decoder(1920, 1088, 8)) }
+    videoExporter = { exports += it }
 
-    assertEquals("the device decodes video/avc up to 2560x1440, the video is 3840x2160", decoderRefusal(clip, decoders))
-    assertEquals(null, decoderRefusal(VideoFacts(1920, 1080, 0, 30f, 2_000_000, 2, false, "video/avc", 8), decoders))
+    val refusal = assertThrows(MediaException.Fetch::class.java) { runBlocking { prepareVideoAt(context, source(), defaultVideoLimits(), null) } }
+
+    assertTrue(refusal.message.orEmpty(), refusal.message.orEmpty().contains("the device decodes video/avc up to 2560x1440, the video is 3840x2160"))
+    assertTrue(exports.isEmpty())
+  }
+
+  @Test
+  fun inv_send_50_aSourceThatNeedsNoDecoderIsCopiedWithoutTheDecoderCheck() = runBlocking {
+    val exports = CopyOnWriteArrayList<VideoExport>()
+    videoReader = { VideoFacts(3840, 2160, 0, 30f, 2_000_000, 2, true, "video/avc", 8) }
+    metadataReader = { _, _ -> listOf("major_brand", "location") }
+    decoderReader = { listOf(decoder(2560, 1440, 8)) }
+    videoExporter = { request ->
+      exports += request
+      request.output.writeBytes(byteArrayOf(1))
+    }
+    val limits = defaultVideoLimits().copy(maxLongSide = 3840u)
+
+    val prepared = prepareVideoAt(context, source(), limits, null)
+
+    assertTrue(prepared.isNew)
+    assertEquals(1, exports.size)
+    prepared.file.delete()
+    Unit
   }
 
   @Test
