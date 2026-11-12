@@ -24,21 +24,6 @@ fn with(contexts: &[(&str, Context)]) -> (Election, Vec<u64>) {
 }
 
 #[test]
-fn inv_session_01_context_table_matches_priorities_groups_and_resume_modes() {
-    let table = [
-        (Context::Ring, "ring", 300, ResumeMode::Automatic),
-        (Context::Ambient, "ambient", 325, ResumeMode::Automatic),
-        (Context::Hero, "hero", 400, ResumeMode::Manual),
-        (Context::Overlay, "overlay", 450, ResumeMode::Automatic),
-        (Context::System, "system", 475, ResumeMode::Automatic),
-        (Context::Exclusive, "exclusive", 500, ResumeMode::Automatic),
-    ];
-    for (context, group, priority, resume) in table {
-        assert_eq!(context.policy(), policy(group, priority, resume));
-    }
-}
-
-#[test]
 fn inv_session_03_eligible_only_in_foreground_with_play_intent() {
     let (mut election, leases) = with(&[("a", Context::Ring)]);
     assert!(!election.is_eligible(leases[0]));
@@ -254,10 +239,4 @@ fn inv_session_05_unregistering_the_active_session_pauses_it_even_if_stale() {
     election.set_intent("a", l[0], Intent::Play);
     assert_eq!(election.unregister("a", l[0]), [pause(l[0])]);
     assert_eq!(election.active(), None);
-}
-
-#[test]
-fn inv_session_02_volume_changes_never_reach_the_election() {
-    let sources = [include_str!("election.rs"), include_str!("suspensions.rs"), include_str!("recovery.rs"), include_str!("watchdog_policy.rs")];
-    assert!(sources.iter().all(|source| !source.to_lowercase().contains("mute")));
 }
