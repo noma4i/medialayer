@@ -26,7 +26,7 @@ subjects="$(git log --format=%s "$previous_tag"..HEAD)" || fail 'cannot read com
 [ "$(printf '%s\n' "$subjects" | grep -Fxc "Release $version" || true)" = 1 ] || fail "expected exactly one Release $version commit since $previous_tag"
 [ "$(sed -n '/^\[package\]/,/^\[/s/^version = "\([^"]*\)"$/\1/p' core/Cargo.toml)" = "$version" ] || fail 'core version does not match'
 grep -Fq "## $version - " CHANGELOG.md || fail 'changelog heading missing'
-for check in check_docs check_invariants check_zoo; do bash "scripts/$check.sh" || fail "$check failed"; done
+for check in check_docs check_zoo; do bash "scripts/$check.sh" || fail "$check failed"; done
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

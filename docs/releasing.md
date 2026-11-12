@@ -13,7 +13,7 @@ The owner chooses the version and authorizes publication. The release script nev
 
 The release page title is the version. Its text is only that version's `CHANGELOG.md` section. Attachments are only the compiled files listed in [Getting started](getting-started.md#use-a-release). Checksums remain in the ignored stage directory.
 
-The release script requires a clean `master` tree, the Android result directory, and exactly one `Release X.Y.Z` commit since the previous tag. It checks both Maven coordinates, module metadata, AAR contents, the Android archive, documentation, invariants, iOS archive contents, architectures, and generated manifest before creating the package commit or tag.
+The release script requires a clean `master` tree, the Android result directory, and exactly one `Release X.Y.Z` commit since the previous tag. It checks both Maven coordinates, module metadata, AAR contents, the Android archive, documentation, iOS archive contents, architectures, and generated manifest before creating the package commit or tag.
 
 Android coordinates are `com.noma4i:medialayer:X.Y.Z`, `com.noma4i:medialayer-ui:X.Y.Z` and `com.noma4i:medialayer-testing:X.Y.Z`. The Maven branch contains `com/noma4i/medialayer/X.Y.Z/`, `com/noma4i/medialayer-ui/X.Y.Z/` and `com/noma4i/medialayer-testing/X.Y.Z/` at its root. Publication uses local Maven staging and does not need credentials.
 
