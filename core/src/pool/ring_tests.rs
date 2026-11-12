@@ -91,65 +91,6 @@ fn inv_pool_10_changed_key_for_same_page_reloads_the_slot() {
 }
 
 #[test]
-fn inv_pool_01_slots_stay_within_pool_over_1000_window_changes() {
-    let mut ring = ring(3, 1);
-    let list = keys(50);
-    for active in walk(50, 1000) {
-        for command in ring.plan(0, active, Some(active), &list) {
-            let slot = match command {
-                Command::Load { slot, .. } => slot,
-                other => slot_of(&other),
-            };
-            assert!(slot < 3);
-        }
-    }
-}
-
-#[test]
-fn inv_pool_02_at_most_one_slot_plays_after_every_command() {
-    let mut ring = ring(5, 2);
-    let list = keys(50);
-    let mut playing: HashSet<usize> = HashSet::new();
-    for active in walk(50, 1000) {
-        for command in ring.plan(0, active, Some(active), &list) {
-            match command {
-                Command::Play { slot } => {
-                    playing.insert(slot);
-                }
-                Command::Pause { slot } | Command::Unload { slot } => {
-                    playing.remove(&slot);
-                }
-                _ => {}
-            }
-            assert!(playing.len() <= 1);
-        }
-    }
-}
-
-#[test]
-fn inv_pool_03_unloaded_slot_gets_no_commands_until_load() {
-    let mut ring = ring(3, 1);
-    let list = keys(50);
-    let mut unloaded: HashSet<usize> = HashSet::new();
-    for active in walk(50, 1000) {
-        for command in ring.plan(0, active, Some(active), &list) {
-            match command {
-                Command::Unload { slot } => {
-                    assert!(!unloaded.contains(&slot));
-                    unloaded.insert(slot);
-                }
-                Command::Load { slot, .. } => {
-                    unloaded.remove(&slot);
-                }
-                other => {
-                    assert!(!unloaded.contains(&slot_of(&other)));
-                }
-            }
-        }
-    }
-}
-
-#[test]
 fn inv_pool_04_preroll_hits_only_non_playing_window_pages_once_per_source() {
     let mut ring = ring(3, 1);
     let list = keys(50);

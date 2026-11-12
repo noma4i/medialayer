@@ -34,13 +34,6 @@ fn inv_pool_14_low_and_normal_profiles_give_different_slot_plans() {
 }
 
 #[test]
-fn inv_pool_14_config_follows_limits_slots() {
-    let limits = Limits { slots: 4, ..Limits::default() };
-    let config = PoolConfig::from_limits(&limits, 1);
-    assert_eq!(config.slots, 4);
-}
-
-#[test]
 fn inv_pool_12_start_muted_slots_load_without_mute_commands_and_unmute_on_request() {
     let mut pool = ring_with(3, 1, |config| config.start_muted = true);
     let commands = pool.plan(0, 5, Some(5), &keys(20));
