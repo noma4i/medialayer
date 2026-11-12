@@ -21,6 +21,9 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
   private var tap: (@Sendable (CVPixelBuffer, UInt64) -> Void)?
   private var chosenPhotoSize: PixelSize?
   private var tokens: [NSObjectProtocol] = []
+  private var previews: [ObjectIdentifier: WeakPreview] = [:]
+  private var previewLinks: [ObjectIdentifier: AVCaptureConnection] = [:]
+  private var videoPort: AVCaptureInput.Port?
 
   override init() {
     super.init()
@@ -86,6 +89,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     session.beginConfiguration()
     session.inputs.forEach(session.removeInput)
     session.outputs.forEach(session.removeOutput)
+    previewLinks = [:]
+    videoPort = nil
     frameOutput = nil
     var outputs: [AVCaptureOutput] = []
     if let photo { outputs.append(photo) }
@@ -97,6 +102,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     }
     inputs.forEach(session.addInput)
     outputs.forEach(session.addOutput)
+    videoPort = inputs.first?.ports(for: .video, sourceDeviceType: device.deviceType, sourceDevicePosition: device.position).first
+    previews.keys.forEach(linkPreview)
     session.commitConfiguration()
     camera = device
     photoOutput = photo
@@ -138,6 +145,42 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     return choice
   }
 
+  /// The preview layer joins the session here, on the session queue: both the join and its connection take the session lock, so Main never touches the session.
+  func attachPreviewLayer(_ layer: AVCaptureVideoPreviewLayer) {
+    queue.async {
+      let id = ObjectIdentifier(layer)
+      layer.setSessionWithNoConnection(self.session)
+      self.previews[id] = WeakPreview(layer)
+      guard self.videoPort != nil else { return }
+      self.session.beginConfiguration()
+      self.linkPreview(id)
+      self.session.commitConfiguration()
+    }
+  }
+
+  func detachPreviewLayer(_ layer: AVCaptureVideoPreviewLayer) {
+    queue.async {
+      let id = ObjectIdentifier(layer)
+      self.previews[id] = nil
+      guard let link = self.previewLinks.removeValue(forKey: id) else { return }
+      self.session.beginConfiguration()
+      self.session.removeConnection(link)
+      self.session.commitConfiguration()
+    }
+  }
+
+  private func linkPreview(_ id: ObjectIdentifier) {
+    guard previewLinks[id] == nil, let port = videoPort else { return }
+    guard let layer = previews[id]?.layer else {
+      previews[id] = nil
+      return
+    }
+    let link = AVCaptureConnection(inputPort: port, videoPreviewLayer: layer)
+    guard session.canAddConnection(link) else { return }
+    session.addConnection(link)
+    previewLinks[id] = link
+  }
+
   func unbind() {
     queue.async {
       if self.movieOutput?.isRecording == true { self.movieOutput?.stopRecording() }
@@ -146,6 +189,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
       self.session.inputs.forEach(self.session.removeInput)
       self.session.outputs.forEach(self.session.removeOutput)
       self.session.commitConfiguration()
+      self.previewLinks = [:]
+      self.videoPort = nil
       self.camera = nil
       self.photoOutput = nil
       self.movieOutput = nil
@@ -259,6 +304,14 @@ extension AVCaptureBackend: AVCaptureVideoDataOutputSampleBufferDelegate {
     guard let handler = lock.withLock({ tap }), let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
     let seconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
     handler(buffer, seconds.isFinite && seconds > 0 ? UInt64(seconds * 1000) : 0)
+  }
+}
+
+private struct WeakPreview {
+  weak var layer: AVCaptureVideoPreviewLayer?
+
+  init(_ layer: AVCaptureVideoPreviewLayer) {
+    self.layer = layer
   }
 }
 

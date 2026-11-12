@@ -37,6 +37,8 @@ protocol CaptureBackend: AnyObject, Sendable {
   func setSink(_ sink: @escaping @Sendable (CaptureEvent) -> Void)
   func bind(lens: CameraLens, profile: CaptureProfile)
   func unbind()
+  func attachPreviewLayer(_ layer: AVCaptureVideoPreviewLayer)
+  func detachPreviewLayer(_ layer: AVCaptureVideoPreviewLayer)
   func takePhoto(flash: Bool, profile: CaptureProfile) async throws -> Data
   func beginRecording(to url: URL, profile: CaptureProfile, lens: CameraLens)
   func endRecording()

@@ -193,7 +193,15 @@ public final class MediaCamera: @unchecked Sendable {
     }
   }
 
-  var previewSession: AVCaptureSession { backend.session }
+  func registerPreview(_ layer: AVCaptureVideoPreviewLayer) {
+    let backend = backend
+    queue.async { backend.attachPreviewLayer(layer) }
+  }
+
+  func unregisterPreview(_ layer: AVCaptureVideoPreviewLayer) {
+    let backend = backend
+    queue.async { backend.detachPreviewLayer(layer) }
+  }
 
   private static func refusal(_ reason: CameraRefusal, recordedMs: UInt64? = nil) -> MediaError {
     MediaError.Camera(reason: reason, detail: cameraRefusalText(reason: reason), recordedMs: recordedMs)

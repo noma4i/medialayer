@@ -4,11 +4,28 @@ import MediaLayer
 import SwiftUI
 import UIKit
 
-final class CameraPreviewLayerView: UIView {
-  override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
+final class CameraPreviewLayer: AVCaptureVideoPreviewLayer {
+  private(set) var sessionJoinsOnMain = 0
 
-  var previewLayer: AVCaptureVideoPreviewLayer {
-    guard let layer = layer as? AVCaptureVideoPreviewLayer else { preconditionFailure("the layer class is AVCaptureVideoPreviewLayer") }
+  override var session: AVCaptureSession? {
+    get { super.session }
+    set {
+      if Thread.isMainThread, newValue != nil { sessionJoinsOnMain += 1 }
+      super.session = newValue
+    }
+  }
+
+  override func setSessionWithNoConnection(_ session: AVCaptureSession) {
+    if Thread.isMainThread { sessionJoinsOnMain += 1 }
+    super.setSessionWithNoConnection(session)
+  }
+}
+
+final class CameraPreviewLayerView: UIView {
+  override class var layerClass: AnyClass { CameraPreviewLayer.self }
+
+  var previewLayer: CameraPreviewLayer {
+    guard let layer = layer as? CameraPreviewLayer else { preconditionFailure("the layer class is CameraPreviewLayer") }
     return layer
   }
 
@@ -27,13 +44,17 @@ final class CameraPreviewLayerView: UIView {
   init(camera: MediaCamera) {
     self.camera = camera
     super.init(frame: .zero)
-    previewLayer.session = camera.previewSession
+    camera.registerPreview(previewLayer)
     previewLayer.videoGravity = .resizeAspectFill
     addGestureRecognizer(pinchRecognizer)
   }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { nil }
+
+  deinit {
+    camera.unregisterPreview(previewLayer)
+  }
 
   override func didMoveToWindow() {
     super.didMoveToWindow()

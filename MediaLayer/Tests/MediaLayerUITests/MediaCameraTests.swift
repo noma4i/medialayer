@@ -48,6 +48,11 @@ private final class FakeBackend: CaptureBackend, @unchecked Sendable {
   }
 
   func unbind() { note("unbind") }
+  func attachPreviewLayer(_ layer: AVCaptureVideoPreviewLayer) {
+    note("attachPreview")
+    layer.setSessionWithNoConnection(session)
+  }
+  func detachPreviewLayer(_ layer: AVCaptureVideoPreviewLayer) { note("detachPreview") }
 
   func takePhoto(flash: Bool, profile: CaptureProfile) async throws -> Data {
     note("photo flash=\(flash)")
@@ -454,6 +459,24 @@ struct MediaCameraTests {
     #expect(rig.backend.count("zoom 1.5") == 1)
     view.sync(onScreen: false)
     await eventually("unbound") { rig.backend.count("unbind") == 1 }
+  }
+
+  @Test @MainActor
+  func inv_capture_29_the_preview_joins_the_session_only_on_the_backend_queue() async throws {
+    let rig = try makeRig()
+    let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+    for round in 0..<5 {
+      let view = CameraPreviewLayerView(camera: rig.camera)
+      window.addSubview(view)
+      view.frame = window.bounds
+      view.layoutIfNeeded()
+      view.frame = CGRect(x: 0, y: 0, width: 844, height: 390)
+      view.layoutIfNeeded()
+      #expect(view.previewLayer.sessionJoinsOnMain == 0, "round \(round): the main thread joined the layer to the session")
+      view.removeFromSuperview()
+    }
+    await eventually("every layer was registered and let go") { rig.backend.count("attachPreview") == 5 && rig.backend.count("detachPreview") == 5 }
+    #expect(rig.backend.mainThreadCalls == 0)
   }
 
   @Test
