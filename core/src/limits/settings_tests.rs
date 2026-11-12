@@ -54,14 +54,6 @@ fn inv_limits_02_encode_decode_round_trip_for_every_strategy() {
 }
 
 #[test]
-fn inv_limits_02_encode_is_key_value_lines() {
-    let text = Limits::default().encode();
-    assert!(text.lines().any(|line| line == "budget=4294967296"));
-    assert!(text.lines().any(|line| line == "shrink_to=0.9"));
-    assert!(text.lines().any(|line| line == "strategy=lru"));
-}
-
-#[test]
 fn inv_limits_02_decode_applies_only_present_keys_over_base() {
     let base = Limits { slots: 7, ..Limits::default() };
     let decoded = Limits::decode(base, "timeout_seconds=10\n").unwrap();

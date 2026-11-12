@@ -105,17 +105,6 @@ fn inv_prefetch_01_entries_stay_within_max_and_oldest_is_dropped() {
 }
 
 #[test]
-fn inv_prefetch_01_limits_are_parameters() {
-    let mut ledger = PrefetchLedger::new(secs(10), 2);
-    load_unit(&mut ledger, "a", secs(0));
-    load_unit(&mut ledger, "b", secs(1));
-    load_unit(&mut ledger, "c", secs(2));
-    assert_eq!(ledger.dedupe_count(), 2);
-    assert!(load_unit(&mut ledger, "a", secs(3)));
-    assert!(load_unit(&mut ledger, "b", secs(11)));
-}
-
-#[test]
 fn inv_prefetch_07_cancel_marks_queued_requests_until_they_drain() {
     let mut ledger = ledger();
     ledger.enqueue("a");

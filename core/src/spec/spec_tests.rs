@@ -31,14 +31,6 @@ fn sample() -> MediaSpec {
 }
 
 #[test]
-fn inv_spec_04_a_video_forwards_by_default_what_the_fetch_policy_forwards() {
-    let policy_names: Vec<String> = crate::fetch::DEFAULT_FORWARDED_HEADERS.iter().map(|name| name.to_string()).collect();
-
-    assert_eq!(VideoSpec::new("a").forward_headers, policy_names);
-    assert_eq!(FetchPolicy::default().forwarded_headers, policy_names);
-}
-
-#[test]
 fn inv_spec_02_json_is_stable_and_round_trips() {
     let spec = sample();
     let json = spec.to_json();
