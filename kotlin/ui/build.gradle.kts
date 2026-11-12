@@ -12,6 +12,7 @@ android {
 
   defaultConfig {
     minSdk = 33
+    testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   publishing {
@@ -90,4 +91,6 @@ dependencies {
   testImplementation("androidx.media3:media3-test-utils-robolectric:1.11.1")
   testImplementation("androidx.compose.ui:ui-test-junit4")
   debugImplementation("androidx.compose.ui:ui-test-manifest")
+  androidTestImplementation("androidx.test:runner:1.7.0")
+  androidTestImplementation("androidx.test.ext:junit:1.3.0")
 }
