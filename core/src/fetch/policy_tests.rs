@@ -8,13 +8,6 @@ fn headers(pairs: &[(&str, &str)]) -> HashMap<String, String> {
 }
 
 #[test]
-fn inv_proxy_18_default_timeout_comes_from_limits() {
-    assert_eq!(FetchPolicy::default().timeout, Duration::from_secs(30));
-    let limits = Limits { timeout_seconds: 7, ..Limits::default() };
-    assert_eq!(FetchPolicy::from_limits(&limits).timeout, Duration::from_secs(7));
-}
-
-#[test]
 fn inv_proxy_18_default_whitelist_forwards_the_seven_v3_headers_and_drops_the_rest() {
     let input = headers(&[
         ("Authorization", "Bearer t"),

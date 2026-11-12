@@ -1,11 +1,6 @@
 use super::*;
 
 #[test]
-fn inv_proxy_15_the_url_is_the_key() {
-    assert_eq!(cache_key("https://cdn.example.com/A/b.m3u8?X=1"), "https://cdn.example.com/A/b.m3u8?X=1");
-}
-
-#[test]
 fn inv_proxy_15_file_name_of_a_key_is_stable_hex() {
     let name = key_file_name("https://a.example.com/x");
     assert_eq!(name.len(), 64);

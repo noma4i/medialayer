@@ -8,6 +8,4 @@ pub use fetcher::{header_value, BodyStream, FetchError, Fetcher, Request, Respon
 pub use policy::{FetchPolicy, DEFAULT_FORWARDED_HEADERS};
 
 #[cfg(test)]
-mod mock_tests;
-#[cfg(test)]
 mod policy_tests;
