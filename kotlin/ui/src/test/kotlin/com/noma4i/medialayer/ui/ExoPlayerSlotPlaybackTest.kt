@@ -126,20 +126,19 @@ internal class ExoPlayerSlotPlaybackTest : ExoPlayerSlotRig() {
 
   @Test
   fun inv_api_48_the_slot_sample_is_the_duration_when_the_clip_ended() {
-    val clock = FakeClock(0)
-    val slot = factory().also { it.clock = clock }.createSlot(3u)
+    val slot = factory().createSlot(3u)
     slot.load("k", route.copy(looping = false), 7uL); idle()
-    slot.play(); idle()
-    playUntilReady(clock, slot)
-    for (step in 0 until 200) {
-      if (slot.player!!.playbackState == Player.STATE_ENDED) break
-      clock.advanceTime(1000); idle(); Thread.sleep(10)
-    }
-    idle()
+    val real = slot.player!!
+    slot.player = EndedShort()
+    try {
+      slot.loadEvents!!.onPlaybackStateChanged(Player.STATE_ENDED)
+      val sample = slot.sample()
 
-    val sample = slot.sample()
-    assertEquals(Player.STATE_ENDED, slot.player!!.playbackState)
-    assertEquals(sample.durationMs, sample.positionMs)
+      assertEquals(10_000uL, sample.durationMs)
+      assertEquals(10_000uL, sample.positionMs)
+    } finally {
+      slot.player = real
+    }
   }
 
   @Test
@@ -263,4 +262,13 @@ internal class ExoPlayerSlotPlaybackTest : ExoPlayerSlotRig() {
       assertEquals("token", server.heads.take().headers["authorization"])
     }
   }
+}
+
+private class EndedShort : androidx.media3.test.utils.StubExoPlayer() {
+  override fun getPlaybackState(): Int = Player.STATE_ENDED
+  override fun getCurrentPosition(): Long = 9_000L
+  override fun getDuration(): Long = 10_000L
+  override fun getPlayWhenReady(): Boolean = false
+  override fun getPlaybackSuppressionReason(): Int = Player.PLAYBACK_SUPPRESSION_REASON_NONE
+  override fun getPlaybackParameters(): androidx.media3.common.PlaybackParameters = androidx.media3.common.PlaybackParameters.DEFAULT
 }
