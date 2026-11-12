@@ -1,5 +1,4 @@
 use super::*;
-use crate::fetch::FetchPolicy;
 use crate::limits::{EvictionStrategy, Limits, LimitsError};
 
 fn sample() -> MediaSpec {

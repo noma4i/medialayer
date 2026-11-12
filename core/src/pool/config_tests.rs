@@ -1,6 +1,5 @@
 use super::test_support::*;
 use super::*;
-use crate::limits::Limits;
 
 fn tuning() -> ProfileTuning {
     ProfileTuning { low_ram_below_mb: 3072, low_slots: 2, low_reach: 0 }

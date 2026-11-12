@@ -1,7 +1,5 @@
 use super::*;
 
-const KNOWN: &str = "LEHV6nWB2yk8pyo0adR*.7kCMdnj";
-
 #[test]
 fn inv_image_01_the_decode_size_rounds_placement_to_8_and_never_upscales_source() {
     let size = |width, height| PixelSize { width, height };

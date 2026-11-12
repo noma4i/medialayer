@@ -1,7 +1,5 @@
 use super::*;
-use crate::limits::Limits;
 use std::collections::HashMap;
-use std::time::Duration;
 
 fn headers(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     pairs.iter().map(|(name, value)| (name.to_string(), value.to_string())).collect()
