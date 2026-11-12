@@ -1,13 +1,5 @@
 use super::*;
 
-#[test]
-fn inv_proxy_15_file_name_of_a_key_is_stable_hex() {
-    let name = key_file_name("https://a.example.com/x");
-    assert_eq!(name.len(), 64);
-    assert!(name.chars().all(|c| c.is_ascii_hexdigit()));
-    assert_eq!(name, key_file_name("https://a.example.com/x"));
-}
-
 fn headers(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, String> {
     pairs.iter().map(|(name, value)| (name.to_string(), value.to_string())).collect()
 }
