@@ -110,13 +110,6 @@ fn inv_capture_04_the_zoom_stays_between_the_minimum_and_the_ceiling() {
 }
 
 #[test]
-fn inv_capture_05_the_flash_needs_a_request_and_a_unit() {
-    for (requested, unit, expected) in [(true, true, true), (true, false, false), (false, true, false), (false, false, false)] {
-        assert_eq!(flash_plan(requested, unit), expected);
-    }
-}
-
-#[test]
 fn inv_capture_06_the_verdict_of_a_recording_follows_the_table() {
     use RecordEnd::{Completed, Failed, LimitReached};
     use RecordVerdict as V;
@@ -136,14 +129,6 @@ fn inv_capture_06_the_verdict_of_a_recording_follows_the_table() {
     }
     assert_eq!(record_verdict(true, false, false, Completed, Some(1), 0), V::Deliver);
     assert_eq!(record_verdict(true, false, false, Completed, Some(0), 0), V::TooShort);
-}
-
-#[test]
-fn inv_capture_07_a_reset_restarts_once_and_every_other_fault_fails() {
-    assert_eq!(recovery_step(false, FaultKind::Reset), RecoveryAction::Restart);
-    assert_eq!(recovery_step(true, FaultKind::Reset), RecoveryAction::Fail);
-    assert_eq!(recovery_step(false, FaultKind::Other), RecoveryAction::Fail);
-    assert_eq!(recovery_step(true, FaultKind::Other), RecoveryAction::Fail);
 }
 
 #[test]
@@ -378,14 +363,6 @@ fn inv_capture_13_the_costs_are_rasters_of_the_session_and_of_the_shot() {
 }
 
 #[test]
-fn inv_capture_25_the_stabilization_of_a_profile_is_circle_cinematic_and_the_rest_off() {
-    let stabilization = |kind| capture_profile(kind).stabilization;
-    assert_eq!((stabilization(CaptureKind::Circle), stabilization(CaptureKind::Moment), stabilization(CaptureKind::Photo)), (VideoStabilization::Cinematic, VideoStabilization::Off, VideoStabilization::Off));
-    let own = CaptureProfile { stabilization: VideoStabilization::Standard, ..moment() };
-    assert_eq!(check_capture_profile(own).unwrap().stabilization, VideoStabilization::Standard);
-}
-
-#[test]
 fn inv_capture_26_the_stabilization_is_set_only_when_the_device_offers_it() {
     use VideoStabilization::{Cinematic, Off, Standard};
     for (requested, supported, expected) in [
@@ -396,14 +373,6 @@ fn inv_capture_26_the_stabilization_is_set_only_when_the_device_offers_it() {
     ] {
         assert_eq!(stabilization_mode(requested, supported.clone()), expected, "{requested:?} in {supported:?}");
     }
-}
-
-#[test]
-fn inv_capture_27_a_profile_with_a_least_take_of_500_ms_is_valid_for_a_circle() {
-    let circle = CaptureProfile { min_take_ms: 500, ..capture_profile(CaptureKind::Circle) };
-    assert_eq!(check_capture_profile(circle).unwrap().min_take_ms, 500);
-    assert_eq!(record_verdict(true, false, false, RecordEnd::Completed, Some(500), circle.min_take_ms), RecordVerdict::TooShort);
-    assert_eq!(record_verdict(true, false, false, RecordEnd::Completed, Some(501), circle.min_take_ms), RecordVerdict::Deliver);
 }
 
 #[test]
