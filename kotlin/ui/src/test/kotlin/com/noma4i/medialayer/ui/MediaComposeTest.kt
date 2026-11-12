@@ -176,6 +176,27 @@ class MediaComposeTest {
   }
 
   @Test
+  fun inv_api_48_a_one_shot_video_reports_full_progress_before_its_end_even_when_the_end_outruns_every_sample() {
+    val events = CopyOnWriteArrayList<String>()
+    var mounted by mutableStateOf(true)
+    val clip = Clip("https://o.test/note.mp4")
+    rule.setContent {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
+        if (mounted) MediaVideo(clip, loop = false, onEnd = { events += "end"; mounted = false }, onProgress = { events += "progress $it" }, modifier = Modifier.size(100.dp))
+      }
+    }
+    rule.waitUntil(5000) { layer.listeners.isNotEmpty() }
+
+    listOf(MediaState.Rendered, MediaState.Ended).forEach { state ->
+      layer.emit(clip.url, state)
+      rule.waitForIdle()
+    }
+
+    val end = events.indexOf("end")
+    assertEquals("the end arrived without a full progress before it: $events", true, end > 0 && events[end - 1] == "progress 1.0")
+  }
+
+  @Test
   fun inv_android_21_a_one_shot_video_next_to_a_window_of_the_same_url_reports_the_end() {
     var ends = 0
     val clip = Clip("https://o.test/replay.mp4")

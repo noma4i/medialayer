@@ -183,7 +183,10 @@ public struct MediaVideo<Content: View>: View {
       if reached.firstFrame {
         onFirstFrame()
       }
-      if reached.ended { onEnd() }
+      if reached.ended {
+        onProgress?(1)
+        onEnd()
+      }
     }
   }
 }

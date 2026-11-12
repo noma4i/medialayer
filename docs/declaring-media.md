@@ -393,7 +393,7 @@ MediaVideo(
 
 ## Video position
 
-`onProgress` receives the played part of a video as a number from 0 to 1: the position divided by the duration. It runs 10 times a second while the video plays. A paused video reports once when it appears or when `playing` changes, then stops, so a paused list does not wake up. When the video ends, it reports 1. A video without a known duration reports nothing. The callback runs on the main thread: do not do heavy work in it.
+`onProgress` receives the played part of a video as a number from 0 to 1: the position divided by the duration. It runs 10 times a second while the video plays. A paused video reports once when it appears or when `playing` changes, then stops, so a paused list does not wake up. When the video ends, it reports 1 before `onEnd` runs, so a view removed in `onEnd` still receives the full value. A video without a known duration reports nothing. The callback runs on the main thread: do not do heavy work in it.
 
 ### Swift
 

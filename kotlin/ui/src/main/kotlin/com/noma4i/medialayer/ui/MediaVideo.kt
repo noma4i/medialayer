@@ -178,7 +178,10 @@ fun MediaVideo(
     if (isFirstFrame) {
       firstFrame()
     }
-    if (isEnd) end()
+    if (isEnd) {
+      progress?.invoke(1.0)
+      end()
+    }
   }
   val player by remember(view) { view?.player ?: flowOf(null) }.collectAsState(null)
   val counters = environment.players?.videoOutputCounters

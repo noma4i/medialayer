@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- `MediaVideo` reports progress 1.0 before `onEnd`, also when `onEnd` removes the view.
+
 ## 3.30.5 - 2026-11-12
 
 ### Fixed
