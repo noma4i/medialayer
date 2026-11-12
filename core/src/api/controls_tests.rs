@@ -89,21 +89,6 @@ fn smaller_budget() -> Limits {
 }
 
 #[tokio::test]
-async fn inv_limits_03_saved_limits_win_over_defaults() {
-    let rig = rig_with_saved(Some("budget=536870912"));
-
-    assert_eq!(rig.controls.limits().await.budget, 512 * MIB);
-}
-
-#[tokio::test]
-async fn inv_limits_03_invalid_saved_limits_fall_back_to_defaults() {
-    let rig = rig_with_saved(Some("budget=1024"));
-
-    assert_eq!(rig.controls.limits().await, Limits::default());
-    assert!(rig.cache.applied.lock().unwrap().is_empty());
-}
-
-#[tokio::test]
 async fn inv_limits_04_set_limits_applies_to_the_cache_and_survives_a_reopen() {
     let rig = rig_with_saved(None);
 

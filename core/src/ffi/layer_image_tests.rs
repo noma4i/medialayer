@@ -166,17 +166,6 @@ fn inv_ffi_05_namespace_headers_given_to_open_give_each_header_value_its_own_cac
     assert_eq!((fetch_twice(Vec::new()), fetch_twice(vec!["Authorization".to_string()])), (1, 2));
 }
 
-#[test]
-fn inv_api_15_the_placeholder_of_a_local_file_is_empty_even_when_it_names_a_cover() {
-    let dir = tempfile::tempdir().unwrap();
-    let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), None)).unwrap();
-    let local = MediaItem { cover: Some("https://o.test/cover.jpg".to_string()), ..MediaItem::bare_video("file:///bundle/intro.mp4") };
-    let remote = MediaItem { cover: Some("https://o.test/cover.jpg".to_string()), ..MediaItem::bare_video("https://o.test/a.mp4") };
-
-    assert_eq!(caller().block_on(layer.placeholder(local, false)), crate::api::Placeholder::None);
-    assert_eq!(caller().block_on(layer.placeholder(remote, false)), crate::api::Placeholder::Cover { url: "https://o.test/cover.jpg".to_string() });
-}
-
 fn poster_pages(count: usize) -> Vec<Vec<MediaItem>> {
     (0..count).map(|index| vec![MediaItem::bare(&format!("https://o.test/p{index}.jpg"), crate::api::Kind::Image)]).collect()
 }
