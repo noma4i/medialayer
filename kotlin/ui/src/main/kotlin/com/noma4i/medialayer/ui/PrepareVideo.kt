@@ -4,6 +4,7 @@ import com.noma4i.medialayer.normalizeItem
 import com.noma4i.medialayer.toItem
 import android.content.Context
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
@@ -79,7 +80,7 @@ internal suspend fun prepareVideoAt(context: Context, file: File, limits: VideoL
   if (!plan.reencode && videoMetadataToStrip(withContext(prepareDispatcher) { metadataReader(context, file) }).isEmpty()) return PreparedMedia(file, false)
   val output = File(context.cacheDir, "prepared-${UUID.randomUUID()}.mp4")
   try {
-    videoExporter(VideoExport(context, file, output, transformSetup(plan, limits, facts), onProgress))
+    videoExporter(VideoExport(context, file, output, transformSetup(plan, limits, facts), facts, onProgress))
   } catch (error: Throwable) {
     withContext(NonCancellable + prepareDispatcher) { output.delete() }
     throw error
@@ -95,12 +96,14 @@ internal class VideoFacts(
   val frameRate: Float,
   val bitrate: Int?,
   val audioChannels: Int?,
-  val mp4H264Aac: Boolean
+  val mp4H264Aac: Boolean,
+  val mime: String = MimeTypes.VIDEO_H264,
+  val profile: Int? = null
 ) {
   fun toSource() = VideoSource(width.toUInt(), height.toUInt(), rotation, frameRate, bitrate?.toUInt(), mp4H264Aac)
 }
 
-internal class VideoExport(val context: Context, val source: File, val output: File, val setup: TransformSetup, val onProgress: ((Double) -> Unit)?)
+internal class VideoExport(val context: Context, val source: File, val output: File, val setup: TransformSetup, val facts: VideoFacts, val onProgress: ((Double) -> Unit)?)
 
 internal class TransformSetup(
   val videoEffects: List<Effect>,
@@ -110,6 +113,27 @@ internal class TransformSetup(
   val videoMime: String?,
   val audioMime: String?
 )
+
+internal class DecoderAbility(val accepts: (Int, Int) -> Boolean, val profiles: Set<Int>, val maxWidth: Int, val maxHeight: Int)
+
+internal fun readDecoders(mime: String): List<DecoderAbility> =
+  MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+    .filter { !it.isEncoder && !it.name.endsWith(".secure") && it.supportedTypes.any { type -> type.equals(mime, ignoreCase = true) } }
+    .mapNotNull { info ->
+      val capabilities = info.getCapabilitiesForType(mime)
+      val video = capabilities.videoCapabilities ?: return@mapNotNull null
+      DecoderAbility(video::isSizeSupported, capabilities.profileLevels.map { it.profile }.toSet(), video.supportedWidths.upper, video.supportedHeights.upper)
+    }
+
+/** Why no decoder of the device can read the source, or null when one can. */
+internal fun decoderRefusal(facts: VideoFacts, decoders: List<DecoderAbility>): String? {
+  val sized = decoders.filter { it.accepts(facts.width, facts.height) }
+  if (sized.any { facts.profile == null || facts.profile in it.profiles }) return null
+  val size = "${facts.width}x${facts.height}"
+  if (sized.isNotEmpty()) return "the device has no ${facts.mime} decoder for profile ${facts.profile} at $size"
+  val widest = decoders.maxByOrNull { it.maxWidth.toLong() * it.maxHeight } ?: return "the device has no ${facts.mime} decoder"
+  return "the device decodes ${facts.mime} up to ${widest.maxWidth}x${widest.maxHeight}, the video is $size"
+}
 
 internal var videoReader: (File) -> VideoFacts = ::readVideoFacts
 
@@ -189,7 +213,9 @@ internal fun readVideoFacts(file: File): VideoFacts {
     return VideoFacts(
       video.getInteger(MediaFormat.KEY_WIDTH), video.getInteger(MediaFormat.KEY_HEIGHT),
       if (video.containsKey(MediaFormat.KEY_ROTATION)) video.getInteger(MediaFormat.KEY_ROTATION) else 0,
-      trackRate ?: countedRate, bitrate.takeIf { it > 0 }, audio?.getInteger(MediaFormat.KEY_CHANNEL_COUNT), fits
+      trackRate ?: countedRate, bitrate.takeIf { it > 0 }, audio?.getInteger(MediaFormat.KEY_CHANNEL_COUNT), fits,
+      video.getString(MediaFormat.KEY_MIME).orEmpty(),
+      video.takeIf { it.containsKey(MediaFormat.KEY_PROFILE) }?.getInteger(MediaFormat.KEY_PROFILE)
     )
   } finally {
     extractor.release()
@@ -219,7 +245,13 @@ internal suspend fun <T> whileExporting(
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)
-private suspend fun exportWithTransformer(request: VideoExport) = withContext(Dispatchers.Main.immediate) {
+private suspend fun exportWithTransformer(request: VideoExport) {
+  withContext(prepareDispatcher) { decoderRefusal(request.facts, readDecoders(request.facts.mime)) }?.let { throw MediaException.Fetch(it) }
+  exportOnMain(request)
+}
+
+@androidx.annotation.OptIn(UnstableApi::class)
+private suspend fun exportOnMain(request: VideoExport) = withContext(Dispatchers.Main.immediate) {
   val setup = request.setup
   val item = EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(request.source))).setEffects(Effects(setup.audioProcessors, setup.videoEffects)).build()
   val encoders = DefaultEncoderFactory.Builder(request.context)

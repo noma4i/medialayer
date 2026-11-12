@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- `prepareVideo` names the decoder maximum when the device cannot decode the source.
+
 ## 3.30.6 - 2026-11-12
 
 ### Fixed

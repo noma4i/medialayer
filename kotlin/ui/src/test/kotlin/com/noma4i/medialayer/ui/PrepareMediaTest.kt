@@ -99,6 +99,26 @@ class PrepareMediaTest {
     assertEquals(1, setup.audioProcessors.count { it is ChannelMixingAudioProcessor })
   }
 
+  private fun decoder(maxWidth: Int, maxHeight: Int, vararg profiles: Int) =
+    DecoderAbility({ width, height -> width <= maxWidth && height <= maxHeight }, profiles.toSet(), maxWidth, maxHeight)
+
+  @Test
+  fun inv_send_48_aSourceLargerThanEveryDecoderOfTheDeviceIsRefusedWithTheDecoderMaximum() {
+    val decoders = listOf(decoder(2560, 1440, 8), decoder(1920, 1088, 8))
+    val clip = VideoFacts(3840, 2160, 0, 30f, 2_000_000, 2, false, "video/avc", 8)
+
+    assertEquals("the device decodes video/avc up to 2560x1440, the video is 3840x2160", decoderRefusal(clip, decoders))
+    assertEquals(null, decoderRefusal(VideoFacts(1920, 1080, 0, 30f, 2_000_000, 2, false, "video/avc", 8), decoders))
+  }
+
+  @Test
+  fun inv_send_49_aTenBitSourceWithoutADecoderForItsProfileIsRefused() {
+    val tenBit = VideoFacts(1920, 1080, 0, 30f, 2_000_000, 2, false, "video/hevc", 2)
+
+    assertEquals("the device has no video/hevc decoder for profile 2 at 1920x1080", decoderRefusal(tenBit, listOf(decoder(2560, 1440, 1))))
+    assertEquals(null, decoderRefusal(tenBit, listOf(decoder(2560, 1440, 1, 2))))
+  }
+
   @Test
   fun inv_send_06_aClipThatFitsIsHandedBackAndNeverEncoded() = runBlocking {
     val file = source()
