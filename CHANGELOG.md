@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.30.8 - 2026-11-13
 
 ### Fixed
 - The camera preview no longer blocks the main thread while the camera starts or stops.

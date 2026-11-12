@@ -6,6 +6,6 @@ import org.junit.Test
 class BridgeProbeTest {
   @Test
   fun versionComesFromRust() {
-    assertEquals("3.30.7", version())
+    assertEquals("3.30.8", version())
   }
 }

@@ -2,5 +2,5 @@ use super::*;
 
 #[test]
 fn version_comes_from_the_crate() {
-    assert_eq!(version(), "3.30.7");
+    assert_eq!(version(), "3.30.8");
 }
