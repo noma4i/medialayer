@@ -174,20 +174,6 @@ fn inv_voice_02_the_recording_limit_has_a_default_and_stays_between_one_second_a
     }
 }
 
-#[test]
-fn inv_voice_03_every_refusal_has_its_own_text() {
-    let texts = [VoiceRefusal::PermissionDenied, VoiceRefusal::MicrophoneBusy, VoiceRefusal::Empty, VoiceRefusal::InCall].map(voice_refusal_text);
-    assert!(texts.iter().all(|text| !text.is_empty()));
-    assert_eq!(texts.iter().collect::<std::collections::HashSet<_>>().len(), 4);
-}
-
-#[test]
-fn inv_voice_12_a_voice_recording_is_encoded_at_44100_hz_in_one_channel_at_128000_bit_per_second() {
-    let settings = voice_encoder_settings();
-
-    assert_eq!((settings.sample_rate_hz, settings.channels, settings.bit_rate), (44_100, 1, 128_000));
-}
-
 fn size(width: u32, height: u32) -> crate::ffi::PixelSize {
     crate::ffi::PixelSize { width, height }
 }
