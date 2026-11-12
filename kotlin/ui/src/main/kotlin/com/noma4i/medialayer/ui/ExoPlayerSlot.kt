@@ -74,7 +74,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
       when (playbackState) {
         Player.STATE_READY -> { hasBeenReady = true; host.events?.ready(id, generation) }
         Player.STATE_BUFFERING -> if (hasBeenReady) host.events?.stalled(id, generation, currentPosition().toULong())
-        Player.STATE_ENDED -> if (!looping) host.events?.ended(id, generation)
+        Player.STATE_ENDED -> if (!looping) { refresh(); host.events?.ended(id, generation) }
       }
       MediaTrace.emit("player") { "slot=$id state=$playbackState generation=$generation looping=$looping key=${key.orEmpty().takeLast(24)}" }
     }
@@ -313,11 +313,11 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
 
   private fun refresh() {
     val exo = player ?: return
-    anchorMs = exo.currentPosition
+    durationMs = exo.duration.takeIf { it != C.TIME_UNSET }
+    anchorMs = if (exo.playbackState == Player.STATE_ENDED) durationMs ?: exo.currentPosition else exo.currentPosition
     anchorAt = host.clock.elapsedRealtime()
     speed = exo.playbackParameters.speed
     advancing = exo.isPlaying
-    durationMs = exo.duration.takeIf { it != C.TIME_UNSET }
   }
 
   private fun httpStatus(error: PlaybackException): Int =

@@ -101,7 +101,7 @@ internal class PlayerProgress private constructor(private val player: Player) : 
     samples++
     val duration = player.duration
     if (duration != C.TIME_UNSET && duration > 0) {
-      val value = (player.currentPosition.toDouble() / duration).coerceIn(0.0, 1.0)
+      val value = if (player.playbackState == Player.STATE_ENDED) 1.0 else (player.currentPosition.toDouble() / duration).coerceIn(0.0, 1.0)
       if (last != value) {
         last = value
         main.post { consumers.values.forEach { it(value) } }

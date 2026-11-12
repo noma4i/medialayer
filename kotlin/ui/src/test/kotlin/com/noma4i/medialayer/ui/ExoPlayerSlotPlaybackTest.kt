@@ -125,6 +125,24 @@ internal class ExoPlayerSlotPlaybackTest : ExoPlayerSlotRig() {
   }
 
   @Test
+  fun inv_api_48_the_slot_sample_is_the_duration_when_the_clip_ended() {
+    val clock = FakeClock(0)
+    val slot = factory().also { it.clock = clock }.createSlot(3u)
+    slot.load("k", route.copy(looping = false), 7uL); idle()
+    slot.play(); idle()
+    playUntilReady(clock, slot)
+    for (step in 0 until 200) {
+      if (slot.player!!.playbackState == Player.STATE_ENDED) break
+      clock.advanceTime(1000); idle(); Thread.sleep(10)
+    }
+    idle()
+
+    val sample = slot.sample()
+    assertEquals(Player.STATE_ENDED, slot.player!!.playbackState)
+    assertEquals(sample.durationMs, sample.positionMs)
+  }
+
+  @Test
   fun aPausedAndRewoundSlotThatEndedPlaysAgainFromTheStart() {
     val clock = FakeClock(0)
     val slot = factory().also { it.clock = clock }.createSlot(0u)
