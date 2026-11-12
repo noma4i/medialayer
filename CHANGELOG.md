@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.30.5 - 2026-11-12
+
+### Fixed
+- Playback progress reaches 1.0 when a video ends, also when the video track is shorter than the item.
+
 ## 3.30.4 - 2026-11-12
 
 ### Fixed
