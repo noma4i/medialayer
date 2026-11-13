@@ -3,7 +3,7 @@ use super::*;
 const DURATION: u64 = 10_000;
 
 fn report(position_ms: u64, at_ms: u64, rate: f64, playing: bool, jump: bool) -> PlayheadReport {
-    PlayheadReport { position_ms, duration_ms: DURATION, at_ms, rate, playing, jump }
+    PlayheadReport { position_ms, duration_ms: DURATION, at_ms, rate, playing, jump, settling: false }
 }
 
 fn playing_from(position_ms: u64, at_ms: u64, rate: f64) -> Playhead {
@@ -80,4 +80,14 @@ fn inv_playhead_07_a_rate_change_continues_from_the_shown_position_at_the_new_ra
 #[test]
 fn inv_playhead_08_the_position_stops_at_the_end() {
     near(playhead_at(playing_from(9000, 1000, 1.0), 9000), 1.0);
+}
+
+#[test]
+fn inv_playhead_09_a_report_while_a_seek_is_in_flight_keeps_the_position_already_shown() {
+    let shown = playhead_next(Some(playing_from(2000, 1000, 1.0)), report(8000, 1100, 1.0, true, true));
+    let stale = PlayheadReport { settling: true, ..report(2200, 1300, 1.0, true, false) };
+
+    let next = playhead_next(Some(shown), stale);
+
+    near(playhead_at(next, 1300), 0.82);
 }

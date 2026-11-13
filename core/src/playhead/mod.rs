@@ -15,6 +15,8 @@ pub struct PlayheadReport {
     pub rate: f64,
     pub playing: bool,
     pub jump: bool,
+    /// A seek is still in flight: the reported position is not the answer yet.
+    pub settling: bool,
 }
 
 const LAG_MS: f64 = 250.0;
