@@ -64,3 +64,11 @@ fn inv_placeholder_09_a_local_video_shows_no_cover_even_before_its_first_frame()
 
     assert_eq!(placeholder_for(local, false), Placeholder::None);
 }
+
+#[test]
+fn inv_placeholder_11_a_local_video_without_a_cover_shows_its_first_frame_until_it_is_rendered() {
+    let local = || MediaItem { url: "file:///picked/clip.mp4".to_string(), ..source(Kind::Video, None, None) };
+
+    assert_eq!(placeholder_for(local(), false), Placeholder::FirstFrame);
+    assert_eq!(placeholder_for(local(), true), Placeholder::None);
+}
