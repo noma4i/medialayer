@@ -371,7 +371,7 @@ Audio does not depend on the size or position of its view. Progress, seek and th
 
 ## One-shot video
 
-A video loops by default. Pass `loop: false` to play it once. `onFirstFrame` runs when the first frame is on screen, once per load. `onEnd` runs each time a one-shot video reaches its end. A source with a `file://` URL plays from its own path: it is never fetched, cached or prefetched, and it shows no placeholder.
+A video loops by default. Pass `loop: false` to play it once. `onFirstFrame` runs when the first frame is on screen, once per load. `onEnd` runs each time a one-shot video reaches its end. A source with a `file://` URL plays from its own path: it is never fetched, cached or prefetched. A video with a `file://` URL and no cover shows its first frame until the first frame is rendered. A video that names a cover, and an image, show no placeholder.
 
 ### Swift
 

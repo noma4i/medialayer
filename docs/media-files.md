@@ -253,7 +253,7 @@ Android разрешает ExoPlayer выбрать следующий дост�
 
 ## Local files
 
-A source with a `file://` URL, such as a clip in the app bundle or a temporary file, plays from its own path. The core does not fetch it, store it in the cache or prefetch it. It counts as cached, so it plays at once, and it shows no placeholder even when a cover is given. The same applies to the `loop`, `onFirstFrame` and `onEnd` options of the place. An image with a `file://` URL is read from its file by `fetchImage`: it is never copied to the disk cache or prefetched. The read goes through the core on both platforms and stays within the response limit (16 MiB): a larger file fails like any other load. One mounted `MediaVideo` or `MediaImage` with a `file://` URL loads, renders and plays without a declared window.
+A source with a `file://` URL, such as a clip in the app bundle or a temporary file, plays from its own path. The core does not fetch it, store it in the cache or prefetch it. It counts as cached, so it plays at once. A video with a `file://` URL and no cover shows its first frame until the first frame is rendered. A video that names a cover, and an image, show no placeholder. The same applies to the `loop`, `onFirstFrame` and `onEnd` options of the place. An image with a `file://` URL is read from its file by `fetchImage`: it is never copied to the disk cache or prefetched. The read goes through the core on both platforms and stays within the response limit (16 MiB): a larger file fails like any other load. One mounted `MediaVideo` or `MediaImage` with a `file://` URL loads, renders and plays without a declared window.
 
 ## Importing picked media
 
