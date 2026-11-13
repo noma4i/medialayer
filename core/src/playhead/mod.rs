@@ -17,18 +17,29 @@ pub struct PlayheadReport {
     pub jump: bool,
 }
 
+const LAG_MS: f64 = 250.0;
+
 /// The anchor to draw after a reading. Both platforms ask this one rule.
 #[uniffi::export]
 pub fn playhead_next(shown: Option<Playhead>, report: PlayheadReport) -> Playhead {
-    let _ = (shown, report);
-    unimplemented!("playhead_next")
+    let known = report.duration_ms > 0;
+    let duration = report.duration_ms as f64;
+    let fraction = if known { (report.position_ms as f64 / duration).clamp(0.0, 1.0) } else { 0.0 };
+    let per_ms = if report.playing && known { report.rate / duration } else { 0.0 };
+    let taken = Playhead { fraction, at_ms: report.at_ms, per_ms };
+    let Some(shown) = shown.filter(|_| !report.jump && known) else { return taken };
+    let shown_now = playhead_at(shown, report.at_ms);
+    if fraction >= shown_now || (shown_now - fraction) * duration > LAG_MS {
+        return taken;
+    }
+    Playhead { fraction: shown_now, ..taken }
 }
 
 /// The fraction to draw at the monotonic millisecond `now_ms`, between 0 and 1.
 #[uniffi::export]
 pub fn playhead_at(playhead: Playhead, now_ms: u64) -> f64 {
-    let _ = (playhead, now_ms);
-    unimplemented!("playhead_at")
+    let elapsed = now_ms.saturating_sub(playhead.at_ms) as f64;
+    (playhead.fraction + elapsed * playhead.per_ms).clamp(0.0, 1.0)
 }
 
 #[cfg(test)]
