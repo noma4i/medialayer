@@ -6,9 +6,15 @@ import android.provider.OpenableColumns
 import com.noma4i.medialayer.MediaException
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.importExtension
+import android.os.ParcelFileDescriptor
 import java.io.File
+import java.io.FileInputStream
+import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.channels.Channels
 import java.io.OutputStream
 import java.util.UUID
+import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
@@ -35,16 +41,26 @@ internal suspend fun importMediaAt(context: Context, uri: Uri, openOutput: (File
         val suffix = if (extension.isEmpty()) "" else ".$extension"
         val file = File(context.cacheDir, "imported-${UUID.randomUUID()}$suffix")
         output = file
-        val input = resolver.openInputStream(uri) ?: throw MediaException.Fetch("the source cannot be opened")
-        input.use { source ->
-          openOutput(file).use { destination ->
-            val buffer = ByteArray(64 * 1024)
-            while (true) {
-              copying.ensureActive()
-              val count = source.read(buffer)
-              copying.ensureActive()
-              if (count < 0) break
-              destination.write(buffer, 0, count)
+        val descriptor = try {
+          resolver.openFileDescriptor(uri, "r")
+        } catch (_: IOException) {
+          null
+        }
+        if (descriptor != null && descriptor.statSize >= 0) {
+          descriptor.use { copyByChannel(it, openOutput(file), copying) }
+        } else {
+          descriptor?.close()
+          val input = resolver.openInputStream(uri) ?: throw MediaException.Fetch("the source cannot be opened")
+          input.use { source ->
+            openOutput(file).use { destination ->
+              val buffer = ByteArray(64 * 1024)
+              while (true) {
+                copying.ensureActive()
+                val count = source.read(buffer)
+                copying.ensureActive()
+                if (count < 0) break
+                destination.write(buffer, 0, count)
+              }
             }
           }
         }
@@ -56,5 +72,31 @@ internal suspend fun importMediaAt(context: Context, uri: Uri, openOutput: (File
     withContext(NonCancellable + prepareDispatcher) { output?.delete() }
     if (error is CancellationException || error is MediaException) throw error
     throw MediaException.Fetch("the source cannot be imported: ${error.message}")
+  }
+}
+
+private const val CHANNEL_CHUNK = 1L shl 20
+
+private fun copyByChannel(descriptor: ParcelFileDescriptor, destination: OutputStream, copying: CoroutineContext) {
+  FileInputStream(descriptor.fileDescriptor).channel.use { source ->
+    destination.use { stream ->
+      val target = Channels.newChannel(stream)
+      val buffer = ByteBuffer.allocate(64 * 1024)
+      var position = 0L
+      while (true) {
+        copying.ensureActive()
+        val moved = source.transferTo(position, CHANNEL_CHUNK, target)
+        if (moved > 0) {
+          position += moved
+          continue
+        }
+        buffer.clear()
+        val count = source.read(buffer, position)
+        if (count < 0) break
+        buffer.flip()
+        target.write(buffer)
+        position += count
+      }
+    }
   }
 }
