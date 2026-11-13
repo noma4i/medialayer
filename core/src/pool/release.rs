@@ -48,16 +48,17 @@ impl Ring {
             .or_else(|| self.bindings.iter().position(|binding| binding.as_ref().is_some_and(|binding| binding.page == Some(self.active))));
         let mut out = vec![Directive::StopPrefetch];
         let mut saved = Vec::new();
-        for slot in (0..self.slots).filter(|slot| Some(*slot) != selected) {
+        for slot in 0..self.slots {
             let Some(binding) = self.take_binding(slot, ReleaseReason::Background) else {
                 continue;
             };
-            let distance = binding.page.map_or(usize::MAX, |page| page.abs_diff(self.active));
+            let distance = if Some(slot) == selected { 0 } else { binding.page.map_or(usize::MAX, |page| page.abs_diff(self.active)) };
             saved.push((distance, Saved { key: binding.key, owner: binding.owner, page: binding.page }));
             out.push(Directive::Slot(Command::Unload { slot }));
         }
         saved.sort_by_key(|(distance, _)| *distance);
         self.restore = saved.into_iter().map(|(_, saved)| saved).collect();
+        out.push(Directive::DropMemoryCache);
         out
     }
 
