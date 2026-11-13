@@ -19,7 +19,7 @@ pub struct PlayheadReport {
     pub settling: bool,
 }
 
-const LAG_MS: f64 = 250.0;
+const LAG_MS: f64 = 1000.0;
 
 /// The anchor to draw after a reading. Both platforms ask this one rule.
 #[uniffi::export]
@@ -31,6 +31,9 @@ pub fn playhead_next(shown: Option<PlayheadAnchor>, report: PlayheadReport) -> P
     let taken = PlayheadAnchor { fraction, at_ms: report.at_ms, per_ms };
     if let Some(shown) = shown.filter(|_| report.settling) {
         return shown;
+    }
+    if let Some(shown) = shown.filter(|_| !known) {
+        return PlayheadAnchor { fraction: playhead_at(shown, report.at_ms), at_ms: report.at_ms, per_ms: 0.0 };
     }
     let Some(shown) = shown.filter(|_| !report.jump && known) else { return taken };
     let shown_now = playhead_at(shown, report.at_ms);
