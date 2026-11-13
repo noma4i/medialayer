@@ -71,7 +71,7 @@ public final class AudioPlayback {
     let clamped = min(max(fraction, 0), 1)
     refresh(progress: clamped)
     jumpPending = true
-    playhead = AudioPlayhead(anchor: Playhead(fraction: clamped, atMs: AudioPlayhead.milliseconds(Date()), perMs: playhead.anchor.perMs))
+    playhead = AudioPlayhead(anchor: PlayheadAnchor(fraction: clamped, atMs: AudioPlayhead.milliseconds(Date()), perMs: playhead.anchor.perMs))
     mount?.seek(clamped)
   }
 
@@ -127,9 +127,9 @@ public final class AudioPlayback {
 }
 
 public struct AudioPlayhead: Sendable {
-  public let anchor: Playhead
+  public let anchor: PlayheadAnchor
 
-  public init(anchor: Playhead = Playhead(fraction: 0, atMs: 0, perMs: 0)) {
+  public init(anchor: PlayheadAnchor = PlayheadAnchor(fraction: 0, atMs: 0, perMs: 0)) {
     self.anchor = anchor
   }
 

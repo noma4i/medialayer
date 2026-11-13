@@ -15,13 +15,13 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
-import com.noma4i.medialayer.Playhead
+import com.noma4i.medialayer.PlayheadAnchor
 import com.noma4i.medialayer.PlayheadReport
 import com.noma4i.medialayer.playheadNext
 import kotlinx.coroutines.flow.flowOf
 
 @Stable
-class AudioPlayhead internal constructor(val anchor: Playhead = Playhead(0.0, 0uL, 0.0)) {
+class AudioPlayhead internal constructor(val anchor: PlayheadAnchor = PlayheadAnchor(0.0, 0uL, 0.0)) {
   // same arithmetic as playhead_at in the core
   fun progress(atNanos: Long): Float {
     val now = atNanos / 1_000_000
@@ -85,7 +85,7 @@ class AudioControl internal constructor(playing: Boolean, private val seekTo: (D
     val clamped = fraction.coerceIn(0f, 1f)
     progress = clamped
     jumpPending = true
-    playhead = AudioPlayhead(Playhead(clamped.toDouble(), (System.nanoTime() / 1_000_000).toULong(), playhead.anchor.perMs))
+    playhead = AudioPlayhead(PlayheadAnchor(clamped.toDouble(), (System.nanoTime() / 1_000_000).toULong(), playhead.anchor.perMs))
     seekTo(clamped.toDouble())
   }
 
