@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import MediaLayer
 
 @MainActor
 final class PlaybackProgress {
@@ -8,6 +9,7 @@ final class PlaybackProgress {
     var player: AVPlayer?
     var observer: Any?
     var consumers: [UUID: AsyncStream<Double>.Continuation] = [:]
+    var reporters: [UUID: AsyncStream<PlayheadReport>.Continuation] = [:]
     var last: Double?
 
     func stopObservingTime() {
@@ -50,6 +52,19 @@ final class PlaybackProgress {
     return pair.stream
   }
 
+  func reports(for key: String) -> AsyncStream<PlayheadReport> {
+    let id = UUID()
+    let pair = AsyncStream<PlayheadReport>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    let demand = demands[key] ?? Demand()
+    demands[key] = demand
+    demand.reporters[id] = pair.continuation
+    pair.continuation.onTermination = { [weak self] _ in
+      Task { @MainActor in self?.remove(id, key: key) }
+    }
+    changed(key)
+    return pair.stream
+  }
+
   func changed(_ key: String) {
     guard let demand = demands[key] else { return }
     let slot = slots.slot(for: key)
@@ -73,6 +88,17 @@ final class PlaybackProgress {
     guard let demand = demands[key], let slot = demand.slot else { return }
     samples += 1
     let sample = slot.sample()
+    if !demand.reporters.isEmpty {
+      let report = PlayheadReport(
+        positionMs: sample.positionMs,
+        durationMs: sample.durationMs ?? 0,
+        atMs: UInt64(Date().timeIntervalSince1970 * 1000),
+        rate: Double(slot.player.rate),
+        playing: slot.player.timeControlStatus == .playing,
+        jump: false
+      )
+      for reporter in demand.reporters.values { reporter.yield(report) }
+    }
     guard let value = VideoProgress.fraction(positionMs: sample.positionMs, durationMs: sample.durationMs), demand.last != value else { return }
     demand.last = value
     for consumer in demand.consumers.values { consumer.yield(value) }
@@ -81,7 +107,8 @@ final class PlaybackProgress {
   private func remove(_ id: UUID, key: String) {
     guard let demand = demands[key] else { return }
     demand.consumers[id] = nil
-    if demand.consumers.isEmpty {
+    demand.reporters[id] = nil
+    if demand.consumers.isEmpty && demand.reporters.isEmpty {
       demand.stop()
       demands[key] = nil
     }

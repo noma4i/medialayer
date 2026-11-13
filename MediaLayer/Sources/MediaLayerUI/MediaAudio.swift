@@ -7,6 +7,8 @@ import SwiftUI
 public final class AudioPlayback {
   public private(set) var isPlaying: Bool
   public private(set) var progress = 0.0
+  public private(set) var playhead = AudioPlayhead()
+  @ObservationIgnored private var jumpPending = false
   public private(set) var rate: Float
   public private(set) var state: MediaState = .idle
   @ObservationIgnored private let item: MediaItem
@@ -68,7 +70,20 @@ public final class AudioPlayback {
     guard fraction.isFinite else { return }
     let clamped = min(max(fraction, 0), 1)
     refresh(progress: clamped)
+    jumpPending = true
+    playhead = AudioPlayhead(anchor: Playhead(fraction: clamped, atMs: AudioPlayhead.milliseconds(Date()), perMs: playhead.anchor.perMs))
     mount?.seek(clamped)
+  }
+
+  func refresh(report: PlayheadReport) {
+    var report = report
+    if jumpPending {
+      report.jump = true
+      jumpPending = false
+    }
+    let known = report.durationMs > 0
+    refresh(progress: known ? min(max(Double(report.positionMs) / Double(report.durationMs), 0), 1) : 0)
+    playhead = AudioPlayhead(anchor: playheadNext(shown: playhead.anchor, report: report))
   }
 
   func refresh(progress value: Double) {
@@ -97,6 +112,8 @@ public final class AudioPlayback {
     if isPlaying { setPlaying(false) }
     guard isNewEnd else { return false }
     refresh(progress: 0)
+    jumpPending = true
+    playhead = AudioPlayhead()
     mount?.seek(0)
     return true
   }
@@ -104,6 +121,38 @@ public final class AudioPlayback {
   private func setPlaying(_ value: Bool) {
     isPlaying = value
     push()
+  }
+}
+
+public struct AudioPlayhead: Sendable {
+  public let anchor: Playhead
+
+  public init(anchor: Playhead = Playhead(fraction: 0, atMs: 0, perMs: 0)) {
+    self.anchor = anchor
+  }
+
+  public func progress(at date: Date = Date()) -> Double {
+    playheadAt(playhead: anchor, nowMs: Self.milliseconds(date))
+  }
+
+  static func milliseconds(_ date: Date) -> UInt64 {
+    UInt64(max(0, date.timeIntervalSince1970) * 1000)
+  }
+}
+
+public struct MediaAudioProgress<Content: View>: View {
+  private let audio: AudioPlayback
+  private let content: (Double) -> Content
+
+  public init(_ audio: AudioPlayback, @ViewBuilder content: @escaping (Double) -> Content) {
+    self.audio = audio
+    self.content = content
+  }
+
+  public var body: some View {
+    TimelineView(.animation(paused: !audio.isSounding)) { context in
+      content(audio.playhead.progress(at: context.date))
+    }
   }
 }
 
@@ -182,6 +231,12 @@ public struct MediaAudio<Content: View>: View {
           let key = await SourceKey.of(source.item)
           guard !Task.isCancelled else { return }
           for await value in context.slots.progress.stream(for: key) { audio.refresh(progress: value) }
+        }
+        .task(id: Sampling(url: source.url, active: !inBackground)) {
+          guard !inBackground else { return }
+          let key = await SourceKey.of(source.item)
+          guard !Task.isCancelled else { return }
+          for await report in context.slots.progress.reports(for: key) { audio.refresh(report: report) }
         }
         .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.background)) { _ in inBackground = true }
         .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
