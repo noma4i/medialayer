@@ -48,4 +48,17 @@ struct AudioPlayheadTests {
     #expect(abs(sought - 0.8) < 0.01)
     #expect(abs(audio.playhead.progress() - 0.8) < 0.01)
   }
+
+  @MainActor
+  @Test
+  func inv_playhead_12_aReportWithAnUnknownDurationKeepsTheProgressAndTheShownPosition() {
+    let audio = note()
+    audio.refresh(report: report(2000, at: 0))
+
+    audio.refresh(report: PlayheadReport(positionMs: 0, durationMs: 0, atMs: origin + 250, rate: 1, playing: false, jump: false, settling: false))
+
+    #expect(abs(audio.progress - 0.2) < 1e-6)
+    #expect(abs(audio.playhead.progress(at: at(250)) - 0.225) < 1e-6)
+    #expect(abs(audio.playhead.progress(at: at(5000)) - 0.225) < 1e-6)
+  }
 }

@@ -21,10 +21,10 @@ fn inv_playhead_01_a_playing_report_anchors_a_position_that_advances_by_the_play
 }
 
 #[test]
-fn inv_playhead_02_a_report_slightly_behind_the_shown_position_does_not_step_back() {
+fn inv_playhead_02_a_report_behind_the_shown_position_by_up_to_a_second_does_not_step_back() {
     let shown = playing_from(2000, 1000, 1.0);
 
-    let next = playhead_next(Some(shown), report(2100, 1250, 1.0, true, false));
+    let next = playhead_next(Some(shown), report(1910, 1250, 1.0, true, false));
 
     near(playhead_at(next, 1250), 0.225);
     near(playhead_at(next, 1750), 0.275);
@@ -34,9 +34,9 @@ fn inv_playhead_02_a_report_slightly_behind_the_shown_position_does_not_step_bac
 fn inv_playhead_03_a_report_far_behind_the_shown_position_snaps_to_the_player() {
     let shown = playing_from(2000, 1000, 1.0);
 
-    let next = playhead_next(Some(shown), report(1900, 1250, 1.0, true, false));
+    let next = playhead_next(Some(shown), report(250, 1250, 1.0, true, false));
 
-    near(playhead_at(next, 1250), 0.19);
+    near(playhead_at(next, 1250), 0.025);
 }
 
 #[test]
@@ -90,4 +90,26 @@ fn inv_playhead_09_a_report_while_a_seek_is_in_flight_keeps_the_position_already
     let next = playhead_next(Some(shown), stale);
 
     near(playhead_at(next, 1300), 0.82);
+}
+
+#[test]
+fn inv_playhead_10_a_report_with_an_unknown_duration_freezes_the_shown_position_instead_of_resetting_it() {
+    let shown = playing_from(2000, 1000, 1.0);
+    let unknown = PlayheadReport { duration_ms: 0, position_ms: 0, ..report(0, 1250, 1.0, false, false) };
+
+    let next = playhead_next(Some(shown), unknown);
+
+    near(playhead_at(next, 1250), 0.225);
+    near(playhead_at(next, 5000), 0.225);
+}
+
+#[test]
+fn inv_playhead_11_a_resume_after_a_long_pause_continues_from_the_frozen_position() {
+    let shown = playing_from(2000, 1000, 1.0);
+    let paused = playhead_next(Some(shown), report(2250, 1250, 1.0, false, false));
+
+    let resumed = playhead_next(Some(paused), report(2250, 6000, 1.0, true, false));
+
+    near(playhead_at(paused, 6000), 0.225);
+    near(playhead_at(resumed, 6500), 0.275);
 }

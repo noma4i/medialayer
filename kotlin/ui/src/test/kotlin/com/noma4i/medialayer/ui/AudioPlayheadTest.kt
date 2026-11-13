@@ -49,6 +49,18 @@ class AudioPlayheadTest {
   }
 
   @Test
+  fun inv_playhead_13_a_report_with_an_unknown_duration_keeps_the_progress_and_the_shown_position() {
+    val control = AudioControl(true) { }
+    control.report(report(2000, 0))
+
+    control.report(PlayheadReport(0uL, 0uL, 250uL, 1.0, false, false, false))
+
+    assertEquals(0.2f, control.progress, 1e-6f)
+    assertEquals(0.225f, control.playhead.progress(nanos(250)), 1e-6f)
+    assertEquals(0.225f, control.playhead.progress(nanos(5000)), 1e-6f)
+  }
+
+  @Test
   fun inv_playhead_12_frames_run_only_while_the_audio_sounds() {
     val control = AudioControl(true) { }
     control.state = MediaState.Ready
