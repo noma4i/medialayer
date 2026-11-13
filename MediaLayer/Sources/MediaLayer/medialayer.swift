@@ -9062,6 +9062,150 @@ public func FfiConverterTypePlaybackRoute_lower(_ value: PlaybackRoute) -> RustB
 }
 
 
+/**
+ * A playing position anchored in time: the fraction `fraction` at the monotonic millisecond `at_ms`, advancing by `per_ms` fractions each millisecond (0 when the audio does not advance).
+ */
+public struct PlayheadAnchor: Equatable, Hashable {
+    public var fraction: Double
+    public var atMs: UInt64
+    public var perMs: Double
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(fraction: Double, atMs: UInt64, perMs: Double) {
+        self.fraction = fraction
+        self.atMs = atMs
+        self.perMs = perMs
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension PlayheadAnchor: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePlayheadAnchor: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PlayheadAnchor {
+        return
+            try PlayheadAnchor(
+                fraction: FfiConverterDouble.read(from: &buf), 
+                atMs: FfiConverterUInt64.read(from: &buf), 
+                perMs: FfiConverterDouble.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PlayheadAnchor, into buf: inout [UInt8]) {
+        FfiConverterDouble.write(value.fraction, into: &buf)
+        FfiConverterUInt64.write(value.atMs, into: &buf)
+        FfiConverterDouble.write(value.perMs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePlayheadAnchor_lift(_ buf: RustBuffer) throws -> PlayheadAnchor {
+    return try FfiConverterTypePlayheadAnchor.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePlayheadAnchor_lower(_ value: PlayheadAnchor) -> RustBuffer {
+    return FfiConverterTypePlayheadAnchor.lower(value)
+}
+
+
+/**
+ * One reading of the player: position, duration (0 when unknown), the monotonic millisecond of the reading, the player rate, whether it advances, and whether the position jumped on purpose (seek, new source, rewind at the end).
+ */
+public struct PlayheadReport: Equatable, Hashable {
+    public var positionMs: UInt64
+    public var durationMs: UInt64
+    public var atMs: UInt64
+    public var rate: Double
+    public var playing: Bool
+    public var jump: Bool
+    /**
+     * A seek is still in flight: the reported position is not the answer yet.
+     */
+    public var settling: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(positionMs: UInt64, durationMs: UInt64, atMs: UInt64, rate: Double, playing: Bool, jump: Bool, 
+        /**
+         * A seek is still in flight: the reported position is not the answer yet.
+         */settling: Bool) {
+        self.positionMs = positionMs
+        self.durationMs = durationMs
+        self.atMs = atMs
+        self.rate = rate
+        self.playing = playing
+        self.jump = jump
+        self.settling = settling
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension PlayheadReport: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePlayheadReport: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PlayheadReport {
+        return
+            try PlayheadReport(
+                positionMs: FfiConverterUInt64.read(from: &buf), 
+                durationMs: FfiConverterUInt64.read(from: &buf), 
+                atMs: FfiConverterUInt64.read(from: &buf), 
+                rate: FfiConverterDouble.read(from: &buf), 
+                playing: FfiConverterBool.read(from: &buf), 
+                jump: FfiConverterBool.read(from: &buf), 
+                settling: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PlayheadReport, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.positionMs, into: &buf)
+        FfiConverterUInt64.write(value.durationMs, into: &buf)
+        FfiConverterUInt64.write(value.atMs, into: &buf)
+        FfiConverterDouble.write(value.rate, into: &buf)
+        FfiConverterBool.write(value.playing, into: &buf)
+        FfiConverterBool.write(value.jump, into: &buf)
+        FfiConverterBool.write(value.settling, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePlayheadReport_lift(_ buf: RustBuffer) throws -> PlayheadReport {
+    return try FfiConverterTypePlayheadReport.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePlayheadReport_lower(_ value: PlayheadReport) -> RustBuffer {
+    return FfiConverterTypePlayheadReport.lower(value)
+}
+
+
 public struct PoolSettings: Equatable, Hashable {
     public var reach: UInt32
     public var holdOffMs: UInt64
@@ -13074,6 +13218,30 @@ fileprivate struct FfiConverterOptionTypePixelSize: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypePlayheadAnchor: FfiConverterRustBuffer {
+    typealias SwiftType = PlayheadAnchor?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypePlayheadAnchor.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypePlayheadAnchor.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeTonePixels: FfiConverterRustBuffer {
     typealias SwiftType = TonePixels?
 
@@ -14435,6 +14603,30 @@ public func loadImage(request: ImageLoadRequest, fetcher: Fetcher)throws  -> Ima
 })
 }
 /**
+ * The fraction to draw at the monotonic millisecond `now_ms`, between 0 and 1.
+ */
+public func playheadAt(playhead: PlayheadAnchor, nowMs: UInt64) -> Double  {
+    return try!  FfiConverterDouble.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_func_playhead_at(
+        FfiConverterTypePlayheadAnchor_lower(playhead),
+        FfiConverterUInt64.lower(nowMs),uniffiCallStatus
+    )
+})
+}
+/**
+ * The anchor to draw after a reading. Both platforms ask this one rule.
+ */
+public func playheadNext(shown: PlayheadAnchor?, report: PlayheadReport) -> PlayheadAnchor  {
+    return try!  FfiConverterTypePlayheadAnchor_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_func_playhead_next(
+        FfiConverterOptionTypePlayheadAnchor.lower(shown),
+        FfiConverterTypePlayheadReport_lower(report),uniffiCallStatus
+    )
+})
+}
+/**
  * The one plan of a picture decode. The long side is cut to `max_side` (absent or 0 keeps the size), a picture is never enlarged.
  * The cost is one raster, two when the picture is turned. A size that is zero or above the pixel limit has no plan.
  */
@@ -14769,6 +14961,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_load_image() != 19276) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_medialayer_checksum_func_playhead_at() != 59413) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_medialayer_checksum_func_playhead_next() != 46949) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_image_decode_plan() != 22732) {
