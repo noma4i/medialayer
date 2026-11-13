@@ -359,6 +359,19 @@ MediaAudio(VoiceNote(url = message.audioUrl)) { audio ->
 
 While an audio plays, its progress updates 4 times per second. A paused audio updates for 1 second after it appears or after a seek, then stops, so a chat full of voice notes does not wake up every 250 milliseconds.
 
+A playhead dot that moves smoothly reads the position at the display frame rate instead of `progress`. The library adds no timer and no wake-up: it keeps a time anchor from the reports above, and the view draws between two reports. Kotlin reads the `State` in the draw phase, so no recomposition runs per frame. A paused, ended, buffering, not-sounding or backgrounded audio draws no frame. A seek, a new source and the rewind at the end take the reported position at once. `progress` and its rate stay as they are.
+
+```swift
+MediaAudioProgress(audio) { fraction in
+  Capsule().frame(width: 200 * fraction, height: 4)
+}
+```
+
+```kotlin
+val fraction = rememberPlayheadProgress(audio)
+Box(Modifier.drawBehind { drawRect(Color.Black, size = Size(size.width * fraction.value, 4f)) })
+```
+
 `onEnd` runs each time the audio reaches its end, once per end. At the end the library rewinds the audio to the start and pauses it: `isPlaying` is false and `progress` is 0. A new `play` starts from the beginning. The app does not rewind or pause the audio itself.
 
 `isSounding` is true while the audio plays and the player is ready or rendered. `isBuffering` is true while the audio is set to play and the player is idle or loading. `MediaState.isFailed` (Swift and Kotlin) is true for the failed state. The app does not write these checks.
