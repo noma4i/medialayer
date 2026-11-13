@@ -4,6 +4,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -13,11 +15,21 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
+import com.noma4i.medialayer.Playhead
+import com.noma4i.medialayer.PlayheadReport
+import com.noma4i.medialayer.playheadAt
+import com.noma4i.medialayer.playheadNext
 import kotlinx.coroutines.flow.flowOf
+
+@Stable
+class AudioPlayhead internal constructor(val anchor: Playhead = Playhead(0.0, 0uL, 0.0)) {
+  fun progress(atNanos: Long): Float = playheadAt(anchor, (atNanos / 1_000_000).toULong()).toFloat()
+}
 
 @Stable
 class AudioControl internal constructor(playing: Boolean, private val seekTo: (Double) -> Unit) {
   private var declared = playing
+  private var jumpPending = false
 
   var rate: Float by mutableFloatStateOf(1f)
 
@@ -27,6 +39,8 @@ class AudioControl internal constructor(playing: Boolean, private val seekTo: (D
     private set
   var progress: Float by mutableFloatStateOf(0f)
     internal set
+  var playhead: AudioPlayhead by mutableStateOf(AudioPlayhead())
+    private set
 
   fun play() { isPlaying = true }
 
@@ -41,7 +55,17 @@ class AudioControl internal constructor(playing: Boolean, private val seekTo: (D
   internal fun ended() {
     isPlaying = false
     progress = 0f
+    jumpPending = true
+    playhead = AudioPlayhead()
     seekTo(0.0)
+  }
+
+  internal fun report(report: PlayheadReport) {
+    val next = if (jumpPending) report.copy(jump = true) else report
+    jumpPending = false
+    val value = if (report.durationMs > 0uL) (report.positionMs.toDouble() / report.durationMs.toDouble()).coerceIn(0.0, 1.0).toFloat() else 0f
+    if (progress != value) progress = value
+    playhead = AudioPlayhead(playheadNext(playhead.anchor, next))
   }
 
   internal fun follow(playing: Boolean) {
@@ -54,9 +78,26 @@ class AudioControl internal constructor(playing: Boolean, private val seekTo: (D
     if (!fraction.isFinite()) return
     val clamped = fraction.coerceIn(0f, 1f)
     progress = clamped
+    jumpPending = true
+    playhead = AudioPlayhead(Playhead(clamped.toDouble(), (System.nanoTime() / 1_000_000).toULong(), playhead.anchor.perMs))
     seekTo(clamped.toDouble())
   }
 
+}
+
+@Composable
+fun rememberPlayheadProgress(audio: AudioControl): State<Float> {
+  val frame = remember(audio) { mutableFloatStateOf(0f) }
+  val sounding = audio.isSounding
+  val idleAnchor = if (sounding) null else audio.playhead
+  LaunchedEffect(audio, sounding, idleAnchor) {
+    if (sounding) {
+      while (true) withFrameNanos { frame.floatValue = audio.playhead.progress(it) }
+    } else {
+      frame.floatValue = audio.playhead.progress(System.nanoTime())
+    }
+  }
+  return frame
 }
 
 @Composable
@@ -84,7 +125,7 @@ fun MediaAudio(source: MediaSource, playing: Boolean = false, muted: Boolean = f
   DisposableEffect(player, screen.started, control) {
     val exo = player
     if (!screen.started || exo == null) return@DisposableEffect onDispose { }
-    val release = PlayerProgress.subscribe(exo) {
+    val release = PlayerProgress.subscribe(exo, reports = control::report) {
       val value = it.toFloat()
       if (control.progress != value) control.progress = value
     }

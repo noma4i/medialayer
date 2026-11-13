@@ -47,6 +47,7 @@ import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.Placeholder
+import com.noma4i.medialayer.PlayheadReport
 import com.noma4i.medialayer.isRendered
 import com.noma4i.medialayer.MediaItem
 import com.noma4i.medialayer.MediaLayer
@@ -95,8 +96,14 @@ internal class PlayerProgress private constructor(private val player: Player) : 
   private val main = Handler(Looper.getMainLooper())
   private val sampler = Handler(player.applicationLooper)
   private val consumers = ConcurrentHashMap<Any, (Double) -> Unit>()
+  private val reporters = ConcurrentHashMap<Any, (PlayheadReport) -> Unit>()
+  @Volatile private var discontinuity = false
   @Volatile private var last: Double? = null
   @Volatile private var samples = 0
+
+  override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+    if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) discontinuity = true
+  }
 
   override fun onEvents(player: Player, events: Player.Events) = run()
 
@@ -105,6 +112,20 @@ internal class PlayerProgress private constructor(private val player: Player) : 
     if (consumers.isEmpty()) return
     samples++
     val duration = player.duration
+    if (reporters.isNotEmpty()) {
+      val known = duration != C.TIME_UNSET && duration > 0
+      val ended = player.playbackState == Player.STATE_ENDED
+      val report = PlayheadReport(
+        positionMs = if (known) (if (ended) duration else player.currentPosition.coerceIn(0L, duration)).toULong() else 0uL,
+        durationMs = if (known) duration.toULong() else 0uL,
+        atMs = (System.nanoTime() / 1_000_000).toULong(),
+        rate = player.playbackParameters.speed.toDouble(),
+        playing = player.isPlaying,
+        jump = discontinuity
+      )
+      discontinuity = false
+      main.post { reporters.values.forEach { it(report) } }
+    }
     if (duration != C.TIME_UNSET && duration > 0) {
       val value = if (player.playbackState == Player.STATE_ENDED) 1.0 else (player.currentPosition.toDouble() / duration).coerceIn(0.0, 1.0)
       if (last != value) {
@@ -120,14 +141,16 @@ internal class PlayerProgress private constructor(private val player: Player) : 
     internal val producerCount: Int get() = active.size
     internal val sampleCount: Int get() = active.values.sumOf { it.samples }
 
-    fun subscribe(player: Player, report: (Double) -> Unit): () -> Unit {
+    fun subscribe(player: Player, reports: ((PlayheadReport) -> Unit)? = null, report: (Double) -> Unit): () -> Unit {
       val demand = active.getOrPut(player) { PlayerProgress(player).also(player::addListener) }
       val token = Any()
       demand.consumers[token] = report
+      reports?.let { demand.reporters[token] = it }
       demand.last?.let(report)
       demand.sampler.post(demand)
       return {
         demand.consumers.remove(token)
+        demand.reporters.remove(token)
         if (demand.consumers.isEmpty()) {
           demand.sampler.removeCallbacks(demand)
           player.removeListener(demand)
