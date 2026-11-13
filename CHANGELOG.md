@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.33.0 - 2026-11-14
+
+### Added
+- Audio exposes a playhead that the view draws at the display frame rate.
+
 ## 3.32.0 - 2026-11-13
 
 ### Added
