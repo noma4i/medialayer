@@ -1,15 +1,18 @@
+import AVFoundation
 import MediaLayer
 import SwiftUI
 
 enum PlaceholderContent {
   case blur(CGImage)
   case cover(PlatformImage)
+  case firstFrame(CGImage)
   case none
 
   var label: String {
     switch self {
     case .blur: "blur"
     case .cover: "cover"
+    case .firstFrame: "firstframe"
     case .none: "none"
     }
   }
@@ -21,6 +24,7 @@ struct PlaceholderView: View {
   var enabled = true
   let context: MediaContext
   var decode: @Sendable (String) -> CGImage? = { PlaceholderPixels.blurHash($0)?.cgImage }
+  var still: @Sendable (URL, CGSize, CGFloat) async -> CGImage? = { await PlaceholderStill.frame(of: $0, points: $1, scale: $2) }
   var published: @MainActor (PlaceholderContent) -> Void = { _ in }
   @State private var current: Current?
   @Environment(\.displayScale) private var displayScale
@@ -33,6 +37,7 @@ struct PlaceholderView: View {
           switch current.content {
           case .blur(let image): Image(decorative: image, scale: 1).resizable().scaledToFill()
           case .cover(let image): Image(platform: image).resizable().scaledToFill()
+          case .firstFrame(let image): Image(decorative: image, scale: 1).resizable().scaledToFill()
           case .none: EmptyView()
           }
         }
@@ -61,7 +66,12 @@ struct PlaceholderView: View {
       let image = await Self.loadCover(url, for: item, context: context, points: points, scale: scale)
       guard !Task.isCancelled else { return nil }
       return image.map { .cover($0) } ?? PlaceholderContent.none
-    case .firstFrame, .none:
+    case .firstFrame:
+      guard let url = URL(string: item.url), url.isFileURL else { return PlaceholderContent.none }
+      let image = await still(url, points, scale)
+      guard !Task.isCancelled else { return nil }
+      return image.map { .firstFrame($0) } ?? PlaceholderContent.none
+    case .none:
       return PlaceholderContent.none
     }
   }
@@ -116,4 +126,17 @@ private struct CoverSource: MediaSource {
   let url: String
   let headers: [String: String]
   var kind: Kind { .image }
+}
+
+enum PlaceholderStill {
+  @concurrent
+  static func frame(of url: URL, points: CGSize, scale: CGFloat) async -> CGImage? {
+    guard !Task.isCancelled, points.width > 0, points.height > 0 else { return nil }
+    let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+    generator.appliesPreferredTrackTransform = true
+    generator.maximumSize = CGSize(width: points.width * scale, height: points.height * scale)
+    return await withTaskCancellationHandler {
+      try? await generator.image(at: .zero).image
+    } onCancel: { generator.cancelAllCGImageGeneration() }
+  }
 }
