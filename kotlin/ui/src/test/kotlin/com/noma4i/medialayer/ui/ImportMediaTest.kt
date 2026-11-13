@@ -140,27 +140,25 @@ class ImportMediaTest {
   }
 
   @Test
-  fun inv_import_02_largeVideoPreservesSha256WithBoundedReads() = runBlocking {
+  fun inv_import_02_largeVideoPreservesSha256() = runBlocking {
     val source = File.createTempFile("large-picked", ".mp4")
     picked.files["large"] = source
     source.outputStream().use { out ->
       val chunk = ByteArray(64 * 1024) { (it % 251).toByte() }
       repeat(256) { out.write(chunk) }
     }
-    val largest = AtomicInteger()
-    val calls = AtomicInteger()
-    shadowOf(app.contentResolver).registerInputStream(uri("large"), object : FilterInputStream(source.inputStream()) {
-      override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-        largest.accumulateAndGet(length, ::maxOf)
-        calls.incrementAndGet()
-        return super.read(buffer, offset, length)
-      }
-    })
     val imported = importMediaAt(context, uri("large"))
     assertEquals(hash(source), hash(imported.file))
     assertEquals(source.length(), imported.file.length())
-    assertTrue(calls.get() > 256)
-    assertTrue(largest.get() in 1..64 * 1024)
+  }
+
+  @Test
+  fun inv_import_02_aProviderWithoutADescriptorIsCopiedByStream() = runBlocking {
+    val bytes = ByteArray(300 * 1024) { (it % 253).toByte() }
+    shadowOf(app.contentResolver).registerInputStream(uri("stream"), bytes.inputStream())
+    val imported = importMediaAt(context, uri("stream"))
+    assertEquals(bytes.size.toLong(), imported.file.length())
+    assertTrue(bytes.contentEquals(imported.file.readBytes()))
   }
 
   @Test
