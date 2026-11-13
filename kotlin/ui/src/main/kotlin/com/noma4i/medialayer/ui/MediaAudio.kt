@@ -17,13 +17,17 @@ import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.Playhead
 import com.noma4i.medialayer.PlayheadReport
-import com.noma4i.medialayer.playheadAt
 import com.noma4i.medialayer.playheadNext
 import kotlinx.coroutines.flow.flowOf
 
 @Stable
 class AudioPlayhead internal constructor(val anchor: Playhead = Playhead(0.0, 0uL, 0.0)) {
-  fun progress(atNanos: Long): Float = playheadAt(anchor, (atNanos / 1_000_000).toULong()).toFloat()
+  // same arithmetic as playhead_at in the core
+  fun progress(atNanos: Long): Float {
+    val now = atNanos / 1_000_000
+    val elapsed = if (now > anchor.atMs.toLong()) (now - anchor.atMs.toLong()).toDouble() else 0.0
+    return (anchor.fraction + elapsed * anchor.perMs).coerceIn(0.0, 1.0).toFloat()
+  }
 }
 
 @Stable
@@ -61,10 +65,12 @@ class AudioControl internal constructor(playing: Boolean, private val seekTo: (D
   }
 
   internal fun report(report: PlayheadReport) {
-    val next = if (jumpPending) report.copy(jump = true) else report
-    jumpPending = false
-    val value = if (report.durationMs > 0uL) (report.positionMs.toDouble() / report.durationMs.toDouble()).coerceIn(0.0, 1.0).toFloat() else 0f
-    if (progress != value) progress = value
+    val next = if (!report.settling && jumpPending) report.copy(jump = true) else report
+    if (!report.settling) {
+      jumpPending = false
+      val value = if (report.durationMs > 0uL) (report.positionMs.toDouble() / report.durationMs.toDouble()).coerceIn(0.0, 1.0).toFloat() else 0f
+      if (progress != value) progress = value
+    }
     playhead = AudioPlayhead(playheadNext(playhead.anchor, next))
   }
 

@@ -121,7 +121,8 @@ internal class PlayerProgress private constructor(private val player: Player) : 
         atMs = (System.nanoTime() / 1_000_000).toULong(),
         rate = player.playbackParameters.speed.toDouble(),
         playing = player.isPlaying,
-        jump = discontinuity
+        jump = discontinuity,
+        settling = false
       )
       discontinuity = false
       main.post { reporters.values.forEach { it(report) } }
