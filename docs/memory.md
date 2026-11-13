@@ -8,8 +8,8 @@ Memory is managed automatically. You do not call anything: there is no pressure 
 | A slot keeps its room in the limit until the native player confirms the unload | Always. A page that needs the room loads when the confirmation arrives, without any call from you |
 | Slots drop from hot to warm to cold | After a slot sits idle for `trim_delay` (default 30 seconds) |
 | Prefetch stops, then far slots are released, then the playing slot last | The system reports memory pressure (iOS memory warning, Android `onTrimMemory` and `onLowMemory`) |
-| Everything except the chosen slot is released, prefetch stops | The app goes to the background |
-| Slots return one by one, the local proxy checks its own port and binds it again if the system closed it while the app slept | The app returns to the foreground |
+| Every player slot unloads its frames, buffers and decoder (the chosen slot keeps only its metadata, warm), prefetch stops, the image memory cache is dropped (the disk cache stays) | The app goes to the background: iOS background entry, Android process `onStop` or `onTrimMemory(TRIM_MEMORY_UI_HIDDEN)`, one path for both signals. Check: on the reference Android device Graphics EGL is 15 MB or less 5 s after the app goes to the background |
+| The chosen slot loads first, then the others one by one, images decode again on demand, the local proxy checks its own port and binds it again if the system closed it while the app slept | The app returns to the foreground |
 | Fewer slots (at least 2), fewer chunks ahead of the playing position | The device is low-memory: Android `isLowRamDevice` or little RAM, iOS little physical memory |
 | Everything stays under one limit | `memory` учитывает плееры и буферы прокси. Кэш картинок имеет отдельный бюджет: Android `min(128 MiB, 25% memoryClass)`, Swift 128 MiB |
 
