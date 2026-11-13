@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.33.1 - 2026-11-14
+
+### Fixed
+- A paused audio keeps its playhead position while the player reloads.
+- The playhead ignores a late player report that is up to a second behind.
+
 ## 3.33.0 - 2026-11-14
 
 ### Added
