@@ -34,6 +34,7 @@ import java.io.File
 import java.util.Collections
 import java.util.WeakHashMap
 import java.lang.ref.WeakReference
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -240,7 +241,10 @@ internal class SystemSignals(
     lifecycle.removeObserver(this@SystemSignals)
   }
 
+  private val isBackground = AtomicBoolean(false)
+
   override fun onTrimMemory(level: Int) {
+    if (level == ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) return goBackground()
     pressure(level)?.let { events.memoryWarning(it) }
   }
 
@@ -248,12 +252,18 @@ internal class SystemSignals(
 
   override fun onConfigurationChanged(newConfig: Configuration) = Unit
 
-  override fun onStart(owner: LifecycleOwner) = events.foreground()
+  override fun onStart(owner: LifecycleOwner) {
+    isBackground.set(false)
+    events.foreground()
+  }
 
-  override fun onStop(owner: LifecycleOwner) = events.background()
+  override fun onStop(owner: LifecycleOwner) = goBackground()
+
+  private fun goBackground() {
+    if (isBackground.compareAndSet(false, true)) events.background()
+  }
 
   private fun pressure(level: Int): Pressure? = when {
-    level == ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> null
     level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> Pressure.CRITICAL
     level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> Pressure.MODERATE
     else -> null
