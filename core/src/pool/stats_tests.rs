@@ -60,7 +60,7 @@ fn inv_pool_13_stats_count_pressure_timer_and_background_reasons_separately() {
     pool.plan(10_000, 9, Some(9), &keys(20));
     pool.background();
     let released = pool.stats().released;
-    assert_eq!((released.timer, released.pressure, released.background), (2, 1, 2));
+    assert_eq!((released.timer, released.pressure, released.background), (2, 1, 3));
 }
 
 #[test]

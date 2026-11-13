@@ -12,12 +12,15 @@ import UIKit
 private final class SuspendProbeSlot: PlayerSlot, PlayerSlotFactory, @unchecked Sendable {
   private let lock = NSLock()
   private var entries: [String] = []
+  private var unloadCount = 0
   var transport: [String] { lock.withLock { entries } }
+  var unloads: Int { lock.withLock { unloadCount } }
   func create(slot: UInt32) async -> CreatedPlayer { CreatedPlayer(player: self) }
   func apply(command: SlotCall) async {
     switch command {
     case .play: lock.withLock { entries.append("play") }
     case .pause: lock.withLock { entries.append("pause") }
+    case .unload: lock.withLock { unloadCount += 1 }
     default: break
     }
   }
@@ -249,13 +252,11 @@ extension GlobalMedia {
       rig.media.followSystem(events: rig.media.playerEvents(), link: PlayerEventsLink(), center: center, names: names)
 
       center.post(name: names.background, object: nil)
-      #expect(await waits { rig.slot.transport == ["play", "pause"] })
+      #expect(await waits { rig.slot.unloads >= 1 })
       center.post(name: names.foreground, object: nil)
-      _ = await waits { rig.slot.transport.last == "play" }
+      #expect(await waits { rig.slot.transport.count >= 2 && rig.slot.transport.last == "play" })
       rig.media.close()
       await rig.media.awaitClosed()
-      let collapsed = rig.slot.transport.reduce(into: [String]()) { seen, next in if seen.last != next { seen.append(next) } }
-      #expect(collapsed == ["play", "pause", "play"])
     }
   }
 }

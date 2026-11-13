@@ -139,13 +139,14 @@ fn inv_pool_06_background_restore_waits_for_memory_and_keeps_the_saved_slots() {
     let list = keys(20);
     pool.plan(0, 5, Some(5), &list);
     pool.background();
-    assert_eq!(ledger.used(), 100);
-    let outside = ledger.reserve(MemoryOwner::Queue, 200).unwrap();
+    assert_eq!(ledger.used(), 0);
+    let outside = ledger.reserve(MemoryOwner::Queue, 300).unwrap();
     pool.foreground();
     assert!(loaded_keys(&pool.tick(10)).is_empty());
     drop(outside);
     assert_eq!(loaded_keys(&pool.tick(20)).len(), 1);
     assert_eq!(loaded_keys(&pool.tick(30)).len(), 1);
+    assert_eq!(loaded_keys(&pool.tick(40)).len(), 1);
     assert_eq!(ledger.used(), 300);
 }
 
