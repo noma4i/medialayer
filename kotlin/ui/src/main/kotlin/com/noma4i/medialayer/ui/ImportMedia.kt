@@ -8,10 +8,11 @@ import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.importExtension
 import android.os.ParcelFileDescriptor
 import java.io.File
-import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.channels.Channels
+import java.nio.channels.WritableByteChannel
 import java.io.OutputStream
 import java.util.UUID
 import kotlin.coroutines.CoroutineContext
@@ -47,7 +48,7 @@ internal suspend fun importMediaAt(context: Context, uri: Uri, openOutput: (File
           null
         }
         if (descriptor != null && descriptor.statSize >= 0) {
-          descriptor.use { copyByChannel(it, openOutput(file), copying) }
+          copyByChannel(descriptor, { openOutput(file) }, copying)
         } else {
           descriptor?.close()
           val input = resolver.openInputStream(uri) ?: throw MediaException.Fetch("the source cannot be opened")
@@ -77,10 +78,11 @@ internal suspend fun importMediaAt(context: Context, uri: Uri, openOutput: (File
 
 private const val CHANNEL_CHUNK = 1L shl 20
 
-private fun copyByChannel(descriptor: ParcelFileDescriptor, destination: OutputStream, copying: CoroutineContext) {
-  FileInputStream(descriptor.fileDescriptor).channel.use { source ->
-    destination.use { stream ->
-      val target = Channels.newChannel(stream)
+private fun copyByChannel(descriptor: ParcelFileDescriptor, openOutput: () -> OutputStream, copying: CoroutineContext) {
+  ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { input ->
+    val source = input.channel
+    openOutput().use { stream ->
+      val target: WritableByteChannel = (stream as? FileOutputStream)?.channel ?: Channels.newChannel(stream)
       val buffer = ByteBuffer.allocate(64 * 1024)
       var position = 0L
       while (true) {
@@ -94,7 +96,7 @@ private fun copyByChannel(descriptor: ParcelFileDescriptor, destination: OutputS
         val count = source.read(buffer, position)
         if (count < 0) break
         buffer.flip()
-        target.write(buffer)
+        while (buffer.hasRemaining()) target.write(buffer)
         position += count
       }
     }
