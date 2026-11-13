@@ -124,14 +124,14 @@ async fn inv_api_06_a_stall_arms_the_watchdog_only_for_the_playing_slot() {
 }
 
 #[tokio::test]
-async fn inv_api_06_going_to_the_background_pauses_playback_and_returning_resumes_it() {
+async fn inv_api_06_going_to_the_background_unloads_playback_and_returning_resumes_it() {
     let rig = rig().await;
     let (_, player) = playing(&rig, video(&url_of(0))).await;
     let stage = &rig.parts.stage;
 
     let directives = PoolControl::background(stage);
     stage.apply(directives);
-    eventually(|| player.calls().last() == Some(&SlotCall::Pause)).await;
+    eventually(|| player.calls().last() == Some(&SlotCall::Unload)).await;
     PoolControl::foreground(stage);
 
     eventually(|| player.calls().iter().filter(|call| **call == SlotCall::Play).count() >= 2).await;
@@ -321,7 +321,7 @@ async fn inv_idle_04_a_foreground_restores_every_saved_slot_without_another_even
 
     let directives = PoolControl::background(stage);
     stage.apply(directives);
-    eventually(|| (0..3).filter(|index| rig.factory.slot_holding(&url_of(*index)).is_some()).count() == 1).await;
+    eventually(|| (0..3).filter(|index| rig.factory.slot_holding(&url_of(*index)).is_some()).count() == 0).await;
     PoolControl::foreground(stage);
 
     eventually(|| (0..3).all(|index| rig.factory.slot_holding(&url_of(index)).is_some())).await;

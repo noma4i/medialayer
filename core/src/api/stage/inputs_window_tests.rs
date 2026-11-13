@@ -17,6 +17,9 @@ async fn inv_pool_01_old_pressure_commands_preserve_new_assignments() {
         } else {
             stage.release_under(0, crate::pool::Pressure::Critical)
         };
+        if background {
+            PoolControl::foreground(stage);
+        }
         stage.replace_window(10, videos(20));
         let assigned = stage.state().slot_keys.clone();
         assert!(!assigned.is_empty());
