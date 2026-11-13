@@ -66,10 +66,13 @@ class AudioControl internal constructor(playing: Boolean, private val seekTo: (D
 
   internal fun report(report: PlayheadReport) {
     val next = if (!report.settling && jumpPending) report.copy(jump = true) else report
+    MediaTrace.emit("playhead") { "report pos=${report.positionMs} dur=${report.durationMs} playing=${report.playing} rate=${report.rate} settling=${report.settling}" }
     if (!report.settling) {
       jumpPending = false
-      val value = if (report.durationMs > 0uL) (report.positionMs.toDouble() / report.durationMs.toDouble()).coerceIn(0.0, 1.0).toFloat() else 0f
-      if (progress != value) progress = value
+      if (report.durationMs > 0uL) {
+        val value = (report.positionMs.toDouble() / report.durationMs.toDouble()).coerceIn(0.0, 1.0).toFloat()
+        if (progress != value) progress = value
+      }
     }
     playhead = AudioPlayhead(playheadNext(playhead.anchor, next))
   }
