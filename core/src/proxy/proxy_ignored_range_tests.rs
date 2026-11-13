@@ -39,6 +39,20 @@ async fn inv_proxy_11_an_origin_that_answers_200_to_a_range_still_serves_every_r
     }
 }
 
+// mutation: a first-block load that gets 200 to its range fails with "origin ignored the range" instead of keeping the whole body
+#[tokio::test]
+async fn inv_proxy_11_a_first_block_load_from_an_origin_that_ignores_ranges_succeeds_and_serves_ranges() {
+    let data = pattern(4500, 8);
+    let (rig, target) = ignoring_rig(&data).await;
+
+    let loaded = rig.proxy.fetch_first_block(IGNORING, &HashMap::new(), Priority::Playback).await;
+    assert!(loaded.is_ok(), "{loaded:?}");
+
+    let reply = request(rig.proxy.port(), "GET", &target, &[("Range", "bytes=0-99")]).await;
+    assert_eq!((reply.status, reply.header("content-range")), (206, Some("bytes 0-99/4500")));
+    assert_eq!(reply.body, data[0..100].to_vec());
+}
+
 #[tokio::test]
 async fn inv_proxy_05_parallel_ranges_of_an_origin_that_ignores_ranges_fetch_the_object_once() {
     let data = pattern(4500, 7);
