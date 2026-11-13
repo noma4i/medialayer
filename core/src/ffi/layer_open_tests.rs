@@ -198,3 +198,24 @@ fn inv_ffi_02_a_critical_memory_warning_reaches_the_platform_memory_releaser() {
     }
     assert_eq!(releaser.0.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
+
+#[test]
+fn inv_pool_09_background_unloads_every_platform_slot_including_the_playing_one_and_drops_the_image_memory_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let factory: Arc<MockFactory> = Arc::default();
+    let slots: Arc<dyn PlayerSlotFactory> = factory.clone();
+    let releaser: Arc<CountingReleaser> = shared();
+    let mut open = config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), Some(slots));
+    open.memory_releaser = Some(releaser.clone());
+    let layer = MediaLayer::open(open).unwrap();
+    let urls: Vec<String> = (0..3).map(|index| format!("https://o.test/v{index}.mp4")).collect();
+    let caller = caller();
+    let _ring = ring(&layer, 1, urls.iter().map(|url| Some(MediaItem::bare_video(url))).collect());
+    let _place = place(&layer, &urls[1], PlaceInput { playing: true, visible: true, ..PlaceInput::default() });
+    caller.block_on(eventually(|| factory.slot_holding(&urls[1]).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))));
+
+    layer.player_events().background();
+
+    let drops = || releaser.0.load(std::sync::atomic::Ordering::SeqCst);
+    caller.block_on(eventually(|| drops() == 1 && urls.iter().all(|url| factory.slot_holding(url).is_none())));
+}

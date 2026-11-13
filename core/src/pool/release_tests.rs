@@ -75,27 +75,43 @@ fn inv_pool_05_repeated_plan_after_a_timer_trim_is_empty() {
 }
 
 #[test]
-fn inv_pool_09_background_releases_all_but_the_playing_slot_after_stopping_prefetch() {
+fn inv_pool_09_background_stops_prefetch_unloads_every_slot_including_the_playing_one_and_drops_the_image_memory_cache() {
     let mut pool = ring(3, 1);
     pool.plan(0, 5, Some(5), &keys(20));
-    assert_eq!(
-        plan_of(&pool.background()),
-        [Plan::StopPrefetch, Plan::Slot(Shape::Unload { slot: 0 }), Plan::Slot(Shape::Unload { slot: 1 })]
-    );
+    let plan = plan_of(&pool.background());
+    let mut unloaded: Vec<usize> = plan
+        .iter()
+        .filter_map(|step| match step {
+            Plan::Slot(Shape::Unload { slot }) => Some(*slot),
+            _ => None,
+        })
+        .collect();
+    unloaded.sort_unstable();
+    assert_eq!(plan.first(), Some(&Plan::StopPrefetch), "{plan:?}");
+    assert_eq!(unloaded, [0, 1, 2], "{plan:?}");
+    assert_eq!(plan.iter().filter(|step| **step == Plan::DropMemoryCache).count(), 1, "{plan:?}");
     assert!(pool.background().is_empty());
     assert!(pool.plan(1, 5, Some(5), &keys(20)).is_empty());
-    assert_eq!(pool.states().iter().filter(|state| state.is_playing).count(), 1);
+    assert!(pool.states().iter().all(|state| state.retention != Retention::Hot), "{:?}", pool.states());
 }
 
 #[test]
-fn inv_pool_09_foreground_restores_one_slot_per_tick_nearest_first() {
+fn inv_pool_09_foreground_loads_the_chosen_slot_first_then_one_slot_per_tick_nearest_first() {
     let mut pool = ring(3, 1);
     pool.plan(0, 5, Some(5), &keys(20));
     pool.background();
     pool.foreground();
-    assert_eq!(pool.tick(10), [load(0, "k6")]);
-    assert_eq!(pool.tick(20), [load(1, "k4")]);
-    assert!(pool.tick(30).is_empty());
+    let loaded_keys = |commands: Vec<Command>| -> Vec<String> {
+        commands
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::Load { key, .. } => Some(key),
+                _ => None,
+            })
+            .collect()
+    };
+    let restored: Vec<Vec<String>> = [10, 20, 30, 40].into_iter().map(|now| loaded_keys(pool.tick(now))).collect();
+    assert_eq!(restored, [vec!["k5".to_string()], vec!["k6".to_string()], vec!["k4".to_string()], vec![]]);
 }
 
 #[test]
