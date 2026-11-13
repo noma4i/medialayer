@@ -24,11 +24,13 @@ private const val SUSPEND_CLIP = "file:///clip.mp4"
 
 private class SuspendProbeSlot : PlayerSlot, PlayerSlotFactory {
   val transport = CopyOnWriteArrayList<String>()
+  val unloads = CopyOnWriteArrayList<String>()
   override suspend fun create(slot: UInt): CreatedPlayer = CreatedPlayer(this)
   override suspend fun apply(command: SlotCall) {
     when (command) {
       SlotCall.Play -> transport.add("play")
       SlotCall.Pause -> transport.add("pause")
+      SlotCall.Unload -> unloads.add("unload")
       else -> {}
     }
   }
@@ -168,11 +170,10 @@ class PlaybackSuspendedTest {
     val owner = object : androidx.lifecycle.LifecycleOwner { override val lifecycle = androidx.lifecycle.LifecycleRegistry(this) }
     val signals = SystemSignals(context, layer.playerEvents(), owner.lifecycle)
     signals.onStop(owner)
-    waitFor(listOf("play", "pause"))
+    rule.waitUntil(10_000) { looper.idle(); slot.unloads.size == 1 }
     signals.onStart(owner)
-    waitForLast("play")
-    looper.idle()
-    assertEquals(listOf("play", "pause", "play"), slot.transport.toList().fold(emptyList<String>()) { seen, next -> if (seen.lastOrNull() == next) seen else seen + next })
+    rule.waitUntil(10_000) { looper.idle(); slot.transport.count { it == "play" } == 2 }
+    assertEquals(listOf("play", "play"), slot.transport.toList())
     layer.close()
   }
 }
