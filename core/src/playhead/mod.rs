@@ -29,6 +29,9 @@ pub fn playhead_next(shown: Option<Playhead>, report: PlayheadReport) -> Playhea
     let fraction = if known { (report.position_ms as f64 / duration).clamp(0.0, 1.0) } else { 0.0 };
     let per_ms = if report.playing && known { report.rate / duration } else { 0.0 };
     let taken = Playhead { fraction, at_ms: report.at_ms, per_ms };
+    if let Some(shown) = shown.filter(|_| report.settling) {
+        return shown;
+    }
     let Some(shown) = shown.filter(|_| !report.jump && known) else { return taken };
     let shown_now = playhead_at(shown, report.at_ms);
     if fraction >= shown_now || (shown_now - fraction) * duration > LAG_MS {
