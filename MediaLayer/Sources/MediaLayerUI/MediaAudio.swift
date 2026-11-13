@@ -77,12 +77,14 @@ public final class AudioPlayback {
 
   func refresh(report: PlayheadReport) {
     var report = report
-    if jumpPending {
+    if !report.settling && jumpPending {
       report.jump = true
       jumpPending = false
     }
-    let known = report.durationMs > 0
-    refresh(progress: known ? min(max(Double(report.positionMs) / Double(report.durationMs), 0), 1) : 0)
+    if !report.settling {
+      let known = report.durationMs > 0
+      refresh(progress: known ? min(max(Double(report.positionMs) / Double(report.durationMs), 0), 1) : 0)
+    }
     playhead = AudioPlayhead(anchor: playheadNext(shown: playhead.anchor, report: report))
   }
 
@@ -132,7 +134,10 @@ public struct AudioPlayhead: Sendable {
   }
 
   public func progress(at date: Date = Date()) -> Double {
-    playheadAt(playhead: anchor, nowMs: Self.milliseconds(date))
+    // same arithmetic as playhead_at in the core
+    let now = Self.milliseconds(date)
+    let elapsed = now > anchor.atMs ? Double(now - anchor.atMs) : 0
+    return min(max(anchor.fraction + elapsed * anchor.perMs, 0), 1)
   }
 
   static func milliseconds(_ date: Date) -> UInt64 {

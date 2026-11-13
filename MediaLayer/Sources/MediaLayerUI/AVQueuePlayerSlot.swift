@@ -121,6 +121,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private var looping = false
   private var wantsPlay = false
   private var seekWait: SeekWait?
+  var isSeeking: Bool { seekWait != nil }
   private var readahead: TimeInterval = 0
   private let closed = Latch()
   private var isDisposed = false
@@ -324,6 +325,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   private func completeSeek(_ wait: SeekWait) {
     wait.finish()
     if seekWait === wait { seekWait = nil }
+    if let key { Task { @MainActor [slots] in slots.progress.changed(key) } }
   }
 
   func cancelSeek(_ wait: SeekWait) {

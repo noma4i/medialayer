@@ -95,7 +95,8 @@ final class PlaybackProgress {
         atMs: UInt64(Date().timeIntervalSince1970 * 1000),
         rate: Double(slot.player.rate),
         playing: slot.player.timeControlStatus == .playing,
-        jump: false
+        jump: false,
+        settling: slot.isSeeking
       )
       for reporter in demand.reporters.values { reporter.yield(report) }
     }
