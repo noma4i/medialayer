@@ -197,6 +197,43 @@ class PlaceholderTest {
     }
   }
 
+  private fun showWithStill(source: MediaSource, layer: ScriptedLayer, asked: MutableList<String>) {
+    val still = LocalStill { url, _, _ ->
+      asked.add(url)
+      Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888)
+    }
+    rule.setContent {
+      CompositionLocalProvider(LocalLocalStill provides still) {
+        MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { MediaVideo(source, modifier = Modifier.size(50.dp)) }
+      }
+    }
+  }
+
+  @Test
+  fun inv_placeholder_11_aLocalVideoWithoutACoverShowsItsFirstFrameUntilItIsRendered() {
+    val layer = ScriptedLayer("A", events)
+    val clip = UrlKeyedClip("file:///picked/clip.mp4", null)
+    val asked = CopyOnWriteArrayList<String>()
+    showWithStill(clip, layer, asked)
+    until("first frame on the node") { nodes("firstframe") == 1 }
+
+    assertEquals(listOf(clip.url), asked.toList())
+    rule.runOnIdle { layer.emit(clip.url, MediaState.Rendered) }
+    until("first frame gone with the rendered frame") { nodes("firstframe") == 0 }
+  }
+
+  @Test
+  fun inv_placeholder_11_aRemoteVideoWithoutACoverDrawsNoStill() {
+    val layer = ScriptedLayer("A", events)
+    val asked = CopyOnWriteArrayList<String>()
+    showWithStill(UrlKeyedClip("https://o.test/remote.mp4", null), layer, asked)
+    until("the answer returned") { returned(layer, "https://o.test/remote.mp4") }
+    rule.waitForIdle()
+
+    assertEquals(0, nodes("firstframe"))
+    assertTrue(asked.isEmpty())
+  }
+
   @Test
   fun inv_placeholder_blurHashDecodesOffTheMainThreadAndIsShown() {
     val layer = ScriptedLayer("A", events)

@@ -17,10 +17,11 @@ private enum Event: Equatable, Sendable {
   case returned(places: String, url: String)
   case decode(hash: String, onMain: Bool)
   case fetch(url: String)
+  case still(url: String)
   case published(Shown)
 }
 
-private enum Shown: Equatable, Sendable { case blur(Tint), cover(Tint), none }
+private enum Shown: Equatable, Sendable { case blur(Tint), cover(Tint), firstFrame(Tint), none }
 
 private final class Events: @unchecked Sendable {
   private final class Waiter {
@@ -187,7 +188,7 @@ private final class Mount {
     window.isHidden = false
   }
 
-  func show(_ item: MediaItem, ready: Bool = false, enabled: Bool = true, context: MediaContext) {
+  func show(_ item: MediaItem, ready: Bool = false, enabled: Bool = true, context: MediaContext, stillColor: UIColor = .red) {
     let events = events
     host.rootView = AnyView(PlaceholderView(
       item: item,
@@ -198,8 +199,16 @@ private final class Mount {
         events.add(.decode(hash: hash, onMain: Thread.isMainThread))
         return PlaceholderPixels.blurHash(hash)?.cgImage
       },
+      still: { url, _, _ in
+        events.add(.still(url: url.absoluteString))
+        return UIGraphicsImageRenderer(size: CGSize(width: 16, height: 16)).image { context in
+          stillColor.setFill()
+          context.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+        }.cgImage
+      },
       published: { content in
         switch content {
+        case .firstFrame(let image): events.add(.published(.firstFrame(tint(image))))
         case .blur(let image): events.add(.published(.blur(tint(image))))
         case .cover(let image): events.add(.published(.cover(tint(image.cgImage))))
         case .none: events.add(.published(.none))
@@ -259,6 +268,40 @@ private let replacements: [PlaceholderReplacement] = [
 ]
 
 struct PlaceholderViewTests {
+  @MainActor
+  @Test
+  func inv_placeholder_11_aLocalVideoWithoutACoverShowsItsFirstFrameUntilItIsRendered() async {
+    let events = Events()
+    let (_, context) = environment("A", events)
+    let mount = Mount(events: events)
+    defer { mount.close() }
+    let local = video(nil, url: "file:///picked/clip.mp4")
+
+    mount.show(local, context: context)
+    guard await events.wait({ $0 == .published(.firstFrame(.red)) }) else { Issue.record("first frame never published"); return }
+    #expect(events.all.contains(.still(url: "file:///picked/clip.mp4")))
+    #expect(mount.shown() == .red)
+
+    mount.show(local, ready: true, context: context)
+    guard await events.wait({ $0 == .published(.none) }) else { Issue.record("still never removed"); return }
+    #expect(mount.shown() == .clear)
+  }
+
+  @MainActor
+  @Test
+  func inv_placeholder_11_aRemoteVideoWithoutACoverDrawsNoStill() async {
+    let events = Events()
+    let (_, context) = environment("A", events)
+    let mount = Mount(events: events)
+    defer { mount.close() }
+
+    mount.show(video(nil, url: "https://o.test/remote.mp4"), context: context)
+    guard await events.wait({ $0 == .published(.none) }) else { Issue.record("answer never published"); return }
+
+    #expect(events.count { if case .still = $0 { return true }; return false } == 0)
+    #expect(mount.shown() == .clear)
+  }
+
   @MainActor
   @Test
   func inv_placeholder_blurHashDecodesOffTheMainThreadAndIsShown() async {
