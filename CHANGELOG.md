@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.32.0 - 2026-11-13
+
+### Added
+- A local video without a cover shows its first frame until the video renders.
+
+### Changed
+- Importing a picked file on Android copies it in the kernel when the provider gives a descriptor.
+
 ## 3.31.0 - 2026-11-13
 
 ### Changed
