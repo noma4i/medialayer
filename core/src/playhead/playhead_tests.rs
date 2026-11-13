@@ -6,7 +6,7 @@ fn report(position_ms: u64, at_ms: u64, rate: f64, playing: bool, jump: bool) ->
     PlayheadReport { position_ms, duration_ms: DURATION, at_ms, rate, playing, jump, settling: false }
 }
 
-fn playing_from(position_ms: u64, at_ms: u64, rate: f64) -> Playhead {
+fn playing_from(position_ms: u64, at_ms: u64, rate: f64) -> PlayheadAnchor {
     playhead_next(None, report(position_ms, at_ms, rate, true, false))
 }
 
