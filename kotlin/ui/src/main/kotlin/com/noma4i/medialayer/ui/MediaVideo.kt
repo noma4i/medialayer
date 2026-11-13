@@ -1,7 +1,10 @@
 package com.noma4i.medialayer.ui
 
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.os.Handler
 import android.os.Looper
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -23,6 +27,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.geometry.isSpecified
@@ -264,9 +269,15 @@ private fun VideoCover(media: MediaLayer, item: MediaItem, ready: Boolean, enabl
     ensureActive()
     value = answer
   }
-  val shown = (placeholder ?: provisionalCover(item, ready)) as? Placeholder.Cover
-  LaunchedEffect(item.url, shown != null) {
-    MediaTrace.emit("view") { "placeholder ${item.url.takeLast(24)} ${if (shown != null) "cover" else "none"}" }
+  val answer = placeholder ?: provisionalCover(item, ready)
+  val shown = answer as? Placeholder.Cover
+  val firstFrame = answer is Placeholder.FirstFrame && item.url.trim().startsWith("file://", ignoreCase = true)
+  LaunchedEffect(item.url, shown != null, firstFrame) {
+    MediaTrace.emit("view") { "placeholder ${item.url.takeLast(24)} ${if (shown != null) "cover" else if (firstFrame) "firstframe" else "none"}" }
+  }
+  if (firstFrame) {
+    FirstFrameStill(item.url.trim(), contentScale)
+    return
   }
   val cover = shown ?: return
   val observer = LocalPlaceholderObserver.current
@@ -286,6 +297,43 @@ private fun VideoCover(media: MediaLayer, item: MediaItem, ready: Boolean, enabl
       contentScale = contentScale,
       modifier = Modifier.fillMaxSize()
     )
+  }
+}
+
+@Composable
+private fun FirstFrameStill(url: String, contentScale: ContentScale) {
+  val still = LocalLocalStill.current
+  BoxWithConstraints(Modifier.fillMaxSize()) {
+    val width = if (constraints.hasBoundedWidth) constraints.maxWidth else 0
+    val height = if (constraints.hasBoundedHeight) constraints.maxHeight else 0
+    val frame by produceState<Bitmap?>(null, url, width, height) {
+      value = if (width > 0 && height > 0) still.first(url, width, height) else null
+    }
+    frame?.let { Image(it.asImageBitmap(), contentDescription = "firstframe", contentScale = contentScale, modifier = Modifier.fillMaxSize()) }
+  }
+}
+
+internal fun interface LocalStill {
+  suspend fun first(url: String, widthPx: Int, heightPx: Int): Bitmap?
+}
+
+internal val LocalLocalStill = staticCompositionLocalOf<LocalStill> { MetadataStill }
+
+internal object MetadataStill : LocalStill {
+  override suspend fun first(url: String, widthPx: Int, heightPx: Int): Bitmap? {
+    val retriever = MediaMetadataRetriever()
+    return try {
+      cancellableBlocking(abort = retriever::release) {
+        try {
+          retriever.setDataSource(android.net.Uri.parse(url).path ?: return@cancellableBlocking null)
+          retriever.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, widthPx, heightPx)
+        } catch (_: RuntimeException) {
+          null
+        }
+      }
+    } finally {
+      retriever.release()
+    }
   }
 }
 
