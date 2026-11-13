@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.31.0 - 2026-11-13
+
+### Changed
+- Background unloads every player slot, including the playing one, and drops the image memory cache.
+
+### Fixed
+- An origin that answers 200 to a range request is served from the whole body.
+
 ## 3.30.8 - 2026-11-13
 
 ### Fixed

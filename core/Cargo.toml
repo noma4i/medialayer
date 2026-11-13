@@ -1,6 +1,6 @@
 [package]
 name = "medialayer"
-version = "3.30.8"
+version = "3.31.0"
 edition = "2021"
 
 [lib]
