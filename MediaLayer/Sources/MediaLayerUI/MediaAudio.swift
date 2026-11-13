@@ -81,9 +81,9 @@ public final class AudioPlayback {
       report.jump = true
       jumpPending = false
     }
-    if !report.settling {
-      let known = report.durationMs > 0
-      refresh(progress: known ? min(max(Double(report.positionMs) / Double(report.durationMs), 0), 1) : 0)
+    MediaTrace.emit("playhead", "report pos=\(report.positionMs) dur=\(report.durationMs) playing=\(report.playing) rate=\(report.rate) settling=\(report.settling)")
+    if !report.settling && report.durationMs > 0 {
+      refresh(progress: min(max(Double(report.positionMs) / Double(report.durationMs), 0), 1))
     }
     playhead = AudioPlayhead(anchor: playheadNext(shown: playhead.anchor, report: report))
   }
