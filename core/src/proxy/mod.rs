@@ -355,7 +355,8 @@ impl Proxy {
         priority: Priority,
     ) -> Result<(), ProxyError> {
         let upstream = self.inner.upstream_headers(url, headers);
-        let key = route::block_key(&self.inner.key(url, &upstream), block_index);
+        let base = self.inner.key(url, &upstream);
+        let key = route::block_key(&base, block_index);
         self.download_into_store(&key, None, || self.inner.get_or_start_block(url, block_index, None, upstream.clone(), priority))
             .await.map(|_| ())
     }
@@ -427,7 +428,7 @@ impl Proxy {
                 return Ok(ImageOrigin::Cache);
             }
             match start().wait_finished(progress).await.outcome {
-                FlightOutcome::Complete => {
+                FlightOutcome::Complete | FlightOutcome::StoredWhole => {
                     if let Some(progress) = progress { progress.notify_one(); }
                     return Ok(ImageOrigin::Network);
                 }

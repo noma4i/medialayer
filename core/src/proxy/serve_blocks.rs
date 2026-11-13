@@ -15,6 +15,7 @@ use super::serve_origin::*;
 pub(super) enum OpenFailure {
     Rejected(Arc<Rejection>),
     Failed(String),
+    StoredWhole,
 }
 
 pub(super) struct BlockCursor {
@@ -71,6 +72,7 @@ impl BlockCursor {
             match (progress.outcome, progress.head) {
                 (FlightOutcome::Rejected(rejection), _) => return Err(OpenFailure::Rejected(rejection)),
                 (FlightOutcome::Failed(message), _) => return Err(OpenFailure::Failed(message)),
+                (FlightOutcome::StoredWhole, _) => return Err(OpenFailure::StoredWhole),
                 (FlightOutcome::Unstorable, _) => {
                     cursor.resumed = true;
                     self.source = Some(cursor);
@@ -155,6 +157,7 @@ pub(super) async fn block_range_response(
     let origin_type = match cursor.open().await {
         Ok(content_type) => content_type,
         Err(OpenFailure::Rejected(rejection)) => return Some(rejected(&rejection, false)),
+        Err(OpenFailure::StoredWhole) => return None,
         Err(OpenFailure::Failed(_)) if inner.ignores_range(&inner.key(target, &headers)) => return None,
         Err(OpenFailure::Failed(message)) => return Some(text(502, &message)),
     };

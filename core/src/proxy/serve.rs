@@ -297,7 +297,7 @@ async fn flight_response(
         (FlightOutcome::Unstorable, _) => {
             return Step::Done(direct_response(inner, target, headers.clone(), range, head_only).await)
         }
-        (FlightOutcome::Cancelled | FlightOutcome::QueueFull, _) | (_, None) => return Step::Retry,
+        (FlightOutcome::Cancelled | FlightOutcome::QueueFull | FlightOutcome::StoredWhole, _) | (_, None) => return Step::Retry,
         (_, Some(head)) => head,
     };
     let content_type = content_type_for(target, head.content_type.as_deref());

@@ -38,6 +38,7 @@ pub(super) enum FlightOutcome {
     QueueFull,
     Failed(String),
     Cancelled,
+    StoredWhole,
 }
 
 #[derive(Debug, Clone)]
@@ -259,12 +260,16 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
         Some(Ok(Err(error))) => return FlightOutcome::Failed(error.to_string()),
         Some(Ok(Ok(response))) => crate::fetch::Response { body: permit.hold(response.body), ..response },
     };
-    let expected = if flight.range.is_some() { 206 } else { 200 };
-    if fetched.status != expected {
-        if flight.range.is_some() && fetched.status == 200 {
-            inner.mark_ignores_range(&flight.base_key);
-            return FlightOutcome::Failed("origin ignored the range".to_string());
-        }
+    let mut range = flight.range;
+    let mut key = &flight.key;
+    let mut whole_body = false;
+    let expected = if range.is_some() { 206 } else { 200 };
+    if range.is_some() && fetched.status == 200 {
+        inner.mark_ignores_range(&flight.base_key);
+        range = None;
+        key = &flight.base_key;
+        whole_body = true;
+    } else if fetched.status != expected {
         let content_type = header_value(&fetched.headers, "content-type").map(str::to_string);
         let Some(collected) = cancellable(inner, flight, collect_limited(fetched.body, REJECTION_BODY_LIMIT, timeout, &buffers)).await else {
             return FlightOutcome::Cancelled;
@@ -274,14 +279,14 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
     }
     let total = header_value(&fetched.headers, "content-length").and_then(|value| value.trim().parse::<u64>().ok());
     let content_type = header_value(&fetched.headers, "content-type").map(str::to_string);
-    let object_length = match flight.range {
+    let object_length = match range {
         Some(_) => content_range_total(&fetched.headers),
         None => total,
     };
-    if let Some(length) = object_length.filter(|_| flight.range.is_some()) {
+    if let Some(length) = object_length.filter(|_| range.is_some()) {
         inner.remember_total(&flight.base_key, length);
     }
-    let expected = match flight.range {
+    let expected = match range {
         Some((start, end)) => match answered_length(&fetched.headers, start, Some(end)) {
             Ok(length) => length,
             Err(message) => return FlightOutcome::Failed(message),
@@ -289,10 +294,12 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
         None => total,
     };
     let meta = Meta { content_type: content_type.clone(), total_length: object_length };
-    let Some(mut writer) = inner.store.begin_write(&flight.key, meta).await else {
+    let Some(mut writer) = inner.store.begin_write(key, meta).await else {
         return FlightOutcome::Unstorable;
     };
-    flight.publish_head(Head { total, content_type });
+    if !whole_body {
+        flight.publish_head(Head { total, content_type });
+    }
 
     let mut body = fetched.body;
     let mut written = 0u64;
@@ -347,7 +354,9 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
         Some(length) => writer.commit_exact(length).await,
         None => writer.commit().await,
     };
-    if committed {
+    if committed && whole_body {
+        FlightOutcome::StoredWhole
+    } else if committed {
         FlightOutcome::Complete
     } else {
         FlightOutcome::Unstorable
