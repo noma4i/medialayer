@@ -301,8 +301,8 @@ public final class MediaCamera: @unchecked Sendable {
       backend.beginRecording(to: url, profile: profile, lens: run.state.lens)
       let callId = callId
       if !calls.register(callId, { [weak self] in self?.post(.callStarted) }) { post(.callStarted) }
-    case .endRecording:
-      backend.endRecording()
+    case let .endRecording(discard):
+      backend.endRecording(cancelled: discard)
     case .readClip:
       readClip()
     case .deliver:

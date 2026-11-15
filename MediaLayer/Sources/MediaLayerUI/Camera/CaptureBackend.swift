@@ -42,10 +42,15 @@ protocol CaptureBackend: AnyObject, Sendable {
   func takePhoto(flash: Bool, profile: CaptureProfile) async throws -> Data
   func beginRecording(to url: URL, profile: CaptureProfile, lens: CameraLens)
   func endRecording()
+  func endRecording(cancelled: Bool)
   func recordedMs() -> UInt64
   func setTorch(_ on: Bool)
   func setZoom(_ ratio: Float)
   func setFrameTap(_ tap: (@Sendable (CVPixelBuffer, UInt64) -> Void)?)
+}
+
+extension CaptureBackend {
+  func endRecording(cancelled: Bool) { endRecording() }
 }
 
 /// What a camera takes from its surroundings, so a test can give it a fake of each.

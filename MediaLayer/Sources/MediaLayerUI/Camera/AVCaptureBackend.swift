@@ -247,8 +247,13 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     }
   }
 
-  func endRecording() {
-    queue.async { if self.movieOutput?.isRecording == true { self.movieOutput?.stopRecording() } }
+  func endRecording() { endRecording(cancelled: false) }
+
+  func endRecording(cancelled: Bool) {
+    queue.async {
+      if cancelled { self.recording?.cancel() }
+      if self.movieOutput?.isRecording == true { self.movieOutput?.stopRecording() }
+    }
   }
 
   func recordedMs() -> UInt64 {
@@ -332,6 +337,8 @@ private final class PhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate, @unc
 }
 
 private final class MovieDelegate: NSObject, AVCaptureFileOutputRecordingDelegate, @unchecked Sendable {
+  private let lock = NSLock()
+  private var cancelled = false
   private let onStart: @Sendable () -> Void
   private let onFinish: @Sendable (RecordEnd) -> Void
 
@@ -340,12 +347,27 @@ private final class MovieDelegate: NSObject, AVCaptureFileOutputRecordingDelegat
     self.onFinish = onFinish
   }
 
+  func cancel() { lock.withLock { cancelled = true } }
+
   func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo fileURL: URL, from connections: [AVCaptureConnection]) {
     onStart()
   }
 
   func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
-    onFinish(Self.end(of: error))
+    let end = Self.end(of: error)
+    guard !lock.withLock({ cancelled }), end == .completed || end == .limitReached else {
+      try? FileManager.default.removeItem(at: outputFileURL)
+      return onFinish(end)
+    }
+    Task.detached { [onFinish] in
+      do {
+        try await uprightVideo(at: outputFileURL)
+        onFinish(end)
+      } catch {
+        try? FileManager.default.removeItem(at: outputFileURL)
+        onFinish(.failed)
+      }
+    }
   }
 
   static func end(of error: Error?) -> RecordEnd {
