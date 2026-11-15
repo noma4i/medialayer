@@ -166,6 +166,8 @@ impl Ledger {
         let granted = wanted.min(available);
         state.used += granted;
         *state.by_owner.entry(owner).or_insert(0) += granted;
+        #[cfg(test)]
+        crate::test_signal::fire();
         Between::Granted(Reservation { ledger: self.clone(), owner, bytes: granted })
     }
 
@@ -206,6 +208,8 @@ impl Ledger {
         }
         drop(state);
         self.0.freed.notify_waiters();
+        #[cfg(test)]
+        crate::test_signal::fire();
     }
 }
 

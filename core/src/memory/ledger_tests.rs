@@ -160,9 +160,7 @@ async fn inv_memory_04_reserve_between_grants_what_is_free_up_to_the_wish_and_wa
         let ledger = ledger.clone();
         async move { ledger.reserve_between(Owner::ProxyBuffer, 40, 50).await.map(|granted| granted.bytes()) }
     });
-    while ledger.waiting() == 0 {
-        tokio::task::yield_now().await;
-    }
+    crate::api::test_support::eventually(|| ledger.waiting() > 0).await;
     assert_eq!(ledger.used_by(Owner::ProxyBuffer), 0);
 
     drop(holder);
@@ -189,9 +187,7 @@ async fn inv_memory_14_a_cancelled_wait_leaves_no_waiter_and_no_bytes() {
         let ledger = ledger.clone();
         async move { ledger.reserve_between(Owner::ImageDecode, 40, 40).await.map(|granted| granted.bytes()) }
     });
-    while ledger.waiting() == 0 {
-        tokio::task::yield_now().await;
-    }
+    crate::api::test_support::eventually(|| ledger.waiting() > 0).await;
 
     waiter.abort();
     assert!(waiter.await.unwrap_err().is_cancelled());
@@ -211,25 +207,13 @@ async fn inv_memory_14_a_grant_the_caller_never_took_returns_its_bytes() {
         let ledger = ledger.clone();
         async move { ledger.reserve_between(Owner::ImageDecode, 40, 40).await }
     });
-    while ledger.waiting() == 0 {
-        tokio::task::yield_now().await;
-    }
+    crate::api::test_support::eventually(|| ledger.waiting() > 0).await;
     drop(holder);
-    for _ in 0..1000 {
-        if ledger.used_by(Owner::ImageDecode) != 0 {
-            break;
-        }
-        tokio::task::yield_now().await;
-    }
+    crate::api::test_support::eventually(|| ledger.used_by(Owner::ImageDecode) != 0).await;
     assert_eq!(ledger.used_by(Owner::ImageDecode), 40, "the waiter was never granted");
 
     drop(task);
-    for _ in 0..1000 {
-        if ledger.used_by(Owner::ImageDecode) == 0 {
-            break;
-        }
-        tokio::task::yield_now().await;
-    }
+    crate::api::test_support::eventually(|| ledger.used_by(Owner::ImageDecode) == 0).await;
 
     assert_eq!((ledger.used(), ledger.used_by(Owner::ImageDecode), ledger.waiting()), (0, 0, 0));
 }
