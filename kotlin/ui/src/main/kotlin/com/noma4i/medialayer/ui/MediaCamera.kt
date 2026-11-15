@@ -234,6 +234,7 @@ class MediaCamera internal constructor(
   }
 
   private fun apply(event: CaptureEvent) {
+    if (event == CaptureEvent.Cancel) backend.discardRecording()
     val step = captureStep(run, event, profile)
     run = step.run
     step.actions.forEach(::perform)

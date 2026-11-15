@@ -37,6 +37,8 @@ internal interface CaptureBackend {
 
   fun endRecording()
 
+  fun discardRecording() {}
+
   fun recordedMs(): Long
 
   fun setTorch(on: Boolean)

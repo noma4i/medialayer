@@ -51,6 +51,10 @@ import java.io.File
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
@@ -63,6 +67,9 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
   private class Plan(val quality: Quality, val photoSize: PixelSize?, val frameRate: FpsRange)
 
   private val main = ContextCompat.getMainExecutor(context)
+  private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+  private var discarding = false
+  private var uprightJob: Job? = null
   @Volatile private var sink: (CaptureEvent) -> Unit = {}
   private var view: PreviewView? = null
   private var owner: LifecycleOwner? = null
@@ -222,6 +229,7 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
     main.execute {
       val output = movie?.output ?: return@execute sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
       try {
+        discarding = false
         recordedNanos = 0
         var pending = output.prepareRecording(context, FileOutputOptions.Builder(file).setDurationLimitMillis(profile.maxDurationMs.toLong()).build())
         if (profile.audio) pending = pending.withAudioEnabled()
@@ -231,7 +239,21 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
             is VideoRecordEvent.Status -> recordedNanos = event.recordingStats.recordedDurationNanos
             is VideoRecordEvent.Finalize -> {
               recording = null
-              sink(CaptureEvent.RecordFinished(endOf(event.error)))
+              val end = endOf(event.error)
+              if (end == RecordEnd.FAILED || discarding) {
+                sink(CaptureEvent.RecordFinished(end))
+              } else {
+                uprightJob = scope.launch {
+                  val result = try {
+                    uprightVideoAt(context, file)
+                    end
+                  } catch (_: Exception) {
+                    file.delete()
+                    RecordEnd.FAILED
+                  }
+                  sink(CaptureEvent.RecordFinished(result))
+                }
+              }
             }
             else -> Unit
           }
@@ -244,6 +266,14 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
 
   override fun endRecording() {
     main.execute { recording?.stop() }
+  }
+
+  override fun discardRecording() {
+    main.execute {
+      discarding = true
+      uprightJob?.cancel()
+      uprightJob = null
+    }
   }
 
   override fun recordedMs(): Long = recordedNanos / 1_000_000
