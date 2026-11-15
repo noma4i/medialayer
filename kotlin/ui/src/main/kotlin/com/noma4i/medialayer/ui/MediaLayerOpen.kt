@@ -222,23 +222,33 @@ internal class SystemSignals(
   private val events: PlayerEventsInterface,
   private val lifecycle: Lifecycle
 ) : ComponentCallbacks2, DefaultLifecycleObserver {
+  private val registrationLock = Any()
+  private var registered = false
+  private var unregistered = false
   private val outputLost = object : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
       if (intent.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) Media.muted = true
     }
   }
 
-  fun register() {
+  fun register(): Unit = synchronized(registrationLock) {
+    if (registered || unregistered) return
     SystemReduceMotion.install(context)
     context.registerComponentCallbacks(this)
     ContextCompat.registerReceiver(context, outputLost, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), ContextCompat.RECEIVER_NOT_EXPORTED)
-    onMain { lifecycle.addObserver(this) }
+    registered = true
+    onMain { synchronized(registrationLock) { if (registered) lifecycle.addObserver(this) } }
   }
 
   suspend fun unregister() = withContext(Dispatchers.Main.immediate) {
-    context.unregisterComponentCallbacks(this@SystemSignals)
-    context.unregisterReceiver(outputLost)
-    lifecycle.removeObserver(this@SystemSignals)
+    synchronized(registrationLock) {
+      if (!registered) return@synchronized
+      registered = false
+      unregistered = true
+      context.unregisterComponentCallbacks(this@SystemSignals)
+      context.unregisterReceiver(outputLost)
+      lifecycle.removeObserver(this@SystemSignals)
+    }
   }
 
   private val isBackground = AtomicBoolean(false)
