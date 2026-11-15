@@ -6,6 +6,22 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use tokio::runtime::Handle;
 use tokio::sync::{broadcast, watch};
 
+#[cfg(test)]
+pub(in crate::ffi) fn prepared() -> broadcast::Receiver<Vec<String>> {
+    prepared_sender().subscribe()
+}
+
+#[cfg(test)]
+fn prepared_sender() -> &'static broadcast::Sender<Vec<String>> {
+    static SENDER: std::sync::OnceLock<broadcast::Sender<Vec<String>>> = std::sync::OnceLock::new();
+    SENDER.get_or_init(|| broadcast::channel(256).0)
+}
+
+#[cfg(test)]
+fn announce_prepared(items: &[MediaItem]) {
+    let _ = prepared_sender().send(items.iter().map(|item| item.url.clone()).collect());
+}
+
 #[derive(Default)]
 struct Shown {
     epoch: u64,
@@ -109,9 +125,13 @@ async fn prepare(assembled: Arc<Assembled>, items: Vec<MediaItem>, receivers: Ve
     // A page whose sources are already shown or cached keeps the window ready: the report never dips to false between two ready pages.
     if all_available(&assembled, &items).await {
         sink.ready(epoch);
+        #[cfg(test)]
+        announce_prepared(&items);
         return;
     }
     sink.pending(epoch);
+    #[cfg(test)]
+    announce_prepared(&items);
     for (item, settled) in items.iter().zip(receivers) {
         if item.kind == Kind::Video {
             first_frame_or_cached(&assembled, item, settled).await;

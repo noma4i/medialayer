@@ -36,6 +36,8 @@ impl Prefetcher {
             state: Mutex::new(PrefetchState { ledger, windows: HashMap::new(), last: HashMap::new(), running: HashMap::new(), wholes: HashMap::new(), next_id: 0, busy: false, suspended: false }),
             live: AtomicUsize::new(0),
             events: broadcast::channel(EVENT_CAPACITY).0,
+            #[cfg(test)]
+            finished: watch::channel(0).0,
             handle: Handle::current(),
         };
         let shared = Arc::new(shared);
@@ -308,6 +310,26 @@ impl Prefetcher {
 
     pub fn settled(&self) -> broadcast::Receiver<Settled> {
         self.shared.events.subscribe()
+    }
+
+    #[cfg(test)]
+    pub async fn wait_finished(&self, count: usize) {
+        assert!(self.shared.finished.subscribe().wait_for(|finished| *finished >= count).await.is_ok());
+    }
+
+    #[cfg(test)]
+    pub async fn wait_queued(&self, count: usize) {
+        self.shared.gate.wait_queued(count).await;
+    }
+
+    #[cfg(test)]
+    pub async fn wait_live_at_most(&self, count: usize) {
+        let mut finished = self.shared.finished.subscribe();
+        loop {
+            finished.borrow_and_update();
+            if self.live_tasks() <= count { return; }
+            assert!(finished.changed().await.is_ok());
+        }
     }
 
     pub fn counters(&self) -> Counters {

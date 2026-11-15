@@ -13,6 +13,21 @@ const INIT: &str = "https://o.test/hls/v0/init.mp4";
 const SEGMENT_0: &str = "https://o.test/hls/v0/s0.m4s";
 const SEGMENT_1: &str = "https://o.test/hls/v0/s1.m4s";
 
+struct HeldFetcher {
+    inner: Arc<MockFetcher>,
+    started: tokio::sync::Notify,
+    release: tokio::sync::Semaphore,
+}
+
+#[async_trait::async_trait]
+impl crate::fetch::Fetcher for HeldFetcher {
+    async fn fetch(&self, request: crate::fetch::Request) -> Result<crate::fetch::Response, crate::fetch::FetchError> {
+        self.started.notify_one();
+        let _ = self.release.acquire().await;
+        self.inner.fetch(request).await
+    }
+}
+
 #[tokio::test]
 async fn inv_prefetch_06_an_hls_source_lands_in_the_disk_cache_through_the_proxy_up_to_the_chunks_of_its_distance() {
     let dir = tempfile::tempdir().unwrap();
@@ -77,16 +92,23 @@ async fn inv_proxy_05_a_prefetch_of_a_chunk_the_player_is_reading_joins_its_flig
     cache.ready().await;
     let store: Arc<dyn ByteStore> = Arc::new(CacheStore::new(cache.clone(), Arc::new(classify_kind)));
     let fetcher = Arc::new(MockFetcher::new());
-    fetcher.route(SEGMENT_0, Script::ok(vec![2; 4000]).chunked(500).head_delay(Duration::from_millis(100)).chunk_delay(Duration::from_millis(5)));
-    let proxy = Proxy::start(Config::default(), fetcher.clone(), store).await.unwrap();
+    fetcher.route(SEGMENT_0, Script::ok(vec![2; 4000]).chunked(500));
+    let held = Arc::new(HeldFetcher { inner: fetcher.clone(), started: tokio::sync::Notify::new(), release: tokio::sync::Semaphore::new(0) });
+    let proxy = Proxy::start(Config::default(), held.clone(), store).await.unwrap();
     let port = proxy.port();
     let parsed = url::Url::parse(&proxy.url_for(SEGMENT_0, &HashMap::new()).unwrap()).unwrap();
     let target = format!("{}?{}", parsed.path(), parsed.query().unwrap_or_default());
     let loader = ProxyLoader::new(proxy);
 
     let player = tokio::spawn(async move { crate::proxy::test_client::get(port, &target).await });
-    tokio::time::sleep(Duration::from_millis(30)).await;
-    let bytes = loader.load(SEGMENT_0, &HashMap::new(), crate::proxy::Priority::Prefetch, &tokio::sync::Notify::new()).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), held.started.notified()).await.expect("player did not start fetching");
+    let headers = HashMap::new();
+    let progress = tokio::sync::Notify::new();
+    let prefetch = loader.load(SEGMENT_0, &headers, crate::proxy::Priority::Prefetch, &progress);
+    tokio::pin!(prefetch);
+    assert!(futures_util::poll!(prefetch.as_mut()).is_pending());
+    held.release.close();
+    let bytes = prefetch.await.unwrap();
     let reply = player.await.unwrap();
 
     assert_eq!((reply.status, reply.body.len(), bytes), (200, 4000, 4000));

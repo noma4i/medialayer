@@ -63,6 +63,8 @@ final class PlaceMount: @unchecked Sendable {
 
   func close() { drain.submit(PlaceUpdate(closes: true)) }
 
+  func idle() async { await drain.idle() }
+
   deinit { close() }
 }
 

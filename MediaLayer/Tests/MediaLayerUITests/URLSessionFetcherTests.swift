@@ -88,13 +88,16 @@ struct URLSessionFetcherTests {
     let server = try await serve()
     defer { server.stop() }
     let fetcher = URLSessionFetcher()
-    var response: FetchResponse? = try await fetcher.fetch(request: request(server.url("/endless")))
     var closed = server.closed.makeAsyncIterator()
-    _ = try await response?.body.nextChunk()
 
-    response = nil
+    try await readFirstChunkAndDrop(fetcher, request(server.url("/endless")))
 
     #expect(await closed.next() == "/endless")
+  }
+
+  private func readFirstChunkAndDrop(_ fetcher: URLSessionFetcher, _ fetch: FetchRequest) async throws {
+    let response = try await fetcher.fetch(request: fetch)
+    _ = try await response.body.nextChunk()
   }
 
   @Test

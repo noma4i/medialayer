@@ -116,7 +116,7 @@ async fn inv_proxy_25_a_download_that_received_every_byte_is_committed_even_when
     let mut stream = open(port, "GET", &target, &[]).await;
     assert!(read_at_least(&mut stream, 4000).await >= 4000);
     drop(stream);
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    within(2, rig.store.committed()).await;
 
     assert_eq!(rig.store.commits(), 1);
     let again = get(port, &target).await;

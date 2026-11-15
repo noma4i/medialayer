@@ -145,9 +145,11 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
     noteMain("stateStream")
     let pair = AsyncStream<MediaState>.makeStream()
     lock.withLock { states.append(pair.continuation) }
+    stateSubscriptionEvents.continuation.yield(())
     return pair.stream
   }
   private var states: [AsyncStream<MediaState>.Continuation] = []
+  let stateSubscriptionEvents = AsyncStream<Void>.makeStream()
   func emit(_ state: MediaState) { lock.withLock { states }.forEach { $0.yield(state) } }
 }
 

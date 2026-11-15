@@ -10,12 +10,16 @@ import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -52,6 +56,7 @@ private class VoiceTicks(var now: Long = 1_000) {
 }
 
 @RunWith(MediaLayerTestRunner::class)
+@OptIn(ExperimentalCoroutinesApi::class)
 class MediaVoiceRecorderTest {
   private val context = ApplicationProvider.getApplicationContext<Application>()
   private val scope = CoroutineScope(Dispatchers.Default)
@@ -84,8 +89,7 @@ class MediaVoiceRecorderTest {
     val ticks = VoiceTicks()
     val recorder = makeRecorder(VoiceFakeCapture(peaks = peaks), ticks)
     val seen = CopyOnWriteArrayList<Float>()
-    val collecting = scope.launch { recorder.levels.take(4).toList(seen) }
-    delay(50)
+    val collecting = scope.launch(start = CoroutineStart.UNDISPATCHED) { recorder.levels.take(4).toList(seen) }
 
     recorder.start(file())
     withTimeout(10_000) { collecting.join() }
@@ -97,19 +101,24 @@ class MediaVoiceRecorderTest {
   }
 
   @Test
-  fun inv_voice_06_theLevelIsNotReadInRestOrAfterTheRecordingEnds() = runBlocking {
+  fun inv_voice_06_theLevelIsNotReadInRestOrAfterTheRecordingEnds() = runTest {
     val capture = VoiceFakeCapture()
     val ticks = VoiceTicks()
-    val recorder = makeRecorder(capture, ticks)
-    delay(60)
+    val recorder = MediaVoiceRecorder(capture, 60_000, { null }, ticks::read, 5, backgroundScope)
+    advanceTimeBy(1_000)
+    runCurrent()
     assertEquals(0, capture.reads.get())
 
     recorder.start(file())
-    withTimeout(10_000) { while (capture.reads.get() < 2) delay(5) }
+    runCurrent()
+    advanceTimeBy(15)
+    runCurrent()
+    assertTrue(capture.reads.get() >= 2)
     ticks.now += 1_000
     recorder.stop()
     val after = capture.reads.get()
-    delay(60)
+    advanceTimeBy(1_000)
+    runCurrent()
 
     assertEquals(after, capture.reads.get())
   }

@@ -279,7 +279,7 @@ async fn inv_prefetch_21_the_window_prefetches_only_after_the_playing_item_has_i
     eventually(|| rig.parts.places.state(&url_of(0)) == MediaState::Loading).await;
 
     stage.replace_window(0, videos(8));
-    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    assert_eq!(rig.parts.prefetcher.live_tasks(), 0);
     assert_eq!((1..4).map(|page| rig.fetcher.calls_for(&url_of(page))).sum::<usize>(), 0);
 
     eventually(|| rig.factory.slot_holding(&url_of(0)).is_some()).await;

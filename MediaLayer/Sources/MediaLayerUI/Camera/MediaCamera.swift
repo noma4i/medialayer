@@ -102,6 +102,12 @@ public final class MediaCamera: @unchecked Sendable {
   /// The state now: readiness, recording and its length, flash, zoom, the side and the last refusal.
   public var state: CameraState { lock.withLock { published } }
 
+  func tickerTask() async -> Task<Void, Never>? {
+    await withCheckedContinuation { continuation in
+      queue.async { continuation.resume(returning: self.ticker) }
+    }
+  }
+
   /// The states as they change. The stream gives the current state at once and ends when the observer stops listening.
   public var states: AsyncStream<CameraState> {
     let id = UUID()

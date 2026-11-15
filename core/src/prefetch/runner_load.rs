@@ -43,6 +43,8 @@ pub(super) async fn run_job(live: LiveTask, mut run: Run) {
     }
     drop(live);
     let _ = shared.events.send(Settled { url: run.source.url, outcome });
+    #[cfg(test)]
+    shared.finished.send_modify(|finished| *finished += 1);
 }
 
 pub(super) async fn load_whole_source(shared: &Arc<Shared>, run: &Run) -> Outcome {

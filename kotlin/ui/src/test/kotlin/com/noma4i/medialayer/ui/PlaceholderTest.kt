@@ -265,6 +265,7 @@ class PlaceholderTest {
       }
     }
     until("old ask held") { askHeld(a) }
+    if (video) until("old cover shown") { events.count { it is Event.Published && it.kind == kind && it.tint == Tint.RED } >= 1 }
     val oldShownBefore = events.count { it is Event.Published && it.kind == kind && it.tint == Tint.RED }
     val oldWorkBefore = oldWork(oldInput)
 

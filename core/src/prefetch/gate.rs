@@ -5,6 +5,8 @@ use tokio::sync::oneshot;
 pub(super) struct Gate {
     limit: AtomicUsize,
     state: Mutex<Queue>,
+    #[cfg(test)]
+    queued: tokio::sync::Notify,
 }
 
 #[derive(Default)]
@@ -48,7 +50,7 @@ impl Drop for LoadPermit {
 
 impl Gate {
     pub fn new(limit: usize) -> Arc<Gate> {
-        Arc::new(Gate { limit: AtomicUsize::new(limit), state: Mutex::new(Queue::default()) })
+        Arc::new(Gate { limit: AtomicUsize::new(limit), state: Mutex::new(Queue::default()), #[cfg(test)] queued: tokio::sync::Notify::new() })
     }
 
     pub fn set_limit(self: &Arc<Gate>, limit: usize) {
@@ -69,6 +71,8 @@ impl Gate {
             queue.next += 1;
             queue.waiters.push(Waiter { distance: distance.clone(), chunk, seq, wake });
             self.grant(&mut queue);
+            #[cfg(test)]
+            self.queued.notify_one();
             (receiver, Pending { gate: self.clone(), seq })
         };
         receiver.await.expect("the gate outlives its waiters")
@@ -77,6 +81,13 @@ impl Gate {
     #[cfg(test)]
     pub fn waiting(&self) -> usize {
         self.queue().waiters.len()
+    }
+
+    #[cfg(test)]
+    pub async fn wait_queued(&self, count: usize) {
+        while self.waiting() < count {
+            self.queued.notified().await;
+        }
     }
 
     #[cfg(test)]

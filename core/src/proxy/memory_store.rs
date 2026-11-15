@@ -16,6 +16,7 @@ struct Shared {
     entries: Mutex<HashMap<String, Entry>>,
     open_writers: AtomicUsize,
     commits: AtomicUsize,
+    committed: tokio::sync::Notify,
     aborts: AtomicUsize,
     failure: Mutex<Option<Failure>>,
     appends: AtomicUsize,
@@ -61,6 +62,10 @@ impl MemoryStore {
 
     pub fn commits(&self) -> usize {
         self.shared.commits.load(Ordering::SeqCst)
+    }
+
+    pub async fn committed(&self) {
+        self.shared.committed.notified().await;
     }
 
     pub fn aborts(&self) -> usize {
@@ -208,6 +213,7 @@ impl StoreWriter for MemoryWriter {
             Some(entry) => {
                 entry.complete = true;
                 self.shared.commits.fetch_add(1, Ordering::SeqCst);
+                self.shared.committed.notify_one();
                 true
             }
             None => false,

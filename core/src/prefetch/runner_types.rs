@@ -113,6 +113,8 @@ pub(super) struct Shared {
     pub(super) state: Mutex<PrefetchState>,
     pub(super) live: AtomicUsize,
     pub(super) events: broadcast::Sender<Settled>,
+    #[cfg(test)]
+    pub(super) finished: tokio::sync::watch::Sender<usize>,
     pub(super) handle: Handle,
 }
 

@@ -221,6 +221,12 @@ class MediaCamera internal constructor(
       false
     }
 
+  internal suspend fun awaitQueue() {
+    val done = CompletableDeferred<Unit>()
+    check(enqueue { done.complete(Unit) })
+    done.await()
+  }
+
   private fun refusal(reason: CameraRefusal, recordedMs: ULong? = null) = MediaException.Camera(reason, cameraRefusalText(reason), recordedMs)
 
   private fun post(event: CaptureEvent) {

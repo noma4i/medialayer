@@ -4,7 +4,7 @@ import com.noma4i.medialayer.*
 import java.nio.file.Files
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
@@ -16,6 +16,7 @@ private class HeldOrigin : Fetcher {
   val fetched = java.util.Collections.synchronizedList(mutableListOf<String>())
   val released = AtomicInteger()
   val reading = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+  val changes = Channel<Unit>(Channel.UNLIMITED)
 
   fun fetches(name: String) = synchronized(fetched) { fetched.count { it.contains(name) } }
 
@@ -23,29 +24,24 @@ private class HeldOrigin : Fetcher {
 
   override suspend fun fetch(request: FetchRequest): FetchResponse {
     fetched.add(request.url)
+    changes.trySend(Unit)
     val body = object : BodyReader {
       override suspend fun nextChunk(): ByteArray? {
         reading.add(request.url)
+        changes.trySend(Unit)
         awaitCancellation()
       }
-      override fun release() { released.incrementAndGet() }
+      override fun release() { released.incrementAndGet(); changes.trySend(Unit) }
     }
     return FetchResponse(200u, emptyMap(), body)
   }
 }
 
-private const val ABSENCE_WINDOW_MS = 300L
-
 private suspend fun HeldOrigin.reaches(condition: () -> Boolean) {
-  if (!waits(condition)) fail("never reached: ${counters()}")
+  if (withTimeoutOrNull(10_000) { while (!condition()) changes.receive(); true } == null) fail("never reached: ${counters()}")
 }
 
 private fun photo(name: String) = MediaItem(Kind.IMAGE, "https://o.test/$name", emptyMap(), null, null, strategy = CacheStrategy.WHOLE)
-
-private suspend fun waits(condition: () -> Boolean): Boolean = withTimeoutOrNull(10_000) {
-  while (!condition()) delay(25)
-  true
-} ?: false
 
 @RunWith(MediaLayerTestRunner::class)
 class WholeHoldTest {
@@ -60,7 +56,7 @@ class WholeHoldTest {
         override fun write(key: String, value: String) {}
         override fun remove(key: String) {}
       },
-      slots = null, device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings()
+      slots = null, device = DeviceMemory(4096u, null, false), defaults = defaultLimits().copy(maxConcurrent = 3u), pool = defaultPoolSettings()
     ))
     val hold = MediaWholeHold()
     val first = photo("a.jpg")
@@ -75,7 +71,7 @@ class WholeHoldTest {
       assertEquals(origin.counters(), 1, origin.fetches("a.jpg"))
 
       hold.add(media, listOf(photo("c.jpg")))
-      delay(ABSENCE_WINDOW_MS)
+      origin.reaches { origin.reading.any { it.contains("c.jpg") } }
       assertEquals(origin.counters(), 1, origin.released.get())
       assertEquals(origin.counters(), 1, origin.fetches("b.jpg"))
 

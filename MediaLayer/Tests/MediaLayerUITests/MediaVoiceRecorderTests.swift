@@ -11,6 +11,7 @@ private final class FakeCapture: VoiceCapture, @unchecked Sendable {
   private let writes: Bool
   private var file: URL?
   private var readCount = 0
+  let readEvents = AsyncStream<Void>.makeStream()
   private(set) var limitMs: UInt64 = 0
   private(set) var limit: (@Sendable () -> Void)?
 
@@ -32,10 +33,12 @@ private final class FakeCapture: VoiceCapture, @unchecked Sendable {
   }
 
   func peak() -> Float {
-    lock.withLock {
+    let peak = lock.withLock {
       defer { readCount += 1 }
       return peaks[readCount % peaks.count]
     }
+    readEvents.continuation.yield(())
+    return peak
   }
 
   private var stopCount = 0
@@ -110,17 +113,28 @@ struct MediaVoiceRecorderTests {
   func inv_voice_06_the_level_is_not_read_in_rest_or_after_the_recording_ends() async throws {
     let capture = FakeCapture()
     let ticks = Ticks()
-    let recorder = makeRecorder(capture, ticks: ticks)
-    try await Task.sleep(for: .milliseconds(60))
+    let levelTicks = AsyncStream<Void>.makeStream()
+    let recorder = MediaVoiceRecorder(capture: capture, maxDurationMs: 60_000, audio: { nil }, clock: { ticks.read() }, waitForLevel: {
+      var iterator = levelTicks.stream.makeAsyncIterator()
+      _ = await iterator.next()
+    })
+    var reads = capture.readEvents.stream.makeAsyncIterator()
+    #expect(recorder.levelPoll.map { _ in true } == nil)
     #expect(capture.reads == 0)
 
     try await recorder.start(to: file())
-    while capture.reads < 2 { try await Task.sleep(for: .milliseconds(5)) }
+    let poll = try #require(recorder.levelPoll)
+    for _ in 0..<2 {
+      levelTicks.continuation.yield(())
+      _ = await reads.next()
+    }
     ticks.advance(1000)
     _ = try await recorder.stop()
+    await poll.value
     let after = capture.reads
-    try await Task.sleep(for: .milliseconds(60))
+    levelTicks.continuation.yield(())
 
+    #expect(recorder.levelPoll.map { _ in true } == nil)
     #expect(capture.reads == after)
   }
 

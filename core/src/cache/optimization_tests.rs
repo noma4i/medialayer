@@ -133,7 +133,10 @@ async fn inv_idle_01_failed_index_save_waits_for_an_event() {
     std::fs::create_dir(f.dir.path().join(super::naming::INDEX_TMP_FILE)).unwrap();
     f.cache.put("clip", Kind::Image, b"data").await.unwrap();
     wait_until(|| f.cache.inner.persist_attempts.load(Ordering::Relaxed) > 0).await;
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    tokio::time::pause();
+    drop(f.cache.inner.persist_lock.lock().await);
+    tokio::time::advance(std::time::Duration::from_secs(3600)).await;
+    drop(f.cache.inner.persist_lock.lock().await);
     assert_eq!(f.cache.inner.persist_attempts.load(Ordering::Relaxed), 1);
     assert!(f.cache.inner.dirty.load(Ordering::SeqCst));
     std::fs::remove_dir(f.dir.path().join(super::naming::INDEX_TMP_FILE)).unwrap();

@@ -100,6 +100,7 @@ fn inv_call_03_a_release_restores_nothing_for_a_place_that_kept_playing() {
 fn inv_call_04_a_suspension_released_during_a_hold_restores_nothing() {
     let rig = Rig::new();
     let suspension = rig.layer.suspend_playback(Vec::new()).unwrap();
+    rig.settled();
     let (place, slot) = {
         let place = rig.layer.open_place(MediaItem::bare_video(URL)).unwrap();
         place.update(rig.playing()).unwrap();

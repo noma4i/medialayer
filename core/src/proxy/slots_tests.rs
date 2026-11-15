@@ -11,6 +11,12 @@ use tokio::time::timeout;
 
 const SHORT: Duration = Duration::from_millis(50);
 
+async fn wait_for_queue(slots: &PrioritySlots, count: usize) {
+    timeout(Duration::from_secs(5), async {
+        while slots.waiting() != count { tokio::task::yield_now().await; }
+    }).await.expect("waiters did not register");
+}
+
 #[tokio::test]
 async fn inv_proxy_09_limit_changes_preserve_the_configured_playback_reservation() {
     for (prefetch, playback) in [(Priority::Prefetch, Priority::Playback), (Priority::ImagePrefetch, Priority::Image)] {
@@ -56,12 +62,12 @@ async fn inv_proxy_09_playback_overtakes_queued_prefetch() {
         let slots = slots.clone();
         async move { slots.acquire(Priority::Prefetch).await.unwrap() }
     });
-    tokio::time::sleep(SHORT).await;
+    wait_for_queue(&slots, 1).await;
     let high = tokio::spawn({
         let slots = slots.clone();
         async move { slots.acquire(Priority::Playback).await.unwrap() }
     });
-    tokio::time::sleep(SHORT).await;
+    wait_for_queue(&slots, 2).await;
     drop(held);
     let winner = timeout(Duration::from_secs(1), high).await.expect("playback not granted first").unwrap();
     assert!(!low.is_finished());
@@ -95,7 +101,7 @@ async fn inv_proxy_09_prefetch_is_refused_at_once_when_the_wait_queue_is_full() 
         let slots = slots.clone();
         async move { slots.acquire(Priority::Prefetch).await.is_ok() }
     });
-    tokio::time::sleep(SHORT).await;
+    wait_for_queue(&slots, 1).await;
     let refused = timeout(SHORT, slots.acquire(Priority::Prefetch)).await.expect("refusal must not wait");
     assert_eq!(refused.err(), Some(QueueFull));
     waiting.abort();
@@ -212,10 +218,12 @@ async fn inv_proxy_27_queued_player_requests_are_granted_before_a_waiting_prefet
         let second = slots.acquire(Priority::Playback).await.unwrap();
         let third = slots.acquire(Priority::Playback).await.unwrap();
         let prefetch = tokio::spawn({ let slots = slots.clone(); async move { slots.acquire(Priority::Prefetch).await.unwrap() } });
-        tokio::time::sleep(SHORT).await;
+        wait_for_queue(&slots, 1).await;
         let player = |slots: &PrioritySlots| tokio::spawn({ let slots = slots.clone(); async move { slots.acquire(Priority::Playback).await.unwrap() } });
-        let (a, b) = (player(&slots), player(&slots));
-        tokio::time::sleep(SHORT).await;
+        let a = player(&slots);
+        wait_for_queue(&slots, 2).await;
+        let b = player(&slots);
+        wait_for_queue(&slots, 3).await;
 
         drop(first);
         let a = timeout(Duration::from_secs(1), a).await.expect("the first queued player request was not granted").unwrap();
@@ -236,7 +244,7 @@ async fn inv_proxy_30_a_waiter_whose_sender_vanished_gets_an_error_not_an_endles
         let slots = slots.clone();
         async move { slots.acquire(Priority::Playback).await.map(drop) }
     });
-    tokio::time::sleep(SHORT).await;
+    wait_for_queue(&slots, 1).await;
     slots.lose_waiters();
 
     let outcome = timeout(Duration::from_secs(1), waiting).await.expect("the waiter hangs after its sender vanished").unwrap();

@@ -20,14 +20,18 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Before
 import org.junit.Assert.assertEquals
@@ -42,6 +46,7 @@ import org.robolectric.annotation.GraphicsMode
 @UnstableApi
 @GraphicsMode(GraphicsMode.Mode.LEGACY)
 @RunWith(MediaLayerTestRunner::class)
+@OptIn(ExperimentalCoroutinesApi::class)
 class PrepareMediaTest {
   private val context = ApplicationProvider.getApplicationContext<Application>()
   private val readerBefore = videoReader
@@ -266,24 +271,35 @@ class PrepareMediaTest {
   }
 
   @Test
-  fun inv_send_16_theProgressIsReadOnlyWhileTheExportRuns() = runBlocking {
+  fun inv_send_16_theProgressIsReadOnlyWhileTheExportRuns() = runTest {
     withTimeout(10_000) {
       val ticks = AtomicInteger()
       val reported = CopyOnWriteArrayList<Double>()
 
-      whileExporting(intervalMs = 20, read = { 0.5 }, report = { reported += it }, onTick = { ticks.incrementAndGet() }) { delay(130) }
+      val gate = CompletableDeferred<Unit>()
+      val runningExport = launch { whileExporting(intervalMs = 20, read = { 0.5 }, report = { reported += it }, onTick = { ticks.incrementAndGet() }) { gate.await() } }
+      runCurrent()
+      advanceTimeBy(60)
+      runCurrent()
+      assertTrue(ticks.get() >= 3)
+      gate.complete(Unit)
+      runningExport.join()
       val afterCompletion = ticks.get()
-      delay(200)
+      advanceTimeBy(1_000)
+      runCurrent()
 
       assertTrue(afterCompletion >= 3)
       assertEquals(afterCompletion, ticks.get())
       assertTrue(reported.all { it == 0.5 })
 
       val running = launch { whileExporting(intervalMs = 20, read = { null }, report = {}, onTick = { ticks.incrementAndGet() }) { awaitCancellation() } }
-      delay(100)
+      runCurrent()
+      advanceTimeBy(100)
+      runCurrent()
       running.cancelAndJoin()
       val afterCancel = ticks.get()
-      delay(200)
+      advanceTimeBy(1_000)
+      runCurrent()
 
       assertTrue(afterCancel > afterCompletion)
       assertEquals(afterCancel, ticks.get())

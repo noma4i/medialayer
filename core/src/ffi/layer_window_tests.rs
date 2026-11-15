@@ -8,8 +8,15 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Handle;
 
-/// Time for the core to act on an event that was already delivered.
-const SETTLE: std::time::Duration = std::time::Duration::from_millis(300);
+async fn prepared(events: &mut tokio::sync::broadcast::Receiver<Vec<String>>, url: &str) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if events.recv().await.unwrap().iter().any(|item| item == url) {
+                return;
+            }
+        }
+    }).await.expect("page preparation in time");
+}
 
 #[derive(Default)]
 struct ReadySeen(Mutex<Vec<bool>>);
@@ -72,10 +79,11 @@ fn inv_window_01_a_video_window_is_ready_by_the_first_frame_or_the_cache_and_a_p
     let (framed, bare, cached) = ("https://o.test/framed.mp4", "https://o.test/bare.mp4", "https://o.test/cached.mp4");
     caller.block_on(cache.put("https://o.test/cached.mp4#0", crate::cache::Kind::Stream, b"first block")).unwrap();
     let seen = Arc::new(ReadySeen::default());
+    let mut preparation = super::ingress::readiness::prepared();
     let window = ring(&layer, 0, [framed, bare, cached].map(|url| Some(MediaItem::bare_video(url))).to_vec());
     window.subscribe_ready(seen.clone()).unwrap();
     caller.block_on(eventually(|| factory.slot_holding(framed).is_some()));
-    caller.block_on(async { tokio::time::sleep(SETTLE).await });
+    caller.block_on(prepared(&mut preparation, framed));
     assert!(!seen.is_ready());
 
     let (index, slot) = factory.slot_holding(framed).unwrap();
@@ -103,11 +111,12 @@ fn inv_window_07_a_move_between_cached_pages_never_reports_not_ready() {
         caller.block_on(cache.put(&format!("{url}#0"), crate::cache::Kind::Stream, b"first block")).unwrap();
     }
     let seen = Arc::new(ReadySeen::default());
+    let mut preparation = super::ingress::readiness::prepared();
     let window = ring(&layer, 0, [first, second, loading].map(|url| Some(MediaItem::bare_video(url))).to_vec());
     window.subscribe_ready(seen.clone()).unwrap();
     caller.block_on(eventually(|| seen.is_ready()));
     window.move_to(1).unwrap();
-    caller.block_on(async { tokio::time::sleep(SETTLE).await });
+    caller.block_on(prepared(&mut preparation, second));
     assert_eq!(*seen.0.lock().unwrap(), vec![true], "the report dipped between two cached pages");
     window.move_to(2).unwrap();
     caller.block_on(eventually(|| !seen.is_ready()));
@@ -120,13 +129,15 @@ fn inv_window_02_an_image_window_is_ready_when_every_source_of_the_active_page_i
     let layer = MediaLayer::open(config(dir.path(), origin.clone(), shared::<FakeSettings>(), None)).unwrap();
     let caller = caller();
     let seen = Arc::new(ReadySeen::default());
+    let mut preparation = super::ingress::readiness::prepared();
     let grid = layer.open_image_window("grid".to_string(), 1, false).unwrap();
     grid.subscribe_ready(seen.clone()).unwrap();
     grid.replace_rows(vec![images(&["a"])]).unwrap();
 
     caller.block_on(eventually_async(|| layer.is_cached(images(&["a"]).remove(0))));
+    caller.block_on(eventually(|| seen.is_ready()));
     grid.replace_rows(vec![images(&["a", "slow-a"])]).unwrap();
-    caller.block_on(async { tokio::time::sleep(SETTLE).await });
+    caller.block_on(prepared(&mut preparation, "https://o.test/slow-a.jpg"));
     assert!(!seen.is_ready(), "ready while a source of the page was still loading");
     origin.release("slow-a");
     caller.block_on(eventually(|| seen.is_ready()));

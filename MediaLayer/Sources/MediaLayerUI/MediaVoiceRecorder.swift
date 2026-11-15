@@ -38,7 +38,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
   private let maxDurationMs: UInt64
   private let audio: @Sendable () -> MediaAudioSession?
   private let clock: @Sendable () -> UInt64
-  private let levelInterval: Duration
+  private let waitForLevel: @Sendable () async -> Void
   private let calls: CallGate
   private let callId = UUID()
   private let lock = NSLock()
@@ -58,17 +58,20 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     audio: @escaping @Sendable () -> MediaAudioSession? = { Media.audio },
     clock: @escaping @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds / 1_000_000 },
     levelInterval: Duration = .milliseconds(50),
+    waitForLevel: (@Sendable () async -> Void)? = nil,
     calls: CallGate = Media.calls
   ) {
     self.capture = capture
     self.maxDurationMs = maxDurationMs
     self.audio = audio
     self.clock = clock
-    self.levelInterval = levelInterval
+    self.waitForLevel = waitForLevel ?? { try? await Task.sleep(for: levelInterval) }
     self.calls = calls
   }
 
   public var isRecording: Bool { lock.withLock { running != nil } }
+
+  var levelPoll: Task<Void, Never>? { lock.withLock { running?.poll } }
 
   /// The wave levels of the recording that runs. The stream ends when the observer stops listening.
   public var levels: AsyncStream<Float> {
@@ -177,7 +180,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
 
   private func pollLevels() async {
     while !Task.isCancelled {
-      try? await Task.sleep(for: levelInterval)
+      await waitForLevel()
       if Task.isCancelled { return }
       let level = voiceLevel(peak: capture.peak())
       for sink in lock.withLock({ Array(sinks.values) }) { sink.yield(level) }

@@ -32,8 +32,14 @@ import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CompletableDeferred
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -149,13 +155,14 @@ private fun eventually(condition: String, holds: () -> Boolean) {
 }
 
 @RunWith(MediaLayerTestRunner::class)
+@OptIn(ExperimentalCoroutinesApi::class)
 class MediaCameraTest {
   private val context = ApplicationProvider.getApplicationContext<Application>()
 
   @get:Rule
   val compose = createComposeRule()
 
-  private fun rig(profile: CaptureProfile = captureProfile(CaptureKind.PHOTO), lens: CameraLens = CameraLens.BACK, configure: (FakeBackend, Counters) -> Unit = { _, _ -> }): Rig {
+  private fun rig(profile: CaptureProfile = captureProfile(CaptureKind.PHOTO), lens: CameraLens = CameraLens.BACK, scope: CoroutineScope = CoroutineScope(Dispatchers.Default), configure: (FakeBackend, Counters) -> Unit = { _, _ -> }): Rig {
     val backend = FakeBackend()
     val counters = Counters()
     configure(backend, counters)
@@ -197,7 +204,7 @@ class MediaCameraTest {
       },
       directory = directory
     )
-    return Rig(MediaCamera(profile, lens, backend, services), backend, counters, directory, audio)
+    return Rig(MediaCamera(profile, lens, backend, services, scope), backend, counters, directory, audio)
   }
 
   private fun ready(rig: Rig) {
@@ -369,17 +376,26 @@ class MediaCameraTest {
   }
 
   @Test
-  fun inv_capture_18_anIdleCameraHoldsNoSessionNoTickerAndNoFrameOutput() = runBlocking {
-    val rig = rig(moment)
-    Thread.sleep(50)
+  fun inv_capture_18_anIdleCameraHoldsNoSessionNoTickerAndNoFrameOutput() = runTest {
+    val rig = rig(moment, scope = backgroundScope)
+    advanceTimeBy(10_000)
+    runCurrent()
     assertTrue(rig.backend.log.isEmpty() && rig.backend.tap == null && rig.counters.taken.get() == 0)
-    ready(rig)
+    rig.attach()
+    rig.camera.awaitQueue()
+    runCurrent()
+    rig.camera.state.first { it.phase == CameraPhase.READY }
     rig.camera.startRecording()
-    eventually("a tick was read") { rig.backend.recordedReads.get() > 0 }
+    rig.camera.awaitQueue()
+    runCurrent()
+    advanceTimeBy(1_000)
+    runCurrent()
+    assertTrue(rig.backend.recordedReads.get() > 0)
     rig.camera.stopRecording()
-    Thread.sleep(50)
+    rig.camera.awaitQueue()
     val reads = rig.backend.recordedReads.get()
-    Thread.sleep(350)
+    advanceTimeBy(10_000)
+    runCurrent()
     assertEquals("the ticker stops with the recording", reads, rig.backend.recordedReads.get())
   }
 

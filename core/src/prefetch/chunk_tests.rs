@@ -1,4 +1,4 @@
-use super::runner_tests::{eventually, next, rig_with, video, Rig};
+use super::runner_tests::{eventually, next, rig_with, video, wait_calls, Rig};
 use super::*;
 use crate::limits::{LeadingChunks, Limits, LimitsError, MIB};
 use std::collections::{HashMap, HashSet};
@@ -246,12 +246,20 @@ async fn inv_prefetch_19_after_the_loads_settle_the_prefetcher_holds_no_task_and
 #[tokio::test]
 async fn inv_prefetch_20_when_the_active_item_changes_no_request_of_a_departed_item_stays_alive() {
     let rig = rig_for(12, 8, |limits| limits.prefetch_to = 3);
+    let mut events = rig.prefetcher.settled();
     rig.loader.hang_all();
     rig.prefetcher.set_window(0, feed(12));
-    eventually(|| rig.loader.alive().len() == 3).await;
+    wait_calls(&rig.loader, 3).await;
 
     rig.prefetcher.set_window(5, feed(12));
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let mut departed = HashSet::new();
+    for _ in 0..3 {
+        let settled = next(&mut events).await;
+        assert_eq!(settled.outcome, Outcome::Cancelled);
+        departed.insert(settled.url);
+    }
+    assert_eq!(departed, [master(1), master(2), master(3)].into_iter().collect());
+    wait_calls(&rig.loader, 4).await;
 
     let alive: HashSet<String> = rig.loader.alive().into_iter().collect();
     assert!(alive.is_subset(&[master(6), master(7), master(8)].into_iter().collect()), "{alive:?}");

@@ -41,6 +41,7 @@ private final class GatedPlace: PlaceHandle, @unchecked Sendable {
   func seek(fraction: Double) throws { note("seek \(fraction)") }
   func itemState(state: MediaState) throws {}
   func release() { note("release") }
+  func waitForEntry() { entered.wait() }
   private func note(_ call: String) { lock.withLock { log.append(call) } }
 }
 
@@ -51,7 +52,7 @@ private final class GatedPlace: PlaceHandle, @unchecked Sendable {
     places.placeFactory = { _ in place }
     let mount = PlaceMount(places: places, item: MediaItem(kind: .audio, url: "https://o.test/note.m4a", headers: [:], cover: nil, blurHash: nil, strategy: .window)) { _ in }
     mount.update(.make(visible: true))
-    place.entered.wait()
+    await Task.detached { place.waitForEntry() }.value
 
     mount.seek(0)
     mount.close()
@@ -232,7 +233,7 @@ extension PlatformInputTests {
 
     mount.close()
     mount.update(.make(visible: true))
-    try? await Task.sleep(for: .milliseconds(100))
+    await mount.idle()
 
     #expect(places.recorded.filter { $0 == "mount" }.isEmpty)
   }

@@ -51,10 +51,11 @@ private struct Poster: MediaSource {
 private final class StatsRecorder: StatsListener, @unchecked Sendable {
   private let lock = NSLock()
   private var seen: [UInt64] = []
+  let events = AsyncStream<Void>.makeStream()
 
   var totals: [UInt64] { lock.withLock { seen } }
 
-  func changed(stats: MediaStats) { lock.withLock { seen.append(stats.totalBytes) } }
+  func changed(stats: MediaStats) { lock.withLock { seen.append(stats.totalBytes) }; events.continuation.yield(()) }
 
   func failed(error: MediaError) {}
 }
@@ -125,8 +126,9 @@ struct MediaLayerBridgeTests {
     #expect(settings.keys == ["medialayer.limits"])
     #expect(stats.totalBytes == 0)
     #expect(stats.fileCount == 0)
-    for _ in 0..<200 where recorder.totals.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
-    #expect(recorder.totals == [0])
+    var events = recorder.events.stream.makeAsyncIterator()
+    _ = await events.next()
+    #expect(Set(recorder.totals) == [0])
     withExtendedLifetime(subscription) {}
   }
 

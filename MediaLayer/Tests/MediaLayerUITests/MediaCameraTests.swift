@@ -17,6 +17,7 @@ private final class FakeBackend: CaptureBackend, @unchecked Sendable {
   private(set) var recordingURL: URL?
   private(set) var tap: (@Sendable (CVPixelBuffer, UInt64) -> Void)?
   private(set) var recordedReads = 0
+  let readEvents = AsyncStream<Void>.makeStream()
   private(set) var recordedProfile: CaptureProfile?
   var answer = Answer.opens
   var hasFlash = true
@@ -74,6 +75,7 @@ private final class FakeBackend: CaptureBackend, @unchecked Sendable {
 
   func recordedMs() -> UInt64 {
     lock.withLock { recordedReads += 1 }
+    readEvents.continuation.yield(())
     return 700
   }
 
@@ -370,15 +372,17 @@ struct MediaCameraTests {
   @Test
   func inv_capture_18_an_idle_camera_holds_no_session_no_ticker_and_no_frame_output() async throws {
     let rig = try makeRig(.moment)
-    try await Task.sleep(for: .milliseconds(50))
+    #expect(await rig.camera.tickerTask().map { _ in true } == nil)
     #expect(rig.backend.log.isEmpty && rig.backend.tap == nil && rig.counters.sessionsTaken == 0)
     await ready(rig)
     try await rig.camera.startRecording()
-    await eventually("a tick was read") { rig.backend.recordedReads > 0 }
+    var readsEvent = rig.backend.readEvents.stream.makeAsyncIterator()
+    _ = await readsEvent.next()
+    let ticker = try #require(await rig.camera.tickerTask())
     _ = try await rig.camera.stopRecording()
-    try await Task.sleep(for: .milliseconds(50))
+    await ticker.value
     let reads = rig.backend.recordedReads
-    try await Task.sleep(for: .milliseconds(350))
+    #expect(await rig.camera.tickerTask().map { _ in true } == nil)
     #expect(rig.backend.recordedReads == reads, "the ticker stops with the recording")
   }
 

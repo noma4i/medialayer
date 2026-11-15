@@ -14,7 +14,7 @@ async fn inv_proxy_09_playback_starts_while_prefetch_holds_every_prefetch_slot()
     let first = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/low1.mp4", &HashMap::new(), Priority::Prefetch, None).await } });
     assert!(eventually(|| rig.fetcher.calls_for("https://o.test/low1.mp4") == 1).await);
     let second = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/low2.mp4", &HashMap::new(), Priority::Prefetch, None).await } });
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    within(5, async { while rig.proxy.inner.slots.waiting() != 1 { tokio::task::yield_now().await; } }).await;
     assert_eq!(rig.fetcher.calls_for("https://o.test/low2.mp4"), 0);
 
     let now = within(2, get(rig.proxy.port(), &path_of(&rig.proxy.url_for("https://o.test/now.mp4", &HashMap::new()).unwrap()))).await;

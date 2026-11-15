@@ -8,6 +8,7 @@ final class LatestDrain<Value: Sendable>: @unchecked Sendable {
   private var pending: Value?
   private var retired: [Value] = []
   private var isScheduled = false
+  private var idleWaiters: [CheckedContinuation<Void, Never>] = []
   private let merge: @Sendable (Value?, Value) -> Value
   private let apply: @Sendable (Value) -> Void
 
@@ -28,6 +29,17 @@ final class LatestDrain<Value: Sendable>: @unchecked Sendable {
     if schedules { schedule() }
   }
 
+  func idle() async {
+    await withCheckedContinuation { continuation in
+      let ready = lock.withLock {
+        if !isScheduled { return true }
+        idleWaiters.append(continuation)
+        return false
+      }
+      if ready { continuation.resume() }
+    }
+  }
+
   private func schedule() {
     DispatchQueue.global(qos: .userInitiated).async { self.run() }
   }
@@ -44,12 +56,16 @@ final class LatestDrain<Value: Sendable>: @unchecked Sendable {
     dead.removeAll()
     if let next { apply(next) }
     next = nil
-    var (again, late) = lock.withLock { () -> (Bool, [Value]) in
+    let (again, released, waiters) = lock.withLock { () -> (Bool, [Value], [CheckedContinuation<Void, Never>]) in
       defer { retired = [] }
       if pending == nil { isScheduled = false }
-      return (pending != nil, retired)
+      let waiters = isScheduled ? [] : idleWaiters
+      if !isScheduled { idleWaiters = [] }
+      return (pending != nil, retired, waiters)
     }
+    var late = released
     late.removeAll()
+    waiters.forEach { $0.resume() }
     if again { schedule() }
   }
 }

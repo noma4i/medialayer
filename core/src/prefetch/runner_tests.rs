@@ -68,6 +68,12 @@ pub(super) async fn next(events: &mut Receiver<Settled>) -> Settled {
     tokio::time::timeout(Duration::from_secs(5), events.recv()).await.expect("event in time").expect("channel open")
 }
 
+pub(super) async fn wait_calls(loader: &MockLoader, count: usize) {
+    while loader.calls().len() < count {
+        loader.started().await;
+    }
+}
+
 pub(super) async fn quiet() {
     for _ in 0..50 {
         tokio::task::yield_now().await;
@@ -81,14 +87,15 @@ fn names(urls: &[String]) -> HashSet<String> {
 #[tokio::test]
 async fn inv_prefetch_03_shifting_the_window_starts_the_new_page_and_cancels_the_departed_one() {
     let rig = rig();
+    let mut events = rig.prefetcher.settled();
     rig.loader.hang_all();
     rig.prefetcher.set_window(0, sources(20));
-    eventually(|| rig.loader.active() == 4).await;
+    wait_calls(&rig.loader, 4).await;
     assert_eq!(names(&rig.loader.urls()), names(&[url(2), url(3), url(4), url(5)]));
 
     rig.prefetcher.set_window(1, sources(20));
-    eventually(|| rig.loader.urls().len() == 5).await;
-    quiet().await;
+    assert_eq!(next(&mut events).await, Settled { url: url(2), outcome: Outcome::Cancelled });
+    wait_calls(&rig.loader, 5).await;
 
     assert_eq!(rig.loader.urls()[4], url(6));
     assert_eq!(rig.loader.active(), 4);
@@ -108,7 +115,6 @@ async fn inv_prefetch_01_a_source_loaded_inside_the_dedupe_window_is_not_loaded_
     assert_eq!(rig.loader.urls().len(), 5);
 
     rig.prefetcher.set_window(0, sources(20));
-    quiet().await;
     assert_eq!(rig.loader.urls().len(), 5);
     assert_eq!(rig.prefetcher.counters().deduped, 1);
 
@@ -137,8 +143,8 @@ async fn inv_prefetch_01_a_failed_source_is_loaded_again_when_it_re_enters_the_w
     rig.loader.fail(&url(2), false);
     rig.prefetcher.set_window(1, sources(20));
     rig.prefetcher.set_window(0, sources(20));
-    next(&mut events).await;
-    assert_eq!(next(&mut events).await, Settled { url: url(2), outcome: Outcome::Loaded });
+    let outcomes: HashMap<_, _> = [next(&mut events).await, next(&mut events).await].into_iter().map(|event| (event.url, event.outcome)).collect();
+    assert_eq!(outcomes[&url(2)], Outcome::Loaded);
     assert_eq!(rig.prefetcher.counters().failed, 1);
 }
 
@@ -172,7 +178,7 @@ async fn inv_prefetch_03_each_started_source_settles_exactly_once() {
     for _ in 0..4 {
         seen.push(next(&mut events).await);
     }
-    quiet().await;
+    rig.prefetcher.wait_finished(4).await;
 
     assert!(seen.iter().all(|settled| settled.outcome == Outcome::Loaded));
     assert_eq!(seen.iter().map(|settled| settled.url.clone()).collect::<HashSet<_>>().len(), 4);
@@ -224,7 +230,7 @@ async fn inv_prefetch_03_a_hung_load_settles_as_timed_out_after_the_configured_t
     let mut events = rig.prefetcher.settled();
     rig.loader.hang_all();
     rig.prefetcher.set_window(0, sources(20));
-    quiet().await;
+    wait_calls(&rig.loader, 4).await;
 
     tokio::time::advance(Duration::from_secs(29)).await;
     assert_eq!(events.try_recv().unwrap_err(), TryRecvError::Empty);
@@ -275,13 +281,12 @@ async fn inv_prefetch_02_no_more_than_max_concurrent_loads_run_and_cancel_hands_
     let rig = rig_with(|limits| limits.max_concurrent = 2);
     rig.loader.hang_all();
     rig.prefetcher.set_window(0, sources(20));
-    eventually(|| rig.loader.active() == 2).await;
-    quiet().await;
-    assert_eq!(rig.loader.urls(), [url(2), url(3)]);
+    wait_calls(&rig.loader, 2).await;
+    rig.prefetcher.wait_queued(2).await;
+    assert_eq!(names(&rig.loader.urls()), names(&[url(2), url(3)]));
 
     rig.prefetcher.cancel(&url(2));
-    eventually(|| rig.loader.urls().len() == 3).await;
-    quiet().await;
+    wait_calls(&rig.loader, 3).await;
     assert_eq!(rig.loader.urls()[2], url(4));
     assert_eq!((rig.loader.active(), rig.loader.peak()), (2, 2));
 }
@@ -297,7 +302,7 @@ async fn inv_prefetch_03_a_thousand_window_shifts_leave_no_live_tasks_behind() {
         tokio::task::yield_now().await;
         most_live = most_live.max(rig.prefetcher.live_tasks());
     }
-    quiet().await;
+    rig.prefetcher.wait_live_at_most(4).await;
     assert_eq!(rig.prefetcher.live_tasks(), 4);
     assert!(most_live <= 6, "most live tasks {most_live}");
 
@@ -317,26 +322,29 @@ async fn inv_prefetch_02_set_limits_changes_the_window_and_the_parallelism_for_t
     rig.prefetcher.set_limits(&Limits { max_concurrent: 1, prefetch_from: 1, prefetch_to: 3, ..Limits::default() });
     rig.prefetcher.set_window(0, sources(6));
 
-    eventually(|| rig.loader.active() == 1).await;
+    wait_calls(&rig.loader, 1).await;
+    rig.prefetcher.wait_queued(2).await;
     assert_eq!(rig.prefetcher.counters().requested, 3);
-    tokio::time::sleep(Duration::from_millis(30)).await;
     assert_eq!((rig.loader.active(), rig.loader.peak()), (1, 1));
 }
 
 #[tokio::test]
 async fn inv_prefetch_08_named_windows_start_and_cancel_only_their_own_sources_and_leave_the_video_window_alone() {
     let rig = rig_with(|limits| limits.max_concurrent = 32);
+    let mut events = rig.prefetcher.settled();
     rig.loader.hang_all();
     rig.prefetcher.set_image_windows(HashMap::from([("grid".to_string(), PageWindow { behind: 0, from: 0, to: 2 }), ("posters".to_string(), PageWindow { behind: 0, from: 0, to: 2 })]));
     rig.prefetcher.set_window(0, sources(20));
     rig.prefetcher.set_image_window("grid", 0, pages_of("g", 20));
     rig.prefetcher.set_image_window("posters", 0, pages_of("p", 20));
-    eventually(|| rig.loader.active() == 4 + 4 + 4).await;
+    wait_calls(&rig.loader, 12).await;
     assert_eq!(rig.prefetcher.counters().cancelled, 0);
 
     rig.prefetcher.set_image_window("grid", 10, pages_of("g", 20));
-    eventually(|| rig.loader.urls().len() == 16).await;
-    quiet().await;
+    for _ in 0..4 {
+        assert_eq!(next(&mut events).await.outcome, Outcome::Cancelled);
+    }
+    wait_calls(&rig.loader, 16).await;
 
     assert_eq!(rig.prefetcher.counters().cancelled, 4);
     assert_eq!(rig.loader.active(), 12);
@@ -349,18 +357,18 @@ async fn inv_prefetch_08_named_windows_start_and_cancel_only_their_own_sources_a
 #[tokio::test]
 async fn inv_prefetch_08_a_source_wanted_by_two_windows_loads_once_and_is_cancelled_only_when_no_window_wants_it() {
     let rig = rig();
+    let mut events = rig.prefetcher.settled();
     rig.loader.hang_all();
     let shared_page = vec![vec![image("https://o.test/shared.jpg")]];
     rig.prefetcher.set_image_window("one", 0, shared_page.clone());
     rig.prefetcher.set_image_window("two", 0, shared_page);
-    eventually(|| rig.loader.active() == 1).await;
+    wait_calls(&rig.loader, 1).await;
 
     rig.prefetcher.set_image_window("one", 0, Vec::<Vec<Source>>::new());
-    quiet().await;
     assert_eq!((rig.loader.urls().len(), rig.loader.active(), rig.prefetcher.counters().cancelled), (1, 1, 0));
 
     rig.prefetcher.set_image_window("two", 0, Vec::<Vec<Source>>::new());
-    eventually(|| rig.loader.active() == 0).await;
+    assert_eq!(next(&mut events).await, Settled { url: "https://o.test/shared.jpg".to_string(), outcome: Outcome::Cancelled });
     assert_eq!((rig.loader.urls().len(), rig.prefetcher.counters().cancelled), (1, 1));
 }
 
