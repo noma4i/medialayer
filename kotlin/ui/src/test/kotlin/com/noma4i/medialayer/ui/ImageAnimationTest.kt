@@ -45,7 +45,8 @@ private class ControlledAnimation : Drawable(), RepeatingAnimation {
   private var running = false
   val starts: Int get() = log.count { it == "start" }
   private var finish: () -> Unit = {}
-  override fun onFinished(callback: () -> Unit) { finish = callback }
+  var watched = false
+  override fun onFinished(callback: () -> Unit) { finish = callback; watched = true }
   fun end() { running = false; finish() }
   override fun start() { running = true; log.add("start") }
   override fun stop() { running = false }
@@ -184,7 +185,7 @@ class ImageAnimationTest {
     rule.setContent {
       MediaLayerProvider(CompletableDeferred(layer), loader) { MediaImage(page, Modifier.size(50.dp), animation = ImageAnimation(repeats = Repeats.Times(1), rest = RestFrame.Last)) }
     }
-    until { animation.isRunning }
+    until { animation.isRunning && animation.watched }
     assertEquals(listOf<RestFrame?>(null), rests.toList())
     val started = animation.starts
 
