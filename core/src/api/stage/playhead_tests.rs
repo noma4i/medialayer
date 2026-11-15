@@ -61,7 +61,7 @@ async fn inv_readahead_02_the_playhead_comes_from_the_loaded_slot_on_demand_and_
     let (_, slot) = playing_clip(&rig).await;
     let port = rig.parts.proxy.port();
     let held = tokio::spawn(async move { get(port, &segment_path(6)).await });
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    eventually(|| rig.parts.proxy.playhead_holds() == 1).await;
     assert!(!held.is_finished());
     slot.sample.lock().unwrap().position_ms = 12_000;
     rig.parts.proxy.nudge_window(MEDIA);
@@ -71,7 +71,7 @@ async fn inv_readahead_02_the_playhead_comes_from_the_loaded_slot_on_demand_and_
 
     slot.sample.lock().unwrap().position_ms = 0;
     let seek_held = tokio::spawn(async move { get(port, &segment_path(7)).await });
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    eventually(|| rig.parts.proxy.playhead_holds() == 1).await;
     assert!(!seek_held.is_finished());
     rig.parts.stage.seek(MEDIA, 21_000);
     assert_eq!(tokio::time::timeout(Duration::from_millis(400), seek_held).await.expect("released by the seek target").unwrap().status, 200);
