@@ -1,4 +1,4 @@
-use super::runner_tests::{eventually, quiet};
+use super::runner_tests::eventually;
 use super::whole_dedupe_tests::over_proxy;
 use super::whole_tests::{stack, Stack};
 use super::*;
@@ -33,12 +33,20 @@ async fn parallel(max_concurrent: u32, urls: &[String], expected: usize) -> (usi
         prefetcher.hold_whole(1, whole(url, kind_of(url)));
     }
     eventually(|| started(&stack, urls) >= expected).await;
-    quiet().await;
+    let image = kind_of(&urls[0]) == SourceKind::Image;
+    let whole_limit = if image { 2 } else { 1 };
+    prefetcher.wait_whole_queued(image, urls.len() - whole_limit).await;
+    if expected < whole_limit {
+        eventually(|| stack.proxy.queued_requests() == whole_limit - expected).await;
+    }
     let running = started(&stack, urls);
 
     prefetcher.release_whole(1, &whole(&urls[0], kind_of(&urls[0])));
     eventually(|| started(&stack, urls) > running).await;
-    quiet().await;
+    prefetcher.wait_whole_queued(image, urls.len() - whole_limit - 1).await;
+    if expected < whole_limit {
+        eventually(|| stack.proxy.queued_requests() == whole_limit - expected).await;
+    }
     (running, started(&stack, urls))
 }
 
