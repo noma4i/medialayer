@@ -11,6 +11,11 @@ impl<T> AbortOnDrop<T> {
         self.0.abort();
     }
 
+    #[cfg(test)]
+    pub fn abort_handle(&self) -> tokio::task::AbortHandle {
+        self.0.abort_handle()
+    }
+
     pub async fn join(&mut self) -> Result<T, JoinError> {
         (&mut self.0).await
     }

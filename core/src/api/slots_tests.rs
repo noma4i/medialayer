@@ -117,11 +117,12 @@ async fn inv_api_42_closing_the_runner_cancels_the_held_apply_and_runs_nothing_a
     eventually(|| factory.gate.entered() == 1).await;
     let slot: Arc<MockSlot> = factory.slot(0);
 
+    let mut task = runner.observe_task(0);
     drop(runner);
-
-    eventually(|| slot.cancelled_applies() == 1).await;
+    let _ = task.join().await;
+    assert_eq!(slot.cancelled_applies(), 1);
     drop(held);
-    eventually(|| Arc::strong_count(&slot) == 2).await;
+    assert_eq!(Arc::strong_count(&slot), 2);
     assert!(slot.calls().is_empty(), "a command ran after the close: {:?}", slot.calls());
     assert_eq!(slot.applies_started(), 1);
 }

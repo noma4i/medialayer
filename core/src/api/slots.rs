@@ -93,6 +93,18 @@ impl Shared {
 struct Lane {
     shared: Arc<Shared>,
     _task: AbortOnDrop,
+    #[cfg(test)]
+    taken_task: Option<AbortTask>,
+}
+
+#[cfg(test)]
+struct AbortTask(tokio::task::AbortHandle);
+
+#[cfg(test)]
+impl Drop for AbortTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 #[derive(Default)]
@@ -109,6 +121,16 @@ pub struct SlotRunner {
 }
 
 impl SlotRunner {
+    #[cfg(test)]
+    pub fn observe_task(&self, slot: usize) -> AbortOnDrop {
+        let mut lanes = self.lanes();
+        let lane = lanes.live.get_mut(&slot).expect("slot exists");
+        let replacement = AbortOnDrop::new(self.handle.spawn(async {}));
+        let task = std::mem::replace(&mut lane._task, replacement);
+        lane.taken_task = Some(AbortTask(task.abort_handle()));
+        task
+    }
+
     pub fn new(handle: Handle, players: Option<Arc<dyn PlayerSlotFactory>>) -> SlotRunner {
         SlotRunner { players, handle, lanes: Arc::new(Mutex::new(Lanes::default())) }
     }
@@ -131,7 +153,7 @@ impl SlotRunner {
         let lane = lanes.live.entry(slot).or_insert_with(|| {
             let shared = Arc::new(Shared { queue: Queue::default(), life: Mutex::new(SlotLife::new()) });
             let task = self.handle.spawn(run_lane(players, slot, shared.clone(), Arc::downgrade(&self.lanes)));
-            Lane { shared, _task: AbortOnDrop::new(task) }
+            Lane { shared, _task: AbortOnDrop::new(task), #[cfg(test)] taken_task: None }
         });
         lane.shared.queue.push(call, held);
     }
