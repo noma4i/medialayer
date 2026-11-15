@@ -15,6 +15,7 @@ import org.junit.runner.RunWith
 private class HeldOrigin : Fetcher {
   val fetched = java.util.Collections.synchronizedList(mutableListOf<String>())
   val released = AtomicInteger()
+  val reading = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
   fun fetches(name: String) = synchronized(fetched) { fetched.count { it.contains(name) } }
 
@@ -23,7 +24,10 @@ private class HeldOrigin : Fetcher {
   override suspend fun fetch(request: FetchRequest): FetchResponse {
     fetched.add(request.url)
     val body = object : BodyReader {
-      override suspend fun nextChunk(): ByteArray? = awaitCancellation()
+      override suspend fun nextChunk(): ByteArray? {
+        reading.add(request.url)
+        awaitCancellation()
+      }
       override fun release() { released.incrementAndGet() }
     }
     return FetchResponse(200u, emptyMap(), body)
@@ -63,7 +67,7 @@ class WholeHoldTest {
     val second = photo("b.jpg")
     try {
       hold.declare(media, listOf(first))
-      origin.reaches { origin.fetches("a.jpg") >= 1 }
+      origin.reaches { origin.reading.any { it.contains("a.jpg") } }
 
       hold.declare(media, listOf(first, second))
       hold.declare(media, listOf(second))
