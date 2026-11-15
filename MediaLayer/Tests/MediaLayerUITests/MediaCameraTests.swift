@@ -101,6 +101,35 @@ private final class Counters: @unchecked Sendable {
   func gave() { lock.withLock { given += 1 } }
   func upright(_ quality: Double) { lock.withLock { uprightQualities.append(quality) } }
   func checkThread() { if Thread.isMainThread { lock.withLock { mainCalls += 1 } } }
+
+  private var parked: CheckedContinuation<Void, Error>?
+  private var straightenedURLs: [URL] = []
+  private var cancelledStraighten = false
+  var holdVideo = false
+  var straightened: [URL] { lock.withLock { straightenedURLs } }
+  var straightenCancelled: Bool { lock.withLock { cancelledStraighten } }
+
+  func straighten(_ url: URL) async throws {
+    let hold = lock.withLock { straightenedURLs.append(url); return holdVideo }
+    guard hold else { return }
+    try await withTaskCancellationHandler {
+      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        let cancelled = lock.withLock { () -> Bool in
+          if cancelledStraighten { return true }
+          parked = continuation
+          return false
+        }
+        if cancelled { continuation.resume(throwing: CancellationError()) }
+      }
+    } onCancel: {
+      let continuation = lock.withLock { () -> CheckedContinuation<Void, Error>? in
+        cancelledStraighten = true
+        defer { parked = nil }
+        return parked
+      }
+      continuation?.resume(throwing: CancellationError())
+    }
+  }
 }
 
 private struct Rig {
@@ -155,6 +184,7 @@ private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .bac
       counters.checkThread()
       return counters.info
     },
+    uprightVideo: { url in try await counters.straighten(url) },
     upright: { raw, quality in
       counters.checkThread()
       counters.upright(quality)
@@ -541,6 +571,35 @@ struct MediaCameraTests {
   func inv_capture_09_a_bad_profile_makes_no_camera() {
     let broken = CaptureProfile(mode: .video, videoSize: nil, photoSize: nil, fps: 30, maxDurationMs: 0, minTakeMs: 0, audio: true, mirrorFrontVideo: false, stabilization: .off, photoQuality: 90, reducesRedEye: false)
     #expect(throws: MediaError.self) { _ = try MediaCamera(profile: broken) }
+  }
+
+  @Test
+  func inv_capture_29_a_finished_take_is_straightened_while_stopping_and_a_cancel_then_throws_it_away() async throws {
+    let rig = try makeRig(.moment) { _, counters in counters.holdVideo = true }
+    await ready(rig)
+    try await rig.camera.startRecording()
+    let recorded = try #require(rig.backend.recordingURL)
+    rig.backend.emit(.recordFinished(end: .limitReached))
+    await eventually("straightening while stopping") { rig.counters.straightened == [recorded] && rig.camera.state.phase == .stopping }
+    rig.camera.cancelRecording()
+    await eventually("ready after the cancel") { rig.camera.state.phase == .ready }
+    #expect(rig.counters.straightenCancelled)
+    #expect(!FileManager.default.fileExists(atPath: recorded.path))
+    await #expect(throws: MediaError.self) { _ = try await rig.camera.stopRecording() }
+  }
+
+  @Test
+  func inv_capture_31_the_clip_of_a_take_is_given_once() async throws {
+    let rig = try makeRig(.moment)
+    await ready(rig)
+    try await rig.camera.startRecording()
+    let recorded = try #require(rig.backend.recordingURL)
+    rig.backend.emit(.recordFinished(end: .limitReached))
+    await eventually("settled") { rig.camera.state.phase == .ready }
+    let clip = try await rig.camera.stopRecording()
+    #expect(FileManager.default.fileExists(atPath: clip.url.path))
+    #expect(rig.counters.straightened == [recorded])
+    await #expect(throws: MediaError.self) { _ = try await rig.camera.stopRecording() }
   }
 }
 

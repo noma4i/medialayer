@@ -148,6 +148,7 @@ class MediaCamera internal constructor(
     val queued = enqueue {
       val outcome = ended
       if (outcome != null) {
+        ended = null
         outcome.fold(waiter::complete, waiter::completeExceptionally)
         return@enqueue
       }
@@ -234,10 +235,16 @@ class MediaCamera internal constructor(
   }
 
   private fun apply(event: CaptureEvent) {
-    if (event == CaptureEvent.Cancel) backend.discardRecording()
+    val cancelReading = event == CaptureEvent.Cancel && reading != null
     val step = captureStep(run, event, profile)
     run = step.run
     step.actions.forEach(::perform)
+    if (cancelReading) {
+      reading?.cancel()
+      reading = null
+      apply(CaptureEvent.RecordSettled(null))
+      return
+    }
     published.value = run.state
     settleWaiters()
     syncTicker()
@@ -261,6 +268,7 @@ class MediaCamera internal constructor(
     stopWaiter?.let { waiter ->
       ended?.let {
         stopWaiter = null
+        ended = null
         it.fold(waiter::complete, waiter::completeExceptionally)
       }
     }
@@ -318,6 +326,7 @@ class MediaCamera internal constructor(
     backend.unbind()
     calls.unregister(callListener)
     reading?.cancel()
+    reading = null
     recordingFile?.delete()
     recordingFile = null
     clipInfo = null
@@ -424,9 +433,16 @@ class MediaCamera internal constructor(
     val file = recordingFile ?: return
     reading?.cancel()
     reading = scope.launch {
-      val info = services.clipInfo(file)
+      val info = try {
+        services.uprightVideo(file)
+        services.clipInfo(file)
+      } catch (failure: Exception) {
+        if (failure is kotlinx.coroutines.CancellationException) throw failure
+        null
+      }
       enqueue {
         if (recordingFile != file) return@enqueue
+        reading = null
         clipInfo = info
         apply(CaptureEvent.RecordSettled(info?.durationMs))
       }
@@ -446,6 +462,8 @@ class MediaCamera internal constructor(
 
   private fun discard() {
     calls.unregister(callListener)
+    reading?.cancel()
+    reading = null
     recordingFile?.delete()
     recordingFile = null
     clipInfo = null

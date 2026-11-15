@@ -16,26 +16,27 @@ class MediaAudioSession internal constructor(
   private val volume: VolumePort? = null
 ) {
   private val demand = AudioDemand()
+  private val recordingLock = Any()
   private val owner = AudioFocusOwner(port, { synchronized(demand) { demand.target(focus) } }, releaseDelayMs, scope)
 
   constructor(context: Context, focus: MediaAudioFocus) : this(focus, SystemAudioFocus(context), volume = SystemVolume(context))
 
   val isRecording: Boolean get() = synchronized(demand) { demand.recording }
 
-  fun activateRecording(): Boolean {
+  fun activateRecording(): Boolean = synchronized(recordingLock) {
     synchronized(demand) { demand.setRecording(true) }
-    if (owner.reconcile()) return true
+    if (owner.reconcile()) return@synchronized true
 
     synchronized(demand) { demand.setRecording(false) }
     owner.reconcile()
-    return false
+    false
   }
 
   fun readVolume(): MediaVolumeReading? = volume?.reading()
 
   fun volumeRaises(): Flow<Unit> = volume?.raises() ?: emptyFlow()
 
-  fun deactivateRecording() {
+  fun deactivateRecording(): Unit = synchronized(recordingLock) {
     synchronized(demand) { demand.setRecording(false) }
     owner.reconcile()
   }

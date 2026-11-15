@@ -2,7 +2,8 @@
 import Foundation
 
 func uprightVideo(at url: URL) async throws {
-  try await Task.detached {
+  let task = Task.detached {
+    try Task.checkCancellation()
     let asset = AVURLAsset(url: url)
     guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw UprightVideoError.invalidVideo }
     let (transform, size, bitrate, descriptions) = try await track.load(.preferredTransform, .naturalSize, .estimatedDataRate, .formatDescriptions)
@@ -48,19 +49,31 @@ func uprightVideo(at url: URL) async throws {
     }
     guard reader.startReading(), writer.startWriting() else { throw reader.error ?? writer.error ?? UprightVideoError.invalidVideo }
     writer.startSession(atSourceTime: .zero)
-    await withTaskGroup(of: Void.self) { group in
-      for (input, output) in pairs {
-        group.addTask { await writeSamples(input: input, output: output) }
+    await withTaskCancellationHandler {
+      await withTaskGroup(of: Void.self) { group in
+        for (input, output) in pairs {
+          group.addTask { await writeSamples(input: input, output: output) }
+        }
       }
+    } onCancel: {
+      reader.cancelReading()
+      writer.cancelWriting()
     }
+    try Task.checkCancellation()
     guard reader.status == .completed, writer.status == .writing else {
       writer.cancelWriting()
       throw reader.error ?? writer.error ?? UprightVideoError.invalidVideo
     }
     await writer.finishWriting()
     guard writer.status == .completed else { throw writer.error ?? UprightVideoError.invalidVideo }
+    try Task.checkCancellation()
     _ = try FileManager.default.replaceItemAt(url, withItemAt: temporary)
-  }.value
+  }
+  try await withTaskCancellationHandler {
+    try await task.value
+  } onCancel: {
+    task.cancel()
+  }
 }
 
 private enum UprightVideoError: Error {

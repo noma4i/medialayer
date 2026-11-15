@@ -29,6 +29,7 @@ import com.noma4i.medialayer.cameraRefusalText
 import com.noma4i.medialayer.captureProfile
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlinx.coroutines.CompletableDeferred
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -120,6 +121,9 @@ private class Counters {
   @Volatile var denySessions = false
   @Volatile var denyShots = false
   @Volatile var info: MediaInfo? = MediaInfo(2000UL, ImageSize(720u, 1280u))
+  @Volatile var videoGate: CompletableDeferred<Unit>? = null
+  val straightened = CopyOnWriteArrayList<File>()
+  val straightenCancelled = java.util.concurrent.atomic.AtomicBoolean()
 
   fun checkThread() {
     if (Looper.myLooper() == Looper.getMainLooper()) mainCalls.incrementAndGet()
@@ -174,6 +178,15 @@ class MediaCameraTest {
       clipInfo = { _ ->
         counters.checkThread()
         counters.info
+      },
+      uprightVideo = { file ->
+        counters.straightened.add(file)
+        try {
+          counters.videoGate?.await()
+        } catch (cancel: kotlinx.coroutines.CancellationException) {
+          counters.straightenCancelled.set(true)
+          throw cancel
+        }
       },
       upright = { raw, quality ->
         counters.checkThread()
@@ -503,5 +516,37 @@ class MediaCameraTest {
   fun inv_capture_09_aBadProfileMakesNoCamera() {
     val broken = captureProfile(CaptureKind.MOMENT).copy(videoSize = null)
     assertThrows(MediaException::class.java) { MediaCamera(context, broken) }
+  }
+
+  @Test
+  fun inv_capture_29_aFinishedTakeIsStraightenedWhileStoppingAndACancelThenThrowsItAway() = runBlocking {
+    val gate = CompletableDeferred<Unit>()
+    val rig = rig(moment) { _, counters -> counters.videoGate = gate }
+    ready(rig)
+    rig.camera.startRecording()
+    val recorded = rig.backend.recordingFile!!
+    rig.backend.emit(CaptureEvent.RecordFinished(RecordEnd.LIMIT_REACHED))
+    eventually("straightening while stopping") { rig.counters.straightened.toList() == listOf(recorded) && rig.camera.state.value.phase == CameraPhase.STOPPING }
+    rig.camera.cancelRecording()
+    eventually("ready after the cancel") { rig.camera.state.value.phase == CameraPhase.READY }
+    assertTrue("the conversion was cancelled", rig.counters.straightenCancelled.get())
+    assertFalse(recorded.exists())
+    val refused = runCatching { rig.camera.stopRecording() }.exceptionOrNull()
+    assertTrue("$refused", refused is MediaException.Camera)
+  }
+
+  @Test
+  fun inv_capture_31_theClipOfATakeIsGivenOnce() = runBlocking {
+    val rig = rig(moment)
+    ready(rig)
+    rig.camera.startRecording()
+    val recorded = rig.backend.recordingFile!!
+    rig.backend.emit(CaptureEvent.RecordFinished(RecordEnd.LIMIT_REACHED))
+    eventually("settled") { rig.camera.state.value.phase == CameraPhase.READY }
+    val clip = rig.camera.stopRecording()
+    assertTrue(clip.file.isFile)
+    assertEquals(listOf(recorded), rig.counters.straightened.toList())
+    val again = runCatching { rig.camera.stopRecording() }.exceptionOrNull()
+    assertEquals(CameraRefusal.NOT_READY, (again as? MediaException.Camera)?.reason)
   }
 }

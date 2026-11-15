@@ -142,7 +142,10 @@ public final class MediaCamera: @unchecked Sendable {
   public func stopRecording() async throws -> CapturedClip {
     try await withCheckedThrowingContinuation { continuation in
       queue.async {
-        if let outcome = self.ended { return continuation.resume(with: outcome) }
+        if let outcome = self.ended {
+          self.ended = nil
+          return continuation.resume(with: outcome)
+        }
         guard self.stopWaiter == nil, self.run.started || self.run.starting else { return continuation.resume(throwing: Self.refusal(.notReady)) }
         self.stopWaiter = continuation
         self.apply(.stop)
@@ -229,6 +232,12 @@ public final class MediaCamera: @unchecked Sendable {
     let step = captureStep(run: run, event: event, profile: profile)
     run = step.run
     for action in step.actions { perform(action) }
+    if run.discard, run.end != nil, reading != nil {
+      reading?.cancel()
+      reading = nil
+      apply(.recordSettled(durationMs: nil))
+      return
+    }
     publish(run.state)
     settleWaiters()
     syncTicker()
@@ -255,6 +264,7 @@ public final class MediaCamera: @unchecked Sendable {
     }
     if let waiter = stopWaiter, let outcome = ended {
       stopWaiter = nil
+      ended = nil
       waiter.resume(with: outcome)
     }
   }
@@ -301,8 +311,8 @@ public final class MediaCamera: @unchecked Sendable {
       backend.beginRecording(to: url, profile: profile, lens: run.state.lens)
       let callId = callId
       if !calls.register(callId, { [weak self] in self?.post(.callStarted) }) { post(.callStarted) }
-    case let .endRecording(discard):
-      backend.endRecording(cancelled: discard)
+    case .endRecording:
+      backend.endRecording()
     case .readClip:
       readClip()
     case .deliver:
@@ -320,6 +330,7 @@ public final class MediaCamera: @unchecked Sendable {
     backend.unbind()
     calls.unregister(callId)
     reading?.cancel()
+    reading = nil
     if let url = recordingURL { try? FileManager.default.removeItem(at: url) }
     recordingURL = nil
     clipInfo = nil
@@ -434,10 +445,18 @@ public final class MediaCamera: @unchecked Sendable {
     guard let url = recordingURL else { return }
     reading?.cancel()
     reading = Task { [services] in
-      let info = await services.clipInfo(url)
+      let info: MediaInfo?
+      do {
+        try await services.uprightVideo(url)
+        try Task.checkCancellation()
+        info = await services.clipInfo(url)
+      } catch {
+        info = nil
+      }
       guard !Task.isCancelled else { return }
       self.queue.async {
         guard self.recordingURL == url else { return }
+        self.reading = nil
         self.clipInfo = info
         self.apply(.recordSettled(durationMs: info?.durationMs))
       }
@@ -457,6 +476,8 @@ public final class MediaCamera: @unchecked Sendable {
 
   private func discard() {
     calls.unregister(callId)
+    reading?.cancel()
+    reading = nil
     if let url = recordingURL { try? FileManager.default.removeItem(at: url) }
     recordingURL = nil
     clipInfo = nil

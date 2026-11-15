@@ -147,6 +147,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
 
   /// The preview layer joins the session here, on the session queue: both the join and its connection take the session lock, so Main never touches the session.
   func attachPreviewLayer(_ layer: AVCaptureVideoPreviewLayer) {
+    nonisolated(unsafe) let layer = layer
     queue.async {
       let id = ObjectIdentifier(layer)
       layer.setSessionWithNoConnection(self.session)
@@ -159,6 +160,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
   }
 
   func detachPreviewLayer(_ layer: AVCaptureVideoPreviewLayer) {
+    nonisolated(unsafe) let layer = layer
     queue.async {
       let id = ObjectIdentifier(layer)
       self.previews[id] = nil
@@ -247,11 +249,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     }
   }
 
-  func endRecording() { endRecording(cancelled: false) }
-
-  func endRecording(cancelled: Bool) {
+  func endRecording() {
     queue.async {
-      if cancelled { self.recording?.cancel() }
       if self.movieOutput?.isRecording == true { self.movieOutput?.stopRecording() }
     }
   }
@@ -337,8 +336,6 @@ private final class PhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate, @unc
 }
 
 private final class MovieDelegate: NSObject, AVCaptureFileOutputRecordingDelegate, @unchecked Sendable {
-  private let lock = NSLock()
-  private var cancelled = false
   private let onStart: @Sendable () -> Void
   private let onFinish: @Sendable (RecordEnd) -> Void
 
@@ -347,27 +344,17 @@ private final class MovieDelegate: NSObject, AVCaptureFileOutputRecordingDelegat
     self.onFinish = onFinish
   }
 
-  func cancel() { lock.withLock { cancelled = true } }
-
   func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo fileURL: URL, from connections: [AVCaptureConnection]) {
     onStart()
   }
 
   func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
     let end = Self.end(of: error)
-    guard !lock.withLock({ cancelled }), end == .completed || end == .limitReached else {
+    guard end == .completed || end == .limitReached else {
       try? FileManager.default.removeItem(at: outputFileURL)
       return onFinish(end)
     }
-    Task.detached { [onFinish] in
-      do {
-        try await uprightVideo(at: outputFileURL)
-        onFinish(end)
-      } catch {
-        try? FileManager.default.removeItem(at: outputFileURL)
-        onFinish(.failed)
-      }
-    }
+    onFinish(end)
   }
 
   static func end(of error: Error?) -> RecordEnd {

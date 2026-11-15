@@ -169,4 +169,21 @@ class MediaAudioSessionTest {
 
     assertEquals(listOf("request:Duck", "request:Recording"), port.calls.toList())
   }
+
+  @Test
+  fun twoRecordingHoldersKeepTheRecordingFocusUntilTheLastLetsGo() {
+    val session = session(MediaAudioFocus.Mix)
+
+    assertTrue(session.activateRecording())
+    assertTrue(session.activateRecording())
+    session.deactivateRecording()
+    advance(300)
+    assertTrue("one holder still records", session.isRecording)
+    assertFalse(port.calls.contains("abandon"))
+
+    session.deactivateRecording()
+    advance(300)
+    assertFalse(session.isRecording)
+    assertEquals("abandon", port.calls.last())
+  }
 }

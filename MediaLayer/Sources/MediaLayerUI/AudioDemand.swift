@@ -1,6 +1,7 @@
 struct AudioDemand {
   private(set) var audible: Set<UInt32> = []
-  private(set) var recording = false
+  private(set) var recordings = 0
+  var recording: Bool { recordings > 0 }
   private(set) var volumeReaders = 0
 
   mutating func setAudible(slot: UInt32, _ value: Bool) -> Bool {
@@ -8,9 +9,9 @@ struct AudioDemand {
   }
 
   mutating func setRecording(_ value: Bool) -> Bool {
-    let changed = recording != value
-    recording = value
-    return changed
+    let previous = recording
+    recordings = max(0, recordings + (value ? 1 : -1))
+    return recording != previous
   }
 
   mutating func readVolume(_ delta: Int) {

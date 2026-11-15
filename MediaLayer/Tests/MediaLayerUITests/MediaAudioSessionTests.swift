@@ -164,6 +164,22 @@ struct MediaAudioSessionTests {
 
     await eventually("port stream ended") { port.volumeStreamEnded }
   }
+
+  @Test
+  func twoRecordingHoldersKeepTheRecordingSessionUntilTheLastLetsGo() async {
+    let port = FakeAudioSessionPort()
+    let session = MediaAudioSession(focus: .mix, port: port, releaseDelay: .zero)
+
+    #expect(await session.activateRecording())
+    #expect(await session.activateRecording())
+    await session.deactivateRecording()
+    #expect(session.isRecording, "one holder still records")
+    #expect(!port.log.contains("active false"))
+
+    await session.deactivateRecording()
+    #expect(!session.isRecording)
+    #expect(port.log.last == "active false")
+  }
 }
 
 private final class RaiseCount: @unchecked Sendable {

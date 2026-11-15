@@ -42,15 +42,10 @@ protocol CaptureBackend: AnyObject, Sendable {
   func takePhoto(flash: Bool, profile: CaptureProfile) async throws -> Data
   func beginRecording(to url: URL, profile: CaptureProfile, lens: CameraLens)
   func endRecording()
-  func endRecording(cancelled: Bool)
   func recordedMs() -> UInt64
   func setTorch(_ on: Bool)
   func setZoom(_ ratio: Float)
   func setFrameTap(_ tap: (@Sendable (CVPixelBuffer, UInt64) -> Void)?)
-}
-
-extension CaptureBackend {
-  func endRecording(cancelled: Bool) { endRecording() }
 }
 
 /// What a camera takes from its surroundings, so a test can give it a fake of each.
@@ -61,6 +56,7 @@ struct CameraServices {
   var admitShot: @Sendable (UInt64) async throws -> Release
   var audio: @Sendable () -> MediaAudioSession?
   var clipInfo: @Sendable (URL) async -> MediaInfo?
+  var uprightVideo: @Sendable (URL) async throws -> Void
   var upright: @Sendable (URL, Double) async throws -> URL
   var directory: URL
   var center: NotificationCenter
@@ -84,6 +80,7 @@ struct CameraServices {
         guard let layer = Media.current as? MediaLayer else { return nil }
         return try? await layer.mediaInfo(MediaSourceValue.file(url, kind: .video))
       },
+      uprightVideo: { try await MediaLayerUI.uprightVideo(at: $0) },
       upright: { url, quality in
         guard let layer = Media.current as? MediaLayer else { throw MediaError.Closed }
         return try await layer.prepareImage(MediaSourceValue.file(url, kind: .image), quality: quality).url
