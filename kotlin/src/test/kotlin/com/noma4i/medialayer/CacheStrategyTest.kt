@@ -2,8 +2,6 @@ package com.noma4i.medialayer
 
 import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -27,11 +25,10 @@ private class StrategyBody(private var rest: ByteArray) : BodyReader {
 
 private class RangeOrigin : Fetcher {
   val requests = CopyOnWriteArrayList<Request>()
-  val changes = LinkedBlockingQueue<Unit>()
 
   override suspend fun fetch(request: FetchRequest): FetchResponse {
     requests.add(Request(request.url, request.rangeStart, request.rangeEnd))
-    changes.offer(Unit)
+    TestSignal.fire()
     val start = (request.rangeStart ?: 0uL).toInt()
     val end = minOf((request.rangeEnd ?: (TOTAL - 1).toULong()).toInt(), TOTAL - 1)
     val length = end - start + 1
@@ -48,13 +45,7 @@ private class RangeOrigin : Fetcher {
 }
 
 private fun eventuallyStrategy(origin: RangeOrigin, what: String, timeoutMs: Long = 8_000, condition: () -> Boolean) {
-  val deadline = System.nanoTime() + timeoutMs * 1_000_000
-  while (!condition()) {
-    val remaining = deadline - System.nanoTime()
-    if (remaining <= 0 || origin.changes.poll(remaining, TimeUnit.NANOSECONDS) == null) {
-      throw AssertionError("never became true within $timeoutMs ms: $what")
-    }
-  }
+  TestSignal.await(what, timeoutMs, condition)
 }
 
 class CacheStrategyTest {
