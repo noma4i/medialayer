@@ -552,6 +552,26 @@ impl Rig {
     }
 }
 
+pub struct TokioClock(tokio::time::Instant);
+
+impl TokioClock {
+    pub fn new() -> TokioClock { TokioClock(tokio::time::Instant::now()) }
+}
+
+impl crate::cache::Clock for TokioClock {
+    fn now_ms(&self) -> u64 { self.0.elapsed().as_millis() as u64 }
+}
+
+pub fn replace_stage_clock(rig: &mut Rig, pool: PoolSettings, clock: Arc<dyn crate::cache::Clock>) {
+    let parts = &mut rig.parts;
+    let ring = crate::pool::Ring::with_ledger(super::assemble::pool_config(&parts.limits, parts.device, &pool), parts.ledger.clone());
+    let runner = Arc::new(super::slots::SlotRunner::new(tokio::runtime::Handle::current(), Some(rig.factory.clone())));
+    parts.stage = super::stage::Stage::new(tokio::runtime::Handle::current(), super::stage::StageParts {
+        ring, runner, routes: parts.routes.clone(), places: parts.places.clone(), prefetcher: parts.prefetcher.clone(), clock,
+        watchdog: fast_watchdog(), silent: false, change: parts.change.clone(), ledger: parts.ledger.clone(),
+    });
+}
+
 pub async fn rig() -> Rig {
     rig_with(|_| {}).await
 }

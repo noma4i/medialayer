@@ -211,6 +211,11 @@ pub(super) async fn tick_loop(inner: Weak<Inner>, mut due: watch::Receiver<Optio
             }
             None => None,
         };
+        #[cfg(test)]
+        if let Some(inner) = inner.upgrade() {
+            *inner.tick_wait.lock().unwrap() = Some(*due.borrow());
+            crate::test_signal::fire();
+        }
         let wake = tokio::select! {
             () = async { tokio::time::sleep(wait.unwrap_or_default()).await }, if wait.is_some() => Wake::Due,
             changed = due.changed() => {

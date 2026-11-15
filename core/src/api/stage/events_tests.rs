@@ -291,19 +291,23 @@ fn quick_trim(config: &mut crate::api::Assembly) {
     config.pool = crate::api::PoolSettings { trim_delay_ms: 300, ..crate::api::PoolSettings::default() };
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn inv_idle_03_a_pending_trim_wakes_the_stage_at_its_deadline_and_not_before() {
-    let rig = rig_with(quick_trim).await;
+    let mut rig = rig_with(quick_trim).await;
+    let pool = crate::api::PoolSettings { trim_delay_ms: 300, ..crate::api::PoolSettings::default() };
+    crate::api::test_support::replace_stage_clock(&mut rig, pool, Arc::new(crate::api::test_support::TokioClock::new()));
     let stage = &rig.parts.stage;
     stage.visible(video(&url_of(0)), true);
     eventually(|| rig.factory.slot_holding(&url_of(0)).is_some()).await;
     let (_, slot) = rig.holder(&url_of(0));
+    eventually(|| stage.inner.tick_wait.lock().unwrap().is_some_and(|due| due.is_some() && due == *stage.inner.due.borrow())).await;
     let armed = stage.wakes();
 
-    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    tokio::time::advance(std::time::Duration::from_millis(150)).await;
     assert_eq!(stage.wakes(), armed, "no wake before the trim deadline");
     assert!(!slot.calls().contains(&SlotCall::Unload));
 
+    tokio::time::advance(std::time::Duration::from_millis(150)).await;
     tokio::time::timeout(std::time::Duration::from_secs(3), eventually(|| slot.calls().contains(&SlotCall::Unload))).await.expect("the trim never came");
     assert!(stage.wakes() > armed, "the deadline woke the stage");
 }

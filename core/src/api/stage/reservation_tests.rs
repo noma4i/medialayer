@@ -159,9 +159,11 @@ async fn inv_pool_19_a_reload_keeps_its_admission_and_a_new_source_gets_its_own(
     eventually(|| reserved(ledger, 4) == SLOT_BYTES).await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn inv_pool_20_a_refused_page_waits_for_the_ack_and_the_window_refills_without_any_input() {
-    let rig = rig().await;
+    let mut rig = rig().await;
+    let pool = crate::api::PoolSettings { trim_delay_ms: 600_000, ..crate::api::PoolSettings::default() };
+    crate::api::test_support::replace_stage_clock(&mut rig, pool, Arc::new(crate::api::test_support::TokioClock::new()));
     let (stage, ledger) = (&rig.parts.stage, &rig.parts.ledger);
     ledger.set_ceiling(SLOT_BYTES);
     stage.replace_window(0, videos(4));
@@ -170,9 +172,7 @@ async fn inv_pool_20_a_refused_page_waits_for_the_ack_and_the_window_refills_wit
     let gate = rig.factory.unload_gate.hold();
     stage.move_window(1);
     eventually(|| rig.factory.unload_gate.entered() == 1).await;
-    for _ in 0..50 {
-        tokio::task::yield_now().await;
-    }
+    eventually(|| stage.state().is_room_wanted).await;
     assert_eq!(ledger.used(), SLOT_BYTES, "the ceiling was exceeded while the old source was still native-live");
     assert!(rig.factory.slot_holding(&url_of(1)).is_none(), "the nearer page loaded before the old source was acked");
 
@@ -181,14 +181,10 @@ async fn inv_pool_20_a_refused_page_waits_for_the_ack_and_the_window_refills_wit
     assert_eq!(ledger.used(), SLOT_BYTES);
     assert_eq!(unloads(&rig.factory), 1, "the refill evicted more than the one source that made room");
 
-    eventually(|| rig.factory.live_sources() == 1).await;
-    for _ in 0..50 {
-        tokio::task::yield_now().await;
-    }
+    eventually(|| rig.factory.live_sources() == 1 && stage.commands_idle() && !stage.state().is_restore_requested
+        && stage.inner.tick_wait.lock().unwrap().is_some_and(|due| due != Some(0) && due == *stage.inner.due.borrow())).await;
     let wakes = stage.wakes();
-    for _ in 0..200 {
-        tokio::task::yield_now().await;
-    }
+    tokio::time::advance(std::time::Duration::from_secs(1)).await;
     assert_eq!(stage.wakes(), wakes, "the settled pool kept waking");
 }
 
@@ -242,9 +238,8 @@ async fn inv_pool_21_dispose_follows_the_started_work_and_never_creates_for_a_lo
     runner.send_held(1, load("started", 1), Some(take(7)));
     eventually(|| factory.gate.entered() == 1).await;
     runner.dispose(1);
-    for _ in 0..50 {
-        tokio::task::yield_now().await;
-    }
+    runner.send(3, SlotCall::Mute);
+    eventually(|| factory.slots.lock().unwrap().get(&3).is_some_and(|slot| slot.calls().contains(&SlotCall::Mute))).await;
     assert_eq!(factory.slot(1).disposed.load(Ordering::SeqCst), 0, "dispose overtook the load that had started");
     drop(started);
     runner.disposed().await;
@@ -253,7 +248,7 @@ async fn inv_pool_21_dispose_follows_the_started_work_and_never_creates_for_a_lo
 
     let creating = factory.create_gate.hold();
     runner.send_held(2, load("created", 1), Some(take(9)));
-    eventually(|| factory.create_gate.entered() == 2).await;
+    eventually(|| factory.create_gate.entered() == 3).await;
     runner.dispose(2);
     drop(creating);
     runner.disposed().await;
@@ -303,9 +298,7 @@ async fn inv_pool_21_shrinking_disposes_the_removed_players_and_closing_leaves_n
     assert_eq!(ledger.used(), 0);
     let created = rig.factory.created.lock().unwrap().len();
     stage.replace_window(0, videos(3));
-    for _ in 0..50 {
-        tokio::task::yield_now().await;
-    }
+    tokio::time::timeout(std::time::Duration::from_secs(20), rig.parts.prefetcher.wait_live_at_most(0)).await.unwrap();
     assert_eq!(rig.factory.created.lock().unwrap().len(), created, "a declaration after the close made a player");
     assert_eq!(ledger.used(), 0, "a declaration after the close took a reservation");
 }
