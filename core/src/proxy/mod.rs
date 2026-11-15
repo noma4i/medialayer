@@ -92,8 +92,8 @@ impl Proxy {
     }
 
     #[cfg(test)]
-    pub(crate) fn gate_next_hold(&self) -> Arc<tokio::sync::Semaphore> {
-        self.inner.windows.gate_next_hold()
+    pub(crate) fn gate_hold(&self, target: &str) -> (Arc<std::sync::atomic::AtomicBool>, Arc<tokio::sync::Semaphore>) {
+        self.inner.windows.gate_hold(target)
     }
 
     #[cfg(test)]

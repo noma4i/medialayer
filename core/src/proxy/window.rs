@@ -66,7 +66,7 @@ pub(super) struct Windows {
     #[cfg(test)]
     holds: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
-    hold_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
+    hold_gate: Mutex<Option<(String, Arc<std::sync::atomic::AtomicBool>, Arc<tokio::sync::Semaphore>)>>,
 }
 
 impl Windows {
@@ -89,10 +89,11 @@ impl Windows {
     }
 
     #[cfg(test)]
-    pub fn gate_next_hold(&self) -> Arc<tokio::sync::Semaphore> {
+    pub fn gate_hold(&self, target: &str) -> (Arc<std::sync::atomic::AtomicBool>, Arc<tokio::sync::Semaphore>) {
         let gate = Arc::new(tokio::sync::Semaphore::new(0));
-        *locked(&self.hold_gate) = Some(gate.clone());
-        gate
+        let entered = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        *locked(&self.hold_gate) = Some((target.to_owned(), entered.clone(), gate.clone()));
+        (entered, gate)
     }
 
     pub fn set_chunks_ahead(&self, chunks_ahead: u32) {
@@ -277,8 +278,13 @@ impl ProxyShared {
             #[cfg(test)]
             if hold.is_none() {
                 hold = Some(HoldCount::new(&self.windows.holds));
-                let gate = locked(&self.windows.hold_gate).take();
-                if let Some(gate) = gate {
+                let gate = {
+                    let mut gate = locked(&self.windows.hold_gate);
+                    if gate.as_ref().is_some_and(|(wanted, _, _)| wanted == target) { gate.take() } else { None }
+                };
+                if let Some((_, entered, gate)) = gate {
+                    entered.store(true, Ordering::SeqCst);
+                    crate::test_signal::fire();
                     let _permit = gate.acquire().await;
                 }
             }

@@ -136,9 +136,9 @@ async fn inv_readahead_01_a_player_that_asks_for_the_whole_clip_pulls_chunks_ahe
 async fn inv_readahead_02_a_held_segment_is_released_by_the_playhead_and_a_seek_and_a_cached_one_is_never_held() {
     let rig = rig().await;
     let targets = playlist_lines(&rig).await;
-    let gate = rig.proxy.gate_next_hold();
+    let (entered, gate) = rig.proxy.gate_hold(&segment_url(5));
     let held = ask(&rig, &targets[5]);
-    assert!(super::proxy_harness::eventually(|| rig.proxy.playhead_holds() == 1).await);
+    assert!(super::proxy_harness::eventually(|| entered.load(Ordering::SeqCst)).await);
     assert_eq!((held.is_finished(), origin_calls(&rig, 5)), (false, 0));
     tokio::time::advance(Duration::from_millis(250)).await;
     rig.playhead.move_to(3 * SEGMENT_MS);
@@ -146,9 +146,9 @@ async fn inv_readahead_02_a_held_segment_is_released_by_the_playhead_and_a_seek_
     let reply = tokio::time::timeout(Duration::from_millis(1_400), held).await.expect("released by the playhead").unwrap();
     assert_eq!((reply.status, origin_calls(&rig, 5)), (200, 1));
 
-    let gate = rig.proxy.gate_next_hold();
+    let (entered, gate) = rig.proxy.gate_hold(&segment_url(7));
     let jumped = ask(&rig, &targets[7]);
-    assert!(super::proxy_harness::eventually(|| rig.proxy.playhead_holds() == 1).await);
+    assert!(super::proxy_harness::eventually(|| entered.load(Ordering::SeqCst)).await);
     assert!(!jumped.is_finished());
     rig.playhead.move_to(6 * SEGMENT_MS);
     rig.proxy.nudge_window(MEDIA);

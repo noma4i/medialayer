@@ -1,6 +1,22 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::Notify;
 
+pub async fn timeout<T>(limit: std::time::Duration, future: impl std::future::Future<Output = T>) -> Result<T, ()> {
+    let (cancel, cancelled) = std::sync::mpsc::channel::<()>();
+    let (expired, deadline) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        if matches!(cancelled.recv_timeout(limit), Err(std::sync::mpsc::RecvTimeoutError::Timeout)) {
+            let _ = expired.send(());
+        }
+    });
+    let result = tokio::select! {
+        value = future => Ok(value),
+        _ = deadline => Err(()),
+    };
+    drop(cancel);
+    result
+}
+
 static VERSION: AtomicU64 = AtomicU64::new(0);
 static CHANGED: Notify = Notify::const_new();
 

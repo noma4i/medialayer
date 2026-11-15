@@ -72,7 +72,7 @@ pub(super) fn media_lines(reply: &Reply) -> Vec<String> {
 #[track_caller]
 pub(super) fn eventually(mut condition: impl FnMut() -> bool) -> impl Future<Output = bool> {
     let caller = std::panic::Location::caller();
-    async move { tokio::time::timeout(Duration::from_secs(3), async {
+    async move { crate::test_signal::timeout(Duration::from_secs(3), async {
         loop {
             let seen = crate::test_signal::current();
             if condition() { return true; }

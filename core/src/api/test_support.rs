@@ -6,7 +6,7 @@ const WAIT_LIMIT: Duration = Duration::from_secs(20);
 #[track_caller]
 pub fn eventually_async<F: std::future::Future<Output = bool>>(mut condition: impl FnMut() -> F) -> impl std::future::Future<Output = ()> {
     let caller = std::panic::Location::caller();
-    async move { tokio::time::timeout(WAIT_LIMIT, async {
+    async move { crate::test_signal::timeout(WAIT_LIMIT, async {
         loop {
             let seen = crate::test_signal::current();
             if condition().await { return; }
@@ -23,7 +23,7 @@ pub fn eventually(condition: impl FnMut() -> bool) -> impl std::future::Future<O
 #[track_caller]
 pub fn wait_until(mut condition: impl FnMut() -> bool, limit: Duration) -> impl std::future::Future<Output = ()> {
     let caller = std::panic::Location::caller();
-    async move { tokio::time::timeout(limit, async {
+    async move { crate::test_signal::timeout(limit, async {
         loop {
             let seen = crate::test_signal::current();
             if condition() { return; }
