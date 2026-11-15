@@ -34,7 +34,7 @@ private final class InputSlot: PlayerSlotFactory, @unchecked Sendable {
 
   func count(_ name: String) -> Int { lock.withLock { events.filter { $0.name == name }.count } }
 
-  func note(slot: UInt32, name: String, key: String) { lock.withLock { events.append((slot, name, key)) } }
+  func note(slot: UInt32, name: String, key: String) { lock.withLock { events.append((slot, name, key)) }; TestSignal.shared.fire() }
   func create(slot: UInt32) async -> CreatedPlayer { CreatedPlayer(player: Recorder(slot: slot, log: self)) }
 
   private final class Recorder: PlayerSlot, @unchecked Sendable {
@@ -71,7 +71,7 @@ private final class MountPlacesLog: MediaPlaces, @unchecked Sendable {
 
   init(_ inner: MediaLayer) { self.inner = inner }
 
-  private func record(_ entry: String) { lock.withLock { entries.append(entry) } }
+  private func record(_ entry: String) { lock.withLock { entries.append(entry) }; TestSignal.shared.fire() }
 
   func imageStats() -> ImageCounters { inner.imageStats() }
   func cacheKey(url: String, headers: [String: String]) -> String { inner.cacheKey(url: url, headers: headers) }

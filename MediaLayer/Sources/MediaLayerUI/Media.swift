@@ -51,7 +51,7 @@ extension MediaLayer: MediaPlaces {
 @Observable
 final class MutedFlag: @unchecked Sendable {
   var value = false
-  var failure: MediaError?
+  var failure: MediaError? { didSet { TestChange.fire() } }
 }
 
 public enum Media {

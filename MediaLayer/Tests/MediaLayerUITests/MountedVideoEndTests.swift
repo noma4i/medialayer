@@ -14,7 +14,7 @@ private struct NoteSource: MediaSource {
 @MainActor
 private final class NoteEvents: ObservableObject {
   @Published var mounted = true
-  var log: [String] = []
+  var log: [String] = [] { didSet { TestSignal.shared.fire() } }
 }
 
 private struct NotePage: View {

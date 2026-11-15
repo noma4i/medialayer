@@ -172,6 +172,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     await MainActor.run { [self] in
       guard !closed.isSet, !Task.isCancelled else { return }
       perform(command)
+      TestChange.fire()
     }
   }
 

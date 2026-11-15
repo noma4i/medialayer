@@ -24,10 +24,12 @@ private final class CountingSlot: PlayerSlot, PlayerSlotFactory, @unchecked Send
 
   func create(slot: UInt32) async -> CreatedPlayer {
     lock.withLock { created += 1 }
+    TestSignal.shared.fire()
     return CreatedPlayer(player: self)
   }
   func apply(command: SlotCall) async {
     if case .play = command { lock.withLock { played.insert("play") } }
+    TestSignal.shared.fire()
   }
   func dispose() async {}
   func sample() -> SlotSample { SlotSample(positionMs: 0, durationMs: nil, isLooping: false, viewAttached: false, frameRendered: false) }

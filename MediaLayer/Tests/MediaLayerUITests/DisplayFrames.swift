@@ -19,7 +19,7 @@ private final class DisplayFrameCounter: NSObject {
     self.link = link
   }
 
-  @objc private func tick() { ticks += 1 }
+  @objc private func tick() { ticks += 1; TestSignal.shared.fire() }
 
   func stop() {
     link?.invalidate()

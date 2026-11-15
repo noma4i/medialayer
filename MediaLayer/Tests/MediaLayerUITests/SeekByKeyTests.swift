@@ -14,6 +14,7 @@ private final class SeekSlot: PlayerSlot, PlayerSlotFactory, @unchecked Sendable
     case let .seek(positionMs): log.continuation.yield("seek \(positionMs)")
     default: break
     }
+    TestSignal.shared.fire()
   }
   func dispose() async {}
   func sample() -> SlotSample {

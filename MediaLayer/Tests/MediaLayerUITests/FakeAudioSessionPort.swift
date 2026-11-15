@@ -31,6 +31,7 @@ final class FakeAudioSessionPort: AudioSessionPort, @unchecked Sendable {
   }
 
   func setActive(_ active: Bool) throws {
+    defer { TestSignal.shared.fire() }
     try lock.withLock {
       if active, let current = currentCategory, failingCategories.contains(current) {
         calls.append("active true FAILED")
@@ -50,7 +51,7 @@ final class FakeAudioSessionPort: AudioSessionPort, @unchecked Sendable {
   func volumeChanges() -> AsyncStream<Float> {
     let (stream, continuation) = AsyncStream<Float>.makeStream()
     lock.withLock { volumeSink = continuation }
-    continuation.onTermination = { [self] _ in lock.withLock { volumeEnded = true } }
+    continuation.onTermination = { [self] _ in lock.withLock { volumeEnded = true }; TestSignal.shared.fire() }
     return stream
   }
 
@@ -67,5 +68,6 @@ final class FakeAudioSessionPort: AudioSessionPort, @unchecked Sendable {
       calls.append(call)
       if Thread.isMainThread { mainThreadCalls += 1 }
     }
+    TestSignal.shared.fire()
   }
 }

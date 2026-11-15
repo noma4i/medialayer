@@ -23,6 +23,7 @@ private final class SuspendProbeSlot: PlayerSlot, PlayerSlotFactory, @unchecked 
     case .unload: lock.withLock { unloadCount += 1 }
     default: break
     }
+    TestSignal.shared.fire()
   }
   func dispose() async {}
   func sample() -> SlotSample { SlotSample(positionMs: 0, durationMs: nil, isLooping: false, viewAttached: false, frameRendered: false) }
@@ -62,15 +63,6 @@ private struct SuspendProbeCell: View {
 }
 
 private let probeClip = "file:///clip.mp4"
-
-@MainActor
-private func waits(_ condition: () -> Bool) async -> Bool {
-  for _ in 0..<400 {
-    if condition() { return true }
-    try? await Task.sleep(for: .milliseconds(25))
-  }
-  return condition()
-}
 
 @MainActor
 private struct SuspendRig {

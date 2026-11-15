@@ -35,11 +35,12 @@ private final class HeldOrigin: Fetcher, @unchecked Sendable {
 
   var counters: String { "a=\(fetches("a.jpg")) b=\(fetches("b.jpg")) c=\(fetches("c.jpg")) released=\(releaseCount)" }
 
-  func reading(_ url: String) { events.continuation.yield(url) }
-  func released() { lock.withLock { releases += 1 }; events.continuation.yield("released") }
+  func reading(_ url: String) { events.continuation.yield(url); TestSignal.shared.fire() }
+  func released() { lock.withLock { releases += 1 }; events.continuation.yield("released"); TestSignal.shared.fire() }
 
   func fetch(request: FetchRequest) async throws -> FetchResponse {
     lock.withLock { urls.append(request.url) }
+    TestSignal.shared.fire()
     return FetchResponse(status: 200, headers: [:], body: OpenBody(origin: self, url: request.url))
   }
 }

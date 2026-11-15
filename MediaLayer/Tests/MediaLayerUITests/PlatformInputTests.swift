@@ -42,7 +42,7 @@ private final class GatedPlace: PlaceHandle, @unchecked Sendable {
   func itemState(state: MediaState) throws {}
   func release() { note("release") }
   func waitForEntry() { entered.wait() }
-  private func note(_ call: String) { lock.withLock { log.append(call) } }
+  private func note(_ call: String) { lock.withLock { log.append(call) }; TestSignal.shared.fire() }
 }
 
 @Suite struct PlatformInputTests {
@@ -183,6 +183,7 @@ private final class MappingGate: @unchecked Sendable {
       if first { held = true }
       return first
     }
+    TestSignal.shared.fire()
     if blocks { semaphore.wait() }
     lock.withLock { active -= 1 }
     return nil
@@ -200,12 +201,13 @@ private final class RefusingPlace: PlaceHandle, @unchecked Sendable {
 
   func update(input: PlaceInput) throws {
     lock.withLock { attempts += 1 }
+    TestSignal.shared.fire()
     throw MediaError.Overloaded(detail: "entry limit reached")
   }
 
   func seek(fraction: Double) throws {}
   func itemState(state: MediaState) throws {}
-  func release() { lock.withLock { released += 1 } }
+  func release() { lock.withLock { released += 1 }; TestSignal.shared.fire() }
 }
 
 extension PlatformInputTests {
@@ -299,6 +301,7 @@ extension PlatformInputTests {
     weak var weakCounters: ImageCounters?
     do {
       let counters = ImageCounters()
+      signalOnRelease(counters)
       weakCounters = counters
       counters.recordLater(work: .observe)
       await eventually("flushed") { counters.snapshot().activeObservers == 1 }
@@ -312,7 +315,7 @@ private final class FailureLog: @unchecked Sendable {
   private let lock = NSLock()
   private var errors: [MediaError] = []
   var count: Int { lock.withLock { errors.count } }
-  func add(_ error: MediaError) { lock.withLock { errors.append(error) } }
+  func add(_ error: MediaError) { lock.withLock { errors.append(error) }; TestSignal.shared.fire() }
 }
 
 extension PlatformInputTests {
@@ -344,6 +347,7 @@ extension PlatformInputTests {
     weak var weakProbe: MapperProbe?
     do {
       let probe = MapperProbe()
+      signalOnRelease(probe)
       weakProbe = probe
       follower.mount(places: places, layout: .video(source: { _ in probe.touch(); return nil }), data: { feed.rows }, active: 0, enabled: true, failed: { _ in })
     }
@@ -381,7 +385,7 @@ private final class Readings: @unchecked Sendable {
   private let lock = NSLock()
   private var values: [Bool] = []
 
-  func add(_ value: Bool) { lock.withLock { values.append(value) } }
+  func add(_ value: Bool) { lock.withLock { values.append(value) }; TestSignal.shared.fire() }
 
   var all: [Bool] { lock.withLock { values } }
 }

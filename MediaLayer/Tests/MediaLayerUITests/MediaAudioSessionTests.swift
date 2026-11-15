@@ -190,5 +190,6 @@ private final class RaiseCount: @unchecked Sendable {
 
   func add() {
     lock.withLock { count += 1 }
+    TestSignal.shared.fire()
   }
 }

@@ -124,8 +124,9 @@ extension GlobalMedia {
       let playback = AnimatedFramesView.Playback()
       let window = attached(view)
 
+      let lastFrame = signature(frames.image(at: 2))
       update(view, playback, frames, animation: ImageAnimation(rest: .last), rests: true)
-      await eventually("the last frame is shown") { signature(view.shownContents) == signature(frames.image(at: 2)) }
+      await eventually("the last frame is shown") { signature(view.shownContents) == lastFrame }
       #expect(signature(view.shownContents) != signature(frames.firstImage))
       #expect(frames.stream.preparations == 0)
 

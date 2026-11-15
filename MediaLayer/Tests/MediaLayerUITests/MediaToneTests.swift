@@ -27,6 +27,7 @@ private final class ToneInputs: ObservableObject {
   func record(_ tone: MediaTone?, _ error: MediaError?) {
     shown.append(tone)
     failures.append(error)
+    TestSignal.shared.fire()
   }
 }
 

@@ -147,6 +147,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
       finishing = task
       return task
     }
+    TestChange.fire()
     return await task.value
   }
 

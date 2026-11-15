@@ -35,6 +35,7 @@ private final class FakeBackend: CaptureBackend, @unchecked Sendable {
       log.append(entry)
       if Thread.isMainThread { mainThreadCalls += 1 }
     }
+    TestSignal.shared.fire()
   }
 
   func bind(lens: CameraLens, profile: CaptureProfile) {
@@ -75,13 +76,14 @@ private final class FakeBackend: CaptureBackend, @unchecked Sendable {
 
   func recordedMs() -> UInt64 {
     lock.withLock { recordedReads += 1 }
+    TestSignal.shared.fire()
     readEvents.continuation.yield(())
     return 700
   }
 
   func setTorch(_ on: Bool) { note("torch \(on)") }
   func setZoom(_ ratio: Float) { note("zoom \(ratio)") }
-  func setFrameTap(_ tap: (@Sendable (CVPixelBuffer, UInt64) -> Void)?) { lock.withLock { self.tap = tap } }
+  func setFrameTap(_ tap: (@Sendable (CVPixelBuffer, UInt64) -> Void)?) { lock.withLock { self.tap = tap }; TestSignal.shared.fire() }
 }
 
 private final class Counters: @unchecked Sendable {
@@ -99,9 +101,9 @@ private final class Counters: @unchecked Sendable {
   var qualities: [Double] { lock.withLock { uprightQualities } }
   var mainThread: Int { lock.withLock { mainCalls } }
 
-  func took() { lock.withLock { taken += 1 } }
-  func gave() { lock.withLock { given += 1 } }
-  func upright(_ quality: Double) { lock.withLock { uprightQualities.append(quality) } }
+  func took() { lock.withLock { taken += 1 }; TestSignal.shared.fire() }
+  func gave() { lock.withLock { given += 1 }; TestSignal.shared.fire() }
+  func upright(_ quality: Double) { lock.withLock { uprightQualities.append(quality) }; TestSignal.shared.fire() }
   func checkThread() { if Thread.isMainThread { lock.withLock { mainCalls += 1 } } }
 
   private var parked: CheckedContinuation<Void, Error>?
@@ -113,6 +115,7 @@ private final class Counters: @unchecked Sendable {
 
   func straighten(_ url: URL) async throws {
     let hold = lock.withLock { straightenedURLs.append(url); return holdVideo }
+    TestSignal.shared.fire()
     guard hold else { return }
     try await withTaskCancellationHandler {
       try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -134,6 +137,14 @@ private final class Counters: @unchecked Sendable {
   }
 }
 
+private final class StateObservation {
+  let task: Task<Void, Never>
+  init(_ states: AsyncStream<CameraState>) {
+    task = Task { for await _ in states { TestSignal.shared.fire() } }
+  }
+  deinit { task.cancel() }
+}
+
 private struct Rig {
   let camera: MediaCamera
   let backend: FakeBackend
@@ -142,6 +153,7 @@ private struct Rig {
   let directory: URL
   let audio: MediaAudioSession
   let signals: SystemSignalNames
+  let observation: StateObservation
 }
 
 private let names = SystemSignalNames(
@@ -200,7 +212,8 @@ private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .bac
     clock: { 0 }
   )
   let camera = try MediaCamera(profile: profile, lens: lens, backend: backend, services: services)
-  return Rig(camera: camera, backend: backend, counters: counters, center: center, directory: directory, audio: audio, signals: names)
+  let observation = StateObservation(camera.states)
+  return Rig(camera: camera, backend: backend, counters: counters, center: center, directory: directory, audio: audio, signals: names, observation: observation)
 }
 
 private func ready(_ rig: Rig) async {
@@ -611,6 +624,6 @@ private final class Received: @unchecked Sendable {
   private let lock = NSLock()
   private var value = 0
   var count: Int { lock.withLock { value } }
-  func add() { lock.withLock { value += 1 } }
+  func add() { lock.withLock { value += 1 }; TestSignal.shared.fire() }
 }
 #endif

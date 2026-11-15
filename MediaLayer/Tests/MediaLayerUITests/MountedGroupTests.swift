@@ -21,7 +21,7 @@ private final class TransportSlot: PlayerSlot, PlayerSlotFactory, @unchecked Sen
   var all: [String] { lock.withLock { events } }
   var transport: String? { all.last { $0 == "play" || $0 == "pause" } }
 
-  private func note(_ event: String) { lock.withLock { events.append(event) } }
+  private func note(_ event: String) { lock.withLock { events.append(event) }; TestSignal.shared.fire() }
   func create(slot: UInt32) async -> CreatedPlayer { CreatedPlayer(player: self) }
   func apply(command: SlotCall) async {
     switch command {

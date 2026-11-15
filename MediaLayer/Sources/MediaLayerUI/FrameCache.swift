@@ -81,7 +81,9 @@ final class FrameCache: @unchecked Sendable {
 
   func load(identity: String, data: Data, maxPixel: Int, admit: @escaping Admit) async -> AnimatedFrames? {
     let key = Key(identity: identity, maxPixel: maxPixel)
-    switch lock.withLock({ join(key, data: data, maxPixel: maxPixel, admit: admit) }) {
+    let joined = lock.withLock { join(key, data: data, maxPixel: maxPixel, admit: admit) }
+    TestChange.fire()
+    switch joined {
     case let .hit(frames): return frames
     case let .flight(flight):
       let waiter = Waiter()

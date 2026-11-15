@@ -180,6 +180,7 @@ struct AVQueuePlayerSlotTests {
     await slot.load(key: "clip", route: route(Self.silentClip))
     await log.wait(for: "ready")
     weak var item = slot.loadedItem
+    if let item { signalOnRelease(item) }
     #expect(slots.slot(for: "clip") === slot)
 
     await slot.unload()
@@ -200,9 +201,11 @@ struct AVQueuePlayerSlotTests {
     do {
       let slot = await makeSlot(log)
       dropped = slot
+      signalOnRelease(slot)
       await slot.load(key: "clip", route: route(Self.silentClip))
       await log.wait(for: "ready")
       item = slot.loadedItem
+      if let item { signalOnRelease(item) }
     }
     await eventually("the slot and its item are released") { dropped == nil && item == nil }
 
@@ -349,18 +352,21 @@ struct AVQueuePlayerSlotTests {
   func seekMovesThePlayhead() async throws {
     let log = PlayerEventLog()
     let slot = await makeSlot(log)
+    let observer = await MainActor.run { slot.player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.025, preferredTimescale: 600), queue: .main) { _ in TestSignal.shared.fire() } }
     await slot.load(key: "clip", route: route(Self.silentClip))
     await log.wait(for: "ready")
 
     await slot.seek(positionMs: 300)
 
     await eventually("the playhead reached 0.29 s") { await MainActor.run { slot.player.currentTime().seconds >= 0.29 } }
+    await MainActor.run { slot.player.removeTimeObserver(observer) }
   }
 
   @Test
   func inv_idle_05_a_slot_sample_reads_the_live_playhead_without_a_periodic_observer() async {
     let log = PlayerEventLog()
     let slot = await makeSlot(log)
+    let observer = await MainActor.run { slot.player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.025, preferredTimescale: 600), queue: .main) { _ in TestSignal.shared.fire() } }
     await slot.load(key: "clip", route: route(Self.silentClip))
     await log.wait(for: "ready")
 
@@ -378,6 +384,7 @@ struct AVQueuePlayerSlotTests {
     await slot.setRate(rate: 2)
     await slot.play()
     await eventually("sample() advances after a rate change") { slot.sample().positionMs > paused + 40 }
+    await MainActor.run { slot.player.removeTimeObserver(observer) }
   }
 
   @Test
@@ -402,6 +409,7 @@ struct AVQueuePlayerSlotTests {
   func aSeekAndAPlayIssuedBeforeTheItemIsReadyStartPlaybackFromTheSoughtPosition() async {
     let log = PlayerEventLog()
     let slot = await makeSlot(log)
+    let observer = await MainActor.run { slot.player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.025, preferredTimescale: 600), queue: .main) { _ in TestSignal.shared.fire() } }
     await slot.load(key: "clip", route: route(Self.silentClip))
 
     await slot.seek(positionMs: 300)
@@ -409,6 +417,7 @@ struct AVQueuePlayerSlotTests {
     await log.wait(for: "ready")
 
     await eventually("playback runs from the sought position") { slot.sample().positionMs >= 290 }
+    await MainActor.run { slot.player.removeTimeObserver(observer) }
   }
 
   @Test

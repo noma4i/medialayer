@@ -30,6 +30,7 @@ private final class FakeCapture: VoiceCapture, @unchecked Sendable {
       limitMs = maxDurationMs
       limit = onLimit
     }
+    TestSignal.shared.fire()
   }
 
   func peak() -> Float {
@@ -38,6 +39,7 @@ private final class FakeCapture: VoiceCapture, @unchecked Sendable {
       return peaks[readCount % peaks.count]
     }
     readEvents.continuation.yield(())
+    TestSignal.shared.fire()
     return peak
   }
 
@@ -46,6 +48,7 @@ private final class FakeCapture: VoiceCapture, @unchecked Sendable {
 
   func stop() throws {
     lock.withLock { stopCount += 1 }
+    TestSignal.shared.fire()
     if writes, let file = lock.withLock({ file }) { try Data([1, 2, 3]).write(to: file) }
   }
 }
@@ -63,7 +66,7 @@ private final class FirstPlayback: @unchecked Sendable {
 
   var log: [String]? { lock.withLock { calls } }
 
-  func record(_ log: [String]) { lock.withLock { if calls == nil { calls = log } } }
+  func record(_ log: [String]) { lock.withLock { if calls == nil { calls = log } }; TestSignal.shared.fire() }
 }
 
 @Suite(.serialized, .timeLimit(.minutes(1)))

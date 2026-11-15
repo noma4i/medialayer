@@ -12,6 +12,7 @@ private final class Ledger: @unchecked Sendable {
       applied.append(value)
       if Thread.isMainThread { onMain = true }
     }
+    TestSignal.shared.fire()
   }
 
   var count: Int { lock.withLock { applied.count } }
@@ -102,6 +103,7 @@ private final class ReleaseLog: @unchecked Sendable {
       total += 1
       if Thread.isMainThread { main += 1 }
     }
+    TestSignal.shared.fire()
   }
 }
 

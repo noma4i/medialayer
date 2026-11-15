@@ -14,17 +14,9 @@ private final class StateLog: StateListener, @unchecked Sendable {
 
   var all: [MediaState] { lock.withLock { states } }
 
-  func changed(state: MediaState) { lock.withLock { states.append(state) } }
+  func changed(state: MediaState) { lock.withLock { states.append(state) }; TestSignal.shared.fire() }
 
   func failed(error: MediaError) {}
-}
-
-private func eventually(_ condition: () -> Bool) async -> Bool {
-  for _ in 0..<400 {
-    if condition() { return true }
-    try? await Task.sleep(for: .milliseconds(25))
-  }
-  return condition()
 }
 
 extension GlobalMedia {

@@ -25,6 +25,7 @@ private final class IdentityOrigin: Fetcher, @unchecked Sendable {
   func fetch(request: FetchRequest) async throws -> FetchResponse {
     let account = request.headers.first { $0.key.lowercased() == "authorization" }?.value ?? ""
     lock.withLock { accounts.append(account) }
+    TestSignal.shared.fire()
     return FetchResponse(status: 200, headers: ["Content-Type": "image/png"], body: IdentityBody(pngData(side: account == "A" ? 8 : 16)))
   }
 }

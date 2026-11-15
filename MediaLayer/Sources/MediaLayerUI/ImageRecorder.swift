@@ -18,6 +18,7 @@ final class ImageRecorder: @unchecked Sendable {
         return self.totals
       }
       counters.add(totals: taken)
+      TestChange.fire()
     }
   }
 

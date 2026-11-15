@@ -13,7 +13,7 @@ private struct PageSource: MediaSource {
 
 @MainActor
 private final class FirstFrames {
-  var count = 0
+  var count = 0 { didSet { TestSignal.shared.fire() } }
   let states = AsyncStream<MediaState>.makeStream()
 }
 
@@ -23,7 +23,7 @@ private struct Page: View {
 
   var body: some View {
     MediaVideo(PageSource(url: "file:///page.mp4"), onFirstFrame: { frames.count += 1 }) { state in
-      Color.clear.onChange(of: state) { _, value in frames.states.continuation.yield(value) }
+      Color.clear.onChange(of: state) { _, value in frames.states.continuation.yield(value); TestSignal.shared.fire() }
     }
       .environment(\.mediaContext, context)
       .frame(width: 80, height: 80)

@@ -19,12 +19,15 @@ func decodedFrames() throws -> AnimatedFrames {
     CGImageDestinationAddImage(destination, try #require(context.makeImage()), [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.1]] as CFDictionary)
   }
   CGImageDestinationFinalize(destination)
-  return try #require(AnimatedFrames.decode(data as Data, maxPixel: 16))
+  let frames = try #require(AnimatedFrames.decode(data as Data, maxPixel: 16))
+  signalOnRelease(frames.stream)
+  return frames
 }
 
 @MainActor
 private func attach(_ view: UIView) -> UIWindow {
   let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+  (view as? FrameLayerView)?.onFrame = { _ in TestSignal.shared.fire() }
   window.addSubview(view)
   return window
 }
@@ -136,8 +139,8 @@ struct PausedFramesTests {
     #expect(view.isPresenting)
     let start = view.framesShown
     var shown = Set<ObjectIdentifier>()
+    view.onFrame = { image in shown.insert(ObjectIdentifier(image)); TestSignal.shared.fire() }
     await eventually("the display link put two different frames on the layer") {
-      if let contents = view.shownContents { shown.insert(ObjectIdentifier(contents)) }
       return view.framesShown >= start + 2 && shown.count >= 2
     }
     #expect(view.shownContents != nil)

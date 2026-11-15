@@ -21,6 +21,7 @@ private final class ConnectSlot: PlayerSlot, PlayerSlotFactory, @unchecked Senda
   func create(slot: UInt32) async -> CreatedPlayer { CreatedPlayer(player: self) }
   func apply(command: SlotCall) async {
     if case .play = command { lock.withLock { played += 1 } }
+    TestSignal.shared.fire()
   }
   func dispose() async {}
   func sample() -> SlotSample { SlotSample(positionMs: 0, durationMs: nil, isLooping: false, viewAttached: false, frameRendered: false) }
@@ -47,6 +48,7 @@ private final class ConnectSeen: @unchecked Sendable {
       self.places = places
       self.layer = layer
     }
+    TestSignal.shared.fire()
   }
 }
 

@@ -33,6 +33,7 @@ private final class NoteSlot: PlayerSlot, PlayerSlotFactory, @unchecked Sendable
       default: break
       }
     }
+    TestSignal.shared.fire()
   }
   func dispose() async {}
   func sample() -> SlotSample {

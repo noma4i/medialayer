@@ -33,6 +33,7 @@ public final class LoadedSlots: @unchecked Sendable {
 
   func assign(_ slot: AVQueuePlayerSlot, key: String) {
     lock.withLock { slots[key] = WeakSlot(slot) }
+    TestChange.fire()
     Task { @MainActor in progress.changed(key) }
   }
 
@@ -41,6 +42,7 @@ public final class LoadedSlots: @unchecked Sendable {
       guard slots[key]?.value === slot || slots[key]?.value == nil else { return }
       slots[key] = nil
     }
+    TestChange.fire()
     Task { @MainActor in progress.changed(key) }
   }
 }

@@ -54,6 +54,7 @@ final class PlayerEventLog: PlayerEventsProtocol, @unchecked Sendable {
       parkedReady.append(generation)
       return true
     }
+    TestSignal.shared.fire()
     if !held { stamp("ready", generation); record("ready") }
   }
 
@@ -86,5 +87,6 @@ final class PlayerEventLog: PlayerEventsProtocol, @unchecked Sendable {
       return matched
     }
     matched.forEach { $0.resume() }
+    TestSignal.shared.fire()
   }
 }

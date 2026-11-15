@@ -27,17 +27,19 @@ final class FrameStream: @unchecked Sendable {
   func preparedTask() { lock.withLock { preparationCount += 1 } }
 
   func image(at index: Int) -> CGImage? {
-    lock.withLock {
-      if cachedIndex == index { return cachedImage }
+    let result = lock.withLock { () -> (CGImage?, Bool) in
+      if cachedIndex == index { return (cachedImage, false) }
       cachedImage = nil
       cachedIndex = nil
       decodeCount += 1
-      guard let image = CGImageSourceCreateThumbnailAtIndex(source, index, options) else { return nil }
+      guard let image = CGImageSourceCreateThumbnailAtIndex(source, index, options) else { return (nil, true) }
 
       cachedIndex = index
       cachedImage = image
-      return image
+      return (image, true)
     }
+    if result.1 { TestChange.fire() }
+    return result.0
   }
 }
 
@@ -171,6 +173,7 @@ final class FrameLayerView: UIView {
   }
   /// Main-thread writes of `layer.contents`.
   private(set) var framesShown = 0
+  var onFrame: ((CGImage) -> Void)?
   private var link: CADisplayLink?
   private var presentation: Presentation?
   private var presentedIndex = -1
@@ -204,6 +207,8 @@ final class FrameLayerView: UIView {
   func show(_ image: CGImage) {
     layer.contents = image
     framesShown += 1
+    onFrame?(image)
+    TestChange.fire()
   }
 
   func present(_ presentation: Presentation) {
@@ -273,7 +278,7 @@ struct AnimatedFramesView: UIViewRepresentable {
     private var runningKey: PlanKey?
     private var shownRest: RestShown?
     private weak var presenter: FrameLayerView?
-    private(set) var finished: PlanKey?
+    private(set) var finished: PlanKey? { didSet { TestChange.fire() } }
 
     private struct RestShown: Equatable {
       let token: UUID?

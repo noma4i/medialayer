@@ -55,8 +55,16 @@ private final class ToneChanges: ToneListener, @unchecked Sendable {
   private let lock = NSLock()
   private var values: [ToneSource] = []
   var count: Int { lock.withLock { values.count } }
-  func changed(tone: MediaTone?) { if let tone, tone.source == .pixels { lock.withLock { values.append(tone.source) } } }
+  func changed(tone: MediaTone?) { if let tone, tone.source == .pixels { lock.withLock { values.append(tone.source) }; TestSignal.shared.fire() } }
   func failed(error: MediaError) {}
+}
+
+private func awaitPixelsTone(_ media: MediaLayer, _ item: MediaItem, _ condition: String, fileID: String = #fileID, filePath: String = #filePath, line: Int = #line, column: Int = #column) async throws {
+  if await pixelsTone(media, item) { return }
+  let changes = ToneChanges()
+  let subscription = try media.subscribeTone(source: item, band: 0.15, listener: changes)
+  await eventually(condition, fileID: fileID, filePath: filePath, line: line, column: column) { await pixelsTone(media, item) }
+  withExtendedLifetime(subscription) {}
 }
 
 extension GlobalMedia {
@@ -147,7 +155,7 @@ extension GlobalMedia {
       let container = await MediaImagePipeline.load(source, request: request, pipeline: context.pipeline)
 
       #expect(container != nil)
-      await eventually("tone answers with pixels") { await pixelsTone(media, source.item) }
+      try await awaitPixelsTone(media, source.item, "tone answers with pixels")
     }
 
     @Test
@@ -159,7 +167,7 @@ extension GlobalMedia {
       let image = await PlaceholderView.loadCover(cover, for: video, context: MediaContext(places: media), points: CGSize(width: 45, height: 80), scale: 2)
 
       #expect(image != nil)
-      await eventually("the video tone answers with pixels") { await pixelsTone(media, video) }
+      try await awaitPixelsTone(media, video, "the video tone answers with pixels")
     }
 
     @Test
@@ -174,7 +182,7 @@ extension GlobalMedia {
       #expect(await media.tonePixelsNeeded(source: bare) == false)
       #expect(await pixelsTone(media, bare) == false)
 
-      await eventually("the first frame gives pixels") { await pixelsTone(media, bare) }
+      try await awaitPixelsTone(media, bare, "the first frame gives pixels")
     }
   }
 }

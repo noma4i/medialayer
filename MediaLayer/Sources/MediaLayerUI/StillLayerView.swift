@@ -48,6 +48,7 @@ struct StillLayerView: UIViewRepresentable {
     coordinator.source = image
     coordinator.grayscale = grayscale
     view.layer.contents = image.cgImage.map { grayscale ? GrayscaleImage.convert($0) : $0 }
+    TestChange.fire()
   }
 
   func sizeThatFits(_ proposal: ProposedViewSize, uiView: StillLayerHost, context: Context) -> CGSize? {

@@ -78,7 +78,7 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
 
   var recorded: [String] { lock.withLock { calls } }
 
-  private func record(_ call: String) { lock.withLock { calls.append(call) } }
+  private func record(_ call: String) { lock.withLock { calls.append(call) }; TestSignal.shared.fire() }
 
   var placeFactory: ((String) -> any PlaceHandle)?
   var mountError: MediaError?
@@ -95,6 +95,7 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   var openedWindows: [RecordingWindow] { lock.withLock { windows } }
   private func opened(_ window: RecordingWindow) -> RecordingWindow {
     lock.withLock { windows.append(window) }
+    TestSignal.shared.fire()
     return window
   }
   func seek(key: String, fraction: Double) throws { record("seek \(key) \(fraction)") }
@@ -110,6 +111,7 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   func fetchImage(url: String, headers: [String: String]) async throws -> ImageFetchResult {
     noteMain("fetchImage")
     lock.withLock { fetches.append(url) }
+    TestSignal.shared.fire()
     if let latch = lock.withLock({ latchedURL == nil || latchedURL == url ? fetchLatch : nil }) { await latch.wait() }
     if let bytes = lock.withLock({ bytesByURL[url] }) { return ImageFetchResult(bytes: bytes, source: imageOrigin) }
     return ImageFetchResult(bytes: try imageResult.get(), source: imageOrigin)
@@ -119,9 +121,10 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder {
     noteMain("placeholder")
     lock.withLock { readyAsks.append(ready) }
+    TestSignal.shared.fire()
     return .none
   }
-  func setTonePreparation(preparation: TonePreparation) throws { lock.withLock { self.preparation = preparation } }
+  func setTonePreparation(preparation: TonePreparation) throws { lock.withLock { self.preparation = preparation }; TestSignal.shared.fire() }
   func tonePixelsNeeded(source: MediaItem) async -> Bool { needsTone }
   func playUrl(source: MediaItem) async throws -> PlaybackRoute {
     PlaybackRoute(url: source.url, headers: source.headers, generation: nil, hls: false, looping: false)
@@ -137,14 +140,16 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   var toneTerminations: Int { lock.withLock { toneEnded } }
   func toneStream(source: MediaItem, band: Float) -> AsyncStream<ToneUpdate> {
     let pair = AsyncStream<ToneUpdate>.makeStream()
-    pair.continuation.onTermination = { [weak self] _ in self?.lock.withLock { self?.toneEnded += 1 } }
+    pair.continuation.onTermination = { [weak self] _ in self?.lock.withLock { self?.toneEnded += 1 }; TestSignal.shared.fire() }
     lock.withLock { toneAsked.append(ToneRequest(source: source, band: band, continuation: pair.continuation)) }
+    TestSignal.shared.fire()
     return pair.stream
   }
   func stateStream(key: String) -> AsyncStream<MediaState> {
     noteMain("stateStream")
     let pair = AsyncStream<MediaState>.makeStream()
     lock.withLock { states.append(pair.continuation) }
+    TestSignal.shared.fire()
     stateSubscriptionEvents.continuation.yield(())
     return pair.stream
   }
@@ -210,6 +215,7 @@ final class RecordingWindow: WindowHandle, @unchecked Sendable {
       log.append(call)
       if Thread.isMainThread { offMain = false }
     }
+    TestSignal.shared.fire()
   }
 
   func replace(active: UInt32, sources: [MediaItem?]) throws { note("replace \(active) \(sources.count)") }

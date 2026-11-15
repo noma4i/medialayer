@@ -10,7 +10,7 @@ public final class AudioPlayback {
   public private(set) var playhead = AudioPlayhead()
   @ObservationIgnored private var jumpPending = false
   public private(set) var rate: Float
-  public private(set) var state: MediaState = .idle
+  public private(set) var state: MediaState = .idle { didSet { TestChange.fire() } }
   @ObservationIgnored private let item: MediaItem
   @ObservationIgnored private(set) var group: String?
   @ObservationIgnored private var muted: Bool
