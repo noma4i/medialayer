@@ -156,6 +156,18 @@ impl Prefetcher {
         self.restart();
     }
 
+    pub fn eviction_listener(&self) -> Arc<dyn Fn(&str) + Send + Sync> {
+        let shared = Arc::downgrade(&self.shared);
+        Arc::new(move |key: &str| {
+            let Some(shared) = shared.upgrade() else { return };
+            let source = key.split('#').next().unwrap_or(key);
+            let mut state = shared.state();
+            if !state.running.values().any(|job| job.url == source) {
+                state.ledger.forget_loaded(Some(source));
+            }
+        })
+    }
+
     pub fn forget_loaded(&self, url: Option<&str>) {
         let mut state = self.shared.state();
         let keys: Vec<String> = state.running.iter().filter(|(_, job)| url.is_none_or(|url| job.url == url)).map(|(key, _)| key.clone()).collect();

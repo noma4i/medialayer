@@ -184,6 +184,10 @@ impl Cache {
         self.inner.state().keep(key);
     }
 
+    pub fn on_evicted(&self, listener: Arc<dyn Fn(&str) + Send + Sync>) {
+        *self.inner.evicted.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(listener);
+    }
+
     pub async fn evict_now(&self) {
         evict_if_needed(&self.inner).await;
     }

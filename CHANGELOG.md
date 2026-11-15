@@ -7,6 +7,9 @@
 - A peeking neighbour page stays paused while a call hold is active.
 - A call hold never hands playback to another waiting video.
 - Closing a sibling place after a call keeps its key paused until a new declaration.
+- A cancelled or cut block download keeps its bytes and resumes from where it stopped.
+- A pending playback retry survives a stall or a pause of the same video.
+- A source evicted from the cache is prefetched again when it re-enters the window.
 - A one-shot video place ends once even when a window loaded the clip first.
 - A fixed crop frame turned right and then left returns to the frame it had.
 - Playback after a voice recording starts in the playback audio session on iOS.

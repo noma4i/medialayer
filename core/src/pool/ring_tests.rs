@@ -46,6 +46,19 @@ fn inv_pool_10_first_plan_loads_window_plays_active_and_prerolls_neighbours() {
 }
 
 #[test]
+fn inv_pool_10_each_window_move_loads_only_the_pages_that_entered_the_reach() {
+    let mut ring = ring(3, 1);
+    let list = keys(20);
+    let mut held: HashSet<usize> = HashSet::new();
+    for active in walk(20, 200) {
+        let reach = ring.pages(active, 20);
+        let loads = ring.plan(0, active, Some(active), &list).iter().filter(|command| matches!(command, Command::Load { .. })).count();
+        assert_eq!(loads, reach.clone().filter(|page| !held.contains(page)).count(), "move to {active}");
+        held = reach.collect();
+    }
+}
+
+#[test]
 fn inv_pool_10_scroll_reuses_the_freed_slot() {
     let mut ring = ring(3, 1);
     ring.plan(0, 5, Some(5), &keys(20));

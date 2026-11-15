@@ -100,7 +100,38 @@ async fn inv_proxy_06_abandoning_a_block_prefetch_cancels_its_download() {
     assert!(eventually(|| rig.store.open_writers() == 1).await);
     owner.abort();
     assert!(eventually(|| rig.proxy.live_tasks() == 0).await);
-    assert_eq!((rig.store.open_writers(), rig.store.count(), rig.store.aborts()), (0, 0, 1));
+    assert_eq!((rig.store.bytes("https://o.test/r.mp4#0"), rig.store.commits()), (None, 0));
+}
+
+#[tokio::test]
+async fn inv_proxy_43_a_block_cut_by_the_origin_keeps_its_bytes_and_the_next_attempt_asks_only_for_the_rest() {
+    let rig = rig_with(block_config(1000)).await;
+    let data = pattern(4500, 3);
+    rig.fetcher.route("https://o.test/r.mp4", Script::ok(data.clone()).chunked(100).cut_after(400));
+
+    let mut attempts = Vec::new();
+    for _ in 0..3 {
+        attempts.push(rig.proxy.fetch_first_block("https://o.test/r.mp4", &HashMap::new(), Priority::Prefetch).await.is_ok());
+    }
+
+    let ranges: Vec<_> = rig.fetcher.requests().into_iter().map(|request| request.range).collect();
+    assert_eq!(attempts, vec![false, false, true], "{ranges:?}");
+    assert_eq!(ranges, vec![Some((0, Some(999))), Some((400, Some(999))), Some((800, Some(999)))]);
+    assert_eq!(rig.store.bytes("https://o.test/r.mp4#0"), Some(data[..1000].to_vec()));
+}
+
+#[tokio::test]
+async fn inv_proxy_43_purging_the_source_drops_its_kept_bytes() {
+    let rig = rig_with(block_config(1000)).await;
+    rig.fetcher.route("https://o.test/r.mp4", Script::ok(pattern(4500, 4)).chunked(100).cut_after(100));
+    let _ = rig.proxy.fetch_block_into_store("https://o.test/r.mp4", 1, &HashMap::new(), Priority::Prefetch).await;
+    rig.fetcher.route("https://o.test/r.mp4", Script::ok(pattern(4500, 4)).chunked(100));
+
+    rig.proxy.forget_downloads(Some("https://o.test/r.mp4"));
+    rig.proxy.fetch_block_into_store("https://o.test/r.mp4", 1, &HashMap::new(), Priority::Prefetch).await.unwrap();
+
+    let last = rig.fetcher.requests().last().map(|request| request.range);
+    assert_eq!(last, Some(Some((1000, Some(1999)))));
 }
 
 #[tokio::test]

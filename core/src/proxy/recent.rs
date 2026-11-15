@@ -55,6 +55,10 @@ impl<V> Recent<V> {
         self.remove_stamped(stamp)
     }
 
+    pub fn keys(&self) -> impl Iterator<Item = &String> {
+        self.items.keys()
+    }
+
     pub fn remove(&mut self, key: &str) -> Option<V> {
         let (stamp, value) = self.items.remove(key)?;
         self.order.remove(&stamp);

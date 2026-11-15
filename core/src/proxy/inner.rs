@@ -1,5 +1,5 @@
 use super::buffer::Buffers;
-use super::byte_store::ByteStore;
+use super::byte_store::{ByteStore, StoreWriter};
 use super::config::Config;
 use super::flight::{download, Flight, FlightOutcome, FlightSubscription};
 use super::route::block_key;
@@ -21,6 +21,7 @@ use tokio::sync::oneshot;
 const MAX_STAMPS: usize = 256;
 const MAX_TOTALS: usize = 1024;
 const MAX_REGISTERED: usize = 4096;
+const MAX_PARKED: usize = 8;
 
 pub(super) struct LiveGuard(Arc<AtomicUsize>);
 
@@ -44,6 +45,11 @@ pub(super) struct Listener {
 
 type ProbeEntry = (Arc<tokio::sync::Mutex<()>>, usize);
 
+pub(super) struct Parked {
+    pub writer: Box<dyn StoreWriter>,
+    pub written: u64,
+}
+
 pub(super) struct ProxyShared {
     pub fetcher: Arc<dyn Fetcher>,
     pub store: Arc<dyn ByteStore>,
@@ -59,6 +65,7 @@ pub(super) struct ProxyShared {
     pub playlists: super::playlists::Playlists,
     pub totals: Mutex<Recent<u64>>,
     whole_only: Mutex<Recent<()>>,
+    parked: Mutex<Recent<Parked>>,
     probe_locks: Mutex<HashMap<String, ProbeEntry>>,
     pub listener: tokio::sync::Mutex<Option<Listener>>,
     pub running: AtomicBool,
@@ -142,6 +149,7 @@ impl ProxyShared {
             playlists: super::playlists::Playlists::default(),
             totals: Mutex::new(Recent::new(MAX_TOTALS)),
             whole_only: Mutex::new(Recent::new(MAX_TOTALS)),
+            parked: Mutex::new(Recent::new(MAX_PARKED)),
             probe_locks: Mutex::new(HashMap::new()),
             listener: tokio::sync::Mutex::new(None),
             running: AtomicBool::new(false),
@@ -296,6 +304,27 @@ impl ProxyShared {
 
     pub fn remember_total(&self, key: &str, total: u64) {
         locked(&self.totals).insert(key, total, |_, _| false);
+    }
+
+    pub fn park(&self, key: &str, parked: Parked) {
+        locked(&self.parked).insert(key, parked, |_, _| false);
+    }
+
+    pub fn parked_len(&self, key: &str) -> u64 {
+        locked(&self.parked).get(key).map_or(0, |parked| parked.written)
+    }
+
+    pub fn take_parked(&self, key: &str) -> Option<Parked> {
+        locked(&self.parked).remove(key)
+    }
+
+    pub fn forget_parked(&self, url: Option<&str>) {
+        let dropped: Vec<Parked> = {
+            let mut parked = locked(&self.parked);
+            let keys: Vec<String> = parked.keys().filter(|key| url.is_none_or(|url| *key == url || key.strip_prefix(url).is_some_and(|suffix| suffix.starts_with('#')))).cloned().collect();
+            keys.iter().filter_map(|key| parked.remove(key)).collect()
+        };
+        drop(dropped);
     }
 
     pub fn mark_ignores_range(&self, key: &str) {

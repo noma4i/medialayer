@@ -104,6 +104,32 @@ async fn inv_api_06_a_player_whose_clock_moves_is_checked_again_and_left_alone()
 }
 
 #[tokio::test]
+async fn inv_api_06_a_stall_while_a_retry_waits_keeps_the_retry() {
+    let rig = rig_with(|config| config.watchdog.retry_delays_ms = vec![300; 5]).await;
+    *rig.factory.advance_ms.lock().unwrap() = 1_000;
+    let (slot, player) = playing(&rig, video(&url_of(0))).await;
+    let (stage, generation) = (&rig.parts.stage, rig.parts.stage.generation_at(slot as usize));
+
+    stage.failed(slot as usize, generation, 0, "decoder died".to_string());
+    stage.stalled(slot as usize, generation, 0);
+
+    eventually(|| player.loads() == 2).await;
+}
+
+#[tokio::test]
+async fn inv_api_06_a_pause_while_a_retry_waits_keeps_the_retry() {
+    let rig = rig_with(|config| config.watchdog.retry_delays_ms = vec![300; 5]).await;
+    *rig.factory.advance_ms.lock().unwrap() = 1_000;
+    let (slot, player) = playing(&rig, video(&url_of(0))).await;
+    let stage = &rig.parts.stage;
+
+    stage.failed(slot as usize, stage.generation_at(slot as usize), 0, "decoder died".to_string());
+    stage.set_playing(&url_of(0), false, &[]);
+
+    eventually(|| player.loads() == 2).await;
+}
+
+#[tokio::test]
 async fn inv_api_06_a_stall_arms_the_watchdog_only_for_the_playing_slot() {
     let rig = rig().await;
     let stage = &rig.parts.stage;

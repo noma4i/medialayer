@@ -144,8 +144,8 @@ impl CacheControl for Cache {
 }
 
 impl TransportControl for Proxy {
-    fn forget_playlists(&self, url: Option<&str>) {
-        Proxy::forget_playlists(self, url);
+    fn forget_downloads(&self, url: Option<&str>) {
+        Proxy::forget_downloads(self, url);
     }
 
     fn set_limits(&self, limits: &Limits) {
@@ -205,6 +205,7 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
     let prefetch_ledger = PrefetchLedger::new(dedupe_window, limits.dedupe_max_entries as usize);
     let prefetcher = Prefetcher::new(Arc::new(ProxyLoader::new(proxy.clone())), &limits, prefetch_ledger, clock.clone());
     prefetcher.set_image_windows(image_windows.into_iter().collect());
+    cache.on_evicted(prefetcher.eviction_listener());
     let routes = Arc::new(Routes::new(proxy.clone(), Arc::new(cache.clone())));
     let keying = {
         let proxy = proxy.clone();

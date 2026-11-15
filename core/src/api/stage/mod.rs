@@ -208,7 +208,7 @@ impl Stage {
             let task = AbortOnDrop::new(self.inner.handle.spawn(body));
             let entries = state.tasks.entry(id.key.clone()).or_default();
             if work.is_timer() {
-                entries.retain(|armed| !armed.work.is_timer());
+                entries.retain(|armed| armed.work != work);
             }
             entries.push(Armed { generation: id.generation, work, token, _task: task });
         });

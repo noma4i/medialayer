@@ -1,9 +1,9 @@
-use super::inner::ProxyShared;
+use super::inner::{Parked, ProxyShared};
 use super::route::{answered_length, content_range_total};
 use super::slots::Priority;
 use crate::fetch::{header_value, BodyStream, FetchError, Request};
 use super::buffer::Buffers;
-use super::byte_store::Meta;
+use super::byte_store::{Meta, StoreWriter};
 use super::slots::QueueFull;
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -230,6 +230,15 @@ async fn cancellable<T>(inner: &ProxyShared, flight: &Arc<Flight>, future: impl 
     }
 }
 
+async fn keep(inner: &ProxyShared, key: &str, writer: Box<dyn StoreWriter>, written: u64, parks: bool) {
+    if parks && written > 0 {
+        crate::trace!("flight", "park {} at {written}", crate::trace::tail(key));
+        inner.park(key, Parked { writer, written });
+    } else {
+        writer.abort().await;
+    }
+}
+
 pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers: HashMap<String, String>, priority: Priority) -> FlightOutcome {
     if inner.store.contains(&flight.key).await {
         return FlightOutcome::Complete;
@@ -250,7 +259,11 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
     crate::trace!("flight", "permit {} waited={}ms {priority:?}", crate::trace::tail(&flight.url), queued.elapsed().as_millis());
     let timeout = inner.timeout();
     let buffers = inner.buffers();
-    let request = Request { url: flight.url.clone(), headers, range: flight.range.map(|(start, end)| (start, Some(end))) };
+    let parked = match flight.range {
+        Some((start, end)) if inner.parked_len(&flight.key) < end + 1 - start => inner.parked_len(&flight.key),
+        _ => 0,
+    };
+    let request = Request { url: flight.url.clone(), headers, range: flight.range.map(|(start, end)| (start + parked, Some(end))) };
     let fetched = match cancellable(inner, flight, tokio::time::timeout(timeout, inner.fetcher.fetch(request))).await {
         None => return FlightOutcome::Cancelled,
         Some(Err(_)) => return FlightOutcome::Failed("origin timed out".to_string()),
@@ -265,6 +278,7 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
     let mut whole_body = false;
     let expected = if range.is_some() { 206 } else { 200 };
     if range.is_some() && fetched.status == 200 {
+        drop(inner.take_parked(&flight.key));
         inner.mark_ignores_range(&flight.base_key);
         range = None;
         key = &flight.base_key;
@@ -286,42 +300,56 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
     if let Some(length) = object_length.filter(|_| range.is_some()) {
         inner.remember_total(&flight.base_key, length);
     }
+    let parked = if range.is_some() { parked } else { 0 };
     let expected = match range {
-        Some((start, end)) => match answered_length(&fetched.headers, start, Some(end)) {
-            Ok(length) => length,
+        Some((start, end)) => match answered_length(&fetched.headers, start + parked, Some(end)) {
+            Ok(length) => length.map(|length| length + parked),
             Err(message) => return FlightOutcome::Failed(message),
         },
         None => total,
     };
+    let total = total.map(|total| total + parked);
     let meta = Meta { content_type: content_type.clone(), total_length: object_length };
-    let Some(mut writer) = inner.store.begin_write(key, meta).await else {
-        return FlightOutcome::Unstorable;
+    let mut writer = if parked > 0 {
+        match inner.take_parked(key) {
+            Some(held) if held.written == parked => held.writer,
+            _ => return FlightOutcome::Failed("the parked part of the block vanished".to_string()),
+        }
+    } else {
+        let Some(writer) = inner.store.begin_write(key, meta).await else {
+            return FlightOutcome::Unstorable;
+        };
+        writer
     };
+    let parks = range.is_some();
     if !whole_body {
         flight.publish_head(Head { total, content_type });
     }
 
     let mut body = fetched.body;
-    let mut written = 0u64;
+    let mut written = parked;
+    if parked > 0 {
+        flight.publish_written(written);
+    }
     loop {
         let _buffer = match cancellable(inner, flight, buffers.reserve_chunk()).await {
             None => {
-                writer.abort().await;
+                keep(inner, key, writer, written, parks).await;
                 return FlightOutcome::Cancelled;
             }
             Some(Err(_)) => {
-                writer.abort().await;
+                keep(inner, key, writer, written, parks).await;
                 return FlightOutcome::Failed("no memory for the download".to_string());
             }
             Some(Ok(buffer)) => buffer,
         };
         let next = match cancellable(inner, flight, tokio::time::timeout(timeout, body.next())).await {
             None => {
-                writer.abort().await;
+                keep(inner, key, writer, written, parks).await;
                 return FlightOutcome::Cancelled;
             }
             Some(Err(_)) => {
-                writer.abort().await;
+                keep(inner, key, writer, written, parks).await;
                 return FlightOutcome::Failed("origin stalled".to_string());
             }
             Some(Ok(next)) => next,
@@ -329,7 +357,7 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
         match next {
             None => break,
             Some(Err(error)) => {
-                writer.abort().await;
+                keep(inner, key, writer, written, parks).await;
                 return FlightOutcome::Failed(error.to_string());
             }
             Some(Ok(chunk)) => {
@@ -347,7 +375,7 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
     }
     drop(body);
     if expected.is_some_and(|expected| expected != written) {
-        writer.abort().await;
+        keep(inner, key, writer, written, parks).await;
         return FlightOutcome::Failed("origin body truncated".to_string());
     }
     let committed = match expected {

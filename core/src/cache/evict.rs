@@ -92,9 +92,15 @@ async fn evict_one(inner: &Arc<CacheShared>, name: &str, version: u64) -> bool {
     if !unlink(inner, name).await {
         return false;
     }
-    let mut state = inner.state();
-    state.take(name);
-    state.evictions += 1;
+    let key = {
+        let mut state = inner.state();
+        state.evictions += 1;
+        state.take(name).map(|slot| slot.key)
+    };
+    let listener = inner.evicted.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+    if let (Some(key), Some(listener)) = (key, listener) {
+        listener(&key);
+    }
     true
 }
 

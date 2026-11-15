@@ -256,6 +256,11 @@ impl Proxy {
         self.inner.playlists.forget(url);
     }
 
+    pub fn forget_downloads(&self, url: Option<&str>) {
+        self.inner.playlists.forget(url);
+        self.inner.forget_parked(url);
+    }
+
     pub async fn ping(&self) -> bool {
         let port = self.port();
         if port == 0 {

@@ -247,6 +247,27 @@ async fn inv_api_04_the_window_also_drives_prefetch_ahead_of_the_active_page() {
 }
 
 #[tokio::test]
+async fn inv_prefetch_24_a_source_evicted_from_the_cache_is_prefetched_again_when_it_re_enters_the_window() {
+    let rig = rig().await;
+    for page in 0..8 {
+        rig.fetcher.route(&url_of(page), Script::ok(vec![1; 2 * 1024 * 1024]));
+    }
+    let block = format!("{}#0", url_of(2));
+    rig.parts.stage.replace_window(0, videos(8));
+    eventually_async(|| async { rig.parts.cache.contains(&block).await }).await;
+    let before = rig.fetcher.calls_for(&url_of(2));
+    let defaults = crate::limits::Limits::default();
+    rig.parts.cache.set_limits(crate::limits::Limits { budget: 1, min_budget: 1, ..defaults }).await.unwrap();
+    assert!(!rig.parts.cache.contains(&block).await);
+    rig.parts.cache.set_limits(defaults).await.unwrap();
+
+    rig.parts.stage.replace_window(0, Vec::new());
+    rig.parts.stage.replace_window(0, videos(8));
+
+    eventually(|| rig.fetcher.calls_for(&url_of(2)) > before).await;
+}
+
+#[tokio::test]
 async fn inv_prefetch_21_the_window_prefetches_only_after_the_playing_item_has_its_first_frame() {
     let rig = rig().await;
     for page in 0..8 {

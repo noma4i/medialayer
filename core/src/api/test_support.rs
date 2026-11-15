@@ -229,12 +229,12 @@ impl PrefetchControl for FakePrefetch {
 #[derive(Default)]
 pub struct FakeTransport {
     pub limits: Mutex<Vec<Limits>>,
-    pub forgotten_playlists: Mutex<Vec<Option<String>>>,
+    pub forgotten_downloads: Mutex<Vec<Option<String>>>,
 }
 
 impl TransportControl for FakeTransport {
-    fn forget_playlists(&self, url: Option<&str>) {
-        self.forgotten_playlists.lock().unwrap().push(url.map(str::to_string));
+    fn forget_downloads(&self, url: Option<&str>) {
+        self.forgotten_downloads.lock().unwrap().push(url.map(str::to_string));
     }
     fn set_limits(&self, limits: &Limits) {
         self.limits.lock().unwrap().push(*limits);

@@ -11,6 +11,17 @@ async fn inv_cache_21_eviction_avoids_full_scans() {
 }
 
 #[tokio::test]
+async fn inv_cache_15_a_larger_copy_that_does_not_fit_beside_the_old_one_is_refused_and_the_old_value_stays() {
+    let f = fixture(limits(100, 0.8, EvictionStrategy::Lru), &[]).await;
+    f.put("a", Kind::Image, 60).await;
+
+    let result = f.cache.put("a", Kind::Image, &vec![b'y'; 70]).await;
+
+    assert_eq!(result, Err(CacheError::NotEnoughSpace));
+    assert_eq!(f.cache.get("a").await, Some(payload(60)));
+}
+
+#[tokio::test]
 async fn inv_cache_30_selected_version_survives_replacement() {
     let f = three_of_thirty(EvictionStrategy::Lru).await;
     let name = super::naming::file_name("a");

@@ -183,7 +183,7 @@ impl Stage {
             Action::Disarm => {
                 self.with_id(&id, |state| {
                     if let Some(entries) = state.tasks.get_mut(&id.key) {
-                        entries.retain(|armed| !armed.work.is_timer());
+                        entries.retain(|armed| armed.work != Work::Watchdog);
                     }
                 });
             }

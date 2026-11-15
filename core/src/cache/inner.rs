@@ -62,6 +62,7 @@ pub struct CacheShared {
     pub evicting: AtomicBool,
     pub persist_lock: tokio::sync::Mutex<super::save::SavedIndex>,
     pub generation: AtomicU64,
+    pub evicted: Mutex<Option<Arc<dyn Fn(&str) + Send + Sync>>>,
     state: Mutex<State>,
     stripes: Vec<Arc<tokio::sync::Mutex<()>>>,
 }
@@ -116,6 +117,7 @@ impl CacheShared {
             evicting: AtomicBool::new(false),
             persist_lock: tokio::sync::Mutex::new(super::save::SavedIndex::default()),
             generation: AtomicU64::new(0),
+            evicted: Mutex::new(None),
             state: Mutex::new(state),
             stripes: (0..STRIPES).map(|_| Arc::new(tokio::sync::Mutex::new(()))).collect(),
         }
