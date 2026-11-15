@@ -54,14 +54,16 @@ pub(super) fn rig() -> Rig {
     rig_with(|_| {})
 }
 
-pub(super) async fn eventually(mut condition: impl FnMut() -> bool) {
-    for _ in 0..500 {
-        if condition() {
-            return;
+#[track_caller]
+pub(super) fn eventually(mut condition: impl FnMut() -> bool) -> impl std::future::Future<Output = ()> {
+    let caller = std::panic::Location::caller();
+    async move { tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let seen = crate::test_signal::current();
+            if condition() { return; }
+            crate::test_signal::changed_since(seen).await;
         }
-        tokio::time::sleep(Duration::from_millis(2)).await;
-    }
-    panic!("condition not reached in time");
+    }).await.unwrap_or_else(|_| panic!("condition at {caller} never became true")); }
 }
 
 pub(super) async fn next(events: &mut Receiver<Settled>) -> Settled {

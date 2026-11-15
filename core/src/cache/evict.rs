@@ -31,6 +31,8 @@ pub fn trigger_eviction(inner: &Arc<CacheShared>) {
     inner.handle.spawn(async move {
         let evicted = evict_if_needed(&task_inner).await;
         task_inner.evicting.store(false, Ordering::SeqCst);
+        #[cfg(test)]
+        crate::test_signal::fire();
         if evicted > 0 {
             trigger_eviction(&task_inner);
         }
@@ -63,6 +65,8 @@ pub async fn evict_to(inner: &Arc<CacheShared>, target: u64) -> usize {
             break;
         }
         inner.eviction_backlog.store(order.len() as u64, Ordering::Relaxed);
+        #[cfg(test)]
+        crate::test_signal::fire();
         for (name, version) in order {
             if !over(inner, target) {
                 break;
@@ -105,10 +109,13 @@ async fn evict_one(inner: &Arc<CacheShared>, name: &str, version: u64) -> bool {
 }
 
 pub(super) async fn unlink(inner: &CacheShared, name: &str) -> bool {
-    match tokio::fs::remove_file(bin_path(&inner.dir, name)).await {
+    let result = match tokio::fs::remove_file(bin_path(&inner.dir, name)).await {
         Ok(()) => true,
         Err(error) => error.kind() == std::io::ErrorKind::NotFound,
-    }
+    };
+    #[cfg(test)]
+    crate::test_signal::fire();
+    result
 }
 
 pub async fn remove_names(inner: &Arc<CacheShared>, names: Vec<String>) -> usize {

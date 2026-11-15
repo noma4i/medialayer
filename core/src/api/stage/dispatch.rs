@@ -74,6 +74,8 @@ impl Stage {
             _ => None,
         };
         self.inner.runner.send_held(slot, call, held);
+        #[cfg(test)]
+        crate::test_signal::fire();
     }
 
     pub(super) fn translate(

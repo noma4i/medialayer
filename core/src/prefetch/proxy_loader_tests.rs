@@ -23,6 +23,7 @@ struct HeldFetcher {
 impl crate::fetch::Fetcher for HeldFetcher {
     async fn fetch(&self, request: crate::fetch::Request) -> Result<crate::fetch::Response, crate::fetch::FetchError> {
         self.started.notify_one();
+        crate::test_signal::fire();
         let _ = self.release.acquire().await;
         self.inner.fetch(request).await
     }

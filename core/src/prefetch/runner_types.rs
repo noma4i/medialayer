@@ -133,6 +133,8 @@ pub(super) struct LiveTask(pub(super) Arc<Shared>);
 impl LiveTask {
     pub(super) fn new(shared: &Arc<Shared>) -> LiveTask {
         shared.live.fetch_add(1, Ordering::SeqCst);
+        #[cfg(test)]
+        crate::test_signal::fire();
         LiveTask(shared.clone())
     }
 }
@@ -140,6 +142,8 @@ impl LiveTask {
 impl Drop for LiveTask {
     fn drop(&mut self) {
         self.0.live.fetch_sub(1, Ordering::SeqCst);
+        #[cfg(test)]
+        crate::test_signal::fire();
     }
 }
 

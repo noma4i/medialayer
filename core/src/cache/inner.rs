@@ -198,4 +198,6 @@ pub async fn delete_files(paths: Vec<PathBuf>) {
         }
     })
     .await;
+    #[cfg(test)]
+    crate::test_signal::fire();
 }

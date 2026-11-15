@@ -69,14 +69,16 @@ pub(super) fn media_lines(reply: &Reply) -> Vec<String> {
     reply.text().lines().filter(|line| !line.starts_with('#') && !line.is_empty()).map(str::to_string).collect()
 }
 
-pub(super) async fn eventually(mut condition: impl FnMut() -> bool) -> bool {
-    for _ in 0..300 {
-        if condition() {
-            return true;
+#[track_caller]
+pub(super) fn eventually(mut condition: impl FnMut() -> bool) -> impl Future<Output = bool> {
+    let caller = std::panic::Location::caller();
+    async move { tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let seen = crate::test_signal::current();
+            if condition() { return true; }
+            crate::test_signal::changed_since(seen).await;
         }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    condition()
+    }).await.unwrap_or_else(|_| panic!("condition at {caller} never became true")) }
 }
 
 pub(super) async fn within<T>(seconds: u64, future: impl Future<Output = T>) -> T {

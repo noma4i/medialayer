@@ -337,6 +337,8 @@ impl Stage {
     fn foreground_pass(&self, id: &LoadId) -> Option<(bool, LoadId)> {
         self.with_id(id, |_| ())?;
         self.inner.foreground_passes.fetch_add(1, Ordering::SeqCst);
+        #[cfg(test)]
+        crate::test_signal::fire();
         if self.inner.routes.readiness() != Readiness::Ready {
             return Some((false, id.clone()));
         }

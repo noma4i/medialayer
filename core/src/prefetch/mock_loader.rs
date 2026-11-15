@@ -49,6 +49,7 @@ impl<'a> Active<'a> {
         let now = loader.active.fetch_add(1, Ordering::SeqCst) + 1;
         loader.peak.fetch_max(now, Ordering::SeqCst);
         loader.script().alive.push(url.to_string());
+        crate::test_signal::fire();
         Active(loader, url.to_string())
     }
 }
@@ -60,6 +61,7 @@ impl Drop for Active<'_> {
         if let Some(position) = script.alive.iter().position(|url| *url == self.1) {
             script.alive.remove(position);
         }
+        crate::test_signal::fire();
     }
 }
 
@@ -142,6 +144,7 @@ impl MockLoader {
             (script.failing.contains(url), script.hanging.contains(url), script.sizes.get(url).copied().unwrap_or(1))
         };
         self.started.notify_one();
+        crate::test_signal::fire();
         tokio::task::yield_now().await;
         if hanging || self.hang_all.load(Ordering::SeqCst) {
             self.released.notified().await;
@@ -184,10 +187,12 @@ impl Loader for MockLoader {
 
     async fn keep(&self, url: &str, _headers: &HashMap<String, String>) {
         self.script().kept.push(url.to_string());
+        crate::test_signal::fire();
     }
 
     async fn playlist(&self, url: &str, _headers: &HashMap<String, String>) -> Option<std::sync::Arc<crate::proxy::StoredPlaylist>> {
         self.stored_reads.fetch_add(1, Ordering::SeqCst);
+        crate::test_signal::fire();
         self.script().bodies.get(url).map(|bytes| crate::proxy::StoredPlaylist::for_test(&String::from_utf8_lossy(bytes), url))
     }
 
@@ -198,5 +203,6 @@ impl Loader for MockLoader {
 
     async fn evict(&self, url: &str, _headers: &HashMap<String, String>) {
         self.script().evicted.push(url.to_string());
+        crate::test_signal::fire();
     }
 }

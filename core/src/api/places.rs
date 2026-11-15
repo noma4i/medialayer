@@ -29,6 +29,8 @@ impl Place {
         let before = self.state();
         self.machine.handle(&signal);
         let after = self.state();
+        #[cfg(test)]
+        crate::test_signal::fire();
         if after == before {
             return false;
         }
@@ -68,6 +70,8 @@ impl Places {
         let hub = place.hub.get_or_insert_with(|| Hub::new(self.handle.clone()));
         let subscription = hub.subscribe(deliver);
         hub.publish(state);
+        #[cfg(test)]
+        crate::test_signal::fire();
         let (entries, key) = (Arc::downgrade(&self.entries), key.to_string());
         Subscription::cancelling(move || {
             drop(subscription);

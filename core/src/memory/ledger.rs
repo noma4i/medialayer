@@ -51,6 +51,8 @@ struct Waiting<'a>(&'a AtomicUsize);
 impl<'a> Waiting<'a> {
     fn start(counter: &'a AtomicUsize) -> Self {
         counter.fetch_add(1, Ordering::SeqCst);
+        #[cfg(test)]
+        crate::test_signal::fire();
         Waiting(counter)
     }
 }
@@ -58,6 +60,8 @@ impl<'a> Waiting<'a> {
 impl Drop for Waiting<'_> {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::SeqCst);
+        #[cfg(test)]
+        crate::test_signal::fire();
     }
 }
 

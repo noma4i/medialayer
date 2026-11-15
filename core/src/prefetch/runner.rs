@@ -306,6 +306,8 @@ impl Prefetcher {
 
     pub fn announce(&self, settled: Settled) {
         let _ = self.shared.events.send(settled);
+        #[cfg(test)]
+        crate::test_signal::fire();
     }
 
     pub fn settled(&self) -> broadcast::Receiver<Settled> {

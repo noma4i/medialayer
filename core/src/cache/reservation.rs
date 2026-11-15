@@ -61,6 +61,8 @@ impl SpaceReservation {
     pub fn settle(&mut self, state: &mut State) {
         state.reserved -= self.held;
         self.held = 0;
+        #[cfg(test)]
+        crate::test_signal::fire();
     }
 }
 
@@ -68,6 +70,8 @@ impl Drop for SpaceReservation {
     fn drop(&mut self) {
         if self.held > 0 {
             self.inner.state().reserved -= self.held;
+            #[cfg(test)]
+            crate::test_signal::fire();
         }
     }
 }

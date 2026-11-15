@@ -162,6 +162,8 @@ impl Drop for Registration {
         let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
         if open.get(&self.key).is_some_and(|current| Arc::ptr_eq(current, &self.file)) {
             open.remove(&self.key);
+            #[cfg(test)]
+            crate::test_signal::fire();
         }
     }
 }

@@ -35,6 +35,8 @@ pub fn version() -> String {
 
 mod detached;
 #[cfg(test)]
+mod test_signal;
+#[cfg(test)]
 mod alloc_probe;
 #[cfg(test)]
 #[global_allocator]

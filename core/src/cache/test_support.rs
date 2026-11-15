@@ -67,12 +67,16 @@ pub fn files_with_suffix(dir: &Path, suffix: &str) -> usize {
         .count()
 }
 
-pub async fn wait_until<F: Fn() -> bool>(condition: F) {
-    let started = Instant::now();
-    while !condition() {
-        assert!(started.elapsed() < WAIT_LIMIT, "condition not reached in time");
-        tokio::time::sleep(WAIT_STEP).await;
-    }
+#[track_caller]
+pub fn wait_until<F: Fn() -> bool>(condition: F) -> impl std::future::Future<Output = ()> {
+    let caller = std::panic::Location::caller();
+    async move { tokio::time::timeout(WAIT_LIMIT, async {
+        loop {
+            let seen = crate::test_signal::current();
+            if condition() { return; }
+            crate::test_signal::changed_since(seen).await;
+        }
+    }).await.unwrap_or_else(|_| panic!("condition at {caller} never became true")); }
 }
 
 pub async fn wait_for_file_count(cache: &Cache, count: u64) {

@@ -140,6 +140,8 @@ impl State {
             self.order.insert(&name, &slot);
         }
         self.entries.insert(name, slot);
+        #[cfg(test)]
+        crate::test_signal::fire();
     }
 
     pub fn take(&mut self, name: &str) -> Option<Slot> {
@@ -155,6 +157,8 @@ impl State {
         let stats = &mut self.per_kind[slot.entry.kind.index()];
         stats.bytes -= slot.entry.size;
         stats.files -= 1;
+        #[cfg(test)]
+        crate::test_signal::fire();
         Some(slot)
     }
 

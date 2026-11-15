@@ -20,7 +20,10 @@ async fn inv_api_02_unsubscribe_visits_only_the_removed_listener() {
 fn recorder() -> (Log, Deliver<u32>) {
     let log: Log = Arc::new(Mutex::new(Vec::new()));
     let sink = log.clone();
-    (log, Arc::new(move |value| sink.lock().unwrap().push(value)))
+    (log, Arc::new(move |value| {
+        sink.lock().unwrap().push(value);
+        crate::test_signal::fire();
+    }))
 }
 
 fn last(log: &Log) -> Option<u32> {

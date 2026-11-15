@@ -141,6 +141,7 @@ impl AsRef<[u8]> for TrackedChunk {
 impl Drop for TrackedChunk {
     fn drop(&mut self) {
         self.live.fetch_sub(1, Ordering::SeqCst);
+        crate::test_signal::fire();
     }
 }
 
@@ -183,6 +184,7 @@ async fn next_chunk(mut cursor: BodyCursor) -> Option<(Result<Bytes, FetchError>
     cursor.served_total.fetch_add(length, Ordering::SeqCst);
     let now = cursor.live.fetch_add(1, Ordering::SeqCst) + 1;
     cursor.peak.fetch_max(now, Ordering::SeqCst);
+    crate::test_signal::fire();
     let chunk = Bytes::from_owner(TrackedChunk { data, live: cursor.live.clone() });
     Some((Ok(chunk), cursor))
 }
@@ -240,6 +242,7 @@ impl MockFetcher {
         self.calls.fetch_add(1, Ordering::SeqCst);
         *self.per_url.lock().unwrap_or_else(PoisonError::into_inner).entry(request.url.clone()).or_default() += 1;
         self.requests.lock().unwrap_or_else(PoisonError::into_inner).push(request.clone());
+        crate::test_signal::fire();
     }
 
     fn script_for(&self, url: &str) -> Script {

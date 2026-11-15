@@ -58,6 +58,7 @@ pub struct Barrier {
 impl Barrier {
     async fn pass(&self) {
         self.entered.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        crate::test_signal::fire();
         let _ = self.held.subscribe().wait_for(|held| !*held).await;
     }
 }

@@ -42,6 +42,7 @@ impl MemoryStore {
 
     pub fn seed(&self, key: &str, data: &[u8]) {
         self.entries().insert(key.to_string(), Entry { data: data.to_vec(), complete: true, meta: Meta::default(), version: self.shared.version.fetch_add(1, Ordering::Relaxed) });
+        crate::test_signal::fire();
     }
 
     pub fn bytes(&self, key: &str) -> Option<Vec<u8>> {
@@ -50,6 +51,7 @@ impl MemoryStore {
 
     pub fn clear(&self) {
         self.entries().clear();
+        crate::test_signal::fire();
     }
 
     pub fn count(&self) -> usize {
@@ -130,11 +132,13 @@ impl ByteStore for MemoryStore {
         }
         self.entries().insert(key.to_string(), Entry { data: Vec::new(), complete: false, meta, version: self.shared.version.fetch_add(1, Ordering::Relaxed) });
         self.shared.open_writers.fetch_add(1, Ordering::SeqCst);
+        crate::test_signal::fire();
         Some(Box::new(MemoryWriter { shared: self.shared.clone(), key: key.to_string(), done: false }))
     }
 
     async fn remove(&self, key: &str) {
         self.entries().remove(key);
+        crate::test_signal::fire();
     }
 }
 
@@ -176,6 +180,7 @@ impl MemoryWriter {
         }
         self.shared.open_writers.fetch_sub(1, Ordering::SeqCst);
         self.shared.aborts.fetch_add(1, Ordering::SeqCst);
+        crate::test_signal::fire();
     }
 }
 
@@ -196,6 +201,7 @@ impl StoreWriter for MemoryWriter {
         match entries.get_mut(&self.key) {
             Some(entry) => {
                 entry.data.extend_from_slice(bytes);
+                crate::test_signal::fire();
                 true
             }
             None => false,
@@ -214,6 +220,7 @@ impl StoreWriter for MemoryWriter {
                 entry.complete = true;
                 self.shared.commits.fetch_add(1, Ordering::SeqCst);
                 self.shared.committed.notify_one();
+                crate::test_signal::fire();
                 true
             }
             None => false,

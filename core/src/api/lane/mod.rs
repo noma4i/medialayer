@@ -119,12 +119,16 @@ impl Queue {
 
     pub fn finish(&self) {
         self.pending().in_flight = false;
+        #[cfg(test)]
+        crate::test_signal::fire();
     }
 
     pub fn settle(&self) {
         self.is_settled.store(true, Ordering::SeqCst);
         self.pending().in_flight = false;
         self.settled.notify_waiters();
+        #[cfg(test)]
+        crate::test_signal::fire();
     }
 
     pub async fn settled(&self) {

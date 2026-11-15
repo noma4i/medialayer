@@ -135,6 +135,8 @@ async fn deliver_latest<T: Send + 'static>(mailbox: Arc<Mailbox<T>>, deliver: De
         };
         let deliver = deliver.clone();
         let _ = tokio::task::spawn_blocking(move || deliver(value)).await;
+        #[cfg(test)]
+        crate::test_signal::fire();
     }
 }
 

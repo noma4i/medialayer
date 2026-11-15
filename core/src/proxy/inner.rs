@@ -28,6 +28,8 @@ pub(super) struct LiveGuard(Arc<AtomicUsize>);
 impl LiveGuard {
     pub fn new(counter: &Arc<AtomicUsize>) -> Self {
         counter.fetch_add(1, Ordering::SeqCst);
+        #[cfg(test)]
+        crate::test_signal::fire();
         LiveGuard(counter.clone())
     }
 }
@@ -35,6 +37,8 @@ impl LiveGuard {
 impl Drop for LiveGuard {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::SeqCst);
+        #[cfg(test)]
+        crate::test_signal::fire();
     }
 }
 
@@ -253,6 +257,8 @@ impl ProxyShared {
                 None => {
                     let flight = Flight::new(url, &key, &base_key, range, priority);
                     flights.insert(key.clone(), flight.clone());
+                    #[cfg(test)]
+                    crate::test_signal::fire();
                     let subscription = flight.subscribe();
                     (flight, subscription, true)
                 }
@@ -278,6 +284,8 @@ impl ProxyShared {
             let mut flights = locked(&self.flights);
             if flights.get(&flight.key).is_some_and(|current| Arc::ptr_eq(current, &flight)) {
                 flights.remove(&flight.key);
+                #[cfg(test)]
+                crate::test_signal::fire();
             }
         }
         if matches!(outcome, FlightOutcome::Complete) && is_manifest_url(&flight.url) {
@@ -364,6 +372,8 @@ impl ProxyShared {
         }
         if flights.get(&flight.key).is_some_and(|current| Arc::ptr_eq(current, flight)) {
             flights.remove(&flight.key);
+            #[cfg(test)]
+            crate::test_signal::fire();
         }
         true
     }

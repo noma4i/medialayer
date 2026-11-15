@@ -3,26 +3,28 @@ use std::time::Duration;
 
 const WAIT_LIMIT: Duration = Duration::from_secs(20);
 
-pub async fn eventually_async<F: std::future::Future<Output = bool>>(mut condition: impl FnMut() -> F) {
-    let deadline = std::time::Instant::now() + WAIT_LIMIT;
-    while std::time::Instant::now() < deadline {
-        if condition().await {
-            return;
+#[track_caller]
+pub fn eventually_async<F: std::future::Future<Output = bool>>(mut condition: impl FnMut() -> F) -> impl std::future::Future<Output = ()> {
+    let caller = std::panic::Location::caller();
+    async move { tokio::time::timeout(WAIT_LIMIT, async {
+        loop {
+            let seen = crate::test_signal::current();
+            if condition().await { return; }
+            crate::test_signal::changed_since(seen).await;
         }
-        tokio::task::yield_now().await;
-    }
-    panic!("condition never became true within {WAIT_LIMIT:?}");
+    }).await.unwrap_or_else(|_| panic!("condition at {caller} never became true")); }
 }
 
-pub async fn eventually(mut condition: impl FnMut() -> bool) {
-    let deadline = std::time::Instant::now() + WAIT_LIMIT;
-    while std::time::Instant::now() < deadline {
-        if condition() {
-            return;
+#[track_caller]
+pub fn eventually(mut condition: impl FnMut() -> bool) -> impl std::future::Future<Output = ()> {
+    let caller = std::panic::Location::caller();
+    async move { tokio::time::timeout(WAIT_LIMIT, async {
+        loop {
+            let seen = crate::test_signal::current();
+            if condition() { return; }
+            crate::test_signal::changed_since(seen).await;
         }
-        tokio::task::yield_now().await;
-    }
-    panic!("condition never became true within {WAIT_LIMIT:?}");
+    }).await.unwrap_or_else(|_| panic!("condition at {caller} never became true")); }
 }
 
 use super::assemble::{Assembly, PoolSettings};
@@ -82,6 +84,7 @@ impl LoadGate {
 
     async fn pass(&self) {
         self.entered.fetch_add(1, Ordering::SeqCst);
+        crate::test_signal::fire();
         let mut closed = self.closed.subscribe();
         let _ = tokio::time::timeout(Duration::from_secs(10), closed.wait_for(|closed| !*closed)).await;
     }
@@ -184,20 +187,24 @@ impl PoolControl for FakePool {
 
     fn set_step(&self, step: Step) {
         self.steps.lock().unwrap().push(step);
+        crate::test_signal::fire();
     }
 
     fn release_under(&self, _now_ms: u64, pressure: Pressure) -> Vec<Directive> {
         self.events.lock().unwrap().push(format!("release_under {pressure:?}"));
+        crate::test_signal::fire();
         self.to_return.lock().unwrap().clone()
     }
 
     fn background(&self) -> Vec<Directive> {
         self.events.lock().unwrap().push("background".to_string());
+        crate::test_signal::fire();
         self.to_return.lock().unwrap().clone()
     }
 
     fn foreground(&self) {
         self.events.lock().unwrap().push("foreground".to_string());
+        crate::test_signal::fire();
     }
 
     fn set_slots(&self, slots: usize) {
@@ -249,6 +256,7 @@ pub struct FakeRelease {
 impl MemoryRelease for FakeRelease {
     fn drop_caches(&self) {
         self.drops.fetch_add(1, Ordering::SeqCst);
+        crate::test_signal::fire();
     }
 }
 
@@ -260,6 +268,7 @@ pub struct FakeDirectives {
 impl SlotDirectives for FakeDirectives {
     fn apply(&self, directives: Vec<Directive>) {
         self.applied.lock().unwrap().push(directives);
+        crate::test_signal::fire();
     }
 }
 
@@ -326,6 +335,7 @@ impl Drop for InFlight<'_> {
         if !self.1 {
             self.0.cancelled.fetch_add(1, Ordering::SeqCst);
         }
+        crate::test_signal::fire();
     }
 }
 
@@ -361,6 +371,7 @@ impl PlayerSlot for MockSlot {
         self.started.fetch_add(1, Ordering::SeqCst);
         let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
         self.peak.fetch_max(now, Ordering::SeqCst);
+        crate::test_signal::fire();
         let mut flight = InFlight(self, false);
         if matches!(command, SlotCall::Load { .. }) {
             self.gate.pass().await;
@@ -383,6 +394,7 @@ impl PlayerSlot for MockSlot {
         flight.1 = true;
         let is_seek = matches!(command, SlotCall::Seek { .. });
         self.calls.lock().unwrap().push(command);
+        crate::test_signal::fire();
         if is_seek {
             self.seeked.notify_one();
         }
@@ -393,10 +405,12 @@ impl PlayerSlot for MockSlot {
         self.live.store(0, Ordering::SeqCst);
         self.disposed.fetch_add(1, Ordering::SeqCst);
         self.disposals.fetch_add(1, Ordering::SeqCst);
+        crate::test_signal::fire();
     }
 
     fn sample(&self) -> SlotSample {
         let taken = self.samples.fetch_add(1, Ordering::SeqCst) as u64 + 1;
+        crate::test_signal::fire();
         let hook = self.on_sample.lock().unwrap().clone();
         if let Some(hook) = hook {
             hook();
@@ -472,6 +486,7 @@ impl PlayerSlotFactory for MockFactory {
         });
         self.created.lock().unwrap().push(slot);
         self.slots.lock().unwrap().insert(slot, player.clone());
+        crate::test_signal::fire();
         CreatedPlayer { player }
     }
 }
