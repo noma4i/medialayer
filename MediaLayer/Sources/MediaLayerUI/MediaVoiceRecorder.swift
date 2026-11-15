@@ -23,10 +23,11 @@ protocol VoiceCapture: Sendable {
 /// The audio focus is taken for recording through `Media.audio` and given back when the recording ends. A refused permission, a busy microphone
 /// and an empty recording are a `MediaError.Voice` with the text of the core. The recording ends by itself after `maxDuration`.
 public final class MediaVoiceRecorder: @unchecked Sendable {
-  private final class Running {
+  private final class Running: @unchecked Sendable {
     let file: URL
     let startedAt: UInt64
     var poll: Task<Void, Never>?
+    var finish: Task<Result<VoiceRecording, Error>, Never>?
     init(file: URL, startedAt: UInt64) {
       self.file = file
       self.startedAt = startedAt
@@ -42,6 +43,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
   private let callId = UUID()
   private let lock = NSLock()
   private var running: Running?
+  private var finishing: Task<Result<VoiceRecording, Error>, Never>?
   private var ended: Result<VoiceRecording, Error>?
   private var held: MediaAudioSession?
   private var sinks: [UUID: AsyncStream<Float>.Continuation] = [:]
@@ -79,7 +81,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
 
   public func start(to file: URL) async throws {
     try lock.withLock {
-      guard running == nil else { throw MediaError.Unexpected(detail: "a recording is already running") }
+      guard running == nil && finishing == nil else { throw MediaError.Unexpected(detail: "a recording is already running") }
       ended = nil
     }
     if calls.inCall { throw Self.inCall() }
@@ -117,11 +119,11 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
 
   /// Ends the recording and gives the file. After the limit ended it, gives the outcome of that recording.
   public func stop() async throws -> VoiceRecording {
-    guard let current = lock.withLock({ running }) else {
-      guard let outcome = lock.withLock({ ended }) else { throw MediaError.Unexpected(detail: "no recording was started") }
-      return try outcome.get()
-    }
-    return try await finish(current).get()
+    let state = lock.withLock { (running, finishing, ended) }
+    if let current = state.0 { return try await finish(current).get() }
+    if let task = state.1 { return try await task.value.get() }
+    guard let outcome = state.2 else { throw MediaError.Unexpected(detail: "no recording was started") }
+    return try outcome.get()
   }
 
   private func limitReached() {
@@ -130,16 +132,22 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
   }
 
   private func finish(_ current: Running, interrupted: MediaError? = nil) async -> Result<VoiceRecording, Error> {
-    let taken: (session: MediaAudioSession?, outcome: Result<VoiceRecording, Error>?) = lock.withLock {
-      guard running === current else { return (nil, ended) }
+    let task = lock.withLock {
+      if let task = current.finish { return task }
       running = nil
       calls.unregister(callId)
       current.poll?.cancel()
       let session = held
       held = nil
-      return (session, nil)
+      let task = Task { await self.finishRecording(current, session: session, interrupted: interrupted) }
+      current.finish = task
+      finishing = task
+      return task
     }
-    if let outcome = taken.outcome { return outcome }
+    return await task.value
+  }
+
+  private func finishRecording(_ current: Running, session: MediaAudioSession?, interrupted: MediaError?) async -> Result<VoiceRecording, Error> {
     let length = clock() &- current.startedAt
     var outcome: Result<VoiceRecording, Error>
     do {
@@ -155,10 +163,11 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     } catch {
       outcome = .failure(error)
     }
-    await taken.session?.deactivateRecording()
+    await session?.deactivateRecording()
     if case .failure = outcome { try? FileManager.default.removeItem(at: current.file) }
     let finished = lock.withLock { () -> [AsyncStream<Float>.Continuation] in
       ended = outcome
+      finishing = nil
       defer { sinks.removeAll() }
       return Array(sinks.values)
     }

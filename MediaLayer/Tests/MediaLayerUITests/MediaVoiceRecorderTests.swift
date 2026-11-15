@@ -38,7 +38,11 @@ private final class FakeCapture: VoiceCapture, @unchecked Sendable {
     }
   }
 
+  private var stopCount = 0
+  var stops: Int { lock.withLock { stopCount } }
+
   func stop() throws {
+    lock.withLock { stopCount += 1 }
     if writes, let file = lock.withLock({ file }) { try Data([1, 2, 3]).write(to: file) }
   }
 }
@@ -191,11 +195,11 @@ struct MediaVoiceRecorderTests {
     #expect(capture.limitMs == 30_000)
     ticks.advance(30_000)
     capture.limit?()
-    while recorder.isRecording { try await Task.sleep(for: .milliseconds(5)) }
     let recording = try await recorder.stop()
 
     #expect(recording.durationMs == 30_000)
     #expect(FileManager.default.fileExists(atPath: recording.url.path))
+    #expect(capture.stops == 1, "the recording ended once")
   }
 
   @Test

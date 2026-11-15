@@ -39,7 +39,10 @@ private class VoiceFakeCapture(private val refusal: VoiceRefusal? = null, privat
 
   override fun peak(): Float = peaks[reads.getAndIncrement() % peaks.size]
 
+  val stops = java.util.concurrent.atomic.AtomicInteger()
+
   override fun stop() {
+    stops.incrementAndGet()
     file!!.writeBytes(byteArrayOf(1, 2, 3))
   }
 }
@@ -183,11 +186,11 @@ class MediaVoiceRecorderTest {
     assertEquals(30_000L, capture.limitMs)
     ticks.now += 30_000
     capture.limit!!.invoke()
-    withTimeout(10_000) { while (recorder.isRecording) delay(5) }
     val recording = recorder.stop()
 
     assertEquals(30_000L, recording.durationMs)
     assertTrue(recording.file.isFile)
+    assertEquals("the recording ended once", 1, capture.stops.get())
   }
 
   @Test
