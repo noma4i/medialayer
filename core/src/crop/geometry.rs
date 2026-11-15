@@ -201,7 +201,6 @@ pub fn crop_drag(rect: CropFractions, setup: CropSetup, handle: CropHandle, dx: 
 }
 
 /// The rectangle after the photo turns a quarter clockwise or counter clockwise. `setup.photo` is the size before the turn.
-/// A crop with proportions is fitted again around the middle of the turned rectangle.
 #[uniffi::export]
 pub fn crop_turn(rect: CropFractions, setup: CropSetup, clockwise: bool) -> CropFractions {
     let turned_setup = CropSetup { photo: PixelSize { width: setup.photo.height, height: setup.photo.width }, ..setup };
@@ -213,7 +212,12 @@ pub fn crop_turn(rect: CropFractions, setup: CropSetup, clockwise: bool) -> Crop
     } else {
         CropFractions { x: rect.y, y: 1.0 - rect.x - rect.width, width: rect.height, height: rect.width }
     };
-    crop_initial(turned_setup, Some(turned))
+    let (Some(current), Some(next)) = (bounds(setup.photo, setup.aspect, setup.limits), bounds(turned_setup.photo, turned_setup.aspect, turned_setup.limits)) else {
+        return crop_initial(turned_setup, Some(turned));
+    };
+    let Some(ratio) = next.ratio else { return crop_initial(turned_setup, Some(turned)) };
+    let width = limit(next.max_w * (rect.width / current.max_w), next.min_w, next.max_w);
+    placed(turned.x + turned.width / 2.0, turned.y + turned.height / 2.0, width, width * ratio)
 }
 
 /// The rectangle the app may use: it keeps its edges inside the photo, its size inside the limits, and with proportions its pixels stay within one pixel per edge of them.
