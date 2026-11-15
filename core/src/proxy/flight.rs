@@ -1,4 +1,4 @@
-use super::inner::{Parked, ProxyShared};
+use super::inner::{ParkedWriter, ProxyShared};
 use super::route::{answered_length, content_range_total};
 use super::slots::Priority;
 use crate::fetch::{header_value, BodyStream, FetchError, Request};
@@ -233,7 +233,7 @@ async fn cancellable<T>(inner: &ProxyShared, flight: &Arc<Flight>, future: impl 
 async fn keep(inner: &ProxyShared, key: &str, writer: Box<dyn StoreWriter>, written: u64, parks: bool) {
     if parks && written > 0 {
         crate::trace!("flight", "park {} at {written}", crate::trace::tail(key));
-        inner.park(key, Parked { writer, written });
+        inner.park(key, ParkedWriter { writer, written });
     } else {
         writer.abort().await;
     }

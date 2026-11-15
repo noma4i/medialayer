@@ -45,7 +45,7 @@ pub(super) struct Listener {
 
 type ProbeEntry = (Arc<tokio::sync::Mutex<()>>, usize);
 
-pub(super) struct Parked {
+pub(super) struct ParkedWriter {
     pub writer: Box<dyn StoreWriter>,
     pub written: u64,
 }
@@ -65,7 +65,7 @@ pub(super) struct ProxyShared {
     pub playlists: super::playlists::Playlists,
     pub totals: Mutex<Recent<u64>>,
     whole_only: Mutex<Recent<()>>,
-    parked: Mutex<Recent<Parked>>,
+    parked: Mutex<Recent<ParkedWriter>>,
     probe_locks: Mutex<HashMap<String, ProbeEntry>>,
     pub listener: tokio::sync::Mutex<Option<Listener>>,
     pub running: AtomicBool,
@@ -306,7 +306,7 @@ impl ProxyShared {
         locked(&self.totals).insert(key, total, |_, _| false);
     }
 
-    pub fn park(&self, key: &str, parked: Parked) {
+    pub fn park(&self, key: &str, parked: ParkedWriter) {
         locked(&self.parked).insert(key, parked, |_, _| false);
     }
 
@@ -314,12 +314,12 @@ impl ProxyShared {
         locked(&self.parked).get(key).map_or(0, |parked| parked.written)
     }
 
-    pub fn take_parked(&self, key: &str) -> Option<Parked> {
+    pub fn take_parked(&self, key: &str) -> Option<ParkedWriter> {
         locked(&self.parked).remove(key)
     }
 
     pub fn forget_parked(&self, url: Option<&str>) {
-        let dropped: Vec<Parked> = {
+        let dropped: Vec<ParkedWriter> = {
             let mut parked = locked(&self.parked);
             let keys: Vec<String> = parked.keys().filter(|key| url.is_none_or(|url| *key == url || key.strip_prefix(url).is_some_and(|suffix| suffix.starts_with('#')))).cloned().collect();
             keys.iter().filter_map(|key| parked.remove(key)).collect()
