@@ -287,6 +287,25 @@ struct AVQueuePlayerSlotTests {
   }
 
   @Test
+  func aLoopingClipSwitchedToOneShotEndsOnceAndStopsAtItsEnd() async throws {
+    let log = PlayerEventLog()
+    let slot = await makeSlot(log)
+    await slot.load(key: "clip", route: route(Self.silentClip, looping: true), generation: 7)
+    await log.wait(for: "ready")
+
+    await slot.apply(command: .looping(looping: false))
+    await drainMain()
+    NotificationCenter.default.post(name: .AVPlayerItemDidPlayToEndTime, object: slot.loadedItem)
+    await drainMain()
+    await drainMain()
+
+    #expect(log.generations("ended") == [7])
+    #expect(slot.player.actionAtItemEnd == .pause)
+    #expect(slot.player.items().count == 1)
+    #expect(slot.sample().isLooping == false)
+  }
+
+  @Test
   func theProgressIsOneWhenTheEndIsReportedWhereverThePlayheadStopped() async throws {
     let log = PlayerEventLog()
     let slots = LoadedSlots()

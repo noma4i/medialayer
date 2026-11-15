@@ -125,6 +125,18 @@ internal class ExoPlayerSlotPlaybackTest : ExoPlayerSlotRig() {
   }
 
   @Test
+  fun a_looping_clip_switched_to_one_shot_reports_its_end_once() {
+    val slot = factory().createSlot(3u)
+    slot.load("k", route.copy(looping = true), 7uL); idle()
+
+    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined).launch { slot.apply(com.noma4i.medialayer.SlotCall.Looping(false)) }; idle()
+    slot.loadEvents!!.onPlaybackStateChanged(Player.STATE_ENDED); idle()
+
+    assertEquals(Player.REPEAT_MODE_OFF, slot.player!!.repeatMode)
+    assertEquals(listOf("ended:3:7"), events.generations.filter { it.startsWith("ended") })
+  }
+
+  @Test
   fun inv_api_48_the_slot_sample_is_the_duration_when_the_clip_ended() {
     val slot = factory().createSlot(3u)
     slot.load("k", route.copy(looping = false), 7uL); idle()
