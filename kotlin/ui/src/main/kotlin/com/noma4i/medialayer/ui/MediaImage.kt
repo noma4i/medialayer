@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -156,7 +157,7 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
     val previewRequest = remember(media, preview, pixels, scale, placementPixels, dimensions) { imageRequest(context, preview, pixels, scale, media, placementPixels, admit = media.viewDecodeAdmit(), dimensions = dimensions?.copy(declared = preview.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) })) }
     AsyncImage(model = previewRequest, contentDescription = null, imageLoader = loader, contentScale = contentScale, modifier = Modifier.fillMaxSize().testTag(PREVIEW_TAG))
   }
-  val drawsImage = state.value.drawsImage()
+  val drawsImage = remember { mutableStateOf(false) }
   AsyncImage(
     model = request,
     contentDescription = null,
@@ -169,16 +170,18 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
         mount.report(reached)
       }
     },
-    modifier = Modifier.fillMaxSize().drawWithContent { if (drawsImage) drawContent() }
+    modifier = Modifier.fillMaxSize().drawWithContent { if (drawsImage.value) drawContent() }
   )
-  ImageContent(screen, state, content)
+  ImageContent(screen, state, drawsImage, content)
 }
 
 internal fun MediaState.drawsImage(): Boolean = this != MediaState.Idle && this != MediaState.Loading
 
 @Composable
-private fun ImageContent(screen: ScreenVisibility, state: State<MediaState>, content: @Composable (MediaState) -> Unit) {
-  if (screen.visible) content(state.value)
+private fun ImageContent(screen: ScreenVisibility, state: State<MediaState>, drawsImage: MutableState<Boolean>, content: @Composable (MediaState) -> Unit) {
+  val composedState = state.value
+  SideEffect { drawsImage.value = composedState.drawsImage() }
+  if (screen.visible) content(composedState)
 }
 
 @Composable
