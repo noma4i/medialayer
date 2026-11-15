@@ -124,6 +124,10 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     SlotCall.Detach -> doDetach()
     is SlotCall.Seek -> { player?.seekTo(command.positionMs.toLong()); Unit }
     is SlotCall.Rate -> { player?.setPlaybackSpeed(command.rate); Unit }
+    is SlotCall.Looping -> {
+      looping = command.looping
+      player?.repeatMode = if (looping) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+    }
     is SlotCall.Readahead -> doSetReadahead(command.ms)
   }
 

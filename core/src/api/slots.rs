@@ -50,6 +50,7 @@ pub enum SlotCall {
     Detach,
     Seek { position_ms: u64 },
     Rate { rate: f32 },
+    Looping { looping: bool },
     Readahead { ms: u64 },
 }
 

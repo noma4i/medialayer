@@ -97,7 +97,9 @@ impl Stage {
             let sources = Sliced::slice(&state.window, reach.start.min(wanted.start)..reach.end.max(wanted.end));
             let keys = sources.map(|source| (source.kind != Kind::Image).then(|| source.url.clone()));
             for source in sources.present() {
-                state.catalog.insert(source.url.clone(), source.clone());
+                if !state.shown.contains_key(&source.url) {
+                    state.catalog.insert(source.url.clone(), source.clone());
+                }
                 state.refresh_pending(&source.url);
             }
             let playing = state.playing_page(&keys, reach.start..reach.end);
@@ -309,6 +311,7 @@ impl Stage {
             self.inner.places.claimed(&url);
             *state.shown.entry(url.clone()).or_insert(0) += 1;
             let is_player = source.kind != Kind::Image;
+            self.update_looping(&mut state, &source);
             state.catalog.insert(url.clone(), source);
             state.refresh_pending(&url);
             let commands = if is_player { state.ring.touch(now, &url) } else { Vec::new() };
@@ -326,8 +329,19 @@ impl Stage {
         if !state.shown.contains_key(&url) {
             return;
         }
+        self.update_looping(&mut state, &source);
         state.catalog.insert(url.clone(), source);
         state.refresh_pending(&url);
+    }
+
+    fn update_looping(&self, state: &mut super::StageState, source: &MediaItem) {
+        if let Some(loaded) = state.loaded.get_mut(&source.url) {
+            loaded.source.looping = source.looping;
+            if loaded.route.looping != source.looping {
+                loaded.route.looping = source.looping;
+                self.inner.runner.send(loaded.slot, SlotCall::Looping { looping: source.looping });
+            }
+        }
     }
 
     pub fn release_all(&self) {

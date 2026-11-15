@@ -212,6 +212,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     case .detach: detach()
     case .seek: break  // applySeek waits for the completion of a seek, perform cannot
     case let .rate(rate): setRate(rate: rate)
+    case let .looping(looping): setLooping(looping: looping)
     case let .readahead(ms): setReadahead(ms: ms)
     }
   }
@@ -358,6 +359,22 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     player.defaultRate = rate
     sampleLock.withLock { commanded.rate = rate }
     if player.rate != 0 { player.rate = rate }
+  }
+
+  private func setLooping(looping: Bool) {
+    guard self.looping != looping else { return }
+    if let current = player.currentItem, current !== item {
+      item = current
+      observe(current, generation: loadGeneration, resetState: false)
+    }
+    self.looping = looping
+    player.actionAtItemEnd = looping ? .advance : .pause
+    if looping {
+      queueNextRound()
+    } else {
+      player.items().filter { $0 !== player.currentItem }.forEach { player.remove($0) }
+    }
+    refreshSample()
   }
 
   private func attach(viewToken: UInt64) {
