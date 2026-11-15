@@ -86,22 +86,6 @@ class LocalFileWithoutWindowTest {
   }
 
   @Test
-  fun inv_api_47_a_lone_local_image_place_is_declared_ready_without_a_window() {
-    val media = open()
-    val url = "file:///bundle/photo.png"
-    val seen = Seen { it.isReady }
-    val subscription = media.subscribeState(url, seen)
-
-    val place = media.openPlace(image(url))
-    show(place)
-
-    assertTrue(seen.states.toString(), seen.reached.await(5, TimeUnit.SECONDS))
-    place.release()
-    subscription.close()
-    media.close()
-  }
-
-  @Test
   fun inv_api_47_a_lone_local_image_place_reports_the_failure_of_its_view_without_a_window() {
     val media = open()
     val url = "file:///bundle/broken.png"

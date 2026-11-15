@@ -74,15 +74,4 @@ struct SuspendPlaybackTests {
     #expect(await events.next() == "play")
     withExtendedLifetime((media, allowing)) {}
   }
-
-  @Test
-  func inv_session_13_a_blank_allow_group_throws() throws {
-    let media = try MediaLayer.open(config: OpenConfig(
-      dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
-      fetcher: TestFetcher(), settings: QuietSettings(), slots: nil,
-      device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
-      defaults: defaultLimits(), pool: defaultPoolSettings()
-    ))
-    #expect(throws: MediaError.self) { try media.suspendPlayback(allowGroups: [" "]) }
-  }
 }

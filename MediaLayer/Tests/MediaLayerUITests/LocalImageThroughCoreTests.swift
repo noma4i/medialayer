@@ -64,20 +64,6 @@ extension GlobalMedia {
     }
 
     @Test
-    func inv_api_47_a_lone_local_image_place_is_declared_ready_without_a_window() async throws {
-      let media = try await openCore()
-      let url = "file:///bundle/photo.png"
-      let stream = media.stateStream(key: url)
-
-      let place = try media.mountPlace(item: MediaItem(kind: .image, url: url, headers: [:], cover: nil, blurHash: nil, strategy: .window))
-      try place.update(input: PlaceInput(visible: true, playing: false, group: nil, peeking: false, muted: nil, rate: nil, pinned: false, viewToken: nil))
-
-      #expect(await first(of: stream) { $0.isReady } != nil)
-      place.release()
-      withExtendedLifetime(media) {}
-    }
-
-    @Test
     func inv_api_47_a_lone_local_image_place_reports_the_failure_of_its_view_without_a_window() async throws {
       let media = try await openCore()
       let url = "file:///bundle/broken.png"

@@ -163,14 +163,9 @@ extension GlobalMedia {
       #expect(slot.transport == "play")
     }
 
-    @Test
-    func inv_session_15_aMountedVideoFollowsAChangeOfItsGroupOnly() async throws {
-      #expect(try await followsItsGroup(audio: false))
-    }
-
-    @Test
-    func inv_session_15_aMountedAudioFollowsAChangeOfItsGroupOnly() async throws {
-      #expect(try await followsItsGroup(audio: true))
+    @Test(arguments: [false, true])
+    func inv_session_15_aMountedPlaceFollowsAChangeOfItsGroupOnly(audio: Bool) async throws {
+      #expect(try await followsItsGroup(audio: audio))
     }
 
     @Test

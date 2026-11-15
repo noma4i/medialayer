@@ -421,13 +421,10 @@ async fn crowded_for_slots(event: impl FnOnce(&crate::api::Stage)) {
 }
 
 #[tokio::test(start_paused = true)]
-async fn inv_idle_04_a_key_refused_for_slots_returns_when_an_unpin_makes_a_spare() {
-    crowded_for_slots(|stage| stage.unpin(&url_of(0))).await;
-}
-
-#[tokio::test(start_paused = true)]
-async fn inv_idle_04_a_key_refused_for_slots_returns_when_the_other_pin_is_released() {
-    crowded_for_slots(|stage| stage.unpin(&url_of(1))).await;
+async fn inv_idle_04_a_key_refused_for_slots_returns_when_either_pin_is_released() {
+    for pinned in [0, 1] {
+        crowded_for_slots(|stage| stage.unpin(&url_of(pinned))).await;
+    }
 }
 
 #[tokio::test]

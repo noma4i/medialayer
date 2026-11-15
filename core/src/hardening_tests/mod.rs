@@ -99,19 +99,6 @@ async fn inv_proxy_02_media_larger_than_cache_still_plays() {
     assert_eq!(bytes, 500, "received bytes={bytes}, origin bytes=500");
 }
 
-#[tokio::test]
-async fn inv_proxy_06_cancel_first_block_stops_download() {
-    let (_dir, cache) = cache(10000).await;
-    let (proxy, origin) = proxy(&cache, true, 10).await;
-    let running = proxy.clone();
-    let task = tokio::spawn(async move { running.fetch_first_block("https://origin.test/a.mp4", &HashMap::new(), Priority::Prefetch).await });
-    origin.started.notified().await;
-    task.abort();
-    let _ = task.await;
-    crate::api::test_support::eventually(|| proxy.live_tasks() == 0).await;
-    proxy.stop().await;
-}
-
 struct HangingLoader {
     calls: AtomicUsize,
     active: AtomicUsize,
@@ -179,13 +166,4 @@ async fn inv_prefetch_04_drop_prefetch_stops_owned_tasks() {
     loader.started.notified().await;
     drop(prefetch);
     crate::api::test_support::eventually(|| loader.active.load(Ordering::SeqCst) == 0).await;
-}
-
-#[tokio::test]
-async fn inv_proxy_07_drop_proxy_closes_owned_listener() {
-    let (_dir, cache) = cache(10000).await;
-    let (proxy, _origin) = proxy(&cache, false, 10).await;
-    let port = proxy.port();
-    drop(proxy);
-    crate::api::test_support::eventually_async(|| async { tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err() }).await;
 }

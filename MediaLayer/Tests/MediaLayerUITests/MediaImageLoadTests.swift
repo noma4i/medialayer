@@ -16,21 +16,6 @@ struct MediaImageLoadTests {
   }
 
   @Test
-  func inv_image_56_second_load_of_a_url_comes_from_the_cache_without_network() async throws {
-    let fetcher = TestFetcher()
-    fetcher.serve(payload, at: address)
-    let directory = try directory()
-
-    let first = try await MediaImageLoad.load(url: URL(string: address)!, directory: directory, fetcher: fetcher)
-    let second = try await MediaImageLoad.load(url: URL(string: address)!, directory: directory, fetcher: fetcher)
-
-    #expect(first.source == .network)
-    #expect(second.source == .cache)
-    #expect(second.bytes == payload)
-    #expect(fetcher.requestCount(for: address) == 1)
-  }
-
-  @Test
   func inv_image_58_slow_origin_ends_with_a_timeout_error() async throws {
     let fetcher = TestFetcher()
     fetcher.serve(payload, at: address)

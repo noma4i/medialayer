@@ -75,4 +75,21 @@ class MemoryWarningTest {
       scratch.dispose()
     }
   }
+
+  @Test
+  fun systemSignalsRegisterOnceAndUnregisterOnceWhateverTheOrderOfCalls() = kotlinx.coroutines.runBlocking {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val owner = object : LifecycleOwner { override val lifecycle = LifecycleRegistry(this) }
+    val signals = SystemSignals(context, RecordingEvents(), owner.lifecycle)
+    fun receivers() = org.robolectric.Shadows.shadowOf(context as android.app.Application).registeredReceivers.count { it.broadcastReceiver.javaClass.name.startsWith(SystemSignals::class.java.name) }
+
+    signals.unregister()
+    signals.register()
+    signals.register()
+    assertEquals(1, receivers())
+    signals.unregister()
+    signals.unregister()
+
+    assertEquals(0, receivers())
+  }
 }

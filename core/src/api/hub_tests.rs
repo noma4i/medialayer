@@ -45,23 +45,6 @@ fn subscribe_blocked(hub: &Hub<u32>) -> Blocked {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn inv_api_02_slow_listener_does_not_delay_the_others() {
-    let hub = Hub::new(Handle::current());
-    let slow = subscribe_blocked(&hub);
-    let (fast_log, fast) = recorder();
-    let _fast = hub.subscribe(fast);
-
-    hub.publish(0);
-    eventually(|| last(&slow.log) == Some(0)).await;
-    (1..=99).for_each(|value| hub.publish(value));
-
-    eventually(|| last(&fast_log) == Some(99)).await;
-    assert_eq!(last(&slow.log), Some(0));
-    let _ = slow.gate.send(());
-    let _ = slow.gate.send(());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn inv_api_02_burst_behind_a_busy_listener_collapses_to_the_latest_value() {
     let hub = Hub::new(Handle::current());
     let slow = subscribe_blocked(&hub);
@@ -72,6 +55,7 @@ async fn inv_api_02_burst_behind_a_busy_listener_collapses_to_the_latest_value()
     eventually(|| last(&slow.log) == Some(0)).await;
     (1..=99).for_each(|value| hub.publish(value));
     eventually(|| last(&fast_log) == Some(99)).await;
+    assert_eq!(last(&slow.log), Some(0), "the fast listener reached 99 while the slow one was still blocked on 0");
     let _ = slow.gate.send(());
     eventually(|| last(&slow.log) == Some(99)).await;
     let _ = slow.gate.send(());

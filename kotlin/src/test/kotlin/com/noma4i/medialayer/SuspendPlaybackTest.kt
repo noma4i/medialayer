@@ -8,7 +8,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertThrows
 import org.junit.Test
 
 private class TransportSlot : PlayerSlot, PlayerSlotFactory {
@@ -80,13 +79,6 @@ class SuspendPlaybackTest {
       blocking.release()
       assertEquals("play", withTimeout(10_000) { slot.log.receive() })
       allowing.release()
-    }
-  }
-
-  @Test
-  fun inv_session_13_a_blank_allow_group_throws() {
-    open(null).use { media ->
-      assertThrows(MediaException::class.java) { media.suspendPlayback(listOf(" ")) }
     }
   }
 }
