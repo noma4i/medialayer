@@ -371,8 +371,7 @@ struct MediaCameraTests {
     try await Task.sleep(for: .milliseconds(50))
     #expect((rig.backend.count("bind back"), rig.backend.count("unbind")) == (1, 0), "one of two previews leaving keeps the camera")
     rig.center.post(name: rig.signals.background, object: nil)
-    await eventually("released in the background") { rig.backend.count("unbind") == 1 }
-    #expect(rig.camera.state.phase == .idle)
+    await eventually("released in the background") { rig.backend.count("unbind") == 1 && rig.camera.state.phase == .idle }
     rig.center.post(name: rig.signals.foreground, object: nil)
     await eventually("bound again") { rig.backend.count("bind back") == 2 && rig.camera.state.phase == .ready }
     rig.camera.detachPreview()

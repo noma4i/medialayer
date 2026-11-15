@@ -344,8 +344,7 @@ class MediaCameraTest {
     Thread.sleep(50)
     assertEquals(1 to 0, rig.backend.count("bind BACK") to rig.backend.count("unbind"))
     rig.detach()
-    eventually("released") { rig.backend.count("unbind") == 1 }
-    assertEquals(CameraPhase.IDLE, rig.camera.state.value.phase)
+    eventually("released") { rig.backend.count("unbind") == 1 && rig.camera.state.value.phase == CameraPhase.IDLE }
     rig.attach()
     eventually("bound again") { rig.backend.count("bind BACK") == 2 && rig.camera.state.value.phase == CameraPhase.READY }
   }
