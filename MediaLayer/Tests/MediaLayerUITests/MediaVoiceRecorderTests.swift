@@ -50,6 +50,15 @@ private final class Ticks: @unchecked Sendable {
   func advance(_ ms: UInt64) { lock.withLock { value += ms } }
 }
 
+private final class FirstPlayback: @unchecked Sendable {
+  private let lock = NSLock()
+  private var calls: [String]?
+
+  var log: [String]? { lock.withLock { calls } }
+
+  func record(_ log: [String]) { lock.withLock { if calls == nil { calls = log } } }
+}
+
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct MediaVoiceRecorderTests {
   private func file() -> URL {
@@ -139,6 +148,37 @@ struct MediaVoiceRecorderTests {
     _ = try await recorder.stop()
 
     #expect(!session.isRecording)
+  }
+
+  @Test(arguments: [0, 4])
+  func playbackAfterRecordingStartsWithAnActivePlaybackSession(busyDeactivations: Int) async throws {
+    let port = FakeAudioSessionPort(busyDeactivations: busyDeactivations)
+    let session = MediaAudioSession(focus: .mix, port: port, releaseDelay: .zero)
+    let ticks = Ticks()
+    let recorder = makeRecorder(FakeCapture(), ticks: ticks, audio: session)
+    let target = file()
+    defer { try? FileManager.default.removeItem(at: target) }
+    try await recorder.start(to: target)
+    ticks.advance(1000)
+    _ = try await recorder.stop()
+
+    let factory = AVQueuePlayerSlotFactory(startMuted: false, audio: session)
+    let slot = await factory.makeSlot(7)
+    let clip = Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!
+    await slot.load(key: "voice", route: PlaybackRoute(url: clip.absoluteString, headers: [:], generation: nil, hls: false, looping: true))
+    let first = FirstPlayback()
+    let observation = await MainActor.run {
+      slot.player.observe(\.timeControlStatus, options: [.new]) { player, _ in
+        if player.timeControlStatus != .paused { first.record(port.log) }
+      }
+    }
+    await slot.play()
+    await eventually("player started") { first.log != nil }
+    let calls = try #require(first.log)
+    #expect(calls.last(where: { $0.hasPrefix("category ") }) == FakeAudioSessionPort.category(.playback(.mix)))
+    #expect(calls.last(where: { $0.hasPrefix("active ") && !$0.hasSuffix("BUSY") }) == "active true")
+    observation.invalidate()
+    await slot.unload()
   }
 
   @Test
