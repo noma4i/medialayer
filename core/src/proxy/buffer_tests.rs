@@ -147,16 +147,6 @@ fn target_of(proxy: &Proxy, url: &str) -> String {
     format!("{}?{}", parsed.path(), parsed.query().unwrap_or_default())
 }
 
-async fn until(mut condition: impl FnMut() -> bool) {
-    for _ in 0..1_000_000 {
-        if condition() {
-            return;
-        }
-        tokio::task::yield_now().await;
-    }
-    panic!("condition not reached");
-}
-
 #[tokio::test]
 async fn inv_proxy_13_downloads_reserve_their_buffers_and_never_pull_more_than_the_ledger_allows() {
     let rig = rig(STREAM_CHUNK).await;
@@ -200,7 +190,7 @@ async fn inv_proxy_13_serving_waits_while_the_ledger_is_full_and_continues_when_
     let target = target_of(&rig.proxy, url);
     let client = tokio::spawn(async move { get(port, &target).await });
 
-    until(|| rig.ledger.waiting() == 1).await;
+    assert!(super::proxy_harness::eventually(|| rig.ledger.waiting() == 1).await);
     assert_eq!(rig.probe.counters.largest_read.load(Ordering::SeqCst), 0);
     drop(held);
 

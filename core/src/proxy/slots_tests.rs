@@ -12,9 +12,7 @@ use tokio::time::timeout;
 const SHORT: Duration = Duration::from_millis(50);
 
 async fn wait_for_queue(slots: &PrioritySlots, count: usize) {
-    timeout(Duration::from_secs(5), async {
-        while slots.waiting() != count { tokio::task::yield_now().await; }
-    }).await.expect("waiters did not register");
+    assert!(super::proxy_harness::eventually(|| slots.waiting() == count).await);
 }
 
 #[tokio::test]
@@ -132,12 +130,7 @@ async fn inv_proxy_10_raising_the_limit_hands_slots_to_the_waiters_and_lowering_
         let slots = slots.clone();
         async move { slots.acquire(Priority::Playback).await.map(drop) }
     });
-    for _ in 0..100_000 {
-        if slots.waiting() == 1 {
-            break;
-        }
-        tokio::task::yield_now().await;
-    }
+    wait_for_queue(&slots, 1).await;
     assert_eq!(slots.waiting(), 1);
 
     slots.set_max(2);
@@ -255,6 +248,7 @@ async fn inv_proxy_30_a_waiter_whose_sender_vanished_gets_an_error_not_an_endles
 struct SlowClose {
     gate: Mutex<mpsc::Receiver<()>>,
     closed: Arc<AtomicBool>,
+    started: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
 
 #[async_trait::async_trait]
@@ -264,6 +258,9 @@ impl BodyReader for SlowClose {
     }
 
     fn release(&self) {
+        if let Some(started) = self.started.lock().unwrap().take() {
+            let _ = started.send(());
+        }
         let _ = self.gate.lock().unwrap().recv();
         self.closed.store(true, Ordering::SeqCst);
     }
@@ -282,24 +279,20 @@ impl crate::ffi::Fetcher for SlowPlatform {
 #[tokio::test]
 async fn inv_proxy_31_a_permit_is_returned_only_after_the_platform_closed_the_response() {
     let (open_gate, gate) = mpsc::channel();
+    let (started, close_started) = tokio::sync::oneshot::channel();
     let closed = Arc::new(AtomicBool::new(false));
-    let platform = Arc::new(SlowPlatform(Mutex::new(Some(Arc::new(SlowClose { gate: Mutex::new(gate), closed: closed.clone() })))));
+    let platform = Arc::new(SlowPlatform(Mutex::new(Some(Arc::new(SlowClose { gate: Mutex::new(gate), closed: closed.clone(), started: Mutex::new(Some(started)) })))));
     let slots = PrioritySlots::new(1, 0, 8);
     let permit = slots.acquire(Priority::Playback).await.unwrap();
     let request = crate::fetch::Request { url: "https://o.test/a".to_string(), ..Default::default() };
     let response = ForeignFetcher::new(platform, InputLimits::default()).fetch(request).await.unwrap();
 
     drop(permit.hold(response.body));
-    tokio::time::sleep(SHORT).await;
+    timeout(Duration::from_secs(3), close_started).await.unwrap().unwrap();
 
     assert_eq!(slots.in_use(), 1, "the permit was returned while the platform still held the connection");
     open_gate.send(()).unwrap();
-    for _ in 0..200 {
-        if slots.in_use() == 0 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
+    assert!(super::proxy_harness::eventually(|| slots.in_use() == 0).await);
     assert!(closed.load(Ordering::SeqCst));
     assert_eq!(slots.in_use(), 0);
 }

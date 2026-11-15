@@ -51,6 +51,7 @@ struct ActiveOwned(Arc<CountingFetcher>);
 impl Drop for ActiveOwned {
     fn drop(&mut self) {
         self.0.active.fetch_sub(1, Ordering::SeqCst);
+        crate::test_signal::fire();
     }
 }
 
@@ -276,6 +277,7 @@ async fn inv_proxy_02_inv_proxy_03_inv_proxy_06_inv_proxy_11_clients_ranges_cuts
     assert!(fetcher.peak.load(Ordering::SeqCst) <= MAX_CONCURRENT, "{} origin responses were open at once", fetcher.peak.load(Ordering::SeqCst));
     let quiet = async {
         loop {
+            let seen = crate::test_signal::current();
             let stats = cache.stats().await;
             if proxy.live_tasks() == 0
                 && proxy.inner.slots.in_use() == 0
@@ -286,7 +288,7 @@ async fn inv_proxy_02_inv_proxy_03_inv_proxy_06_inv_proxy_11_clients_ranges_cuts
             {
                 break;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            crate::test_signal::changed_since(seen).await;
         }
     };
     tokio::time::timeout(std::time::Duration::from_secs(15), quiet).await.unwrap_or_else(|_| {
@@ -329,6 +331,7 @@ impl Drop for CloseWatch {
     fn drop(&mut self) {
         let held = self.slots.get().map_or(0, |slots| slots.in_use());
         self.held_at_close.lock().unwrap().push(held);
+        crate::test_signal::fire();
     }
 }
 
@@ -357,12 +360,7 @@ async fn inv_proxy_10_an_origin_body_is_closed_while_its_slot_is_still_held() {
     let target = path_of(&proxy.url_for("https://o.test/probe.mp4", &HashMap::new()).unwrap());
     let head = request(proxy.port(), "HEAD", &target, &[]).await;
     assert_eq!(head.status, 200);
-    for _ in 0..200 {
-        if !held_at_close.lock().unwrap().is_empty() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-    }
+    assert!(super::proxy_harness::eventually(|| !held_at_close.lock().unwrap().is_empty()).await);
     let closes = held_at_close.lock().unwrap().clone();
     assert!(!closes.is_empty(), "the origin body was never closed");
     assert!(closes.iter().all(|held| *held == 1), "an origin body outlived its slot: slots held at each close {closes:?}");

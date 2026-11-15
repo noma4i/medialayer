@@ -4,12 +4,7 @@ use crate::fetch::mock::{MockFetcher, Script};
 use crate::proxy::{memory_store::MemoryStore, Config, Proxy};
 
 async fn permits_returned(proxy: &Proxy) {
-    for _ in 0..400 {
-        if proxy.inner.slots.in_use() == 0 {
-            return;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-    }
+    assert!(crate::proxy::proxy_harness::eventually(|| proxy.inner.slots.in_use() == 0).await);
     assert_eq!(proxy.inner.slots.in_use(), 0, "a cancelled probe kept its permit");
 }
 

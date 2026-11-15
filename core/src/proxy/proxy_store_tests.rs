@@ -5,7 +5,7 @@ use crate::fetch::mock::{MockFetcher, Script};
 use std::time::Duration;
 use super::proxy_harness::*;
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn inv_proxy_12_a_master_playlist_without_endlist_survives_a_restart_and_plays_offline() {
     let store = MemoryStore::new();
     let master = "https://o.test/live/master.m3u8";
@@ -16,7 +16,7 @@ async fn inv_proxy_12_a_master_playlist_without_endlist_survives_a_restart_and_p
     let first = Proxy::start(short_ttl.clone(), first_fetcher.clone(), Arc::new(store.clone())).await.unwrap();
     let online = get(first.port(), &path_of(&first.url_for(master, &HashMap::new()).unwrap())).await;
     first.stop().await;
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    tokio::time::advance(Duration::from_millis(150)).await;
 
     let offline = Arc::new(MockFetcher::new());
     offline.set_offline(true);

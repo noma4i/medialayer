@@ -14,7 +14,7 @@ async fn inv_proxy_09_playback_starts_while_prefetch_holds_every_prefetch_slot()
     let first = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/low1.mp4", &HashMap::new(), Priority::Prefetch, None).await } });
     assert!(eventually(|| rig.fetcher.calls_for("https://o.test/low1.mp4") == 1).await);
     let second = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/low2.mp4", &HashMap::new(), Priority::Prefetch, None).await } });
-    within(5, async { while rig.proxy.inner.slots.waiting() != 1 { tokio::task::yield_now().await; } }).await;
+    assert!(eventually(|| rig.proxy.inner.slots.waiting() == 1).await);
     assert_eq!(rig.fetcher.calls_for("https://o.test/low2.mp4"), 0);
 
     let now = within(2, get(rig.proxy.port(), &path_of(&rig.proxy.url_for("https://o.test/now.mp4", &HashMap::new()).unwrap()))).await;
@@ -133,9 +133,7 @@ async fn inv_proxy_23_an_accept_task_that_ended_is_rebound_by_repair() {
     let rig = rig().await;
     let port = rig.proxy.port();
     let _ = rig.proxy.inner.listener.lock().await.as_ref().unwrap().shutdown.send(true);
-    while rig.proxy.readiness() == Readiness::Ready {
-        tokio::task::yield_now().await;
-    }
+    assert!(eventually(|| rig.proxy.readiness() != Readiness::Ready).await);
     assert_eq!(rig.proxy.readiness(), Readiness::Unhealthy);
     assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err());
 

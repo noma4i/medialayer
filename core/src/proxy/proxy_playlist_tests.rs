@@ -89,7 +89,7 @@ async fn inv_proxy_13_a_playlist_over_the_input_limit_is_refused_with_502() {
     assert_eq!((reply.status, reply.text().as_str()), (502, "playlist too large"));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn inv_proxy_12_live_playlists_are_refetched_after_the_ttl_and_vod_playlists_are_not() {
     let mut config = config(8);
     config.playlist_ttl = Duration::from_millis(150);
@@ -108,7 +108,7 @@ async fn inv_proxy_12_live_playlists_are_refetched_after_the_ttl_and_vod_playlis
     assert_eq!(rig.fetcher.calls_for(live), 1);
 
     rig.fetcher.route(live, Script::ok(live_playlist(2)));
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    tokio::time::advance(Duration::from_millis(300)).await;
     assert!(get(port, &live_target).await.text().contains("MEDIA-SEQUENCE:2"));
     get(port, &vod_target).await;
     assert_eq!(rig.fetcher.calls_for(live), 2);

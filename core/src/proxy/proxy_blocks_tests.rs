@@ -73,7 +73,7 @@ async fn inv_proxy_09_prefetch_over_the_wait_queue_limit_is_refused_at_once() {
     let running = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/a.mp4", &HashMap::new(), Priority::Prefetch, None).await } });
     assert!(eventually(|| rig.fetcher.calls_for("https://o.test/a.mp4") == 1).await);
     let waiting = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/b.mp4", &HashMap::new(), Priority::Prefetch, None).await } });
-    within(5, async { while rig.proxy.inner.slots.waiting() != 1 { tokio::task::yield_now().await; } }).await;
+    assert!(eventually(|| rig.proxy.inner.slots.waiting() == 1).await);
 
     let refused = within(1, rig.proxy.fetch_into_store("https://o.test/c.mp4", &HashMap::new(), Priority::Prefetch, None)).await;
     assert_eq!(refused, Err(ProxyError::QueueFull));
@@ -90,7 +90,7 @@ async fn inv_proxy_09_a_player_request_promotes_a_waiting_prefetch() {
     let hold = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/hold.mp4", &HashMap::new(), Priority::Prefetch, None).await } });
     assert!(eventually(|| rig.fetcher.calls_for("https://o.test/hold.mp4") == 1).await);
     let queued = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.fetch_into_store("https://o.test/next.mp4", &HashMap::new(), Priority::Prefetch, None).await } });
-    within(5, async { while rig.proxy.inner.slots.waiting() != 1 { tokio::task::yield_now().await; } }).await;
+    assert!(eventually(|| rig.proxy.inner.slots.waiting() == 1).await);
     assert_eq!(rig.fetcher.calls_for("https://o.test/next.mp4"), 0);
 
     let target = path_of(&rig.proxy.url_for("https://o.test/next.mp4", &HashMap::new()).unwrap());

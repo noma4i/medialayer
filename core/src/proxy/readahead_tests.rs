@@ -120,10 +120,6 @@ fn origin_segments(rig: &Rig) -> usize {
     (0..SEGMENTS).filter(|index| origin_calls(rig, *index) > 0).count()
 }
 
-async fn settle(milliseconds: u64) {
-    tokio::time::sleep(Duration::from_millis(milliseconds)).await;
-}
-
 #[tokio::test]
 async fn inv_readahead_01_a_player_that_asks_for_the_whole_clip_pulls_chunks_ahead_plus_one_from_the_origin() {
     let rig = rig().await;
@@ -136,19 +132,20 @@ async fn inv_readahead_01_a_player_that_asks_for_the_whole_clip_pulls_chunks_ahe
     assert!(origin_segments(&rig) <= CHUNKS_AHEAD + 1, "origin fetched {} of {SEGMENTS} segments", origin_segments(&rig));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn inv_readahead_02_a_held_segment_is_released_by_the_playhead_and_a_seek_and_a_cached_one_is_never_held() {
     let rig = rig().await;
     let targets = playlist_lines(&rig).await;
     let held = ask(&rig, &targets[5]);
-    settle(250).await;
+    assert!(super::proxy_harness::eventually(|| rig.proxy.playhead_holds() == 1).await);
     assert_eq!((held.is_finished(), origin_calls(&rig, 5)), (false, 0));
+    tokio::time::advance(Duration::from_millis(250)).await;
     rig.playhead.move_to(3 * SEGMENT_MS);
     let reply = tokio::time::timeout(Duration::from_millis(1_400), held).await.expect("released by the playhead").unwrap();
     assert_eq!((reply.status, origin_calls(&rig, 5)), (200, 1));
 
     let jumped = ask(&rig, &targets[7]);
-    settle(250).await;
+    assert!(super::proxy_harness::eventually(|| rig.proxy.playhead_holds() == 1).await);
     assert!(!jumped.is_finished());
     rig.playhead.move_to(6 * SEGMENT_MS);
     rig.proxy.nudge_window(MEDIA);
@@ -191,7 +188,7 @@ async fn inv_readahead_04_a_stall_grows_the_cap_by_one_chunk_up_to_eight_and_a_n
     let rig = rig().await;
     let targets = playlist_lines(&rig).await;
     let held = ask(&rig, &targets[3]);
-    settle(250).await;
+    assert!(super::proxy_harness::eventually(|| rig.proxy.playhead_holds() == 1).await);
     assert!(!held.is_finished());
     rig.proxy.grow_window(MEDIA);
     let reply = tokio::time::timeout(Duration::from_millis(300), held).await.expect("released by the growth").unwrap();
@@ -218,7 +215,7 @@ async fn inv_readahead_07_a_memory_step_lowers_the_cap_and_the_hint_down_to_one_
     rig.proxy.set_readahead_percent(25);
     assert_eq!(rig.playhead.hints().last().copied(), Some(TARGET_MS));
     let held = ask(&rig, &targets[2]);
-    settle(250).await;
+    assert!(super::proxy_harness::eventually(|| rig.proxy.playhead_holds() == 1).await);
     assert_eq!((held.is_finished(), origin_calls(&rig, 2)), (false, 0));
     rig.proxy.set_readahead_percent(100);
     let reply = tokio::time::timeout(Duration::from_millis(300), held).await.expect("released by the full cap").unwrap();

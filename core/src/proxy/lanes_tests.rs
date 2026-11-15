@@ -49,7 +49,7 @@ async fn video_wait(proxy: &Proxy, fetcher: &MockFetcher) -> Duration {
 async fn inv_proxy_20_a_burst_of_images_never_delays_a_video_request() {
     let (proxy, fetcher) = rig(2).await;
     let images = spawn_images(&proxy, &fetcher);
-    tokio::time::sleep(Duration::from_millis(60)).await;
+    assert!(super::proxy_harness::eventually(|| proxy.inner.image_slots.in_use() == 2).await);
     let waited = video_wait(&proxy, &fetcher).await;
     assert!(waited < VIDEO_BUDGET, "the video playlist waited {waited:?} behind {IMAGES} images");
     for task in images {

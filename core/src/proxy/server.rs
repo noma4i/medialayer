@@ -19,6 +19,8 @@ struct AliveGuard(Arc<AtomicBool>);
 impl Drop for AliveGuard {
     fn drop(&mut self) {
         self.0.store(false, Ordering::SeqCst);
+        #[cfg(test)]
+        crate::test_signal::fire();
     }
 }
 
