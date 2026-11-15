@@ -19,10 +19,6 @@ async fn stored(rig: &Rig, keys: &[String]) -> bool {
     true
 }
 
-async fn quiet() {
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-}
-
 fn blocks(url: &str, count: usize) -> Vec<String> {
     (0..count).map(|block| format!("{url}#{block}")).collect()
 }
@@ -104,7 +100,7 @@ async fn inv_strategy_10_the_prefetch_window_skips_on_demand_and_whole_items() {
         }
         rig.parts.stage.replace_image_window("feed", 0, pages);
         rig.parts.stage.move_image_window("feed", 3);
-        quiet().await;
+        tokio::time::timeout(std::time::Duration::from_secs(20), rig.parts.prefetcher.wait_live_at_most(0)).await.unwrap();
 
         let expected = if strategy == CacheStrategy::Whole { 10 } else { 0 };
         assert_eq!(rig.fetcher.calls(), expected, "{strategy:?}");
@@ -119,7 +115,7 @@ async fn inv_strategy_11_a_local_whole_source_is_never_fetched() {
     rig.parts.stage.visible(local.clone(), true);
     rig.parts.stage.replace_window(0, vec![Some(local)]);
     eventually(|| rig.parts.stage.commands_idle()).await;
-    quiet().await;
+    tokio::time::timeout(std::time::Duration::from_secs(20), rig.parts.prefetcher.wait_live_at_most(0)).await.unwrap();
 
     assert_eq!(rig.fetcher.calls(), 0);
 }
@@ -132,7 +128,7 @@ async fn inv_strategy_09_a_default_list_still_reaches_only_the_window() {
     }
 
     rig.parts.stage.replace_window(0, videos(40));
-    quiet().await;
+    tokio::time::timeout(std::time::Duration::from_secs(20), rig.parts.prefetcher.wait_live_at_most(0)).await.unwrap();
 
     assert!(rig.fetcher.calls() < 10, "{}", rig.fetcher.calls());
 }

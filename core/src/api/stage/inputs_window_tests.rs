@@ -35,14 +35,21 @@ async fn inv_api_03_retired_declarations_ignore_late_cache_results() {
         let stage = &rig.parts.stage;
         let source = MediaItem::bare("file:///poster.jpg", Kind::Image);
         stage.visible(source.clone(), true);
+        let check = {
+            let mut state = stage.state();
+            let declaration = state.declarations.get_mut(&source.url).unwrap();
+            let check = declaration.check.take();
+            declaration.observed = check.as_ref().map(|check| check.abort_handle());
+            check
+        };
         if release_all {
             stage.release_all();
         } else {
             stage.visible(source.clone(), false);
         }
         assert_eq!(stage.declaration_checks(), 0, "the check of a retired declaration is still running");
-        for _ in 0..50 {
-            tokio::task::yield_now().await;
+        if let Some(mut check) = check {
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(20), check.join()).await.unwrap();
         }
         assert!(!rig.parts.places.is_declared(&source.url), "late cache check redeclared hidden image");
     }

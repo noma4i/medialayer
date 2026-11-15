@@ -54,6 +54,15 @@ pub(super) struct Armed {
 pub(super) struct Declaration {
     pub(super) token: Arc<()>,
     pub(super) check: Option<AbortOnDrop>,
+    #[cfg(test)]
+    pub(super) observed: Option<tokio::task::AbortHandle>,
+}
+
+#[cfg(test)]
+impl Drop for Declaration {
+    fn drop(&mut self) {
+        if let Some(observed) = &self.observed { observed.abort(); }
+    }
 }
 
 #[derive(Default)]

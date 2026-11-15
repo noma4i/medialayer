@@ -37,10 +37,6 @@ async fn backgrounded(rig: &Rig, signals: &Signals) {
     eventually(|| rig.parts.stage.state().ring.is_background()).await;
 }
 
-async fn quiet() {
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-}
-
 fn whole(url: &str, kind: Kind) -> MediaItem {
     MediaItem { strategy: CacheStrategy::Whole, ..MediaItem::bare(url, kind) }
 }
@@ -54,7 +50,7 @@ async fn inv_prefetch_22_a_whole_declared_after_background_waits_for_the_foregro
 
     backgrounded(&rig, &signals).await;
     rig.parts.stage.replace_window(0, vec![Some(whole(clip, Kind::Video))]);
-    quiet().await;
+    tokio::time::timeout(std::time::Duration::from_secs(20), rig.parts.prefetcher.wait_live_at_most(0)).await.unwrap();
     assert_eq!(rig.fetcher.calls(), 0, "a whole source started in the background");
 
     signals.foreground();
@@ -71,7 +67,7 @@ async fn inv_prefetch_22_a_window_declared_after_background_waits_for_the_foregr
 
     backgrounded(&rig, &signals).await;
     rig.parts.stage.replace_window(0, videos(4));
-    quiet().await;
+    tokio::time::timeout(std::time::Duration::from_secs(20), rig.parts.prefetcher.wait_live_at_most(0)).await.unwrap();
     assert_eq!(rig.fetcher.calls(), 0, "a window source started in the background");
 
     signals.foreground();
@@ -88,6 +84,7 @@ struct CountDrop<'a>(&'a AtomicUsize);
 impl Drop for CountDrop<'_> {
     fn drop(&mut self) {
         self.0.fetch_add(1, Ordering::SeqCst);
+        crate::test_signal::fire();
     }
 }
 
@@ -95,6 +92,7 @@ impl Drop for CountDrop<'_> {
 impl TonePreparation for Hanging {
     async fn prepare(&self, _source: MediaItem) -> Option<TonePixels> {
         self.started.fetch_add(1, Ordering::SeqCst);
+        crate::test_signal::fire();
         let _guard = CountDrop(&self.dropped);
         std::future::pending::<()>().await;
         None
@@ -114,8 +112,10 @@ async fn inv_tone_14_background_cancels_tone_preparation_and_the_foreground_rest
 
     backgrounded(&rig, &signals).await;
     eventually(|| preparation.dropped.load(Ordering::SeqCst) == 1).await;
-    let _second = rig.parts.tones.subscribe(&second, 0.15, Arc::new(|_| {})).unwrap();
-    quiet().await;
+    let (sent, received) = tokio::sync::oneshot::channel();
+    let sent = std::sync::Mutex::new(Some(sent));
+    let _second = rig.parts.tones.subscribe(&second, 0.15, Arc::new(move |_| { if let Some(sent) = sent.lock().unwrap().take() { let _ = sent.send(()); } })).unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(20), received).await.unwrap().unwrap();
     assert_eq!(preparation.started.load(Ordering::SeqCst), 1, "tone work started in the background");
 
     signals.foreground();

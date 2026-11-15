@@ -332,7 +332,7 @@ impl Stage {
             state.refresh_pending(&url);
             let commands = if is_player { state.ring.touch(now, &url) } else { Vec::new() };
             let check = self.inner.handle.spawn(check_cached(std::sync::Arc::downgrade(&self.inner), self.inner.routes.clone(), url.clone(), headers, declaration.clone()));
-            state.declarations.insert(url.clone(), Declaration { token: declaration, check: Some(AbortOnDrop::new(check)) });
+            state.declarations.insert(url.clone(), Declaration { token: declaration, check: Some(AbortOnDrop::new(check)), #[cfg(test)] observed: None });
             (state, commands)
         };
         self.dispatch(state, commands);
