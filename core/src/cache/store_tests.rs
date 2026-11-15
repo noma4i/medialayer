@@ -186,13 +186,21 @@ async fn inv_cache_14_url_key_of_5000_chars_round_trips_through_a_reopen() {
 }
 
 #[tokio::test]
-async fn inv_cache_05_reads_count_hits_for_lfu() {
-    let f = roomy().await;
-    f.put("k", Kind::Image, 10).await;
-    f.touch("k").await;
-    f.touch("k").await;
+async fn inv_cache_05_read_frequency_survives_reopening_for_lfu() {
+    let limits = limits(100, 0.8, EvictionStrategy::Lfu);
+    let f = fixture(limits, &[]).await;
+    for key in ["a", "b", "c"] {
+        f.put(key, Kind::Image, 30).await;
+    }
+    f.touch("a").await;
+    f.touch("a").await;
+    f.touch("b").await;
     f.cache.flush().await.unwrap();
-    let text = std::fs::read_to_string(f.dir.path().join("index.tsv")).unwrap();
-    let record = text.lines().filter_map(super::persist::decode_line).next_back().unwrap();
-    assert_eq!(record.1.hits, 2);
+    let reopened = Cache::open(f.dir.path(), limits);
+    reopened.ready().await;
+    reopened.put("d", Kind::Image, &payload(30)).await.unwrap();
+    assert!(reopened.contains("a").await);
+    assert!(reopened.contains("b").await);
+    assert!(!reopened.contains("c").await);
+    assert!(reopened.contains("d").await);
 }

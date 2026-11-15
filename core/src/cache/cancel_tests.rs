@@ -39,7 +39,8 @@ async fn inv_cache_02_write_cancelled_at_any_await_point_leaves_no_reserve_after
         let mut writer = f.cache.begin_write("a", Kind::Stream).await.unwrap();
         poll_then_drop(writer.write(&[0; 80]), polls).await;
         drop(writer);
-        assert_eq!(reserved(&f.cache), 0, "polls {polls}");
+        let mut next = f.cache.begin_write("b", Kind::Stream).await.unwrap();
+        next.write(&[1; 100]).await.unwrap_or_else(|error| panic!("polls {polls}: {error}"));
     }
 }
 
