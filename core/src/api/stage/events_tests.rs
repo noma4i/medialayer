@@ -577,3 +577,23 @@ async fn inv_api_18_a_note_that_ended_and_was_rewound_before_its_place_closed_re
     let load = calls.iter().rposition(|call| matches!(call, SlotCall::Load { .. })).unwrap();
     assert!(!calls[load..].iter().any(|call| matches!(call, SlotCall::Seek { position_ms } if *position_ms > 0)), "{calls:?}");
 }
+
+#[tokio::test]
+async fn inv_api_49_a_window_entry_never_turns_a_one_shot_place_into_a_loop() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    let url = url_of(0);
+    stage.visible(once(&url), true);
+    stage.replace_window(0, vec![Some(video(&url))]);
+    stage.set_playing(&url, true, &[]);
+    eventually(|| rig.factory.slot_holding(&url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
+    let (slot, player) = rig.holder(&url);
+    let loads: Vec<bool> = player.calls().iter().filter_map(|call| match call { SlotCall::Load { route, .. } => Some(route.looping), _ => None }).collect();
+
+    let slot = slot as usize;
+    stage.ready(slot, stage.generation_at(slot));
+    stage.ended(slot, stage.generation_at(slot));
+
+    assert_eq!(loads, vec![false]);
+    assert_eq!(rig.parts.places.state(&url), MediaState::Ended);
+}
