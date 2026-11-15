@@ -156,6 +156,7 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
     val previewRequest = remember(media, preview, pixels, scale, placementPixels, dimensions) { imageRequest(context, preview, pixels, scale, media, placementPixels, admit = media.viewDecodeAdmit(), dimensions = dimensions?.copy(declared = preview.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) })) }
     AsyncImage(model = previewRequest, contentDescription = null, imageLoader = loader, contentScale = contentScale, modifier = Modifier.fillMaxSize().testTag(PREVIEW_TAG))
   }
+  val drawsImage = state.value.drawsImage()
   AsyncImage(
     model = request,
     contentDescription = null,
@@ -168,7 +169,7 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
         mount.report(reached)
       }
     },
-    modifier = Modifier.fillMaxSize().drawWithContent { if (state.value.drawsImage()) drawContent() }
+    modifier = Modifier.fillMaxSize().drawWithContent { if (drawsImage) drawContent() }
   )
   ImageContent(screen, state, content)
 }
