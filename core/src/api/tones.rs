@@ -110,6 +110,8 @@ pub struct Tones {
     active: AtomicUsize,
     idle: Notify,
     demand_seq: AtomicU64,
+    #[cfg(test)]
+    delivered_changes: Arc<AtomicU64>,
 }
 
 struct Running {
@@ -123,6 +125,8 @@ impl Drop for Running {
         if self.tones.active.fetch_sub(1, Ordering::SeqCst) == 1 {
             self.tones.idle.notify_waiters();
         }
+        #[cfg(test)]
+        crate::test_signal::fire();
     }
 }
 
@@ -146,6 +150,8 @@ impl Tones {
             active: AtomicUsize::new(0),
             idle: Notify::new(),
             demand_seq: AtomicU64::new(0),
+            #[cfg(test)]
+            delivered_changes: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -214,8 +220,14 @@ impl Tones {
         let key = self.store.key_for(&source.url, &source.headers);
         let pending = Arc::new(Notify::new());
         let mark = pending.clone();
+        #[cfg(test)]
+        let delivered_changes = self.delivered_changes.clone();
         let mut hubs = locked(&self.hubs);
-        let inner = hubs.entry(key.clone()).or_insert_with(|| Hub::new(self.handle.clone())).subscribe(Arc::new(move |_: ToneSource| mark.notify_one()));
+        let inner = hubs.entry(key.clone()).or_insert_with(|| Hub::new(self.handle.clone())).subscribe(Arc::new(move |_: ToneSource| {
+            mark.notify_one();
+            #[cfg(test)]
+            { delivered_changes.fetch_add(1, Ordering::SeqCst); crate::test_signal::fire(); }
+        }));
         let seq = self.demand_seq.fetch_add(1, Ordering::Relaxed);
         locked(&self.demands).entry(key.clone()).or_insert_with(|| Demand { source: source.clone(), queried: false, seq });
         drop(hubs);
@@ -345,6 +357,18 @@ impl Tones {
         if let Some(hub) = locked(&self.hubs).get(key) {
             hub.publish(ToneSource::Pixels);
         }
+        #[cfg(test)]
+        crate::test_signal::fire();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active(&self) -> usize {
+        self.active.load(Ordering::SeqCst)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn delivered_changes(&self) -> u64 {
+        self.delivered_changes.load(Ordering::SeqCst)
     }
 
     #[cfg(test)]

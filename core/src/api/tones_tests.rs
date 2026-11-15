@@ -5,7 +5,7 @@ use crate::cache::{Cache, Kind as CacheKind};
 use crate::limits::Limits;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::runtime::Handle;
 
 const KNOWN: &str = "LEHV6nWB2yk8pyo0adR*.7kCMdnj";
@@ -16,7 +16,7 @@ async fn inv_tone_13_pixels_without_demand_do_no_work() {
     let rig = rig(8).await;
     let source = item("https://cdn.test/unwatched.jpg", None);
     offer(&rig.tones, source, 90);
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(rig.tones.active(), 0);
     assert_eq!(rig.tones.analyses(), 0, "pixel analyses without tone demand");
 }
 
@@ -93,7 +93,7 @@ async fn inv_tone_13_late_demand_prepares_once_and_cached_pixels_skip_preparatio
     let listener = rig.tones.subscribe(&source, 0.15, Arc::new(move |value: Option<MediaTone>| { sent.send(value).unwrap(); })).unwrap();
     tokio::time::timeout(WAIT_LIMIT, preparation.started.notified()).await.unwrap();
     for _ in 0..8 { rig.tones.refresh(&source.url); }
-    tokio::task::yield_now().await;
+    assert_eq!(rig.tones.active(), 1);
     assert_eq!(preparation.calls.load(Ordering::SeqCst), 1);
     preparation.release.add_permits(1);
     let mut sources = Vec::new();
@@ -136,7 +136,9 @@ struct FailsOnce {
 impl TonePreparation for FailsOnce {
     async fn prepare(&self, source: MediaItem) -> Option<TonePixels> {
         assert!(self.tones.upgrade().unwrap().pixels_needed(&source).await);
-        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 { return None; }
+        let calls = self.calls.fetch_add(1, Ordering::SeqCst);
+        crate::test_signal::fire();
+        if calls == 0 { return None; }
         Some(TonePixels { width: 4, height: 4, rgba: pixels(80) })
     }
 }
@@ -156,23 +158,12 @@ async fn inv_tone_13_failed_preparation_releases_request_and_callback_can_reente
     assert_eq!(rig.tones.analyses(), 1);
 }
 
-async fn wait_for(mut condition: impl FnMut() -> bool) {
-    let started = Instant::now();
-    while !condition() {
-        assert!(started.elapsed() < WAIT_LIMIT, "condition not reached in time");
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
+async fn wait_for(condition: impl FnMut() -> bool) {
+    crate::api::test_support::wait_until(condition, WAIT_LIMIT).await;
 }
 
 async fn wait_for_source(tones: &Arc<Tones>, source: &MediaItem, wanted: ToneSource) {
-    let started = Instant::now();
-    loop {
-        if tones.tone(source, 0.15).await.unwrap().is_some_and(|tone| tone.source == wanted) {
-            return;
-        }
-        assert!(started.elapsed() < WAIT_LIMIT, "tone from {wanted:?} did not arrive");
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
+    crate::api::test_support::eventually_async(|| async { tones.tone(source, 0.15).await.unwrap().is_some_and(|tone| tone.source == wanted) }).await;
 }
 
 #[tokio::test]
@@ -230,14 +221,14 @@ async fn inv_tone_10_the_analysis_runs_once_per_key_however_many_times_the_pixel
     }
     offer(&rig.tones, second.clone(), 90);
     wait_for_source(&rig.tones, &second, ToneSource::Pixels).await;
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    wait_for(|| rig.tones.active() == 0).await;
 
     assert_eq!(rig.tones.analyses(), 2);
     rig.cache.flush().await.unwrap();
     let again = Tones::new(Handle::current(), Arc::new(CacheTones::new(rig.cache.clone(), Arc::new(|url, _| url.to_string()))), 8);
     offer(&again, first.clone(), 90);
     again.tone(&first, 0.15).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    wait_for(|| again.active() == 0).await;
     assert_eq!(again.analyses(), 0);
 }
 
@@ -256,6 +247,7 @@ async fn inv_tone_11_a_listener_hears_every_stored_or_replaced_tone_of_its_sourc
         rig.tones.subscribe(&watched, 0.15, Arc::new(move |tone: Option<MediaTone>| {
             heard.lock().unwrap().push(tone.map(|tone| tone.source));
             count.fetch_add(1, Ordering::SeqCst);
+            crate::test_signal::fire();
         })).unwrap()
     };
     wait_for(|| count.load(Ordering::SeqCst) == 1).await;
@@ -274,7 +266,7 @@ async fn inv_tone_11_a_listener_hears_every_stored_or_replaced_tone_of_its_sourc
     rig.cache.put(&watched.url, CacheKind::Image, b"third bytes").await.unwrap();
     offer(&rig.tones, watched.clone(), 60);
     wait_for_source(&rig.tones, &watched, ToneSource::Pixels).await;
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    wait_for(|| rig.tones.active() == 0).await;
     assert_eq!(count.load(Ordering::SeqCst), 3);
     assert_eq!(rig.tones.listener_count(), 0);
 }
@@ -317,6 +309,7 @@ impl Drop for Reading<'_> {
         if !self.finished {
             self.store.dropped.fetch_add(1, Ordering::SeqCst);
         }
+        crate::test_signal::fire();
     }
 }
 
@@ -330,6 +323,7 @@ impl ToneStore for Gated {
         self.started.fetch_add(1, Ordering::SeqCst);
         let now = self.inflight.fetch_add(1, Ordering::SeqCst) + 1;
         self.peak.fetch_max(now, Ordering::SeqCst);
+        crate::test_signal::fire();
         let mut reading = Reading { store: self, finished: false };
         let tone = self.inner.tone(key).await;
         if self.holds.try_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1)).is_ok() {
@@ -373,7 +367,7 @@ type Heard = Arc<Mutex<Vec<Option<MediaTone>>>>;
 
 fn recording(heard: &Heard) -> Arc<dyn Fn(Option<MediaTone>) + Send + Sync> {
     let heard = heard.clone();
-    Arc::new(move |tone| heard.lock().unwrap().push(tone))
+    Arc::new(move |tone| { heard.lock().unwrap().push(tone); crate::test_signal::fire(); })
 }
 
 #[tokio::test]
@@ -400,18 +394,20 @@ async fn inv_tone_16_rapid_changes_keep_one_reader_and_one_pending_mark() {
     let heard: Heard = Arc::new(Mutex::new(Vec::new()));
     let _subscription = rig.tones.subscribe(&source, 0.15, recording(&heard)).unwrap();
     wait_for(|| rig.store.started.load(Ordering::SeqCst) == 1).await;
+    let delivered = rig.tones.delivered_changes();
     for _ in 0..50 { rig.tones.changed(&source.url); }
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    wait_for(|| rig.tones.delivered_changes() > delivered).await;
     assert_eq!(rig.store.started.load(Ordering::SeqCst), 1, "a change started a read while one was held");
 
     rig.store.gate.add_permits(1);
     wait_for(|| rig.store.started.load(Ordering::SeqCst) == 2).await;
+    let delivered = rig.tones.delivered_changes();
     for _ in 0..50 { rig.tones.changed(&source.url); }
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    wait_for(|| rig.tones.delivered_changes() > delivered).await;
     assert_eq!(rig.store.started.load(Ordering::SeqCst), 2);
 
     rig.store.gate.add_permits(1);
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    wait_for(|| rig.store.started.load(Ordering::SeqCst) >= 3).await;
     assert!(rig.store.started.load(Ordering::SeqCst) <= 4, "reads: {}", rig.store.started.load(Ordering::SeqCst));
     assert_eq!(rig.store.peak.load(Ordering::SeqCst), 1);
 }
@@ -431,7 +427,6 @@ async fn inv_tone_17_cancel_drops_a_held_read_and_an_old_generation_never_delive
     let _second = rig.tones.subscribe(&new, 0.15, recording(&heard_new)).unwrap();
     wait_for(|| !heard_new.lock().unwrap().is_empty()).await;
     rig.store.gate.add_permits(1);
-    tokio::time::sleep(Duration::from_millis(100)).await;
 
     assert!(heard_old.lock().unwrap().is_empty(), "the cancelled subscription delivered");
     assert_eq!(rig.tones.listener_count(), 1);
@@ -472,8 +467,8 @@ async fn inv_tone_19_a_cancelled_one_shot_read_leaves_no_standing_preparation_de
 
     read.abort();
     wait_for(|| rig.store.dropped.load(Ordering::SeqCst) == 1).await;
+    assert!(read.await.unwrap_err().is_cancelled());
     rig.store.gate.add_permits(1);
-    tokio::time::sleep(Duration::from_millis(100)).await;
 
     assert_eq!(rig.tones.demand_count(), 0);
     assert_eq!(preparation.calls.load(Ordering::SeqCst), 0);
