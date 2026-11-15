@@ -11,6 +11,7 @@
 
 ### Fixed
 
+- The iOS camera preview keeps its frames when a recording starts or stops.
 - A lens change asked while the camera stops or takes a photo is applied when that ends.
 - A camera and a voice recorder can hold the recording audio together.
 - An iOS voice recording stopped right after its limit gives its file and ends once.
