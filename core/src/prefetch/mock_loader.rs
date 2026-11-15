@@ -145,7 +145,6 @@ impl MockLoader {
         };
         self.started.notify_one();
         crate::test_signal::fire();
-        tokio::task::yield_now().await;
         if hanging || self.hang_all.load(Ordering::SeqCst) {
             self.released.notified().await;
         }

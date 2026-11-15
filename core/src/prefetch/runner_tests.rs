@@ -76,12 +76,6 @@ pub(super) async fn wait_calls(loader: &MockLoader, count: usize) {
     }
 }
 
-pub(super) async fn quiet() {
-    for _ in 0..50 {
-        tokio::task::yield_now().await;
-    }
-}
-
 fn names(urls: &[String]) -> HashSet<String> {
     urls.iter().cloned().collect()
 }
@@ -301,8 +295,8 @@ async fn inv_prefetch_03_a_thousand_window_shifts_leave_no_live_tasks_behind() {
     let mut most_live = 0;
     for active in 0..1000 {
         rig.prefetcher.set_window(active, feed.clone());
-        tokio::task::yield_now().await;
         most_live = most_live.max(rig.prefetcher.live_tasks());
+        rig.prefetcher.wait_live_at_most(4).await;
     }
     rig.prefetcher.wait_live_at_most(4).await;
     assert_eq!(rig.prefetcher.live_tasks(), 4);

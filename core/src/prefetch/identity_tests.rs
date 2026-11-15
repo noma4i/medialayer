@@ -48,7 +48,7 @@ async fn completed_namespaces(mode: &str) -> u64 {
         "window" => prefetch.set_window(0, vec![Some(same)]),
         _ => prefetch.set_image_window("feed", 0, vec![vec![same]]),
     }
-    super::runner_tests::quiet().await;
+    assert_eq!(prefetch.live_tasks(), 0);
     assert_eq!(prefetch.counters().started, 2, "{mode} repeated the same disk key");
     proxy.stop().await;
     prefetch.counters().completed
@@ -87,14 +87,14 @@ async fn inv_prefetch_03_cancel_removes_all_namespaces_and_saved_declarations() 
             "window" => rig.prefetcher.set_window(0, sources.into_iter().map(Some).collect::<Vec<_>>()),
             _ => rig.prefetcher.set_image_window("feed", 0, vec![sources]),
         }
-        super::runner_tests::quiet().await;
+        super::runner_tests::eventually(|| rig.loader.active() == 2).await;
         assert_eq!(rig.loader.active(), 2, "{mode}");
         rig.prefetcher.cancel(&source("A").url);
         for _ in 0..2 {
             assert_eq!(next(&mut events).await.outcome, Outcome::Cancelled);
         }
         rig.prefetcher.resume();
-        super::runner_tests::quiet().await;
+        assert_eq!(rig.prefetcher.live_tasks(), 0);
         assert_eq!(rig.loader.calls().len(), 2, "cancelled {mode} resumed");
         assert_eq!(rig.loader.active(), 0);
     }

@@ -325,6 +325,11 @@ impl Prefetcher {
     }
 
     #[cfg(test)]
+    pub async fn wait_whole_queued(&self, image: bool, count: usize) {
+        self.shared.whole_gates[usize::from(image)].wait_queued(count).await;
+    }
+
+    #[cfg(test)]
     pub async fn wait_live_at_most(&self, count: usize) {
         let mut finished = self.shared.finished.subscribe();
         loop {

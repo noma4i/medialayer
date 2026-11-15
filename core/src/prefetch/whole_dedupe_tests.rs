@@ -1,5 +1,5 @@
 use super::loader::ProxyLoader;
-use super::runner_tests::{eventually, next, quiet, rig, rig_with, Rig};
+use super::runner_tests::{eventually, next, rig, rig_with, Rig};
 use super::whole_tests::{stack, Stack};
 use super::*;
 use crate::cache::{Clock, ManualClock};
@@ -33,15 +33,18 @@ async fn inv_strategy_22_a_failing_whole_source_is_fetched_three_times_in_one_bl
     failing.loader.fail(URL, true);
     failing.prefetcher.keep_whole(photo(CacheStrategy::Whole));
     assert!(matches!(next(&mut events).await.outcome, Outcome::Failed(_)));
-    tokio::time::sleep(Duration::from_secs(120)).await;
+    tokio::time::advance(Duration::from_secs(120)).await;
+    assert_eq!(failing.prefetcher.live_tasks(), 0);
     assert_eq!(fetches(&failing), 3);
 
     let recovering = rig();
     let mut events = recovering.prefetcher.settled();
     recovering.loader.fail(URL, true);
+    recovering.loader.hang(URL);
     recovering.prefetcher.keep_whole(photo(CacheStrategy::Whole));
     eventually(|| fetches(&recovering) == 1).await;
     recovering.loader.fail(URL, false);
+    recovering.loader.release(URL);
     assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
     assert_eq!(fetches(&recovering), 2);
 }
@@ -56,14 +59,14 @@ async fn inv_strategy_23_suspend_and_resume_restart_a_whole_load_once_and_resume
     rig.prefetcher.set_foreground_busy(true);
     rig.prefetcher.set_foreground_busy(false);
     rig.prefetcher.resume();
-    quiet().await;
+    assert_eq!(rig.prefetcher.live_tasks(), 1);
     assert_eq!(fetches(&rig), 1);
 
     rig.prefetcher.suspend();
     eventually(|| rig.loader.alive().is_empty()).await;
     rig.prefetcher.resume();
     eventually(|| rig.loader.alive() == [URL]).await;
-    quiet().await;
+    assert_eq!(rig.prefetcher.live_tasks(), 1);
     assert_eq!((fetches(&rig), rig.loader.alive().len()), (2, 1));
 }
 
@@ -80,7 +83,7 @@ async fn inv_strategy_24_a_window_and_a_whole_declaration_of_one_url_share_the_r
         if whole_first { whole(&rig) } else { window(&rig) }
         eventually(|| rig.loader.alive() == [URL]).await;
         if whole_first { window(&rig) } else { whole(&rig) }
-        quiet().await;
+        assert_eq!(rig.prefetcher.live_tasks(), 1);
         assert_eq!((fetches(&rig), rig.loader.alive().len()), (1, 1), "whole first: {whole_first}");
     }
 }
@@ -97,7 +100,9 @@ async fn inv_strategy_25_a_window_load_then_a_whole_declaration_reach_the_networ
         if whole_first { whole() } else { window() }
         assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
         if whole_first { window() } else { whole() }
-        quiet().await;
+        if prefetcher.live_tasks() > 0 {
+            assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
+        }
         assert_eq!(stack.fetcher.calls_for(URL), 1, "whole first: {whole_first}");
     }
 }
@@ -112,7 +117,7 @@ async fn inv_strategy_26_a_declaration_made_right_after_a_release_leaves_exactly
     rig.prefetcher.release_owner(1);
     rig.prefetcher.hold_whole(2, photo(CacheStrategy::Whole));
     eventually(|| fetches(&rig) == 2 && rig.loader.alive().len() == 1).await;
-    quiet().await;
+    assert_eq!(rig.prefetcher.live_tasks(), 1);
     assert_eq!((fetches(&rig), rig.loader.alive().len(), rig.prefetcher.counters().cancelled), (2, 1, 1));
 }
 
@@ -140,12 +145,12 @@ async fn inv_strategy_28_forgetting_a_loaded_source_allows_exactly_one_new_load_
     rig.prefetcher.keep_whole(photo(CacheStrategy::Whole));
     assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
     rig.prefetcher.keep_whole(photo(CacheStrategy::Whole));
-    quiet().await;
+    assert_eq!(rig.prefetcher.live_tasks(), 0);
     assert_eq!(fetches(&rig), 1);
 
     rig.prefetcher.forget_loaded(Some(URL));
     rig.prefetcher.keep_whole(photo(CacheStrategy::Whole));
     assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
-    quiet().await;
+    assert_eq!(rig.prefetcher.live_tasks(), 0);
     assert_eq!(fetches(&rig), 2);
 }

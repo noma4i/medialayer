@@ -159,7 +159,7 @@ async fn inv_strategy_01_a_window_or_on_demand_source_is_not_a_whole_load() {
         let rig = rig();
 
         rig.prefetcher.keep_whole(source("https://o.test/clip.mp4", SourceKind::Video, strategy));
-        super::runner_tests::quiet().await;
+        assert_eq!(rig.prefetcher.live_tasks(), 0);
 
         assert!(rig.loader.calls().is_empty(), "{strategy:?}");
     }
@@ -178,7 +178,7 @@ async fn inv_strategy_02_moving_the_window_and_foreground_play_never_cancel_a_wh
     }
     rig.prefetcher.set_foreground_busy(true);
     rig.prefetcher.set_window(5, vec![None; 12]);
-    super::runner_tests::quiet().await;
+    assert_eq!(rig.prefetcher.live_tasks(), 1);
 
     assert_eq!(rig.loader.alive(), [clip]);
     assert_eq!(rig.prefetcher.counters().cancelled, 0);
@@ -198,6 +198,8 @@ async fn inv_strategy_02_a_whole_source_is_not_evicted_by_the_window_budget() {
     rig.loader.size("https://o.test/w1/s0.ts", 700 * 1024);
     rig.loader.size("https://o.test/w2/s0.ts", 700 * 1024);
     rig.loader.size("https://o.test/w3/s0.ts", 700 * 1024);
+    rig.prefetcher.set_window(0, vec![None, None, None, feed[3].clone()]);
+    assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
     rig.prefetcher.set_window(0, feed);
     eventually(|| !rig.loader.evicted().is_empty()).await;
 
@@ -225,7 +227,7 @@ async fn inv_strategy_03_declaring_a_source_again_loads_it_once() {
     rig.prefetcher.keep_whole(whole(clip, SourceKind::Video));
     next(&mut events).await;
     rig.prefetcher.keep_whole(whole(clip, SourceKind::Video));
-    super::runner_tests::quiet().await;
+    assert_eq!(rig.prefetcher.live_tasks(), 0);
 
     assert_eq!(rig.loader.urls(), [clip]);
     assert_eq!(rig.prefetcher.counters().deduped, 2);
@@ -239,7 +241,7 @@ async fn inv_strategy_04_whole_media_loads_one_at_a_time_and_whole_images_two() 
         rig.prefetcher.keep_whole(whole(&format!("https://o.test/v{index}.mp4"), SourceKind::Video));
     }
     eventually(|| rig.loader.active() == 1).await;
-    super::runner_tests::quiet().await;
+    rig.prefetcher.wait_whole_queued(false, 2).await;
     assert_eq!((rig.loader.active(), rig.loader.peak()), (1, 1));
     rig.prefetcher.forget_windows();
 
@@ -249,7 +251,7 @@ async fn inv_strategy_04_whole_media_loads_one_at_a_time_and_whole_images_two() 
         rig.prefetcher.keep_whole(whole(&format!("https://o.test/p{index}.jpg"), SourceKind::Image));
     }
     eventually(|| rig.loader.active() == 2).await;
-    super::runner_tests::quiet().await;
+    rig.prefetcher.wait_whole_queued(true, 2).await;
     assert_eq!((rig.loader.active(), rig.loader.peak()), (2, 2));
 }
 
@@ -429,11 +431,11 @@ async fn inv_strategy_17_a_source_held_by_two_owners_loads_once_and_stops_when_t
     rig.prefetcher.hold_whole(1, clip.clone());
     rig.prefetcher.hold_whole(2, clip);
     eventually(|| rig.loader.active() == 1).await;
-    super::runner_tests::quiet().await;
+    assert_eq!(rig.prefetcher.live_tasks(), 1);
     assert_eq!(rig.loader.calls().len(), 1);
 
     rig.prefetcher.release_owner(2);
-    super::runner_tests::quiet().await;
+    assert_eq!(rig.prefetcher.live_tasks(), 1);
     assert_eq!((rig.loader.active(), rig.prefetcher.counters().cancelled), (1, 0));
 
     rig.prefetcher.release_owner(1);
@@ -455,7 +457,7 @@ async fn inv_strategy_17_a_window_load_promoted_by_a_declaration_stops_when_the_
 
     rig.prefetcher.hold_whole(1, whole(clip, SourceKind::Video));
     rig.prefetcher.set_window(0, vec![]);
-    super::runner_tests::quiet().await;
+    assert_eq!(rig.prefetcher.live_tasks(), 1);
     assert_eq!(rig.prefetcher.counters().cancelled, 0);
 
     rig.prefetcher.release_owner(1);
