@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Internal test hooks do no work in release builds.
 - The outcome of a recording is given once; a second stop is refused until the next start.
 - A recording is turned upright while the camera is stopping, and a cancel then stops the conversion.
 - A recorded video comes out upright in its pixels, with no rotation tag.

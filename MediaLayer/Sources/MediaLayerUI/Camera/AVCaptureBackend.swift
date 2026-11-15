@@ -102,6 +102,15 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     }
     inputs.forEach(session.addInput)
     outputs.forEach(session.addOutput)
+    let choice = applyFormat(device, profile: profile)
+    if let connection = movie?.connection(with: .video) {
+      if connection.isVideoMirroringSupported {
+        connection.automaticallyAdjustsVideoMirroring = false
+        connection.isVideoMirrored = lens == .front && profile.mirrorFrontVideo
+      }
+      let supported = [VideoStabilization.standard, .cinematic].filter { device.activeFormat.isVideoStabilizationModeSupported($0.avMode) }
+      if let mode = stabilizationMode(requested: profile.stabilization, supported: supported) { connection.preferredVideoStabilizationMode = mode.avMode }
+    }
     videoPort = inputs.first?.ports(for: .video, sourceDeviceType: device.deviceType, sourceDevicePosition: device.position).first
     previews.keys.forEach(linkPreview)
     session.commitConfiguration()
@@ -109,7 +118,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     photoOutput = photo
     movieOutput = movie
     rotation = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
-    let choice = applyFormat(device, profile: profile)
     if let photo, let size = choice?.photoSize {
       photo.maxPhotoDimensions = CMVideoDimensions(width: Int32(size.width), height: Int32(size.height))
     }
@@ -231,16 +239,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
       guard let self else { return }
       guard let output = self.movieOutput, !output.isRecording, self.session.isRunning else { return self.emit(.recordFinished(end: .failed)) }
       if let connection = output.connection(with: .video) {
-        if connection.isVideoMirroringSupported {
-          connection.automaticallyAdjustsVideoMirroring = false
-          connection.isVideoMirrored = lens == .front && profile.mirrorFrontVideo
-        }
         let angle = self.rotation?.videoRotationAngleForHorizonLevelCapture ?? 90
-        if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
-        if let camera = self.camera {
-          let supported = [VideoStabilization.standard, .cinematic].filter { camera.activeFormat.isVideoStabilizationModeSupported($0.avMode) }
-          if let mode = stabilizationMode(requested: profile.stabilization, supported: supported) { connection.preferredVideoStabilizationMode = mode.avMode }
-        }
+        if connection.videoRotationAngle != angle && connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
       }
       output.maxRecordedDuration = CMTime(value: CMTimeValue(profile.maxDurationMs), timescale: 1000)
       let delegate = MovieDelegate(onStart: { [weak self] in self?.emit(.recordStarted) }, onFinish: { [weak self] end in self?.emit(.recordFinished(end: end)) })
