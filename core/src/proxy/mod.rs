@@ -86,6 +86,15 @@ pub struct Proxy {
 }
 
 impl Proxy {
+    #[cfg(test)]
+    pub(crate) fn playhead_holds(&self) -> usize {
+        self.inner.windows.playhead_holds()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn queued_requests(&self) -> usize {
+        self.inner.slots.waiting() + self.inner.image_slots.waiting()
+    }
     pub async fn start(config: Config, fetcher: Arc<dyn Fetcher>, store: Arc<dyn ByteStore>) -> Result<Proxy, ProxyError> {
         let tasks = tasks::Tasks::default();
         let inner = Arc::new(ProxyShared::new(config, fetcher, store, tasks.clone()));

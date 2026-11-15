@@ -63,6 +63,8 @@ pub(super) struct Windows {
     playhead: Mutex<Option<Arc<dyn Playhead>>>,
     chunks_ahead: AtomicU32,
     scale_percent: AtomicU32,
+    #[cfg(test)]
+    holds: std::sync::atomic::AtomicUsize,
 }
 
 impl Windows {
@@ -72,7 +74,14 @@ impl Windows {
             playhead: Mutex::new(None),
             chunks_ahead: AtomicU32::new(chunks_ahead),
             scale_percent: AtomicU32::new(FULL_PERCENT),
+            #[cfg(test)]
+            holds: std::sync::atomic::AtomicUsize::new(0),
         }
+    }
+
+    #[cfg(test)]
+    pub fn playhead_holds(&self) -> usize {
+        self.holds.load(Ordering::SeqCst)
     }
 
     pub fn set_chunks_ahead(&self, chunks_ahead: u32) {
@@ -260,10 +269,32 @@ impl ProxyShared {
             let opens_at = stream.starts_ms[index - ahead];
             let wait = if seen == Some(position) { left } else { Duration::from_millis(opens_at.saturating_sub(position)).max(RECHECK_MIN) };
             seen = Some(position);
+            #[cfg(test)]
+            let _hold = HoldCount::new(&self.windows.holds);
             tokio::select! {
                 _ = tokio::time::sleep(wait.min(left)) => {}
                 _ = &mut nudged => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+struct HoldCount<'a>(&'a std::sync::atomic::AtomicUsize);
+
+#[cfg(test)]
+impl<'a> HoldCount<'a> {
+    fn new(count: &'a std::sync::atomic::AtomicUsize) -> Self {
+        count.fetch_add(1, Ordering::SeqCst);
+        crate::test_signal::fire();
+        Self(count)
+    }
+}
+
+#[cfg(test)]
+impl Drop for HoldCount<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+        crate::test_signal::fire();
     }
 }

@@ -58,6 +58,8 @@ impl Drop for Waiting {
         let mut state = lock(&self.state);
         let queue = if self.prefetch { &mut state.prefetch } else { &mut state.playback };
         if queue.remove(&self.seq).is_some() {
+            #[cfg(test)]
+            crate::test_signal::fire();
             state.hand_out(&self.state);
         }
     }
@@ -161,6 +163,7 @@ impl PrioritySlots {
         let mut state = lock(&self.state);
         state.playback.clear();
         state.prefetch.clear();
+        crate::test_signal::fire();
     }
 
     pub fn in_use(&self) -> usize {
@@ -221,6 +224,8 @@ impl State {
                 None
             };
             let Some(sender) = waiter else { return };
+            #[cfg(test)]
+            crate::test_signal::fire();
             self.in_use += 1;
             if let Err(mut returned) = sender.send(Permit { state: Some(shared.clone()) }) {
                 returned.state = None;
@@ -236,6 +241,8 @@ impl Drop for Permit {
         let mut state = lock(&shared);
         state.in_use -= 1;
         state.hand_out(&shared);
+        #[cfg(test)]
+        crate::test_signal::fire();
     }
 }
 
