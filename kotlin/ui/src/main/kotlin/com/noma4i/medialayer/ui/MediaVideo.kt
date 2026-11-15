@@ -229,11 +229,12 @@ fun MediaVideo(
   }
   val clipped = if (cornerRadius > 0.dp) modifier.clip(RoundedCornerShape(cornerRadius)) else modifier
   val faded = if (alpha != 1f) clipped.alpha(alpha) else clipped
+  val item = source.toItem()
   Box(faded.then(screen.modifier)) {
     if (surfaceHeld[0]) {
       VideoSurface(outputPlayer, contentScale)
     }
-    VideoPlaceholder(source.toItem(), frameShown, screen.visible, contentScale)
+    VideoPlaceholder(item, frameShown, screen.visible, contentScale)
     content(state)
   }
 }
