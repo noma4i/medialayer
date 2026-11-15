@@ -150,6 +150,7 @@ class MediaPrecomposeTest {
     val page = Page("https://o.test/clip.mp4", Kind.VIDEO, cover = "https://o.test/cover.jpg")
     workFor(page, measured = true) { MediaVideo(page, modifier = Modifier.size(50.dp)) }
     rule.waitUntil(5000) { looper.idle(); fetched.toList() == listOf("https://o.test/cover.jpg") }
+    rule.waitUntil(5000) { looper.idle(); attaches(page.url).isNotEmpty() }
     assertEquals(1, attaches(page.url).size)
   }
 }
