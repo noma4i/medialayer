@@ -99,7 +99,7 @@ fn inv_call_03_a_release_restores_nothing_for_a_place_that_kept_playing() {
 fn inv_call_04_a_suspension_released_during_a_hold_restores_nothing() {
     let rig = Rig::new();
     let suspension = rig.layer.suspend_playback(Vec::new()).unwrap();
-    let (_place, slot) = {
+    let (place, slot) = {
         let place = rig.layer.open_place(MediaItem::bare_video(URL)).unwrap();
         place.update(rig.playing()).unwrap();
         (place, rig.slot())
@@ -108,8 +108,10 @@ fn inv_call_04_a_suspension_released_during_a_hold_restores_nothing() {
 
     suspension.release();
     rig.settled();
+    place.update(PlaceInput { muted: Some(true), ..rig.playing() }).unwrap();
+    rig.caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Mute)));
 
-    assert_eq!(rig.plays(&slot), 0, "the suspension release played during a call");
+    assert_eq!(rig.plays(&slot), 0, "the suspension release played during a call: {:?}", slot.calls());
 }
 
 #[test]

@@ -79,6 +79,7 @@ private class LoggingSlot(val id: UInt) : PlayerSlot {
       SlotCall.Detach -> log.add("detach")
       is SlotCall.Seek -> log.add("seek")
       is SlotCall.Rate -> log.add("rate:${command.rate}")
+      is SlotCall.Looping -> log.add("looping:${command.looping}")
     }
   }
   override suspend fun dispose() {}
