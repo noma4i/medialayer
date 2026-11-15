@@ -39,15 +39,17 @@ private class VoiceFakeCapture(private val refusal: VoiceRefusal? = null, privat
     this.file = file
     limit = onLimit
     limitMs = maxDurationMs
+    TestSignal.fire()
   }
 
-  override fun peak(): Float = peaks[reads.getAndIncrement() % peaks.size]
+  override fun peak(): Float = peaks[reads.getAndIncrement() % peaks.size].also { TestSignal.fire() }
 
   val stops = java.util.concurrent.atomic.AtomicInteger()
 
   override fun stop() {
     stops.incrementAndGet()
     file!!.writeBytes(byteArrayOf(1, 2, 3))
+    TestSignal.fire()
   }
 }
 

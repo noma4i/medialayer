@@ -18,8 +18,8 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.CopyOnWriteArrayList
 
 internal class RecordingEvents : PlayerEvents(NoHandle) {
-  val calls = CopyOnWriteArrayList<String>()
-  val generations = CopyOnWriteArrayList<String>()
+  val calls = SignallingList<String>()
+  val generations = SignallingList<String>()
   @Volatile var onReady: (UInt) -> Unit = {}
 
   override fun ready(slot: UInt, generation: ULong) { generations.add("ready:$slot:$generation"); calls.add("ready:$slot"); onReady(slot) }
@@ -52,12 +52,12 @@ internal class RecordingCounters(private val mainThreadFfi: MutableList<String>,
     observed.addAndGet(totals.observed)
     if (totals.observed != 0L) observers.add(if (totals.observed > 0) "Observe" else "Unobserve")
     super.add(totals)
+    TestSignal.fire()
   }
 }
 
 internal fun drainFfi() {
-  val deadline = System.nanoTime() + 5_000_000_000
-  while (activeDrains.get() != 0 && System.nanoTime() < deadline) Thread.sleep(2)
+  TestSignal.await("input drains finish", 5_000) { activeDrains.get() == 0 }
 }
 
 internal class NullPlace : com.noma4i.medialayer.MediaPlace(NoHandle) {
@@ -120,8 +120,8 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
   val mainThreadFfi = CopyOnWriteArrayList<String>()
   private fun noteFfi(call: String) { noteMainThreadFfi(mainThreadFfi, call) }
   override fun cacheKey(url: String, headers: Map<String, String>): String { cacheKeyReads.incrementAndGet(); noteFfi("cacheKey"); return url }
-  val calls = CopyOnWriteArrayList<String>()
-  val listeners = CopyOnWriteArrayList<Pair<String, StateListener>>()
+  val calls = SignallingList<String>()
+  val listeners = SignallingList<Pair<String, StateListener>>()
   var closed = false
   var image: ByteArray = ByteArray(0)
   val counterWork = CopyOnWriteArrayList<String>()
@@ -131,7 +131,7 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
   var preparedTones: TonePreparation? = null
   val toneChecks = AtomicInteger()
   var needsTone = false
-  val placeholders = CopyOnWriteArrayList<Pair<String, Boolean>>()
+  val placeholders = SignallingList<Pair<String, Boolean>>()
 
   override fun playerEvents(): PlayerEvents = events
   val items = CopyOnWriteArrayList<MediaItem>()
@@ -152,7 +152,7 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
   class ToneWatch(val item: MediaItem, val band: Float, val listener: com.noma4i.medialayer.ToneListener) {
     val closed = java.util.concurrent.atomic.AtomicBoolean(false)
   }
-  val toneWatches = CopyOnWriteArrayList<ToneWatch>()
+  val toneWatches = SignallingList<ToneWatch>()
 
   override fun subscribeTone(source: MediaItem, band: Float, listener: com.noma4i.medialayer.ToneListener): Subscription {
     noteFfi("subscribeTone")

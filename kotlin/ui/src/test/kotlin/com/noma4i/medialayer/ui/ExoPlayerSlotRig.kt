@@ -54,18 +54,15 @@ internal abstract class ExoPlayerSlotRig {
   fun releaseEverything() { factories.forEach { it.release() }; idle() }
 
   protected fun playUntilReady(clock: FakeClock, slot: ExoPlayerSlot) {
-    repeat(100) {
-      if (slot.player!!.isPlaying) return
-      clock.advanceTime(50); idle(); Thread.sleep(20)
-    }
+    androidx.media3.test.utils.robolectric.TestPlayerRunHelper.advance(slot.player!!)
+      .withTimeoutMs(2_000).untilState(androidx.media3.common.Player.STATE_READY)
   }
 
-  protected fun untilIdle(condition: () -> Boolean) {
-    val deadline = System.nanoTime() + 10_000_000_000L
-    while (!condition()) {
-      check(System.nanoTime() < deadline) { "condition never held" }
+  protected fun untilIdle(slot: ExoPlayerSlot, condition: () -> Boolean) {
+    TestSignal.await("untilIdle at ${Throwable().stackTrace[1]}", 10_000) {
       idle()
-      Thread.yield()
+      slot.player?.applicationLooper?.let { shadowOf(it).idle() }
+      condition()
     }
   }
 }

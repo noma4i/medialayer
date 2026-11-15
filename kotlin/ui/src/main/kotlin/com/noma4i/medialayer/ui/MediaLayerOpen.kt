@@ -122,10 +122,12 @@ internal fun openMediaLayer(
     held.imageLoader?.shutdown()
     held.layer?.let { bindings.remove(it) }
     if (Media.audio === audio) Media.audio = null
+    onTestChange?.invoke()
   }
   val releaser = object : MemoryReleaser {
     override fun dropMemoryCaches() {
       synchronized(lock) { imageLoader }?.memoryCache?.clear()
+      onTestChange?.invoke()
     }
 
     override suspend fun shutdown() {
@@ -280,6 +282,9 @@ internal class SystemSignals(
   }
 
   private fun onMain(work: () -> Unit) {
-    if (Looper.myLooper() == Looper.getMainLooper()) work() else Handler(Looper.getMainLooper()).post(work)
+    if (Looper.myLooper() == Looper.getMainLooper()) work() else {
+      Handler(Looper.getMainLooper()).post(work)
+      onTestChange?.invoke()
+    }
   }
 }

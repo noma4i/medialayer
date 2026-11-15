@@ -32,6 +32,7 @@ class ViewHandle internal constructor(val token: ULong) {
 
   internal fun show(player: Player?) {
     current.value = player
+    onTestChange?.invoke()
   }
 }
 

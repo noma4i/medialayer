@@ -53,6 +53,7 @@ class PlayerLooperTest {
       validAtClear = surface?.isValid
       clears.incrementAndGet()
       acknowledged.countDown()
+      TestSignal.fire()
     }
   }
 
@@ -108,7 +109,7 @@ class PlayerLooperTest {
   }
 
   private class TestHolder(val frame: Surface) : SurfaceHolder {
-    val callbacks = CopyOnWriteArrayList<SurfaceHolder.Callback>()
+    val callbacks = SignallingList<SurfaceHolder.Callback>()
     override fun addCallback(callback: SurfaceHolder.Callback) { callbacks.add(callback) }
     override fun removeCallback(callback: SurfaceHolder.Callback) { callbacks.remove(callback) }
     override fun isCreating() = false
@@ -227,11 +228,6 @@ class PlayerLooperTest {
   }
 
   private fun untilMain(condition: () -> Boolean) {
-    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
-    while (!condition()) {
-      assertTrue("timed out", System.nanoTime() < deadline)
-      shadowOf(Looper.getMainLooper()).idle()
-      Thread.sleep(5)
-    }
+    TestSignal.await("untilMain at ${Throwable().stackTrace[1]}", 10_000) { shadowOf(Looper.getMainLooper()).idle(); condition() }
   }
 }

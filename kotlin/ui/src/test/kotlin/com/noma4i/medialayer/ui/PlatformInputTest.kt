@@ -23,7 +23,7 @@ private class CountingWindow(private val log: CopyOnWriteArrayList<String>, priv
   override fun replacePages(active: UInt, pages: List<List<MediaItem>>) { threads.add(Thread.currentThread()); log.add("pages $active ${pages.size}") }
   override fun replaceRows(rows: List<List<MediaItem>>) { threads.add(Thread.currentThread()); log.add("rows ${rows.size}") }
   override fun showRows(first: UInt, last: UInt) { threads.add(Thread.currentThread()); log.add("show $first $last") }
-  override fun subscribeReady(listener: WindowReadyListener) { readyListener = listener }
+  override fun subscribeReady(listener: WindowReadyListener) { readyListener = listener; TestSignal.fire() }
   override fun moveTo(active: UInt) { threads.add(Thread.currentThread()); log.add("move $active") }
   override fun setActive(isActive: Boolean) { log.add("active $isActive") }
   override fun release() { log.add("release") }
@@ -31,20 +31,16 @@ private class CountingWindow(private val log: CopyOnWriteArrayList<String>, priv
 }
 
 private class WindowLayer : MediaLayer(NoHandle) {
-  val log = CopyOnWriteArrayList<String>()
+  val log = SignallingList<String>()
   val threads = CopyOnWriteArrayList<Thread>()
-  val windows = CopyOnWriteArrayList<CountingWindow>()
+  val windows = SignallingList<CountingWindow>()
   override fun openVideoWindow(): MediaWindow = CountingWindow(log, threads).also { windows.add(it) }
   override fun openImageWindow(name: String, rowsPerPage: UInt, reversed: Boolean): MediaWindow = CountingWindow(log, threads).also { windows.add(it) }
   override fun close() = Unit
 }
 
 private fun eventually(what: String, condition: () -> Boolean) {
-  val deadline = System.nanoTime() + 5_000_000_000
-  while (!condition()) {
-    assertTrue("never became true: $what", System.nanoTime() < deadline)
-    Thread.sleep(5)
-  }
+  TestSignal.await(what, 5_000, condition)
 }
 
 private fun clip(index: Int) = MediaItem(Kind.VIDEO, "https://o.test/$index.mp4", emptyMap(), null, null, strategy = CacheStrategy.WINDOW)
@@ -145,7 +141,7 @@ class PlatformInputTest {
         override fun seek(fraction: Double) = Unit
         override fun itemState(state: com.noma4i.medialayer.MediaState) = Unit
         override fun release() { releases.incrementAndGet() }
-        override fun close() { closes.incrementAndGet() }
+        override fun close() { closes.incrementAndGet(); TestSignal.fire() }
       }
     }
     val mount = PlaceMount(layer, clip(1)) { }
@@ -164,7 +160,7 @@ class PlatformInputTest {
   @Test
   fun inv_ingress_43_aSeekAndACloseInOneDrainWindowSeekThePlaceBeforeItIsReleased() {
     val layer = RecordingLayer()
-    val calls = CopyOnWriteArrayList<String>()
+    val calls = SignallingList<String>()
     val entered = CountDownLatch(1)
     val gate = CountDownLatch(1)
     layer.placeFactory = {
@@ -208,7 +204,7 @@ class PlatformInputTest {
     val release = CountDownLatch(1)
     val held = LatestDrain<Int>({ _, next -> next }) { entered.countDown(); release.await(5, TimeUnit.SECONDS) }
     val applied = AtomicInteger()
-    val other = LatestDrain<Int>({ _, next -> next }) { applied.incrementAndGet() }
+    val other = LatestDrain<Int>({ _, next -> next }) { applied.incrementAndGet(); TestSignal.fire() }
 
     held.submit(0)
     assertTrue(entered.await(5, TimeUnit.SECONDS))
@@ -264,7 +260,7 @@ class PlatformInputTest {
   fun aRefusedMountReachesTheOwnerAsAFailure() {
     val layer = RecordingLayer()
     layer.placeError = com.noma4i.medialayer.MediaException.Overloaded("owner limit reached")
-    val failures = CopyOnWriteArrayList<Throwable>()
+    val failures = SignallingList<Throwable>()
     val mount = PlaceMount(layer, clip(1)) { failures.add(it) }
 
     mount.update(placeInput(visible = true))
@@ -276,23 +272,23 @@ class PlatformInputTest {
   @Test
   fun anImageRecorderDoesNotKeepItsCountersAlive() {
     var counters: com.noma4i.medialayer.ImageCounters? = com.noma4i.medialayer.ImageCounters()
-    val weak = java.lang.ref.WeakReference(counters)
+    val collected = java.lang.ref.ReferenceQueue<com.noma4i.medialayer.ImageCounters>()
+    val weak = java.lang.ref.WeakReference(counters, collected)
     counters!!.recordLater(com.noma4i.medialayer.ImageWork.Observe)
     eventually("flushed") { counters!!.snapshot().activeObservers == 1uL }
 
     counters = null
 
-    eventually("released") {
-      System.gc()
-      weak.get() == null
-    }
+    System.gc()
+    assertTrue("image counters not collected", collected.remove(5_000) === weak)
   }
 
   @Test
   fun theLatestMapperServesTheNextSendAndTheReplacedOneIsReleased() {
     val base = System.nanoTime().toInt()
     var old: ((Int) -> Int)? = { it + base }
-    val weak = java.lang.ref.WeakReference(old)
+    val collected = java.lang.ref.ReferenceQueue<(Int) -> Int>()
+    val weak = java.lang.ref.WeakReference(old, collected)
     val mapper = LatestMapper(old!!)
     assertEquals(1 + base, mapper(1))
 
@@ -300,10 +296,8 @@ class PlatformInputTest {
     old = null
 
     assertEquals(10, mapper(1))
-    eventually("the replaced mapper is released") {
-      System.gc()
-      weak.get() == null
-    }
+    System.gc()
+    assertTrue("replaced mapper not collected", collected.remove(5_000) === weak)
   }
 
   @Test

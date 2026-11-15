@@ -9,6 +9,7 @@ internal val inputExecutor: Executor = Dispatchers.Default.asExecutor()
 
 /** Drains that have a block scheduled or running; tests wait for zero. */
 internal val activeDrains = AtomicInteger()
+@Volatile internal var onTestChange: (() -> Unit)? = null
 
 /**
  * Runs [apply] off the caller with at most one running block and one pending value per drain; later values merge into the pending one.
@@ -38,6 +39,7 @@ internal class LatestDrain<Value : Any>(private val merge: (Value?, Value) -> Va
     } finally {
       val again = synchronized(lock) { (pending != null).also { if (!it) scheduled = false } }
       if (again) inputExecutor.execute(::run) else activeDrains.decrementAndGet()
+      onTestChange?.invoke()
     }
   }
 }

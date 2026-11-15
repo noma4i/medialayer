@@ -108,6 +108,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
           if (continuation.isActive) continuation.resume(Unit)
         }
       }
+      if (onTestChange != null && looper == Looper.getMainLooper()) onTestChange?.invoke()
       if (!posted) continuation.resume(Unit)
     }
   }

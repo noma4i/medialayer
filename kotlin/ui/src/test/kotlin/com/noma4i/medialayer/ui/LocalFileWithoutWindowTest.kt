@@ -40,12 +40,8 @@ class LocalFileWithoutWindowTest {
   }
 
   private fun untilMain(timeoutMs: Long = 10_000, condition: () -> Boolean) {
-    val deadline = System.nanoTime() + timeoutMs * 1_000_000
-    while (!condition()) {
-      check(System.nanoTime() < deadline) { "never became true within $timeoutMs ms" }
-      looper.idle()
-      Thread.sleep(1)
-    }
+    val caller = Throwable().stackTrace.first { it.methodName != "untilMain" && it.methodName != "untilMain\$default" }
+    TestSignal.await("untilMain at $caller", timeoutMs) { looper.idle(); condition() }
   }
 
   private fun open(): MediaLayer {

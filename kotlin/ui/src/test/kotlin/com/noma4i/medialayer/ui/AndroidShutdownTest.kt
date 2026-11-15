@@ -22,17 +22,42 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.MainCoroutineDispatcher
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.android.asCoroutineDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
+import kotlin.coroutines.CoroutineContext
 import org.junit.Assert.*
+import org.junit.After
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
 
 @RunWith(MediaLayerTestRunner::class)
+@OptIn(ExperimentalCoroutinesApi::class)
 class AndroidShutdownTest {
   private val app = ApplicationProvider.getApplicationContext<Application>()
   private val owner = object : LifecycleOwner {
     override val lifecycle = LifecycleRegistry.createUnsafe(this)
   }
+
+  @Before
+  fun signalMainPosts() {
+    val main = android.os.Handler(Looper.getMainLooper()).asCoroutineDispatcher("test-main").immediate
+    Dispatchers.setMain(object : MainCoroutineDispatcher() {
+      override val immediate: MainCoroutineDispatcher get() = this
+      override fun isDispatchNeeded(context: CoroutineContext): Boolean = main.isDispatchNeeded(context)
+      override fun dispatch(context: CoroutineContext, block: Runnable) {
+        main.dispatch(context, block)
+        TestSignal.fire()
+      }
+    })
+  }
+
+  @After
+  fun restoreMainDispatcher() { Dispatchers.resetMain() }
 
   private fun roomyDevice() {
     val manager = app.getSystemService(ActivityManager::class.java)
@@ -53,12 +78,8 @@ class AndroidShutdownTest {
   }
 
   private fun untilMain(timeoutMs: Long = 10_000, condition: () -> Boolean) {
-    val deadline = System.nanoTime() + timeoutMs * 1_000_000
-    while (!condition()) {
-      check(System.nanoTime() < deadline) { "never became true within $timeoutMs ms" }
-      shadowOf(Looper.getMainLooper()).idle()
-      Thread.sleep(1)
-    }
+    val caller = Throwable().stackTrace.first { it.methodName != "untilMain" && it.methodName != "untilMain\$default" }
+    TestSignal.await("untilMain at $caller", timeoutMs) { shadowOf(Looper.getMainLooper()).idle(); condition() }
   }
 
   @Test
@@ -74,10 +95,8 @@ class AndroidShutdownTest {
 
   private fun <T> onWorker(block: suspend () -> T): T {
     val result = CoroutineScope(Dispatchers.Default).async { block() }
-    while (!result.isCompleted) {
-      shadowOf(Looper.getMainLooper()).idle()
-      Thread.sleep(1)
-    }
+    result.invokeOnCompletion { TestSignal.fire() }
+    TestSignal.await("onWorker at ${Throwable().stackTrace[1]}", 10_000) { shadowOf(Looper.getMainLooper()).idle(); result.isCompleted }
     return runBlocking { result.await() }
   }
 
@@ -134,6 +153,7 @@ class AndroidShutdownTest {
     assertTrue(owner.lifecycle.observerCount > 0)
 
     val waiting = CoroutineScope(Dispatchers.Default).async(start = CoroutineStart.UNDISPATCHED) { media.awaitClosed() }
+    waiting.invokeOnCompletion { TestSignal.fire() }
     assertFalse("Closed came while the main thread still held the system subscriptions", waiting.isCompleted)
     assertTrue(owner.lifecycle.observerCount > 0)
 

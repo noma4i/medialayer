@@ -68,6 +68,7 @@ private class FakeBackend : CaptureBackend {
   private fun note(entry: String) {
     log.add(entry)
     if (Looper.myLooper() == Looper.getMainLooper()) mainCalls.incrementAndGet()
+    TestSignal.fire()
   }
 
   override fun setSink(sink: (CaptureEvent) -> Unit) {
@@ -114,6 +115,7 @@ private class FakeBackend : CaptureBackend {
 
   override fun setFrameTap(analyzer: ImageAnalysis.Analyzer?) {
     tap = analyzer
+    TestSignal.fire()
   }
 
   override fun sensorToView(): android.graphics.Matrix? = null
@@ -147,11 +149,7 @@ private class Rig(val camera: MediaCamera, val backend: FakeBackend, val counter
 }
 
 private fun eventually(condition: String, holds: () -> Boolean) {
-  val deadline = System.nanoTime() + 5_000_000_000L
-  while (!holds()) {
-    check(System.nanoTime() < deadline) { "never became true within 5 s: $condition" }
-    Thread.sleep(5)
-  }
+  TestSignal.await(condition, 5_000, holds)
 }
 
 @RunWith(MediaLayerTestRunner::class)
@@ -173,13 +171,13 @@ class MediaCameraTest {
         counters.checkThread()
         if (counters.denySessions) throw MediaException.Overloaded("no memory")
         counters.taken.incrementAndGet()
-        AutoCloseable { counters.released.incrementAndGet() }
+        AutoCloseable { counters.released.incrementAndGet(); TestSignal.fire() }
       },
       admitShot = { _ ->
         counters.checkThread()
         if (counters.denyShots) throw MediaException.Overloaded("no memory")
         counters.taken.incrementAndGet()
-        AutoCloseable { counters.released.incrementAndGet() }
+        AutoCloseable { counters.released.incrementAndGet(); TestSignal.fire() }
       },
       audio = { audio },
       clipInfo = { _ ->
@@ -188,6 +186,7 @@ class MediaCameraTest {
       },
       uprightVideo = { file ->
         counters.straightened.add(file)
+        TestSignal.fire()
         try {
           counters.videoGate?.await()
         } catch (cancel: kotlinx.coroutines.CancellationException) {

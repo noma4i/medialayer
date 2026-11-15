@@ -14,6 +14,7 @@ class VideoOutputCounters {
   @Synchronized
   internal fun count(event: String) {
     totals[event] = (totals[event] ?: 0) + 1
+    onTestChange?.invoke()
   }
 
   @Synchronized

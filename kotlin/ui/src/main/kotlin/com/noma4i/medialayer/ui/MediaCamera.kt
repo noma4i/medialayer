@@ -252,6 +252,7 @@ class MediaCamera internal constructor(
       return
     }
     published.value = run.state
+    onTestChange?.invoke()
     settleWaiters()
     syncTicker()
   }

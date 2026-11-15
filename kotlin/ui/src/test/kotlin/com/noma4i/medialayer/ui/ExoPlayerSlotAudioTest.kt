@@ -21,14 +21,15 @@ internal class ExoPlayerSlotAudioTest : ExoPlayerSlotRig() {
     val slot = factory(startMuted = false, focus = MediaAudioFocus.Exclusive).createSlot(0u)
     val audio = shadowOf(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
     slot.load("k", route); slot.play(); idle()
-    untilIdle { audio.lastAudioFocusRequest != null }
+    androidx.media3.test.utils.robolectric.TestPlayerRunHelper.runUntilPlaybackState(slot.player!!, androidx.media3.common.Player.STATE_READY)
+    untilIdle(slot) { audio.lastAudioFocusRequest != null }
     val grant = audio.lastAudioFocusRequest
     assertEquals(AudioManager.AUDIOFOCUS_GAIN, grant!!.audioFocusRequest.focusGain)
     assertEquals(emptyList<String>(), focusPort.calls.toList())
 
     repeat(10) { slot.mute(); idle(); assertEquals(0f, slot.player!!.volume, 0f); slot.unmute(); idle(); assertEquals(1f, slot.player!!.volume, 0f) }
     slot.unload(); idle()
-    untilIdle { audio.lastAbandonedAudioFocusRequest != null }
+    untilIdle(slot) { audio.lastAbandonedAudioFocusRequest != null }
 
     assertSame(grant, audio.lastAudioFocusRequest)
   }
