@@ -9,6 +9,8 @@ enum TestChange {
   }
 
   static func fire() {
+    #if DEBUG
     lock.withLock { callback }?()
+    #endif
   }
 }
