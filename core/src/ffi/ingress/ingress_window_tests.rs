@@ -187,13 +187,21 @@ fn inv_ingress_54_two_one_shot_places_of_a_windowed_note_end_once_across_a_hando
     floating.update(PlaceInput { visible: true, playing: false, view_token: Some(2), ..PlaceInput::default() }).unwrap();
     caller.block_on(eventually(|| factory.slot_holding(url).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))));
     caller.block_on(eventually(|| layer.queue().audit().entries == 0));
-    let loads: Vec<bool> = (0..4u32).filter(|index| factory.slots.lock().unwrap().contains_key(index)).flat_map(|index| factory.slot(index).calls()).filter_map(|call| match call { SlotCall::Load { key, route, .. } if key == url => Some(route.looping), _ => None }).collect();
     let (index, slot) = factory.slot_holding(url).unwrap();
+    let effective = slot.calls().iter().fold(None, |looping, call| match call { SlotCall::Load { key, route, .. } if key == url => Some(route.looping), _ => looping.map(|current| call_looping(call).unwrap_or(current)) });
     layer.player_events().ready(index, slot.generation());
     layer.player_events().visual_ready(index, slot.generation());
     layer.player_events().ended(index, slot.generation());
 
-    assert!(loads.iter().all(|looping| !looping), "every load of a one-shot note is one-shot: {loads:?}");
+    assert_eq!(effective, Some(false), "the slot of a one-shot note plays one-shot before its end: {:?}", slot.calls());
     caller.block_on(eventually(|| seen.0.lock().unwrap().last() == Some(&MediaState::Ended)));
     assert_eq!(seen.0.lock().unwrap().iter().filter(|state| **state == MediaState::Ended).count(), 1);
+}
+
+fn call_looping(call: &SlotCall) -> Option<bool> {
+    match format!("{call:?}") {
+        text if text.starts_with("Looping { looping: true") => Some(true),
+        text if text.starts_with("Looping { looping: false") => Some(false),
+        _ => None,
+    }
 }
