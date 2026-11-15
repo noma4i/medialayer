@@ -13,8 +13,10 @@ class LatestDrainTest {
     val applied = CopyOnWriteArrayList<Int>()
     val entered = CountDownLatch(1)
     val release = CountDownLatch(1)
+    val appliedLast = CountDownLatch(1)
     val drain = LatestDrain<Int>({ _, next -> next }) { value ->
       applied.add(value)
+      if (value == 10_000) appliedLast.countDown()
       if (value == 0) {
         entered.countDown()
         release.await(5, TimeUnit.SECONDS)
@@ -26,8 +28,7 @@ class LatestDrainTest {
     for (value in 1..10_000) drain.submit(value)
     release.countDown()
 
-    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
-    while (applied.lastOrNull() != 10_000 && System.nanoTime() < deadline) Thread.sleep(5)
+    assertTrue("last value applied", appliedLast.await(5, TimeUnit.SECONDS))
     assertEquals(listOf(0, 10_000), applied.toList())
   }
 

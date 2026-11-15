@@ -2,6 +2,8 @@ package com.noma4i.medialayer
 
 import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -25,9 +27,11 @@ private class StrategyBody(private var rest: ByteArray) : BodyReader {
 
 private class RangeOrigin : Fetcher {
   val requests = CopyOnWriteArrayList<Request>()
+  val changes = LinkedBlockingQueue<Unit>()
 
   override suspend fun fetch(request: FetchRequest): FetchResponse {
     requests.add(Request(request.url, request.rangeStart, request.rangeEnd))
+    changes.offer(Unit)
     val start = (request.rangeStart ?: 0uL).toInt()
     val end = minOf((request.rangeEnd ?: (TOTAL - 1).toULong()).toInt(), TOTAL - 1)
     val length = end - start + 1
@@ -43,11 +47,13 @@ private class RangeOrigin : Fetcher {
   }
 }
 
-private fun eventuallyStrategy(what: String, timeoutMs: Long = 8_000, condition: () -> Boolean) {
+private fun eventuallyStrategy(origin: RangeOrigin, what: String, timeoutMs: Long = 8_000, condition: () -> Boolean) {
   val deadline = System.nanoTime() + timeoutMs * 1_000_000
   while (!condition()) {
-    if (System.nanoTime() > deadline) throw AssertionError("never became true within $timeoutMs ms: $what")
-    Thread.sleep(10)
+    val remaining = deadline - System.nanoTime()
+    if (remaining <= 0 || origin.changes.poll(remaining, TimeUnit.NANOSECONDS) == null) {
+      throw AssertionError("never became true within $timeoutMs ms: $what")
+    }
   }
 }
 
@@ -71,10 +77,10 @@ class CacheStrategyTest {
     val clip = MediaItem(Kind.VIDEO, "https://o.test/clip.mp4", emptyMap(), null, null, strategy = CacheStrategy.WHOLE)
     try {
       media.visible(clip, true)
-      eventuallyStrategy("the first block was requested") { origin.requests.isNotEmpty() }
+      eventuallyStrategy(origin, "the first block was requested") { origin.requests.isNotEmpty() }
       media.visible(clip, false)
 
-      eventuallyStrategy("3 blocks were requested") { origin.requests.size >= RangeOrigin.BLOCKS.size }
+      eventuallyStrategy(origin, "3 blocks were requested") { origin.requests.size >= RangeOrigin.BLOCKS.size }
       assertEquals(RangeOrigin.BLOCKS, origin.requests.toList())
     } finally {
       media.close()

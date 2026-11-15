@@ -6,6 +6,7 @@ import com.noma4i.medialayer.SlotCall
 import java.nio.file.Files
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineStart
@@ -29,7 +30,7 @@ private class MemorySettings : SettingsStore {
 private class StatsRecorder : StatsListener {
   val totals = CopyOnWriteArrayList<ULong>()
 
-  override fun changed(stats: MediaStats) { totals.add(stats.totalBytes) }
+  override fun changed(stats: MediaStats) { totals.add(stats.totalBytes); bridgeChanges.fire() }
   override fun failed(error: MediaException) = Unit
 }
 
@@ -81,6 +82,7 @@ private class LoggingSlot(val id: UInt) : PlayerSlot {
       is SlotCall.Rate -> log.add("rate:${command.rate}")
       is SlotCall.Looping -> log.add("looping:${command.looping}")
     }
+    bridgeChanges.fire()
   }
   override suspend fun dispose() {}
   override fun sample(): SlotSample = SlotSample(0uL, null, false, false, false)
@@ -89,7 +91,7 @@ private class LoggingSlot(val id: UInt) : PlayerSlot {
 private class LoggingSlots : PlayerSlotFactory {
   val slots = ConcurrentHashMap<UInt, LoggingSlot>()
 
-  override suspend fun create(slot: UInt): CreatedPlayer = CreatedPlayer(LoggingSlot(slot).also { slots[slot] = it })
+  override suspend fun create(slot: UInt): CreatedPlayer = CreatedPlayer(LoggingSlot(slot).also { slots[slot] = it; bridgeChanges.fire() })
 
   fun loaded(): LoggingSlot? = slots.values.firstOrNull { "load" in it.log }
 }
@@ -97,16 +99,26 @@ private class LoggingSlots : PlayerSlotFactory {
 private class StateRecorder : StateListener {
   val states = CopyOnWriteArrayList<MediaState>()
 
-  override fun changed(state: MediaState) { states.add(state) }
+  override fun changed(state: MediaState) { states.add(state); bridgeChanges.fire() }
   override fun failed(error: MediaException) = Unit
 }
 
-private fun eventually(what: String, timeoutMs: Long = 5_000, condition: () -> Boolean) {
-  val deadline = System.nanoTime() + timeoutMs * 1_000_000
-  while (!condition()) {
-    if (System.nanoTime() > deadline) throw AssertionError("never became true within $timeoutMs ms: $what")
-    Thread.sleep(10)
+private object bridgeChanges {
+  private val lock = Object()
+  fun fire() = synchronized(lock) { lock.notifyAll() }
+
+  fun await(what: String, timeoutMs: Long, condition: () -> Boolean) = synchronized(lock) {
+    val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
+    while (!condition()) {
+      val remaining = deadline - System.nanoTime()
+      if (remaining <= 0) throw AssertionError("never became true within $timeoutMs ms: $what")
+      TimeUnit.NANOSECONDS.timedWait(lock, remaining)
+    }
   }
+}
+
+private fun eventually(what: String, timeoutMs: Long = 5_000, condition: () -> Boolean) {
+  bridgeChanges.await(what, timeoutMs, condition)
 }
 
 class MediaLayerBridgeTest {
@@ -172,7 +184,13 @@ class MediaLayerBridgeTest {
     val media = MediaLayer.open(
       OpenConfig(
         dir = Files.createTempDirectory("medialayer").toString(),
-        fetcher = fetcher,
+        fetcher = object : Fetcher {
+          override suspend fun fetch(request: FetchRequest): FetchResponse = try {
+            fetcher.fetch(request)
+          } finally {
+            bridgeChanges.fire()
+          }
+        },
         settings = MemorySettings(),
         slots = null,
         device = DeviceMemory(totalMb = 4096u, heapClassMb = null, lowRam = false),
