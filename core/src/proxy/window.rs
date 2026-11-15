@@ -65,6 +65,8 @@ pub(super) struct Windows {
     scale_percent: AtomicU32,
     #[cfg(test)]
     holds: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    hold_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
 }
 
 impl Windows {
@@ -76,12 +78,21 @@ impl Windows {
             scale_percent: AtomicU32::new(FULL_PERCENT),
             #[cfg(test)]
             holds: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            hold_gate: Mutex::new(None),
         }
     }
 
     #[cfg(test)]
     pub fn playhead_holds(&self) -> usize {
         self.holds.load(Ordering::SeqCst)
+    }
+
+    #[cfg(test)]
+    pub fn gate_next_hold(&self) -> Arc<tokio::sync::Semaphore> {
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *locked(&self.hold_gate) = Some(gate.clone());
+        gate
     }
 
     pub fn set_chunks_ahead(&self, chunks_ahead: u32) {
@@ -249,6 +260,8 @@ impl ProxyShared {
         let Some((stream, index)) = self.windows.lookup(target) else { return };
         let deadline = Instant::now() + self.config.hold_ceiling;
         let mut seen = None;
+        #[cfg(test)]
+        let mut hold = None;
         loop {
             let nudged = stream.nudge.notified();
             tokio::pin!(nudged);
@@ -261,6 +274,14 @@ impl ProxyShared {
             if index <= stream.index_at(position) + ahead {
                 return;
             }
+            #[cfg(test)]
+            if hold.is_none() {
+                hold = Some(HoldCount::new(&self.windows.holds));
+                let gate = locked(&self.windows.hold_gate).take();
+                if let Some(gate) = gate {
+                    let _permit = gate.acquire().await;
+                }
+            }
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
                 crate::trace!("window", "hold ceiling reached for {}", crate::trace::tail(target));
@@ -269,8 +290,6 @@ impl ProxyShared {
             let opens_at = stream.starts_ms[index - ahead];
             let wait = if seen == Some(position) { left } else { Duration::from_millis(opens_at.saturating_sub(position)).max(RECHECK_MIN) };
             seen = Some(position);
-            #[cfg(test)]
-            let _hold = HoldCount::new(&self.windows.holds);
             tokio::select! {
                 _ = tokio::time::sleep(wait.min(left)) => {}
                 _ = &mut nudged => {}

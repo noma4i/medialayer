@@ -92,6 +92,11 @@ impl Proxy {
     }
 
     #[cfg(test)]
+    pub(crate) fn gate_next_hold(&self) -> Arc<tokio::sync::Semaphore> {
+        self.inner.windows.gate_next_hold()
+    }
+
+    #[cfg(test)]
     pub(crate) fn queued_requests(&self) -> usize {
         self.inner.slots.waiting() + self.inner.image_slots.waiting()
     }
