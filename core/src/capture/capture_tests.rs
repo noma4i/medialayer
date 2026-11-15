@@ -191,8 +191,8 @@ fn inv_capture_09_a_command_acts_only_in_the_phase_that_takes_it() {
     let shot = drive(photo, ready(photo), &[CaptureEvent::Photo]);
     assert_eq!(shot.1, vec![CaptureAction::TakePhoto]);
     assert!(shot.0.state.shooting);
-    let again = drive(photo, shot.0, &[CaptureEvent::Photo, CaptureEvent::SetLens { lens: CameraLens::Front }]);
-    assert_eq!((again.0, again.1.len()), (shot.0, 0), "a second shot and a lens change wait for the first photo");
+    let again = drive(photo, shot.0, &[CaptureEvent::Photo]);
+    assert_eq!((again.0, again.1.len()), (shot.0, 0), "a second shot waits for the first photo");
     let done = drive(photo, shot.0, &[CaptureEvent::PhotoDone { ok: false }]).0;
     assert_eq!((done.state.shooting, done.state.fault, phase(&done)), (false, Some(CameraRefusal::PhotoFailed), CameraPhase::Ready));
     let good = drive(photo, done, &[CaptureEvent::Photo, CaptureEvent::PhotoDone { ok: true }]).0;
@@ -205,8 +205,6 @@ fn inv_capture_10_a_lens_change_during_a_recording_throws_it_away_and_switches_a
     let (run, actions) = drive(profile, recording(profile), &[CaptureEvent::SetLens { lens: CameraLens::Front }]);
     assert_eq!((phase(&run), actions), (CameraPhase::Stopping, vec![CaptureAction::EndRecording { discard: true }]));
     assert_eq!(run.state.lens, CameraLens::Back, "the lens stays until the recording ended");
-    let ignored = drive(profile, run, &[CaptureEvent::SetLens { lens: CameraLens::Back }]);
-    assert_eq!((ignored.0, ignored.1.len()), (run, 0), "a lens change while stopping is ignored");
     let (after, actions) = drive(profile, run, &[CaptureEvent::RecordFinished { end: RecordEnd::Completed }]);
     assert_eq!(actions, vec![CaptureAction::Discard, CaptureAction::Bind { lens: CameraLens::Front }]);
     assert_eq!((phase(&after), after.state.lens, after.state.fault), (CameraPhase::Opening, CameraLens::Front, None));
@@ -296,7 +294,7 @@ fn inv_capture_20_a_recording_runs_start_to_verdict_and_the_limit_ends_it_by_its
     let profile = moment();
     let (starting, actions) = drive(profile, ready(profile), &[CaptureEvent::Start]);
     assert_eq!((phase(&starting), starting.starting, actions), (CameraPhase::Ready, true, vec![CaptureAction::BeginRecording]));
-    assert!(drive(profile, starting, &[CaptureEvent::Start, CaptureEvent::SetLens { lens: CameraLens::Front }]).1.is_empty(), "no second start and no lens change before the start event");
+    assert!(drive(profile, starting, &[CaptureEvent::Start]).1.is_empty(), "no second start before the start event");
     let running = drive(profile, starting, &[CaptureEvent::RecordStarted, CaptureEvent::Tick { recorded_ms: 300 }]).0;
     assert_eq!((phase(&running), running.state.recorded_ms), (CameraPhase::Recording, 300));
     assert_eq!(drive(profile, ready(profile), &[CaptureEvent::Tick { recorded_ms: 9 }]).0.state.recorded_ms, 0, "no length outside a recording");
@@ -408,4 +406,36 @@ fn inv_call_08_a_call_throws_a_running_recording_away_and_ends_it_with_the_in_ca
     let idle = ready(profile);
     let (untouched, actions) = drive(profile, idle, &[CaptureEvent::CallStarted]);
     assert_eq!((actions, untouched.state.fault, phase(&untouched)), (Vec::new(), None, CameraPhase::Ready), "a call without a recording changes nothing");
+}
+
+#[test]
+fn inv_capture_30_a_lens_change_in_a_passing_phase_is_applied_when_that_phase_settles() {
+    let profile = moment();
+    let front = CaptureEvent::SetLens { lens: CameraLens::Front };
+    let back = CaptureEvent::SetLens { lens: CameraLens::Back };
+    let finished = CaptureEvent::RecordFinished { end: RecordEnd::Completed };
+
+    let (cancelled, actions) = drive(profile, recording(profile), &[CaptureEvent::Cancel, front]);
+    assert_eq!((actions, cancelled.state.lens), (vec![CaptureAction::EndRecording { discard: true }], CameraLens::Back), "the lens waits for the cancel to settle");
+    let (after, actions) = drive(profile, cancelled, &[finished]);
+    assert_eq!((actions, after.state.lens, phase(&after)), (vec![CaptureAction::Discard, CaptureAction::Bind { lens: CameraLens::Front }], CameraLens::Front, CameraPhase::Opening), "cancel then lens");
+
+    let (stopped, _) = drive(profile, recording(profile), &[CaptureEvent::Stop, front, finished]);
+    let (after, actions) = drive(profile, stopped, &[CaptureEvent::RecordSettled { duration_ms: Some(2_000) }]);
+    assert_eq!((actions, after.state.lens), (vec![CaptureAction::Deliver, CaptureAction::Bind { lens: CameraLens::Front }], CameraLens::Front), "stop then lens keeps the clip and switches");
+
+    let (after, actions) = drive(profile, cancelled, &[back, finished]);
+    assert_eq!((actions, after.state.lens), (vec![CaptureAction::Discard], CameraLens::Back), "a lens asked back to the current one switches nothing");
+
+    let starting = drive(profile, ready(profile), &[CaptureEvent::Start]).0;
+    let (after, actions) = drive(profile, starting, &[front, CaptureEvent::RecordStarted, finished]);
+    assert_eq!((actions.last().copied(), after.state.lens), (Some(CaptureAction::Bind { lens: CameraLens::Front }), CameraLens::Front), "a lens asked before the start event throws the take away and switches");
+    assert!(actions.contains(&CaptureAction::Discard), "{actions:?}");
+
+    let photo = photo_profile();
+    let shooting = drive(photo, ready(photo), &[CaptureEvent::Photo]).0;
+    let (waiting, actions) = drive(photo, shooting, &[front]);
+    assert_eq!((actions.len(), waiting.state.lens), (0, CameraLens::Back), "the lens waits for the photo");
+    let (after, actions) = drive(photo, waiting, &[CaptureEvent::PhotoDone { ok: true }]);
+    assert_eq!((actions, after.state.lens), (vec![CaptureAction::Bind { lens: CameraLens::Front }], CameraLens::Front), "photo then lens");
 }

@@ -152,6 +152,9 @@ impl Machine {
                 self.run.state.shooting = false;
                 self.run.state.fault = (!ok).then_some(CameraRefusal::PhotoFailed);
                 self.run.state.refused_ms = None;
+                if let Some(lens) = self.run.pending_lens.take() {
+                    self.rebind(lens);
+                }
             }
             CaptureEvent::Start => self.start(),
             CaptureEvent::RecordStarted if self.run.starting => {
@@ -341,7 +344,15 @@ impl Machine {
     }
 
     fn set_lens(&mut self, lens: CameraLens) {
-        if self.run.state.shooting || self.run.starting && self.phase() == CameraPhase::Ready {
+        if self.run.state.shooting || self.phase() == CameraPhase::Stopping {
+            self.run.pending_lens = (lens != self.run.state.lens).then_some(lens);
+            return;
+        }
+        if self.run.starting && self.phase() == CameraPhase::Ready {
+            if lens != self.run.state.lens {
+                self.run.pending_lens = Some(lens);
+                self.end_recording(true);
+            }
             return;
         }
         match self.phase() {
