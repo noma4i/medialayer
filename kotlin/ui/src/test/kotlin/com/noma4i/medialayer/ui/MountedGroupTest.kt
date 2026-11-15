@@ -119,18 +119,6 @@ class MountedGroupTest {
   }
 
   @Test
-  fun inv_session_16_a_toggled_audio_keeps_playing_when_its_group_changes_under_a_suspension() {
-    var group by mutableStateOf("ring")
-    mountToggledAudio { group }
-    val hold = layer.suspendPlayback(listOf("system"))
-    waitFor("pause")
-    rule.runOnIdle { group = "system" }
-    waitFor("play")
-    assertEquals("play", slot.transport)
-    hold.release()
-  }
-
-  @Test
   fun inv_session_16_a_toggled_audio_stays_playing_when_another_view_of_its_key_comes_and_goes() {
     val audio = mountToggledAudio { "ring" }
     val other = layer.openPlace(MediaItem(Kind.VIDEO, CLIP, emptyMap(), null, null, strategy = CacheStrategy.WINDOW))

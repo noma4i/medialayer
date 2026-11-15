@@ -4,10 +4,16 @@
 
 ### Changed
 
+- The outcome of a recording is given once; a second stop is refused until the next start.
+- A recording is turned upright while the camera is stopping, and a cancel then stops the conversion.
 - A recorded video comes out upright in its pixels, with no rotation tag.
 
 ### Fixed
 
+- A lens change asked while the camera stops or takes a photo is applied when that ends.
+- A camera and a voice recorder can hold the recording audio together.
+- An iOS voice recording stopped right after its limit gives its file and ends once.
+- An Android layer released twice reports no receiver error.
 - A peeking neighbour page stays paused while a call hold is active.
 - A call hold never hands playback to another waiting video.
 - Closing a sibling place after a call keeps its key paused until a new declaration.
