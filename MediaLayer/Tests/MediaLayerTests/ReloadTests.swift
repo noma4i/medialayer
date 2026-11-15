@@ -20,6 +20,7 @@ private final class ReloadSlot: PlayerSlot, PlayerSlotFactory, @unchecked Sendab
     case let .attach(viewToken): lock.withLock { attached = viewToken == 42 }
     default: break
     }
+    TestSignal.shared.fire()
   }
   func dispose() async {}
   func sample() -> SlotSample {

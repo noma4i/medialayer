@@ -19,6 +19,7 @@ private final class CallSlot: PlayerSlot, PlayerSlotFactory, @unchecked Sendable
     case .pause: log.continuation.yield("pause")
     default: break
     }
+    TestSignal.shared.fire()
   }
   func dispose() async {}
   func sample() -> SlotSample {

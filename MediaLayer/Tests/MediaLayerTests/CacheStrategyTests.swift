@@ -40,33 +40,18 @@ private final class RangeOrigin: Fetcher, @unchecked Sendable {
 
   private let lock = NSLock()
   private var seen: [Request] = []
-  let events = AsyncStream<UUID?>.makeStream()
 
   var requests: [Request] { lock.withLock { seen } }
 
   func fetch(request: FetchRequest) async throws -> FetchResponse {
     lock.withLock { seen.append(Request(url: request.url, start: request.rangeStart, end: request.rangeEnd)) }
-    events.continuation.yield(nil)
+    TestSignal.shared.fire()
     let start = Int(request.rangeStart ?? 0)
     let end = min(Int(request.rangeEnd ?? UInt64(Self.total - 1)), Self.total - 1)
     let length = end - start + 1
     var headers = ["Content-Type": "video/mp4", "Content-Length": String(length)]
     if request.rangeStart != nil { headers["Content-Range"] = "bytes \(start)-\(end)/\(Self.total)" }
     return FetchResponse(status: request.rangeStart == nil ? 200 : 206, headers: headers, body: MemoryBody(Data(repeating: 7, count: length)))
-  }
-}
-
-private func eventually(_ origin: RangeOrigin, _ condition: String, _ holds: () -> Bool) async throws {
-  let timer = DispatchSource.makeTimerSource()
-  let timeoutID = UUID()
-  timer.schedule(deadline: .now() + 8)
-  timer.setEventHandler { origin.events.continuation.yield(timeoutID) }
-  timer.resume()
-  defer { timer.cancel() }
-  var events = origin.events.stream.makeAsyncIterator()
-  while !holds() {
-    guard let event = await events.next() else { throw MediaError.Fetch(detail: "event stream ended: \(condition)") }
-    if event == timeoutID && !holds() { throw MediaError.Fetch(detail: "timed out: \(condition)") }
   }
 }
 

@@ -14,6 +14,7 @@ private final class TransportSlot: PlayerSlot, PlayerSlotFactory, @unchecked Sen
     case .rate: log.continuation.yield("rate")
     default: break
     }
+    TestSignal.shared.fire()
   }
   func dispose() async {}
   func sample() -> SlotSample {
