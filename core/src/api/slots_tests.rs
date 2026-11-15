@@ -25,9 +25,7 @@ async fn inv_api_42_a_command_is_done_only_after_the_native_side_applied_it() {
         runner.send(0, call);
     }
     eventually(|| factory.gate.entered() == 1).await;
-    for _ in 0..20 {
-        tokio::task::yield_now().await;
-    }
+    assert_eq!(runner.queued(0), 2);
 
     assert!(!runner.is_idle(), "the runner is idle while the first command is not applied");
     assert_eq!(factory.slot(0).applies_started(), 1, "the next command started before the first one was applied");
@@ -139,9 +137,7 @@ async fn inv_api_42_a_held_seek_blocks_a_play_but_gives_way_to_a_new_source() {
     runner.send(0, SlotCall::Seek { position_ms: 0 });
     eventually(|| factory.seek_gate.entered() == 1).await;
     runner.send(0, SlotCall::Play);
-    for _ in 0..20 {
-        tokio::task::yield_now().await;
-    }
+    assert_eq!(runner.queued(0), 1);
     assert_eq!(slot.calls(), vec![load("a", 1)], "the play passed the held seek");
     assert_eq!(slot.cancelled_applies(), 0, "a play cancelled the seek");
     drop(held);
