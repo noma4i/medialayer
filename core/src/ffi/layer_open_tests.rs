@@ -108,12 +108,7 @@ fn inv_ffi_02_a_play_url_routes_the_platform_fetcher_through_the_proxy_into_the_
     let port = parsed.port().unwrap();
     let reply = caller.block_on(test_client::get(port, &format!("{}?{}", parsed.path(), parsed.query().unwrap_or_default())));
     let stored = caller.block_on(async {
-        for _ in 0..1_000_000 {
-            if layer.stats().await.unwrap().file_count > 0 {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
+        eventually_async(|| async { layer.stats().await.unwrap().file_count > 0 }).await;
         layer.stats().await.unwrap().file_count
     });
     caller.block_on(layer.purge(source.url.clone())).unwrap();
@@ -177,6 +172,7 @@ impl MemoryReleaser for CountingReleaser {
 
     fn drop_memory_caches(&self) {
         self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        crate::test_signal::fire();
     }
 }
 
@@ -190,12 +186,7 @@ fn inv_ffi_02_a_critical_memory_warning_reaches_the_platform_memory_releaser() {
 
     layer.player_events().memory_warning(crate::api::Pressure::Critical);
 
-    for _ in 0..2_000_000 {
-        if releaser.0.load(std::sync::atomic::Ordering::SeqCst) == 1 {
-            break;
-        }
-        std::thread::yield_now();
-    }
+    caller().block_on(eventually(|| releaser.0.load(std::sync::atomic::Ordering::SeqCst) == 1));
     assert_eq!(releaser.0.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 

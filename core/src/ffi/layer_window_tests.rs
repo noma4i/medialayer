@@ -24,6 +24,7 @@ struct ReadySeen(Mutex<Vec<bool>>);
 impl WindowReadyListener for ReadySeen {
     fn changed(&self, ready: bool) {
         self.0.lock().unwrap().push(ready);
+        crate::test_signal::fire();
     }
 }
 

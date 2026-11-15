@@ -359,6 +359,8 @@ impl InputQueue {
         let mut inner = self.inner();
         inner.owners.remove(&owner);
         inner.by_owner.remove(&owner);
+        #[cfg(test)]
+        crate::test_signal::fire();
     }
 
     /// Takes the garbage so the caller of this method frees it outside the lock, then reports it with `freed`.

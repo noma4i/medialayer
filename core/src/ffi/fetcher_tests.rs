@@ -18,6 +18,7 @@ impl BodyReader for Chunks {
 
     fn release(&self) {
         self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        crate::test_signal::fire();
     }
 }
 
@@ -104,12 +105,7 @@ async fn inv_ffi_01_the_platform_reader_is_closed_when_the_body_is_dropped_midwa
         }
         drop(body);
 
-        for _ in 0..1_000_000 {
-            if platform.closes.load(std::sync::atomic::Ordering::SeqCst) > 0 {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
+        crate::api::test_support::eventually(|| platform.closes.load(std::sync::atomic::Ordering::SeqCst) > 0).await;
         assert_eq!(platform.closes.load(std::sync::atomic::Ordering::SeqCst), 1, "read_to_end={read_to_end}");
     }
 }

@@ -206,15 +206,7 @@ fn inv_call_06_dropping_the_hold_releases_it() {
     drop(hold);
 
     let item = MediaItem::bare_video(URL);
-    rig.caller.block_on(async {
-        for _ in 0..200 {
-            if rig.layer.play_url(item.clone()).await.is_ok() {
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        panic!("the dropped hold still refuses play_url");
-    });
+    assert!(rig.caller.block_on(rig.layer.play_url(item)).is_ok());
 }
 
 #[test]

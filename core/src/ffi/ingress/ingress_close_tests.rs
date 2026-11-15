@@ -13,9 +13,13 @@ fn inv_ingress_14_closing_the_layer_answers_a_query_that_waits_on_held_io() {
     caller.block_on(layer.limits()).unwrap();
 
     let outcome = caller.block_on(async {
-        let waiting = layer.controlled(|_| async { std::future::pending::<()>().await });
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let waiting = layer.controlled(|_| async {
+            let _ = entered.send(());
+            std::future::pending::<()>().await
+        });
         let closing = async {
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            started.await.unwrap();
             layer.shutdown();
         };
         tokio::time::timeout(std::time::Duration::from_secs(5), async { tokio::join!(waiting, closing).0 }).await
@@ -33,6 +37,7 @@ fn inv_ingress_15_a_native_event_flood_closes_the_layer_with_overloaded_for_the_
         fn changed(&self, _: MediaState) {}
         fn failed(&self, error: MediaError) {
             self.0.lock().unwrap().push(error);
+            crate::test_signal::fire();
         }
     }
     let dir = tempfile::tempdir().unwrap();

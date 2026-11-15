@@ -81,6 +81,7 @@ fn inv_ingress_48_a_play_that_is_not_issued_leaves_a_trace_line_with_its_reason(
     impl crate::trace::TraceSink for Lines {
         fn line(&self, text: String) {
             self.0.lock().unwrap().push(text);
+            crate::test_signal::fire();
         }
     }
     let _owner = crate::trace::sink_test_guard();
@@ -107,6 +108,7 @@ fn inv_trace_04_a_suspension_leaves_a_suspend_line_with_its_id_and_groups_and_a_
     impl crate::trace::TraceSink for Lines {
         fn line(&self, text: String) {
             self.0.lock().unwrap().push(text);
+            crate::test_signal::fire();
         }
     }
     let _owner = crate::trace::sink_test_guard();
