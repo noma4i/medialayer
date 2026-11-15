@@ -135,6 +135,7 @@ internal class LooperPlayer(private val exo: ExoPlayer) : ForwardingPlayer(exo) 
         cleared.countDown()
       }
     }
+    if (posted && handler.looper == Looper.getMainLooper()) onTestChange?.invoke()
     if (posted) cleared.await()
   }
 
