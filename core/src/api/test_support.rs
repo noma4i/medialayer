@@ -16,9 +16,14 @@ pub fn eventually_async<F: std::future::Future<Output = bool>>(mut condition: im
 }
 
 #[track_caller]
-pub fn eventually(mut condition: impl FnMut() -> bool) -> impl std::future::Future<Output = ()> {
+pub fn eventually(condition: impl FnMut() -> bool) -> impl std::future::Future<Output = ()> {
+    wait_until(condition, WAIT_LIMIT)
+}
+
+#[track_caller]
+pub fn wait_until(mut condition: impl FnMut() -> bool, limit: Duration) -> impl std::future::Future<Output = ()> {
     let caller = std::panic::Location::caller();
-    async move { tokio::time::timeout(WAIT_LIMIT, async {
+    async move { tokio::time::timeout(limit, async {
         loop {
             let seen = crate::test_signal::current();
             if condition() { return; }

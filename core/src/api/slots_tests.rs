@@ -117,7 +117,7 @@ async fn inv_api_42_closing_the_runner_cancels_the_held_apply_and_runs_nothing_a
     eventually(|| factory.gate.entered() == 1).await;
     let slot: Arc<MockSlot> = factory.slot(0);
 
-    let mut task = runner.observe_task(0);
+    let mut task = runner.observe_task(0).expect("slot exists");
     drop(runner);
     let _ = task.join().await;
     assert_eq!(slot.cancelled_applies(), 1);

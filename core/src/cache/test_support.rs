@@ -3,10 +3,9 @@ use super::*;
 use crate::limits::{EvictionStrategy, Limits};
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const WAIT_LIMIT: Duration = Duration::from_secs(10);
-const WAIT_STEP: Duration = Duration::from_millis(5);
 
 pub struct Fixture {
     pub cache: Cache,
@@ -69,22 +68,11 @@ pub fn files_with_suffix(dir: &Path, suffix: &str) -> usize {
 
 #[track_caller]
 pub fn wait_until<F: Fn() -> bool>(condition: F) -> impl std::future::Future<Output = ()> {
-    let caller = std::panic::Location::caller();
-    async move { tokio::time::timeout(WAIT_LIMIT, async {
-        loop {
-            let seen = crate::test_signal::current();
-            if condition() { return; }
-            crate::test_signal::changed_since(seen).await;
-        }
-    }).await.unwrap_or_else(|_| panic!("condition at {caller} never became true")); }
+    crate::api::test_support::wait_until(condition, WAIT_LIMIT)
 }
 
 pub async fn wait_for_file_count(cache: &Cache, count: u64) {
-    let started = Instant::now();
-    while cache.stats().await.file_count != count {
-        assert!(started.elapsed() < WAIT_LIMIT, "file count did not reach {count}");
-        tokio::time::sleep(WAIT_STEP).await;
-    }
+    crate::api::test_support::eventually_async(|| async { cache.stats().await.file_count == count }).await;
 }
 
 pub async fn poll_then_drop<F: std::future::Future>(future: F, polls: usize) -> bool {

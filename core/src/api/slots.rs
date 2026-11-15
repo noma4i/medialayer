@@ -122,13 +122,13 @@ pub struct SlotRunner {
 
 impl SlotRunner {
     #[cfg(test)]
-    pub fn observe_task(&self, slot: usize) -> AbortOnDrop {
+    pub fn observe_task(&self, slot: usize) -> Option<AbortOnDrop> {
         let mut lanes = self.lanes();
-        let lane = lanes.live.get_mut(&slot).expect("slot exists");
+        let lane = lanes.live.get_mut(&slot)?;
         let replacement = AbortOnDrop::new(self.handle.spawn(async {}));
         let task = std::mem::replace(&mut lane._task, replacement);
         lane.taken_task = Some(AbortTask(task.abort_handle()));
-        task
+        Some(task)
     }
 
     pub fn new(handle: Handle, players: Option<Arc<dyn PlayerSlotFactory>>) -> SlotRunner {

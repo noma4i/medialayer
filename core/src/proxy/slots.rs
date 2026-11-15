@@ -187,6 +187,8 @@ impl PrioritySlots {
             } else {
                 state.playback.insert(seq, sender);
             }
+            #[cfg(test)]
+            crate::test_signal::fire();
             (receiver, Waiting { state: self.state.clone(), seq, prefetch })
         };
         match receiver.await {
