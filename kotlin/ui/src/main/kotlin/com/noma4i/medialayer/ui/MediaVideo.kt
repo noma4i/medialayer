@@ -293,11 +293,16 @@ private fun VideoCover(media: MediaLayer, item: MediaItem, ready: Boolean, enabl
     ensureActive()
     value = answer
   }
-  val answer = placeholder ?: provisionalCover(item, ready)
+  val answer = placeholder ?: if (enabled) provisionalCover(item, ready) else null
   val shown = answer as? Placeholder.Cover
   val firstFrame = answer is Placeholder.FirstFrame && item.url.trim().startsWith("file://", ignoreCase = true)
-  LaunchedEffect(item.url, shown != null, firstFrame) {
-    MediaTrace.emit("view") { "placeholder ${item.url.takeLast(24)} ${if (shown != null) "cover" else if (firstFrame) "firstframe" else "none"}" }
+  val label = if (shown != null) "cover" else if (firstFrame) "firstframe" else "none"
+  val last = remember { arrayOf<String?>(null) }
+  LaunchedEffect(label, enabled) {
+    if (enabled && last[0] != label) {
+      last[0] = label
+      MediaTrace.emit("view") { "placeholder ${item.url.takeLast(24)} $label" }
+    }
   }
   if (firstFrame) {
     FirstFrameStill(item.url.trim(), contentScale)
