@@ -353,3 +353,17 @@ fn inv_crop_20_a_finished_gesture_reports_its_length_its_largest_move_its_scale_
     let (_, backwards) = run(first, first, &[(5.0, 1.0)], true, false, 90, 10);
     assert_eq!(backwards[0].duration_ms, 0, "a clock that went back gives no negative length");
 }
+
+#[test]
+fn inv_crop_22_a_fixed_frame_turned_right_then_left_returns_to_the_rectangle_it_had() {
+    let portrait = photo(3000, 4000);
+    let landscape = photo(4000, 3000);
+    let fitted = crop_initial(setup(portrait, chat()), None);
+    let zoomed = crop_zoom(fitted, setup(portrait, chat()), 1.5, fitted.x + fitted.width / 2.0, fitted.y + fitted.height / 2.0);
+
+    for (name, start) in [("the fit on open", fitted), ("a zoomed frame", zoomed)] {
+        let right = crop_turn(start, setup(portrait, chat()), true);
+        let back = crop_turn(right, setup(landscape, chat()), false);
+        near(back, start, name);
+    }
+}
