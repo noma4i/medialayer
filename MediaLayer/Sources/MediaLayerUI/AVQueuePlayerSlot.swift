@@ -165,6 +165,10 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
       await applySeek(positionMs: positionMs)
       return
     }
+    if case .play = command {
+      await applyPlay()
+      return
+    }
     await MainActor.run { [self] in
       guard !closed.isSet, !Task.isCancelled else { return }
       perform(command)
@@ -200,7 +204,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     case let .load(key, route, generation): load(key: key, route: route, generation: generation)
     case .unload: unload()
     case .preroll: preroll()
-    case .play: play()
+    case .play: break
     case .pause: pause()
     case .mute: player.isMuted = true; sampleLock.withLock { commanded.isMuted = true }
     case .unmute: player.isMuted = false; sampleLock.withLock { commanded.isMuted = false }
@@ -244,6 +248,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     dispatchPrecondition(condition: .onQueue(.main))
     let released = key
     MediaTrace.emit("player", "slot=\(id) unload key=\(released.map(MediaTrace.tail) ?? "-")")
+    wantsPlay = false
     tearDownItem()
     key = nil
     sampleLock.withLock { commanded.key = nil; commanded.isPlaying = false; commanded.rate = 1 }
@@ -255,11 +260,21 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
     prerollIfReady()
   }
 
-  private func play() {
-    wantsPlay = true
-    sampleLock.withLock { commanded.isPlaying = true }
-    MediaTrace.emit("player", "slot=\(id) play key=\(key.map(MediaTrace.tail) ?? "-")")
-    player.play()
+  private func applyPlay() async {
+    let shouldSettle = await MainActor.run { [self] in
+      guard !closed.isSet, !Task.isCancelled else { return false }
+      wantsPlay = true
+      sampleLock.withLock { commanded.isPlaying = true }
+      let audible = !player.isMuted && player.currentItem != nil
+      if audible { audio?.setAudible(slot: id, true) }
+      return audible
+    }
+    if shouldSettle, let audio { _ = await audio.settled() }
+    await MainActor.run { [self] in
+      guard !closed.isSet, !Task.isCancelled, wantsPlay else { return }
+      MediaTrace.emit("player", "slot=\(id) play key=\(key.map(MediaTrace.tail) ?? "-")")
+      player.play()
+    }
   }
 
   private func pause() {
@@ -415,7 +430,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
       self?.onMain { [weak self] in
         guard let self else { return }
         refreshSample()
-        audio?.setAudible(slot: id, !player.isMuted && player.timeControlStatus != .paused && player.currentItem != nil)
+        audio?.setAudible(slot: id, !player.isMuted && wantsPlay && player.currentItem != nil)
       }
     }
     audibleObservations = [

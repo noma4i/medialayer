@@ -8,7 +8,7 @@ actor AudioSessionOwner {
   private let box: DemandBox
   private let releaseDelay: Duration
   private var category: SessionPlan?
-  private var active = false
+  private var active: Bool? = false
 
   init(port: AudioSessionPort, box: DemandBox, releaseDelay: Duration) {
     self.port = port
@@ -19,7 +19,7 @@ actor AudioSessionOwner {
   func reconcile() async -> Bool {
     for _ in 0..<Self.deactivateAttempts {
       var want = box.target()
-      if want == .idle && active && releaseDelay > .zero {
+      if want == .idle && active != false && releaseDelay > .zero {
         try? await Task.sleep(for: releaseDelay)
         want = box.target()
       }
@@ -40,7 +40,7 @@ actor AudioSessionOwner {
 
       category = plan
     }
-    if !active {
+    if active != true {
       guard (try? port.setActive(true)) != nil else { return .failed }
 
       active = true
@@ -49,8 +49,12 @@ actor AudioSessionOwner {
   }
 
   private func release() -> Step {
-    guard active else { return .done }
-    guard (try? port.setActive(false)) != nil else { return .busy }
+    guard active != false else { return .done }
+    guard (try? port.setActive(false)) != nil else {
+      active = nil
+      category = nil
+      return .busy
+    }
 
     active = false
     return .done
