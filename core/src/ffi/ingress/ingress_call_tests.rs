@@ -6,6 +6,7 @@ use std::sync::Arc;
 use super::ingress_harness::*;
 
 const URL: &str = "https://o.test/v1.mp4";
+const OTHER: &str = "https://o.test/v2.mp4";
 
 struct Rig {
     _dir: tempfile::TempDir,
@@ -112,6 +113,72 @@ fn inv_call_04_a_suspension_released_during_a_hold_restores_nothing() {
     rig.caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Mute)));
 
     assert_eq!(rig.plays(&slot), 0, "the suspension release played during a call: {:?}", slot.calls());
+}
+
+#[test]
+fn inv_call_01_the_first_hold_hands_play_to_no_other_waiting_key() {
+    let rig = Rig::new();
+    let waiting = rig.layer.open_place(MediaItem::bare_video(URL)).unwrap();
+    waiting.update(rig.playing()).unwrap();
+    let slot = rig.slot();
+    rig.caller.block_on(eventually(|| rig.plays(&slot) == 1));
+    let newer = rig.layer.open_place(MediaItem::bare_video(OTHER)).unwrap();
+    newer.update(PlaceInput { visible: true, ..rig.playing() }).unwrap();
+    rig.caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Pause)));
+
+    let _hold = rig.layer.hold_call().unwrap();
+    rig.settled();
+    waiting.update(PlaceInput { muted: Some(true), ..rig.playing() }).unwrap();
+    rig.caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Mute)));
+
+    assert_eq!(rig.plays(&slot), 1, "the hold handed play to the waiting key: {:?}", slot.calls());
+}
+
+#[test]
+fn inv_call_03_closing_a_sibling_place_after_the_release_restores_nothing() {
+    let rig = Rig::new();
+    let (place, slot) = rig.started();
+    let sibling = rig.layer.open_place(MediaItem::bare_video(URL)).unwrap();
+    sibling.update(rig.playing()).unwrap();
+    let hold = rig.layer.hold_call().unwrap();
+    rig.caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Pause)));
+
+    hold.release();
+    sibling.release();
+    place.update(PlaceInput { muted: Some(true), ..PlaceInput::default() }).unwrap();
+    rig.caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Mute)));
+
+    assert_eq!(rig.plays(&slot), 1, "closing a sibling resumed the key: {:?}", slot.calls());
+}
+
+#[test]
+fn inv_call_14_a_peek_declared_during_a_hold_gives_no_play() {
+    let rig = Rig::new();
+    let _hold = rig.layer.hold_call().unwrap();
+    let place = rig.layer.open_place(MediaItem::bare_video(URL)).unwrap();
+    place.update(PlaceInput { peeking: true, ..PlaceInput::default() }).unwrap();
+    let slot = rig.slot();
+    rig.settled();
+    place.update(PlaceInput { peeking: true, view_token: Some(7), ..PlaceInput::default() }).unwrap();
+    rig.caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Attach { view_token: 7 })));
+
+    assert_eq!(rig.plays(&slot), 0, "a peek played during a call: {:?}", slot.calls());
+}
+
+#[test]
+fn inv_call_14_the_first_hold_pauses_a_running_peek() {
+    let rig = Rig::new();
+    let place = rig.layer.open_place(MediaItem::bare_video(URL)).unwrap();
+    place.update(PlaceInput { peeking: true, ..PlaceInput::default() }).unwrap();
+    let slot = rig.slot();
+    rig.caller.block_on(eventually(|| rig.plays(&slot) == 1));
+
+    let _hold = rig.layer.hold_call().unwrap();
+
+    rig.caller.block_on(eventually(|| {
+        let calls = slot.calls();
+        calls.iter().rposition(|call| *call == SlotCall::Play).is_some_and(|play| calls[play..].contains(&SlotCall::Pause))
+    }));
 }
 
 #[test]

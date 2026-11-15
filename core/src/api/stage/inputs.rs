@@ -161,6 +161,22 @@ impl Stage {
         self.sync_foreground();
     }
 
+    pub fn stop_all_playing(&self) {
+        crate::trace!("stage", "stop_all_playing");
+        let (state, commands) = {
+            let mut state = self.state();
+            let orders = state.election.stop_all();
+            let mut commands = state.commands_for(orders);
+            let keys: Vec<String> = state.leases.keys().cloned().collect();
+            for key in keys {
+                commands.extend(state.forget_lease(&key));
+            }
+            (state, commands)
+        };
+        self.dispatch(state, commands);
+        self.sync_foreground();
+    }
+
     pub fn suspend(&self, id: u64, allow_groups: &[String]) {
         let groups: Vec<&str> = allow_groups.iter().map(String::as_str).collect();
         self.set_suspension(id, true, Some(&groups));

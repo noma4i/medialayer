@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A peeking neighbour page stays paused while a call hold is active.
+- A call hold never hands playback to another waiting video.
+- Closing a sibling place after a call keeps its key paused until a new declaration.
+- A one-shot video place ends once even when a window loaded the clip first.
+- A fixed crop frame turned right and then left returns to the frame it had.
+- Playback after a voice recording starts in the playback audio session on iOS.
+- An Android image is drawn only in the frame where its content gets the ready state.
+- An Android video starts no cover request while it is off screen.
+
 ## 3.33.1 - 2026-11-14
 
 ### Fixed

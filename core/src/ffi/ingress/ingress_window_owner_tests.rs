@@ -26,7 +26,7 @@ impl Feed {
         let caller = caller();
         let window = layer.open_video_window().unwrap();
         window.replace(0, vec![Some(MediaItem::bare_video(FEED))]).unwrap();
-        caller.block_on(eventually(|| factory.slot_holding(FEED).is_some_and(|(_, slot)| slot.calls().iter().any(|call| matches!(call, SlotCall::Load { .. })))));
+        caller.block_on(eventually(|| factory.slot_holding(FEED).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Preroll))));
         let slot = factory.slot_holding(FEED).unwrap().1;
         Feed { factory, layer, caller, slot, window, _dir: dir }
     }

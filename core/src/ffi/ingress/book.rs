@@ -166,18 +166,24 @@ impl Book {
         self.flush(&key);
     }
 
-    /// The first hold of a call pauses every playing key and forgets the opinions: nothing plays again until an owner declares play after the last release.
+    /// The first hold of a call stops all playback in one step and forgets every play and peek opinion: nothing plays again until an owner declares after the last release.
     fn hold_call(&mut self, owner: u64, reserve: Reserve) {
         let first = self.calls.is_empty();
         self.calls.insert(owner, reserve);
         if !first {
             return;
         }
-        let stage = &self.assembled.stage;
-        for (key, keyed) in self.keys.iter_mut().filter(|(_, keyed)| keyed.applied.playing) {
-            stage.set_playing(key, false, &[]);
-            keyed.applied.playing = false;
-            keyed.applied.groups.clear();
+        self.assembled.stage.stop_all_playing();
+        for (owner, place) in self.places.iter_mut().filter(|(_, place)| place.input.playing || place.input.peeking) {
+            let Some(keyed) = self.keys.get_mut(&place.item.url) else { continue };
+            withdraw(keyed, *owner, &place.input, place.declared, place.intent);
+            place.input.playing = false;
+            place.input.peeking = false;
+            contribute(keyed, *owner, &place.input, place.declared, place.intent);
+        }
+        let keys: Vec<String> = self.keys.iter().filter(|(_, keyed)| keyed.applied.playing || keyed.applied.peeking).map(|(key, _)| key.clone()).collect();
+        for key in keys {
+            self.flush(&key);
         }
     }
 
@@ -233,7 +239,7 @@ impl Book {
             }
             keyed.applied.token = token;
         }
-        let peeking = keyed.peeking > 0;
+        let peeking = keyed.peeking > 0 && self.calls.is_empty();
         if peeking != keyed.applied.peeking {
             stage.set_peeking(key, peeking);
             keyed.applied.peeking = peeking;
