@@ -30,6 +30,8 @@ pub struct CacheShared {
     #[cfg(test)]
     pub load_stats: AtomicU64,
     #[cfg(test)]
+    pub load_finished: AtomicBool,
+    #[cfg(test)]
     pub scans: AtomicU64,
     #[cfg(test)]
     pub read_opens: AtomicU64,
@@ -41,6 +43,10 @@ pub struct CacheShared {
     pub write_open_threads: Mutex<Vec<std::thread::ThreadId>>,
     #[cfg(test)]
     pub writer_drops: AtomicU64,
+    #[cfg(test)]
+    pub pending_parts: AtomicU64,
+    #[cfg(test)]
+    pub commit_waiting: AtomicU64,
     #[cfg(test)]
     pub write_open_pause: Mutex<Option<(tokio::sync::oneshot::Sender<()>, tokio::sync::oneshot::Receiver<()>)>>,
     #[cfg(test)]
@@ -67,6 +73,13 @@ pub struct CacheShared {
     stripes: Vec<Arc<tokio::sync::Mutex<()>>>,
 }
 
+#[cfg(test)]
+impl Drop for CacheShared {
+    fn drop(&mut self) {
+        crate::test_signal::fire();
+    }
+}
+
 impl CacheShared {
     pub fn new(dir: PathBuf, limits: Limits, options: super::options::Options, handle: Handle) -> CacheShared {
         let mut state = State::new(limits);
@@ -85,6 +98,8 @@ impl CacheShared {
             #[cfg(test)]
             load_stats: AtomicU64::new(0),
             #[cfg(test)]
+            load_finished: AtomicBool::new(false),
+            #[cfg(test)]
             scans: AtomicU64::new(0),
             #[cfg(test)]
             read_opens: AtomicU64::new(0),
@@ -96,6 +111,10 @@ impl CacheShared {
             write_open_threads: Mutex::new(Vec::new()),
             #[cfg(test)]
             writer_drops: AtomicU64::new(0),
+            #[cfg(test)]
+            pending_parts: AtomicU64::new(0),
+            #[cfg(test)]
+            commit_waiting: AtomicU64::new(0),
             #[cfg(test)]
             write_open_pause: Mutex::new(None),
             #[cfg(test)]

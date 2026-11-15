@@ -57,7 +57,10 @@ pub async fn write_index(inner: &Arc<CacheShared>) -> std::io::Result<()> {
     let _ = inner.ready.subscribe().wait_for(|ready| *ready).await;
     let mut saved = inner.persist_lock.lock().await;
     #[cfg(test)]
-    inner.persist_attempts.fetch_add(1, Ordering::Relaxed);
+    {
+        inner.persist_attempts.fetch_add(1, Ordering::Relaxed);
+        crate::test_signal::fire();
+    }
     inner.dirty.store(false, Ordering::SeqCst);
     let mut pending = PendingSave { dirty: &inner.dirty, complete: false };
     let revision = inner.state().revision;

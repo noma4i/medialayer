@@ -53,6 +53,11 @@ pub async fn load(inner: Arc<CacheShared>) {
     inner.ready.send_replace(true);
     trigger_eviction(&inner);
     remove_leftovers(&inner, listing).await;
+    #[cfg(test)]
+    {
+        inner.load_finished.store(true, std::sync::atomic::Ordering::SeqCst);
+        crate::test_signal::fire();
+    }
     mark_dirty(&inner);
 }
 

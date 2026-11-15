@@ -54,13 +54,7 @@ async fn start(cache: &Cache, fetcher: Arc<MockFetcher>) -> Proxy {
 }
 
 async fn downloads_finished(proxy: &Proxy) {
-    for _ in 0..5_000 {
-        if proxy.live_tasks() == 0 {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(1)).await;
-    }
-    panic!("downloads did not finish");
+    wait_until(|| proxy.live_tasks() == 0).await;
 }
 
 async fn reopen_offline(rig: Rig) -> Rig {
@@ -111,13 +105,7 @@ async fn play(rig: &Rig, urls: &[&str]) -> Vec<Reply> {
 
 async fn settle(cache: &Cache) {
     let target = SMALL_BUDGET * 9 / 10;
-    for _ in 0..400 {
-        if cache.stats().await.total_bytes <= target {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
-    panic!("eviction did not reach its target");
+    crate::api::test_support::eventually_async(|| async { cache.stats().await.total_bytes <= target }).await;
 }
 
 #[tokio::test]

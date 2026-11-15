@@ -12,7 +12,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::io::Write;
-use tokio::runtime::Handle;
 use tokio::sync::oneshot;
 
 struct Registration {
@@ -65,7 +64,7 @@ impl Writer {
         let registration = Registration::new(&inner, &name, key, kind, &part);
         let reservation = SpaceReservation::new(inner.clone());
         let mut writer = Writer { inner, key: key.to_string(), name, kind, meta: Meta::default(), part, _registration: registration, file: None, reservation, hasher: Sha256::new(), filled: 0, sums: Vec::new(), renamed: false, #[cfg(test)] io_calls: Arc::default() };
-        writer.file = Some(create_part(&writer.inner.handle, &writer.part).await?);
+        writer.file = Some(create_part(&writer.inner, &writer.part).await?);
         Ok(writer)
     }
 
@@ -122,6 +121,11 @@ impl Writer {
         #[cfg(test)]
         self.io_calls.1.fetch_add(1, Ordering::Relaxed);
         tokio::task::spawn_blocking(move || (&*file).flush()).await.map_err(|error| CacheError::Io(error.to_string()))??;
+        #[cfg(test)]
+        {
+            self.inner.commit_waiting.fetch_add(1, Ordering::SeqCst);
+            crate::test_signal::fire();
+        }
         let stripe = self.inner.stripe(&self.name).clone().lock_owned().await;
         let handle = self.inner.handle.clone();
         handle.spawn(self.finish(stripe)).await.map_err(|error| CacheError::Io(error.to_string()))?
@@ -157,10 +161,14 @@ impl Writer {
 #[path = "writer_work_tests.rs"]
 mod chunk_work_tests;
 
-async fn create_part(handle: &Handle, part: &Path) -> Result<Arc<std::fs::File>, CacheError> {
+async fn create_part(inner: &Arc<CacheShared>, part: &Path) -> Result<Arc<std::fs::File>, CacheError> {
     let (sender, receiver) = oneshot::channel();
     let part = part.to_path_buf();
-    handle.spawn(async move {
+    #[cfg(test)]
+    inner.pending_parts.fetch_add(1, Ordering::SeqCst);
+    #[cfg(test)]
+    let tracked = inner.clone();
+    inner.handle.spawn(async move {
         let created = match tokio::fs::File::create(&part).await {
             Ok(file) => Ok(Arc::new(file.into_std().await)),
             Err(error) => Err(error),
@@ -168,6 +176,11 @@ async fn create_part(handle: &Handle, part: &Path) -> Result<Arc<std::fs::File>,
         if let Err(Ok(abandoned)) = sender.send(created) {
             drop(abandoned);
             delete_files(vec![part]).await;
+        }
+        #[cfg(test)]
+        {
+            tracked.pending_parts.fetch_sub(1, Ordering::SeqCst);
+            crate::test_signal::fire();
         }
     });
     let created = receiver.await.map_err(|_| CacheError::Io("part creation was dropped".to_string()))?;
@@ -180,7 +193,18 @@ impl Drop for Writer {
         self.inner.writer_drops.fetch_add(1, Ordering::Relaxed);
         if !self.renamed {
             let part = self.part.clone();
-            self.inner.handle.spawn(delete_files(vec![part]));
+            #[cfg(test)]
+            self.inner.pending_parts.fetch_add(1, Ordering::SeqCst);
+            #[cfg(test)]
+            let tracked = self.inner.clone();
+            self.inner.handle.spawn(async move {
+                delete_files(vec![part]).await;
+                #[cfg(test)]
+                {
+                    tracked.pending_parts.fetch_sub(1, Ordering::SeqCst);
+                    crate::test_signal::fire();
+                }
+            });
         }
     }
 }

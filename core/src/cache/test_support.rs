@@ -77,12 +77,12 @@ pub async fn wait_for_file_count(cache: &Cache, count: u64) {
 
 pub async fn poll_then_drop<F: std::future::Future>(future: F, polls: usize) -> bool {
     let mut future = Box::pin(future);
-    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
-    for _ in 0..polls {
-        if future.as_mut().poll(&mut context).is_ready() {
-            return true;
+    let mut remaining = polls;
+    tokio::time::timeout(WAIT_LIMIT, std::future::poll_fn(|context| {
+        if future.as_mut().poll(context).is_ready() {
+            return std::task::Poll::Ready(true);
         }
-        tokio::time::sleep(Duration::from_millis(2)).await;
-    }
-    false
+        remaining -= 1;
+        if remaining == 0 { std::task::Poll::Ready(false) } else { std::task::Poll::Pending }
+    })).await.expect("future did not wake")
 }

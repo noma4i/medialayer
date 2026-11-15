@@ -66,8 +66,7 @@ async fn inv_cache_02_commit_cancelled_while_waiting_for_the_key_lock_releases_t
     writer.write(&[0; 80]).await.unwrap();
     let stripe = f.cache.inner.stripe(&file_name("a")).lock().await;
     let task = tokio::spawn(writer.commit());
-    wait_until(|| reserved(&f.cache) == 80 && f.cache.inner.state().live_parts.len() == 1).await;
-    tokio::task::yield_now().await;
+    wait_until(|| f.cache.inner.commit_waiting.load(std::sync::atomic::Ordering::SeqCst) > 0).await;
     task.abort();
     let _ = task.await;
     drop(stripe);
@@ -82,7 +81,7 @@ async fn inv_cache_02_a_begin_write_cancelled_at_any_microsecond_leaves_no_part_
         let key = format!("k{round}");
         let _ = tokio::time::timeout(std::time::Duration::from_micros(round % 120), f.cache.begin_write(&key, Kind::Stream)).await;
     }
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    wait_until(|| f.cache.inner.pending_parts.load(std::sync::atomic::Ordering::SeqCst) == 0).await;
     assert_eq!(f.cache.stats().await.open_writers, 0);
     assert_eq!(files_with_suffix(f.dir.path(), ".part"), 0, "cancelled begin_write calls left part files");
 }

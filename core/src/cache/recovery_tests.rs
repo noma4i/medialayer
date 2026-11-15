@@ -67,7 +67,7 @@ async fn inv_cache_07_live_writer_part_survives_recovery() {
     let mut writer = cache.begin_write("k", Kind::Stream).await.unwrap();
     writer.write(b"abc").await.unwrap();
     cache.ready().await;
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    wait_until(|| cache.inner.load_finished.load(std::sync::atomic::Ordering::SeqCst)).await;
     assert_eq!(files_with_suffix(dir.path(), ".part"), 1);
     writer.commit().await.unwrap();
     assert_eq!(cache.get("k").await, Some(b"abc".to_vec()));

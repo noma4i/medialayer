@@ -267,7 +267,7 @@ async fn inv_cache_09_eviction_waits_for_the_key_lock_before_deleting_the_file()
     let guard = f.cache.inner.stripe(&name).lock().await;
     let cache = f.cache.clone();
     let evicting = tokio::spawn(async move { cache.set_limits(limits(70, 0.5, EvictionStrategy::Lru)).await });
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    wait_until(|| f.cache.inner.eviction_backlog.load(std::sync::atomic::Ordering::Relaxed) > 0).await;
     assert!(f.dir.path().join(format!("{name}.bin")).exists());
     assert!(!evicting.is_finished());
     drop(guard);
@@ -283,7 +283,7 @@ async fn inv_cache_09_entry_rewritten_during_eviction_keeps_its_file() {
     let guard = f.cache.inner.stripe(&name).lock().await;
     let cache = f.cache.clone();
     let evicting = tokio::spawn(async move { cache.set_limits(limits(70, 0.5, EvictionStrategy::Lru)).await });
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    wait_until(|| f.cache.inner.eviction_backlog.load(std::sync::atomic::Ordering::Relaxed) > 0).await;
     drop(guard);
     f.cache.put("a", Kind::Image, &payload(30)).await.unwrap();
     evicting.await.unwrap().unwrap();
