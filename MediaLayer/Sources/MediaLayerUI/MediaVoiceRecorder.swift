@@ -15,8 +15,16 @@ struct VoiceRefused: Error {
 /// The microphone side of a recording. `start` throws `VoiceRefused`, `peak` is the linear peak 0 to 1.
 protocol VoiceCapture: Sendable {
   func start(file: URL, maxDurationMs: UInt64, onLimit: @escaping @Sendable () -> Void) async throws
+  func start(file: URL, maxDurationMs: UInt64, ticket: RecordingTicket, onLimit: @escaping @Sendable () -> Void) async throws
   func peak() -> Float
   func stop() throws
+}
+
+extension VoiceCapture {
+  func start(file: URL, maxDurationMs: UInt64, ticket: RecordingTicket, onLimit: @escaping @Sendable () -> Void) async throws {
+    try ticket.start {}
+    try await start(file: file, maxDurationMs: maxDurationMs, onLimit: onLimit)
+  }
 }
 
 /// Records a voice message into an m4a file (AAC, mono). `levels` gives the wave level 0 to 1 while a recording runs and nothing in rest.
@@ -104,7 +112,17 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
       throw error
     }
     do {
-      try await capture.start(file: file, maxDurationMs: maxDurationMs) { [weak self] in self?.limitReached() }
+      try await capture.start(file: file, maxDurationMs: maxDurationMs, ticket: hold) { [weak self] in self?.limitReached() }
+      do {
+        try hold.start {}
+      } catch {
+        do { try capture.stop() } catch { Media.recordOpenFailure(error) }
+        throw error
+      }
+    } catch let reason as RecordingRefusal {
+      hold.end()
+      try? FileManager.default.removeItem(at: file)
+      throw Self.refusal(reason)
     } catch let refused as VoiceRefused {
       hold.end()
       try? FileManager.default.removeItem(at: file)
@@ -227,16 +245,27 @@ final class SystemVoiceCapture: NSObject, VoiceCapture, AVAudioRecorderDelegate,
   }
 
   func start(file: URL, maxDurationMs: UInt64, onLimit: @escaping @Sendable () -> Void) async throws {
+    try await start(file: file, maxDurationMs: maxDurationMs, ticket: nil, onLimit: onLimit)
+  }
+
+  func start(file: URL, maxDurationMs: UInt64, ticket: RecordingTicket, onLimit: @escaping @Sendable () -> Void) async throws {
+    try await start(file: file, maxDurationMs: maxDurationMs, ticket: Optional(ticket), onLimit: onLimit)
+  }
+
+  private func start(file: URL, maxDurationMs: UInt64, ticket: RecordingTicket?, onLimit: @escaping @Sendable () -> Void) async throws {
     guard await Self.permitted() else { throw VoiceRefused(reason: .permissionDenied) }
     let made: AVAudioRecorder
     made = try AVAudioRecorder(url: file, settings: Self.settings)
     made.delegate = self
     made.isMeteringEnabled = true
-    guard made.record(forDuration: TimeInterval(maxDurationMs) / 1000) else { throw NSError(domain: "MediaLayer.VoiceCapture", code: 1) }
-    lock.withLock {
-      recorder = made
-      self.onLimit = onLimit
+    let start = {
+      guard made.record(forDuration: TimeInterval(maxDurationMs) / 1000) else { throw NSError(domain: "MediaLayer.VoiceCapture", code: 1) }
+      self.lock.withLock {
+        self.recorder = made
+        self.onLimit = onLimit
+      }
     }
+    if let ticket { try ticket.start(start) } else { try start() }
   }
 
   func peak() -> Float {

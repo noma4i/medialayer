@@ -280,6 +280,10 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
   }
 
   func beginRecording(to url: URL, profile: CaptureProfile, lens: CameraLens) {
+    beginRecording(to: url, profile: profile, lens: lens, ticket: nil, refused: { _ in })
+  }
+
+  func beginRecording(to url: URL, profile: CaptureProfile, lens: CameraLens, ticket: RecordingTicket?, refused: @escaping @Sendable (RecordingRefusal) -> Void) {
     queue.async { [weak self] in
       guard let self else { return }
       guard let output = self.movieOutput, !output.isRecording, self.session.isRunning else { return self.emit(.recordFinished(end: .failed)) }
@@ -288,9 +292,16 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
         if connection.videoRotationAngle != angle && connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
       }
       output.maxRecordedDuration = CMTime(value: CMTimeValue(profile.maxDurationMs), timescale: 1000)
-      let delegate = MovieDelegate(onStart: { [weak self] in self?.emit(.recordStarted) }, onFinish: { [weak self] end in self?.emit(.recordFinished(end: end)) })
+      let delegate = MovieDelegate(onStart: { [weak self] in
+        self?.emit(.recordStarted)
+        if let ticket, !ticket.isActive { self?.endRecording() }
+      }, onFinish: { [weak self] end in self?.emit(.recordFinished(end: end)) })
       self.recording = delegate
-      output.startRecording(to: url, recordingDelegate: delegate)
+      do {
+        if let ticket { try ticket.start { output.startRecording(to: url, recordingDelegate: delegate) } }
+        else { output.startRecording(to: url, recordingDelegate: delegate) }
+      } catch let reason as RecordingRefusal { self.recording = nil; refused(reason) }
+      catch { self.recording = nil; refused(.interrupted) }
     }
   }
 

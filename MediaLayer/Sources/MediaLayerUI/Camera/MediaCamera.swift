@@ -50,6 +50,7 @@ public final class MediaCamera: @unchecked Sendable {
   private var epoch = 0
   private var sessionHold: CameraServices.Release?
   private var audioHold: RecordingTicket?
+  private var microphoneFlowing = true
   private var binding: Task<Void, Never>?
   private var shooting: Task<Void, Never>?
   private var reading: Task<Void, Never>?
@@ -134,6 +135,7 @@ public final class MediaCamera: @unchecked Sendable {
       try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
         queue.async {
           guard self.startWaiter == nil else { return continuation.resume(throwing: Self.refusal(.notReady)) }
+          if self.profile.audio && self.audioHold == nil { return continuation.resume(throwing: Self.refusal(.notReady)) }
           self.ended = nil
           let wasReady = self.run.state.phase == .ready && self.profile.mode == .video
           self.apply(.start)
@@ -256,9 +258,11 @@ public final class MediaCamera: @unchecked Sendable {
   }
 
   private func apply(_ event: CaptureEvent) {
+    if case let .audioFlow(flowing) = event { microphoneFlowing = flowing }
     let step = captureStep(run: run, event: event, profile: profile)
     run = step.run
     for action in step.actions { perform(action) }
+    if case .recordFinished = event { apply(.microphoneFlow(microphoneFlowing)) }
     if run.discard, run.end != nil, reading != nil {
       reading?.cancel()
       reading = nil
@@ -335,7 +339,10 @@ public final class MediaCamera: @unchecked Sendable {
       let url = CaptureFiles.name(.clip, in: services.directory)
       recordingURL = url
       clipInfo = nil
-      backend.beginRecording(to: url, profile: profile, lens: run.state.lens)
+      backend.beginRecording(to: url, profile: profile, lens: run.state.lens, ticket: audioHold) { [weak self] reason in
+        self?.post(.revoked(reason: Self.microphoneReason(reason)))
+        self?.post(.recordFinished(end: .failed))
+      }
     case .endRecording:
       backend.endRecording()
     case .readClip:

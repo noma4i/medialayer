@@ -10,7 +10,7 @@ private final class RealSessionPort: AudioSessionPort, @unchecked Sendable {
   private var releases = 0
   var releaseCount: Int { lock.withLock { releases } }
   init(session: SystemAudioSession) { self.session = session }
-  func systemEvents() -> AsyncStream<SystemAudioEvent> { session.systemEvents() }
+  func systemEvents(_ sink: @escaping @Sendable (SystemAudioEvent) -> Void) -> @Sendable () -> Void { session.systemEvents(sink) }
   func apply(_ plan: SessionPlan, activate: Bool) throws { defer { TestSignal.shared.fire() }; try session.apply(plan, activate: activate) }
   func deactivate() throws { try session.deactivate(); lock.withLock { releases += 1 }; TestSignal.shared.fire() }
   func overrideSpeaker(_ on: Bool) throws { try session.overrideSpeaker(on) }

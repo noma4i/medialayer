@@ -12,7 +12,7 @@ enum SystemAudioEvent: Sendable {
 struct AudioSessionBusy: Error {}
 
 protocol AudioSessionPort: Sendable {
-  func systemEvents() -> AsyncStream<SystemAudioEvent>
+  func systemEvents(_ sink: @escaping @Sendable (SystemAudioEvent) -> Void) -> @Sendable () -> Void
   func apply(_ plan: SessionPlan, activate: Bool) throws
   func deactivate() throws
   func overrideSpeaker(_ on: Bool) throws
@@ -21,7 +21,7 @@ protocol AudioSessionPort: Sendable {
 }
 
 protocol CallObserverPort: Sendable {
-  func calls() -> AsyncStream<Set<String>>
+  func calls(_ sink: @escaping @Sendable (Set<String>) -> Void) -> @Sendable () -> Void
 }
 
 protocol MicrophonePermissionPort: Sendable {

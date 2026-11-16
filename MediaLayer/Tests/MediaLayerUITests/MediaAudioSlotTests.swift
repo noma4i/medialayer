@@ -11,7 +11,7 @@ final class TestSessionPort: AudioSessionPort, @unchecked Sendable {
   private var applied: [SessionPlan] = []
   var plans: [SessionPlan] { lock.withLock { applied } }
   init(_ base: FakeSessionPort) { self.base = base }
-  func systemEvents() -> AsyncStream<SystemAudioEvent> { base.systemEvents() }
+  func systemEvents(_ sink: @escaping @Sendable (SystemAudioEvent) -> Void) -> @Sendable () -> Void { base.systemEvents(sink) }
   func apply(_ plan: SessionPlan, activate: Bool) throws {
     lock.withLock { applied.append(plan) }
     try base.apply(plan, activate: activate)
@@ -61,7 +61,7 @@ private final class VolumeSessionPort: AudioSessionPort, @unchecked Sendable {
   var plans: [SessionPlan] { lock.withLock { applied } }
   var volumeStreamEnded: Bool { lock.withLock { ended } }
 
-  func systemEvents() -> AsyncStream<SystemAudioEvent> { AsyncStream { _ in } }
+  func systemEvents(_ sink: @escaping @Sendable (SystemAudioEvent) -> Void) -> @Sendable () -> Void { {} }
   func apply(_ plan: SessionPlan, activate: Bool) throws {
     lock.withLock { applied.append(plan); entries.append("apply \(plan.category.rawValue) \(plan.mode.rawValue) activate=\(activate)") }
     TestSignal.shared.fire()

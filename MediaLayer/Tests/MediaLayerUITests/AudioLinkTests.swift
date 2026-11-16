@@ -9,7 +9,7 @@ final class FakeSessionPort: AudioSessionPort, @unchecked Sendable {
   private let lock = NSLock()
   private var entries: [String] = []
   private var busy: Int
-  private var sink: AsyncStream<SystemAudioEvent>.Continuation?
+  private var sink: (@Sendable (SystemAudioEvent) -> Void)?
 
   init(busyDeactivations: Int = 0) { busy = busyDeactivations }
 
@@ -26,13 +26,12 @@ final class FakeSessionPort: AudioSessionPort, @unchecked Sendable {
     TestSignal.shared.fire()
   }
 
-  func systemEvents() -> AsyncStream<SystemAudioEvent> {
-    let (stream, continuation) = AsyncStream<SystemAudioEvent>.makeStream()
-    lock.withLock { sink = continuation }
-    return stream
+  func systemEvents(_ sink: @escaping @Sendable (SystemAudioEvent) -> Void) -> @Sendable () -> Void {
+    lock.withLock { self.sink = sink }
+    return { [weak self] in self?.lock.withLock { self?.sink = nil } }
   }
 
-  func send(_ event: SystemAudioEvent) { lock.withLock { sink }?.yield(event) }
+  func send(_ event: SystemAudioEvent) { lock.withLock { sink }?(event) }
 
   func apply(_ plan: SessionPlan, activate: Bool) throws {
     note("apply \(plan.category.rawValue) \(plan.mode.rawValue) activate=\(activate)")
@@ -59,15 +58,14 @@ final class FakeSessionPort: AudioSessionPort, @unchecked Sendable {
 
 final class FakeCallObserver: CallObserverPort, @unchecked Sendable {
   private let lock = NSLock()
-  private var sink: AsyncStream<Set<String>>.Continuation?
+  private var sink: (@Sendable (Set<String>) -> Void)?
 
-  func calls() -> AsyncStream<Set<String>> {
-    let (stream, continuation) = AsyncStream<Set<String>>.makeStream()
-    lock.withLock { sink = continuation }
-    return stream
+  func calls(_ sink: @escaping @Sendable (Set<String>) -> Void) -> @Sendable () -> Void {
+    lock.withLock { self.sink = sink }
+    return { [weak self] in self?.lock.withLock { self?.sink = nil } }
   }
 
-  func send(_ calls: Set<String>) { lock.withLock { sink }?.yield(calls) }
+  func send(_ calls: Set<String>) { lock.withLock { sink }?(calls) }
 }
 
 struct GrantedMicrophone: MicrophonePermissionPort {

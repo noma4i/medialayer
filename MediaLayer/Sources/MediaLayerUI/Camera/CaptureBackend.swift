@@ -45,11 +45,22 @@ protocol CaptureBackend: AnyObject, Sendable {
   func detachPreviewLayer(_ layer: AVCaptureVideoPreviewLayer)
   func takePhoto(flash: Bool, profile: CaptureProfile) async throws -> Data
   func beginRecording(to url: URL, profile: CaptureProfile, lens: CameraLens)
+  func beginRecording(to url: URL, profile: CaptureProfile, lens: CameraLens, ticket: RecordingTicket?, refused: @escaping @Sendable (RecordingRefusal) -> Void)
   func endRecording()
   func recordedMs() -> UInt64
   func setTorch(_ on: Bool)
   func setZoom(_ ratio: Float)
   func setFrameTap(_ tap: (@Sendable (CVPixelBuffer, UInt64) -> Void)?)
+}
+
+extension CaptureBackend {
+  func beginRecording(to url: URL, profile: CaptureProfile, lens: CameraLens, ticket: RecordingTicket?, refused: @escaping @Sendable (RecordingRefusal) -> Void) {
+    do {
+      if let ticket { try ticket.start { beginRecording(to: url, profile: profile, lens: lens) } }
+      else { beginRecording(to: url, profile: profile, lens: lens) }
+    } catch let reason as RecordingRefusal { refused(reason) }
+    catch { refused(.interrupted) }
+  }
 }
 
 /// What a camera takes from its surroundings, so a test can give it a fake of each.

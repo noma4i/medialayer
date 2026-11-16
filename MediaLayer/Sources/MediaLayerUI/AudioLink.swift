@@ -29,18 +29,16 @@ final class AudioLink: @unchecked Sendable {
   private var unmanagedSpeakers: [UInt64: Bool] = [:]
   private var availabilitySinks: [UUID: AsyncStream<MicrophoneAvailability>.Continuation] = [:]
   private var currentAvailability: MicrophoneAvailability = .available
-  private var tasks: [Task<Void, Never>] = []
+  private var stopEvents: [@Sendable () -> Void] = []
   private let setVolumeMultiplier: @Sendable (Float) -> Void
 
   init(core: MediaLayer, ports: AudioPorts, setVolumeMultiplier: @escaping @Sendable (Float) -> Void = { _ in }) {
     self.inputs = core.audioInputs()
     self.ports = ports
     self.setVolumeMultiplier = setVolumeMultiplier
-    let systemEvents = ports.session.systemEvents()
-    let observedCalls = ports.calls.calls()
-    tasks = [
-      Task { [weak self] in for await event in systemEvents { self?.systemEvent(event) } },
-      Task { [weak self] in for await calls in observedCalls { self?.send(.observedCalls(uuids: calls.sorted())) } }
+    stopEvents = [
+      ports.session.systemEvents { [weak self] event in self?.systemEvent(event) },
+      ports.calls.calls { [weak self] calls in self?.send(.observedCalls(uuids: calls.sorted())) }
     ]
     send(.permission(granted: ports.permission.granted()))
   }
@@ -143,13 +141,13 @@ final class AudioLink: @unchecked Sendable {
     inbox.async {
       guard !self.closed else { return }
       self.closed = true
-      self.tasks.forEach { $0.cancel() }
-      self.tasks.removeAll()
+      self.stopEvents.forEach { $0() }
+      self.stopEvents.removeAll()
       self.pending.values.forEach { $0.resume(returning: .failure(MediaError.Closed)) }
       self.pending.removeAll()
       self.tickets.values.forEach { $0.value?.revoke(.interrupted) }
       self.tickets.removeAll()
-      self.calls.values.forEach { $0.finish() }
+      self.calls.values.forEach { $0.yield(.ended); $0.finish() }
       self.calls.removeAll()
       self.availabilitySinks.values.forEach { $0.finish() }
       self.availabilitySinks.removeAll()
@@ -255,6 +253,13 @@ final class RecordingTicket: @unchecked Sendable {
     lock.withLock { revokedReason = reason }
     sink.yield(reason)
     sink.finish()
+  }
+  func start<T>(_ operation: () throws -> T) throws -> T {
+    try lock.withLock {
+      if let revokedReason { throw revokedReason }
+      guard !ended else { throw RecordingRefusal.interrupted }
+      return try operation()
+    }
   }
   func end() {
     guard lock.withLock({ if ended { return false }; ended = true; return true }) else { return }
