@@ -32,7 +32,7 @@ final class CallAudioHold: @unchecked Sendable {
   func setSpeaker(_ on: Bool) {
     _ = box.update { $0.setSpeaker(id, on); return true }
     MediaTrace.emit("audio", "call speaker \(on)")
-    Task { await owner.request() }
+    Task { [owner] in await owner.request() }
   }
 
   func systemActivated() { systemChanged(true) }
@@ -46,14 +46,14 @@ final class CallAudioHold: @unchecked Sendable {
     }
     if exists { box.setLive(live) }
     MediaTrace.emit("audio", "call system \(live ? "activated" : "deactivated")")
-    Task { await owner.request() }
+    Task { [owner] in await owner.request() }
   }
 
   func release() {
     guard lock.withLock({ if released { return false }; released = true; return true }) else { return }
     box.removeCall(id)
     MediaTrace.emit("audio", "call release")
-    Task { await owner.request() }
+    Task { [owner] in await owner.request() }
   }
 
   deinit { release() }
