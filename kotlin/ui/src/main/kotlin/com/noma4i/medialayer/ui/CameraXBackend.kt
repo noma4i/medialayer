@@ -223,8 +223,13 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
   }
 
   override fun beginRecording(file: File, profile: CaptureProfile, lens: CameraLens) {
+    beginRecording(file, profile, lens) { it() }
+  }
+
+  override fun beginRecording(file: File, profile: CaptureProfile, lens: CameraLens, start: (() -> Unit) -> Unit) {
     main.execute {
-      val output = movie?.output ?: return@execute sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
+      start startRecording@{
+      val output = movie?.output ?: return@startRecording sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
       try {
         recordedNanos = 0
         var pending = output.prepareRecording(context, FileOutputOptions.Builder(file).setDurationLimitMillis(profile.maxDurationMs.toLong()).build())
@@ -254,6 +259,7 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
         sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
       } catch (_: Exception) {
         sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
+      }
       }
     }
   }

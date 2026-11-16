@@ -30,7 +30,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.runBlocking
 
 /** A finished voice recording: an m4a file (AAC, mono) and its length. */
 data class VoiceRecording(val file: File, val durationMs: Long)
@@ -78,28 +77,39 @@ class MediaVoiceRecorder internal constructor(
 
   val isRecording: Boolean get() = synchronized(lock) { running != null }
 
-  fun start(file: File) {
+  suspend fun start(file: File) {
     synchronized(lock) {
       check(running == null && !starting) { "a recording is already running" }
       starting = true
       ended = null
     }
     try {
-      begin(file)
+      withContext(Dispatchers.IO) { begin(file) }
     } finally {
       synchronized(lock) { starting = false }
     }
   }
 
-  private fun begin(file: File) {
+  private suspend fun begin(file: File) {
     val session = link() ?: throw MediaException.Closed()
-    val hold = when (val admission = runBlocking { session.admit(RecordingKind.VOICE) }) {
+    val hold = when (val admission = session.admit(RecordingKind.VOICE)) {
       is Admission.Admitted -> admission.ticket
       is Admission.Refused -> throw voiceError(admission.reason)
     }
     capture.onSilenced { session.send(com.noma4i.medialayer.AudioInput.Silenced(hold.id)) }
     try {
-      capture.start(file, maxDurationMs, ::limitReached)
+      val refusal = hold.start {
+        capture.start(file, maxDurationMs, ::limitReached)
+        synchronized(lock) {
+          heldAudio = hold
+          val current = Running(file, clock()).also {
+            running = it
+            it.poll = scope.launch { pollLevels() }
+          }
+          revoked = hold.onRevoked { reason -> scope.launch(Dispatchers.IO) { finish(current, voiceError(reason)) } }
+        }
+      }
+      if (refusal != null) throw voiceError(refusal)
     } catch (refused: VoiceRefused) {
       hold.close()
       file.delete()
@@ -110,15 +120,9 @@ class MediaVoiceRecorder internal constructor(
       throw failure
     }
     synchronized(lock) {
-      heldAudio = hold
-      val current = Running(file, clock()).also {
-        running = it
-        it.poll = scope.launch { pollLevels() }
-      }
-      revoked = hold.onRevoked { reason -> scope.launch(Dispatchers.IO) { finish(current, voiceError(reason)) } }
       if (capture.isSilenced()) {
         val failure = voiceError(RecordingRefusal.MICROPHONE_SILENT)
-        finish(current, failure)
+        running?.let { finish(it, failure) }
         throw failure
       }
     }

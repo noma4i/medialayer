@@ -81,6 +81,7 @@ class MediaCamera internal constructor(
   private var epoch = 0
   private var sessionHold: AutoCloseable? = null
   private var audioHold: RecordingTicket? = null
+  private var audioFailure: RecordingRefusal? = null
   private var retiringAudio: RecordingTicket? = null
   private var audioRevocation: java.io.Closeable? = null
   private var binding: Job? = null
@@ -137,8 +138,12 @@ class MediaCamera internal constructor(
       }
       ended = null
       startFailure = null
+      if (profile.audio && audioHold == null) {
+        waiter.completeExceptionally(audioFailure?.let(::microphoneRefusal) ?: refusal(CameraRefusal.NOT_READY))
+        return@enqueue
+      }
       apply(CaptureEvent.Start)
-      if (run.starting) startWaiter = waiter else waiter.completeExceptionally(refusal(CameraRefusal.NOT_READY))
+      if (run.starting) startWaiter = waiter else waiter.completeExceptionally(startFailure ?: refusal(CameraRefusal.NOT_READY))
     }
     if (!queued) throw refusal(CameraRefusal.NOT_READY)
     waiter.await()
@@ -266,9 +271,11 @@ class MediaCamera internal constructor(
     audioHold?.close()
     audioRevocation?.close()
     audioHold = ticket
+    audioFailure = null
     audioRevocation = ticket.onRevoked { reason -> enqueue {
       if (audioHold !== ticket) return@enqueue
       audioHold = null
+      audioFailure = reason
       audioRevocation?.close()
       audioRevocation = null
       if (run.starting || run.started) {
@@ -305,14 +312,20 @@ class MediaCamera internal constructor(
   }
 
   private fun apply(event: CaptureEvent) {
-    val cancelReading = event == CaptureEvent.Cancel && reading != null
+    val cancelReading = if (event == CaptureEvent.Cancel) reading else null
     val step = captureStep(run, event, profile)
     run = step.run
     step.actions.forEach(::perform)
-    if (cancelReading) {
-      reading?.cancel()
-      reading = null
-      apply(CaptureEvent.RecordSettled(null))
+    if (cancelReading != null) {
+      cancelReading.invokeOnCompletion {
+        enqueue {
+          if (reading === cancelReading) {
+            reading = null
+            apply(CaptureEvent.RecordSettled(null))
+          }
+        }
+      }
+      cancelReading.cancel()
       return
     }
     published.value = run.state
@@ -381,7 +394,11 @@ class MediaCamera internal constructor(
         val file = CaptureFiles.name(CaptureFileKind.CLIP, services.directory)
         recordingFile = file
         clipInfo = null
-        backend.beginRecording(file, profile, run.state.lens)
+        val ticket = audioHold
+        backend.beginRecording(file, profile, run.state.lens) { start ->
+          val refused = if (profile.audio) checkNotNull(ticket).start(start) else { start(); null }
+          if (refused != null) enqueue { failMicrophone(microphoneRefusal(refused)) }
+        }
       }
       is CaptureAction.EndRecording -> backend.endRecording()
       CaptureAction.ReadClip -> readClip()
@@ -531,6 +548,7 @@ class MediaCamera internal constructor(
       }
       enqueue {
         if (recordingFile != file) return@enqueue
+        if (reading?.isCancelled == true) return@enqueue
         reading = null
         clipInfo = info
         apply(CaptureEvent.RecordSettled(info?.durationMs))

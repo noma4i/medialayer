@@ -62,8 +62,14 @@ internal class RecordingTicket(val id: ULong, private val end: (ULong) -> Unit) 
     return Closeable { synchronized(listeners) { listeners.remove(listener) } }
   }
   internal fun revoke(value: RecordingRefusal) = synchronized(listeners) {
+    if (reason != null) return@synchronized
     reason = value
     listeners.toList().forEach { it(value) }
+  }
+  fun start(work: () -> Unit): RecordingRefusal? = synchronized(listeners) {
+    reason?.let { return@synchronized it }
+    work()
+    null
   }
   override fun close() { if (closed.compareAndSet(false, true)) end(id) }
 }
@@ -102,6 +108,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
   val microphoneAvailability: StateFlow<MicrophoneAvailability> = availability
   private val listeners = LinkedHashSet<(MicrophoneAvailability) -> Unit>()
   private var communication = false
+  private var focusHeld = false
   private val inputs = ArrayDeque<AudioInput>()
   private var processing = false
   @Volatile internal var volumeMultiplier: (Float) -> Unit = {}
@@ -122,7 +129,9 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
   }
   private fun id() = nextId.incrementAndGet().toULong()
   private fun enqueue(work: () -> Unit): Boolean = synchronized(postLock) { !closed.get() && handler.post(work) }
-  internal fun send(input: AudioInput) { enqueue { process(input) } }
+  internal fun send(input: AudioInput) {
+    if (Looper.myLooper() == thread.looper && !closed.get()) process(input) else enqueue { process(input) }
+  }
   private fun process(input: AudioInput) {
     inputs.addLast(input)
     if (processing) return
@@ -140,8 +149,17 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
         is AudioAction.Apply -> {
           try {
             val plan = FocusPlan.of(action.want)
+            if (communication && plan?.communication != true) {
+              ports.focus.setCommunication(false, false)
+              communication = false
+            }
+            if (plan == null && focusHeld) {
+              ports.focus.abandon()
+              focusHeld = false
+            }
             if (plan != null) {
               val answer = ports.focus.request(plan)
+              focusHeld = answer != FocusAnswer.FAILED
               if (plan.communication) {
                 ports.focus.setCommunication(true, (action.want as SessionWant.Call).speaker)
                 communication = true
@@ -157,6 +175,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
           try {
             if (communication) { ports.focus.setCommunication(false, false); communication = false }
             ports.focus.abandon()
+            focusHeld = false
             process(AudioInput.Applied(action.generation, AppliedResult.Ok))
           } catch (failure: Exception) { process(AudioInput.Applied(action.generation, AppliedResult.Failed(-1))) }
         }
@@ -224,6 +243,9 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
       try {
         pending.values.forEach { it.completeExceptionally(MediaException.Closed()) }
         pending.clear()
+        tickets.values.toList().forEach { it.revoke(RecordingRefusal.INTERRUPTED) }
+        calls.values.toList().forEach { it.update(CallState.ENDED) }
+        calls.clear()
         if (communication) ports.focus.setCommunication(false, false)
         ports.focus.abandon()
         (ports.focus as? AutoCloseable)?.close()

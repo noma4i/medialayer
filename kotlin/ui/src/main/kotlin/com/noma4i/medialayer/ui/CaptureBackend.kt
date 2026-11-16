@@ -38,6 +38,9 @@ internal interface CaptureBackend {
   suspend fun takePhoto(file: File, flash: Boolean, profile: CaptureProfile)
 
   fun beginRecording(file: File, profile: CaptureProfile, lens: CameraLens)
+  fun beginRecording(file: File, profile: CaptureProfile, lens: CameraLens, start: (() -> Unit) -> Unit) {
+    start { beginRecording(file, profile, lens) }
+  }
 
   fun endRecording()
 
