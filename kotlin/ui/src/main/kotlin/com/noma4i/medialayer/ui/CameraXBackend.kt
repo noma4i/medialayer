@@ -234,7 +234,9 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
           if (profile.audio) {
             when (event.recordingStats.audioStats.audioState) {
               AudioStats.AUDIO_STATE_SOURCE_SILENCED -> audioIssue(CaptureAudioIssue.SILENCED)
+              AudioStats.AUDIO_STATE_ACTIVE -> audioIssue(CaptureAudioIssue.ACTIVE)
               AudioStats.AUDIO_STATE_SOURCE_ERROR -> audioIssue(CaptureAudioIssue.SOURCE_ERROR)
+              AudioStats.AUDIO_STATE_ENCODER_ERROR -> audioIssue(CaptureAudioIssue.ENCODER_ERROR)
             }
           }
           when (event) {

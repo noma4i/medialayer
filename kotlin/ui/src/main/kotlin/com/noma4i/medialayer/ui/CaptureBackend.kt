@@ -15,7 +15,7 @@ import com.noma4i.medialayer.isCaptureOrphan
 import java.io.File
 import java.util.UUID
 
-internal enum class CaptureAudioIssue { PERMISSION_DENIED, SOURCE_ERROR, SILENCED }
+internal enum class CaptureAudioIssue { PERMISSION_DENIED, SOURCE_ERROR, ENCODER_ERROR, SILENCED, ACTIVE }
 
 /**
  * The hardware side of a camera. Every method returns at once: the answer of the hardware comes back as an event to the sink.

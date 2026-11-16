@@ -280,9 +280,13 @@ class MediaCamera internal constructor(
   }
 
   private fun microphoneFailed(issue: CaptureAudioIssue) {
-    if (closed || !(run.starting || run.started)) return
-    val reason = if (issue == CaptureAudioIssue.PERMISSION_DENIED) RecordingRefusal.PERMISSION_DENIED else RecordingRefusal.MICROPHONE_SILENT
-    failMicrophone(microphoneRefusal(reason))
+    if (closed) return
+    when (issue) {
+      CaptureAudioIssue.SILENCED -> apply(CaptureEvent.AudioFlow(false))
+      CaptureAudioIssue.ACTIVE -> apply(CaptureEvent.AudioFlow(true))
+      CaptureAudioIssue.PERMISSION_DENIED -> if (run.starting || run.started) failMicrophone(microphoneRefusal(RecordingRefusal.PERMISSION_DENIED))
+      CaptureAudioIssue.SOURCE_ERROR, CaptureAudioIssue.ENCODER_ERROR -> if (run.starting || run.started) failMicrophone(refusal(CameraRefusal.RECORD_FAILED))
+    }
   }
 
   private fun failMicrophone(failure: MediaException.Camera) {
@@ -318,7 +322,7 @@ class MediaCamera internal constructor(
     startWaiter?.let { waiter ->
       if (!run.starting) {
         startWaiter = null
-        if (run.started) waiter.complete(Unit) else waiter.completeExceptionally(startFailure ?: refusal(CameraRefusal.NOT_READY))
+        if (run.started) waiter.complete(Unit) else waiter.completeExceptionally(startFailure ?: refusal(run.state.fault ?: CameraRefusal.NOT_READY))
       }
     }
     photoWaiter?.let { waiter ->
