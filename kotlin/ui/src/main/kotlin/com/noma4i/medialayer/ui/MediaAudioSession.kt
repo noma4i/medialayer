@@ -38,6 +38,7 @@ class MediaAudioSession internal constructor(
   private val demand = AudioDemand()
   private val recordingLock = Any()
   private val callStates = HashMap<UUID, MutableStateFlow<Boolean>>()
+  private val managedCalls = HashSet<UUID>()
   private var microphoneState = MicrophoneState()
   private var failure: MicrophoneAvailability? = null
   private var externalChange: (Boolean) -> Unit = {}
@@ -48,7 +49,7 @@ class MediaAudioSession internal constructor(
   private val owner = AudioFocusOwner(
     port, { synchronized(demand) { demand.target(focus) } }, releaseDelayMs, scope,
     { synchronized(demand) { demand.communication() } },
-    { value -> synchronized(demand) { callStates.values.forEach { it.value = value } }; MediaTrace.emit("audio") { "call live $value" } }
+    { value -> synchronized(demand) { callStates.forEach { (id, state) -> state.value = id in managedCalls || value } }; MediaTrace.emit("audio") { "call live $value" } }
   )
 
   init {
@@ -61,6 +62,7 @@ class MediaAudioSession internal constructor(
         microphoneListeners.toList()
       }
       publishExternal()
+      if (source == "mode") owner.reconcile()
       listeners.forEach { it() }
     }
   }
@@ -90,19 +92,25 @@ class MediaAudioSession internal constructor(
     null
   }
 
-  internal fun holdCall(): CallAudioHold? {
+  internal fun holdCall(managedBySystem: Boolean = false): CallAudioHold? {
     val result = synchronized(recordingLock) {
       val id = UUID.randomUUID()
-      val live = MutableStateFlow(false)
-      synchronized(demand) { demand.calls[id] = false; callStates[id] = live }
+      val live = MutableStateFlow(managedBySystem)
+      if (managedBySystem && managedCalls.isEmpty()) owner.setManaged(true)
+      synchronized(demand) { demand.calls[id] = false; callStates[id] = live; if (managedBySystem) managedCalls.add(id) }
       updateMicrophone("call hold")
       MediaTrace.emit("audio") { "call hold" }
       val hold = CallAudioHold(live, { on ->
-        synchronized(demand) { if (demand.calls.containsKey(id)) demand.calls[id] = on }
-        MediaTrace.emit("audio") { "call speaker $on" }
-        owner.reconcile()
+        if (!managedBySystem) {
+          synchronized(demand) { if (demand.calls.containsKey(id)) demand.calls[id] = on }
+          MediaTrace.emit("audio") { "call speaker $on" }
+          owner.reconcile()
+        }
       }, {
-        synchronized(demand) { demand.calls.remove(id); callStates.remove(id); live.value = false }
+        synchronized(recordingLock) {
+          synchronized(demand) { demand.calls.remove(id); callStates.remove(id); managedCalls.remove(id); live.value = false }
+          if (managedBySystem && managedCalls.isEmpty()) owner.setManaged(false)
+        }
         MediaTrace.emit("audio") { "call release" }
         owner.reconcile()
         microphone.foreground()
@@ -159,7 +167,7 @@ class MediaAudioSession internal constructor(
   }
 
   private fun publishExternal() = synchronized(externalLock) {
-    val active = synchronized(recordingLock) { microphoneState.externalCall && synchronized(demand) { demand.calls.isEmpty() } }
+    val active = synchronized(recordingLock) { microphoneState.externalCall }
     externalChange(active)
   }
 

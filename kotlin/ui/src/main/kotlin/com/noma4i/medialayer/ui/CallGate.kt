@@ -83,10 +83,10 @@ class MediaCallAudio internal constructor(private val call: MediaCallHold, priva
   }
 }
 
-fun MediaLayer.callAudio(): MediaCallAudio {
+fun MediaLayer.callAudio(managedBySystem: Boolean = false): MediaCallAudio {
   val call = callHold()
   val session = Media.audio ?: return MediaCallAudio(call, null)
-  val audio = session.holdCall() ?: run {
+  val audio = session.holdCall(managedBySystem) ?: run {
     call.close()
     throw MediaException.Unexpected("call audio refused")
   }

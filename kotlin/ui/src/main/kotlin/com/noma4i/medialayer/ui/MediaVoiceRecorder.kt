@@ -107,23 +107,23 @@ class MediaVoiceRecorder internal constructor(
       file.delete()
       throw failure
     }
-    val current = synchronized(lock) {
+    synchronized(lock) {
       heldAudio = hold
-      Running(file, clock()).also {
+      val current = Running(file, clock()).also {
         running = it
         it.poll = scope.launch { pollLevels() }
       }
-    }
-    session?.observeMicrophone(microphoneListener)
-    if (capture.isSilenced()) {
-      session?.recordingFailed()
-      val failure = unavailable(MicrophoneAvailability.OTHER_APP)
-      finish(current, failure)
-      throw failure
-    }
-    if (!calls.register(callListener)) {
-      finish(current, inCall())
-      throw inCall()
+      if (!calls.register(callListener)) {
+        finish(current, inCall())
+        throw inCall()
+      }
+      session?.observeMicrophone(microphoneListener)
+      if (capture.isSilenced()) {
+        session?.recordingFailed()
+        val failure = unavailable(MicrophoneAvailability.OTHER_APP)
+        finish(current, failure)
+        throw failure
+      }
     }
   }
 

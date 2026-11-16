@@ -19,8 +19,10 @@ internal class AudioFocusOwner(
   private var pending: Job? = null
   private var seenLosses = 0
   private var appliedCommunication = false to false
+  private var managed = false
 
   fun reconcile(): Boolean = synchronized(lock) {
+    if (managed) return true
     val target = want()
     val losses = port.losses
     if (losses != seenLosses) {
@@ -49,6 +51,19 @@ internal class AudioFocusOwner(
     held = target
     callLive(target == FocusKind.Call)
     true
+  }
+
+  fun setManaged(value: Boolean): Unit = synchronized(lock) {
+    if (managed == value) return
+    if (value) {
+      pending?.cancel()
+      pending = null
+      if (held != null) port.abandon()
+      held = null
+      if (appliedCommunication.first) port.setCommunication(false, false)
+      appliedCommunication = false to false
+    }
+    managed = value
   }
 
   fun close() = synchronized(lock) {
