@@ -77,8 +77,8 @@ public final class MediaAudioSession: Sendable {
   init(focus: MediaAudioFocus, port: AudioSessionPort, releaseDelay: Duration = .milliseconds(300), microphonePort: MicrophonePort = AvailableMicrophone()) {
     self.focus = focus
     self.port = port
-    microphone = MicrophoneStatus(port: microphonePort)
     box = DemandBox(focus: focus)
+    microphone = MicrophoneStatus(port: microphonePort, box: box)
     let owner = AudioSessionOwner(port: port, box: box, releaseDelay: releaseDelay)
     self.owner = owner
     let stream = port.systemEvents()
@@ -94,9 +94,8 @@ public final class MediaAudioSession: Sendable {
   public var microphoneAvailability: AsyncStream<MicrophoneAvailability> { microphone.changes }
 
   public func holdRecording() async -> MediaRecordingHold? {
-    guard microphone.current == .available else { return nil }
     let id = UUID()
-    guard box.update({ $0.setRecording(id, true) }) else { return nil }
+    guard box.update({ $0.microphoneAvailability == .available && $0.setRecording(id, true) }) else { return nil }
     MediaTrace.emit("audio", "recording hold holders=\(box.recordings)")
     let hold = MediaRecordingHold { [box, owner] in
       _ = box.update { $0.setRecording(id, false) }

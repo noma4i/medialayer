@@ -7,6 +7,7 @@ struct AudioDemand {
   private(set) var managedCalls: Set<UUID> = []
   private(set) var speakers: Set<UUID> = []
   var systemLive = false
+  var microphoneAvailability: MicrophoneAvailability = .available
   var recording: Bool { !recordings.isEmpty }
   private(set) var volumeReaders = 0
 

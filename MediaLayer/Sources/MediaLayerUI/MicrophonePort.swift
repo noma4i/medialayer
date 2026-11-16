@@ -27,6 +27,7 @@ struct AvailableMicrophone: MicrophonePort {
 final class MicrophoneStatus: @unchecked Sendable {
   private let lock = NSLock()
   private let port: MicrophonePort
+  private let box: DemandBox
   private var own: [UUID: UUID?] = [:]
   private var failure = false
   private var value: MicrophoneAvailability = .available
@@ -35,8 +36,9 @@ final class MicrophoneStatus: @unchecked Sendable {
   private var onExternal: (@Sendable (Bool) -> Void)?
   private var events: Task<Void, Never>?
 
-  init(port: MicrophonePort) {
+  init(port: MicrophonePort, box: DemandBox) {
     self.port = port
+    self.box = box
     let changes = port.changes()
     refresh("subscribe")
     events = Task { [weak self] in
@@ -68,7 +70,13 @@ final class MicrophoneStatus: @unchecked Sendable {
   }
 
   func addCall(_ id: UUID, uuid: UUID?) {
-    lock.withLock { own[id] = .some(uuid) }
+    lock.withLock {
+      own[id] = .some(uuid)
+      _ = box.update { demand in
+        if demand.microphoneAvailability != .permissionDenied { demand.microphoneAvailability = .ownCall }
+        return true
+      }
+    }
     refresh("ownCall")
   }
 
@@ -99,6 +107,7 @@ final class MicrophoneStatus: @unchecked Sendable {
       else { next = .available }
       let changed = next == value ? nil : next
       value = next
+      _ = box.update { $0.microphoneAvailability = next; return true }
       let externalChange = external == externalNow ? nil : externalNow
       external = externalNow
       return (changed, Array(sinks.values), externalChange, onExternal)
