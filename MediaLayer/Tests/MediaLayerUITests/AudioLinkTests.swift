@@ -302,20 +302,25 @@ final class StatesSeen: @unchecked Sendable {
   func inv_audio_53_closing_the_link_revokes_running_recordings_and_ends_calls() async throws {
     let rig = try AudioRig()
     guard case let .success(ticket) = await rig.link.admit(.voice) else { Issue.record("refused"); return }
-    let call = await rig.link.call(.unmanaged)
     let revoked = Task { () -> RecordingRefusal? in
       for await reason in ticket.revoked { return reason }
       return nil
     }
+
+    rig.link.close()
+
+    #expect(await revoked.value == .interrupted)
+
+    let callRig = try AudioRig()
+    let call = await callRig.link.call(.unmanaged)
     let states = Task { () -> [CallState] in
       var seen: [CallState] = []
       for await state in call.states { seen.append(state) }
       return seen
     }
 
-    rig.link.close()
+    callRig.link.close()
 
-    #expect(await revoked.value == .interrupted)
     #expect(await states.value.last == .ended)
   }
 

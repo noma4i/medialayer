@@ -247,12 +247,29 @@ class AudioLinkTest {
     val admitted = link.admit(RecordingKind.VOICE) as Admission.Admitted
     val revoked = CopyOnWriteArrayList<RecordingRefusal>()
     admitted.ticket.onRevoked { revoked.add(it); TestSignal.fire() }
-    val states = CopyOnWriteArrayList<CallState>()
-    link.call(MediaCallKind.Telecom).onState { states.add(it); TestSignal.fire() }
 
     link.close()
 
-    await("revoked and ended") { revoked.toList() == listOf(RecordingRefusal.INTERRUPTED) && states.lastOrNull() == CallState.ENDED }
+    await("revoked") { revoked.toList() == listOf(RecordingRefusal.INTERRUPTED) }
+
+    val callCore = MediaLayer.open(OpenConfig(
+      dir = Files.createTempDirectory("audio-link-call").toString(),
+      fetcher = TestFetcher(),
+      settings = SharedPreferencesSettings(context, "audio-link-call"), slots = null,
+      device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings(),
+      audioFocus = AudioFocus.EXCLUSIVE
+    ))
+    val callLink = AudioLink(callCore, AudioPorts(RecordingFocusPort(), GrantedPermission))
+    try {
+      val states = CopyOnWriteArrayList<CallState>()
+      callLink.call(MediaCallKind.Telecom).onState { states.add(it); TestSignal.fire() }
+
+      callLink.close()
+
+      await("ended") { states.lastOrNull() == CallState.ENDED }
+    } finally {
+      callCore.close()
+    }
   }
 
 }
