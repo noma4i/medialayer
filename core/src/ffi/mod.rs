@@ -1,4 +1,5 @@
 mod assembled;
+mod audio_inputs;
 mod events;
 mod fetcher;
 mod image;
@@ -12,6 +13,7 @@ mod rows;
 mod spec_defaults;
 
 pub use events::PlayerEvents;
+pub use audio_inputs::AudioInputs;
 pub use ingress::{IngressLimits, PlaceInput};
 pub use owned::{MediaPlace, MediaWholeDeclaration, MediaWindow, PlaybackSuspension};
 pub use image::{decode_blurhash, decode_cost, DecodeHold, image_pixel_size, ImageCounters, ImageSnapshot, ImageTotals, ImageWork, PixelSize};

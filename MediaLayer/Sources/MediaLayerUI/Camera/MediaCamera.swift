@@ -396,7 +396,9 @@ public final class MediaCamera: @unchecked Sendable {
     let ticket: RecordingTicket
     switch await link.admit(.video) {
     case let .success(value): ticket = value
-    case let .failure(reason): throw Self.refusal(Self.microphoneReason(reason))
+    case let .failure(error):
+      if let reason = error as? RecordingRefusal { throw Self.refusal(Self.microphoneReason(reason)) }
+      throw error
     }
     let accepted = await withCheckedContinuation { continuation in
       queue.async {
@@ -440,9 +442,10 @@ public final class MediaCamera: @unchecked Sendable {
         }
         switch await link.admit(.video) {
         case let .success(ticket): session = ticket
-        case let .failure(reason):
+        case let .failure(error):
           release?()
-          self.queue.async { if self.epoch == current { self.apply(.refuse(reason: Self.microphoneReason(reason))) } }
+          let reason = (error as? RecordingRefusal).map(Self.microphoneReason) ?? .notReady
+          self.queue.async { if self.epoch == current { self.apply(.refuse(reason: reason)) } }
           return
         }
       }

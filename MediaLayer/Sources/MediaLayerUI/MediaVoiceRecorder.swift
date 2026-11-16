@@ -99,7 +99,9 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     let hold: RecordingTicket
     switch await link.admit(.voice) {
     case let .success(ticket): hold = ticket
-    case let .failure(reason): throw Self.refusal(reason)
+    case let .failure(error):
+      if let reason = error as? RecordingRefusal { throw Self.refusal(reason) }
+      throw error
     }
     do {
       try await capture.start(file: file, maxDurationMs: maxDurationMs) { [weak self] in self?.limitReached() }

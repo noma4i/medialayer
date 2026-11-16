@@ -5,7 +5,6 @@ import android.os.HandlerThread
 import android.os.Looper
 import com.noma4i.medialayer.*
 import java.io.Closeable
-import java.lang.ref.WeakReference
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicInteger
@@ -88,7 +87,7 @@ class MediaCallAudio internal constructor(private val id: ULong, private val sen
 }
 
 internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, private val volume: VolumePort? = null) : Closeable {
-  private val core = WeakReference(core)
+  private val audioInputs = core.audioInputs()
   private val thread = HandlerThread("MediaLayer audio").also { it.start() }
   internal val handler = Handler(thread.looper)
   private val nextId = AtomicLong()
@@ -131,13 +130,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
     try { while (inputs.isNotEmpty()) applyInput(inputs.removeFirst()) } finally { processing = false }
   }
   private fun applyInput(input: AudioInput) {
-    val owner = core.get()
-    if (owner == null) {
-      pending.values.forEach { it.completeExceptionally(MediaException.Closed()) }
-      pending.clear()
-      return
-    }
-    val actions = try { owner.audio(input) } catch (failure: MediaException) {
+    val actions = try { audioInputs.send(input) } catch (failure: MediaException) {
       pending.values.forEach { it.completeExceptionally(failure) }
       pending.clear()
       return

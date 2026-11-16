@@ -1,11 +1,12 @@
 use super::assembled::Assembled;
 use super::events::PlayerEvents;
+use super::audio_inputs::AudioInputs;
 use super::fetcher::{Fetcher, ForeignFetcher};
-use super::ingress::{run, Answer, CoreAudio, Declared, Admitted, IngressLimits, Finished, OwnerKind, Pause, InputQueue, Query, Subscribing, WindowKind};
+use super::ingress::{run, Answer, Declared, Admitted, IngressLimits, Finished, OwnerKind, Pause, InputQueue, Query, Subscribing, WindowKind};
 use super::layer_life::LayerLife;
 use super::limits::{DeviceMemory, Evict, ImageWindow, Limits, PoolSettings};
 use super::owned::{MediaPlace, MediaWholeDeclaration, MediaWindow, PlaybackSuspension};
-use crate::audio::{AudioAction, AudioFocus, AudioInput, AudioOwner};
+use crate::audio::{AudioFocus, AudioOwner};
 use super::ready::Ready;
 use crate::analysis::MediaTone;
 use crate::api::TonePreparation;
@@ -101,7 +102,7 @@ pub(super) struct Closing {
 }
 
 impl Closing {
-    fn life(&self) -> MutexGuard<'_, LayerLife> {
+    pub(super) fn life(&self) -> MutexGuard<'_, LayerLife> {
         self.life.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
@@ -157,7 +158,7 @@ pub struct MediaLayer {
     failures: Arc<Failures>,
     next_owner: AtomicU64,
     controls: tokio::sync::Mutex<()>,
-    audio: Mutex<AudioOwner>,
+    audio: Arc<Mutex<AudioOwner>>,
 }
 
 impl MediaLayer {
@@ -220,7 +221,7 @@ impl MediaLayer {
             late: Mutex::new(None),
             closed: watch::channel(false).0,
         });
-        Arc::new(MediaLayer { handle, closing, namespace_headers, image_stats: super::image::ImageCounters::new(), failures, next_owner: AtomicU64::new(1), controls: tokio::sync::Mutex::new(()), audio: Mutex::new(AudioOwner::new(AudioFocus::Exclusive)) })
+        Arc::new(MediaLayer { handle, closing, namespace_headers, image_stats: super::image::ImageCounters::new(), failures, next_owner: AtomicU64::new(1), controls: tokio::sync::Mutex::new(()), audio: Arc::new(Mutex::new(AudioOwner::new(AudioFocus::Exclusive))) })
     }
 
     #[cfg(test)]
@@ -537,23 +538,8 @@ impl MediaLayer {
         Ok(Arc::new(PlaybackSuspension::new(self.closing.queue.clone(), owner)))
     }
 
-    pub fn audio(&self, input: AudioInput) -> Result<Vec<AudioAction>, MediaError> {
-        let mut owner = self.audio.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut next = owner.clone();
-        let mut platform = Vec::new();
-        let mut commands = Vec::new();
-        for action in next.step(input) {
-            match action {
-                AudioAction::PauseAll { .. } => commands.push(Declared::Audio(CoreAudio::PauseAll)),
-                AudioAction::ResumePaused => commands.push(Declared::Audio(CoreAudio::ResumePaused)),
-                AudioAction::ForgetPaused => commands.push(Declared::Audio(CoreAudio::ForgetPaused)),
-                AudioAction::CallHold { on } => commands.push(Declared::Audio(CoreAudio::CallHold(on))),
-                _ => platform.push(action),
-            }
-        }
-        self.closing.queue.submit_audio(commands)?;
-        *owner = next;
-        Ok(platform)
+    pub fn audio_inputs(&self) -> Arc<AudioInputs> {
+        AudioInputs::new(&self.closing, self.audio.clone())
     }
 
     pub fn seek(&self, key: String, fraction: f64) -> Result<(), MediaError> {

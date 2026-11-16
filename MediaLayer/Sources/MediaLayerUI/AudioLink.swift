@@ -16,14 +16,14 @@ public enum MediaCallKind: Sendable {
 }
 
 final class AudioLink: @unchecked Sendable {
-  private weak var core: MediaLayer?
+  private let inputs: AudioInputs
   private let ports: AudioPorts
   private let inbox = DispatchQueue(label: "MediaLayer.audio.inbox")
   private let sessionQueue = DispatchQueue(label: "MediaLayer.audio.session")
   private var sessionConfigured = false
   private var next: UInt64 = 0
   private var closed = false
-  private var pending: [UInt64: CheckedContinuation<Result<RecordingTicket, RecordingRefusal>, Never>] = [:]
+  private var pending: [UInt64: CheckedContinuation<Result<RecordingTicket, Error>, Never>] = [:]
   private var tickets: [UInt64: WeakRecordingTicket] = [:]
   private var calls: [UInt64: AsyncStream<CallState>.Continuation] = [:]
   private var unmanagedSpeakers: [UInt64: Bool] = [:]
@@ -33,7 +33,7 @@ final class AudioLink: @unchecked Sendable {
   private let setVolumeMultiplier: @Sendable (Float) -> Void
 
   init(core: MediaLayer, ports: AudioPorts, setVolumeMultiplier: @escaping @Sendable (Float) -> Void = { _ in }) {
-    self.core = core
+    self.inputs = core.audioInputs()
     self.ports = ports
     self.setVolumeMultiplier = setVolumeMultiplier
     let systemEvents = ports.session.systemEvents()
@@ -57,10 +57,10 @@ final class AudioLink: @unchecked Sendable {
     }
   }
 
-  func admit(_ kind: RecordingKind) async -> Result<RecordingTicket, RecordingRefusal> {
+  func admit(_ kind: RecordingKind) async -> Result<RecordingTicket, Error> {
     await withCheckedContinuation { continuation in
       inbox.async {
-        guard !self.closed else { continuation.resume(returning: .failure(.microphoneBusy)); return }
+        guard !self.closed else { continuation.resume(returning: .failure(MediaError.Closed)); return }
         let id = self.allocate()
         self.pending[id] = continuation
         self.process(.capture(id: id, kind: kind))
@@ -145,7 +145,7 @@ final class AudioLink: @unchecked Sendable {
       self.closed = true
       self.tasks.forEach { $0.cancel() }
       self.tasks.removeAll()
-      self.pending.values.forEach { $0.resume(returning: .failure(.microphoneBusy)) }
+      self.pending.values.forEach { $0.resume(returning: .failure(MediaError.Closed)) }
       self.pending.removeAll()
       self.tickets.values.forEach { $0.value?.revoke(.interrupted) }
       self.tickets.removeAll()
@@ -163,8 +163,17 @@ final class AudioLink: @unchecked Sendable {
 
   private func process(_ input: AudioInput) {
     guard !closed else { return }
-    guard let actions = try? core?.audio(input: input) else {
-      if case let .capture(id, _) = input { pending.removeValue(forKey: id)?.resume(returning: .failure(.microphoneBusy)) }
+    let actions: [AudioAction]
+    do {
+      actions = try inputs.send(input: input)
+    } catch MediaError.Closed {
+      pending.values.forEach { $0.resume(returning: .failure(MediaError.Closed)) }
+      pending.removeAll()
+      return
+    } catch {
+      Media.recordOpenFailure(error)
+      pending.values.forEach { $0.resume(returning: .failure(error)) }
+      pending.removeAll()
       return
     }
     for action in actions {
