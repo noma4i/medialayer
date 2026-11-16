@@ -531,6 +531,9 @@ impl AudioOwner {
             actions.push(AudioAction::ForgetPaused);
             self.paused = None;
         }
+        if self.resume_wait {
+            self.resuming = true;
+        }
         if !defer_reconcile {
             self.reconcile(&mut actions);
         }
@@ -538,7 +541,6 @@ impl AudioOwner {
             actions.push(AudioAction::ResumePaused);
             self.paused = None;
             self.resume_wait = false;
-            self.resuming = true;
         }
         let hold = !self.calls.is_empty() || self.external();
         if hold != self.hold {
