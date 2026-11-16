@@ -261,8 +261,8 @@ extension GlobalMedia {
     }
 
     // P5
-    @Test(arguments: [(PauseSource.call, PlayRefusal.inCall), (.recording, .recording)])
-    func inv_api_53_a_play_during_a_call_or_a_recording_is_refused(source: PauseSource, refusal: PlayRefusal) async throws {
+    @Test(arguments: [(PauseSource.call, PlayRefusal.inCall)])
+    func inv_api_53_a_play_during_a_call_is_refused(source: PauseSource, refusal: PlayRefusal) async throws {
       let screen = try await Screen.open()
       await eventually("the audio place is mounted") { screen.audio != nil }
       let cause = try await takeSound(source, screen.app)

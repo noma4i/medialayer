@@ -259,19 +259,22 @@ fn inv_playback_04_a_forgotten_wish_ignores_a_stale_play_and_a_new_play_generati
 }
 
 #[test]
-fn inv_playback_05_a_play_during_a_call_or_a_recording_is_refused_with_its_reason() {
-    for (blocker, refusal) in [(Pauser::Call, PlayRefusal::InCall), (Pauser::Recording, PlayRefusal::Recording)] {
-        let rig = Rig::new();
-        let (_, slot) = rig.slot();
-        let _suspension = blocker.inject(&rig);
-        rig.settled();
+fn inv_playback_05_a_play_during_a_call_is_refused_and_a_play_during_a_recording_plays() {
+    let rig = Rig::new();
+    let (_, slot) = rig.slot();
+    let _suspension = Pauser::Call.inject(&rig);
+    rig.settled();
+    let watched = rig.watched(PlaceInput { playing: true, play_generation: 1, ..PlaceInput::default() });
+    rig.until(&watched.seen, &state(false, false, None, Some(PlayRefusal::InCall)));
+    rig.settled();
+    assert_eq!(rig.plays(&slot), 0, "the refused play reached the slot: {:?}", slot.calls());
 
-        let watched = rig.watched(PlaceInput { playing: true, play_generation: 1, ..PlaceInput::default() });
-
-        rig.until(&watched.seen, &state(false, false, None, Some(refusal)));
-        rig.settled();
-        assert_eq!(rig.plays(&slot), 0, "{blocker:?}: the refused play reached the slot: {:?}", slot.calls());
-    }
+    let rig = Rig::new();
+    let (_, slot) = rig.slot();
+    rig.record();
+    rig.settled();
+    let _watched = rig.watched(PlaceInput { playing: true, play_generation: 1, ..PlaceInput::default() });
+    rig.caller.block_on(eventually(|| rig.plays(&slot) == 1));
 }
 
 #[test]
