@@ -394,6 +394,8 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
         let mut last_availability = MicrophoneAvailability::Available;
         let mut kinds = std::collections::HashMap::new();
         let (mut gate, mut multiplier) = (false, 1.0f32);
+        let mut heard_in_flight = false;
+        let mut releases = std::collections::BTreeSet::new();
         let track = |actions: &[AudioAction], admitted: &mut Vec<u64>, hold: &mut bool, session_active: &mut bool, last_availability: &mut MicrophoneAvailability| {
             for action in actions {
                 match action {
@@ -417,7 +419,22 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
             }
         };
         for _ in 0..60 {
-            let input = random_input(&mut dice, &mut next_id, &started);
+            let mut input = random_input(&mut dice, &mut next_id, &started);
+            if let (I::Applied { generation, result }, Some(inflight)) = (&mut input, world.owner.inflight) {
+                if dice.percent(70) {
+                    *generation = inflight;
+                }
+                if !releases.contains(generation) && matches!(result, AppliedResult::Busy) {
+                    *result = AppliedResult::Ok;
+                }
+            }
+            let answers_flight = matches!(input, I::Applied { generation, .. } if Some(generation) == world.owner.inflight);
+            let release_in_flight = world.owner.inflight.is_some_and(|generation| releases.contains(&generation));
+            let busy_answer = answers_flight && release_in_flight && matches!(input, I::Applied { result: AppliedResult::Busy, .. });
+            let pending_release = world.owner.release_pending && !matches!(input, I::Applied { .. });
+            if !matches!(input, I::Applied { .. }) && release_in_flight {
+                heard_in_flight = true;
+            }
             if let I::CallStarted { id, .. } = &input {
                 started.push(*id);
             }
@@ -443,7 +460,21 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
                     _ => {}
                 }
             }
+            for action in &actions {
+                if let A::Deactivate { generation } = action {
+                    releases.insert(*generation);
+                }
+            }
+            if actions.iter().any(|action| matches!(action, A::Apply { .. } | A::Deactivate { .. })) && !busy_answer {
+                heard_in_flight = false;
+            }
             let owner = &world.owner;
+            assert!(owner.inflight.is_some() || owner.applied == owner.want() || owner.request_blocked || owner.release_pending, "the session neither matches the demand nor waits for an answer or a system event: {label} applied {:?} want {:?}", owner.applied, owner.want());
+            assert!(!(pending_release && owner.release_pending && owner.inflight.is_none()), "a busy release survived the next event: {label} {actions:?}");
+            assert!(!(busy_answer && heard_in_flight && owner.release_pending), "an event heard during the busy release did not finish it: {label} {actions:?}");
+            if busy_answer {
+                heard_in_flight = false;
+            }
             assert!(!(refusal && actions.iter().any(|action| matches!(action, A::Apply { .. }))), "the answer to a refusal asked the system again: {label} {actions:?}");
             assert!(!(owner.inflight.is_none() && matches!(owner.applied, Some(SessionWant::Recording { .. })) && !owner.pending.is_empty()), "a capture waits although its recording session is applied: {label} {:?}", owner.pending);
             assert!(owner.captures.is_empty() || gate, "playback may start during a recording: {label} {actions:?}");
