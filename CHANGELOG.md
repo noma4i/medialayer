@@ -4,6 +4,8 @@
 
 ### Added
 
+- `MediaLayer.callAudio` holds a call and its audio session, with speaker and CallKit control.
+- `CameraRefusal.microphoneBusy` names a camera refusal caused by a busy microphone.
 - `MediaAudioSession.holdRecording()` gives a recording hold that its owner releases.
 - The trace writes audio session steps, recording holders and camera audio tracks.
 
@@ -17,6 +19,7 @@
 
 ### Fixed
 
+- Only a lost headphone, Bluetooth or other private output turns the global mute on.
 - Sound comes back after a recording, an interruption or a media services reset.
 - An Android audio focus taken by the system is requested again.
 - A second voice recording start during the first is refused.

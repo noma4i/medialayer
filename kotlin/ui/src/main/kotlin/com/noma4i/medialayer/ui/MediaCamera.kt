@@ -90,6 +90,7 @@ class MediaCamera internal constructor(
   private var photoOutcome: Result<CapturedPhoto>? = null
   private var photoWaiter: CompletableDeferred<CapturedPhoto>? = null
   private var startWaiter: CompletableDeferred<Unit>? = null
+  private var startFailure: MediaException.Camera? = null
   private var stopWaiter: CompletableDeferred<CapturedClip>? = null
   private val observers = ConcurrentHashMap<String, Observer>()
   private var frameTapOn = false
@@ -100,6 +101,7 @@ class MediaCamera internal constructor(
   init {
     checkCaptureProfile(profile)
     backend.setSink { event -> post(event) }
+    backend.setAudioIssueSink { issue -> enqueue { microphoneFailed(issue) } }
   }
 
   /** The state now: readiness, recording and its length, flash, zoom, the side and the last refusal. */
@@ -124,6 +126,10 @@ class MediaCamera internal constructor(
 
   /** Returns after the hardware started the recording. `NOT_READY` when the camera is not ready or the profile holds no video. */
   suspend fun startRecording() {
+    if (profile.audio) {
+      val availability = services.audio()?.microphoneAvailability?.value ?: MicrophoneAvailability.AVAILABLE
+      if (availability != MicrophoneAvailability.AVAILABLE) throw microphoneRefusal(availability)
+    }
     if (calls.inCall) throw refusal(CameraRefusal.IN_CALL)
     val waiter = CompletableDeferred<Unit>()
     val queued = enqueue {
@@ -132,6 +138,7 @@ class MediaCamera internal constructor(
         return@enqueue
       }
       ended = null
+      startFailure = null
       apply(CaptureEvent.Start)
       if (run.starting) startWaiter = waiter else waiter.completeExceptionally(refusal(CameraRefusal.NOT_READY))
     }
@@ -229,8 +236,23 @@ class MediaCamera internal constructor(
 
   private fun refusal(reason: CameraRefusal, recordedMs: ULong? = null) = MediaException.Camera(reason, cameraRefusalText(reason), recordedMs)
 
+  private fun microphoneRefusal(value: MicrophoneAvailability) = refusal(value.cameraRefusal())
+
   private fun post(event: CaptureEvent) {
     if (!queue.isShutdown) enqueue { if (!closed) apply(event) }
+  }
+
+  private fun microphoneFailed(issue: CaptureAudioIssue) {
+    if (closed || !(run.starting || run.started)) return
+    val reason = if (issue == CaptureAudioIssue.PERMISSION_DENIED) MicrophoneAvailability.PERMISSION_DENIED else MicrophoneAvailability.OTHER_APP
+    val audio = services.audio()
+    audio?.recordingFailed(reason)
+    val failure = microphoneRefusal(audio?.microphoneAvailability?.value ?: reason)
+    startFailure = failure
+    startWaiter?.let { startWaiter = null; it.completeExceptionally(failure) }
+    stopWaiter?.let { stopWaiter = null; it.completeExceptionally(failure) }
+    apply(CaptureEvent.Refuse(failure.reason))
+    ended = Result.failure(failure)
   }
 
   private fun reconcile() {
@@ -261,7 +283,7 @@ class MediaCamera internal constructor(
     startWaiter?.let { waiter ->
       if (!run.starting) {
         startWaiter = null
-        if (run.started) waiter.complete(Unit) else waiter.completeExceptionally(refusal(CameraRefusal.NOT_READY))
+        if (run.started) waiter.complete(Unit) else waiter.completeExceptionally(startFailure ?: refusal(CameraRefusal.NOT_READY))
       }
     }
     photoWaiter?.let { waiter ->
@@ -373,10 +395,16 @@ class MediaCamera internal constructor(
       var session: MediaRecordingHold? = null
       if (needsAudio) {
         val audio = services.audio()
+        val availability = audio?.microphoneAvailability?.value ?: MicrophoneAvailability.AVAILABLE
+        if (availability != MicrophoneAvailability.AVAILABLE) {
+          hold?.close()
+          enqueue { if (epoch == current) apply(CaptureEvent.Refuse(availability.cameraRefusal())) }
+          return@launch
+        }
         session = audio?.holdRecording()
         if (audio != null && session == null) {
           hold?.close()
-          enqueue { if (epoch == current) apply(CaptureEvent.Refuse(CameraRefusal.BUSY)) }
+          enqueue { if (epoch == current) apply(CaptureEvent.Refuse(audio.microphoneAvailability.value.cameraRefusal())) }
           return@launch
         }
       }

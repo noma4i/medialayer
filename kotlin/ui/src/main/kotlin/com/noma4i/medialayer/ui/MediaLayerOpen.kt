@@ -59,6 +59,8 @@ private val openScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
 internal val MediaLayer.binding: Binding? get() = bindings[this]
 
+val MediaLayer.microphoneAvailability get() = checkNotNull(Media.audio) { "MediaLayer is closed" }.microphoneAvailability
+
 fun MediaLayer.Companion.open(
   context: Context,
   fetcher: Fetcher? = null,
@@ -110,6 +112,7 @@ internal fun openMediaLayer(
   var reference: WeakReference<MediaLayer>? = null
   var imageLoader: ImageLoader? = null
   var signals: SystemSignals? = null
+  var externalCall: MediaCallHold? = null
   fun detach(): HeldResources = synchronized(lock) {
     HeldResources(signals, factory, imageLoader, reference?.get()).also {
       signals = null
@@ -118,6 +121,8 @@ internal fun openMediaLayer(
     }
   }
   fun finish(held: HeldResources) {
+    audio.onExternalCall { }
+    synchronized(lock) { externalCall?.close(); externalCall = null }
     held.factory?.release() ?: audio.close()
     held.imageLoader?.shutdown()
     held.layer?.let { bindings.remove(it) }
@@ -193,7 +198,11 @@ internal fun openMediaLayer(
     val events = layer.playerEvents()
     ensureActive()
     slots.bind(events)
-    val registered = SystemSignals(app, events, lifecycle).also { it.register() }
+    audio.onExternalCall { active -> synchronized(lock) {
+      if (active && externalCall == null) externalCall = layer.callHold()
+      if (!active) { externalCall?.close(); externalCall = null }
+    } }
+    val registered = SystemSignals(app, events, lifecycle, audio::foreground).also { it.register() }
     synchronized(lock) { signals = registered }
     bindings[layer] = Binding(slots, registered, loader)
     layer
@@ -222,7 +231,8 @@ private const val BYTES_PER_MB = 1024L * 1024L
 internal class SystemSignals(
   private val context: Context,
   private val events: PlayerEventsInterface,
-  private val lifecycle: Lifecycle
+  private val lifecycle: Lifecycle,
+  private val microphoneForeground: () -> Unit = {}
 ) : ComponentCallbacks2, DefaultLifecycleObserver {
   private val registrationLock = Any()
   private var registered = false
@@ -266,6 +276,7 @@ internal class SystemSignals(
 
   override fun onStart(owner: LifecycleOwner) {
     isBackground.set(false)
+    microphoneForeground()
     events.foreground()
   }
 

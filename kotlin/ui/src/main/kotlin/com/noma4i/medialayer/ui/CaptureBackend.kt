@@ -15,6 +15,8 @@ import com.noma4i.medialayer.isCaptureOrphan
 import java.io.File
 import java.util.UUID
 
+internal enum class CaptureAudioIssue { PERMISSION_DENIED, SOURCE_ERROR, SILENCED }
+
 /**
  * The hardware side of a camera. Every method returns at once: the answer of the hardware comes back as an event to the sink.
  * `bind` ends with `Opened` and `Streaming`, or with `Refuse`. A finished or failed recording ends with `RecordFinished`.
@@ -23,6 +25,8 @@ internal interface CaptureBackend {
   val photoSize: PixelSize?
 
   fun setSink(sink: (CaptureEvent) -> Unit)
+
+  fun setAudioIssueSink(sink: (CaptureAudioIssue) -> Unit) = Unit
 
   fun setHost(view: PreviewView?, owner: LifecycleOwner?)
 

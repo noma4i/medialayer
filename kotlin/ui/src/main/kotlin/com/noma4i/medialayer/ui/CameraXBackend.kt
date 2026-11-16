@@ -23,6 +23,7 @@ import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FallbackStrategy
+import androidx.camera.video.AudioStats
 import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
@@ -64,6 +65,9 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
 
   private val main = ContextCompat.getMainExecutor(context)
   @Volatile private var sink: (CaptureEvent) -> Unit = {}
+  @Volatile private var audioIssue: (CaptureAudioIssue) -> Unit = {}
+
+  override fun setAudioIssueSink(sink: (CaptureAudioIssue) -> Unit) { audioIssue = sink }
   private var view: PreviewView? = null
   private var owner: LifecycleOwner? = null
   private var cameras: ProcessCameraProvider? = null
@@ -227,6 +231,12 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
         if (profile.audio) pending = pending.withAudioEnabled()
         MediaTrace.emit("camera") { "take audio=${profile.audio}" }
         recording = pending.start(main) { event ->
+          if (profile.audio) {
+            when (event.recordingStats.audioStats.audioState) {
+              AudioStats.AUDIO_STATE_SOURCE_SILENCED -> audioIssue(CaptureAudioIssue.SILENCED)
+              AudioStats.AUDIO_STATE_SOURCE_ERROR -> audioIssue(CaptureAudioIssue.SOURCE_ERROR)
+            }
+          }
           when (event) {
             is VideoRecordEvent.Start -> sink(CaptureEvent.RecordStarted)
             is VideoRecordEvent.Status -> recordedNanos = event.recordingStats.recordedDurationNanos
@@ -237,6 +247,9 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
             else -> Unit
           }
         }
+      } catch (_: SecurityException) {
+        audioIssue(CaptureAudioIssue.PERMISSION_DENIED)
+        sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
       } catch (_: Exception) {
         sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
       }

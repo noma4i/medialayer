@@ -39,6 +39,8 @@ internal interface VoiceCapture {
   fun peak(): Float
 
   fun stop()
+
+  fun isSilenced(): Boolean = false
 }
 
 /**
@@ -64,6 +66,7 @@ class MediaVoiceRecorder internal constructor(
   private var heldAudio: MediaRecordingHold? = null
   private var starting = false
   private val callListener = CallListener(::callBegan)
+  private val microphoneListener: () -> Unit = { checkSilenced() }
 
   private class Running(val file: File, val startedAt: Long, var poll: Job? = null)
 
@@ -85,16 +88,20 @@ class MediaVoiceRecorder internal constructor(
   }
 
   private fun begin(file: File) {
-    if (calls.inCall) throw inCall()
     val session = audio()
+    val availability = session?.microphoneAvailability?.value ?: MicrophoneAvailability.AVAILABLE
+    if (availability != MicrophoneAvailability.AVAILABLE) throw unavailable(availability)
+    if (calls.inCall) throw inCall()
     val hold = session?.holdRecording()
-    if (session != null && hold == null) throw MediaException.Voice(voiceRefusalText(VoiceRefusal.MICROPHONE_BUSY))
+    if (session != null && hold == null) throw unavailable(session.microphoneAvailability.value)
     try {
       capture.start(file, maxDurationMs, ::limitReached)
     } catch (refused: VoiceRefused) {
       hold?.close()
       file.delete()
-      throw MediaException.Voice(voiceRefusalText(refused.reason))
+      val reason = if (refused.reason == VoiceRefusal.PERMISSION_DENIED) MicrophoneAvailability.PERMISSION_DENIED else MicrophoneAvailability.OTHER_APP
+      session?.recordingFailed(reason)
+      throw unavailable(session?.microphoneAvailability?.value ?: reason)
     } catch (failure: Throwable) {
       hold?.close()
       file.delete()
@@ -107,6 +114,13 @@ class MediaVoiceRecorder internal constructor(
         it.poll = scope.launch { pollLevels() }
       }
     }
+    session?.observeMicrophone(microphoneListener)
+    if (capture.isSilenced()) {
+      session?.recordingFailed()
+      val failure = unavailable(MicrophoneAvailability.OTHER_APP)
+      finish(current, failure)
+      throw failure
+    }
     if (!calls.register(callListener)) {
       finish(current, inCall())
       throw inCall()
@@ -115,9 +129,19 @@ class MediaVoiceRecorder internal constructor(
 
   private fun inCall() = MediaException.Voice(voiceRefusalText(VoiceRefusal.IN_CALL))
 
+  private fun unavailable(value: MicrophoneAvailability) = MediaException.Voice(voiceRefusalText(value.voiceRefusal()))
+
   private fun callBegan() {
     val current = synchronized(lock) { running } ?: return
     scope.launch(Dispatchers.IO) { finish(current, inCall()) }
+  }
+
+  private fun checkSilenced() {
+    val current = synchronized(lock) { running } ?: return
+    if (!capture.isSilenced()) return
+    val session = audio()
+    session?.recordingFailed()
+    scope.launch(Dispatchers.IO) { finish(current, unavailable(MicrophoneAvailability.OTHER_APP)) }
   }
 
   /** Ends the recording and gives the file. After the limit ended it, gives the outcome of that recording. */
@@ -136,6 +160,7 @@ class MediaVoiceRecorder internal constructor(
     if (running !== current) return@synchronized checkNotNull(ended)
     running = null
     calls.unregister(callListener)
+    audio()?.forgetMicrophone(microphoneListener)
     current.poll?.cancel()
     val session = heldAudio
     heldAudio = null
@@ -200,6 +225,8 @@ internal class SystemVoiceCapture(private val context: Context) : VoiceCapture {
   }
 
   override fun peak(): Float = (recorder?.maxAmplitude ?: 0) / MAX_AMPLITUDE
+
+  override fun isSilenced(): Boolean = recorder?.activeRecordingConfiguration?.isClientSilenced == true
 
   override fun stop() {
     val made = recorder ?: return
