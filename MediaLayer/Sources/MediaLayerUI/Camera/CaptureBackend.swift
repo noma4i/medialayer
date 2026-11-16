@@ -5,6 +5,10 @@ import CoreVideo
 import Foundation
 import MediaLayer
 
+extension CaptureEvent {
+  static func microphoneFlow(_ flowing: Bool) -> CaptureEvent { .audioFlow(flowing: flowing) }
+}
+
 /// A frame of the camera for analysis in the app. `orientation` tells how the buffer is turned against an upright picture.
 public struct CameraFrame: @unchecked Sendable {
   public let pixelBuffer: CVPixelBuffer

@@ -135,8 +135,9 @@ public final class MediaCamera: @unchecked Sendable {
         queue.async {
           guard self.startWaiter == nil else { return continuation.resume(throwing: Self.refusal(.notReady)) }
           self.ended = nil
+          let wasReady = self.run.state.phase == .ready && self.profile.mode == .video
           self.apply(.start)
-          if self.run.starting { self.startWaiter = continuation } else { continuation.resume(throwing: Self.refusal(.notReady)) }
+          if self.run.starting { self.startWaiter = continuation } else { continuation.resume(throwing: Self.refusal(wasReady ? self.run.state.fault ?? .notReady : .notReady)) }
         }
       }
     } catch {

@@ -444,7 +444,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
       self?.onMain { [weak self] in
         guard let self else { return }
         refreshSample()
-        audio?.setAudible(slot: id, !player.isMuted && player.timeControlStatus == .playing)
+        audio?.setAudible(slot: id, !player.isMuted && player.timeControlStatus == .playing && player.currentItem != nil)
       }
     }
     audibleObservations = [

@@ -14,6 +14,9 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
   private var camera: AVCaptureDevice?
   private var photoOutput: AVCapturePhotoOutput?
   private var movieOutput: AVCaptureMovieFileOutput?
+  private var audioOutput: AVCaptureAudioDataOutput?
+  private var audioFlowing = false
+  private var audioInterrupted = false
   private var frameOutput: AVCaptureVideoDataOutput?
   private var rotation: AVCaptureDevice.RotationCoordinator?
   private var recording: MovieDelegate?
@@ -32,10 +35,25 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     tokens = [
       center.addObserver(forName: AVCaptureSession.didStartRunningNotification, object: session, queue: nil) { [weak self] _ in self?.emit(.streaming(on: true)) },
       center.addObserver(forName: AVCaptureSession.didStopRunningNotification, object: session, queue: nil) { [weak self] _ in self?.emit(.streaming(on: false)) },
-      center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { [weak self] _ in self?.emit(.streaming(on: false)) },
+      center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { [weak self] note in
+        let reason = (note.userInfo?[AVCaptureSessionInterruptionReasonKey] as? NSNumber)?.intValue
+        self?.queue.async { [weak self] in
+          guard let self else { return }
+          MediaTrace.emit("camera", "interruption reason=\(reason.map(String.init) ?? "unknown")")
+          if reason == AVCaptureSession.InterruptionReason.audioDeviceInUseByAnotherClient.rawValue, audioOutput != nil {
+            audioInterrupted = true
+            audioFlowing = false
+            emit(.microphoneFlow(false))
+          }
+          emit(.streaming(on: false))
+        }
+      },
       center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) { [weak self] _ in
         guard let self else { return }
-        self.emit(.streaming(on: self.session.isRunning))
+        self.queue.async {
+          self.audioInterrupted = false
+          self.emit(.streaming(on: self.session.isRunning))
+        }
       },
       center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil) { [weak self] note in
         let error = note.userInfo?[AVCaptureSessionErrorKey] as? AVError
@@ -56,6 +74,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
   }
 
   private func emit(_ event: CaptureEvent) {
+    if case let .refuse(reason) = event { MediaTrace.emit("camera", "refuse reason=\(reason)") }
     let sink = lock.withLock { self.sink }
     sink?(event)
   }
@@ -93,6 +112,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     }
     let photo = profile.mode == .photo ? AVCapturePhotoOutput() : nil
     let movie = profile.mode == .video ? AVCaptureMovieFileOutput() : nil
+    let audio = profile.audio ? AVCaptureAudioDataOutput() : nil
+    audio?.setSampleBufferDelegate(self, queue: queue)
     session.beginConfiguration()
     session.inputs.forEach(session.removeInput)
     session.outputs.forEach(session.removeOutput)
@@ -102,6 +123,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     var outputs: [AVCaptureOutput] = []
     if let photo { outputs.append(photo) }
     if let movie { outputs.append(movie) }
+    if let audio { outputs.append(audio) }
     let added = inputs.allSatisfy { session.canAddInput($0) } && outputs.allSatisfy { session.canAddOutput($0) }
     guard added else {
       session.commitConfiguration()
@@ -121,9 +143,20 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     videoPort = inputs.first?.ports(for: .video, sourceDeviceType: device.deviceType, sourceDevicePosition: device.position).first
     previews.keys.forEach(linkPreview)
     session.commitConfiguration()
+    guard session.hardwareCost <= 1 else {
+      session.beginConfiguration()
+      session.inputs.forEach(session.removeInput)
+      session.outputs.forEach(session.removeOutput)
+      session.commitConfiguration()
+      return emit(.refuse(reason: .configureFailed))
+    }
     camera = device
     photoOutput = photo
     movieOutput = movie
+    audioOutput = audio
+    audioFlowing = false
+    audioInterrupted = false
+    if audio != nil { emit(.microphoneFlow(false)) }
     rotation = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
     if let photo, let size = choice?.photoSize {
       photo.maxPhotoDimensions = CMVideoDimensions(width: Int32(size.width), height: Int32(size.height))
@@ -212,6 +245,10 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
       self.camera = nil
       self.photoOutput = nil
       self.movieOutput = nil
+      self.audioOutput = nil
+      self.audioFlowing = false
+      self.audioInterrupted = false
+      self.emit(.microphoneFlow(true))
       self.frameOutput = nil
       self.rotation = nil
       self.recording = nil
@@ -311,8 +348,15 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
   }
 }
 
-extension AVCaptureBackend: AVCaptureVideoDataOutputSampleBufferDelegate {
+extension AVCaptureBackend: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
   func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+    if output is AVCaptureAudioDataOutput {
+      guard output === audioOutput, !audioInterrupted, !audioFlowing else { return }
+      audioFlowing = true
+      MediaTrace.emit("camera", "first audio sample")
+      emit(.microphoneFlow(true))
+      return
+    }
     guard let handler = lock.withLock({ tap }), let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
     let seconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
     handler(buffer, seconds.isFinite && seconds > 0 ? UInt64(seconds * 1000) : 0)
