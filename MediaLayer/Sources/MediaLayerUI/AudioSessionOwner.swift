@@ -65,8 +65,17 @@ actor AudioSessionOwner {
     if changes != seenChanges {
       seenChanges = changes
       needsRelease = true
+      _ = box.update { $0.systemLive = false; return true }
+      box.setLive(false)
     }
-    guard case .active(let plan) = want else { return release() }
+    let plan: SessionPlan
+    let managed: Bool
+    let call: Bool
+    switch want {
+    case .idle: return release()
+    case .active(let value): plan = value; managed = false; call = false
+    case .call(let value, let system): plan = value; managed = system; call = true
+    }
     if plan != port.currentPlan() {
       do { try port.setCategory(plan) } catch {
         MediaTrace.emit("audio", "category \(plan.trace) failed \(error)")
@@ -74,19 +83,25 @@ actor AudioSessionOwner {
       }
       MediaTrace.emit("audio", "category \(plan.trace)")
     }
-    do { try port.setActive(true) } catch {
+    if managed { needsRelease = true; return .done }
+    do {
+      guard try box.activateUnlessManaged({ try port.setActive(true) }) else { return .done }
+    } catch {
       needsRelease = true
       MediaTrace.emit("audio", "activate failed \(error)")
       return .failed
     }
     MediaTrace.emit("audio", "active")
     needsRelease = true
+    if call { box.setLive(true) }
     return .done
   }
 
   private func release() -> Step {
     guard needsRelease else { return .done }
-    do { try port.setActive(false) } catch {
+    do {
+      guard try box.activateUnlessManaged({ try port.setActive(false) }) else { return .done }
+    } catch {
       MediaTrace.emit("audio", "deactivate busy \(error)")
       return .busy
     }

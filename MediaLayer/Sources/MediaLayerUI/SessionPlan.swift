@@ -9,6 +9,10 @@ struct SessionPlan: Equatable {
 
   static let recording = SessionPlan(category: .playAndRecord, mode: .default, options: [.defaultToSpeaker])
 
+  static func call(speaker: Bool) -> SessionPlan {
+    SessionPlan(category: .playAndRecord, mode: .voiceChat, options: speaker ? [.allowBluetoothHFP, .defaultToSpeaker] : [.allowBluetoothHFP])
+  }
+
   static func playback(_ focus: MediaAudioFocus) -> SessionPlan {
     switch focus {
     case .exclusive: SessionPlan(category: .playback, mode: .moviePlayback, options: [])

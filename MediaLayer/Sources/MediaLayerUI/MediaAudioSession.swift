@@ -14,6 +14,51 @@ public final class MediaRecordingHold: @unchecked Sendable {
   deinit { release() }
 }
 
+final class CallAudioHold: @unchecked Sendable {
+  private let id: UUID
+  private let box: DemandBox
+  private let owner: AudioSessionOwner
+  private let lock = NSLock()
+  private var released = false
+
+  init(id: UUID, box: DemandBox, owner: AudioSessionOwner) {
+    self.id = id
+    self.box = box
+    self.owner = owner
+  }
+
+  var liveChanges: AsyncStream<Bool> { box.changes(for: id) }
+
+  func setSpeaker(_ on: Bool) {
+    _ = box.update { $0.setSpeaker(id, on); return true }
+    MediaTrace.emit("audio", "call speaker \(on)")
+    Task { await owner.request() }
+  }
+
+  func systemActivated() { systemChanged(true) }
+  func systemDeactivated() { systemChanged(false) }
+
+  private func systemChanged(_ live: Bool) {
+    let exists = box.update { demand in
+      guard demand.calls.contains(id) else { return false }
+      demand.systemLive = live
+      return true
+    }
+    if exists { box.setLive(live) }
+    MediaTrace.emit("audio", "call system \(live ? "activated" : "deactivated")")
+    Task { await owner.request() }
+  }
+
+  func release() {
+    guard lock.withLock({ if released { return false }; released = true; return true }) else { return }
+    box.removeCall(id)
+    MediaTrace.emit("audio", "call release")
+    Task { await owner.request() }
+  }
+
+  deinit { release() }
+}
+
 public final class MediaAudioSession: Sendable {
   public let focus: MediaAudioFocus
   private let box: DemandBox
@@ -43,13 +88,27 @@ public final class MediaAudioSession: Sendable {
 
   public func holdRecording() async -> MediaRecordingHold? {
     let id = UUID()
-    _ = box.update { $0.setRecording(id, true) }
+    guard box.update({ $0.setRecording(id, true) }) else { return nil }
     MediaTrace.emit("audio", "recording hold holders=\(box.recordings)")
     let hold = MediaRecordingHold { [box, owner] in
       _ = box.update { $0.setRecording(id, false) }
       MediaTrace.emit("audio", "recording release holders=\(box.recordings)")
       Task { await owner.request() }
     }
+    guard await owner.settle() else {
+      hold.release()
+      _ = await owner.settle()
+      return nil
+    }
+    return hold
+  }
+
+  func holdCall(managedBySystem: Bool) async -> CallAudioHold? {
+    let id = UUID()
+    _ = box.update { $0.addCall(id, managed: managedBySystem); return true }
+    if managedBySystem { box.setLive(false) }
+    MediaTrace.emit("audio", "call hold managed=\(managedBySystem)")
+    let hold = CallAudioHold(id: id, box: box, owner: owner)
     guard await owner.settle() else {
       hold.release()
       _ = await owner.settle()

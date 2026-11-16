@@ -2,8 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- `MediaAudioSession.holdRecording()` gives a recording hold that its owner releases.
+- The trace writes audio session steps, recording holders and camera audio tracks.
+
 ### Changed
 
+- The audio session follows the recording and playback demand after any system event.
 - Internal test hooks do no work in release builds.
 - The outcome of a recording is given once; a second stop is refused until the next start.
 - A recording is turned upright while the camera is stopping, and a cancel then stops the conversion.
@@ -11,6 +17,9 @@
 
 ### Fixed
 
+- Sound comes back after a recording, an interruption or a media services reset.
+- An Android audio focus taken by the system is requested again.
+- A second voice recording start during the first is refused.
 - The iOS camera preview keeps its frames when a recording starts or stops.
 - A lens change asked while the camera stops or takes a photo is applied when that ends.
 - A camera and a voice recorder can hold the recording audio together.
@@ -28,6 +37,10 @@
 - Playback after a voice recording starts in the playback audio session on iOS.
 - An Android image is drawn only in the frame where its content gets the ready state.
 - An Android video starts no cover request while it is off screen.
+
+### Removed
+
+- `MediaAudioSession.activateRecording()` and `deactivateRecording()`, replaced by `holdRecording()`.
 
 ## 3.33.1 - 2026-11-14
 

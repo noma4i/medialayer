@@ -74,3 +74,37 @@ extension MediaLayer {
     return MediaCallHold(core: core, gate: gate)
   }
 }
+
+public final class MediaCallAudio: @unchecked Sendable {
+  private let call: MediaCallHold
+  private let audio: CallAudioHold?
+  private let lock = NSLock()
+  private var ended = false
+
+  init(call: MediaCallHold, audio: CallAudioHold?) { self.call = call; self.audio = audio }
+
+  public var liveChanges: AsyncStream<Bool> {
+    audio?.liveChanges ?? AsyncStream { $0.yield(false); $0.finish() }
+  }
+  public func setSpeaker(_ on: Bool) { audio?.setSpeaker(on) }
+  public func systemActivated() { audio?.systemActivated() }
+  public func systemDeactivated() { audio?.systemDeactivated() }
+  public func end() {
+    guard lock.withLock({ if ended { return false }; ended = true; return true }) else { return }
+    audio?.release()
+    call.release()
+  }
+  deinit { end() }
+}
+
+extension MediaLayer {
+  public func callAudio(managedBySystem: Bool) async throws -> MediaCallAudio {
+    let call = try callHold()
+    guard let session = Media.audio else { return MediaCallAudio(call: call, audio: nil) }
+    guard let audio = await session.holdCall(managedBySystem: managedBySystem) else {
+      call.release()
+      throw MediaError.Unexpected(detail: "call audio refused")
+    }
+    return MediaCallAudio(call: call, audio: audio)
+  }
+}
