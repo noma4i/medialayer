@@ -172,8 +172,8 @@ impl AudioOwner {
             }
         }
     }
-    fn session_event(&mut self, event: session::Event, actions: &mut Vec<AudioAction>) {
-        let mut context = session::Context { generation: &mut self.generation, actions };
+    fn session_event(&mut self, event: session::SessionEvent, actions: &mut Vec<AudioAction>) {
+        let mut context = session::SessionContext { generation: &mut self.generation, actions };
         self.session.handle_with_context(&event, &mut context);
     }
     fn may_ask(&self) -> bool { matches!(self.system(), System::Free | System::Ducked) }
@@ -207,7 +207,7 @@ impl AudioOwner {
             self.resuming = false;
         }
         if next {
-            self.session_event(session::Event::Other, &mut actions);
+            self.session_event(session::SessionEvent::Other, &mut actions);
         }
         match input {
             I::VolumeReadStarted { id } => { fresh = self.volume_readers.insert(id); }
@@ -287,7 +287,7 @@ impl AudioOwner {
                     fresh = true;
                     if matches!(call.kind, CallKind::CallKit { .. }) {
                         let want = SessionWant::Call { kind: call.kind.clone(), speaker: call.speaker };
-                        self.session_event(session::Event::CallActivated(want), &mut actions);
+                        self.session_event(session::SessionEvent::CallActivated(want), &mut actions);
                     }
                     self.system_event(SystemEvent::CallSystemActivated, &mut actions);
                     self.call_state(id, CallState::Live, &mut actions);
@@ -298,7 +298,7 @@ impl AudioOwner {
             }
             I::Applied { generation, result } => {
                 let asking = session::applied(&self.session).is_some();
-                self.session_event(session::Event::Applied { generation, result: result.clone() }, &mut actions);
+                self.session_event(session::SessionEvent::Applied { generation, result: result.clone() }, &mut actions);
                 if asking && matches!(result, AppliedResult::Failed { .. }) {
                     self.system_event(SystemEvent::AppliedFailed, &mut actions);
                     self.revoke(RecordingRefusal::MicrophoneBusy, &mut actions);
@@ -311,7 +311,7 @@ impl AudioOwner {
             }
             I::InterruptionBegan => {
                 self.system_event(SystemEvent::InterruptionBegan, &mut actions);
-                self.session_event(session::Event::Reset, &mut actions);
+                self.session_event(session::SessionEvent::Reset, &mut actions);
                 self.revoke(RecordingRefusal::Interrupted, &mut actions);
                 self.pause(PauseReason::Interrupted, &mut actions);
                 for call in &mut self.calls {
@@ -346,12 +346,12 @@ impl AudioOwner {
                     actions.push(AudioAction::VolumeMultiplier { value: 0.2 });
                 }
                 FocusChange::Gain => {
-                    self.session_event(session::Event::Gain, &mut actions);
+                    self.session_event(session::SessionEvent::Gain, &mut actions);
                     self.system_event(SystemEvent::Focus(change), &mut actions);
                 }
             },
             I::FocusRequest { generation, answer } => {
-                self.session_event(session::Event::Focus { generation, answer }, &mut actions);
+                self.session_event(session::SessionEvent::Focus { generation, answer }, &mut actions);
                 if matches!(answer, FocusAnswer::Delayed | FocusAnswer::Failed) {
                     self.revoke(RecordingRefusal::MicrophoneBusy, &mut actions);
                     self.system_event(SystemEvent::FocusRequest(answer), &mut actions);
@@ -359,7 +359,7 @@ impl AudioOwner {
                 }
             }
             I::MediaReset => {
-                self.session_event(session::Event::Reset, &mut actions);
+                self.session_event(session::SessionEvent::Reset, &mut actions);
                 self.system_event(SystemEvent::MediaReset, &mut actions);
                 self.revoke(RecordingRefusal::Interrupted, &mut actions);
                 if !self.audible.is_empty() {
@@ -446,7 +446,7 @@ impl AudioOwner {
             self.system_event(SystemEvent::NewDemand, &mut actions);
         }
         let want = self.want();
-        self.session_event(session::Event::Reconcile { want, may_ask: self.may_ask(), fresh, next }, &mut actions);
+        self.session_event(session::SessionEvent::Reconcile { want, may_ask: self.may_ask(), fresh, next }, &mut actions);
         if own_before && !session::own_mode(&self.session) { self.comm_mode = false; }
         if self.paused == Some(Paused::Interrupted { resume: true }) && session::held(&self.session).is_some() && session::held(&self.session) == self.want() {
             actions.push(AudioAction::ResumePaused);
