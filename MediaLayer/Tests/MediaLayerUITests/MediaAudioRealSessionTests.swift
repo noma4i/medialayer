@@ -39,7 +39,7 @@ extension GlobalMedia {
     @Test
     func recordingSwitchesTheRealSessionToTheMicrophoneCategory() async throws {
       let real = AVAudioSession.sharedInstance()
-      let session = MediaAudioSession(focus: .mix)
+      let session = MediaAudioSession(focus: .mix, port: SystemAudioSession(), microphonePort: AvailableMicrophone())
 
       let hold = await session.holdRecording()
       #expect(hold != nil)

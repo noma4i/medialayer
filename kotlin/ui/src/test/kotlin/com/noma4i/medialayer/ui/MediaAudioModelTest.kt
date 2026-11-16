@@ -236,7 +236,7 @@ private class World(private val directory: File) {
 
   fun describe() =
     "camera=${camera?.state?.value?.phase} shown=$cameraShown voice=${voice.isRecording} recordingDemand=${audio.isRecording} " +
-      "audible=$audible held=${system.held} taken=${system.takenBySystem} call=${call != null} live=${call?.live?.value} talk=${system.talk}"
+      "availability=${audio.microphoneAvailability.value} audible=$audible held=${system.held} taken=${system.takenBySystem} call=${call != null} live=${call?.live?.value} talk=${system.talk}"
 
   private fun file() = File(directory, "voice-${System.nanoTime()}.m4a")
 
