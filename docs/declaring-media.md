@@ -495,7 +495,7 @@ Every place takes `playing` and `muted`. A player that is not playing stays prep
 
 A pager declares the neighbour page that the finger is dragging into with `peeking: true`. The player of that page plays muted beside the page that plays, so the drag shows a moving picture. When the page becomes `playing` its player keeps running and gets its sound, with no restart. When `peeking` ends without `playing`, the player pauses. One page peeks at a time, and a page that plays never peeks.
 
-When the app loses its audio output (headphones unplugged on iOS, `ACTION_AUDIO_BECOMING_NOISY` on Android), `open` has already set `Media.muted` to true. The players do not pause, and the app calls nothing. The app turns the sound on again by setting `Media.muted = false`.
+When the app loses a private audio output (headphones or Bluetooth on iOS, `ACTION_AUDIO_BECOMING_NOISY` on Android), MediaLayer pauses every playing place and forgets the play wish. `Media.muted` does not change. A place plays again after its owner declares play. See [audio focus](audio-focus.md).
 
 ## Suspending playback
 

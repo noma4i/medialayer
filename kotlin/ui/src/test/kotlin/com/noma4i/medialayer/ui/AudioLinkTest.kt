@@ -36,6 +36,7 @@ import org.junit.runner.RunWith
 internal class RecordingFocusPort : AudioFocusPort {
   val calls = SignallingList<String>()
   var answer = FocusAnswer.GRANTED
+  @Volatile var onRequest: (FocusPlan) -> Unit = {}
   private var sink: (FocusSignal) -> Unit = {}
 
   override fun listen(sink: (FocusSignal) -> Unit) { this.sink = sink }
@@ -43,6 +44,7 @@ internal class RecordingFocusPort : AudioFocusPort {
 
   override fun request(plan: FocusPlan): FocusAnswer {
     calls.add("request ${plan.gain} ${plan.usage}")
+    onRequest(plan)
     return answer
   }
 
@@ -198,6 +200,61 @@ class AudioLinkTest {
     assertEquals(0, capture.starts)
     assertFalse(target.exists())
   }
+  @Test
+  fun inv_audio_51_a_call_that_arrives_with_the_admission_leaves_the_microphone_untouched() = runBlocking {
+    val capture = WritingVoiceCapture()
+    val recorder = MediaVoiceRecorder(capture = capture, maxDurationMs = 60_000u, link = { link }, clock = { 1000uL })
+    repeat(20) { round ->
+      focus.onRequest = { plan -> if (plan.gain == FocusGain.GAIN_TRANSIENT_EXCLUSIVE) focus.send(FocusSignal.PhoneCall(true)) }
+      val target = File.createTempFile("voice", ".m4a").also { it.delete() }
+      val error = assertThrows(MediaException.Voice::class.java) { runBlocking { recorder.start(target) } }
+      assertEquals("round $round", voiceRefusalText(VoiceRefusal.IN_CALL), error.detail)
+      assertEquals("round $round: the microphone was started during the call", 0, capture.starts)
+      assertFalse(target.exists())
+      focus.onRequest = {}
+      focus.send(FocusSignal.PhoneCall(false))
+      await("free after round $round") { seen.lastOrNull() == MicrophoneAvailability.AVAILABLE }
+    }
+  }
+
+  @Test
+  fun inv_audio_52_a_new_plan_releases_what_the_previous_plan_held() {
+    val mixCore = MediaLayer.open(OpenConfig(
+      dir = Files.createTempDirectory("audio-link-mix").toString(),
+      fetcher = TestFetcher(),
+      settings = SharedPreferencesSettings(context, "audio-link-mix"), slots = null,
+      device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings(),
+      audioFocus = AudioFocus.MIX
+    ))
+    val mixFocus = RecordingFocusPort()
+    val mixLink = AudioLink(mixCore, AudioPorts(mixFocus, GrantedPermission))
+    try {
+      mixLink.audible(0u, true)
+      val call = mixLink.call(MediaCallKind.Unmanaged)
+      TestSignal.await("call focus", 5_000) { mixFocus.calls.contains("communication on=true speaker=false") }
+
+      call.close()
+
+      TestSignal.await("released", 5_000) { mixFocus.calls.toList().takeLast(2).toSet() == setOf("communication on=false speaker=false", "abandon") }
+    } finally {
+      mixLink.close()
+      mixCore.close()
+    }
+  }
+
+  @Test
+  fun inv_audio_53_closing_the_link_revokes_running_recordings_and_ends_calls() = runBlocking {
+    val admitted = link.admit(RecordingKind.VOICE) as Admission.Admitted
+    val revoked = CopyOnWriteArrayList<RecordingRefusal>()
+    admitted.ticket.onRevoked { revoked.add(it); TestSignal.fire() }
+    val states = CopyOnWriteArrayList<CallState>()
+    link.call(MediaCallKind.Telecom).onState { states.add(it); TestSignal.fire() }
+
+    link.close()
+
+    await("revoked and ended") { revoked.toList() == listOf(RecordingRefusal.INTERRUPTED) && states.lastOrNull() == CallState.ENDED }
+  }
+
 }
 
 internal class WritingVoiceCapture : VoiceCapture {

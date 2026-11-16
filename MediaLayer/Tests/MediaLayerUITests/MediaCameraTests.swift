@@ -362,6 +362,28 @@ struct MediaCameraTests {
   }
 
   @Test
+  func inv_capture_33_after_a_silent_take_the_next_start_follows_the_preview_sensor() async throws {
+    let rig = try makeRig(.moment)
+    await ready(rig)
+    rig.backend.emit(.microphoneFlow(true))
+    try await rig.camera.startRecording()
+    rig.backend.emit(.microphoneFlow(false))
+    await eventually("the take ended") { rig.camera.state.phase != .recording }
+    _ = try? await rig.camera.stopRecording()
+
+    do {
+      try await rig.camera.startRecording()
+      Issue.record("a take started while the preview sensor still hears silence")
+    } catch let MediaError.Camera(reason, _, _) {
+      #expect(reason == .microphoneSilent)
+    }
+
+    rig.backend.emit(.microphoneFlow(true))
+    try await rig.camera.startRecording()
+    await eventually("recording") { rig.camera.state.phase == .recording }
+  }
+
+  @Test
   func inv_capture_14_the_orphans_of_an_earlier_run_are_removed_and_other_files_stay() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("sweep-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

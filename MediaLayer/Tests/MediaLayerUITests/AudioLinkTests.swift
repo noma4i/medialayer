@@ -13,6 +13,12 @@ final class FakeSessionPort: AudioSessionPort, @unchecked Sendable {
 
   init(busyDeactivations: Int = 0) { busy = busyDeactivations }
 
+  private var onApplyHook: (@Sendable (SessionPlan) -> Void)?
+  var onApply: (@Sendable (SessionPlan) -> Void)? {
+    get { lock.withLock { onApplyHook } }
+    set { lock.withLock { onApplyHook = newValue } }
+  }
+
   var log: [String] { lock.withLock { entries } }
 
   private func note(_ entry: String) {
@@ -30,6 +36,7 @@ final class FakeSessionPort: AudioSessionPort, @unchecked Sendable {
 
   func apply(_ plan: SessionPlan, activate: Bool) throws {
     note("apply \(plan.category.rawValue) \(plan.mode.rawValue) activate=\(activate)")
+    onApply?(plan)
   }
 
   func deactivate() throws {
@@ -267,6 +274,51 @@ final class StatesSeen: @unchecked Sendable {
 
   var values: [CallState] { lock.withLock { seen } }
   deinit { task?.cancel() }
+  @Test
+  func inv_audio_51_a_call_that_arrives_with_the_admission_leaves_the_microphone_untouched() async throws {
+    let rig = try AudioRig()
+    let capture = WritingCapture()
+    let recorder = MediaVoiceRecorder(capture: capture, maxDurationMs: 60_000, link: { rig.link }, clock: { 1000 }, levelInterval: .milliseconds(5))
+    for round in 0..<20 {
+      let calls = rig.calls
+      rig.session.onApply = { plan in if plan.category == .playAndRecord { calls.send(["cellular"]) } }
+      let target = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).m4a")
+      do {
+        try await recorder.start(to: target)
+        Issue.record("round \(round): a recording started during the call")
+        _ = try? await recorder.stop()
+      } catch let MediaError.Voice(detail) {
+        #expect(detail == voiceRefusalText(reason: .inCall), "round \(round)")
+      }
+      #expect(capture.starts == 0, "round \(round): the microphone was started during the call")
+      #expect(!FileManager.default.fileExists(atPath: target.path))
+      rig.session.onApply = nil
+      rig.calls.send([])
+      await eventually("free after round \(round)") { rig.availability.last == .available }
+    }
+  }
+
+  @Test
+  func inv_audio_53_closing_the_link_revokes_running_recordings_and_ends_calls() async throws {
+    let rig = try AudioRig()
+    guard case let .success(ticket) = await rig.link.admit(.voice) else { Issue.record("refused"); return }
+    let call = await rig.link.call(.unmanaged)
+    let revoked = Task { () -> RecordingRefusal? in
+      for await reason in ticket.revoked { return reason }
+      return nil
+    }
+    let states = Task { () -> [CallState] in
+      var seen: [CallState] = []
+      for await state in call.states { seen.append(state) }
+      return seen
+    }
+
+    rig.link.close()
+
+    #expect(await revoked.value == .interrupted)
+    #expect(await states.value.last == .ended)
+  }
+
 }
 
 final class WritingCapture: VoiceCapture, @unchecked Sendable {

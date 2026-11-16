@@ -335,6 +335,22 @@ class MediaCameraTest {
   }
 
   @Test
+  fun inv_capture_33_after_a_silent_take_the_next_take_starts_because_camerax_reports_sound_only_during_a_take() = runBlocking {
+    val rig = rig(moment)
+    ready(rig)
+    rig.camera.startRecording()
+    rig.backend.audioIssue(CaptureAudioIssue.SILENCED)
+    eventually("the take ended") { rig.camera.state.value.phase != CameraPhase.RECORDING }
+    assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
+    val before = rig.backend.log.count { it.startsWith("record ") }
+
+    rig.camera.startRecording()
+
+    assertEquals("the next take began on the hardware", before + 1, rig.backend.log.count { it.startsWith("record ") })
+    eventually("recording") { rig.camera.state.value.phase == CameraPhase.RECORDING }
+  }
+
+  @Test
   fun inv_capture_14_theOrphansOfAnEarlierRunAreRemovedAndOtherFilesStay() {
     val directory = File(context.cacheDir, "sweep-${System.nanoTime()}").apply { mkdirs() }
     listOf("capture-a.jpg", "capture-b.mp4", "keep.txt", "voice-a.m4a").forEach { File(directory, it).writeBytes(byteArrayOf(1)) }
