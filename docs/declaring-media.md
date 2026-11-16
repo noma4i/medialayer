@@ -565,3 +565,41 @@ call.release()
 ```
 
 The hold also releases when it is deallocated (Swift) or closed (Kotlin `use`).
+
+### Call audio
+
+Use `callAudio` to hold both the call and its audio session. MediaLayer owns the session and focus for playback, recording and calls. A call has priority over recording and playback. Ending it returns audio ownership to the current demand. A place needs a new play declaration after the call.
+
+On Swift, pass `true` for a CallKit-managed call. MediaLayer sets the category and CallKit activates the session. Forward CallKit activation and deactivation to the call. For an unmanaged call, pass `false` and MediaLayer activates the session.
+
+```swift
+let call = try await media.callAudio(managedBySystem: true)
+call.setSpeaker(true)
+call.systemActivated() // CXProviderDelegate provider(_:didActivate:)
+call.systemDeactivated() // CXProviderDelegate provider(_:didDeactivate:)
+call.end()
+```
+
+At app start, set `RTCAudioSession.sharedInstance().useManualAudio = true`. The app never calls `RTCAudioSession` setCategory or setActive and never touches `AVAudioSession`. Forward `liveChanges` to WebRTC in this order:
+
+```swift
+let rtc = RTCAudioSession.sharedInstance()
+for await live in call.liveChanges {
+  if live {
+    rtc.audioSessionDidActivate(AVAudioSession.sharedInstance())
+    rtc.isAudioEnabled = true
+  } else {
+    rtc.isAudioEnabled = false
+    rtc.audioSessionDidDeactivate(AVAudioSession.sharedInstance())
+  }
+}
+```
+
+On Kotlin, observe `live` and close the call when it ends:
+
+```kotlin
+val call = media.callAudio()
+call.setSpeaker(true)
+call.live.collect { live -> /* update call audio */ }
+call.close()
+```
