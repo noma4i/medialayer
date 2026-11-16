@@ -129,11 +129,11 @@ impl Drop for Reserve {
 }
 
 /// One admitted entry slot, freed when the popped command is done.
-pub(crate) struct EntryPlace(Arc<InputQueue>);
+pub(crate) struct EntryPlace(Option<Arc<InputQueue>>);
 
 impl Drop for EntryPlace {
     fn drop(&mut self) {
-        self.0.inner().reduce(0, 1);
+        if let Some(queue) = &self.0 { queue.inner().reduce(0, 1); }
     }
 }
 
@@ -282,11 +282,12 @@ impl InputQueue {
 
     pub fn submit_audio(&self, commands: Vec<Declared>) -> Result<(), MediaError> {
         let mut inner = self.inner();
-        let commands: Vec<_> = commands.into_iter().map(|command| command.weight().map(|weight| (command, weight))).collect::<Option<_>>().ok_or_else(|| Self::overloaded("byte"))?;
-        let bytes = commands.iter().try_fold(0u64, |sum, (_, weight)| sum.checked_add(*weight)).ok_or_else(|| Self::overloaded("byte"))?;
-        self.admit(&inner, bytes, commands.len())?;
-        for (command, weight) in commands {
-            self.push(&mut inner, command, weight).map_err(|error| error.0)?;
+        if let Phase::Ended(error) = &inner.phase { return Err(error.clone()); }
+        for command in commands {
+            let seq = inner.seq;
+            inner.seq += 1;
+            inner.entries.insert(seq, Entry { command, bytes: 0, fold: None, owner: None });
+            inner.epoch += 1;
         }
         drop(inner);
         self.wake.notify_one();
@@ -410,7 +411,8 @@ impl InputQueue {
         if let Declared::Release { owner, kind } = entry.command {
             return Upcoming::Release(owner, kind);
         }
-        Upcoming::Apply(Box::new(Popped { command: entry.command, reserve: Reserve { queue: Some(self.clone()), bytes: entry.bytes }, owner: entry.owner, slot: EntryPlace(self.clone()) }))
+        let counted = !matches!(entry.command, Declared::Audio(_));
+        Upcoming::Apply(Box::new(Popped { command: entry.command, reserve: Reserve { queue: Some(self.clone()), bytes: entry.bytes }, owner: entry.owner, slot: EntryPlace(counted.then(|| self.clone())) }))
     }
 
     /// Takes every queued entry out after the end so the executor can answer them, and writes their accounting off.
@@ -422,7 +424,7 @@ impl InputQueue {
         inner.by_owner.clear();
         inner.owners.clear();
         let bytes = entries.values().map(|entry| entry.bytes).chain(garbage.iter().map(|garbage| garbage.bytes)).sum();
-        let queued = entries.values().filter(|entry| !matches!(entry.command, Declared::Release { .. })).count();
+        let queued = entries.values().filter(|entry| !matches!(entry.command, Declared::Release { .. } | Declared::Audio(_))).count();
         inner.reduce(bytes, queued + garbage.iter().filter(|garbage| garbage.counted).count());
         drop(inner);
         entries.into_values().map(|entry| entry.command).chain(garbage.into_iter().map(|garbage| garbage.command)).collect()
