@@ -77,3 +77,12 @@ func eventually(_ condition: String, timeout: Duration = .seconds(5), fileID: St
     Issue.record("never became true within \(timeout): \(condition)", sourceLocation: SourceLocation(fileID: fileID, filePath: filePath, line: line, column: column))
   }
 }
+
+/// The system port of the screen flag for one object under test: what the library asks the system to do.
+final class ScreenSwitch: @unchecked Sendable {
+  private let lock = NSLock()
+  private var value = false
+  var on: Bool { lock.withLock { value } }
+  func set(_ on: Bool) { lock.withLock { value = on } }
+  func awake() -> ScreenAwake { ScreenAwake(apply: { [self] in set($0) }) }
+}

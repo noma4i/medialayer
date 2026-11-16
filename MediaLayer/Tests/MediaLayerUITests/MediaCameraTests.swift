@@ -181,7 +181,7 @@ private func jpeg() -> Data {
   }
 }
 
-private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .back, configure: (FakeBackend, Counters) -> Void = { _, _ in }) throws -> Rig {
+private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .back, screen: ScreenSwitch = ScreenSwitch(), configure: (FakeBackend, Counters) -> Void = { _, _ in }) throws -> Rig {
   let backend = FakeBackend()
   let counters = Counters()
   configure(backend, counters)
@@ -220,7 +220,7 @@ private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .bac
     signals: names,
     clock: { 0 }
   )
-  let camera = try MediaCamera(profile: profile, lens: lens, backend: backend, services: services)
+  let camera = try MediaCamera(profile: profile, lens: lens, backend: backend, services: services, screen: screen.awake())
   let observation = StateObservation(camera.states)
   return Rig(camera: camera, backend: backend, counters: counters, center: center, directory: directory, audio: audio, signals: names, observation: observation)
 }
@@ -285,6 +285,23 @@ struct MediaCameraTests {
     #expect(rig.counters.qualities == [0.9])
     #expect(files(rig) == [photo.url.lastPathComponent], "no raw file stays in the capture directory")
     #expect(rig.camera.state.shooting == false)
+  }
+
+  @Test
+  func inv_api_63_a_camera_preview_on_screen_keeps_the_screen_on() async throws {
+    let screen = ScreenSwitch()
+    let rig = try makeRig(.moment, screen: screen)
+    #expect(!screen.on)
+
+    await ready(rig)
+    await eventually("the screen stays on while the capture screen shows the preview") { screen.on }
+
+    try await rig.camera.startRecording()
+    _ = try await rig.camera.stopRecording()
+    #expect(screen.on, "a recording keeps the hold of its preview")
+
+    rig.camera.detachPreview()
+    await eventually("the screen may sleep after the preview leaves") { !screen.on }
   }
 
   @Test

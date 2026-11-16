@@ -59,6 +59,7 @@ class ScreenWakeTest {
   private val place = DrivenPlace()
   private val layer = RecordingLayer().also { it.placeFactory = { place } }
   private var shown by mutableStateOf(true)
+  private var muted = false
 
   private val screenKeptOn: Boolean
     get() = rule.activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0
@@ -68,7 +69,7 @@ class ScreenWakeTest {
   private fun mount() {
     rule.setContent {
       MediaLayerProvider(CompletableDeferred(layer)) {
-        if (shown) MediaAudio(WakeClip("file:///wake.m4a")) { Box(Modifier.size(40.dp)) }
+        if (shown) MediaAudio(WakeClip("file:///wake.m4a"), muted = muted) { Box(Modifier.size(40.dp)) }
       }
     }
     until { place.subscribed }
@@ -84,6 +85,46 @@ class ScreenWakeTest {
 
     place.push(playing = false)
     until { !screenKeptOn }
+  }
+
+  @Test
+  fun inv_api_64_a_muted_playing_place_does_not_keep_the_screen_on() {
+    muted = true
+    mount()
+
+    place.push(playing = true)
+    looper.idle()
+
+    assertFalse(screenKeptOn)
+  }
+
+  @Test
+  fun inv_api_65_the_global_mute_lets_the_screen_sleep_while_a_place_plays() {
+    mount()
+    place.push(playing = true)
+    until { screenKeptOn }
+
+    try {
+      Media.muted = true
+      until { !screenKeptOn }
+
+      Media.muted = false
+      until { screenKeptOn }
+    } finally {
+      Media.muted = false
+    }
+  }
+
+  @Test
+  fun inv_api_66_a_running_call_keeps_the_screen_on() {
+    mount()
+    AudioFixture(rule.activity).use { audio ->
+      val call = audio.link.call(MediaCallKind.Unmanaged)
+      until { screenKeptOn }
+
+      call.close()
+      until { !screenKeptOn }
+    }
   }
 
   @Test

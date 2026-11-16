@@ -4,6 +4,18 @@
 
 ### Added
 
+- `Media.retry(source)` reloads a failed source without remounting its places.
+- `VoiceState.recordedMs` publishes the elapsed recording time.
+- `MediaVoiceRecorder` accepts `minTakeMs` and refuses shorter takes.
+- Each place publishes `PlaybackState` with playing, wish, pause reason and play refusal.
+- `MediaVideo(onPlaybackChange:)` reports each change of the core `PlaybackState`.
+- Swift `AudioPlayback` gains `play()` and `pause()` like Kotlin `AudioControl`.
+- `readRoute(item)` returns the local proxy route without starting playback.
+- `MediaVoiceRecorder.state` and `states` show the take, its phase and its outcome.
+- `CameraState` gains `take` and `outcome`, and `CameraPhase` gains `closed`.
+- `MediaCallAudio.route` shows the applied call output or its failure.
+- `Media.failures` streams every native failure with its source, domain and code.
+- The screen stays on while a `MediaVideo` or `MediaAudio` place plays (`PlaybackState.playing`) and is released when the last playing place of the window pauses, ends or leaves.
 - One core rule owns the audio session, audio focus, recording and calls on both platforms.
 - `callAudio(kind)` takes a CallKit, Telecom or unmanaged call with call states.
 - `microphoneAvailability` names who holds the microphone, including calls of other apps.
@@ -16,6 +28,22 @@
 
 ### Changed
 
+- `playUrl` returns a library `MediaPlayer` with its own playback state.
+- A play during a call or recording is refused and shows its refusal.
+- After the library forgets a wish, one Play plays again.
+- `MediaError.Voice` carries the `VoiceRefusal` reason.
+- Kotlin `MediaCallKind.Telecom` takes the call endpoint control of the app.
+- Speaker changes of CallKit and Telecom calls route without a new audio session.
+- A lost or failed call session shows the call as interrupted until it returns.
+- `microphoneAvailability` follows permission changes, other apps and refused sessions.
+- Closing the layer ends cameras, recorders, calls, volume and availability streams.
+- The audio session changes only after the recorder and players stopped.
+- Swift `statsStream` throws its failure: read it with `for try await`.
+- Kotlin `readVolume` is a suspend function and reads the volume off the main thread.
+- `FailureListener` gains `closed`, and failure streams end when the layer closes.
+- `Media.muted` changes only after the core accepted the mute.
+- `clear` returns the error of the cache instead of hiding it.
+- `PlaceInput` gains `playGeneration`: Kotlin callers pass its fields by name.
 - A recording pauses playback, and its end resumes nothing.
 - A lost headphone or Bluetooth output pauses playback and keeps `Media.muted` unchanged.
 - An interruption resumes playback only when the system allows it.
@@ -32,6 +60,16 @@
 
 ### Fixed
 
+- `isPlaying` shows paused after the library pauses a place.
+- A muted or buffering place pauses on a call, recording or interruption.
+- A take finished by the duration limit reaches the app without a stop.
+- A take lost by a media services reset shows its loss.
+- A failed recorder ends the take with its native failure and deletes the file.
+- A new call after a permanent focus loss takes its audio session.
+- Kotlin camera and volume calls run off the main thread.
+- Kotlin frame observers all receive frames.
+- A file that cannot be deleted is reported instead of ignored.
+- A call or recording changes the audio session only after playback has paused.
 - Sound returns after a recording, a call or an interruption without an end.
 - The first video note after a cold start records its sound or fails.
 - An own Android call is not counted as an external call.

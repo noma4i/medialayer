@@ -187,9 +187,24 @@ struct MediaVoiceRecorderTests {
     FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).m4a")
   }
 
-  private func makeRecorder(_ capture: VoiceCapture, ticks: Ticks = Ticks(), rig: TestAudioRig? = nil, maxMs: UInt64 = 60_000, minTakeMs: UInt64 = 0) -> MediaVoiceRecorder {
+  private func makeRecorder(_ capture: VoiceCapture, ticks: Ticks = Ticks(), rig: TestAudioRig? = nil, maxMs: UInt64 = 60_000, minTakeMs: UInt64 = 0, screen: ScreenSwitch = ScreenSwitch()) -> MediaVoiceRecorder {
     let rig = rig ?? (try! TestAudioRig())
-    return MediaVoiceRecorder(capture: capture, maxDurationMs: maxMs, minTakeMs: minTakeMs, link: { rig.link }, clock: { ticks.read() }, levelInterval: .milliseconds(5))
+    return MediaVoiceRecorder(capture: capture, maxDurationMs: maxMs, minTakeMs: minTakeMs, link: { rig.link }, clock: { ticks.read() }, levelInterval: .milliseconds(5), screen: screen.awake())
+  }
+
+  @Test
+  func inv_api_62_a_running_voice_take_keeps_the_screen_on() async throws {
+    let screen = ScreenSwitch()
+    let ticks = Ticks()
+    let recorder = makeRecorder(FakeCapture(), ticks: ticks, screen: screen)
+    #expect(!screen.on)
+
+    try await recorder.start(to: file())
+    await eventually("the screen stays on while the take runs") { screen.on }
+
+    ticks.advance(1000)
+    _ = try await recorder.stop()
+    await eventually("the screen may sleep after the take") { !screen.on }
   }
 
   @Test

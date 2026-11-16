@@ -72,8 +72,23 @@ class MediaVoiceRecorderTest {
 
   private fun file(): File = File.createTempFile("voice", ".m4a").apply { delete(); deleteOnExit() }
 
-  private fun makeRecorder(capture: VoiceCapture, ticks: VoiceTicks = VoiceTicks(), audio: AudioLink = audio(), maxMs: Long = 60_000, minTakeMs: ULong = 0uL) =
-    MediaVoiceRecorder(capture, maxMs.toULong(), { audio }, { ticks.read().toULong() }, 5, scope, minTakeMs)
+  private fun makeRecorder(capture: VoiceCapture, ticks: VoiceTicks = VoiceTicks(), audio: AudioLink = audio(), maxMs: Long = 60_000, minTakeMs: ULong = 0uL, screen: ScreenSwitch = ScreenSwitch()) =
+    MediaVoiceRecorder(capture, maxMs.toULong(), { audio }, { ticks.read().toULong() }, 5, scope, minTakeMs, screen = screen.awake())
+
+  @Test
+  fun inv_api_62_a_running_voice_take_keeps_the_screen_on() = runBlocking {
+    val screen = ScreenSwitch()
+    val ticks = VoiceTicks()
+    val recorder = makeRecorder(VoiceFakeCapture(), ticks, screen = screen)
+    assertFalse(screen.on)
+
+    recorder.start(file())
+    TestSignal.await("the screen stays on while the take runs", 5_000) { screen.on }
+
+    ticks.now += 1_000
+    recorder.stop()
+    TestSignal.await("the screen may sleep after the take", 5_000) { !screen.on }
+  }
 
   @Test
   fun inv_audio_69_voice_state_publishes_recorded_time() = runTest {

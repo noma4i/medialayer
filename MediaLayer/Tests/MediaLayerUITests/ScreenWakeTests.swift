@@ -41,9 +41,10 @@ private final class DrivenPlace: PlaceHandle, @unchecked Sendable {
 
 private struct WakeCell: View {
   let context: MediaContext
+  var muted = false
 
   var body: some View {
-    MediaAudio(WakeClip(url: "file:///wake.m4a")) { _ in Color.clear }
+    MediaAudio(WakeClip(url: "file:///wake.m4a"), muted: muted) { _ in Color.clear }
       .frame(width: 40, height: 40)
       .environment(\.mediaContext, context)
   }
@@ -71,11 +72,11 @@ extension GlobalMedia {
       func restore() { ScreenAwake.shared.apply = original }
     }
 
-    private func mount(_ place: DrivenPlace) async -> UIWindow {
+    private func mount(_ place: DrivenPlace, muted: Bool = false) async -> UIWindow {
       let places = RecordingPlaces()
       places.placeFactory = { _ in place }
       let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
-      window.rootViewController = UIHostingController(rootView: WakeCell(context: MediaContext(places: places)))
+      window.rootViewController = UIHostingController(rootView: WakeCell(context: MediaContext(places: places), muted: muted))
       window.isHidden = false
       await eventually("the place subscribed to its playback") { place.subscribed }
       return window
@@ -100,6 +101,51 @@ extension GlobalMedia {
 
       place.push(playing: false)
       await eventually("the screen may sleep after the place stops") { !screen.on }
+    }
+
+    @Test
+    func inv_api_64_a_muted_playing_place_does_not_keep_the_screen_on() async {
+      let screen = ScreenPort()
+      defer { screen.restore() }
+      let place = DrivenPlace()
+      let window = await mount(place, muted: true)
+      defer { unmount(window) }
+
+      place.push(playing: true)
+      await queuedDeliveriesRan()
+
+      #expect(!screen.on)
+    }
+
+    @Test
+    func inv_api_65_the_global_mute_lets_the_screen_sleep_while_a_place_plays() async throws {
+      let screen = ScreenPort()
+      defer { screen.restore() }
+      defer { try? Media.setMuted(false) }
+      let place = DrivenPlace()
+      let window = await mount(place)
+      defer { unmount(window) }
+      place.push(playing: true)
+      await eventually("the screen stays on while the place plays with sound") { screen.on }
+
+      try Media.setMuted(true)
+      await eventually("the screen may sleep while everything is muted") { !screen.on }
+
+      try Media.setMuted(false)
+      await eventually("the screen stays on again when the sound returns") { screen.on }
+    }
+
+    @Test
+    func inv_api_66_a_running_call_keeps_the_screen_on() async throws {
+      let screen = ScreenPort()
+      defer { screen.restore() }
+      let rig = try TestAudioRig()
+
+      let call = try await rig.link.call(.unmanaged)
+      await eventually("the screen stays on while the call runs") { screen.on }
+
+      call.end()
+      await eventually("the screen may sleep after the call") { !screen.on }
     }
 
     @Test

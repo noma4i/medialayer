@@ -213,7 +213,7 @@ class MediaCameraTest {
   @get:Rule
   val compose = createComposeRule()
 
-  private fun rig(profile: CaptureProfile = captureProfile(CaptureKind.PHOTO), lens: CameraLens = CameraLens.BACK, scope: CoroutineScope = CoroutineScope(Dispatchers.Default), app: AppPath? = null, configure: (FakeBackend, Counters) -> Unit = { _, _ -> }): Rig {
+  private fun rig(profile: CaptureProfile = captureProfile(CaptureKind.PHOTO), lens: CameraLens = CameraLens.BACK, scope: CoroutineScope = CoroutineScope(Dispatchers.Default), app: AppPath? = null, screen: ScreenSwitch = ScreenSwitch(), configure: (FakeBackend, Counters) -> Unit = { _, _ -> }): Rig {
     val backend = FakeBackend()
     val counters = Counters()
     configure(backend, counters)
@@ -258,7 +258,7 @@ class MediaCameraTest {
       },
       directory = directory
     )
-    return Rig(MediaCamera(profile, lens, backend, services, scope), backend, counters, directory, fixture)
+    return Rig(MediaCamera(profile, lens, backend, services, scope, screen = screen.awake()), backend, counters, directory, fixture)
   }
 
   private fun ready(rig: Rig) {
@@ -312,6 +312,23 @@ class MediaCameraTest {
     assertEquals(listOf(0.9), rig.counters.qualities.toList())
     assertEquals(listOf(photo.file.name), rig.files())
     assertFalse(rig.camera.state.value.shooting)
+  }
+
+  @Test
+  fun inv_api_63_a_camera_preview_on_screen_keeps_the_screen_on() = runBlocking {
+    val screen = ScreenSwitch()
+    val rig = rig(moment, screen = screen)
+    assertFalse(screen.on)
+
+    ready(rig)
+    eventually("the screen stays on while the capture screen shows the preview") { screen.on }
+
+    rig.camera.startRecording()
+    rig.camera.stopRecording()
+    assertTrue("a recording keeps the hold of its preview", screen.on)
+
+    rig.detach()
+    eventually("the screen may sleep after the preview leaves") { !screen.on }
   }
 
   @Test

@@ -43,3 +43,10 @@ internal object TestSignal {
     if (reached != true) throw AssertionError("never became true within $timeoutMs ms: $what")
   }
 }
+
+/** The system port of the screen flag for one object under test: what the library asks the system to do. */
+internal class ScreenSwitch {
+  @Volatile var on = false
+    private set
+  fun awake() = ScreenAwake { on = it; TestSignal.fire() }
+}
