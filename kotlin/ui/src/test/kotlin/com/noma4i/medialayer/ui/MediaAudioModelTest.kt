@@ -36,6 +36,14 @@ private class SystemFocus : AudioFocusPort {
   private var taken = false
   private var changes = 0
   private var listener: () -> Unit = {}
+  private var communication: Pair<Boolean, Boolean> = false to false
+
+  val talk: Pair<Boolean, Boolean> get() = synchronized(lock) { communication }
+
+  override fun setCommunication(on: Boolean, speaker: Boolean) {
+    synchronized(lock) { communication = on to speaker }
+    TestSignal.fire()
+  }
 
   val held: FocusKind? get() = synchronized(lock) { holder }
   val takenBySystem: Boolean get() = synchronized(lock) { taken }
@@ -44,8 +52,6 @@ private class SystemFocus : AudioFocusPort {
   override fun onChange(action: () -> Unit) {
     synchronized(lock) { listener = action }
   }
-
-  override fun setCommunication(on: Boolean, speaker: Boolean) = Unit
 
   override fun request(kind: FocusKind): Boolean {
     val granted = synchronized(lock) {
@@ -136,7 +142,8 @@ private class ModelMicrophone(private val refuses: Boolean) : VoiceCapture {
 private enum class Step {
   CameraShows, CameraHides, CameraRecords, CameraStops, CameraCancels, CameraDeniedShows, CameraCloses,
   VoiceStarts, VoiceStops, VoiceStartsTwice, VoiceStopsWhileStarting, VoiceDenied,
-  PlayerAudible, PlayerSilent, SystemTakesFocus, SystemGivesFocusBack
+  PlayerAudible, PlayerSilent, SystemTakesFocus, SystemGivesFocusBack,
+  CallStarts, CallSpeaker, CallEnds
 }
 
 private class World(private val directory: File) {
@@ -149,6 +156,8 @@ private class World(private val directory: File) {
   var cameraShown = false
   var voice = recorder(false)
   val audible = HashSet<UInt>()
+  var call: CallAudioHold? = null
+  var callSpeaker = false
 
   fun recorder(refuses: Boolean) = MediaVoiceRecorder(ModelMicrophone(refuses), 60_000, { audio }, { clock.addAndGet(500) }, 5, scope)
 
@@ -173,7 +182,9 @@ private class World(private val directory: File) {
   fun converged(): Boolean {
     if (cameraShown && camera?.state?.value?.phase == CameraPhase.OPENING) return false
     if (audio.isRecording != wantsMicrophone) return false
-    if (system.takenBySystem) return true
+    if (system.takenBySystem) return call?.live?.value != true
+    call?.let { return system.held == FocusKind.Call && system.talk == (true to callSpeaker) && it.live.value }
+    if (system.talk.first) return false
     return when {
       wantsMicrophone -> system.held == FocusKind.Recording
       audible.isNotEmpty() -> system.held == FocusKind.Duck
@@ -183,7 +194,7 @@ private class World(private val directory: File) {
 
   fun describe() =
     "camera=${camera?.state?.value?.phase} shown=$cameraShown voice=${voice.isRecording} recordingDemand=${audio.isRecording} " +
-      "audible=$audible held=${system.held} taken=${system.takenBySystem}"
+      "audible=$audible held=${system.held} taken=${system.takenBySystem} call=${call != null} live=${call?.live?.value} talk=${system.talk}"
 
   private fun file() = File(directory, "voice-${System.nanoTime()}.m4a")
 
@@ -238,6 +249,18 @@ private class World(private val directory: File) {
         audible.remove(slot)
         audio.setAudible(slot, false)
       }
+      Step.CallStarts -> if (call == null) {
+        call = audio.holdCall()
+        callSpeaker = false
+      }
+      Step.CallSpeaker -> call?.let {
+        callSpeaker = !callSpeaker
+        it.setSpeaker(callSpeaker)
+      }
+      Step.CallEnds -> {
+        call?.close()
+        call = null
+      }
       Step.SystemTakesFocus -> system.systemTakes()
       Step.SystemGivesFocusBack -> system.systemGivesBack()
     }
@@ -267,6 +290,8 @@ class MediaAudioModelTest {
       }
     }
     world.system.systemGivesBack()
+    world.call?.close()
+    world.call = null
     world.camera?.close()
     world.camera = null
     world.cameraShown = false

@@ -43,6 +43,10 @@ private final class SystemSession: AudioSessionPort, @unchecked Sendable {
 
   func volumeChanges() -> AsyncStream<Float> { AsyncStream { _ in } }
 
+  func callKitActivates() { change { active = true } }
+
+  func callKitDeactivates() { change { active = false } }
+
   func interruptionBegins() { change { active = false; interrupted = true } }
 
   func interruptionEnds() { change { interrupted = false } }
@@ -142,6 +146,26 @@ private enum Step: CaseIterable {
   case voiceStarts, voiceStops, voiceStartsTwice, voiceStopsWhileStarting, voiceDenied
   case playerAudible, playerSilent
   case interruptionBegins, interruptionEnds, mediaServicesReset, routeChanges
+  case callStarts, callSystemActivates, callSystemDeactivates, callSpeaker, callEnds
+}
+
+private final class Live: @unchecked Sendable {
+  private let lock = NSLock()
+  private var latest = false
+  private var task: Task<Void, Never>?
+
+  func follow(_ stream: AsyncStream<Bool>) {
+    task = Task { [weak self] in
+      for await value in stream {
+        self?.lock.withLock { self?.latest = value }
+        TestSignal.shared.fire()
+      }
+    }
+  }
+
+  var value: Bool { lock.withLock { latest } }
+
+  deinit { task?.cancel() }
 }
 
 private final class World {
@@ -160,6 +184,11 @@ private final class World {
   var foreground = true
   var voice: MediaVoiceRecorder
   var audible: Set<UInt32> = []
+  var call: CallAudioHold?
+  var callManaged = false
+  var callSpeaker = false
+  var callKitLive = false
+  var live = Live()
   var ticks: UInt64 = 0
 
   init() {
@@ -196,10 +225,19 @@ private final class World {
 
   var wantsMicrophone: Bool { voice.isRecording || cameraHoldsMicrophone }
 
+  func callConverged(_ call: CallAudioHold) -> Bool {
+    let now = system.state
+    guard now.plan == .call(speaker: callSpeaker) else { return false }
+    if callManaged { return now.active == callKitLive && live.value == (callKitLive && !now.interrupted) }
+    if now.interrupted { return !live.value }
+    return now.active && live.value
+  }
+
   func converged() -> Bool {
     if cameraShown && foreground && camera?.state.phase == .opening { return false }
     guard audio.isRecording == wantsMicrophone else { return false }
 
+    if let call { return callConverged(call) }
     let now = system.state
     if now.interrupted { return true }
     if wantsMicrophone { return now.active && now.plan == .recording }
@@ -270,12 +308,46 @@ private final class World {
       audio.setAudible(slot: slot, false)
     case .interruptionBegins:
       system.interruptionBegins()
+      callKitLive = false
     case .interruptionEnds:
       system.interruptionEnds()
     case .mediaServicesReset:
       system.mediaServicesReset()
     case .routeChanges:
       system.routeChanges()
+    case .callStarts:
+      guard call == nil else { return }
+      let managed = Bool.random(using: &random)
+      if let hold = await audio.holdCall(managedBySystem: managed) {
+        call = hold
+        callManaged = managed
+        callSpeaker = false
+        callKitLive = false
+        live = Live()
+        live.follow(hold.liveChanges)
+      }
+    case .callSystemActivates:
+      guard let call, callManaged, !system.state.interrupted else { return }
+      system.callKitActivates()
+      callKitLive = true
+      call.systemActivated()
+    case .callSystemDeactivates:
+      guard let call, callManaged else { return }
+      system.callKitDeactivates()
+      callKitLive = false
+      call.systemDeactivated()
+    case .callSpeaker:
+      guard let call else { return }
+      callSpeaker.toggle()
+      call.setSpeaker(callSpeaker)
+    case .callEnds:
+      guard let ending = call else { return }
+      call = nil
+      ending.release()
+      if callManaged && callKitLive {
+        callKitLive = false
+        system.callKitDeactivates()
+      }
     }
   }
 
@@ -309,6 +381,9 @@ struct MediaAudioModelTests {
       if !world.converged() { return }
     }
     world.system.interruptionEnds()
+    world.call?.release()
+    world.call = nil
+    if world.callKitLive { world.system.callKitDeactivates() }
     world.camera = nil
     _ = try? await world.voice.stop()
     for slot in world.audible { world.audio.setAudible(slot: slot, false) }
