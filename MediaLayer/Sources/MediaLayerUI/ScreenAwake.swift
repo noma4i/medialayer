@@ -4,40 +4,88 @@ import Foundation
   import UIKit
 #endif
 
-@MainActor
-final class ScreenAwake {
-  static let shared = ScreenAwake(apply: { value in
-    #if os(iOS)
-      if UIApplication.shared.isIdleTimerDisabled != value { UIApplication.shared.isIdleTimerDisabled = value }
-    #endif
+enum ScreenHoldKind {
+  case sound
+  case always
+}
+
+/// One process counter of holders. A `sound` holder counts while the global mute is off, an `always` holder counts always. The system port is called inside the counter order when "any counted holder" flips.
+final class ScreenAwake: @unchecked Sendable {
+  static let shared = ScreenAwake(muted: Media.muted, apply: { value in
+    DispatchQueue.main.async {
+      #if os(iOS)
+        if UIApplication.shared.isIdleTimerDisabled != value { UIApplication.shared.isIdleTimerDisabled = value }
+      #endif
+    }
   })
 
-  var apply: (Bool) -> Void
-  private var holders = Set<ObjectIdentifier>()
+  private let lock = NSLock()
+  private var port: (Bool) -> Void
+  private var holders: [ObjectIdentifier: ScreenHoldKind] = [:]
+  private var muted: Bool
 
-  init(apply: @escaping (Bool) -> Void) {
-    self.apply = apply
+  var apply: (Bool) -> Void {
+    get { lock.withLock { port } }
+    set { lock.withLock { port = newValue } }
   }
 
-  func set(_ holder: ObjectIdentifier, playing: Bool) {
-    let before = !holders.isEmpty
-    if playing { holders.insert(holder) } else { holders.remove(holder) }
-    let after = !holders.isEmpty
-    guard before != after else { return }
-    apply(after)
-    TestChange.fire()
+  init(muted: Bool = false, apply: @escaping (Bool) -> Void) {
+    self.muted = muted
+    port = apply
+  }
+
+  func set(_ holder: ObjectIdentifier, kind: ScreenHoldKind, on: Bool) {
+    change { if on { holders[holder] = kind } else { holders[holder] = nil } }
+  }
+
+  func set(muted value: Bool) {
+    change { muted = value }
+  }
+
+  private var counted: Bool { holders.values.contains { $0 == .always || !muted } }
+
+  private func change(_ edit: () -> Void) {
+    let flipped = lock.withLock { () -> Bool in
+      let before = counted
+      edit()
+      let after = counted
+      guard before != after else { return false }
+      port(after)
+      return true
+    }
+    if flipped { TestChange.fire() }
   }
 }
 
-@MainActor
-final class ScreenAwakeHold {
+/// One hold of one owner: a place (`sound`: while it plays and is not muted), a voice recorder, a camera or a call (`always`).
+final class ScreenAwakeHold: @unchecked Sendable {
   private let awake: ScreenAwake
+  private let kind: ScreenHoldKind
+  private let lock = NSLock()
+  private var playing = false
+  private var muted = false
 
-  init(awake: ScreenAwake = .shared) {
+  init(kind: ScreenHoldKind = .always, awake: ScreenAwake = .shared) {
+    self.kind = kind
     self.awake = awake
   }
 
-  func set(playing: Bool) {
-    awake.set(ObjectIdentifier(self), playing: playing)
+  deinit {
+    awake.set(ObjectIdentifier(self), kind: kind, on: false)
+  }
+
+  func set(playing value: Bool) {
+    update { playing = value }
+  }
+
+  func set(muted value: Bool) {
+    update { muted = value }
+  }
+
+  private func update(_ edit: () -> Void) {
+    lock.withLock {
+      edit()
+      awake.set(ObjectIdentifier(self), kind: kind, on: playing && !muted)
+    }
   }
 }

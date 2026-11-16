@@ -83,6 +83,7 @@ public enum Media {
     flag.failure = nil
     NativeFailures.clear()
     flag.value = value
+    ScreenAwake.shared.set(muted: value)
   }
 
   /// The last refusal of the core to apply the global mute, or nil after a success.

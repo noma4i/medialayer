@@ -33,7 +33,7 @@ public final class AudioPlayback {
   @ObservationIgnored private var mount: PlaceMount?
   @ObservationIgnored private var playingWish: Bool
   @ObservationIgnored private var playGeneration: UInt64 = 0
-  @ObservationIgnored private let awake = ScreenAwakeHold()
+  @ObservationIgnored private let awake = ScreenAwakeHold(kind: .sound)
   @ObservationIgnored private let gate = DeliveryGate()
 
   init(item: MediaItem, playing: Bool, muted: Bool = false, rate: Float = 1, group: String? = nil, places: MediaPlaces) {
@@ -42,6 +42,7 @@ public final class AudioPlayback {
     self.muted = muted
     self.rate = rate
     self.places = places
+    awake.set(muted: muted)
     playingWish = playing
   }
 
@@ -71,6 +72,7 @@ public final class AudioPlayback {
 
   func follow(muted value: Bool) {
     muted = value
+    awake.set(muted: value)
     push()
   }
 

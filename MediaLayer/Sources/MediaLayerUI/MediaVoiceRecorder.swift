@@ -54,6 +54,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
   private var ended: Result<VoiceRecording, Error>?
   private var held: RecordingTicket?
   private var starting = false
+  private let awake: ScreenAwakeHold
   private var sinks: [UUID: AsyncStream<Float>.Continuation] = [:]
   private var voiceState = VoiceState(take: 0, phase: .idle, outcome: nil, recordedMs: 0)
   private var stateSinks: [UUID: AsyncStream<VoiceState>.Continuation] = [:]
@@ -71,12 +72,13 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     lock.withLock {
       voiceState = value
       stateSinks.values.forEach { $0.yield(value) }
+      awake.set(playing: value.phase != .idle)
     }
     TestChange.fire()
   }
 
   public convenience init(maxDuration: TimeInterval? = nil, minTakeMs: UInt64 = 0) {
-    self.init(capture: SystemVoiceCapture(), maxDurationMs: voiceLimitMs(requested: maxDuration.map { UInt64(max($0, 0) * 1000) }), minTakeMs: minTakeMs)
+    self.init(capture: SystemVoiceCapture(), maxDurationMs: voiceLimitMs(requested: maxDuration.map { UInt64(max($0, 0) * 1000) }), minTakeMs: minTakeMs, screen: .shared)
   }
 
   deinit {
@@ -95,8 +97,10 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     link: @escaping @Sendable () -> AudioLink? = { Media.link },
     clock: @escaping @Sendable () -> UInt64 = { DispatchTime.now().uptimeNanoseconds / 1_000_000 },
     levelInterval: Duration = .milliseconds(50),
-    waitForLevel: (@Sendable () async -> Void)? = nil
+    waitForLevel: (@Sendable () async -> Void)? = nil,
+    screen: ScreenAwake = .shared
   ) {
+    awake = ScreenAwakeHold(kind: .always, awake: screen)
     self.capture = capture
     self.maxDurationMs = maxDurationMs
     self.minTakeMs = minTakeMs

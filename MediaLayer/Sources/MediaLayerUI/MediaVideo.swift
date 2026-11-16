@@ -59,7 +59,7 @@ public struct MediaVideo<Content: View>: View {
   @State private var onScreen = false
   @State private var inBackground = false
   @State private var playGeneration: UInt64 = 0
-  @State private var awake = ScreenAwakeHold()
+  @State private var awake = ScreenAwakeHold(kind: .sound)
   @State private var gate = DeliveryGate()
   @Environment(\.mediaShape) private var shape
   private let source: any MediaSource
@@ -132,7 +132,7 @@ public struct MediaVideo<Content: View>: View {
     }
     .onChange(of: group) { mount?.update(input()) }
     .onChange(of: peeking) { mount?.update(input()) }
-    .onChange(of: muted) { mount?.update(input()) }
+    .onChange(of: muted) { _, value in awake.set(muted: value); mount?.update(input()) }
     .id(identity)
   }
 
@@ -176,6 +176,7 @@ public struct MediaVideo<Content: View>: View {
       host = SurfaceHost(places: places)
       hostIdentity = identity
     }
+    awake.set(muted: muted)
     let token = gate.open()
     let relay = PlaybackRelay(receive: { [gate, awake] value in
       gate.deliver(token) {

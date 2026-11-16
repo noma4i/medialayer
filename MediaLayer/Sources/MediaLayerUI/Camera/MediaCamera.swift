@@ -85,6 +85,7 @@ public final class MediaCamera: @unchecked Sendable {
   private let queue = DispatchQueue(label: "com.noma4i.medialayer.camera")
   private let lock = NSLock()
   private var published: CameraState
+  private let awake: ScreenAwakeHold
   private var sinks: [UUID: AsyncStream<CameraState>.Continuation] = [:]
 
   private var run: CaptureRun
@@ -110,10 +111,11 @@ public final class MediaCamera: @unchecked Sendable {
   private var observers: [UUID: (rate: Double, last: UInt64?, handler: @Sendable (CameraFrame) -> Void)] = [:]
 
   public convenience init(profile: CaptureProfile, lens: CameraLens = .back) throws {
-    try self.init(profile: profile, lens: lens, backend: AVCaptureBackend(), services: .live)
+    try self.init(profile: profile, lens: lens, backend: AVCaptureBackend(), services: .live, screen: .shared)
   }
 
-  init(profile: CaptureProfile, lens: CameraLens, backend: CaptureBackend, services: CameraServices) throws {
+  init(profile: CaptureProfile, lens: CameraLens, backend: CaptureBackend, services: CameraServices, screen: ScreenAwake = .shared) throws {
+    awake = ScreenAwakeHold(kind: .always, awake: screen)
     self.profile = try checkCaptureProfile(profile: profile)
     self.services = services
     self.backend = backend
@@ -262,6 +264,7 @@ public final class MediaCamera: @unchecked Sendable {
   func attachPreview() {
     queue.async {
       self.demand += 1
+      self.awake.set(playing: true)
       self.reconcile()
     }
   }
@@ -269,6 +272,7 @@ public final class MediaCamera: @unchecked Sendable {
   func detachPreview() {
     queue.async {
       self.demand = max(0, self.demand - 1)
+      self.awake.set(playing: self.demand > 0)
       self.reconcile()
     }
   }
@@ -304,6 +308,7 @@ public final class MediaCamera: @unchecked Sendable {
   private func closeFromLayer() {
     queue.sync {
       apply(.layerClosed)
+      awake.set(playing: false)
       if case let .success(clip)? = ended { removeFile(clip.url) }
       ended = nil
       let closed = lock.withLock { let closed = Array(sinks.values); sinks.removeAll(); return closed }

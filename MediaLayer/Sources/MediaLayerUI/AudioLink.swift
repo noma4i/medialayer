@@ -369,8 +369,13 @@ private final class CallSignals: @unchecked Sendable {
   private var state: CallState = .connecting
   private var route: CallRoute = .receiver
   private var closed = false
+  private let awake = ScreenAwakeHold(kind: .always)
   private var stateSinks: [UUID: AsyncStream<CallState>.Continuation] = [:]
   private var routeSinks: [UUID: AsyncStream<CallRoute>.Continuation] = [:]
+
+  init() { awake.set(playing: true) }
+
+  func release() { awake.set(playing: false) }
 
   func states() -> AsyncStream<CallState> {
     AsyncStream { sink in
@@ -420,6 +425,7 @@ private final class CallSignals: @unchecked Sendable {
       routeSinks.removeAll()
       return result
     }
+    release()
     sinks.0.forEach { $0.yield(.ended); $0.finish() }
     sinks.1.forEach { $0.finish() }
   }
@@ -481,6 +487,7 @@ public final class MediaCallAudio: @unchecked Sendable {
   public func systemDeactivated() { link?.send(.callSystemDeactivated(id: id)) }
   public func end() {
     guard lock.withLock({ if ended { return false }; ended = true; return true }) else { return }
+    signals.release()
     link?.endCall(id: id)
   }
   deinit { end() }
