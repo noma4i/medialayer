@@ -10,7 +10,7 @@ mod queue;
 pub(super) mod readiness;
 mod weight;
 
-pub(crate) use command::{Answer, Declared, Finished, OwnerKind, PlayerEvent, Query, Subscribing, WindowKind};
+pub(crate) use command::{Answer, CoreAudio, Declared, Finished, OwnerKind, PlayerEvent, Query, Subscribing, WindowKind};
 pub use command::PlaceInput;
 pub(crate) use executor::{run, Pause};
 pub use limits::IngressLimits;

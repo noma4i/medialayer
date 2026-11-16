@@ -1,4 +1,4 @@
-use super::command::{Answer, Declared, Finished, OwnerKind, PlaceInput, PlayerEvent, Query};
+use super::command::{Answer, CoreAudio, Declared, Finished, OwnerKind, PlaceInput, PlayerEvent, Query};
 use super::queue::{InputQueue, Reserve, EntryPlace};
 use crate::api::{placeholder_for, AbortOnDrop, MediaError, MediaItem, MediaState};
 use tokio::runtime::Handle;
@@ -165,13 +165,12 @@ impl Book {
         self.flush(&key);
     }
 
-    fn audio(&mut self, action: crate::audio::AudioAction) {
-        use crate::audio::AudioAction;
+    fn audio(&mut self, action: CoreAudio) {
         match action {
-            AudioAction::PauseAll { .. } => { self.paused = true; self.flush_keys(); }
-            AudioAction::ResumePaused => { self.paused = false; self.flush_keys(); }
-            AudioAction::ForgetPaused => { self.forget_playback(); self.paused = false; self.flush_keys(); }
-            AudioAction::CallHold { on } => {
+            CoreAudio::PauseAll => { self.paused = true; self.flush_keys(); }
+            CoreAudio::ResumePaused => { self.paused = false; self.flush_keys(); }
+            CoreAudio::ForgetPaused => { self.forget_playback(); self.paused = false; self.flush_keys(); }
+            CoreAudio::CallHold(on) => {
                 if on && !self.in_call {
                     self.in_call = true;
                     self.assembled.stage.stop_all_playing();
@@ -181,7 +180,6 @@ impl Book {
                     self.in_call = false;
                 }
             }
-            _ => unreachable!(),
         }
     }
 

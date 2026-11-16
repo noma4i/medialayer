@@ -1,7 +1,7 @@
 use super::assembled::Assembled;
 use super::events::PlayerEvents;
 use super::fetcher::{Fetcher, ForeignFetcher};
-use super::ingress::{run, Answer, Declared, Admitted, IngressLimits, Finished, OwnerKind, Pause, InputQueue, Query, Subscribing, WindowKind};
+use super::ingress::{run, Answer, CoreAudio, Declared, Admitted, IngressLimits, Finished, OwnerKind, Pause, InputQueue, Query, Subscribing, WindowKind};
 use super::layer_life::LayerLife;
 use super::limits::{DeviceMemory, Evict, ImageWindow, Limits, PoolSettings};
 use super::owned::{MediaPlace, MediaWholeDeclaration, MediaWindow, PlaybackSuspension};
@@ -544,7 +544,10 @@ impl MediaLayer {
         let mut commands = Vec::new();
         for action in next.step(input) {
             match action {
-                AudioAction::PauseAll { .. } | AudioAction::ResumePaused | AudioAction::ForgetPaused | AudioAction::CallHold { .. } => commands.push(Declared::Audio(action)),
+                AudioAction::PauseAll { .. } => commands.push(Declared::Audio(CoreAudio::PauseAll)),
+                AudioAction::ResumePaused => commands.push(Declared::Audio(CoreAudio::ResumePaused)),
+                AudioAction::ForgetPaused => commands.push(Declared::Audio(CoreAudio::ForgetPaused)),
+                AudioAction::CallHold { on } => commands.push(Declared::Audio(CoreAudio::CallHold(on))),
                 _ => platform.push(action),
             }
         }

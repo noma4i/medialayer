@@ -31,6 +31,13 @@ pub(crate) enum OwnerKind {
     Declaration,
 }
 
+pub(crate) enum CoreAudio {
+    PauseAll,
+    ResumePaused,
+    ForgetPaused,
+    CallHold(bool),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WindowKind {
     Video,
@@ -114,7 +121,7 @@ pub(crate) enum Declared {
     ImageWindow { owner: u64, active: u32, pages: Option<Arc<Vec<Vec<MediaItem>>>> },
     WindowReady { owner: u64, listener: Arc<dyn WindowReadyListener> },
     Suspend { owner: u64, groups: Vec<String> },
-    Audio(crate::audio::AudioAction),
+    Audio(CoreAudio),
     WholeOpen { owner: u64 },
     WholeAdd { owner: u64, items: Vec<MediaItem> },
     WholeRemove { owner: u64, items: Vec<MediaItem> },
