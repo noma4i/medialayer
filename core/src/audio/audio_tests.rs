@@ -304,3 +304,15 @@ fn inv_audio_28_availability_is_one_value_derived_from_every_input() {
     assert_eq!(world.settle(I::CallEnded { id: 7 }), vec![DEACTIVATE, A::CallState { id: 7, state: CallState::Ended }, available(MicrophoneAvailability::ExternalCall)]);
     assert_eq!(world.send(I::Permission { granted: true }), vec![], "an unchanged value is not sent again");
 }
+
+#[test]
+fn inv_audio_32_a_video_recording_starts_and_lasts_only_while_the_microphone_sound_flows() {
+    let mut world = World::new();
+    assert_eq!(world.send(I::MicrophoneFlow { flowing: false }), vec![]);
+    assert_eq!(world.send(I::Capture { id: 1, kind: RecordingKind::Video }), vec![A::Refuse { id: 1, reason: RecordingRefusal::MicrophoneSilent }]);
+    assert_eq!(world.settle(I::Capture { id: 2, kind: RecordingKind::Voice }), vec![apply(SessionWant::Recording { kind: RecordingKind::Voice }), A::Admit { id: 2 }], "the camera sound does not gate a voice recording");
+    assert_eq!(world.settle(I::CaptureEnded { id: 2 }), vec![DEACTIVATE]);
+    assert_eq!(world.send(I::MicrophoneFlow { flowing: true }), vec![]);
+    assert_eq!(world.settle(I::Capture { id: 3, kind: RecordingKind::Video }), vec![apply(SessionWant::Recording { kind: RecordingKind::Video }), A::Admit { id: 3 }]);
+    assert_eq!(world.send(I::MicrophoneFlow { flowing: false }), vec![A::Revoke { id: 3, reason: RecordingRefusal::MicrophoneSilent }, DEACTIVATE]);
+}
