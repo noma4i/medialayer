@@ -208,7 +208,7 @@ struct AudioLinkTests {
     await eventually("external") { rig.availability.last == .externalCall }
     switch await rig.link.admit(.voice) {
     case .success: Issue.record("a recording was admitted during an external call")
-    case let .failure(reason): #expect(reason == .inCall)
+    case let .failure(error): #expect(error as? RecordingRefusal == .inCall)
     }
 
     rig.calls.send([])
