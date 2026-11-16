@@ -38,13 +38,15 @@ impl SystemMachine {
             _ => Super,
         }
     }
-    #[state(superstate = "any")]
-    fn ducked(context: &mut Exit, event: &SystemEvent) -> Outcome<State> {
+    #[state(superstate = "any", exit_action = "restore_volume")]
+    fn ducked(event: &SystemEvent) -> Outcome<State> {
         match event {
-            SystemEvent::Focus(FocusChange::Gain) => { context.restore_volume = true; Transition(State::free()) }
+            SystemEvent::Focus(FocusChange::Gain) => Transition(State::free()),
             _ => Super,
         }
     }
+    #[action]
+    fn restore_volume(context: &mut Exit) { context.restore_volume = true; }
     #[state(superstate = "any")]
     fn wait_foreground(context: &mut Exit, event: &SystemEvent) -> Outcome<State> {
         match event {
