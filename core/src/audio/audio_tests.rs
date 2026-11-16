@@ -58,7 +58,7 @@ fn plain(actions: Vec<AudioAction>) -> Vec<AudioAction> {
 }
 
 fn answer(world: &World, answer: FocusAnswer) -> AudioInput {
-    I::FocusRequest { generation: world.owner.inflight.expect("a request is in flight"), answer }
+    I::FocusRequest { generation: world.owner.inflight().expect("a request is in flight"), answer }
 }
 
 fn apply(want: SessionWant) -> AudioAction {
@@ -430,12 +430,12 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
         };
         for _ in 0..60 {
             let mut input = random_input(&mut dice, &mut next_id, &started);
-            if let (I::FocusRequest { generation, .. }, Some(inflight)) = (&mut input, world.owner.inflight) {
+            if let (I::FocusRequest { generation, .. }, Some(inflight)) = (&mut input, world.owner.inflight()) {
                 if dice.percent(70) {
                     *generation = inflight;
                 }
             }
-            if let (I::Applied { generation, result }, Some(inflight)) = (&mut input, world.owner.inflight) {
+            if let (I::Applied { generation, result }, Some(inflight)) = (&mut input, world.owner.inflight()) {
                 if dice.percent(70) {
                     *generation = inflight;
                 }
@@ -443,10 +443,10 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
                     *result = AppliedResult::Ok;
                 }
             }
-            let answers_flight = matches!(input, I::Applied { generation, .. } if Some(generation) == world.owner.inflight);
-            let release_in_flight = world.owner.inflight.is_some_and(|generation| releases.contains(&generation));
+            let answers_flight = matches!(input, I::Applied { generation, .. } if Some(generation) == world.owner.inflight());
+            let release_in_flight = world.owner.inflight().is_some_and(|generation| releases.contains(&generation));
             let busy_answer = answers_flight && release_in_flight && matches!(input, I::Applied { result: AppliedResult::Busy, .. });
-            let pending_release = world.owner.release_pending && !matches!(input, I::Applied { .. });
+            let pending_release = world.owner.release_pending() && !matches!(input, I::Applied { .. });
             if !matches!(input, I::Applied { .. }) && release_in_flight {
                 heard_in_flight = true;
             }
@@ -462,7 +462,7 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
             if system_deactivates(&input) {
                 session_active = false;
             }
-            let refusal = answers_flight_now(&input, world.owner.inflight) && matches!(input, I::FocusRequest { answer: FocusAnswer::Delayed | FocusAnswer::Failed, .. } | I::Applied { result: AppliedResult::Failed { .. }, .. });
+            let refusal = answers_flight_now(&input, world.owner.inflight()) && matches!(input, I::FocusRequest { answer: FocusAnswer::Delayed | FocusAnswer::Failed, .. } | I::Applied { result: AppliedResult::Failed { .. }, .. });
             let noisy = matches!(input, I::Noisy);
             let label = format!("{input:?}");
             let actions = world.raw(input);
@@ -484,18 +484,18 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
                 heard_in_flight = false;
             }
             let owner = &world.owner;
-            assert!(owner.inflight.is_some() || owner.applied == owner.want() || owner.request_blocked || owner.release_pending, "the session neither matches the demand nor waits for an answer or a system event: {label} applied {:?} want {:?}", owner.applied, owner.want());
-            assert!(!(pending_release && owner.release_pending && owner.inflight.is_none()), "a busy release survived the next event: {label} {actions:?}");
-            assert!(!(busy_answer && heard_in_flight && owner.release_pending), "an event heard during the busy release did not finish it: {label} {actions:?}");
+            assert!(owner.inflight().is_some() || owner.applied() == owner.want() || owner.request_blocked() || owner.release_pending(), "the session neither matches the demand nor waits for an answer or a system event: {label} applied {:?} want {:?}", owner.applied(), owner.want());
+            assert!(!(pending_release && owner.release_pending() && owner.inflight().is_none()), "a busy release survived the next event: {label} {actions:?}");
+            assert!(!(busy_answer && heard_in_flight && owner.release_pending()), "an event heard during the busy release did not finish it: {label} {actions:?}");
             if busy_answer {
                 heard_in_flight = false;
             }
             assert!(!(refusal && actions.iter().any(|action| matches!(action, A::Apply { .. }))), "the answer to a refusal asked the system again: {label} {actions:?}");
-            assert!(!(owner.inflight.is_none() && matches!(owner.applied, Some(SessionWant::Recording { .. })) && !owner.pending.is_empty()), "a capture waits although its recording session is applied: {label} {:?}", owner.pending);
-            assert!(owner.captures.is_empty() || gate, "playback may start during a recording: {label} {actions:?}");
-            assert!(!actions.contains(&A::ResumePaused) || (owner.inflight.is_none() && owner.applied.is_some()), "the players resume before their session is applied: {label} {actions:?}");
+            assert!(!(owner.inflight().is_none() && matches!(owner.applied(), Some(SessionWant::Recording { .. })) && !owner.pending().is_empty()), "a capture waits although its recording session is applied: {label} {:?}", owner.pending());
+            assert!(owner.captures().is_empty() || gate, "playback may start during a recording: {label} {actions:?}");
+            assert!(!actions.contains(&A::ResumePaused) || (owner.inflight().is_none() && owner.applied().is_some()), "the players resume before their session is applied: {label} {actions:?}");
             assert!(owner.system() == System::Ducked || multiplier == 1.0, "the ducked volume outlived the duck: {label} {:?}", owner.system());
-            assert!(!(noisy && owner.paused == Some(PauseReason::Interrupted)), "a pause saved before the output was lost can resume on another output: {actions:?}");
+            assert!(!(noisy && owner.paused() == Some(PauseReason::Interrupted)), "a pause saved before the output was lost can resume on another output: {actions:?}");
             let running: std::collections::BTreeSet<_> = admitted.iter().map(|id| format!("{:?}", kinds[id])).collect();
             assert_eq!(running.len(), admitted.len(), "two recordings of one kind run: {admitted:?} {actions:?}");
         }
@@ -680,7 +680,7 @@ fn inv_audio_56_an_answer_of_an_older_request_changes_nothing() {
 fn inv_audio_57_a_lost_private_output_pauses_even_while_a_request_is_in_flight() {
     let mut world = World::new();
     world.raw(I::Audible { slot: 0, on: true });
-    assert!(world.owner.inflight.is_some());
+    assert!(world.owner.inflight().is_some());
     let lost = world.send(I::Route { reason: RouteReason::OldDeviceUnavailable, lost_private_output: true });
     assert!(lost.contains(&A::PauseAll { reason: PauseReason::OutputLost }), "{lost:?}");
 }
