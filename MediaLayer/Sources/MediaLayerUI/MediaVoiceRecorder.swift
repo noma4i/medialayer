@@ -45,7 +45,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
   private var running: Running?
   private var finishing: Task<Result<VoiceRecording, Error>, Never>?
   private var ended: Result<VoiceRecording, Error>?
-  private var held: MediaAudioSession?
+  private var held: MediaRecordingHold?
   private var starting = false
   private var sinks: [UUID: AsyncStream<Float>.Continuation] = [:]
 
@@ -92,20 +92,25 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     defer { lock.withLock { starting = false } }
     if calls.inCall { throw Self.inCall() }
     let session = audio()
-    if let session, !(await session.activateRecording()) {
+    let hold = await session?.holdRecording()
+    if session != nil && hold == nil {
       throw MediaError.Voice(detail: voiceRefusalText(reason: .microphoneBusy))
     }
     do {
       try await capture.start(file: file, maxDurationMs: maxDurationMs) { [weak self] in self?.limitReached() }
     } catch let refused as VoiceRefused {
-      await session?.deactivateRecording()
+      hold?.release()
       try? FileManager.default.removeItem(at: file)
       throw MediaError.Voice(detail: voiceRefusalText(reason: refused.reason))
+    } catch {
+      hold?.release()
+      try? FileManager.default.removeItem(at: file)
+      throw error
     }
     let current = Running(file: file, startedAt: clock())
     current.poll = Task { [weak self] in await self?.pollLevels() }
     lock.withLock {
-      held = session
+      held = hold
       running = current
     }
     if !calls.register(callId, { [weak self] in self?.callBegan() }) {
@@ -154,7 +159,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     return await task.value
   }
 
-  private func finishRecording(_ current: Running, session: MediaAudioSession?, interrupted: MediaError?) async -> Result<VoiceRecording, Error> {
+  private func finishRecording(_ current: Running, session: MediaRecordingHold?, interrupted: MediaError?) async -> Result<VoiceRecording, Error> {
     let length = clock() &- current.startedAt
     var outcome: Result<VoiceRecording, Error>
     do {
@@ -170,7 +175,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     } catch {
       outcome = .failure(error)
     }
-    await session?.deactivateRecording()
+    session?.release()
     if case .failure = outcome { try? FileManager.default.removeItem(at: current.file) }
     let finished = lock.withLock { () -> [AsyncStream<Float>.Continuation] in
       ended = outcome

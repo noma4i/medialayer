@@ -51,7 +51,7 @@ public final class MediaCamera: @unchecked Sendable {
   private var engaged = false
   private var epoch = 0
   private var sessionHold: CameraServices.Release?
-  private var audioHold: MediaAudioSession?
+  private var audioHold: MediaRecordingHold?
   private var binding: Task<Void, Never>?
   private var shooting: Task<Void, Never>?
   private var reading: Task<Void, Never>?
@@ -91,7 +91,7 @@ public final class MediaCamera: @unchecked Sendable {
     backend.unbind()
     for task in [binding, shooting, reading, ticker] { task?.cancel() }
     sessionHold?()
-    if let audio = audioHold { Task { await audio.deactivateRecording() } }
+    audioHold?.release()
     if let url = recordingURL { try? FileManager.default.removeItem(at: url) }
   }
 
@@ -347,7 +347,7 @@ public final class MediaCamera: @unchecked Sendable {
     sessionHold = nil
     if let audio = audioHold {
       audioHold = nil
-      Task { await audio.deactivateRecording() }
+      audio.release()
     }
   }
 
@@ -373,19 +373,19 @@ public final class MediaCamera: @unchecked Sendable {
           return
         }
       }
-      var session: MediaAudioSession?
+      var session: MediaRecordingHold?
       if needsAudio, let audio = services.audio() {
-        guard await audio.activateRecording() else {
+        guard let hold = await audio.holdRecording() else {
           release?()
           self.queue.async { if self.epoch == current { self.apply(.refuse(reason: .busy)) } }
           return
         }
-        session = audio
+        session = hold
       }
       self.queue.async {
         guard self.epoch == current else {
           release?()
-          if let session { Task { await session.deactivateRecording() } }
+          session?.release()
           return
         }
         if let release { self.sessionHold = release }

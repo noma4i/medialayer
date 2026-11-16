@@ -1,17 +1,17 @@
+import Foundation
+
 struct AudioDemand {
   private(set) var audible: Set<UInt32> = []
-  private(set) var recordings = 0
-  var recording: Bool { recordings > 0 }
+  private(set) var recordings: Set<UUID> = []
+  var recording: Bool { !recordings.isEmpty }
   private(set) var volumeReaders = 0
 
   mutating func setAudible(slot: UInt32, _ value: Bool) -> Bool {
     value ? audible.insert(slot).inserted : audible.remove(slot) != nil
   }
 
-  mutating func setRecording(_ value: Bool) -> Bool {
-    let previous = recording
-    recordings = max(0, recordings + (value ? 1 : -1))
-    return recording != previous
+  mutating func setRecording(_ id: UUID, _ value: Bool) -> Bool {
+    value ? recordings.insert(id).inserted : recordings.remove(id) != nil
   }
 
   mutating func readVolume(_ delta: Int) {

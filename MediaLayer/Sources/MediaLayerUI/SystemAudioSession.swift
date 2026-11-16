@@ -5,6 +5,22 @@ struct SystemAudioSession: AudioSessionPort {
 
   var systemChanges: Int { Self.changes.count }
 
+  func currentPlan() -> SessionPlan {
+    let session = AVAudioSession.sharedInstance()
+    return SessionPlan(category: session.category, mode: session.mode, options: session.categoryOptions)
+  }
+
+  func systemEvents() -> AsyncStream<Void> {
+    AsyncStream { continuation in
+      let center = NotificationCenter.default
+      let session = AVAudioSession.sharedInstance()
+      let tokens = [AVAudioSession.interruptionNotification, AVAudioSession.mediaServicesWereResetNotification, AVAudioSession.routeChangeNotification].map { name in
+        center.addObserver(forName: name, object: session, queue: nil) { _ in continuation.yield(()) }
+      }
+      continuation.onTermination = { _ in tokens.forEach { center.removeObserver($0) } }
+    }
+  }
+
   func setCategory(_ plan: SessionPlan) throws {
     try AVAudioSession.sharedInstance().setCategory(plan.category, mode: plan.mode, options: plan.options)
   }
