@@ -228,7 +228,7 @@ private final class World {
   func callConverged(_ call: CallAudioHold) -> Bool {
     let now = system.state
     guard now.plan == .call(speaker: callSpeaker) else { return false }
-    if callManaged { return now.active == callKitLive && live.value == (callKitLive && !now.interrupted) }
+    if callManaged { return live.value == (callKitLive && !now.interrupted) }
     if now.interrupted { return !live.value }
     return now.active && live.value
   }
