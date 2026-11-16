@@ -128,14 +128,14 @@ extension MediaLayer {
   }
 
   public var microphoneAvailability: AsyncStream<MicrophoneAvailability> {
-    Media.audio?.microphoneAvailability ?? AsyncStream { $0.yield(.available); $0.finish() }
+    (objc_getAssociatedObject(self, &lifetimeKey) as? SystemSignals)?.audio?.microphoneAvailability ?? AsyncStream { $0.yield(.available); $0.finish() }
   }
 
   func followSystem(events: PlayerEventsProtocol, link: PlayerEventsLink, center: NotificationCenter, names: SystemSignalNames, audio: MediaAudioSession? = nil) {
     link.bind(events)
     let calls = ExternalCall(media: self)
     audio?.microphone.setExternalListener { [weak calls] active in calls?.set(active) }
-    let signals = SystemSignals(events: events, center: center, names: names, onForeground: { audio?.microphone.systemChanged("foreground") }, onRelease: { calls.close(); link.bind(nil) })
+    let signals = SystemSignals(events: events, center: center, names: names, audio: audio, onForeground: { audio?.microphone.systemChanged("foreground") }, onRelease: { calls.close(); link.bind(nil) })
     objc_setAssociatedObject(self, &lifetimeKey, signals, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
   }
 

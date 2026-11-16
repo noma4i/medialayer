@@ -38,12 +38,14 @@ public struct SystemSignalNames {
 }
 
 final class SystemSignals {
+  let audio: MediaAudioSession?
   private let center: NotificationCenter
   private var tokens: [NSObjectProtocol] = []
   private var onRelease: () -> Void
 
-  init(events: PlayerEventsProtocol, center: NotificationCenter, names: SystemSignalNames, onOutputLost: @escaping () -> Void = { try? Media.setMuted(true) }, onForeground: @escaping @Sendable () -> Void = {}, onRelease: @escaping () -> Void = {}) {
+  init(events: PlayerEventsProtocol, center: NotificationCenter, names: SystemSignalNames, audio: MediaAudioSession? = nil, onOutputLost: @escaping () -> Void = { try? Media.setMuted(true) }, onForeground: @escaping @Sendable () -> Void = {}, onRelease: @escaping () -> Void = {}) {
     self.center = center
+    self.audio = audio
     self.onRelease = onRelease
     tokens = [
       center.addObserver(forName: names.memoryWarning, object: nil, queue: nil) { _ in events.memoryWarning(level: .critical) },
