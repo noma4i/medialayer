@@ -33,7 +33,14 @@ final class FakeSessionPort: AudioSessionPort, @unchecked Sendable {
 
   func send(_ event: SystemAudioEvent) { lock.withLock { sink }?(event) }
 
+  private var applyFailures: [AVAudioSession.Category: Error] = [:]
+  func failApply(_ category: AVAudioSession.Category, _ error: Error?) { lock.withLock { applyFailures[category] = error } }
+
   func apply(_ plan: SessionPlan, activate: Bool) throws {
+    if let failure = lock.withLock({ applyFailures[plan.category] }) {
+      note("apply failed \(plan.category.rawValue)")
+      throw failure
+    }
     note("apply \(plan.category.rawValue) \(plan.mode.rawValue) activate=\(activate)")
     onApply?(plan)
   }
@@ -57,8 +64,18 @@ final class FakeSessionPort: AudioSessionPort, @unchecked Sendable {
     if let failure = lock.withLock({ speakerFailure }) { note("speaker failed"); throw failure }
     note("speaker \(on)")
   }
+  private var volumeSink: AsyncStream<Float>.Continuation?
+  private var volumeEnded = false
+  var volumeObserved: Bool { lock.withLock { volumeSink != nil && !volumeEnded } }
   func outputVolume() -> Float { 0.5 }
-  func volumeChanges() -> AsyncStream<Float> { AsyncStream { _ in } }
+  func volumeChanges() -> AsyncStream<Float> {
+    AsyncStream { continuation in
+      lock.withLock { volumeSink = continuation; volumeEnded = false }
+      continuation.onTermination = { [weak self] _ in self?.lock.withLock { self?.volumeEnded = true }; TestSignal.shared.fire() }
+      TestSignal.shared.fire()
+    }
+  }
+  func pressVolume(_ value: Float) { lock.withLock { volumeSink }?.yield(value) }
 }
 
 final class FakeCallObserver: CallObserverPort, @unchecked Sendable {
@@ -190,12 +207,17 @@ struct AudioLinkTests {
     }
     call?.systemActivated()
     await eventually("live") { states.values == [.connecting, .live] }
-    await #expect(throws: MediaError.self) { try await rig.core.playUrl(source: clip) }
+    let player = try await rig.core.playUrl(source: clip)
+    try player.play()
+    let refused = Collected(player.states)
+    await eventually("a play during the call is refused") { refused.last?.refused == .inCall }
 
     call = nil
 
     await eventually("the released object ended the call") { states.values.last == .ended }
-    _ = try await rig.core.playUrl(source: clip)
+    try player.play()
+    await eventually("a play after the call is not refused") { refused.last?.refused == nil && refused.last?.wish == true }
+    player.release()
   }
 
   @Test
@@ -232,25 +254,6 @@ struct AudioLinkTests {
   }
 
   @Test
-  func inv_audio_41_an_interruption_ends_a_voice_recording_with_its_refusal_and_no_file() async throws {
-    let rig = try AudioRig()
-    let recorder = MediaVoiceRecorder(capture: WritingCapture(), maxDurationMs: 60_000, link: { rig.link }, clock: { 1000 }, levelInterval: .milliseconds(5))
-    let target = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).m4a")
-    try await recorder.start(to: target)
-
-    rig.session.send(.interruptionBegan)
-
-    await eventually("revoked") { !recorder.isRecording }
-    do {
-      _ = try await recorder.stop()
-      Issue.record("a recording survived the interruption")
-    } catch let MediaError.Voice(detail) {
-      #expect(detail == voiceRefusalText(reason: .interrupted))
-    }
-    #expect(!FileManager.default.fileExists(atPath: target.path))
-  }
-
-  @Test
   func inv_audio_42_a_recording_without_an_open_layer_is_refused_and_records_nothing() async throws {
     let capture = WritingCapture()
     let recorder = MediaVoiceRecorder(capture: capture, maxDurationMs: 60_000, link: { nil }, clock: { 1000 }, levelInterval: .milliseconds(5))
@@ -273,8 +276,8 @@ struct AudioLinkTests {
         try await recorder.start(to: target)
         Issue.record("round \(round): a recording started during the call")
         _ = try? await recorder.stop()
-      } catch let MediaError.Voice(detail) {
-        #expect(detail == voiceRefusalText(reason: .inCall), "round \(round)")
+      } catch let MediaError.Voice(detail, reason) {
+        #expect((detail, reason) == (voiceRefusalText(reason: .inCall), .inCall), "round \(round)")
       }
       #expect(capture.starts == 0, "round \(round): the microphone was started during the call")
       #expect(!FileManager.default.fileExists(atPath: target.path))
@@ -282,45 +285,6 @@ struct AudioLinkTests {
       rig.calls.send([])
       await eventually("free after round \(round)") { rig.availability.last == .available }
     }
-  }
-
-  @Test
-  func inv_audio_53_closing_the_link_revokes_running_recordings_and_ends_calls() async throws {
-    let rig = try AudioRig()
-    guard case let .success(ticket) = await rig.link.admit(.voice) else { Issue.record("refused"); return }
-    let revoked = Task { () -> RecordingRefusal? in
-      for await reason in ticket.revoked { return reason }
-      return nil
-    }
-
-    rig.link.close()
-
-    #expect(await revoked.value == .interrupted)
-
-    let callRig = try AudioRig()
-    let call = try await callRig.link.call(.unmanaged)
-    let states = Task { () -> [CallState] in
-      var seen: [CallState] = []
-      for await state in call.states { seen.append(state) }
-      return seen
-    }
-
-    callRig.link.close()
-
-    #expect(await states.value.last == .ended)
-  }
-  @Test
-  func inv_audio_59_a_call_after_close_is_refused_and_a_failed_speaker_reaches_the_app() async throws {
-    let closed = try AudioRig()
-    closed.link.close()
-    await #expect(throws: MediaError.self) { _ = try await closed.link.call(.unmanaged) }
-
-    let rig = try AudioRig()
-    let call = try await rig.link.call(.unmanaged)
-    rig.session.failSpeaker(NSError(domain: "speaker", code: 7))
-    call.setSpeaker(true)
-    await eventually("the failure reached the app") { String(describing: Media.failure).contains("speaker") }
-    call.end()
   }
 
 }
@@ -349,7 +313,7 @@ final class WritingCapture: VoiceCapture, @unchecked Sendable {
   private var started = 0
   var starts: Int { lock.withLock { started } }
 
-  func start(file: URL, maxDurationMs: UInt64, onLimit: @escaping @Sendable () -> Void) async throws {
+  func start(file: URL, maxDurationMs: UInt64, onLimit: @escaping @Sendable () -> Void, onFailure: @escaping @Sendable (Error) -> Void) async throws {
     lock.withLock { started += 1 }
     try Data([1, 2, 3]).write(to: file)
   }

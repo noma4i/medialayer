@@ -13,7 +13,7 @@ extension MediaLayer {
           try ImagePreparation.encode($0, format: format, quality: quality, to: output)
         }
       } catch {
-        try? FileManager.default.removeItem(at: output)
+        NativeFailures.removeFile(output)
         throw error
       }
       return PreparedMedia(url: output, isNew: true)

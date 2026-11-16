@@ -195,8 +195,59 @@ struct MediaLayerBridgeTests {
 
     try! await media.evictNow()
 
-    let first = await iterator.next()
+    let first = try await iterator.next()
     #expect(first?.totalBytes == 0)
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func inv_failures_07_the_failure_stream_ends_when_the_layer_closes_and_a_late_one_ends_at_once() async throws {
+    let media = try open(settings: MemorySettings())
+    let early = media.failureStream()
+
+    await media.awaitClosed()
+
+    var seen: [MediaFailure] = []
+    for await failure in early { seen.append(failure) }
+    for await failure in media.failureStream() { seen.append(failure) }
+    #expect(seen.isEmpty, "\(seen)")
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func inv_failures_08_a_stats_stream_the_input_queue_refuses_ends_with_overloaded_and_the_close_ends_one_without_an_error() async throws {
+    let media = try MediaLayer.open(config: OpenConfig(
+      dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
+      fetcher: TestFetcher(),
+      settings: MemorySettings(),
+      slots: nil,
+      device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
+      defaults: defaultLimits(),
+      pool: defaultPoolSettings(),
+      ingress: IngressLimits(entries: 64, owners: 1, bytes: 1 << 20),
+      audioFocus: .exclusive
+    ))
+    let held = media.statsStream()
+
+    var refusal: Error?
+    do {
+      for try await _ in media.statsStream() {}
+    } catch {
+      refusal = error
+    }
+    guard case .Overloaded? = refusal as? MediaError else {
+      Issue.record("the refused stream ended without its error: \(String(describing: refusal))")
+      return
+    }
+
+    await media.awaitClosed()
+
+    var closeError: Error?
+    do {
+      for try await _ in held {}
+      for try await _ in media.statsStream() {}
+    } catch {
+      closeError = error
+    }
+    #expect(closeError == nil, "the close ended a stream with an error: \(String(describing: closeError))")
   }
 
   @Test
@@ -210,11 +261,11 @@ struct MediaLayerBridgeTests {
   }
 
   @Test
-  func playUrlGoesThroughTheLocalProxyAndTheVideoPlaceholderIsTheFirstFrame() async throws {
+  func aReadRouteGoesThroughTheLocalProxyAndTheVideoPlaceholderIsTheFirstFrame() async throws {
     let media = try open(settings: MemorySettings())
     let source = MediaItem(kind: .video, url: "https://o.test/a.mp4", headers: [:], cover: nil, blurHash: nil, strategy: .window)
 
-    let route = try await media.playUrl(source: source)
+    let route = try await media.readRoute(item: source)
 
     #expect(route.url.hasPrefix("http://127.0.0.1:"))
     #expect(placeholderFor(source: source, ready: false) == .firstFrame)
@@ -231,7 +282,7 @@ struct MediaLayerBridgeTests {
       defaults: defaultLimits(),
       pool: defaultPoolSettings(), audioFocus: .exclusive
     ))
-    let route = try await media.playUrl(source: MediaItem(kind: .audio, url: "https://o.test/voice.m4a", headers: [:], cover: nil, blurHash: nil, strategy: .window))
+    let route = try await media.readRoute(item: MediaItem(kind: .audio, url: "https://o.test/voice.m4a", headers: [:], cover: nil, blurHash: nil, strategy: .window))
     var request = URLRequest(url: URL(string: route.url)!)
     request.setValue("bytes=0-1", forHTTPHeaderField: "Range")
 

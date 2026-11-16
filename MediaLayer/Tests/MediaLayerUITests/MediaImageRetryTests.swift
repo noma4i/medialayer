@@ -12,6 +12,16 @@ private struct RetriedPhoto: MediaSource {
   var headers: [String: String] { [:] }
 }
 
+private struct RetriedOnce: View {
+  let places: RecordingPlaces
+
+  var body: some View {
+    MediaImage(RetriedPhoto(url: "file:///cache/retried.png"))
+    .frame(width: 50, height: 50)
+    .mediaLayer(places)
+  }
+}
+
 private struct RetryCell: View {
   let attempt: Int
   let context: MediaContext
@@ -58,6 +68,26 @@ extension GlobalMedia {
       host.rootView = RetryCell(attempt: 1, context: context)
       await until("the second load is ready") { places.recorded.contains("state ready") }
 
+      #expect(places.fetchedURLs.count == 2)
+    }
+
+    @Test
+    func inv_api_59_retry_reloads_a_failed_place_without_remount() async throws {
+      let places = RecordingPlaces()
+      ImageMemory.install(ImageCache(), on: places)
+      places.imageResult = .failure(MediaError.Fetch(detail: "the network dropped"))
+      let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+      window.rootViewController = UIHostingController(rootView: RetriedOnce(places: places))
+      window.isHidden = false
+      defer { window.isHidden = true; window.rootViewController = nil }
+
+      await until("the first load failed") { places.recorded.contains { $0.hasPrefix("state failed") } }
+      places.imageResult = .success(pngData(side: 8))
+      try await Media.retry(RetriedPhoto(url: "file:///cache/retried.png"))
+      await until("the same place loads again and is ready") { places.recorded.contains("state ready") }
+
+      #expect(places.recorded.filter { $0 == "mount" }.count == 1)
+      #expect(places.recorded.contains("retry file:///cache/retried.png"))
       #expect(places.fetchedURLs.count == 2)
     }
   }

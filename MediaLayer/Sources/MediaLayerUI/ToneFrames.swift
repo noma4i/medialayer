@@ -41,7 +41,7 @@ final class ToneFrames: TonePreparation, @unchecked Sendable {
   }
 
   private func firstFrame(source: MediaItem, places: MediaPlaces) async -> CGImage? {
-    guard source.kind == .video, let route = try? await places.playUrl(source: source), let url = URL(string: route.url) else { return nil }
+    guard source.kind == .video, let route = try? await places.readRoute(item: source), let url = URL(string: route.url) else { return nil }
     let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": route.headers])
     let generator = AVAssetImageGenerator(asset: asset)
     generator.appliesPreferredTrackTransform = true

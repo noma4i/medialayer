@@ -42,7 +42,7 @@ func importMediaFile(
     try Task.checkCancellation()
     return PreparedMedia(url: destination, isNew: true)
   } catch {
-    if let output { try? FileManager.default.removeItem(at: output) }
+    if let output { NativeFailures.removeFile(output) }
     if error is CancellationError { throw error }
     throw error as? MediaError ?? MediaError.Fetch(detail: "the source cannot be imported: \(error.localizedDescription)")
   }

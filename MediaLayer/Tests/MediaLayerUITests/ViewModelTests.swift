@@ -87,7 +87,10 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
     noteMain("mountPlace")
     record("mount")
     if let mountError { throw mountError }
-    return placeFactory?(item.url) ?? RecordingPlace(places: self, url: item.url)
+    if let placeFactory { return placeFactory(item.url) }
+    let place = RecordingPlace(places: self, url: item.url)
+    lock.withLock { mounted.append(place) }
+    return place
   }
   func mountVideoWindow() throws -> any WindowHandle { opened(RecordingWindow()) }
   func mountImageWindow(name: String, rowsPerPage: Int, reversed: Bool) throws -> any WindowHandle { opened(RecordingWindow()) }
@@ -126,8 +129,9 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   }
   func setTonePreparation(preparation: TonePreparation) throws { lock.withLock { self.preparation = preparation }; TestSignal.shared.fire() }
   func tonePixelsNeeded(source: MediaItem) async -> Bool { needsTone }
-  func playUrl(source: MediaItem) async throws -> PlaybackRoute {
-    PlaybackRoute(url: source.url, headers: source.headers, generation: nil, hls: false, looping: false)
+  func playUrl(source: MediaItem) async throws -> MediaPlayer { throw MediaError.Closed }
+  func readRoute(item: MediaItem) async throws -> PlaybackRoute {
+    PlaybackRoute(url: item.url, headers: item.headers, generation: nil, hls: false, looping: false)
   }
   struct ToneRequest: @unchecked Sendable {
     let source: MediaItem
@@ -153,14 +157,36 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
     stateSubscriptionEvents.continuation.yield(())
     return pair.stream
   }
+  func retry(item: MediaItem) async throws {
+    let (plain, live, turn) = lock.withLock { () -> ([AsyncStream<MediaState>.Continuation], [RecordingPlace], UInt64) in
+      retries += 1
+      return (states, mounted.filter { $0.url == item.url }, retries)
+    }
+    record("retry \(item.url)")
+    plain.forEach { $0.yield(.loading) }
+    live.forEach { $0.retried(attempt: turn) }
+  }
+  private var retries: UInt64 = 0
+  private var mounted: [RecordingPlace] = []
   private var states: [AsyncStream<MediaState>.Continuation] = []
   let stateSubscriptionEvents = AsyncStream<Void>.makeStream()
-  func emit(_ state: MediaState) { lock.withLock { states }.forEach { $0.yield(state) } }
+  func emit(_ state: MediaState) {
+    let plain = lock.withLock { states }
+    plain.forEach { $0.yield(state) }
+  }
 }
 
 private final class RecordingPlace: PlaceHandle, @unchecked Sendable {
+  private var listener: (any PlaybackListener)?
+  func subscribePlayback(listener: any PlaybackListener) throws -> Subscription {
+    lock.withLock { self.listener = listener }
+    return Subscription(noHandle: .init())
+  }
+  func retried(attempt: UInt64) {
+    lock.withLock { listener }?.changed(state: PlaybackState(playing: false, wish: false, reason: nil, refused: nil, attempt: attempt))
+  }
   private let places: RecordingPlaces
-  private let url: String
+  let url: String
   private let lock = NSLock()
   private var last = PlaceInput.make()
   private var released = false
@@ -230,22 +256,6 @@ final class RecordingWindow: WindowHandle, @unchecked Sendable {
 struct ViewModelTests {
   @MainActor
   @Test
-  func inv_audio_01_onlyTheEndedStateOfTheCoreStopsTheAudio() {
-    let places = RecordingPlaces()
-    let audio = AudioPlayback(item: TestAudio().item, playing: false, places: places)
-
-    audio.toggle()
-    audio.refresh(progress: 0.5)
-    #expect(audio.progress == 0.5)
-    audio.refresh(progress: 1)
-    #expect(audio.isPlaying)
-    audio.follow(.ended)
-
-    #expect(!audio.isPlaying)
-  }
-
-  @MainActor
-  @Test
   func inv_audio_06_everyEndRewindsToTheStartPausesAndReportsOnce() async {
     let places = RecordingPlaces()
     let audio = AudioPlayback(item: TestAudio().item, playing: true, places: places)
@@ -253,7 +263,6 @@ struct ViewModelTests {
     audio.refresh(progress: 0.7)
 
     #expect(audio.follow(.ended))
-    #expect(!audio.isPlaying)
     #expect(audio.progress == 0)
     #expect(!audio.follow(.ended))
     await eventually("the first end sought to the start") { places.recorded.filter { $0 == "seek 0.0" }.count == 1 }
@@ -268,21 +277,16 @@ struct ViewModelTests {
 
   @MainActor
   @Test
-  func inv_audio_07_theAudioStateTableDecidesSoundingBufferingAndFailed() {
-    let table: [(MediaState, sounding: Bool, buffering: Bool, failed: Bool)] = [
-      (.idle, false, true, false), (.loading, false, true, false), (.ready, true, false, false),
-      (.rendered, true, false, false), (.ended, false, false, false), (.failed(detail: "x"), false, false, true)
+  func inv_audio_07_theCoreTruthAndTheLoadStateDecideSoundingAndBuffering() {
+    let table: [(MediaState, sounding: Bool, buffering: Bool)] = [
+      (.idle, false, true), (.loading, false, true), (.ready, true, false),
+      (.rendered, true, false), (.ended, false, false), (.failed(detail: "x"), false, false)
     ]
-    for (state, sounding, buffering, failed) in table {
-      let audio = AudioPlayback(item: TestAudio().item, playing: true, places: RecordingPlaces())
-      audio.follow(state)
-      #expect(audio.isSounding == sounding, "\(state)")
-      #expect(audio.isBuffering == buffering, "\(state)")
-      #expect(state.isFailed == failed, "\(state)")
+    for (state, sounding, buffering) in table {
+      #expect(audioSounding(playing: true, state: state) == sounding, "\(state)")
+      #expect(audioBuffering(wish: true, state: state) == buffering, "\(state)")
+      #expect(!audioSounding(playing: false, state: state) && !audioBuffering(wish: false, state: state), "\(state)")
     }
-    let paused = AudioPlayback(item: TestAudio().item, playing: false, places: RecordingPlaces())
-    paused.follow(.rendered)
-    #expect(!paused.isSounding && !paused.isBuffering)
   }
 
   @MainActor

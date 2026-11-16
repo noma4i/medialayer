@@ -145,6 +145,7 @@ public struct MediaImage<Content: View>: View {
   @Environment(\.mediaShape) private var shape
   @State private var loaded: LoadedImage?
   @State private var state: MediaState = .idle
+  @State private var loadTurn: UInt64 = 0
   @State private var failure: ScopedFailure?
   @State private var claim = ClaimedMount()
   @State private var mountedItem: MediaItem?
@@ -200,7 +201,7 @@ public struct MediaImage<Content: View>: View {
           }
           .frame(width: geometry.size.width, height: geometry.size.height)
           .clipped()
-          .task(id: ImageLoad(key: key, active: isPlaying)) {
+          .task(id: ImageLoad(key: key, active: isPlaying, turn: loadTurn)) {
             if isPlaying { await load(key: key, request: request) }
           }
           .task(id: framesJob(for: key)) { [job = framesJob(for: key)] in await decodeFrames(job) }
@@ -240,6 +241,7 @@ public struct MediaImage<Content: View>: View {
   private struct ImageLoad: Equatable {
     let key: ImageKey
     let active: Bool
+    let turn: UInt64
   }
 
   private struct ImageFollow: Equatable {
@@ -258,15 +260,19 @@ public struct MediaImage<Content: View>: View {
     let places = context?.places
     let current = places.map { ObjectIdentifier($0) }
     if let mounted = mountedItem, !onScreen || mounted != item || mountedContext != current {
-      mount?.close()
-      mount = nil
+      claim.close()
       mountedItem = nil
       mountedContext = nil
     }
     guard let places else { return }
     if onScreen, mount == nil {
-      let created = PlaceMount(places: places, item: item) { error in
-        Task { @MainActor in failure = ScopedFailure(item: item, state: .failed(detail: String(describing: error))) }
+      let token = claim.gate.open()
+      let relay = PlaybackRelay(
+        receive: { [gate = claim.gate] playback in gate.deliver(token) { loadTurn = playback.attempt } },
+        failure: { _ in }
+      )
+      let created = PlaceMount(places: places, item: item, playback: relay) { [gate = claim.gate] error in
+        gate.deliver(token) { failure = ScopedFailure(item: item, state: .failed(detail: String(describing: error))) }
       }
       created.update(.make(visible: true))
       mount = created
@@ -345,8 +351,10 @@ extension MediaImage where Content == EmptyView {
 /// The place claim of an image. A plain object, so the teardown of the view releases it without writing view state.
 final class ClaimedMount {
   var mount: PlaceMount?
+  let gate = DeliveryGate()
 
   func close() {
+    gate.close()
     mount?.close()
     mount = nil
   }

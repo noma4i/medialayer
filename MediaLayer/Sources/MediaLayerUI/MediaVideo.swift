@@ -58,6 +58,9 @@ public struct MediaVideo<Content: View>: View {
   @State private var hostIdentity: MountIdentity?
   @State private var onScreen = false
   @State private var inBackground = false
+  @State private var playGeneration: UInt64 = 0
+  @State private var awake = ScreenAwakeHold()
+  @State private var gate = DeliveryGate()
   @Environment(\.mediaShape) private var shape
   private let source: any MediaSource
   private let playing: Bool
@@ -69,6 +72,7 @@ public struct MediaVideo<Content: View>: View {
   private let onFirstFrame: () -> Void
   private let onEnd: () -> Void
   private let onProgress: ((Double) -> Void)?
+  private let onPlaybackChange: (PlaybackState) -> Void
   private let content: (MediaState) -> Content
 
   public init(
@@ -82,6 +86,7 @@ public struct MediaVideo<Content: View>: View {
     onFirstFrame: @escaping () -> Void = {},
     onEnd: @escaping () -> Void = {},
     onProgress: ((Double) -> Void)? = nil,
+    onPlaybackChange: @escaping (PlaybackState) -> Void = { _ in },
     @ViewBuilder content: @escaping (MediaState) -> Content
   ) {
     self.source = source
@@ -94,6 +99,7 @@ public struct MediaVideo<Content: View>: View {
     self.onFirstFrame = onFirstFrame
     self.onEnd = onEnd
     self.onProgress = onProgress
+    self.onPlaybackChange = onPlaybackChange
     self.content = content
   }
 
@@ -120,7 +126,10 @@ public struct MediaVideo<Content: View>: View {
     .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
     .onChange(of: onScreen) { _, value in declare(visible: value) }
     .onDisappear { declare(visible: false) }
-    .onChange(of: playing) { mount?.update(input()) }
+    .onChange(of: playing) { _, value in
+      if value { playGeneration &+= 1 }
+      mount?.update(input())
+    }
     .onChange(of: group) { mount?.update(input()) }
     .onChange(of: peeking) { mount?.update(input()) }
     .onChange(of: muted) { mount?.update(input()) }
@@ -151,11 +160,13 @@ public struct MediaVideo<Content: View>: View {
   }
 
   private func input() -> PlaceInput {
-    .make(visible: true, playing: playing, group: group, peeking: peeking, muted: muted, viewToken: host?.token)
+    .make(visible: true, playing: playing, group: group, peeking: peeking, muted: muted, viewToken: host?.token, playGeneration: playGeneration)
   }
 
   private func declare(visible: Bool) {
     guard visible else {
+      gate.close()
+      awake.set(playing: false)
       mount?.close()
       mount = nil
       return
@@ -165,8 +176,17 @@ public struct MediaVideo<Content: View>: View {
       host = SurfaceHost(places: places)
       hostIdentity = identity
     }
-    let created = PlaceMount(places: places, item: item) { error in
-      Task { @MainActor in state = .failed(detail: String(describing: error)) }
+    let token = gate.open()
+    let relay = PlaybackRelay(receive: { [gate, awake] value in
+      gate.deliver(token) {
+        awake.set(playing: value.playing)
+        onPlaybackChange(value)
+      }
+    }, failure: { [gate] error in
+      gate.deliver(token) { state = .failed(detail: String(describing: error)) }
+    })
+    let created = PlaceMount(places: places, item: item, playback: relay) { [gate] error in
+      gate.deliver(token) { state = .failed(detail: String(describing: error)) }
     }
     mount = created
     created.update(input())
@@ -202,8 +222,9 @@ extension MediaVideo where Content == EmptyView {
     gravity: AVLayerVideoGravity = .resizeAspectFill,
     onFirstFrame: @escaping () -> Void = {},
     onEnd: @escaping () -> Void = {},
-    onProgress: ((Double) -> Void)? = nil
+    onProgress: ((Double) -> Void)? = nil,
+    onPlaybackChange: @escaping (PlaybackState) -> Void = { _ in }
   ) {
-    self.init(source, playing: playing, peeking: peeking, muted: muted, loop: loop, group: group, gravity: gravity, onFirstFrame: onFirstFrame, onEnd: onEnd, onProgress: onProgress) { _ in EmptyView() }
+    self.init(source, playing: playing, peeking: peeking, muted: muted, loop: loop, group: group, gravity: gravity, onFirstFrame: onFirstFrame, onEnd: onEnd, onProgress: onProgress, onPlaybackChange: onPlaybackChange) { _ in EmptyView() }
   }
 }

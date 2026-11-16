@@ -41,6 +41,7 @@ protocol CaptureBackend: AnyObject, Sendable {
   func setSink(_ sink: @escaping @Sendable (CaptureEvent) -> Void)
   func bind(lens: CameraLens, profile: CaptureProfile)
   func unbind()
+  func unbind(completion: @escaping @Sendable () -> Void)
   func attachPreviewLayer(_ layer: AVCaptureVideoPreviewLayer)
   func detachPreviewLayer(_ layer: AVCaptureVideoPreviewLayer)
   func takePhoto(flash: Bool, profile: CaptureProfile) async throws -> Data
@@ -48,12 +49,14 @@ protocol CaptureBackend: AnyObject, Sendable {
   func beginRecording(to url: URL, profile: CaptureProfile, lens: CameraLens, ticket: RecordingTicket?, refused: @escaping @Sendable (RecordingRefusal) -> Void)
   func endRecording()
   func recordedMs() -> UInt64
-  func setTorch(_ on: Bool)
-  func setZoom(_ ratio: Float)
+  func setTorch(_ on: Bool) throws
+  func setZoom(_ ratio: Float) throws
   func setFrameTap(_ tap: (@Sendable (CVPixelBuffer, UInt64) -> Void)?)
 }
 
 extension CaptureBackend {
+  func unbind(completion: @escaping @Sendable () -> Void) { unbind(); completion() }
+
   func beginRecording(to url: URL, profile: CaptureProfile, lens: CameraLens, ticket: RecordingTicket?, refused: @escaping @Sendable (RecordingRefusal) -> Void) {
     do {
       if let ticket { try ticket.start { beginRecording(to: url, profile: profile, lens: lens) } }
@@ -70,7 +73,7 @@ struct CameraServices {
   var admitSession: @Sendable (UInt64) async throws -> Release
   var admitShot: @Sendable (UInt64) async throws -> Release
   var link: @Sendable () -> AudioLink?
-  var clipInfo: @Sendable (URL) async -> MediaInfo?
+  var clipInfo: @Sendable (URL) async throws -> MediaInfo?
   var uprightVideo: @Sendable (URL) async throws -> Void
   var upright: @Sendable (URL, Double) async throws -> URL
   var directory: URL
@@ -93,7 +96,7 @@ struct CameraServices {
       link: { Media.link },
       clipInfo: { url in
         guard let layer = Media.current as? MediaLayer else { return nil }
-        return try? await layer.mediaInfo(MediaSourceValue.file(url, kind: .video))
+        return try await layer.mediaInfo(MediaSourceValue.file(url, kind: .video))
       },
       uprightVideo: { try await MediaLayerUI.uprightVideo(at: $0) },
       upright: { url, quality in
@@ -124,7 +127,7 @@ enum CaptureFiles {
   static func sweepOrphans(in directory: URL = CaptureFiles.directory) {
     let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
     for name in names where isCaptureOrphan(name: name) {
-      try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+      NativeFailures.removeFile(directory.appendingPathComponent(name))
     }
   }
 }

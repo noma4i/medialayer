@@ -22,6 +22,8 @@ private final class FakeBackend: CaptureBackend, @unchecked Sendable {
   var answer = Answer.opens
   var hasFlash = true
   var photoFails = false
+  /// The preview microphone sensor hears sound once bound, as AVCaptureBackend reports from audio buffers; a test sends silence itself.
+  var soundOnBind = true
   var photoSize: PixelSize? { PixelSize(width: 3000, height: 4000) }
 
   func setSink(_ sink: @escaping @Sendable (CaptureEvent) -> Void) { lock.withLock { self.sink = sink } }
@@ -44,6 +46,7 @@ private final class FakeBackend: CaptureBackend, @unchecked Sendable {
     case .opens:
       emit(.opened(hasFlash: hasFlash, zoomMin: 1, zoomMax: 20))
       emit(.streaming(on: true))
+      if profile.audio && lock.withLock({ soundOnBind }) { emit(.microphoneFlow(true)) }
     case let .refuses(reason): emit(.refuse(reason: reason))
     case .silent: break
     }
@@ -81,8 +84,15 @@ private final class FakeBackend: CaptureBackend, @unchecked Sendable {
     return 700
   }
 
-  func setTorch(_ on: Bool) { note("torch \(on)") }
-  func setZoom(_ ratio: Float) { note("zoom \(ratio)") }
+  var commandFailure: NSError?
+  func setTorch(_ on: Bool) throws {
+    note("torch \(on)")
+    if let commandFailure { throw commandFailure }
+  }
+  func setZoom(_ ratio: Float) throws {
+    note("zoom \(ratio)")
+    if let commandFailure { throw commandFailure }
+  }
   func setFrameTap(_ tap: (@Sendable (CVPixelBuffer, UInt64) -> Void)?) { lock.withLock { self.tap = tap }; TestSignal.shared.fire() }
 }
 
@@ -537,6 +547,23 @@ struct MediaCameraTests {
     await eventually("tap removed") { rig.backend.tap == nil }
   }
 
+  @Test
+  func inv_capture_39_a_frame_observer_that_arrives_during_a_take_gets_frames_after_it_without_touching_the_recording() async throws {
+    let rig = try makeRig(.moment)
+    await ready(rig)
+    try await rig.camera.startRecording()
+    await eventually("recording") { rig.camera.state.phase == .recording }
+    let binds = rig.backend.log.filter { $0.hasPrefix("bind") }.count
+
+    let observation = rig.camera.observeFrames(maxPerSecond: 10) { _ in }
+
+    #expect(rig.backend.tap == nil, "the frame output was added to the running recording")
+    #expect(rig.backend.log.filter { $0.hasPrefix("bind") }.count == binds, "the running recording was bound again")
+    _ = try await rig.camera.stopRecording()
+    await eventually("the frame output stands after the take") { rig.backend.tap != nil }
+    observation.cancel()
+  }
+
   @Test @MainActor
   func inv_capture_23_the_preview_fills_the_frame_and_a_pinch_zooms_by_the_step_and_the_view_attaches_by_the_window() async throws {
     let rig = try makeRig()
@@ -665,6 +692,135 @@ struct MediaCameraTests {
     #expect(FileManager.default.fileExists(atPath: clip.url.path))
     #expect(rig.counters.straightened == [recorded])
     await #expect(throws: MediaError.self) { _ = try await rig.camera.stopRecording() }
+  }
+
+  // C1
+  @Test
+  func inv_capture_34_a_take_ended_by_the_limit_shows_its_captured_outcome_without_stop() async throws {
+    let rig = try makeRig(.moment)
+    await ready(rig)
+    let states = Collected(rig.camera.states)
+    try await rig.camera.startRecording()
+    let take = try #require(rig.camera.state.take)
+
+    rig.backend.emit(.recordFinished(end: .limitReached))
+
+    await eventually("the outcome reached the app") { states.last?.outcome != nil }
+    #expect(states.last?.outcome == .captured(take: take))
+    #expect((states.last?.take, states.last?.phase) == (take, .ready))
+    #expect(files(rig).count == 1 && files(rig).first?.hasSuffix(".mp4") == true, "the clip stays without a stop: \(files(rig))")
+  }
+
+  // C2
+  @Test(arguments: [("interruption", CameraRefusal.interrupted), ("silence", .microphoneSilent), ("too short", .tooShort), ("failure", .recordFailed)])
+  func inv_capture_35_a_thrown_away_take_shows_its_refusal_and_fault_without_stop(cause: String, reason: CameraRefusal) async throws {
+    let rig = try makeRig(.moment)
+    await ready(rig)
+    let states = Collected(rig.camera.states)
+    rig.backend.emit(.microphoneFlow(true))
+    try await rig.camera.startRecording()
+    let take = try #require(rig.camera.state.take)
+
+    switch cause {
+    case "interruption": rig.audio.port.send(.interruptionBegan)
+    case "silence": rig.backend.emit(.microphoneFlow(false))
+    case "too short":
+      rig.counters.info = MediaInfo(durationMs: 300, frame: nil)
+      rig.backend.emit(.recordFinished(end: .limitReached))
+    default:
+      rig.counters.info = nil
+      rig.backend.emit(.recordFinished(end: .limitReached))
+    }
+
+    await eventually("\(cause): the outcome reached the app") { states.last?.outcome != nil }
+    #expect(states.last?.outcome == .refused(reason: reason), "\(cause)")
+    #expect((states.last?.take, states.last?.fault) == (take, reason), "\(cause)")
+    #expect(files(rig).isEmpty, "\(cause)")
+  }
+
+  // C3
+  @Test
+  func inv_capture_36_a_reset_during_a_take_shows_the_lost_take_and_the_camera_opens_again() async throws {
+    let rig = try makeRig(.moment)
+    await ready(rig)
+    let states = Collected(rig.camera.states)
+    try await rig.camera.startRecording()
+    let take = try #require(rig.camera.state.take)
+
+    rig.backend.emit(.fault(kind: .reset))
+
+    await eventually("recovered") { states.values.contains { $0.outcome == .lost(reason: .interrupted) } && states.last?.phase == .ready }
+    #expect((states.last?.take, states.last?.outcome) == (take, .lost(reason: .interrupted)))
+    #expect(states.values.filter { $0.outcome == .lost(reason: .interrupted) }.map(\.take).allSatisfy { $0 == take })
+    #expect(files(rig).isEmpty)
+  }
+
+  // C5 is in inv_ios_04. C4 is an Android row.
+
+  // C6
+  @Test(arguments: ["flash", "zoom"])
+  func inv_capture_38_a_command_the_system_rejects_is_a_failure_event_and_the_state_stays_true(command: String) async throws {
+    let rig = try makeRig(.moment)
+    await ready(rig)
+    let failures = Collected(Media.failures)
+    rig.backend.commandFailure = NSError(domain: AVFoundationErrorDomain, code: -11852, userInfo: [NSLocalizedDescriptionKey: "lock failed"])
+
+    if command == "flash" { rig.camera.setFlash(true) } else { rig.camera.zoom(by: 2) }
+
+    await eventually("\(command): the failure reached the app") { failures.values.contains { $0.source == .camera } }
+    let failure = try #require(failures.values.first { $0.source == .camera })
+    #expect((failure.domain, failure.code) == (AVFoundationErrorDomain, -11852))
+    #expect((rig.camera.state.flash, rig.camera.state.zoom) == (false, 1), "\(command)")
+  }
+}
+
+extension GlobalMedia {
+  @Suite(.serialized, .timeLimit(.minutes(2)))
+  struct LayerCloseTests {
+    // D08, D13 and the close rows of C5, V2, K4, M4
+    @Test
+    func inv_ios_04_closing_the_layer_ends_the_camera_the_recorder_the_call_the_volume_and_the_availability() async throws {
+      let app = try await AppLayer.open()
+      let backend = FakeBackend()
+      var services = CameraServices.live
+      services.directory = FileManager.default.temporaryDirectory.appendingPathComponent("camera-\(UUID().uuidString)")
+      services.center = NotificationCenter()
+      services.signals = names
+      let camera = try MediaCamera(profile: .photo, lens: .back, backend: backend, services: services)
+      let cameraStates = Collected(camera.states)
+      camera.attachPreview()
+      await eventually("preview ready") { cameraStates.last?.phase == .ready }
+      let recorder = MediaVoiceRecorder(capture: WritingCapture(), maxDurationMs: 60_000)
+      let voice = Collected(recorder.states)
+      let target = temporaryFile("m4a")
+      try await recorder.start(to: target)
+      let raises = Collected(try #require(await Media.audio?.volumeRaises()))
+      let availability = Collected(app.media.microphoneAvailability)
+      await eventually("observing") { app.session.volumeObserved && !availability.values.isEmpty }
+
+      await app.close()
+
+      await eventually("camera closed") { cameraStates.last?.phase == .closed }
+      #expect(backend.count("unbind") == 1)
+      await eventually("the take ended") { voice.last?.outcome != nil }
+      #expect(voice.last == VoiceState(take: 1, phase: .idle, outcome: .refused(reason: .interrupted), recordedMs: 0))
+      #expect(!FileManager.default.fileExists(atPath: target.path))
+      await eventually("volume and availability streams ended") { raises.finished && availability.finished && !app.session.volumeObserved }
+      let late = Collected(app.media.microphoneAvailability)
+      await eventually("a read after the close ends at once") { late.finished }
+      #expect(late.values.isEmpty)
+
+      let calling = try await AppLayer.open()
+      let call = try await calling.media.callAudio(.unmanaged)
+      let callStates = Collected(call.states)
+      let route = Collected(call.route)
+
+      await calling.close()
+
+      await eventually("call ended") { callStates.finished && route.finished }
+      #expect(callStates.last == .ended)
+      await #expect(throws: MediaError.self) { _ = try await calling.media.callAudio(.unmanaged) }
+    }
   }
 }
 

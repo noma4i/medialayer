@@ -11,7 +11,7 @@ func recordSessionFailure(_ error: Error) {
     AVAudioSession.ErrorCode.cannotStartPlaying.rawValue,
     AVAudioSession.ErrorCode.isBusy.rawValue
   ].contains(value.code) { return }
-  Media.recordFailure(MediaError.Unexpected(detail: "\(value.domain) \(value.code) \(value.localizedDescription)"))
+  Media.recordNativeFailure(error, source: .session)
 }
 
 struct SystemAudioSession: AudioSessionPort {

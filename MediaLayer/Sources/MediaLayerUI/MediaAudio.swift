@@ -2,10 +2,25 @@ import MediaLayer
 import Observation
 import SwiftUI
 
+func audioSounding(playing: Bool, state: MediaState) -> Bool {
+  switch state {
+  case .ready, .rendered: playing
+  case .idle, .loading, .ended, .failed: false
+  }
+}
+
+func audioBuffering(wish: Bool, state: MediaState) -> Bool {
+  switch state {
+  case .idle, .loading: wish
+  case .ready, .rendered, .ended, .failed: false
+  }
+}
+
 @MainActor
 @Observable
 public final class AudioPlayback {
-  public private(set) var isPlaying: Bool
+  public private(set) var playback = PlaybackState(playing: false, wish: false, reason: nil, refused: nil, attempt: 0)
+  public var isPlaying: Bool { playback.playing }
   public private(set) var progress = 0.0
   public private(set) var playhead = AudioPlayhead()
   @ObservationIgnored private var jumpPending = false
@@ -16,6 +31,10 @@ public final class AudioPlayback {
   @ObservationIgnored private var muted: Bool
   @ObservationIgnored private let places: MediaPlaces
   @ObservationIgnored private var mount: PlaceMount?
+  @ObservationIgnored private var playingWish: Bool
+  @ObservationIgnored private var playGeneration: UInt64 = 0
+  @ObservationIgnored private let awake = ScreenAwakeHold()
+  @ObservationIgnored private let gate = DeliveryGate()
 
   init(item: MediaItem, playing: Bool, muted: Bool = false, rate: Float = 1, group: String? = nil, places: MediaPlaces) {
     self.item = item
@@ -23,18 +42,29 @@ public final class AudioPlayback {
     self.muted = muted
     self.rate = rate
     self.places = places
-    isPlaying = playing
+    playingWish = playing
   }
 
   func mountPlace() {
     guard mount == nil else { return }
-    mount = PlaceMount(places: places, item: item) { [weak self] error in
-      Task { @MainActor in self?.follow(.failed(detail: String(describing: error))) }
+    let token = gate.open()
+    let relay = PlaybackRelay(receive: { [weak self, gate] value in
+      gate.deliver(token) {
+        self?.playback = value
+        self?.awake.set(playing: value.playing)
+      }
+    }, failure: { [weak self, gate] error in
+      gate.deliver(token) { self?.follow(.failed(detail: String(describing: error))) }
+    })
+    mount = PlaceMount(places: places, item: item, playback: relay) { [weak self, gate] error in
+      gate.deliver(token) { self?.follow(.failed(detail: String(describing: error))) }
     }
     push()
   }
 
   func unmountPlace() {
+    gate.close()
+    awake.set(playing: false)
     mount?.close()
     mount = nil
   }
@@ -50,12 +80,16 @@ public final class AudioPlayback {
   }
 
   private func push() {
-    mount?.update(.make(visible: true, playing: isPlaying, group: group, muted: muted, rate: rate))
+    mount?.update(.make(visible: true, playing: playingWish, group: group, muted: muted, rate: rate, playGeneration: playGeneration))
   }
 
   public func toggle() {
     setPlaying(!isPlaying)
   }
+
+  public func play() { setPlaying(true) }
+
+  public func pause() { setPlaying(false) }
 
   func follow(playing value: Bool) {
     setPlaying(value)
@@ -93,17 +127,11 @@ public final class AudioPlayback {
   }
 
   public var isSounding: Bool {
-    switch state {
-    case .ready, .rendered: isPlaying
-    case .idle, .loading, .ended, .failed: false
-    }
+    audioSounding(playing: isPlaying, state: state)
   }
 
   public var isBuffering: Bool {
-    switch state {
-    case .idle, .loading: isPlaying
-    case .ready, .rendered, .ended, .failed: false
-    }
+    audioBuffering(wish: playback.wish, state: state)
   }
 
   @discardableResult
@@ -121,7 +149,8 @@ public final class AudioPlayback {
   }
 
   private func setPlaying(_ value: Bool) {
-    isPlaying = value
+    playingWish = value
+    if value { playGeneration &+= 1 }
     push()
   }
 }

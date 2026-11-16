@@ -478,17 +478,13 @@ struct AVQueuePlayerSlotTests {
   func inv_audio_03_anEndedAudioStopsAtTheStartAndALaterSeekSurvivesARepeatedEnd() {
     let places = RecordingPlaces()
     let audio = AudioPlayback(item: MediaItem(kind: .audio, url: "note", headers: [:], cover: nil, blurHash: nil, strategy: .window), playing: false, places: places)
-    audio.toggle()
     audio.refresh(progress: 1)
 
     audio.follow(.ended)
-    #expect(!audio.isPlaying && audio.progress == 0)
+    #expect(audio.progress == 0)
     audio.seek(to: 0.5)
     audio.follow(.ended)
     #expect(audio.progress == 0.5)
-    audio.toggle()
-
-    #expect(audio.isPlaying)
   }
 
   @Test(arguments: [

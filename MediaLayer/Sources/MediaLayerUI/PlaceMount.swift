@@ -1,6 +1,19 @@
 import Foundation
 import MediaLayer
 
+final class PlaybackRelay: PlaybackListener, @unchecked Sendable {
+  private let receive: @Sendable (PlaybackState) -> Void
+  private let failure: @Sendable (MediaError) -> Void
+
+  init(receive: @escaping @Sendable (PlaybackState) -> Void, failure: @escaping @Sendable (MediaError) -> Void) {
+    self.receive = receive
+    self.failure = failure
+  }
+
+  func changed(state: PlaybackState) { receive(state) }
+  func failed(error: MediaError) { failure(error) }
+}
+
 struct PlaceUpdate: Sendable {
   var input: PlaceInput?
   var seek: Double?
@@ -19,6 +32,7 @@ struct PlaceUpdate: Sendable {
 
 private final class OpenedPlace: @unchecked Sendable {
   var place: (any PlaceHandle)?
+  var playback: Subscription?
   var isClosed = false
 }
 
@@ -30,7 +44,7 @@ func mediaError(_ error: Error) -> MediaError {
 final class PlaceMount: @unchecked Sendable {
   private let drain: LatestDrain<PlaceUpdate>
 
-  init(places: MediaPlaces, item: MediaItem, failed: @escaping @Sendable (MediaError) -> Void) {
+  init(places: MediaPlaces, item: MediaItem, playback: (any PlaybackListener)? = nil, failed: @escaping @Sendable (MediaError) -> Void) {
     let opened = OpenedPlace()
     drain = LatestDrain(merge: { PlaceUpdate.merged($0, $1) }) { update in
       guard !opened.isClosed else { return }
@@ -40,11 +54,15 @@ final class PlaceMount: @unchecked Sendable {
           do { try opened.place?.seek(fraction: fraction) } catch { failed(mediaError(error)) }
         }
         opened.place?.release()
+        opened.playback = nil
         opened.place = nil
         return
       }
       do {
-        if opened.place == nil { opened.place = try places.mountPlace(item: item) }
+        if opened.place == nil {
+          opened.place = try places.mountPlace(item: item)
+          if let playback { opened.playback = try opened.place?.subscribePlayback(listener: playback) }
+        }
         guard let place = opened.place else { return }
         if let input = update.input { try place.update(input: input) }
         if let fraction = update.seek { try place.seek(fraction: fraction) }
@@ -71,8 +89,8 @@ final class PlaceMount: @unchecked Sendable {
 extension PlaceInput {
   static func make(
     visible: Bool = false, playing: Bool = false, group: String? = nil, peeking: Bool = false,
-    muted: Bool? = nil, rate: Float? = nil, pinned: Bool = false, viewToken: UInt64? = nil
+    muted: Bool? = nil, rate: Float? = nil, pinned: Bool = false, viewToken: UInt64? = nil, playGeneration: UInt64 = 0
   ) -> PlaceInput {
-    PlaceInput(visible: visible, playing: playing, group: group, peeking: peeking, muted: muted, rate: rate, pinned: pinned, viewToken: viewToken)
+    PlaceInput(visible: visible, playing: playing, playGeneration: playGeneration, group: group, peeking: peeking, muted: muted, rate: rate, pinned: pinned, viewToken: viewToken)
   }
 }

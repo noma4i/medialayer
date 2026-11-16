@@ -15,12 +15,15 @@ public protocol MediaPlaces: AnyObject, Sendable {
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder
   func setTonePreparation(preparation: TonePreparation) throws
   func tonePixelsNeeded(source: MediaItem) async -> Bool
-  func playUrl(source: MediaItem) async throws -> PlaybackRoute
+  func playUrl(source: MediaItem) async throws -> MediaPlayer
+  func readRoute(item: MediaItem) async throws -> PlaybackRoute
+  func retry(item: MediaItem) async throws
   func stateStream(key: String) -> AsyncStream<MediaState>
   func toneStream(source: MediaItem, band: Float) -> AsyncStream<ToneUpdate>
 }
 
 public protocol PlaceHandle: AnyObject, Sendable {
+  func subscribePlayback(listener: any PlaybackListener) throws -> Subscription
   func update(input: PlaceInput) throws
   func seek(fraction: Double) throws
   func itemState(state: MediaState) throws
@@ -62,27 +65,54 @@ public enum Media {
 
   public static var muted: Bool { flag.value }
 
+  public static func retry(_ source: some MediaSource) async throws {
+    guard let places = ProcessMediaContext.shared.current?.places else { throw MediaError.Closed }
+    try await places.retry(item: normalizeItem(item: source.item))
+  }
+
   /// Applies the flag to the open layer first: a refusal of the core throws and leaves the flag unchanged.
   public static func setMuted(_ value: Bool) throws {
     do {
       try current?.setMutedAll(muted: value)
     } catch {
       flag.failure = mediaError(error)
+      let native = error as NSError
+      NativeFailures.publish(NativeFailure(source: .device, domain: native.domain, code: Int64(native.code), message: native.localizedDescription))
       throw error
     }
     flag.failure = nil
+    NativeFailures.clear()
     flag.value = value
   }
 
   /// The last refusal of the core to apply the global mute, or nil after a success.
-  public static var failure: MediaError? { flag.failure }
+  public static var failure: MediaError? {
+    if let error = NativeFailures.lastError { return error }
+    if let failure = NativeFailures.last, failure.source == .file { return .Unexpected(detail: failure.message) }
+    return flag.failure
+  }
+
+  public static var failures: AsyncStream<NativeFailure> { NativeFailures.events }
+
+  static func publishFailure(_ failure: NativeFailure) {
+    NativeFailures.publish(failure)
+    flag.failure = .Unexpected(detail: failure.message)
+  }
+
+  static func recordNativeFailure(_ error: Error, source: FailureSource) {
+    let native = error as NSError
+    publishFailure(NativeFailure(source: source, domain: native.domain, code: Int64(native.code), message: native.localizedDescription))
+  }
 
   static func recordFailure(_ error: Error) {
-    flag.failure = mediaError(error)
+    let failure = mediaError(error)
+    NativeFailures.record(failure)
+    flag.failure = failure
   }
 
   static func clearFailure() {
     flag.failure = nil
+    NativeFailures.clear()
   }
 }
 

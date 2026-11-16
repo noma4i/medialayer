@@ -41,6 +41,7 @@ private final class Admissions: @unchecked Sendable {
   }
 }
 
+extension GlobalMedia {
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct MediaImageDecodeTests {
   private func decode(_ data: Data, maxSide: Int?, circle: Bool = false, admit: @escaping DecodeAdmit) async throws -> PlatformImage {
@@ -137,4 +138,5 @@ struct MediaImageDecodeTests {
 
     #expect(try size(image) == [15, 30])
   }
+}
 }

@@ -31,8 +31,10 @@ private final class StatsCountingPlaces: MediaPlaces, @unchecked Sendable {
   func fetchImage(url: String, headers: [String: String]) async throws -> ImageFetchResult { try await inner.fetchImage(url: url, headers: headers) }
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder { await inner.placeholder(source: source, ready: ready) }
   func tonePixelsNeeded(source: MediaItem) async -> Bool { await inner.tonePixelsNeeded(source: source) }
-  func playUrl(source: MediaItem) async throws -> PlaybackRoute { try await inner.playUrl(source: source) }
+  func playUrl(source: MediaItem) async throws -> MediaPlayer { try await inner.playUrl(source: source) }
+  func readRoute(item: MediaItem) async throws -> PlaybackRoute { try await inner.readRoute(item: item) }
   func stateStream(key: String) -> AsyncStream<MediaState> { inner.stateStream(key: key) }
+  func retry(item: MediaItem) async throws { try await inner.retry(item: item) }
   func toneStream(source: MediaItem, band: Float) -> AsyncStream<ToneUpdate> { inner.toneStream(source: source, band: band) }
   func mountPlace(item: MediaItem) throws -> any PlaceHandle { try inner.mountPlace(item: item) }
   func mountVideoWindow() throws -> any WindowHandle { try inner.mountVideoWindow() }

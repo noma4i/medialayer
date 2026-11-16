@@ -52,7 +52,7 @@ enum VideoPreparation {
     do {
       try await withTaskCancellationHandler { try await job.run() } onCancel: { job.cancel() }
     } catch {
-      try? FileManager.default.removeItem(at: output)
+      NativeFailures.removeFile(output)
       throw error
     }
     progress?(1)

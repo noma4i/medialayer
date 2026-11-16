@@ -78,8 +78,10 @@ private final class MountPlacesLog: MediaPlaces, @unchecked Sendable {
   func fetchImage(url: String, headers: [String: String]) async throws -> ImageFetchResult { try await inner.fetchImage(url: url, headers: headers) }
   func placeholder(source: MediaItem, ready: Bool) async -> Placeholder { await inner.placeholder(source: source, ready: ready) }
   func tonePixelsNeeded(source: MediaItem) async -> Bool { await inner.tonePixelsNeeded(source: source) }
-  func playUrl(source: MediaItem) async throws -> PlaybackRoute { try await inner.playUrl(source: source) }
+  func playUrl(source: MediaItem) async throws -> MediaPlayer { try await inner.playUrl(source: source) }
+  func readRoute(item: MediaItem) async throws -> PlaybackRoute { try await inner.readRoute(item: item) }
   func stateStream(key: String) -> AsyncStream<MediaState> { inner.stateStream(key: key) }
+  func retry(item: MediaItem) async throws { try await inner.retry(item: item) }
   func toneStream(source: MediaItem, band: Float) -> AsyncStream<ToneUpdate> { inner.toneStream(source: source, band: band) }
   func mountPlace(item: MediaItem) throws -> any PlaceHandle { record("mountPlace \(item.url)"); return try inner.mountPlace(item: item) }
   func mountVideoWindow() throws -> any WindowHandle { try inner.mountVideoWindow() }
@@ -141,14 +143,6 @@ private func openInputCore(_ slot: InputSlot) throws -> MediaLayer {
   ))
 }
 
-private func settles(_ condition: () -> Bool) async -> Bool {
-  for _ in 0..<400 {
-    if condition() { return true }
-    try? await Task.sleep(for: .milliseconds(25))
-  }
-  return condition()
-}
-
 extension GlobalMedia {
   @MainActor
   @Suite(.serialized, .timeLimit(.minutes(2)))
@@ -157,7 +151,7 @@ extension GlobalMedia {
       let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 200))
       window.rootViewController = UIHostingController(rootView: InputCell(input: input, context: MediaContext(places: places ?? media)))
       window.isHidden = false
-      _ = await settles { input.audio != nil }
+      _ = await eventually { input.audio != nil }
       return window
     }
 
@@ -170,10 +164,10 @@ extension GlobalMedia {
     private func barrier(_ input: AudioInput, _ media: MediaLayer, _ slot: InputSlot, key: String) async {
       let renders = input.seen.count
       input.unrelated += 1
-      _ = await settles { input.seen.count > renders }
+      _ = await eventually { input.seen.count > renders }
       let before = slot.count("rate")
       media.setRate(key: key, rate: Float(3 + before))
-      _ = await settles { slot.count("rate") > before }
+      _ = await eventually { slot.count("rate") > before }
     }
 
     @Test
@@ -187,12 +181,12 @@ extension GlobalMedia {
       #expect(slot.count("play") == 0)
 
       input.playing = true
-      #expect(await settles { slot.playing("file:///clip.mp4") })
-      #expect(first.isPlaying)
+      #expect(await eventually { slot.playing("file:///clip.mp4") })
+      #expect(await eventually { first.isPlaying })
 
       input.playing = false
-      #expect(await settles { !slot.playing("file:///clip.mp4") })
-      #expect(!first.isPlaying)
+      #expect(await eventually { !slot.playing("file:///clip.mp4") })
+      #expect(await eventually { !first.isPlaying })
       #expect(input.seen.count > 1)
       #expect(input.sameObject)
       #expect(input.audio === first)
@@ -206,8 +200,8 @@ extension GlobalMedia {
       let window = await mount(input, media)
       defer { unmount(window, media) }
 
-      #expect(input.audio?.isPlaying == true)
-      #expect(await settles { slot.playing("file:///clip.mp4") })
+      #expect(await eventually { slot.playing("file:///clip.mp4") })
+      #expect(await eventually { input.audio?.isPlaying == true })
     }
 
     @Test
@@ -220,12 +214,12 @@ extension GlobalMedia {
       let window = await mount(input, media, places: places)
       defer { unmount(window, media) }
 
-      let played = await settles { slot.playing("file:///clip.mp4") }
+      let played = await eventually { slot.playing("file:///clip.mp4") }
       #expect(input.order == ["child onAppear toggle"])
       #expect(places.calls == ["mountPlace file:///clip.mp4"])
       #expect(played)
       await barrier(input, media, slot, key: "file:///clip.mp4")
-      #expect(input.audio?.isPlaying == true)
+      #expect(await eventually { input.audio?.isPlaying == true })
       #expect(slot.playing("file:///clip.mp4"))
     }
 
@@ -239,13 +233,13 @@ extension GlobalMedia {
       let audio = try #require(input.audio)
 
       audio.toggle()
-      #expect(await settles { slot.playing("file:///clip.mp4") })
+      #expect(await eventually { slot.playing("file:///clip.mp4") })
       input.rate = 2
       input.muted = true
       input.group = "system"
       await barrier(input, media, slot, key: "file:///clip.mp4")
 
-      #expect(audio.isPlaying)
+      #expect(await eventually { audio.isPlaying })
       #expect(slot.playing("file:///clip.mp4"))
       #expect(slot.count("pause") == 0)
       #expect(input.sameObject)
@@ -259,17 +253,17 @@ extension GlobalMedia {
       let window = await mount(input, media)
       defer { unmount(window, media) }
       let first = try #require(input.audio)
-      #expect(await settles { slot.playing("file:///first.mp4") })
+      #expect(await eventually { slot.playing("file:///first.mp4") })
 
       input.url = "file:///second.mp4"
       input.playing = false
-      #expect(await settles { input.audio !== first })
+      #expect(await eventually { input.audio !== first })
       #expect(input.audio?.isPlaying == false)
 
       input.url = "file:///third.mp4"
       input.playing = true
-      #expect(await settles { slot.playing("file:///third.mp4") })
-      #expect(input.audio?.isPlaying == true)
+      #expect(await eventually { slot.playing("file:///third.mp4") })
+      #expect(await eventually { input.audio?.isPlaying == true })
       #expect(!slot.all.contains { $0.contains("play:file:///second.mp4") })
       #expect(!slot.playing("file:///first.mp4"))
     }

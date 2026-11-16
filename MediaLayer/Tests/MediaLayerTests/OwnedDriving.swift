@@ -81,6 +81,7 @@ extension MediaLayer {
   func setPlaying(key: String, playing: Bool, groups: [String?] = []) {
     driving.edit(self, key: key) {
       $0.playing = playing
+      if playing { $0.playGeneration &+= 1 }
       $0.group = groups.compactMap { $0 }.first
     }
   }

@@ -55,11 +55,15 @@ struct CallHoldTests {
     let inputs = media.audioInputs()
     _ = try inputs.send(input: .callStarted(id: 1, kind: .unmanaged, speaker: false))
     #expect(await events.next() == "pause")
-    await #expect(throws: MediaError.self) { _ = try await media.playUrl(source: item) }
+    let player = try await media.playUrl(source: item)
+    try player.play()
+    _ = try await media.readRoute(item: item)
+    #expect(slot.plays == 1, "a player played during the call")
 
     _ = try inputs.send(input: .callEnded(id: 1))
-    _ = try await media.playUrl(source: item)
+    _ = try await media.readRoute(item: item)
     #expect(slot.plays == 1, "the release resumed the playback")
+    player.release()
     media.setPlaying(key: clip, playing: true, groups: [nil])
     #expect(await events.next() == "play")
     #expect(slot.plays == 2)

@@ -71,7 +71,7 @@ enum ImagePreparation {
     do {
       try encode(result, format: .jpeg, quality: quality, to: output)
     } catch {
-      try? FileManager.default.removeItem(at: output)
+      NativeFailures.removeFile(output)
       throw error as? MediaError ?? MediaError.Unexpected(detail: "the JPEG cannot be written")
     }
     return PreparedMedia(url: output, isNew: true)

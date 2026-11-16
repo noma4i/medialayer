@@ -1,13 +1,15 @@
 import Foundation
 
 private final class StatsRelay: StatsListener, @unchecked Sendable {
-  private let continuation: AsyncStream<MediaStats>.Continuation
+  private let continuation: AsyncThrowingStream<MediaStats, Error>.Continuation
 
-  init(_ continuation: AsyncStream<MediaStats>.Continuation) { self.continuation = continuation }
+  init(_ continuation: AsyncThrowingStream<MediaStats, Error>.Continuation) { self.continuation = continuation }
 
   func changed(stats: MediaStats) { continuation.yield(stats) }
 
-  func failed(error: MediaError) { continuation.finish() }
+  func failed(error: MediaError) {
+    if case .Closed = error { continuation.finish() } else { continuation.finish(throwing: error) }
+  }
 }
 
 private final class StateRelay: StateListener, @unchecked Sendable {
@@ -29,6 +31,7 @@ private final class FailureRelay: FailureListener, @unchecked Sendable {
   init(_ continuation: AsyncStream<MediaFailure>.Continuation) { self.continuation = continuation }
 
   func failed(failure: MediaFailure) { continuation.yield(failure) }
+  func closed() { continuation.finish() }
 }
 
 public enum ToneUpdate: Sendable {
@@ -62,13 +65,13 @@ extension MediaLayer {
     }
   }
 
-  public func statsStream() -> AsyncStream<MediaStats> {
-    AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+  public func statsStream() -> AsyncThrowingStream<MediaStats, Error> {
+    AsyncThrowingStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
       do {
         let subscription = try subscribeStats(listener: StatsRelay(continuation))
         continuation.onTermination = { _ in withExtendedLifetime(subscription) {} }
       } catch {
-        continuation.finish()
+        if let error = error as? MediaError, case .Closed = error { continuation.finish() } else { continuation.finish(throwing: error) }
       }
     }
   }

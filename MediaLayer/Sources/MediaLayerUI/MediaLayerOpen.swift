@@ -49,6 +49,7 @@ extension MediaLayer {
     audioFocus: MediaAudioFocus,
     imageMemoryBytes: Int,
     onSimulator: Bool = runsOnSimulator,
+    ports: @escaping @Sendable (AudioFocus) -> AudioPorts = { .system(focus: $0) },
     build: @escaping @Sendable (OpenConfig) throws -> MediaLayer = { try MediaLayer.open(config: $0) }
   ) async throws -> MediaLayer {
     guard imageMemoryBytes > 0 else { throw MediaError.InvalidSpec(detail: "imageMemoryBytes must be positive") }
@@ -62,7 +63,7 @@ extension MediaLayer {
       do {
         try Task.checkCancellation()
         let media = try build(config)
-        let link = AudioLink(core: media, ports: .system(focus: audioFocus.core), setVolumeMultiplier: { value in factory.slots.setVolumeMultiplier(value) })
+        let link = AudioLink(core: media, ports: ports(audioFocus.core), setVolumeMultiplier: { value in factory.slots.setVolumeMultiplier(value) })
         audio.bind(link)
         resources?.bind(media, link: link)
         #if os(iOS)
@@ -84,6 +85,7 @@ extension MediaLayer {
       throw CancellationError()
     }
     try media.setTonePreparation(preparation: ToneFrames(places: media))
+    try media.setMutedAll(muted: Media.muted)
     ImageMemory.install(imageCache, on: media)
     LoadedSlots.install(factory.slots, on: media)
     HostLayers.install(factory.hosts, on: media)
@@ -193,7 +195,7 @@ final class OpenedResources: MemoryReleaser, @unchecked Sendable {
     guard let media else { return }
     media?.stopFollowingSystem()
     let link = lock.withLock { let link = self.link; self.link = nil; return link }
-    link?.close()
+    await link?.awaitClose()
     audio?.bind(nil)
     factory.release()
     images.shutdown()

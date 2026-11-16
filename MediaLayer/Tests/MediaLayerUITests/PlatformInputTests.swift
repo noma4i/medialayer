@@ -27,6 +27,7 @@ private final class Mapped: @unchecked Sendable {
 }
 
 private final class GatedPlace: PlaceHandle, @unchecked Sendable {
+  func subscribePlayback(listener: any PlaybackListener) throws -> Subscription { Subscription(noHandle: .init()) }
   let entered = DispatchSemaphore(value: 0)
   let gate = DispatchSemaphore(value: 0)
   private let lock = NSLock()
@@ -193,6 +194,7 @@ private final class MappingGate: @unchecked Sendable {
 }
 
 private final class RefusingPlace: PlaceHandle, @unchecked Sendable {
+  func subscribePlayback(listener: any PlaybackListener) throws -> Subscription { Subscription(noHandle: .init()) }
   private let lock = NSLock()
   private var attempts = 0
   private var released = 0

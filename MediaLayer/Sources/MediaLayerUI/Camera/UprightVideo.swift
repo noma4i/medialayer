@@ -1,5 +1,6 @@
 @preconcurrency import AVFoundation
 import Foundation
+import MediaLayer
 
 func uprightVideo(at url: URL) async throws {
   let task = Task.detached {
@@ -24,7 +25,7 @@ func uprightVideo(at url: URL) async throws {
     let height = Int(ceil(bounds.height / 2)) * 2
     guard width > 0, height > 0 else { throw UprightVideoError.invalidVideo }
     let temporary = url.deletingLastPathComponent().appendingPathComponent(".upright-\(UUID().uuidString).\(url.pathExtension)")
-    defer { try? FileManager.default.removeItem(at: temporary) }
+    defer { NativeFailures.removeFile(temporary) }
     let reader = try AVAssetReader(asset: asset)
     let fileType: AVFileType = url.pathExtension.lowercased() == "mov" ? .mov : .mp4
     let writer = try AVAssetWriter(outputURL: temporary, fileType: fileType)

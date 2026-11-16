@@ -94,7 +94,8 @@ public final class MediaCamera: @unchecked Sendable {
   private var epoch = 0
   private var sessionHold: CameraServices.Release?
   private var audioHold: RecordingTicket?
-  private var microphoneFlowing = true
+  private var revokedAudio: RecordingTicket?
+  private var microphoneFlowing = false
   private var binding: Task<Void, Never>?
   private var shooting: Task<Void, Never>?
   private var reading: Task<Void, Never>?
@@ -123,6 +124,7 @@ public final class MediaCamera: @unchecked Sendable {
       services.center.addObserver(forName: services.signals.background, object: nil, queue: nil) { [weak self] _ in self?.setForeground(false) },
       services.center.addObserver(forName: services.signals.foreground, object: nil, queue: nil) { [weak self] _ in self?.setForeground(true) }
     ]
+    services.link()?.onClose { [weak self] in self?.closeFromLayer() }
   }
 
   deinit {
@@ -134,7 +136,8 @@ public final class MediaCamera: @unchecked Sendable {
     for task in [binding, shooting, reading, ticker] { task?.cancel() }
     sessionHold?()
     audioHold?.end()
-    if let url = recordingURL { try? FileManager.default.removeItem(at: url) }
+    if let url = recordingURL { removeFile(url) }
+    if case let .success(clip)? = ended { removeFile(clip.url) }
   }
 
   public static func isAvailable(_ lens: CameraLens) -> Bool {
@@ -180,8 +183,11 @@ public final class MediaCamera: @unchecked Sendable {
         queue.async {
           guard self.startWaiter == nil else { return continuation.resume(throwing: Self.refusal(.notReady)) }
           if self.profile.audio && self.audioHold == nil { return continuation.resume(throwing: Self.refusal(.notReady)) }
-          self.ended = nil
           let wasReady = self.run.state.phase == .ready && self.profile.mode == .video
+          if wasReady {
+            if case let .success(clip)? = self.ended { self.removeFile(clip.url) }
+            self.ended = nil
+          }
           self.apply(.start)
           if self.run.starting { self.startWaiter = continuation } else { continuation.resume(throwing: Self.refusal(wasReady ? self.run.state.fault ?? .notReady : .notReady)) }
         }
@@ -190,7 +196,7 @@ public final class MediaCamera: @unchecked Sendable {
       await withCheckedContinuation { continuation in
         queue.async {
           if !self.run.started && !self.run.starting {
-            if let url = self.recordingURL { try? FileManager.default.removeItem(at: url) }
+            if let url = self.recordingURL { self.removeFile(url) }
             self.recordingURL = nil
           }
           continuation.resume()
@@ -213,6 +219,14 @@ public final class MediaCamera: @unchecked Sendable {
         self.stopWaiter = continuation
         self.apply(.stop)
       }
+    }
+  }
+
+  public func clip(take: UInt64) -> CapturedClip? {
+    queue.sync {
+      guard run.state.take == take, case let .success(clip)? = ended else { return nil }
+      ended = nil
+      return clip
     }
   }
 
@@ -287,6 +301,16 @@ public final class MediaCamera: @unchecked Sendable {
     queue.async { self.apply(event) }
   }
 
+  private func closeFromLayer() {
+    queue.sync {
+      apply(.layerClosed)
+      if case let .success(clip)? = ended { removeFile(clip.url) }
+      ended = nil
+      let closed = lock.withLock { let closed = Array(sinks.values); sinks.removeAll(); return closed }
+      closed.forEach { $0.finish() }
+    }
+  }
+
   private func setForeground(_ value: Bool) {
     queue.async {
       self.foreground = value
@@ -302,10 +326,28 @@ public final class MediaCamera: @unchecked Sendable {
   }
 
   private func apply(_ event: CaptureEvent) {
+    if case .recordFinished = event {
+      revokedAudio?.end()
+      revokedAudio = nil
+    }
     if case let .audioFlow(flowing) = event { microphoneFlowing = flowing }
+    let taking = run.starting || run.started
     let step = captureStep(run: run, event: event, profile: profile)
+    do {
+      for action in step.actions {
+        switch action {
+        case let .setTorch(on): try backend.setTorch(on)
+        case let .setZoom(ratio): try backend.setZoom(ratio)
+        default: break
+        }
+      }
+    } catch {
+      Media.recordNativeFailure(error, source: .camera)
+      return
+    }
     run = step.run
     for action in step.actions { perform(action) }
+    if taking && !run.starting && !run.started && run.state.phase == .ready { installTap() }
     if case .recordFinished = event { apply(.microphoneFlow(microphoneFlowing)) }
     if run.discard, run.end != nil, reading != nil {
       reading?.cancel()
@@ -328,9 +370,9 @@ public final class MediaCamera: @unchecked Sendable {
   }
 
   private func settleWaiters() {
-    if let waiter = startWaiter, !run.starting {
+    if let waiter = startWaiter, run.state.phase == .recording || (!run.starting && !run.started) {
       startWaiter = nil
-      if run.started { waiter.resume() } else { waiter.resume(throwing: Self.refusal(run.state.fault ?? .notReady)) }
+      if run.state.phase == .recording { waiter.resume() } else { waiter.resume(throwing: Self.refusal(run.state.fault ?? .notReady)) }
     }
     if let waiter = photoWaiter, !run.state.shooting {
       photoWaiter = nil
@@ -368,13 +410,16 @@ public final class MediaCamera: @unchecked Sendable {
     case let .bind(lens):
       open(lens)
     case let .restart(lens):
+      if stopWaiter != nil { ended = .failure(Self.refusal(.interrupted)) }
       teardownHardware()
       open(lens)
     case .unbind:
       epoch += 1
       binding?.cancel()
       shooting?.cancel()
-      teardownHardware()
+      let ticket = audioHold
+      audioHold = nil
+      teardownHardware { ticket?.end() }
       releaseHolds()
       failWaiters()
     case .takePhoto:
@@ -395,18 +440,17 @@ public final class MediaCamera: @unchecked Sendable {
       deliver()
     case .discard:
       discard()
-    case let .setTorch(on):
-      backend.setTorch(on)
-    case let .setZoom(ratio):
-      backend.setZoom(ratio)
+    case .setTorch, .setZoom: break
     }
   }
 
-  private func teardownHardware() {
-    backend.unbind()
+  private func teardownHardware(completion: @escaping @Sendable () -> Void = {}) {
+    let revoked = revokedAudio
+    revokedAudio = nil
+    backend.unbind { revoked?.end(); completion() }
     reading?.cancel()
     reading = nil
-    if let url = recordingURL { try? FileManager.default.removeItem(at: url) }
+    if let url = recordingURL { removeFile(url) }
     recordingURL = nil
     clipInfo = nil
   }
@@ -424,6 +468,8 @@ public final class MediaCamera: @unchecked Sendable {
     queue.async {
       guard self.audioHold === ticket else { return }
       self.audioHold = nil
+      if self.run.starting || self.run.started { self.revokedAudio = ticket }
+      else { ticket.end() }
       self.apply(.revoked(reason: Self.microphoneReason(reason)))
     }
   }
@@ -527,7 +573,7 @@ public final class MediaCamera: @unchecked Sendable {
       func finish(_ outcome: Result<CapturedPhoto, Error>) {
         self.queue.async {
           guard self.epoch == current else {
-            if case let .success(photo) = outcome { try? FileManager.default.removeItem(at: photo.url) }
+            if case let .success(photo) = outcome { NativeFailures.removeFile(photo.url) }
             return
           }
           self.photoOutcome = outcome
@@ -542,19 +588,20 @@ public final class MediaCamera: @unchecked Sendable {
       }
       let file = CaptureFiles.name(.photo, in: services.directory)
       let raw = file.deletingPathExtension().appendingPathExtension("raw")
-      defer { try? FileManager.default.removeItem(at: raw) }
+      defer { NativeFailures.removeFile(raw) }
       do {
         let data = try await backend.takePhoto(flash: flash, profile: profile)
         try data.write(to: raw, options: .atomic)
         hold()
         let made = try await services.upright(raw, Double(profile.photoQuality) / 100)
-        try? FileManager.default.removeItem(at: raw)
+        NativeFailures.removeFile(raw)
         try FileManager.default.moveItem(at: made, to: file)
         let size = Self.pixelSize(of: file)
         finish(.success(CapturedPhoto(url: file, width: size.width, height: size.height, lens: lens)))
       } catch {
         hold()
-        try? FileManager.default.removeItem(at: file)
+        NativeFailures.removeFile(file)
+        if !(error is CancellationError) { Media.recordNativeFailure(error, source: .camera) }
         finish(.failure(Self.refusal(.photoFailed)))
       }
     }
@@ -577,8 +624,9 @@ public final class MediaCamera: @unchecked Sendable {
       do {
         try await services.uprightVideo(url)
         try Task.checkCancellation()
-        info = await services.clipInfo(url)
+        info = try await services.clipInfo(url)
       } catch {
+        if !(error is CancellationError) { Media.recordNativeFailure(error, source: .camera) }
         info = nil
       }
       guard !Task.isCancelled else { return }
@@ -604,13 +652,18 @@ public final class MediaCamera: @unchecked Sendable {
   private func discard() {
     reading?.cancel()
     reading = nil
-    if let url = recordingURL { try? FileManager.default.removeItem(at: url) }
+    if let url = recordingURL { removeFile(url) }
     recordingURL = nil
     clipInfo = nil
     ended = .failure(Self.refusal(run.state.fault ?? .notReady, recordedMs: run.state.refusedMs))
   }
 
+  private func removeFile(_ url: URL) {
+    NativeFailures.removeFile(url)
+  }
+
   private func installTap() {
+    guard !run.starting && !run.started else { return }
     guard !lock.withLock({ observers.isEmpty }) else {
       backend.setFrameTap(nil)
       return

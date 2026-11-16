@@ -133,7 +133,7 @@ extension GlobalMedia {
         window.isHidden = true
         window.rootViewController = nil
       }
-      #expect(audio?.isPlaying == true)
+      #expect(await eventually { audio?.isPlaying == true })
       let hold = try media.suspendPlayback(allowGroups: ["system"])
       #expect(await until { slot.transport == "pause" })
 

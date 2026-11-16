@@ -142,8 +142,10 @@ private final class ScriptedPlaces: MediaPlaces, @unchecked Sendable {
   func imageStats() -> ImageCounters { counters }
   func cacheKey(url: String, headers: [String: String]) -> String { url }
   func tonePixelsNeeded(source: MediaItem) async -> Bool { false }
-  func playUrl(source: MediaItem) async throws -> PlaybackRoute { throw CancellationError() }
+  func playUrl(source: MediaItem) async throws -> MediaPlayer { throw CancellationError() }
+  func readRoute(item: MediaItem) async throws -> PlaybackRoute { throw CancellationError() }
   func stateStream(key: String) -> AsyncStream<MediaState> { AsyncStream { _ in } }
+  func retry(item: MediaItem) async throws {}
   func toneStream(source: MediaItem, band: Float) -> AsyncStream<ToneUpdate> { AsyncStream { _ in } }
   func mountPlace(item: MediaItem) throws -> any PlaceHandle { throw MediaError.Closed }
   func mountVideoWindow() throws -> any WindowHandle { throw MediaError.Closed }

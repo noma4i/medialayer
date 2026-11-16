@@ -26,6 +26,11 @@ protocol CallObserverPort: Sendable {
 
 protocol MicrophonePermissionPort: Sendable {
   func granted() -> Bool
+  func changes(_ sink: @escaping @Sendable (Bool) -> Void) -> @Sendable () -> Void
+}
+
+extension MicrophonePermissionPort {
+  func changes(_ sink: @escaping @Sendable (Bool) -> Void) -> @Sendable () -> Void { {} }
 }
 
 struct AudioPorts: Sendable {
