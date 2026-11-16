@@ -127,7 +127,8 @@ class AudioLinkTest {
     link.foreground(true)
     link.audible(0u, true)
 
-    await("requested again") { focus.calls.toList() == listOf("request GAIN MEDIA", "request GAIN MEDIA") }
+    await("requested again") { focus.calls.count { it == "request GAIN MEDIA" } == 2 }
+    assertEquals(listOf("request GAIN MEDIA", "request GAIN MEDIA"), focus.calls.toList())
   }
 
   @Test
@@ -159,7 +160,9 @@ class AudioLinkTest {
 
     call.close()
 
-    await("cleared") { focus.calls.last() == "abandon" && focus.calls.contains("communication on=false speaker=false") }
+    await("cleared") { focus.calls.contains("communication on=false speaker=false") }
+    val calls = focus.calls.toList()
+    assertTrue("the release abandons the focus, then clears the mode: $calls", calls.lastIndexOf("abandon") in 0 until calls.lastIndexOf("communication on=false speaker=false"))
     assertFalse("the own mode is not an external call", seen.contains(MicrophoneAvailability.EXTERNAL_CALL))
   }
 
