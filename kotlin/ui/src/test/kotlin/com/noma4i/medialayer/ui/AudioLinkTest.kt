@@ -50,7 +50,9 @@ internal class RecordingFocusPort : AudioFocusPort {
 
   override fun abandon() { calls.add("abandon") }
 
-  override fun setCommunication(on: Boolean, speaker: Boolean) { calls.add("communication on=$on speaker=$speaker") }
+  override fun enterCommunication(speaker: Boolean) { calls.add("communication on=true speaker=$speaker") }
+
+  override fun leaveCommunication() { calls.add("communication on=false speaker=false") }
 }
 
 internal object GrantedPermission : MicrophonePermissionPort {
