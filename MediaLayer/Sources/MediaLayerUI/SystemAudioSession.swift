@@ -52,7 +52,14 @@ struct SystemAudioSession: AudioSessionPort {
   func apply(_ plan: SessionPlan, activate: Bool) throws {
     let session = AVAudioSession.sharedInstance()
     try session.setCategory(plan.category, mode: plan.mode, options: plan.options)
-    if activate { try session.setActive(true) }
+    if activate {
+      do { try session.setActive(true) }
+      catch {
+        do { try session.setCategory(rest.category, mode: rest.mode, options: rest.options) }
+        catch { Media.recordOpenFailure(error) }
+        throw error
+      }
+    }
   }
 
   func deactivate() throws {
@@ -61,7 +68,10 @@ struct SystemAudioSession: AudioSessionPort {
       try AVAudioSession.sharedInstance().setCategory(rest.category, mode: rest.mode, options: rest.options)
     } catch {
       let value = error as NSError
-      if value.domain == NSOSStatusErrorDomain && value.code == AVAudioSession.ErrorCode.isBusy.rawValue { throw AudioSessionBusy() }
+      if value.domain == NSOSStatusErrorDomain && value.code == AVAudioSession.ErrorCode.isBusy.rawValue {
+        Media.recordOpenFailure(error)
+        throw AudioSessionBusy()
+      }
       throw error
     }
   }
