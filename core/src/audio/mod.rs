@@ -36,6 +36,7 @@ pub struct AudioOwner {
     applied: Option<SessionWant>,
     inflight: Option<u64>,
     release_pending: bool,
+    release_event: bool,
     generation: u64,
     paused: Option<PauseReason>,
     resuming: bool,
@@ -65,6 +66,7 @@ impl AudioOwner {
             applied: None,
             inflight: None,
             release_pending: false,
+            release_event: false,
             generation: 0,
             paused: None,
             resuming: false,
@@ -185,6 +187,7 @@ impl AudioOwner {
         self.inflight = Some(self.generation);
         self.applied = None;
         self.release_pending = false;
+        self.release_event = false;
         actions.push(AudioAction::Deactivate {
             generation: self.generation,
         });
@@ -213,6 +216,7 @@ impl AudioOwner {
                 self.generation += 1;
                 self.inflight = Some(self.generation);
                 self.release_pending = false;
+                self.release_event = false;
                 if matches!(
                     &want,
                     SessionWant::Call {
@@ -235,6 +239,9 @@ impl AudioOwner {
         use AudioInput as I;
         if !matches!(input, I::Applied { .. }) {
             self.resuming = false;
+            if self.inflight.is_some() && self.applied.is_none() {
+                self.release_event = true;
+            }
         }
         let mut actions = Vec::new();
         let mut defer_reconcile = false;
@@ -361,7 +368,7 @@ impl AudioOwner {
                         }
                         AppliedResult::Busy => {
                             self.release_pending = true;
-                            defer_reconcile = true;
+                            defer_reconcile = !self.release_event;
                         }
                         AppliedResult::Failed { .. } => {
                             self.applied = None;
