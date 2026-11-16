@@ -5,7 +5,7 @@ use super::{FocusAnswer, FocusChange};
 pub(super) enum System { Free, Interrupted, FocusLost, Transient, Ducked, WaitForeground }
 
 pub(super) enum SystemEvent {
-    Audible(bool), Capture, CallSystemActivated, AppliedFailed, InterruptionBegan,
+    Audible(bool), Capture, NewDemand, CallSystemActivated, AppliedFailed, InterruptionBegan,
     InterruptionEnded(bool), ResumptionRecommendation(bool), Focus(FocusChange), FocusRequest(FocusAnswer), MediaReset, Foreground(bool),
 }
 
@@ -33,7 +33,7 @@ impl SystemMachine {
     #[state(superstate = "any")]
     fn transient(context: &mut Exit, event: &SystemEvent) -> Outcome<State> {
         match event {
-            SystemEvent::Capture => Transition(State::free()),
+            SystemEvent::Capture | SystemEvent::NewDemand => Transition(State::free()),
             SystemEvent::Focus(FocusChange::Gain) => { context.resume = Some(true); Transition(State::free()) }
             _ => Super,
         }
@@ -50,7 +50,7 @@ impl SystemMachine {
     #[state(superstate = "any")]
     fn wait_foreground(context: &mut Exit, event: &SystemEvent) -> Outcome<State> {
         match event {
-            SystemEvent::Capture => Transition(State::free()),
+            SystemEvent::Capture | SystemEvent::NewDemand => Transition(State::free()),
             SystemEvent::Foreground(true) | SystemEvent::Focus(FocusChange::Gain) => { context.resume = Some(true); Transition(State::free()) }
             _ => Super,
         }

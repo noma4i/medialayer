@@ -192,15 +192,16 @@ impl AudioOwner {
             generation: self.generation,
         });
     }
-    fn new_demand(&mut self) {
+    fn new_demand(&mut self, actions: &mut Vec<AudioAction>) {
         if self.request_blocked {
             self.applied = None;
             self.request_blocked = false;
+            self.system_event(SystemEvent::NewDemand, actions);
         }
     }
     fn reconcile(&mut self, actions: &mut Vec<AudioAction>) {
         let want = self.want();
-        if self.request_blocked && want.is_some() {
+        if self.request_blocked && (want.is_some() || !self.audible.is_empty() || !self.volume_readers.is_empty() || !self.captures.is_empty() || !self.calls.is_empty() || self.paused.is_some() || self.resuming) {
             return;
         }
         if self.applied == want && !self.release_pending && !(want.is_none() && self.request_blocked) {
@@ -264,11 +265,11 @@ impl AudioOwner {
             self.request_blocked = false;
         }
         match input {
-            I::VolumeReadStarted { id } => { if self.volume_readers.insert(id) { self.new_demand(); } }
+            I::VolumeReadStarted { id } => { if self.volume_readers.insert(id) { self.new_demand(&mut actions); } }
             I::VolumeReadEnded { id } => { self.volume_readers.remove(&id); }
             I::Audible { slot, on } => {
                 if on {
-                    if self.audible.insert(slot) { self.new_demand(); }
+                    if self.audible.insert(slot) { self.new_demand(&mut actions); }
                 } else {
                     self.audible.remove(&slot);
                 }
@@ -289,7 +290,7 @@ impl AudioOwner {
                 if let Some(reason) = refusal {
                     actions.push(AudioAction::Refuse { id, reason });
                 } else {
-                    self.new_demand();
+                    self.new_demand(&mut actions);
                     let first = self.captures.is_empty();
                     self.captures.push((id, kind));
                     if matches!(self.applied, Some(SessionWant::Recording { kind: RecordingKind::Video })) && self.inflight.is_none() || self.applied == Some(SessionWant::Recording { kind }) && self.inflight.is_none() {
@@ -306,7 +307,7 @@ impl AudioOwner {
                 self.pending.remove(&id);
             }
             I::CallStarted { id, kind, speaker } => {
-                if !self.calls.iter().any(|call| call.id == id) { self.new_demand(); }
+                if !self.calls.iter().any(|call| call.id == id) { self.new_demand(&mut actions); }
                 self.calls.retain(|call| call.id != id);
                 self.calls.push(Call {
                     id,
@@ -394,7 +395,8 @@ impl AudioOwner {
                         AppliedResult::Failed { .. } => {
                             let was_request = self.applied.is_some();
                             self.applied = None;
-                            self.request_blocked = was_request;
+                            self.request_blocked = true;
+                            defer_reconcile = !was_request;
                             if self.resume_wait {
                                 actions.push(AudioAction::ForgetPaused);
                                 self.paused = None;
