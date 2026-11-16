@@ -61,7 +61,7 @@ class MediaVoiceRecorder internal constructor(
   private val lock = Any()
   private var running: Running? = null
   private var ended: Result<VoiceRecording>? = null
-  private var heldAudio: MediaAudioSession? = null
+  private var heldAudio: MediaRecordingHold? = null
   private var starting = false
   private val callListener = CallListener(::callBegan)
 
@@ -87,16 +87,21 @@ class MediaVoiceRecorder internal constructor(
   private fun begin(file: File) {
     if (calls.inCall) throw inCall()
     val session = audio()
-    if (session != null && !session.activateRecording()) throw MediaException.Voice(voiceRefusalText(VoiceRefusal.MICROPHONE_BUSY))
+    val hold = session?.holdRecording()
+    if (session != null && hold == null) throw MediaException.Voice(voiceRefusalText(VoiceRefusal.MICROPHONE_BUSY))
     try {
       capture.start(file, maxDurationMs, ::limitReached)
     } catch (refused: VoiceRefused) {
-      session?.deactivateRecording()
+      hold?.close()
       file.delete()
       throw MediaException.Voice(voiceRefusalText(refused.reason))
+    } catch (failure: Throwable) {
+      hold?.close()
+      file.delete()
+      throw failure
     }
     val current = synchronized(lock) {
-      heldAudio = session
+      heldAudio = hold
       Running(file, clock()).also {
         running = it
         it.poll = scope.launch { pollLevels() }
@@ -141,7 +146,7 @@ class MediaVoiceRecorder internal constructor(
       } catch (refused: VoiceRefused) {
         if (interrupted == null) throw MediaException.Voice(voiceRefusalText(refused.reason))
       } finally {
-        session?.deactivateRecording()
+        session?.close()
       }
       if (interrupted != null) throw interrupted
       if (length <= 0 || !current.file.isFile || current.file.length() == 0L) throw MediaException.Voice(voiceRefusalText(VoiceRefusal.EMPTY))

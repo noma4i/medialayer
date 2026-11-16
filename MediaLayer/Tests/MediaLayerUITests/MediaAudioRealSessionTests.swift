@@ -41,13 +41,14 @@ extension GlobalMedia {
       let real = AVAudioSession.sharedInstance()
       let session = MediaAudioSession(focus: .mix)
 
-      #expect(await session.activateRecording())
+      let hold = await session.holdRecording()
+      #expect(hold != nil)
       #expect(real.category == .playAndRecord)
       #expect(real.mode == .default)
       #expect(real.categoryOptions.contains(.defaultToSpeaker))
       #expect(!real.categoryOptions.contains(.mixWithOthers))
 
-      await session.deactivateRecording()
+      hold?.release()
       session.setAudible(slot: 1, true)
       #expect(await session.settled())
       #expect(real.category == .playback)

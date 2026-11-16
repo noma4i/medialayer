@@ -1,17 +1,17 @@
 package com.noma4i.medialayer.ui
 
 import androidx.media3.common.Player
+import java.util.UUID
 
 internal class AudioDemand {
   private val audible = HashSet<UInt>()
-  var recordings = 0
-    private set
-  val recording: Boolean get() = recordings > 0
+  val recordings = HashSet<UUID>()
+  val recording: Boolean get() = recordings.isNotEmpty()
 
   fun setAudible(slot: UInt, value: Boolean): Boolean = if (value) audible.add(slot) else audible.remove(slot)
 
-  fun setRecording(value: Boolean) {
-    recordings = if (value) recordings + 1 else (recordings - 1).coerceAtLeast(0)
+  fun setRecording(id: UUID, value: Boolean) {
+    if (value) recordings.add(id) else recordings.remove(id)
   }
 
   fun target(focus: MediaAudioFocus): FocusKind? = when {

@@ -54,8 +54,10 @@ struct MediaAudioSessionTests {
     let port = FakeAudioSessionPort()
     let session = MediaAudioSession(focus: .mix, port: port, releaseDelay: .zero)
 
-    #expect(await session.activateRecording())
-    await session.deactivateRecording()
+    let hold = await session.holdRecording()
+    #expect(hold != nil)
+    hold?.release()
+    _ = await session.settled()
     #expect(port.log == [FakeAudioSessionPort.category(.recording), "active true", "active false"])
 
     session.setAudible(slot: 1, true)
@@ -67,13 +69,15 @@ struct MediaAudioSessionTests {
   func playbackDuringRecordingKeepsTheMicrophoneCategoryAndEndingItRestoresPlayback() async {
     let port = FakeAudioSessionPort()
     let session = MediaAudioSession(focus: .mix, port: port, releaseDelay: .zero)
-    #expect(await session.activateRecording())
+    let hold = await session.holdRecording()
+    #expect(hold != nil)
 
     session.setAudible(slot: 1, true)
     #expect(await session.settled())
     #expect(port.log == [FakeAudioSessionPort.category(.recording), "active true"])
 
-    await session.deactivateRecording()
+    hold?.release()
+    _ = await session.settled()
     #expect(port.log == [FakeAudioSessionPort.category(.recording), "active true", category(.mix)])
   }
 
@@ -140,7 +144,7 @@ struct MediaAudioSessionTests {
     await eventually("playback activation attempted") { port.log.contains("active true FAILED") }
     port.stopFailing(.playback)
 
-    #expect(await session.activateRecording() == false)
+    #expect(await session.holdRecording() == nil)
 
     #expect(!session.isRecording)
     #expect(port.log.suffix(2) == [category(.mix), "active true"])
@@ -150,9 +154,10 @@ struct MediaAudioSessionTests {
   func isRecordingFollowsTheActivationPair() async {
     let session = MediaAudioSession(focus: .mix, port: FakeAudioSessionPort(), releaseDelay: .zero)
 
-    #expect(await session.activateRecording())
+    let hold = await session.holdRecording()
+    #expect(hold != nil)
     #expect(session.isRecording)
-    await session.deactivateRecording()
+    hold?.release()
     #expect(!session.isRecording)
   }
 
@@ -183,13 +188,16 @@ struct MediaAudioSessionTests {
     let port = FakeAudioSessionPort()
     let session = MediaAudioSession(focus: .mix, port: port, releaseDelay: .zero)
 
-    #expect(await session.activateRecording())
-    #expect(await session.activateRecording())
-    await session.deactivateRecording()
+    let first = await session.holdRecording()
+    let second = await session.holdRecording()
+    #expect(first != nil)
+    #expect(second != nil)
+    first?.release()
     #expect(session.isRecording, "one holder still records")
     #expect(!port.log.contains("active false"))
 
-    await session.deactivateRecording()
+    second?.release()
+    _ = await session.settled()
     #expect(!session.isRecording)
     #expect(port.log.last == "active false")
   }

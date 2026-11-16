@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import MediaLayerUI
 
@@ -17,7 +18,7 @@ struct AudioDemandTests {
     _ = demand.setAudible(slot: 2, false)
     #expect(demand.target(for: .mix) == .idle)
 
-    _ = demand.setRecording(true)
+    _ = demand.setRecording(UUID(), true)
     #expect(demand.target(for: .duck) == .active(.recording))
   }
 
@@ -46,10 +47,11 @@ struct AudioDemandTests {
   @Test
   func changesReportOnlyRealTransitions() {
     var demand = AudioDemand()
+    let id = UUID()
     let changes = [
       demand.setAudible(slot: 1, true), demand.setAudible(slot: 1, true),
       demand.setAudible(slot: 1, false), demand.setAudible(slot: 1, false),
-      demand.setRecording(true), demand.setRecording(true)
+      demand.setRecording(id, true), demand.setRecording(id, true)
     ]
     #expect(changes == [true, false, true, false, true, false])
   }

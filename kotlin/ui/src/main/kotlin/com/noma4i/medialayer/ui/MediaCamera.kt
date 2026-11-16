@@ -79,7 +79,7 @@ class MediaCamera internal constructor(
   private var closed = false
   private var epoch = 0
   private var sessionHold: AutoCloseable? = null
-  private var audioHold: MediaAudioSession? = null
+  private var audioHold: MediaRecordingHold? = null
   private var binding: Job? = null
   private var shooting: Job? = null
   private var reading: Job? = null
@@ -344,7 +344,7 @@ class MediaCamera internal constructor(
     sessionHold = null
     audioHold?.let {
       audioHold = null
-      it.deactivateRecording()
+      it.close()
     }
   }
 
@@ -370,10 +370,11 @@ class MediaCamera internal constructor(
           return@launch
         }
       }
-      var session: MediaAudioSession? = null
+      var session: MediaRecordingHold? = null
       if (needsAudio) {
-        session = services.audio()
-        if (session != null && !session.activateRecording()) {
+        val audio = services.audio()
+        session = audio?.holdRecording()
+        if (audio != null && session == null) {
           hold?.close()
           enqueue { if (epoch == current) apply(CaptureEvent.Refuse(CameraRefusal.BUSY)) }
           return@launch
@@ -382,7 +383,7 @@ class MediaCamera internal constructor(
       enqueue {
         if (epoch != current || closed) {
           hold?.close()
-          session?.deactivateRecording()
+          session?.close()
           return@enqueue
         }
         hold?.let { sessionHold = it }

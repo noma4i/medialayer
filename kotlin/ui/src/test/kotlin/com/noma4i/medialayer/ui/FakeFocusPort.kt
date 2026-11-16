@@ -4,10 +4,16 @@ internal class FakeFocusPort(var grant: Boolean = true, var throwOnRecording: Bo
   val calls = SignallingList<String>()
   override var losses = 0
     private set
+  private var action: () -> Unit = {}
+
+  override fun onChange(action: () -> Unit) { this.action = action }
+
+  fun gain() { action() }
 
   fun lose() {
     losses += 1
     calls.add("lost")
+    action()
   }
 
   override fun request(kind: FocusKind): Boolean {

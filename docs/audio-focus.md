@@ -60,29 +60,29 @@ Recording has its own call and its own plan. It does not follow the playback pol
 | Question | Answer |
 | -------- | ------ |
 | What does recording set | iOS: category `playAndRecord`, mode `default`, option `defaultToSpeaker`. Android: `AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE` |
-| When | Only between `activateRecording` and `deactivateRecording` |
-| What does `deactivateRecording` do | Ends the recording session. The next heard place sets the playback category again |
+| When | While a `holdRecording` token is live |
+| What does releasing the token do | Ends the recording session. The next heard place sets the playback category again |
 | Does the playback policy change recording | No. Recording works with every policy |
-| Returns | `false` when the system refuses the recording focus. The call leaves no recording demand then |
+| Returns | A token, or `nil` on iOS and `null` on Android when the system refuses recording focus |
 
 ### Swift
 
 ```swift
-guard await Media.audio.activateRecording() else { return }
+guard let hold = await Media.audio.holdRecording() else { return }
 // record
-await Media.audio.deactivateRecording()
+hold.release()
 ```
 
 ### Kotlin
 
 ```kotlin
 // Request RECORD_AUDIO and record with your own recorder as before. The library only holds the focus.
-if (!Media.audio!!.activateRecording()) return
+val hold = Media.audio!!.holdRecording() ?: return
 // record
-Media.audio!!.deactivateRecording()
+hold.close()
 ```
 
-On Android recording asks for `AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE`, so other apps pause while you record. `deactivateRecording` abandons it after 300 ms and the playback focus of the policy returns when a place is heard.
+On Android recording asks for `AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE`, so other apps pause while you record. Closing the token abandons it after 300 ms and the playback focus of the policy returns when a place is heard.
 
 ## Read the volume
 

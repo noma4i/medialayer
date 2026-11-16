@@ -10,6 +10,8 @@ final class FakeAudioSessionPort: AudioSessionPort, @unchecked Sendable {
   private var volumeSink: AsyncStream<Float>.Continuation?
   private var failingCategories: Set<AVAudioSession.Category>
   private var currentCategory: AVAudioSession.Category?
+  private var plan = SessionPlan(category: .soloAmbient, mode: .default, options: [])
+  private var eventSink: AsyncStream<Void>.Continuation?
   private var volumeEnded = false
   private var changes = 0
 
@@ -27,7 +29,7 @@ final class FakeAudioSessionPort: AudioSessionPort, @unchecked Sendable {
   var onMain: Int { lock.withLock { mainThreadCalls } }
 
   func setCategory(_ plan: SessionPlan) throws {
-    lock.withLock { currentCategory = plan.category }
+    lock.withLock { currentCategory = plan.category; self.plan = plan }
     record(Self.category(plan))
   }
 
@@ -48,6 +50,14 @@ final class FakeAudioSessionPort: AudioSessionPort, @unchecked Sendable {
   }
 
   var systemChanges: Int { lock.withLock { changes } }
+
+  func currentPlan() -> SessionPlan { lock.withLock { plan } }
+
+  func systemEvents() -> AsyncStream<Void> {
+    let (stream, continuation) = AsyncStream<Void>.makeStream()
+    lock.withLock { eventSink = continuation }
+    return stream
+  }
 
   func systemDeactivates() {
     lock.withLock { changes += 1 }

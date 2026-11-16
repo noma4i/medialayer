@@ -1,6 +1,7 @@
 package com.noma4i.medialayer.ui
 
 import androidx.media3.common.Player
+import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -40,11 +41,12 @@ class AudioDemandTest {
   @Test
   fun recordingWinsOverPlaybackUnderEveryPolicyAndPlaybackReturnsAfterIt() {
     demand.setAudible(1u, true)
-    demand.setRecording(true)
+    val id = UUID.randomUUID()
+    demand.setRecording(id, true)
 
     MediaAudioFocus.entries.forEach { assertEquals(FocusKind.Recording, demand.target(it)) }
 
-    demand.setRecording(false)
+    demand.setRecording(id, false)
 
     assertEquals(FocusKind.Duck, demand.target(MediaAudioFocus.Duck))
   }

@@ -9,7 +9,10 @@ internal class SystemAudioFocus(context: Context) : AudioFocusPort {
   private val manager = context.applicationContext.getSystemService(AudioManager::class.java)
   private var current: AudioFocusRequest? = null
   private val lost = java.util.concurrent.atomic.AtomicInteger()
+  @Volatile private var onChange: () -> Unit = {}
   override val losses: Int get() = lost.get()
+
+  override fun onChange(action: () -> Unit) { onChange = action }
 
   override fun request(kind: FocusKind): Boolean {
     val gain = when (kind) {
@@ -22,6 +25,7 @@ internal class SystemAudioFocus(context: Context) : AudioFocusPort {
         lost.incrementAndGet()
         MediaTrace.emit("audio") { "focus lost $change" }
       }
+      onChange()
     }.build()
     if (manager.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return false
 
