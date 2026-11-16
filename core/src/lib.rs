@@ -1,3 +1,4 @@
+pub mod audio;
 uniffi::setup_scaffolding!();
 
 pub mod analysis;
