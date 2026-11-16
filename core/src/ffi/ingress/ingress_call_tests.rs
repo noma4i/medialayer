@@ -15,6 +15,7 @@ struct Rig {
     factory: Arc<MockFactory>,
     caller: tokio::runtime::Runtime,
     _window: Arc<crate::ffi::MediaWindow>,
+    inputs: Arc<crate::ffi::AudioInputs>,
 }
 
 impl Rig {
@@ -25,7 +26,8 @@ impl Rig {
         let layer = MediaLayer::build(config(dir.path(), Some(slots), None), Pause::new()).unwrap();
         let window = layer.open_video_window().unwrap();
         window.replace(0, vec![Some(MediaItem::bare_video(URL))]).unwrap();
-        Rig { _dir: dir, layer, factory, caller: caller(), _window: window }
+        let inputs = layer.audio_inputs();
+        Rig { _dir: dir, layer, factory, caller: caller(), _window: window, inputs }
     }
 
     fn playing(&self) -> PlaceInput {
@@ -42,7 +44,7 @@ impl Rig {
     }
 
     fn audio(&self, input: AudioInput) -> Vec<AudioAction> {
-        self.layer.audio(input).unwrap()
+        self.inputs.send(input).unwrap()
     }
 
     fn external(&self, active: bool) {
@@ -280,4 +282,21 @@ fn inv_audio_31_a_recording_keeps_playback_paused_until_it_ends_and_resumes_noth
 
     place.update(PlaceInput { visible: true, ..rig.playing() }).unwrap();
     rig.caller.block_on(eventually(|| rig.plays(&slot) == 2));
+}
+
+#[test]
+fn inv_audio_44_audio_inputs_outlive_the_layer_handle_and_answer_closed_after_it_closes() {
+    let rig = Rig::new();
+    let inputs = rig.layer.audio_inputs();
+    let actions = inputs.send(AudioInput::Capture { id: 1, kind: RecordingKind::Voice }).unwrap();
+    let [AudioAction::Apply { generation, want: SessionWant::Recording { kind: RecordingKind::Voice }, activate: true }] = actions[..] else { panic!("{actions:?}") };
+    rig.layer.shutdown();
+    rig.caller.block_on(rig.layer.await_closed());
+
+    assert!(matches!(inputs.send(AudioInput::Applied { generation, result: AppliedResult::Ok }), Err(MediaError::Closed)), "an input that would admit the recording");
+    assert!(matches!(inputs.send(AudioInput::Audible { slot: 0, on: true }), Err(MediaError::Closed)), "an input that would pause through the core");
+    assert!(matches!(inputs.send(AudioInput::Foreground { on: true }), Err(MediaError::Closed)), "an input without a core command");
+    let Rig { layer, .. } = rig;
+    drop(layer);
+    assert!(matches!(inputs.send(AudioInput::Foreground { on: false }), Err(MediaError::Closed)), "after the last layer handle is gone");
 }

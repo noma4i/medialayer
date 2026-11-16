@@ -54,15 +54,15 @@ class MemoryWarningTest {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val owner = object : LifecycleOwner { override val lifecycle = LifecycleRegistry(this) }
     val signals = SystemSignals(context, RecordingEvents(), owner.lifecycle)
-    fun receivers() = org.robolectric.Shadows.shadowOf(context as android.app.Application).registeredReceivers.count { it.broadcastReceiver.javaClass.name.startsWith(SystemSignals::class.java.name) }
+    fun observers(): Int { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); return owner.lifecycle.observerCount }
 
     signals.unregister()
     signals.register()
     signals.register()
-    assertEquals(1, receivers())
+    assertEquals(1, observers())
     signals.unregister()
     signals.unregister()
 
-    assertEquals(0, receivers())
+    assertEquals(0, observers())
   }
 }

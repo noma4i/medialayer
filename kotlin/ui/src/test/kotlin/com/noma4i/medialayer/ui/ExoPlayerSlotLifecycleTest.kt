@@ -110,7 +110,8 @@ internal class ExoPlayerSlotLifecycleTest : ExoPlayerSlotRig() {
 
   @Test
   fun inv_pool_06_default_renderers_allow_the_next_decoder_after_initialization_failure() {
-    val renderers = factory().renderersFactory.createRenderers(
+    val production = ExoPlayerSlotFactory(context, okhttp3.OkHttpClient(), startMuted = true)
+    val renderers = production.renderersFactory.createRenderers(
       android.os.Handler(Looper.getMainLooper()),
       object : androidx.media3.exoplayer.video.VideoRendererEventListener {},
       object : androidx.media3.exoplayer.audio.AudioRendererEventListener {},
