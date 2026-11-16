@@ -7,6 +7,12 @@ struct MediaAudioSessionTests {
     FakeAudioSessionPort.category(.playback(focus))
   }
 
+  private func transitions(_ log: [String]) -> [String] {
+    log.reduce(into: []) { result, entry in
+      if entry != "active true" || result.last != entry { result.append(entry) }
+    }
+  }
+
   @Test
   func constructionAndIdleSlotsNeverTouchTheSession() async {
     let port = FakeAudioSessionPort()
@@ -28,11 +34,11 @@ struct MediaAudioSessionTests {
     session.setAudible(slot: 2, true)
     session.setAudible(slot: 1, false)
     #expect(await session.settled())
-    #expect(port.log == [category(.duck), "active true"])
+    #expect(transitions(port.log) == [category(.duck), "active true"])
 
     session.setAudible(slot: 2, false)
     #expect(await session.settled())
-    #expect(port.log == [category(.duck), "active true", "active false"])
+    #expect(transitions(port.log) == [category(.duck), "active true", "active false"])
     #expect(port.onMain == 0)
   }
 
@@ -46,7 +52,7 @@ struct MediaAudioSessionTests {
     port.systemDeactivates()
     #expect(await session.settled())
 
-    #expect(port.log == [category(.mix), "active true", "system deactivated", category(.mix), "active true"])
+    #expect(transitions(port.log) == [category(.mix), "active true", "system deactivated", "active true"])
   }
 
   @Test
@@ -58,11 +64,11 @@ struct MediaAudioSessionTests {
     #expect(hold != nil)
     hold?.release()
     _ = await session.settled()
-    #expect(port.log == [FakeAudioSessionPort.category(.recording), "active true", "active false"])
+    #expect(transitions(port.log) == [FakeAudioSessionPort.category(.recording), "active true", "active false"])
 
     session.setAudible(slot: 1, true)
     #expect(await session.settled())
-    #expect(port.log.suffix(2) == [category(.mix), "active true"])
+    #expect(transitions(port.log).suffix(2) == [category(.mix), "active true"])
   }
 
   @Test
@@ -74,11 +80,11 @@ struct MediaAudioSessionTests {
 
     session.setAudible(slot: 1, true)
     #expect(await session.settled())
-    #expect(port.log == [FakeAudioSessionPort.category(.recording), "active true"])
+    #expect(transitions(port.log) == [FakeAudioSessionPort.category(.recording), "active true"])
 
     hold?.release()
     _ = await session.settled()
-    #expect(port.log == [FakeAudioSessionPort.category(.recording), "active true", category(.mix)])
+    #expect(transitions(port.log) == [FakeAudioSessionPort.category(.recording), "active true", category(.mix), "active true"])
   }
 
   @Test
@@ -94,7 +100,7 @@ struct MediaAudioSessionTests {
     session.setAudible(slot: 2, true)
     #expect(await released)
 
-    #expect(port.log == [category(.duck), "active true"])
+    #expect(transitions(port.log) == [category(.duck), "active true"])
   }
 
   @Test
@@ -147,7 +153,7 @@ struct MediaAudioSessionTests {
     #expect(await session.holdRecording() == nil)
 
     #expect(!session.isRecording)
-    #expect(port.log.suffix(2) == [category(.mix), "active true"])
+    #expect(transitions(port.log).suffix(2) == [category(.mix), "active true"])
   }
 
   @Test

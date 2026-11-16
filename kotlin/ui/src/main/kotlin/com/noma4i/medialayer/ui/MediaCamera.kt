@@ -380,7 +380,7 @@ class MediaCamera internal constructor(
           return@launch
         }
       }
-      enqueue {
+      if (!enqueue {
         if (epoch != current || closed) {
           hold?.close()
           session?.close()
@@ -390,6 +390,9 @@ class MediaCamera internal constructor(
         session?.let { audioHold = it }
         backend.bind(lens, profile)
         installTap()
+      }) {
+        hold?.close()
+        session?.close()
       }
     }
   }

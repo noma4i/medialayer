@@ -52,6 +52,7 @@ public final class MediaAudioSession: Sendable {
     }
     guard await owner.settle() else {
       hold.release()
+      _ = await owner.settle()
       return nil
     }
     return hold
