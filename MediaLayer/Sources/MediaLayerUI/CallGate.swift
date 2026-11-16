@@ -98,10 +98,10 @@ public final class MediaCallAudio: @unchecked Sendable {
 }
 
 extension MediaLayer {
-  public func callAudio(managedBySystem: Bool) async throws -> MediaCallAudio {
+  public func callAudio(managedBySystem: Bool, callUUID: UUID? = nil) async throws -> MediaCallAudio {
     let call = try callHold()
     guard let session = Media.audio else { return MediaCallAudio(call: call, audio: nil) }
-    guard let audio = await session.holdCall(managedBySystem: managedBySystem) else {
+    guard let audio = await session.holdCall(managedBySystem: managedBySystem, callUUID: callUUID) else {
       call.release()
       throw MediaError.Unexpected(detail: "call audio refused")
     }

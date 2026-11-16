@@ -73,16 +73,16 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: lens == .front ? .front : .back) else {
       return emit(.refuse(reason: .noCamera))
     }
-    let inputs: [AVCaptureDeviceInput]
+    var inputs: [AVCaptureDeviceInput]
     do {
-      var made = [try AVCaptureDeviceInput(device: device)]
-      if profile.audio {
-        guard let microphone = AVCaptureDevice.default(for: .audio) else { return emit(.refuse(reason: .configureFailed)) }
-        made.append(try AVCaptureDeviceInput(device: microphone))
-      }
-      inputs = made
+      inputs = [try AVCaptureDeviceInput(device: device)]
     } catch {
       return emit(.refuse(reason: .busy))
+    }
+    if profile.audio {
+      guard let microphone = AVCaptureDevice.default(for: .audio) else { return emit(.refuse(reason: .microphoneBusy)) }
+      do { inputs.append(try AVCaptureDeviceInput(device: microphone)) }
+      catch { return emit(.refuse(reason: .microphoneBusy)) }
     }
     let photo = profile.mode == .photo ? AVCapturePhotoOutput() : nil
     let movie = profile.mode == .video ? AVCaptureMovieFileOutput() : nil

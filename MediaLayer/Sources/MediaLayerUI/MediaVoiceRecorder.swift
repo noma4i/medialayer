@@ -90,20 +90,25 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
       ended = nil
     }
     defer { lock.withLock { starting = false } }
-    if calls.inCall { throw Self.inCall() }
     let session = audio()
+    if let availability = session?.microphone.current, availability != .available { throw Self.refusal(availability) }
+    if calls.inCall { throw Self.inCall() }
     let hold = await session?.holdRecording()
     if session != nil && hold == nil {
-      throw MediaError.Voice(detail: voiceRefusalText(reason: .microphoneBusy))
+      throw Self.refusal(session?.microphone.current ?? .otherApp)
     }
     do {
       try await capture.start(file: file, maxDurationMs: maxDurationMs) { [weak self] in self?.limitReached() }
     } catch let refused as VoiceRefused {
       hold?.release()
+      _ = await session?.settled()
       try? FileManager.default.removeItem(at: file)
-      throw MediaError.Voice(detail: voiceRefusalText(reason: refused.reason))
+      if refused.reason == .microphoneBusy { session?.microphone.refused() }
+      if refused.reason == .permissionDenied { throw Self.refusal(.permissionDenied) }
+      throw Self.refusal(session?.microphone.current ?? .otherApp)
     } catch {
       hold?.release()
+      _ = await session?.settled()
       try? FileManager.default.removeItem(at: file)
       throw error
     }
@@ -121,6 +126,16 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
 
   private static func inCall() -> MediaError {
     MediaError.Voice(detail: voiceRefusalText(reason: .inCall))
+  }
+
+  private static func refusal(_ availability: MicrophoneAvailability) -> MediaError {
+    let reason: VoiceRefusal
+    switch availability {
+    case .ownCall, .externalCall: reason = .inCall
+    case .permissionDenied: reason = .permissionDenied
+    case .available, .otherApp: reason = .microphoneBusy
+    }
+    return MediaError.Voice(detail: voiceRefusalText(reason: reason))
   }
 
   private func callBegan() {

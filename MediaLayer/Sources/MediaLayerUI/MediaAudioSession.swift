@@ -18,13 +18,15 @@ final class CallAudioHold: @unchecked Sendable {
   private let id: UUID
   private let box: DemandBox
   private let owner: AudioSessionOwner
+  private let microphone: MicrophoneStatus
   private let lock = NSLock()
   private var released = false
 
-  init(id: UUID, box: DemandBox, owner: AudioSessionOwner) {
+  init(id: UUID, box: DemandBox, owner: AudioSessionOwner, microphone: MicrophoneStatus) {
     self.id = id
     self.box = box
     self.owner = owner
+    self.microphone = microphone
   }
 
   var liveChanges: AsyncStream<Bool> { box.changes(for: id) }
@@ -52,6 +54,7 @@ final class CallAudioHold: @unchecked Sendable {
   func release() {
     guard lock.withLock({ if released { return false }; released = true; return true }) else { return }
     box.removeCall(id)
+    microphone.removeCall(id)
     MediaTrace.emit("audio", "call release")
     Task { [owner] in await owner.request() }
   }
@@ -65,14 +68,16 @@ public final class MediaAudioSession: Sendable {
   private let owner: AudioSessionOwner
   private let port: AudioSessionPort
   private let events: Task<Void, Never>
+  let microphone: MicrophoneStatus
 
   public convenience init(focus: MediaAudioFocus) {
-    self.init(focus: focus, port: SystemAudioSession())
+    self.init(focus: focus, port: SystemAudioSession(), microphonePort: SystemMicrophone())
   }
 
-  init(focus: MediaAudioFocus, port: AudioSessionPort, releaseDelay: Duration = .milliseconds(300)) {
+  init(focus: MediaAudioFocus, port: AudioSessionPort, releaseDelay: Duration = .milliseconds(300), microphonePort: MicrophonePort = AvailableMicrophone()) {
     self.focus = focus
     self.port = port
+    microphone = MicrophoneStatus(port: microphonePort)
     box = DemandBox(focus: focus)
     let owner = AudioSessionOwner(port: port, box: box, releaseDelay: releaseDelay)
     self.owner = owner
@@ -86,7 +91,10 @@ public final class MediaAudioSession: Sendable {
     box.isRecording
   }
 
+  public var microphoneAvailability: AsyncStream<MicrophoneAvailability> { microphone.changes }
+
   public func holdRecording() async -> MediaRecordingHold? {
+    guard microphone.current == .available else { return nil }
     let id = UUID()
     guard box.update({ $0.setRecording(id, true) }) else { return nil }
     MediaTrace.emit("audio", "recording hold holders=\(box.recordings)")
@@ -96,6 +104,7 @@ public final class MediaAudioSession: Sendable {
       Task { await owner.request() }
     }
     guard await owner.settle() else {
+      microphone.refused()
       hold.release()
       _ = await owner.settle()
       return nil
@@ -103,12 +112,13 @@ public final class MediaAudioSession: Sendable {
     return hold
   }
 
-  func holdCall(managedBySystem: Bool) async -> CallAudioHold? {
+  func holdCall(managedBySystem: Bool, callUUID: UUID? = nil) async -> CallAudioHold? {
     let id = UUID()
+    microphone.addCall(id, uuid: callUUID)
     _ = box.update { $0.addCall(id, managed: managedBySystem); return true }
     if managedBySystem { box.setLive(false) }
     MediaTrace.emit("audio", "call hold managed=\(managedBySystem)")
-    let hold = CallAudioHold(id: id, box: box, owner: owner)
+    let hold = CallAudioHold(id: id, box: box, owner: owner, microphone: microphone)
     guard await owner.settle() else {
       hold.release()
       _ = await owner.settle()

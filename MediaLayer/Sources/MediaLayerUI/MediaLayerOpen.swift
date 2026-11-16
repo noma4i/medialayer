@@ -85,7 +85,7 @@ extension MediaLayer {
     ImageMemory.install(imageCache, on: media)
     LoadedSlots.install(factory.slots, on: media)
     HostLayers.install(factory.hosts, on: media)
-    media.followSystem(events: media.playerEvents(), link: factory.events, center: .default, names: .system)
+    media.followSystem(events: media.playerEvents(), link: factory.events, center: .default, names: .system, audio: audio)
     Media.current = media
     Media.audio = audio
     return media
@@ -127,9 +127,15 @@ extension MediaLayer {
     objc_setAssociatedObject(self, &lifetimeKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
   }
 
-  func followSystem(events: PlayerEventsProtocol, link: PlayerEventsLink, center: NotificationCenter, names: SystemSignalNames) {
+  public var microphoneAvailability: AsyncStream<MicrophoneAvailability> {
+    Media.audio?.microphoneAvailability ?? AsyncStream { $0.yield(.available); $0.finish() }
+  }
+
+  func followSystem(events: PlayerEventsProtocol, link: PlayerEventsLink, center: NotificationCenter, names: SystemSignalNames, audio: MediaAudioSession? = nil) {
     link.bind(events)
-    let signals = SystemSignals(events: events, center: center, names: names, onRelease: { link.bind(nil) })
+    let calls = ExternalCall(media: self)
+    audio?.microphone.setExternalListener { [weak calls] active in calls?.set(active) }
+    let signals = SystemSignals(events: events, center: center, names: names, onForeground: { audio?.microphone.systemChanged("foreground") }, onRelease: { calls.close(); link.bind(nil) })
     objc_setAssociatedObject(self, &lifetimeKey, signals, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
   }
 
@@ -142,6 +148,27 @@ extension MediaLayer {
     let directory = caches.appendingPathComponent("MediaLayer", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     return directory
+  }
+}
+
+private final class ExternalCall: @unchecked Sendable {
+  private let lock = NSLock()
+  private weak var media: MediaLayer?
+  private var hold: MediaCallHold?
+  private var closed = false
+
+  init(media: MediaLayer) { self.media = media }
+
+  func set(_ active: Bool) {
+    lock.withLock {
+      guard !closed else { return }
+      if active && hold == nil { hold = try? media?.callHold() }
+      if !active { hold?.release(); hold = nil }
+    }
+  }
+
+  func close() {
+    lock.withLock { closed = true; hold?.release(); hold = nil }
   }
 }
 
@@ -175,6 +202,7 @@ final class OpenedResources: MemoryReleaser, @unchecked Sendable {
     }
     guard let media else { return }
     media?.stopFollowingSystem()
+    audio?.microphone.stop()
     factory.release()
     images.shutdown()
     if let media, Media.current === media { Media.current = nil }

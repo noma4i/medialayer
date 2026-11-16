@@ -42,13 +42,13 @@ final class SystemSignals {
   private var tokens: [NSObjectProtocol] = []
   private var onRelease: () -> Void
 
-  init(events: PlayerEventsProtocol, center: NotificationCenter, names: SystemSignalNames, onOutputLost: @escaping () -> Void = { try? Media.setMuted(true) }, onRelease: @escaping () -> Void = {}) {
+  init(events: PlayerEventsProtocol, center: NotificationCenter, names: SystemSignalNames, onOutputLost: @escaping () -> Void = { try? Media.setMuted(true) }, onForeground: @escaping @Sendable () -> Void = {}, onRelease: @escaping () -> Void = {}) {
     self.center = center
     self.onRelease = onRelease
     tokens = [
       center.addObserver(forName: names.memoryWarning, object: nil, queue: nil) { _ in events.memoryWarning(level: .critical) },
       center.addObserver(forName: names.background, object: nil, queue: nil) { _ in events.background() },
-      center.addObserver(forName: names.foreground, object: nil, queue: nil) { _ in events.foreground() },
+      center.addObserver(forName: names.foreground, object: nil, queue: nil) { _ in events.foreground(); onForeground() },
       center.addObserver(forName: names.outputLost, object: nil, queue: nil) { note in
         #if canImport(UIKit)
         let reason = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt

@@ -132,6 +132,9 @@ public final class MediaCamera: @unchecked Sendable {
 
   /// Returns after the hardware started the recording. `NotReady` when the camera is not ready or the profile holds no video.
   public func startRecording() async throws {
+    if profile.audio, let availability = services.audio()?.microphone.current, availability != .available {
+      throw Self.microphoneRefusal(availability)
+    }
     if calls.inCall { throw Self.refusal(.inCall) }
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
       queue.async {
@@ -216,6 +219,18 @@ public final class MediaCamera: @unchecked Sendable {
     MediaError.Camera(reason: reason, detail: cameraRefusalText(reason: reason), recordedMs: recordedMs)
   }
 
+  private static func microphoneReason(_ availability: MicrophoneAvailability) -> CameraRefusal {
+    switch availability {
+    case .ownCall, .externalCall: return .inCall
+    case .permissionDenied: return .permissionDenied
+    case .available, .otherApp: return .microphoneBusy
+    }
+  }
+
+  private static func microphoneRefusal(_ availability: MicrophoneAvailability) -> MediaError {
+    refusal(microphoneReason(availability))
+  }
+
   private func post(_ event: CaptureEvent) {
     queue.async { self.apply(event) }
   }
@@ -235,6 +250,7 @@ public final class MediaCamera: @unchecked Sendable {
   }
 
   private func apply(_ event: CaptureEvent) {
+    if case .refuse(reason: .microphoneBusy) = event { services.audio()?.microphone.refused() }
     let step = captureStep(run: run, event: event, profile: profile)
     run = step.run
     for action in step.actions { perform(action) }
@@ -375,9 +391,16 @@ public final class MediaCamera: @unchecked Sendable {
       }
       var session: MediaRecordingHold?
       if needsAudio, let audio = services.audio() {
+        let availability = audio.microphone.current
+        guard availability == .available else {
+          release?()
+          self.queue.async { if self.epoch == current { self.apply(.refuse(reason: Self.microphoneReason(availability))) } }
+          return
+        }
         guard let hold = await audio.holdRecording() else {
           release?()
-          self.queue.async { if self.epoch == current { self.apply(.refuse(reason: .busy)) } }
+          let reason = Self.microphoneReason(audio.microphone.current)
+          self.queue.async { if self.epoch == current { self.apply(.refuse(reason: reason)) } }
           return
         }
         session = hold
