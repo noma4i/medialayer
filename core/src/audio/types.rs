@@ -155,9 +155,6 @@ pub enum AudioInput {
     OtherRecording {
         active: bool,
     },
-    MicrophoneFlow {
-        flowing: bool,
-    },
     Silenced {
         id: u64,
     },

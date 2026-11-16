@@ -34,6 +34,7 @@ pub struct CaptureRun {
     pub state: CameraState,
     pub open: bool,
     pub streaming: bool,
+    pub audio_flowing: bool,
     pub starting: bool,
     pub started: bool,
     pub discard: bool,
@@ -58,8 +59,8 @@ pub enum CaptureEvent {
     Tick { recorded_ms: u64 },
     Stop,
     Cancel,
-    /// A call began: a recording that runs is thrown away and ends with `InCall`.
-    CallStarted,
+    Revoked { reason: CameraRefusal },
+    AudioFlow { flowing: bool },
     RecordFinished { end: RecordEnd },
     RecordSettled { duration_ms: Option<u64> },
     SetLens { lens: CameraLens },
@@ -96,6 +97,7 @@ pub fn capture_run(lens: CameraLens) -> CaptureRun {
         state: CameraState { phase: CameraPhase::Idle, lens, flash: false, has_flash: false, zoom: 1.0, zoom_min: 1.0, zoom_max: 1.0, recorded_ms: 0, shooting: false, fault: None, refused_ms: None },
         open: false,
         streaming: false,
+        audio_flowing: true,
         starting: false,
         started: false,
         discard: false,
@@ -167,9 +169,12 @@ impl Machine {
             CaptureEvent::Tick { recorded_ms } if phase == CameraPhase::Recording => self.run.state.recorded_ms = recorded_ms,
             CaptureEvent::Stop if phase == CameraPhase::Recording => self.end_recording(false),
             CaptureEvent::Cancel => self.cancel(),
-            CaptureEvent::CallStarted if self.recording_in_progress() => {
-                self.run.state.fault = Some(CameraRefusal::InCall);
-                self.cancel();
+            CaptureEvent::Revoked { reason } if self.recording_in_progress() => self.revoke(reason),
+            CaptureEvent::AudioFlow { flowing } => {
+                self.run.audio_flowing = flowing;
+                if !flowing && self.profile.audio && self.recording_in_progress() {
+                    self.revoke(CameraRefusal::MicrophoneSilent);
+                }
             }
             CaptureEvent::RecordFinished { end } if self.recording_in_progress() => self.record_finished(end),
             CaptureEvent::RecordSettled { duration_ms } if phase == CameraPhase::Stopping && self.run.end.is_some() => self.settle(duration_ms),
@@ -270,6 +275,10 @@ impl Machine {
         if !self.profile.is_video() || self.phase() != CameraPhase::Ready || self.run.starting || self.run.state.shooting {
             return;
         }
+        if self.profile.audio && !self.run.audio_flowing {
+            self.run.state.fault = Some(CameraRefusal::MicrophoneSilent);
+            return;
+        }
         self.run.starting = true;
         self.run.started = false;
         self.run.discard = false;
@@ -284,6 +293,11 @@ impl Machine {
         self.run.discard |= discard;
         self.run.state.phase = CameraPhase::Stopping;
         self.actions.push(CaptureAction::EndRecording { discard });
+    }
+
+    fn revoke(&mut self, reason: CameraRefusal) {
+        self.run.state.fault = Some(reason);
+        self.cancel();
     }
 
     fn cancel(&mut self) {
@@ -311,7 +325,7 @@ impl Machine {
         let verdict = record_verdict(self.run.started, false, self.run.discard, end, duration_ms, self.profile.min_take_ms);
         let (action, fault) = match verdict {
             RecordVerdict::Deliver => (CaptureAction::Deliver, None),
-            RecordVerdict::Skip => (CaptureAction::Discard, self.run.state.fault.filter(|fault| *fault == CameraRefusal::InCall)),
+            RecordVerdict::Skip => (CaptureAction::Discard, self.run.state.fault),
             RecordVerdict::TooShort => (CaptureAction::Discard, Some(CameraRefusal::TooShort)),
             RecordVerdict::CameraNotReady => (CaptureAction::Discard, Some(CameraRefusal::NotReady)),
             RecordVerdict::Failed => (CaptureAction::Discard, Some(CameraRefusal::RecordFailed)),

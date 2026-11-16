@@ -30,7 +30,7 @@ pub struct AudioOwner {
     own_mode: bool,
     permission: bool,
     other_recording: bool,
-    flowing: bool,
+    pending: Option<u64>,
     system: StateMachine<SystemMachine>,
     foreground: bool,
     applied: Option<SessionWant>,
@@ -57,7 +57,7 @@ impl AudioOwner {
             own_mode: false,
             permission: true,
             other_recording: false,
-            flowing: true,
+            pending: None,
             system: SystemMachine.state_machine(),
             foreground: true,
             applied: None,
@@ -140,7 +140,8 @@ impl AudioOwner {
     }
     fn revoke(&mut self, reason: RecordingRefusal, actions: &mut Vec<AudioAction>) {
         for (id, _) in self.captures.drain(..) {
-            actions.push(AudioAction::Revoke { id, reason });
+            actions.push(if self.pending == Some(id) { AudioAction::Refuse { id, reason } } else { AudioAction::Revoke { id, reason } });
+            if self.pending == Some(id) { self.pending = None; }
         }
     }
     fn pause(&mut self, reason: PauseReason, actions: &mut Vec<AudioAction>) {
@@ -248,8 +249,6 @@ impl AudioOwner {
                     Some(RecordingRefusal::Interrupted)
                 } else if !self.captures.is_empty() || self.other_recording {
                     Some(RecordingRefusal::MicrophoneBusy)
-                } else if kind == RecordingKind::Video && !self.flowing {
-                    Some(RecordingRefusal::MicrophoneSilent)
                 } else {
                     None
                 };
@@ -257,12 +256,19 @@ impl AudioOwner {
                     actions.push(AudioAction::Refuse { id, reason });
                 } else {
                     self.captures.push((id, kind));
-                    actions.push(AudioAction::Admit { id });
+                    if self.applied == Some(SessionWant::Recording { kind }) && self.inflight.is_none() {
+                        actions.push(AudioAction::Admit { id });
+                    } else {
+                        self.pending = Some(id);
+                    }
                     self.system_event(SystemEvent::Capture, &mut actions);
                     self.pause(PauseReason::Capture, &mut actions);
                 }
             }
-            I::CaptureEnded { id } => self.captures.retain(|(capture, _)| *capture != id),
+            I::CaptureEnded { id } => {
+                self.captures.retain(|(capture, _)| *capture != id);
+                if self.pending == Some(id) { self.pending = None; }
+            }
             I::CallStarted { id, kind, speaker } => {
                 self.calls.retain(|call| call.id != id);
                 self.calls.push(Call {
@@ -313,6 +319,9 @@ impl AudioOwner {
                     self.inflight = None;
                     match result {
                         AppliedResult::Ok => {
+                            if matches!(self.applied, Some(SessionWant::Recording { .. })) {
+                                if let Some(id) = self.pending.take() { actions.push(AudioAction::Admit { id }); }
+                            }
                             if matches!(
                                 self.applied,
                                 Some(SessionWant::Call {
@@ -386,10 +395,15 @@ impl AudioOwner {
             I::FocusRequest { answer } => match answer {
                 FocusAnswer::Granted => {}
                 FocusAnswer::Delayed => {
+                    self.inflight = None;
+                    self.applied = None;
+                    self.revoke(RecordingRefusal::MicrophoneBusy, &mut actions);
                     self.system_event(SystemEvent::FocusRequest(answer), &mut actions);
                     self.pause(PauseReason::Interrupted, &mut actions);
                 }
                 FocusAnswer::Failed => {
+                    self.inflight = None;
+                    self.revoke(RecordingRefusal::MicrophoneBusy, &mut actions);
                     self.applied = None;
                     self.system_event(SystemEvent::FocusRequest(answer), &mut actions);
                     self.pause(PauseReason::Interrupted, &mut actions);
@@ -450,26 +464,11 @@ impl AudioOwner {
                 }
             }
             I::OtherRecording { active } => self.other_recording = active,
-            I::MicrophoneFlow { flowing } => {
-                self.flowing = flowing;
-                if !flowing {
-                    self.captures.retain(|(id, kind)| {
-                        if *kind == RecordingKind::Video {
-                            actions.push(AudioAction::Revoke { id: *id, reason: RecordingRefusal::MicrophoneSilent });
-                            false
-                        } else {
-                            true
-                        }
-                    });
-                }
-            }
             I::Silenced { id } => {
                 if let Some(index) = self.captures.iter().position(|(capture, _)| *capture == id) {
                     self.captures.remove(index);
-                    actions.push(AudioAction::Revoke {
-                        id,
-                        reason: RecordingRefusal::MicrophoneSilent,
-                    });
+                    let reason = RecordingRefusal::MicrophoneSilent;
+                    actions.push(if self.pending == Some(id) { self.pending = None; AudioAction::Refuse { id, reason } } else { AudioAction::Revoke { id, reason } });
                 }
             }
             I::Foreground { on } => {
