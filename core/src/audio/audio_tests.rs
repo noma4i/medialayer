@@ -96,7 +96,7 @@ fn inv_audio_14_an_interruption_without_an_end_is_left_by_the_return_to_the_fore
     assert_eq!(world.send(I::Capture { id: 1, kind: RecordingKind::Voice }), vec![A::Refuse { id: 1, reason: RecordingRefusal::Interrupted }]);
     assert_eq!(world.send(I::Foreground { on: false }), vec![]);
     assert_eq!(world.send(I::Foreground { on: true }), vec![A::ForgetPaused, available(MicrophoneAvailability::Available)]);
-    assert_eq!(world.settle(I::Capture { id: 2, kind: RecordingKind::Voice }), vec![apply(SessionWant::Recording { kind: RecordingKind::Voice }), A::Admit { id: 2 }]);
+    assert_eq!(world.settle(I::Capture { id: 2, kind: RecordingKind::Voice }), vec![A::PauseAll { reason: PauseReason::Capture }, apply(SessionWant::Recording { kind: RecordingKind::Voice }), A::Admit { id: 2 }]);
 }
 
 #[test]
@@ -192,23 +192,23 @@ fn inv_audio_20_one_recording_of_each_kind_pauses_playback_and_camera_and_voice_
     assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
     assert_eq!(world.send(I::InterruptionBegan), vec![A::Revoke { id: 1, reason: RecordingRefusal::Interrupted }, A::ForgetPaused, available(MicrophoneAvailability::OtherApp)]);
     assert_eq!(world.send(I::InterruptionEnded { should_resume: true }), vec![available(MicrophoneAvailability::Available)], "the end of an interruption never resumes what the recording paused");
-    assert_eq!(world.settle(I::Capture { id: 4, kind: RecordingKind::Voice }), vec![apply(voice), A::Admit { id: 4 }]);
-    assert_eq!(world.settle(I::CaptureEnded { id: 4 }), vec![DEACTIVATE]);
+    assert_eq!(world.settle(I::Capture { id: 4, kind: RecordingKind::Voice }), vec![A::PauseAll { reason: PauseReason::Capture }, apply(voice), A::Admit { id: 4 }], "a recording closes the playback gate while nothing sounds");
+    assert_eq!(world.settle(I::CaptureEnded { id: 4 }), vec![A::ForgetPaused, DEACTIVATE], "its end opens the gate and resumes nothing");
 }
 
 #[test]
 fn inv_audio_21_every_loss_of_the_microphone_revokes_the_running_recording_with_its_reason() {
     let revoke = |reason| A::Revoke { id: 1, reason };
     let cases: Vec<(AudioInput, Vec<AudioAction>)> = vec![
-        (I::InterruptionBegan, vec![revoke(RecordingRefusal::Interrupted), available(MicrophoneAvailability::OtherApp)]),
-        (I::Focus { change: FocusChange::Loss }, vec![revoke(RecordingRefusal::Interrupted), DEACTIVATE]),
-        (I::Focus { change: FocusChange::LossTransient }, vec![revoke(RecordingRefusal::Interrupted), DEACTIVATE]),
-        (I::Silenced { id: 1 }, vec![revoke(RecordingRefusal::MicrophoneSilent), DEACTIVATE]),
-        (I::PhoneCall { active: true }, vec![revoke(RecordingRefusal::InCall), A::CallHold { on: true }, DEACTIVATE, available(MicrophoneAvailability::ExternalCall)]),
-        (I::ObservedCalls { uuids: vec!["cellular".into()] }, vec![revoke(RecordingRefusal::InCall), A::CallHold { on: true }, DEACTIVATE, available(MicrophoneAvailability::ExternalCall)]),
-        (I::CallStarted { id: 7, kind: CallKind::Unmanaged, speaker: false }, vec![revoke(RecordingRefusal::InCall), A::CallHold { on: true }, apply(SessionWant::Call { kind: CallKind::Unmanaged, speaker: false }), A::CallState { id: 7, state: CallState::Connecting }, available(MicrophoneAvailability::OwnCall)]),
-        (I::Permission { granted: false }, vec![revoke(RecordingRefusal::PermissionDenied), DEACTIVATE, available(MicrophoneAvailability::PermissionDenied)]),
-        (I::MediaReset, vec![revoke(RecordingRefusal::Interrupted)]),
+        (I::InterruptionBegan, vec![revoke(RecordingRefusal::Interrupted), A::ForgetPaused, available(MicrophoneAvailability::OtherApp)]),
+        (I::Focus { change: FocusChange::Loss }, vec![revoke(RecordingRefusal::Interrupted), A::ForgetPaused, DEACTIVATE]),
+        (I::Focus { change: FocusChange::LossTransient }, vec![revoke(RecordingRefusal::Interrupted), A::ForgetPaused, DEACTIVATE]),
+        (I::Silenced { id: 1 }, vec![revoke(RecordingRefusal::MicrophoneSilent), A::ForgetPaused, DEACTIVATE]),
+        (I::PhoneCall { active: true }, vec![revoke(RecordingRefusal::InCall), A::ForgetPaused, A::CallHold { on: true }, DEACTIVATE, available(MicrophoneAvailability::ExternalCall)]),
+        (I::ObservedCalls { uuids: vec!["cellular".into()] }, vec![revoke(RecordingRefusal::InCall), A::ForgetPaused, A::CallHold { on: true }, DEACTIVATE, available(MicrophoneAvailability::ExternalCall)]),
+        (I::CallStarted { id: 7, kind: CallKind::Unmanaged, speaker: false }, vec![revoke(RecordingRefusal::InCall), A::ForgetPaused, A::CallHold { on: true }, apply(SessionWant::Call { kind: CallKind::Unmanaged, speaker: false }), A::CallState { id: 7, state: CallState::Connecting }, available(MicrophoneAvailability::OwnCall)]),
+        (I::Permission { granted: false }, vec![revoke(RecordingRefusal::PermissionDenied), A::ForgetPaused, DEACTIVATE, available(MicrophoneAvailability::PermissionDenied)]),
+        (I::MediaReset, vec![revoke(RecordingRefusal::Interrupted), A::ForgetPaused]),
     ];
     for (input, expected) in cases {
         let mut world = World::new();
@@ -479,7 +479,7 @@ fn inv_audio_32_a_recording_is_admitted_only_after_its_session_is_applied() {
     for result in [I::FocusRequest { answer: FocusAnswer::Failed }, I::FocusRequest { answer: FocusAnswer::Delayed }] {
         let mut world = World::new();
         let label = format!("{result:?}");
-        assert_eq!(world.send(I::Capture { id: 1, kind: RecordingKind::Voice }), vec![apply(SessionWant::Recording { kind: RecordingKind::Voice })], "{label}");
+        assert_eq!(world.send(I::Capture { id: 1, kind: RecordingKind::Voice }), vec![A::PauseAll { reason: PauseReason::Capture }, apply(SessionWant::Recording { kind: RecordingKind::Voice })], "{label}");
         assert_eq!(world.send(I::Capture { id: 2, kind: RecordingKind::Voice }), vec![A::Refuse { id: 2, reason: RecordingRefusal::MicrophoneBusy }], "{label}: one admission at a time");
         let answer = world.send(result);
         assert_eq!(answer.first(), Some(&A::Refuse { id: 1, reason: RecordingRefusal::MicrophoneBusy }), "{label}: {answer:?}");
@@ -488,7 +488,7 @@ fn inv_audio_32_a_recording_is_admitted_only_after_its_session_is_applied() {
     let mut world = World::new();
     let start = world.raw(I::Capture { id: 1, kind: RecordingKind::Voice });
     let generation = start.iter().find_map(generation_of).unwrap();
-    assert_eq!(world.send(I::Applied { generation, result: AppliedResult::Failed { code: 561017449 } }), vec![A::Refuse { id: 1, reason: RecordingRefusal::MicrophoneBusy }], "a refused activation refuses the recording");
+    assert_eq!(world.send(I::Applied { generation, result: AppliedResult::Failed { code: 561017449 } }), vec![A::Refuse { id: 1, reason: RecordingRefusal::MicrophoneBusy }, A::ForgetPaused], "a refused activation refuses the recording and opens the gate");
     let mut call = World::new();
     call.send(I::Capture { id: 1, kind: RecordingKind::Voice });
     assert_eq!(call.send(I::PhoneCall { active: true }).first(), Some(&A::Refuse { id: 1, reason: RecordingRefusal::InCall }), "a call before the admission refuses it");

@@ -237,7 +237,11 @@ fn inv_audio_29_an_interruption_pauses_the_playing_key_and_its_resumable_end_pla
     assert_eq!(rig.plays(&slot), 1, "a declaration during the interruption played");
     rig.audio(AudioInput::Audible { slot: 0, on: false });
 
-    rig.audio(AudioInput::InterruptionEnded { should_resume: true });
+    let end = rig.audio(AudioInput::InterruptionEnded { should_resume: true });
+    let Some(generation) = end.iter().find_map(|action| match action { AudioAction::Apply { generation, .. } => Some(*generation), _ => None }) else { panic!("the resumed demand asks for its session: {end:?}") };
+    rig.settled();
+    assert_eq!(rig.plays(&slot), 1, "the key resumed before its session was applied");
+    rig.audio(AudioInput::Applied { generation, result: AppliedResult::Ok });
 
     rig.caller.block_on(eventually(|| rig.plays(&slot) == 2));
 }
