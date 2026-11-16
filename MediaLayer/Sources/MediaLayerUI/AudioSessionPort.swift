@@ -1,13 +1,39 @@
+import Foundation
+import MediaLayer
+
 enum SystemAudioEvent: Sendable {
-  case interruptionBegan, interruptionEnded, mediaServicesReset, routeChanged
+  case interruptionBegan
+  case interruptionEnded(shouldResume: Bool)
+  case resumption(shouldResume: Bool)
+  case mediaServicesReset
+  case routeChanged(RouteReason, hadPrivateOutput: Bool)
 }
 
+struct AudioSessionBusy: Error {}
+
 protocol AudioSessionPort: Sendable {
-  func currentPlan() -> SessionPlan
   func systemEvents() -> AsyncStream<SystemAudioEvent>
-  func setCategory(_ plan: SessionPlan) throws
-  func setActive(_ active: Bool) throws
-  var systemChanges: Int { get }
+  func apply(_ plan: SessionPlan, activate: Bool) throws
+  func deactivate() throws
+  func overrideSpeaker(_ on: Bool) throws
   func outputVolume() -> Float
   func volumeChanges() -> AsyncStream<Float>
+}
+
+protocol CallObserverPort: Sendable {
+  func calls() -> AsyncStream<Set<String>>
+}
+
+protocol MicrophonePermissionPort: Sendable {
+  func granted() -> Bool
+}
+
+struct AudioPorts: Sendable {
+  let session: any AudioSessionPort
+  let calls: any CallObserverPort
+  let permission: any MicrophonePermissionPort
+
+  static var system: AudioPorts {
+    AudioPorts(session: SystemAudioSession(), calls: SystemCallObserver(), permission: SystemMicrophonePermission())
+  }
 }

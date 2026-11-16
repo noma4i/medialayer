@@ -1,45 +1,71 @@
 @preconcurrency import AVFoundation
+@preconcurrency import CallKit
+import Foundation
+import MediaLayer
 
 struct SystemAudioSession: AudioSessionPort {
-  private static let changes = SystemChanges()
-
-  var systemChanges: Int { Self.changes.count }
-
-  func currentPlan() -> SessionPlan {
-    let session = AVAudioSession.sharedInstance()
-    return SessionPlan(category: session.category, mode: session.mode, options: session.categoryOptions)
-  }
-
   func systemEvents() -> AsyncStream<SystemAudioEvent> {
     AsyncStream { continuation in
       let center = NotificationCenter.default
       let session = AVAudioSession.sharedInstance()
-      let tokens = [AVAudioSession.interruptionNotification, AVAudioSession.mediaServicesWereResetNotification, AVAudioSession.routeChangeNotification].map { name in
-        center.addObserver(forName: name, object: session, queue: nil) { note in
-          if name == AVAudioSession.interruptionNotification {
-            guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-                  let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
-            continuation.yield(type == .began ? .interruptionBegan : .interruptionEnded)
-          } else {
-            continuation.yield(name == AVAudioSession.mediaServicesWereResetNotification ? .mediaServicesReset : .routeChanged)
-          }
+      var tokens: [NSObjectProtocol] = []
+      tokens.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: session, queue: nil) { note in
+        guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+        if type == .began {
+          continuation.yield(.interruptionBegan)
+        } else {
+          let rawOptions = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+          continuation.yield(.interruptionEnded(shouldResume: AVAudioSession.InterruptionOptions(rawValue: rawOptions).contains(.shouldResume)))
         }
+      })
+      tokens.append(center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: session, queue: nil) { _ in
+        continuation.yield(.mediaServicesReset)
+      })
+      tokens.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: session, queue: nil) { note in
+        let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt ?? 0
+        let previous = (note.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription)?.outputs.map(\.portType) ?? []
+        let reason: RouteReason
+        switch AVAudioSession.RouteChangeReason(rawValue: raw) {
+        case .oldDeviceUnavailable: reason = .oldDeviceUnavailable
+        case .newDeviceAvailable: reason = .newDeviceAvailable
+        case .categoryChange: reason = .categoryChange
+        case .override: reason = .override
+        default: reason = .other
+        }
+        continuation.yield(.routeChanged(reason, hadPrivateOutput: hadPrivateOutput(previous)))
+      })
+      if #available(iOS 27.0, *) {
+        tokens.append(center.addObserver(forName: AVAudioSession.resumptionRecommendationNotification, object: session, queue: nil) { _ in
+          continuation.yield(.resumption(shouldResume: session.recommendation == .shouldResume))
+        })
       }
-      continuation.onTermination = { _ in tokens.forEach { center.removeObserver($0) } }
+      let registered = tokens
+      continuation.onTermination = { _ in registered.forEach { center.removeObserver($0) } }
     }
   }
 
-  func setCategory(_ plan: SessionPlan) throws {
-    try AVAudioSession.sharedInstance().setCategory(plan.category, mode: plan.mode, options: plan.options)
+  func apply(_ plan: SessionPlan, activate: Bool) throws {
+    let session = AVAudioSession.sharedInstance()
+    try session.setCategory(plan.category, mode: plan.mode, options: plan.options)
+    if activate { try session.setActive(true) }
   }
 
-  func setActive(_ active: Bool) throws {
-    try AVAudioSession.sharedInstance().setActive(active, options: active ? [] : [.notifyOthersOnDeactivation])
+  func deactivate() throws {
+    do {
+      try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+    } catch {
+      let value = error as NSError
+      if value.domain == NSOSStatusErrorDomain && value.code == AVAudioSession.ErrorCode.isBusy.rawValue { throw AudioSessionBusy() }
+      throw error
+    }
   }
 
-  func outputVolume() -> Float {
-    AVAudioSession.sharedInstance().outputVolume
+  func overrideSpeaker(_ on: Bool) throws {
+    try AVAudioSession.sharedInstance().overrideOutputAudioPort(on ? .speaker : .none)
   }
+
+  func outputVolume() -> Float { AVAudioSession.sharedInstance().outputVolume }
 
   func volumeChanges() -> AsyncStream<Float> {
     AsyncStream { continuation in
@@ -53,40 +79,35 @@ struct SystemAudioSession: AudioSessionPort {
 
 private final class VolumeObservation: @unchecked Sendable {
   private let token: NSKeyValueObservation
-
-  init(_ token: NSKeyValueObservation) {
-    self.token = token
-  }
-
-  func invalidate() {
-    token.invalidate()
-  }
+  init(_ token: NSKeyValueObservation) { self.token = token }
+  func invalidate() { token.invalidate() }
 }
 
-private final class SystemChanges: @unchecked Sendable {
-  private let lock = NSLock()
-  private var value = 0
-  private var tokens: [NSObjectProtocol] = []
+struct SystemMicrophonePermission: MicrophonePermissionPort {
+  func granted() -> Bool { AVAudioApplication.shared.recordPermission == .granted }
+}
 
-  init() {
-    let center = NotificationCenter.default
-    let session = AVAudioSession.sharedInstance()
-    tokens = [AVAudioSession.interruptionNotification, AVAudioSession.mediaServicesWereResetNotification].map { name in
-      center.addObserver(forName: name, object: session, queue: nil) { [weak self] note in
-        self?.advance()
-        MediaTrace.emit("audio", "system \(name.rawValue) \(note.userInfo ?? [:])")
-      }
-    }
-    if MediaTrace.isOn {
-      tokens.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: session, queue: nil) { note in
-        MediaTrace.emit("audio", "system route \(note.userInfo ?? [:]) now \(session.category.rawValue) \(session.mode.rawValue)")
-      })
+final class SystemCallObserver: NSObject, CallObserverPort, CXCallObserverDelegate, @unchecked Sendable {
+  private let observer = CXCallObserver()
+  private let lock = NSLock()
+  private var sink: AsyncStream<Set<String>>.Continuation?
+
+  override init() {
+    super.init()
+    observer.setDelegate(self, queue: DispatchQueue(label: "MediaLayer.calls"))
+  }
+
+  func calls() -> AsyncStream<Set<String>> {
+    AsyncStream { continuation in
+      lock.withLock { sink = continuation }
+      publish()
     }
   }
 
-  var count: Int { lock.withLock { value } }
+  func callObserver(_ callObserver: CXCallObserver, callChanged call: CXCall) { publish() }
 
-  private func advance() {
-    lock.withLock { value += 1 }
+  private func publish() {
+    let active = Set(observer.calls.filter { !$0.hasEnded }.map { $0.uuid.uuidString })
+    lock.withLock { sink }?.yield(active)
   }
 }
