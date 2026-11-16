@@ -4,7 +4,8 @@ use super::fetcher::{Fetcher, ForeignFetcher};
 use super::ingress::{run, Answer, Declared, Admitted, IngressLimits, Finished, OwnerKind, Pause, InputQueue, Query, Subscribing, WindowKind};
 use super::layer_life::LayerLife;
 use super::limits::{DeviceMemory, Evict, ImageWindow, Limits, PoolSettings};
-use super::owned::{CallHold, MediaPlace, MediaWholeDeclaration, MediaWindow, PlaybackSuspension};
+use super::owned::{MediaPlace, MediaWholeDeclaration, MediaWindow, PlaybackSuspension};
+use crate::audio::{AudioAction, AudioFocus, AudioInput, AudioOwner};
 use super::ready::Ready;
 use crate::analysis::MediaTone;
 use crate::api::TonePreparation;
@@ -52,6 +53,7 @@ pub struct OpenConfig {
     pub silent: bool,
     #[uniffi(default = None)]
     pub ingress: Option<IngressLimits>,
+    pub audio_focus: AudioFocus,
 }
 
 #[uniffi::export(with_foreign)]
@@ -155,6 +157,7 @@ pub struct MediaLayer {
     failures: Arc<Failures>,
     next_owner: AtomicU64,
     controls: tokio::sync::Mutex<()>,
+    audio: Mutex<AudioOwner>,
 }
 
 impl MediaLayer {
@@ -217,7 +220,7 @@ impl MediaLayer {
             late: Mutex::new(None),
             closed: watch::channel(false).0,
         });
-        Arc::new(MediaLayer { handle, closing, namespace_headers, image_stats: super::image::ImageCounters::new(), failures, next_owner: AtomicU64::new(1), controls: tokio::sync::Mutex::new(()) })
+        Arc::new(MediaLayer { handle, closing, namespace_headers, image_stats: super::image::ImageCounters::new(), failures, next_owner: AtomicU64::new(1), controls: tokio::sync::Mutex::new(()), audio: Mutex::new(AudioOwner::new(AudioFocus::Exclusive)) })
     }
 
     #[cfg(test)]
@@ -268,7 +271,9 @@ impl MediaLayer {
             silent: config.silent,
             watchdog: WatchdogConfig::default(),
         };
-        Ok(MediaLayer::assembling_with(runtime, assemble(assembly), config.memory_releaser, namespace_headers, ingress, pause, failures))
+        let layer = MediaLayer::assembling_with(runtime, assemble(assembly), config.memory_releaser, namespace_headers, ingress, pause, failures);
+        *layer.audio.lock().unwrap_or_else(PoisonError::into_inner) = AudioOwner::new(config.audio_focus);
+        Ok(layer)
     }
 
     fn open_window(&self, kind: WindowKind) -> Result<Arc<MediaWindow>, MediaError> {
@@ -532,10 +537,20 @@ impl MediaLayer {
         Ok(Arc::new(PlaybackSuspension::new(self.closing.queue.clone(), owner)))
     }
 
-    pub fn hold_call(&self) -> Result<Arc<CallHold>, MediaError> {
-        let owner = self.owner();
-        self.closing.queue.open(owner, OwnerKind::Call, Declared::CallHold { owner })?;
-        Ok(Arc::new(CallHold::new(self.closing.queue.clone(), owner)))
+    pub fn audio(&self, input: AudioInput) -> Result<Vec<AudioAction>, MediaError> {
+        let mut owner = self.audio.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut next = owner.clone();
+        let mut platform = Vec::new();
+        let mut commands = Vec::new();
+        for action in next.step(input) {
+            match action {
+                AudioAction::PauseAll { .. } | AudioAction::ResumePaused | AudioAction::ForgetPaused | AudioAction::CallHold { .. } => commands.push(Declared::Audio(action)),
+                _ => platform.push(action),
+            }
+        }
+        self.closing.queue.submit_audio(commands)?;
+        *owner = next;
+        Ok(platform)
     }
 
     pub fn seek(&self, key: String, fraction: f64) -> Result<(), MediaError> {

@@ -1,5 +1,6 @@
-#[derive(uniffi::Enum, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(uniffi::Enum, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AudioFocus {
+    #[default]
     Exclusive,
     Duck,
     Mix,
@@ -147,6 +148,9 @@ pub enum AudioInput {
     },
     OtherRecording {
         active: bool,
+    },
+    MicrophoneFlow {
+        flowing: bool,
     },
     Silenced {
         id: u64,

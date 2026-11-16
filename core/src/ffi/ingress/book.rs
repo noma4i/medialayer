@@ -11,7 +11,7 @@ use super::book_types::*;
 
 impl Book {
     pub fn new(assembled: Arc<Assembled>, queue: Arc<InputQueue>, handle: Handle) -> Book {
-        Book { assembled, queue, handle, seq: 0, places: HashMap::new(), keys: HashMap::new(), windows: HashMap::new(), video_order: BTreeMap::new(), video_applied: None, subscriptions: HashMap::new(), suspensions: HashMap::new(), calls: HashMap::new(), declarations: HashMap::new() }
+        Book { assembled, queue, handle, seq: 0, places: HashMap::new(), keys: HashMap::new(), windows: HashMap::new(), video_order: BTreeMap::new(), video_applied: None, subscriptions: HashMap::new(), suspensions: HashMap::new(), in_call: false, paused: false, declarations: HashMap::new() }
     }
 
     pub(super) fn next_seq(&mut self) -> u64 {
@@ -46,7 +46,7 @@ impl Book {
                 self.assembled.stage.suspend(owner, &groups);
                 self.suspensions.insert(owner, reserve);
             }
-            Declared::CallHold { owner } => self.hold_call(owner, reserve),
+            Declared::Audio(action) => self.audio(action),
             Declared::WholeOpen { owner } => {
                 self.declarations.insert(owner, reserve);
             }
@@ -73,7 +73,7 @@ impl Book {
     pub(super) fn answer(&self, query: Query, reserve: Reserve, slot: EntryPlace) -> Answer {
         let assembled = self.assembled.clone();
         match query {
-            Query::PlayUrl(_) if !self.calls.is_empty() => Answer::Failed(MediaError::InCall),
+            Query::PlayUrl(_) if self.in_call => Answer::Failed(MediaError::InCall),
             Query::PlayUrl(item) => Answer::Route(assembled.routes.play_url(&item)),
             Query::Refresh(item, route) => Answer::Route(assembled.routes.refresh(&item, &route)),
             Query::Pool => Answer::Pool(assembled.pool_stats()),
@@ -120,7 +120,6 @@ impl Book {
                 self.declarations.remove(&owner);
                 self.assembled.stage.release_wholes_of(owner);
             }
-            OwnerKind::Call => drop(self.calls.remove(&owner)),
             OwnerKind::Suspension => {
                 self.assembled.stage.resume(owner);
                 self.suspensions.remove(&owner);
@@ -166,14 +165,27 @@ impl Book {
         self.flush(&key);
     }
 
-    /// The first hold of a call stops all playback in one step and forgets every play and peek opinion: nothing plays again until an owner declares after the last release.
-    fn hold_call(&mut self, owner: u64, reserve: Reserve) {
-        let first = self.calls.is_empty();
-        self.calls.insert(owner, reserve);
-        if !first {
-            return;
+    fn audio(&mut self, action: crate::audio::AudioAction) {
+        use crate::audio::AudioAction;
+        match action {
+            AudioAction::PauseAll { .. } => { self.paused = true; self.flush_keys(); }
+            AudioAction::ResumePaused => { self.paused = false; self.flush_keys(); }
+            AudioAction::ForgetPaused => { self.forget_playback(); self.paused = false; self.flush_keys(); }
+            AudioAction::CallHold { on } => {
+                if on && !self.in_call {
+                    self.in_call = true;
+                    self.assembled.stage.stop_all_playing();
+                    self.forget_playback();
+                    self.flush_keys();
+                } else if !on {
+                    self.in_call = false;
+                }
+            }
+            _ => unreachable!(),
         }
-        self.assembled.stage.stop_all_playing();
+    }
+
+    fn forget_playback(&mut self) {
         for (owner, place) in self.places.iter_mut().filter(|(_, place)| place.input.playing || place.input.peeking) {
             let Some(keyed) = self.keys.get_mut(&place.item.url) else { continue };
             withdraw(keyed, *owner, &place.input, place.declared, place.intent);
@@ -181,7 +193,10 @@ impl Book {
             place.input.peeking = false;
             contribute(keyed, *owner, &place.input, place.declared, place.intent);
         }
-        let keys: Vec<String> = self.keys.iter().filter(|(_, keyed)| keyed.applied.playing || keyed.applied.peeking).map(|(key, _)| key.clone()).collect();
+    }
+
+    fn flush_keys(&mut self) {
+        let keys: Vec<String> = self.keys.keys().cloned().collect();
         for key in keys {
             self.flush(&key);
         }
@@ -224,7 +239,7 @@ impl Book {
             }
             (None, _) => {}
         }
-        let playing = keyed.playing > 0 && self.calls.is_empty();
+        let playing = keyed.playing > 0 && !self.in_call && !self.paused;
         let groups: Vec<Option<String>> = keyed.groups.keys().cloned().collect();
         let token = keyed.token_owner().and_then(|owner| self.places.get(&owner)).and_then(|place| place.input.view_token);
         if playing != keyed.applied.playing || (playing && groups != keyed.applied.groups) {
@@ -239,7 +254,7 @@ impl Book {
             }
             keyed.applied.token = token;
         }
-        let peeking = keyed.peeking > 0 && self.calls.is_empty();
+        let peeking = keyed.peeking > 0 && !self.in_call && !self.paused;
         if peeking != keyed.applied.peeking {
             stage.set_peeking(key, peeking);
             keyed.applied.peeking = peeking;

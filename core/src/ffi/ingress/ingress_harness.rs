@@ -24,6 +24,7 @@ pub(super) fn config(dir: &std::path::Path, slots: Option<Arc<dyn PlayerSlotFact
         memory_releaser: None,
         silent: false,
         ingress: limits,
+        audio_focus: crate::audio::AudioFocus::Exclusive,
     }
 }
 

@@ -10,6 +10,8 @@ pub enum VoiceRefusal {
     MicrophoneBusy,
     Empty,
     InCall,
+    Interrupted,
+    MicrophoneSilent,
 }
 
 /// How a voice recording is encoded, the same on both platforms: AAC in m4a.
@@ -34,6 +36,8 @@ pub fn voice_refusal_text(reason: VoiceRefusal) -> String {
         VoiceRefusal::MicrophoneBusy => "the microphone is used by another app or call",
         VoiceRefusal::Empty => "the recording holds no sound",
         VoiceRefusal::InCall => "a call is running, there is no recording",
+        VoiceRefusal::Interrupted => "the system interrupted the recording",
+        VoiceRefusal::MicrophoneSilent => "the microphone gives no sound, the recording did not start",
     }
     .to_string()
 }

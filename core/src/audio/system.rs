@@ -1,54 +1,70 @@
 use statig::blocking::*;
+use super::{FocusAnswer, FocusChange};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum System {
-    Free,
-    Interrupted,
-    FocusLost,
-    Transient,
-    Ducked,
-    WaitForeground,
+pub(super) enum System { Free, Interrupted, FocusLost, Transient, Ducked, WaitForeground }
+
+pub(super) enum SystemEvent {
+    Audible(bool), Capture, CallSystemActivated, AppliedFailed, InterruptionBegan,
+    InterruptionEnded(bool), ResumptionRecommendation(bool), Focus(FocusChange), FocusRequest(FocusAnswer), MediaReset, Foreground(bool),
 }
 
 #[derive(Default)]
+pub(super) struct Exit { pub resume: Option<bool>, pub restore_volume: bool }
+
+#[derive(Default, Clone)]
 pub(super) struct SystemMachine;
 
-#[state_machine(initial = "State::free()")]
+#[state_machine(initial = "State::free()", state(derive(Clone)))]
 impl SystemMachine {
     #[state(superstate = "any")]
-    fn free() -> Outcome<State> {
-        Super
+    fn free() -> Outcome<State> { Super }
+    #[state(superstate = "any")]
+    fn interrupted(context: &mut Exit, event: &SystemEvent) -> Outcome<State> {
+        match event {
+            SystemEvent::Foreground(true) => { context.resume = Some(false); Transition(State::free()) }
+            _ => Super,
+        }
     }
     #[state(superstate = "any")]
-    fn interrupted() -> Outcome<State> {
-        Super
+    fn focus_lost(event: &SystemEvent) -> Outcome<State> {
+        match event { SystemEvent::Audible(true) | SystemEvent::Capture => Transition(State::free()), _ => Super }
     }
     #[state(superstate = "any")]
-    fn focus_lost() -> Outcome<State> {
-        Super
+    fn transient(context: &mut Exit, event: &SystemEvent) -> Outcome<State> {
+        match event {
+            SystemEvent::Capture => Transition(State::free()),
+            SystemEvent::Focus(FocusChange::Gain) => { context.resume = Some(true); Transition(State::free()) }
+            _ => Super,
+        }
     }
     #[state(superstate = "any")]
-    fn transient() -> Outcome<State> {
-        Super
+    fn ducked(context: &mut Exit, event: &SystemEvent) -> Outcome<State> {
+        match event {
+            SystemEvent::Focus(FocusChange::Gain) => { context.restore_volume = true; Transition(State::free()) }
+            _ => Super,
+        }
     }
     #[state(superstate = "any")]
-    fn ducked() -> Outcome<State> {
-        Super
-    }
-    #[state(superstate = "any")]
-    fn wait_foreground() -> Outcome<State> {
-        Super
+    fn wait_foreground(context: &mut Exit, event: &SystemEvent) -> Outcome<State> {
+        match event {
+            SystemEvent::Capture => Transition(State::free()),
+            SystemEvent::Foreground(true) | SystemEvent::Focus(FocusChange::Gain) => { context.resume = Some(true); Transition(State::free()) }
+            _ => Super,
+        }
     }
     #[superstate]
-    fn any(event: &System) -> Outcome<State> {
-        Transition(match event {
-            System::Free => State::free(),
-            System::Interrupted => State::interrupted(),
-            System::FocusLost => State::focus_lost(),
-            System::Transient => State::transient(),
-            System::Ducked => State::ducked(),
-            System::WaitForeground => State::wait_foreground(),
-        })
+    fn any(context: &mut Exit, event: &SystemEvent) -> Outcome<State> {
+        match event {
+            SystemEvent::InterruptionBegan => Transition(State::interrupted()),
+            SystemEvent::InterruptionEnded(resume) | SystemEvent::ResumptionRecommendation(resume) => { context.resume = Some(*resume); Transition(State::free()) }
+            SystemEvent::Focus(FocusChange::Loss) => Transition(State::focus_lost()),
+            SystemEvent::Focus(FocusChange::LossTransient) | SystemEvent::FocusRequest(FocusAnswer::Delayed) => Transition(State::transient()),
+            SystemEvent::Focus(FocusChange::LossTransientDuck) => Transition(State::ducked()),
+            SystemEvent::FocusRequest(FocusAnswer::Failed) | SystemEvent::AppliedFailed => Transition(State::wait_foreground()),
+            SystemEvent::MediaReset | SystemEvent::CallSystemActivated => Transition(State::free()),
+            _ => Handled,
+        }
     }
 }
 

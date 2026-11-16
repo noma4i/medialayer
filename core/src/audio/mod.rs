@@ -3,12 +3,13 @@ mod system;
 mod types;
 use statig::blocking::*;
 use std::collections::BTreeSet;
-use system::{current, System, SystemMachine};
+use system::{current, Exit, System, SystemEvent, SystemMachine};
 pub use types::*;
 
 #[cfg(test)]
 mod audio_tests;
 
+#[derive(Clone)]
 struct Call {
     id: u64,
     kind: CallKind,
@@ -16,6 +17,7 @@ struct Call {
     state: CallState,
 }
 
+#[derive(Clone)]
 pub struct AudioOwner {
     focus: AudioFocus,
     audible: BTreeSet<u64>,
@@ -27,6 +29,7 @@ pub struct AudioOwner {
     own_mode: bool,
     permission: bool,
     other_recording: bool,
+    flowing: bool,
     system: StateMachine<SystemMachine>,
     foreground: bool,
     applied: Option<SessionWant>,
@@ -52,6 +55,7 @@ impl AudioOwner {
             own_mode: false,
             permission: true,
             other_recording: false,
+            flowing: true,
             system: SystemMachine.state_machine(),
             foreground: true,
             applied: None,
@@ -68,8 +72,15 @@ impl AudioOwner {
     fn system(&self) -> System {
         current(&self.system)
     }
-    fn set_system(&mut self, value: System) {
-        self.system.handle(&value);
+    fn system_event(&mut self, event: SystemEvent, actions: &mut Vec<AudioAction>) {
+        let mut exit = Exit::default();
+        self.system.handle_with_context(&event, &mut exit);
+        if let Some(resume) = exit.resume {
+            self.finish_interruption(resume, actions);
+        }
+        if exit.restore_volume {
+            actions.push(AudioAction::VolumeMultiplier { value: 1.0 });
+        }
     }
     fn external(&self) -> bool {
         self.phone
@@ -214,12 +225,10 @@ impl AudioOwner {
             I::Audible { slot, on } => {
                 if on {
                     self.audible.insert(slot);
-                    if self.system() == System::FocusLost {
-                        self.set_system(System::Free);
-                    }
                 } else {
                     self.audible.remove(&slot);
                 }
+                self.system_event(SystemEvent::Audible(on), &mut actions);
             }
             I::Capture { id, kind } => {
                 let refusal = if !self.permission {
@@ -230,6 +239,8 @@ impl AudioOwner {
                     Some(RecordingRefusal::Interrupted)
                 } else if !self.captures.is_empty() || self.other_recording {
                     Some(RecordingRefusal::MicrophoneBusy)
+                } else if kind == RecordingKind::Video && !self.flowing {
+                    Some(RecordingRefusal::MicrophoneSilent)
                 } else {
                     None
                 };
@@ -238,12 +249,7 @@ impl AudioOwner {
                 } else {
                     self.captures.push((id, kind));
                     actions.push(AudioAction::Admit { id });
-                    if matches!(
-                        self.system(),
-                        System::FocusLost | System::Transient | System::WaitForeground
-                    ) {
-                        self.set_system(System::Free);
-                    }
+                    self.system_event(SystemEvent::Capture, &mut actions);
                     self.pause(PauseReason::Capture, &mut actions);
                 }
             }
@@ -286,7 +292,7 @@ impl AudioOwner {
                             speaker: call.speaker,
                         });
                     }
-                    self.set_system(System::Free);
+                    self.system_event(SystemEvent::CallSystemActivated, &mut actions);
                     self.call_state(id, CallState::Live, &mut actions);
                 }
             }
@@ -324,14 +330,14 @@ impl AudioOwner {
                         }
                         AppliedResult::Failed { .. } => {
                             self.applied = None;
-                            self.set_system(System::WaitForeground);
+                            self.system_event(SystemEvent::AppliedFailed, &mut actions);
                             self.revoke(RecordingRefusal::MicrophoneBusy, &mut actions);
                         }
                     }
                 }
             }
             I::InterruptionBegan => {
-                self.set_system(System::Interrupted);
+                self.system_event(SystemEvent::InterruptionBegan, &mut actions);
                 self.applied = None;
                 self.revoke(RecordingRefusal::Interrupted, &mut actions);
                 self.pause(PauseReason::Interrupted, &mut actions);
@@ -345,53 +351,44 @@ impl AudioOwner {
                     }
                 }
             }
-            I::InterruptionEnded { should_resume }
-            | I::ResumptionRecommendation { should_resume } => {
-                self.set_system(System::Free);
-                self.finish_interruption(should_resume, &mut actions);
+            I::InterruptionEnded { should_resume } => {
+                self.system_event(SystemEvent::InterruptionEnded(should_resume), &mut actions);
+            }
+            I::ResumptionRecommendation { should_resume } => {
+                self.system_event(SystemEvent::ResumptionRecommendation(should_resume), &mut actions);
             }
             I::Focus { change } => match change {
                 FocusChange::Loss => {
-                    self.set_system(System::FocusLost);
+                    self.system_event(SystemEvent::Focus(change), &mut actions);
                     self.revoke(RecordingRefusal::Interrupted, &mut actions);
                     self.pause(PauseReason::FocusLost, &mut actions);
                 }
                 FocusChange::LossTransient => {
-                    self.set_system(System::Transient);
+                    self.system_event(SystemEvent::Focus(change), &mut actions);
                     self.revoke(RecordingRefusal::Interrupted, &mut actions);
                     self.pause(PauseReason::Interrupted, &mut actions);
                 }
                 FocusChange::LossTransientDuck => {
-                    self.set_system(System::Ducked);
+                    self.system_event(SystemEvent::Focus(change), &mut actions);
                     actions.push(AudioAction::VolumeMultiplier { value: 0.2 });
                 }
-                FocusChange::Gain => match self.system() {
-                    System::Transient | System::WaitForeground => {
-                        self.set_system(System::Free);
-                        self.finish_interruption(true, &mut actions);
-                    }
-                    System::Ducked => {
-                        self.set_system(System::Free);
-                        actions.push(AudioAction::VolumeMultiplier { value: 1.0 });
-                    }
-                    _ => {}
-                },
+                FocusChange::Gain => self.system_event(SystemEvent::Focus(change), &mut actions),
             },
             I::FocusRequest { answer } => match answer {
                 FocusAnswer::Granted => {}
                 FocusAnswer::Delayed => {
-                    self.set_system(System::Transient);
+                    self.system_event(SystemEvent::FocusRequest(answer), &mut actions);
                     self.pause(PauseReason::Interrupted, &mut actions);
                 }
                 FocusAnswer::Failed => {
                     self.applied = None;
-                    self.set_system(System::WaitForeground);
+                    self.system_event(SystemEvent::FocusRequest(answer), &mut actions);
                     self.pause(PauseReason::Interrupted, &mut actions);
                 }
             },
             I::MediaReset => {
                 self.applied = None;
-                self.set_system(System::Free);
+                self.system_event(SystemEvent::MediaReset, &mut actions);
                 self.revoke(RecordingRefusal::Interrupted, &mut actions);
                 if !self.audible.is_empty() {
                     actions.push(AudioAction::PauseAll {
@@ -444,6 +441,19 @@ impl AudioOwner {
                 }
             }
             I::OtherRecording { active } => self.other_recording = active,
+            I::MicrophoneFlow { flowing } => {
+                self.flowing = flowing;
+                if !flowing {
+                    self.captures.retain(|(id, kind)| {
+                        if *kind == RecordingKind::Video {
+                            actions.push(AudioAction::Revoke { id: *id, reason: RecordingRefusal::MicrophoneSilent });
+                            false
+                        } else {
+                            true
+                        }
+                    });
+                }
+            }
             I::Silenced { id } => {
                 if let Some(index) = self.captures.iter().position(|(capture, _)| *capture == id) {
                     self.captures.remove(index);
@@ -455,11 +465,7 @@ impl AudioOwner {
             }
             I::Foreground { on } => {
                 self.foreground = on;
-                if on && matches!(self.system(), System::Interrupted | System::WaitForeground) {
-                    let resume = self.system() == System::WaitForeground;
-                    self.set_system(System::Free);
-                    self.finish_interruption(resume, &mut actions);
-                }
+                self.system_event(SystemEvent::Foreground(on), &mut actions);
             }
         }
         if self.captures.is_empty() && self.paused == Some(PauseReason::Capture) {

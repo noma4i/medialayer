@@ -175,32 +175,6 @@ impl Drop for MediaWholeDeclaration {
     }
 }
 
-/// While at least one hold lives, a call runs: nothing plays, `play_url` is refused, and releasing restores nothing.
-#[derive(uniffi::Object)]
-pub struct CallHold {
-    queue: Arc<InputQueue>,
-    owner: u64,
-}
-
-impl CallHold {
-    pub(super) fn new(queue: Arc<InputQueue>, owner: u64) -> CallHold {
-        CallHold { queue, owner }
-    }
-}
-
-#[uniffi::export]
-impl CallHold {
-    pub fn release(&self) {
-        self.queue.release(self.owner);
-    }
-}
-
-impl Drop for CallHold {
-    fn drop(&mut self) {
-        self.release();
-    }
-}
-
 #[derive(uniffi::Object)]
 pub struct PlaybackSuspension {
     queue: Arc<InputQueue>,

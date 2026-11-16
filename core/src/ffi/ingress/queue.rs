@@ -280,6 +280,19 @@ impl InputQueue {
         Ok(())
     }
 
+    pub fn submit_audio(&self, commands: Vec<Declared>) -> Result<(), MediaError> {
+        let mut inner = self.inner();
+        let bytes = commands.iter().try_fold(0u64, |sum, command| sum.checked_add(command.weight()?)).ok_or_else(|| Self::overloaded("byte"))?;
+        self.admit(&inner, bytes, commands.len())?;
+        for command in commands {
+            let weight = command.weight().expect("audio weight checked");
+            self.push(&mut inner, command, weight).map_err(|error| error.0)?;
+        }
+        drop(inner);
+        self.wake.notify_one();
+        Ok(())
+    }
+
     fn push(&self, inner: &mut Inner, command: Declared, bytes: u64) -> Result<(), Box<(MediaError, Declared)>> {
         let fold = command.fold();
         if let Some(fold) = &fold {
