@@ -20,6 +20,7 @@ final class AudioLink: @unchecked Sendable {
   private let ports: AudioPorts
   private let inbox = DispatchQueue(label: "MediaLayer.audio.inbox")
   private let sessionQueue = DispatchQueue(label: "MediaLayer.audio.session")
+  private var sessionConfigured = false
   private var next: UInt64 = 0
   private var closed = false
   private var pending: [UInt64: CheckedContinuation<Result<RecordingTicket, RecordingRefusal>, Never>] = [:]
@@ -29,11 +30,12 @@ final class AudioLink: @unchecked Sendable {
   private var availabilitySinks: [UUID: AsyncStream<MicrophoneAvailability>.Continuation] = [:]
   private var currentAvailability: MicrophoneAvailability = .available
   private var tasks: [Task<Void, Never>] = []
-  var setVolumeMultiplier: @Sendable (Float) -> Void = { _ in }
+  private let setVolumeMultiplier: @Sendable (Float) -> Void
 
-  init(core: MediaLayer, ports: AudioPorts) {
+  init(core: MediaLayer, ports: AudioPorts, setVolumeMultiplier: @escaping @Sendable (Float) -> Void = { _ in }) {
     self.core = core
     self.ports = ports
+    self.setVolumeMultiplier = setVolumeMultiplier
     let systemEvents = ports.session.systemEvents()
     let observedCalls = ports.calls.calls()
     tasks = [
@@ -81,7 +83,6 @@ final class AudioLink: @unchecked Sendable {
   }
 
   func audible(slot: UInt64, _ on: Bool) { send(.audible(slot: slot, on: on)) }
-  func microphoneFlow(_ flowing: Bool) { send(.microphoneFlow(flowing: flowing)) }
   func readVolume() async -> MediaVolumeReading {
     await withCheckedContinuation { continuation in
       inbox.async {
@@ -125,6 +126,13 @@ final class AudioLink: @unchecked Sendable {
     }
   }
 
+  func endTicket(id: UInt64) {
+    inbox.async {
+      self.tickets[id] = nil
+      self.process(.captureEnded(id: id))
+    }
+  }
+
   func close() {
     inbox.async {
       guard !self.closed else { return }
@@ -139,6 +147,9 @@ final class AudioLink: @unchecked Sendable {
       self.calls.removeAll()
       self.availabilitySinks.values.forEach { $0.finish() }
       self.availabilitySinks.removeAll()
+      self.sessionQueue.async {
+        if self.sessionConfigured { try? self.ports.session.deactivate(); self.sessionConfigured = false }
+      }
     }
   }
 
@@ -156,14 +167,14 @@ final class AudioLink: @unchecked Sendable {
         let plan = SessionPlan.of(want)
         sessionQueue.async {
           let result: AppliedResult
-          do { try self.ports.session.apply(plan, activate: activate); result = .ok }
+          do { try self.ports.session.apply(plan, activate: activate); self.sessionConfigured = true; result = .ok }
           catch { result = .failed(code: Int64((error as NSError).code)) }
           self.send(.applied(generation: generation, result: result))
         }
       case let .deactivate(generation):
         sessionQueue.async {
           let result: AppliedResult
-          do { try self.ports.session.deactivate(); result = .ok }
+          do { try self.ports.session.deactivate(); self.sessionConfigured = false; result = .ok }
           catch is AudioSessionBusy { result = .busy }
           catch { result = .failed(code: Int64((error as NSError).code)) }
           self.send(.applied(generation: generation, result: result))
@@ -216,6 +227,8 @@ final class RecordingTicket: @unchecked Sendable {
   private weak var link: AudioLink?
   private let lock = NSLock()
   private var ended = false
+  private var revokedReason: RecordingRefusal?
+  var isActive: Bool { lock.withLock { !ended && revokedReason == nil } }
 
   init(id: UInt64, link: AudioLink) {
     self.id = id
@@ -223,11 +236,15 @@ final class RecordingTicket: @unchecked Sendable {
     (revoked, sink) = AsyncStream.makeStream()
   }
 
-  func revoke(_ reason: RecordingRefusal) { sink.yield(reason); sink.finish() }
+  func revoke(_ reason: RecordingRefusal) {
+    lock.withLock { revokedReason = reason }
+    sink.yield(reason)
+    sink.finish()
+  }
   func end() {
     guard lock.withLock({ if ended { return false }; ended = true; return true }) else { return }
     sink.finish()
-    link?.send(.captureEnded(id: id))
+    link?.endTicket(id: id)
   }
   deinit { end() }
 }

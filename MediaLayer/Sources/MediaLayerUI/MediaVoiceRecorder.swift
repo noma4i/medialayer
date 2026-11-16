@@ -51,6 +51,15 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     self.init(capture: SystemVoiceCapture(), maxDurationMs: voiceLimitMs(requested: maxDuration.map { UInt64(max($0, 0) * 1000) }))
   }
 
+  deinit {
+    running?.poll?.cancel()
+    if let file = running?.file {
+      try? capture.stop()
+      try? FileManager.default.removeItem(at: file)
+    }
+    held?.end()
+  }
+
   init(
     capture: VoiceCapture,
     maxDurationMs: UInt64,
@@ -104,7 +113,14 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
       throw error
     }
     let current = Running(file: file, startedAt: clock())
-    current.poll = Task { [weak self] in await self?.pollLevels() }
+    let waitForLevel = waitForLevel
+    current.poll = Task { [weak self] in
+      while !Task.isCancelled {
+        await waitForLevel()
+        if Task.isCancelled { return }
+        self?.publishLevel()
+      }
+    }
     lock.withLock {
       held = hold
       running = current
@@ -187,13 +203,9 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     return outcome
   }
 
-  private func pollLevels() async {
-    while !Task.isCancelled {
-      await waitForLevel()
-      if Task.isCancelled { return }
-      let level = voiceLevel(peak: capture.peak())
-      for sink in lock.withLock({ Array(sinks.values) }) { sink.yield(level) }
-    }
+  private func publishLevel() {
+    let level = voiceLevel(peak: capture.peak())
+    for sink in lock.withLock({ Array(sinks.values) }) { sink.yield(level) }
   }
 }
 

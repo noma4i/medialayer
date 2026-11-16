@@ -102,23 +102,15 @@ private final class Ticks: @unchecked Sendable {
   func advance(_ ms: UInt64) { lock.withLock { value += ms } }
 }
 
-private final class FirstPlayback: @unchecked Sendable {
-  private let lock = NSLock()
-  private var calls: [String]?
-
-  var log: [String]? { lock.withLock { calls } }
-
-  func record(_ log: [String]) { lock.withLock { if calls == nil { calls = log } }; TestSignal.shared.fire() }
-}
-
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct MediaVoiceRecorderTests {
   private func file() -> URL {
     FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).m4a")
   }
 
-  private func makeRecorder(_ capture: VoiceCapture, ticks: Ticks = Ticks(), audio: MediaAudioSession? = nil, maxMs: UInt64 = 60_000) -> MediaVoiceRecorder {
-    MediaVoiceRecorder(capture: capture, maxDurationMs: maxMs, audio: { audio }, clock: { ticks.read() }, levelInterval: .milliseconds(5))
+  private func makeRecorder(_ capture: VoiceCapture, ticks: Ticks = Ticks(), rig: TestAudioRig? = nil, maxMs: UInt64 = 60_000) -> MediaVoiceRecorder {
+    let rig = rig ?? (try! TestAudioRig())
+    return MediaVoiceRecorder(capture: capture, maxDurationMs: maxMs, link: { rig.link }, clock: { ticks.read() }, levelInterval: .milliseconds(5))
   }
 
   @Test
@@ -159,7 +151,8 @@ struct MediaVoiceRecorderTests {
     let capture = FakeCapture()
     let ticks = Ticks()
     let levelTicks = AsyncStream<Void>.makeStream()
-    let recorder = MediaVoiceRecorder(capture: capture, maxDurationMs: 60_000, audio: { nil }, clock: { ticks.read() }, waitForLevel: {
+    let rig = try TestAudioRig()
+    let recorder = MediaVoiceRecorder(capture: capture, maxDurationMs: 60_000, link: { rig.link }, clock: { ticks.read() }, waitForLevel: {
       var iterator = levelTicks.stream.makeAsyncIterator()
       _ = await iterator.next()
     })
@@ -200,25 +193,25 @@ struct MediaVoiceRecorderTests {
 
   @Test
   func inv_voice_08_the_recording_takes_the_audio_focus_and_gives_it_back_at_the_end() async throws {
-    let port = FakeAudioSessionPort()
-    let session = MediaAudioSession(focus: .mix, port: port, releaseDelay: .zero)
+    let rig = try TestAudioRig()
+    let port = rig.port
     let ticks = Ticks()
-    let recorder = makeRecorder(FakeCapture(), ticks: ticks, audio: session)
+    let recorder = makeRecorder(FakeCapture(), ticks: ticks, rig: rig)
 
     try await recorder.start(to: file())
-    #expect(session.isRecording)
+    #expect(port.log.last == "apply AVAudioSessionCategoryPlayAndRecord AVAudioSessionModeDefault activate=true")
     ticks.advance(1000)
     _ = try await recorder.stop()
 
-    #expect(!session.isRecording)
+    await eventually("recording released") { port.log.last == "deactivate" }
   }
 
   @Test
   func aSecondStartWhileTheFirstIsStartingIsRefusedAndHoldsNoRecordingSession() async throws {
-    let session = MediaAudioSession(focus: .mix, port: FakeAudioSessionPort(), releaseDelay: .zero)
+    let rig = try TestAudioRig()
     let capture = FirstStartGate()
     let ticks = Ticks()
-    let recorder = makeRecorder(capture, ticks: ticks, audio: session)
+    let recorder = makeRecorder(capture, ticks: ticks, rig: rig)
     let first = Task { try await recorder.start(to: file()) }
     var entered = capture.entered.stream.makeAsyncIterator()
     _ = await entered.next()
@@ -229,37 +222,33 @@ struct MediaVoiceRecorderTests {
     ticks.advance(1000)
     _ = try await recorder.stop()
 
-    #expect(!session.isRecording)
+    await eventually("recording released") { rig.port.log.last == "deactivate" }
   }
 
   @Test(arguments: [0, 4])
   func playbackAfterRecordingStartsWithAnActivePlaybackSession(busyDeactivations: Int) async throws {
-    let port = FakeAudioSessionPort(busyDeactivations: busyDeactivations)
-    let session = MediaAudioSession(focus: .mix, port: port, releaseDelay: .zero)
+    let port = FakeSessionPort(busyDeactivations: busyDeactivations)
+    let rig = try TestAudioRig(port: port)
     let ticks = Ticks()
-    let recorder = makeRecorder(FakeCapture(), ticks: ticks, audio: session)
+    let recorder = makeRecorder(FakeCapture(), ticks: ticks, rig: rig)
     let target = file()
     defer { try? FileManager.default.removeItem(at: target) }
     try await recorder.start(to: target)
     ticks.advance(1000)
     _ = try await recorder.stop()
 
-    let factory = AVQueuePlayerSlotFactory(startMuted: false, audio: session)
+    let factory = AVQueuePlayerSlotFactory(startMuted: false, audio: rig.audio)
     let slot = await factory.makeSlot(7)
     let clip = Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!
     await slot.load(key: "voice", route: PlaybackRoute(url: clip.absoluteString, headers: [:], generation: nil, hls: false, looping: true))
-    let first = FirstPlayback()
-    let observation = await MainActor.run {
-      slot.player.observe(\.timeControlStatus, options: [.new]) { player, _ in
-        if player.timeControlStatus != .paused { first.record(port.log) }
-      }
-    }
     await slot.play()
-    await eventually("player started") { first.log != nil }
-    let calls = try #require(first.log)
-    #expect(calls.last(where: { $0.hasPrefix("category ") }) == FakeAudioSessionPort.category(.playback(.mix)))
-    #expect(calls.last(where: { $0.hasPrefix("active ") && !$0.hasSuffix("BUSY") }) == "active true")
-    observation.invalidate()
+    for attempt in 0..<busyDeactivations {
+      await eventually("deactivation busy") { port.log.filter { $0 == "deactivate BUSY" }.count > attempt }
+      port.send(.routeChanged(.categoryChange, hadPrivateOutput: false))
+    }
+    await eventually("playback session restored") { port.log.last == "apply AVAudioSessionCategoryPlayback AVAudioSessionModeMoviePlayback activate=true" }
+    let calls = port.log
+    #expect(calls.last == "apply AVAudioSessionCategoryPlayback AVAudioSessionModeMoviePlayback activate=true")
     await slot.unload()
   }
 

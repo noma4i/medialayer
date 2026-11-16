@@ -151,7 +151,7 @@ private struct Rig {
   let counters: Counters
   let center: NotificationCenter
   let directory: URL
-  let audio: MediaAudioSession
+  let audio: TestAudioRig
   let signals: SystemSignalNames
   let observation: StateObservation
 }
@@ -178,7 +178,7 @@ private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .bac
   configure(backend, counters)
   let center = NotificationCenter()
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent("camera-\(UUID().uuidString)")
-  let audio = MediaAudioSession(focus: .mix, port: FakeAudioSessionPort(), releaseDelay: .milliseconds(5))
+  let audio = try TestAudioRig()
   let image = jpeg()
   let services = CameraServices(
     admitSession: { _ in
@@ -193,7 +193,7 @@ private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .bac
       counters.took()
       return { counters.gave() }
     },
-    audio: { audio },
+    link: { audio.link },
     clipInfo: { _ in
       counters.checkThread()
       return counters.info

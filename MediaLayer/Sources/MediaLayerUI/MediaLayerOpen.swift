@@ -62,9 +62,8 @@ extension MediaLayer {
       do {
         try Task.checkCancellation()
         let media = try build(config)
-        let link = AudioLink(core: media, ports: .system(focus: audioFocus.core))
+        let link = AudioLink(core: media, ports: .system(focus: audioFocus.core), setVolumeMultiplier: { value in factory.slots.setVolumeMultiplier(value) })
         audio.bind(link)
-        link.setVolumeMultiplier = { value in factory.slots.setVolumeMultiplier(value) }
         resources?.bind(media, link: link)
         #if os(iOS)
         CaptureFiles.sweepOrphans()

@@ -372,7 +372,7 @@ public final class MediaCamera: @unchecked Sendable {
     queue.async {
       guard self.audioHold === ticket else { return }
       self.audioHold = nil
-      self.apply(.callStarted)
+      self.apply(.revoked(reason: Self.microphoneReason(reason)))
     }
   }
 
@@ -383,8 +383,12 @@ public final class MediaCamera: @unchecked Sendable {
   }
 
   private func ensureAudioTicket() async throws {
-    let needed = await withCheckedContinuation { continuation in
-      queue.async { continuation.resume(returning: self.audioHold == nil) }
+    let needed: Bool = try await withCheckedThrowingContinuation { continuation in
+      queue.async {
+        guard !self.run.starting, !self.run.started else { continuation.resume(throwing: Self.refusal(.notReady)); return }
+        if let ticket = self.audioHold, !ticket.isActive { self.audioHold = nil }
+        continuation.resume(returning: self.audioHold == nil)
+      }
     }
     guard needed else { return }
     guard let link = services.link() else { throw Self.refusal(.notReady) }

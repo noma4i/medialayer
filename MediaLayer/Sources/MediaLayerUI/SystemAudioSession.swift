@@ -40,8 +40,9 @@ struct SystemAudioSession: AudioSessionPort {
         continuation.yield(.routeChanged(reason, hadPrivateOutput: hadPrivateOutput(previous)))
       })
       if #available(iOS 27.0, *) {
-        tokens.append(center.addObserver(forName: AVAudioSession.resumptionRecommendationNotification, object: session, queue: nil) { _ in
-          continuation.yield(.resumption(shouldResume: session.recommendation == .shouldResume))
+        tokens.append(center.addObserver(forName: AVAudioSession.resumptionRecommendationNotification, object: session, queue: nil) { note in
+          guard let context = note.userInfo?[AVAudioSession.resumptionContextKey] as? AVAudioSession.ResumptionContext else { return }
+          continuation.yield(.resumption(shouldResume: context.recommendation == .shouldResume))
         })
       }
       let registered = tokens
