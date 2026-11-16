@@ -136,6 +136,7 @@ private class Counters {
   @Volatile var denyShots = false
   @Volatile var info: MediaInfo? = MediaInfo(2000UL, ImageSize(720u, 1280u))
   @Volatile var videoGate: CompletableDeferred<Unit>? = null
+  @Volatile var focusAnswer = com.noma4i.medialayer.FocusAnswer.GRANTED
   val straightened = CopyOnWriteArrayList<File>()
   val straightenCancelled = java.util.concurrent.atomic.AtomicBoolean()
 
@@ -175,6 +176,7 @@ class MediaCameraTest {
     configure(backend, counters)
     val directory = File(context.cacheDir, "camera-${System.nanoTime()}")
     val fixture = AudioFixture(context).also { fixtures.add(it) }
+    fixture.port.answer = counters.focusAnswer
     val audio = fixture.link
     val services = CameraServices(
       admitSession = { _ ->
@@ -509,6 +511,15 @@ class MediaCameraTest {
     val still = rig()
     ready(still)
     assertFalse("a photo profile does not take the microphone", still.audio.isRecording)
+  }
+
+  @Test
+  fun inv_capture_34_aBindCancelledWhileTheMicrophoneWaitsGivesItsSessionMemoryBack() {
+    val rig = rig(moment) { _, counters -> counters.focusAnswer = com.noma4i.medialayer.FocusAnswer.DELAYED }
+    rig.attach()
+    eventually("the session memory is taken while the microphone waits") { rig.counters.taken.get() == 1 }
+    rig.detach()
+    eventually("the session memory is given back") { rig.counters.released.get() == rig.counters.taken.get() }
   }
 
   @Test

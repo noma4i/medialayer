@@ -51,7 +51,12 @@ final class FakeSessionPort: AudioSessionPort, @unchecked Sendable {
     note("deactivate")
   }
 
-  func overrideSpeaker(_ on: Bool) throws { note("speaker \(on)") }
+  private var speakerFailure: Error?
+  func failSpeaker(_ error: Error) { lock.withLock { speakerFailure = error } }
+  func overrideSpeaker(_ on: Bool) throws {
+    if let failure = lock.withLock({ speakerFailure }) { note("speaker failed"); throw failure }
+    note("speaker \(on)")
+  }
   func outputVolume() -> Float { 0.5 }
   func volumeChanges() -> AsyncStream<Float> { AsyncStream { _ in } }
 }
@@ -304,6 +309,20 @@ struct AudioLinkTests {
 
     #expect(await states.value.last == .ended)
   }
+  @Test
+  func inv_audio_59_a_call_after_close_is_refused_and_a_failed_speaker_reaches_the_app() async throws {
+    let closed = try AudioRig()
+    closed.link.close()
+    await #expect(throws: MediaError.self) { _ = try await closed.link.call(.unmanaged) }
+
+    let rig = try AudioRig()
+    let call = try await rig.link.call(.unmanaged)
+    rig.session.failSpeaker(NSError(domain: "speaker", code: 7))
+    call.setSpeaker(true)
+    await eventually("the failure reached the app") { String(describing: Media.failure).contains("speaker") }
+    call.end()
+  }
+
 }
 
 final class StatesSeen: @unchecked Sendable {

@@ -272,6 +272,20 @@ class AudioLinkTest {
     }
   }
 
+  @Test
+  fun inv_audio_58_a_refused_call_focus_holds_no_communication_mode() {
+    focus.answer = FocusAnswer.FAILED
+    val states = CopyOnWriteArrayList<CallState>()
+    val call = link.call(MediaCallKind.Unmanaged)
+    call.onState { states.add(it); TestSignal.fire() }
+    await("asked") { focus.calls.any { it.startsWith("request") } }
+
+    call.close()
+
+    await("ended") { states.lastOrNull() == CallState.ENDED }
+    assertFalse("the earpiece mode was set without focus: ${focus.calls}", focus.calls.any { it.startsWith("communication on=true") })
+  }
+
 }
 
 internal class WritingVoiceCapture : VoiceCapture {
