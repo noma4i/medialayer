@@ -60,7 +60,7 @@ struct CancellationTests {
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
       fetcher: fetcher, settings: EmptySettings(), slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
-      defaults: defaultLimits(), pool: defaultPoolSettings()
+      defaults: defaultLimits(), pool: defaultPoolSettings(), audioFocus: .exclusive
     ))
     let request = Task { try await media.fetchImage(url: "https://o.test/pending.jpg", headers: [:]) }
     #expect(await arrives(fetcher.body.reading.stream))

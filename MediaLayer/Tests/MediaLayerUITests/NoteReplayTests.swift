@@ -76,7 +76,7 @@ extension GlobalMedia {
         dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
         fetcher: TestFetcher(), settings: NoteSettings(), slots: slot,
         device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
-        defaults: defaultLimits(), pool: defaultPoolSettings()
+        defaults: defaultLimits(), pool: defaultPoolSettings(), audioFocus: .exclusive
       ))
       let context = MediaContext(places: media)
       let first = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 200))

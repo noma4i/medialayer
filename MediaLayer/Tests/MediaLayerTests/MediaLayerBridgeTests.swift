@@ -70,7 +70,7 @@ struct MediaLayerBridgeTests {
       slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
       defaults: defaultLimits(),
-      pool: defaultPoolSettings()
+      pool: defaultPoolSettings(), audioFocus: .exclusive
     ))
   }
 
@@ -85,7 +85,7 @@ struct MediaLayerBridgeTests {
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
       defaults: defaultLimits(),
       pool: defaultPoolSettings(),
-      imageWindows: [ImageWindow(name: "grid", behind: 0, from: 0, to: 2)]
+      imageWindows: [ImageWindow(name: "grid", behind: 0, from: 0, to: 2)], audioFocus: .exclusive
     ))
 
     media.replaceImageWindow("grid", active: 0, pages: (0..<4).map { [Poster(url: "https://o.test/p\($0).jpg")] })
@@ -142,7 +142,7 @@ struct MediaLayerBridgeTests {
       slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
       defaults: defaultLimits(),
-      pool: defaultPoolSettings()
+      pool: defaultPoolSettings(), audioFocus: .exclusive
     ))
     var limits = try await media.limits()
     limits.budget = 512 * 1024 * 1024
@@ -229,7 +229,7 @@ struct MediaLayerBridgeTests {
       slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
       defaults: defaultLimits(),
-      pool: defaultPoolSettings()
+      pool: defaultPoolSettings(), audioFocus: .exclusive
     ))
     let route = try await media.playUrl(source: MediaItem(kind: .audio, url: "https://o.test/voice.m4a", headers: [:], cover: nil, blurHash: nil, strategy: .window))
     var request = URLRequest(url: URL(string: route.url)!)

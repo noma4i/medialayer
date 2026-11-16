@@ -47,7 +47,7 @@ struct SlotThreadTests {
       slots: factory,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
       defaults: defaultLimits(),
-      pool: defaultPoolSettings()
+      pool: defaultPoolSettings(), audioFocus: .exclusive
     ))
     factory.events.bind(media.playerEvents())
     let url = Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!.absoluteString

@@ -36,7 +36,7 @@ private func openPlaying(groups: [String?] = [nil]) async throws -> (MediaLayer,
     dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
     fetcher: TestFetcher(), settings: QuietSettings(), slots: slot,
     device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
-    defaults: defaultLimits(), pool: defaultPoolSettings()
+    defaults: defaultLimits(), pool: defaultPoolSettings(), audioFocus: .exclusive
   ))
   media.replaceWindow(active: 0, sources: [MediaItem(kind: .video, url: clip, headers: [:], cover: nil, blurHash: nil, strategy: .window)])
   media.setPlaying(key: clip, playing: true, groups: groups)

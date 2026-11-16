@@ -78,7 +78,7 @@ private struct SuspendRig {
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
       fetcher: TestFetcher(), settings: SuspendProbeSettings(), slots: slot,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
-      defaults: defaultLimits(), pool: defaultPoolSettings(), ingress: ingress
+      defaults: defaultLimits(), pool: defaultPoolSettings(), ingress: ingress, audioFocus: .exclusive
     ))
     media.replaceWindow(active: 0, sources: [MediaItem(kind: .video, url: probeClip, headers: [:], cover: nil, blurHash: nil, strategy: .window)])
     media.setPlaying(key: probeClip, playing: true, groups: [nil])

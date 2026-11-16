@@ -67,7 +67,7 @@ private func openCore(_ slot: TransportSlot) throws -> MediaLayer {
     dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
     fetcher: TestFetcher(), settings: QuietSettings(), slots: slot,
     device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
-    defaults: defaultLimits(), pool: defaultPoolSettings()
+    defaults: defaultLimits(), pool: defaultPoolSettings(), audioFocus: .exclusive
   ))
 }
 

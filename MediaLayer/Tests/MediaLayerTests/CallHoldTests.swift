@@ -45,7 +45,7 @@ struct CallHoldTests {
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
       fetcher: TestFetcher(), settings: CallSettings(), slots: slot,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
-      defaults: defaultLimits(), pool: defaultPoolSettings()
+      defaults: defaultLimits(), pool: defaultPoolSettings(), audioFocus: .exclusive
     ))
     media.replaceWindow(active: 0, sources: [item])
     media.setPlaying(key: clip, playing: true, groups: [nil])

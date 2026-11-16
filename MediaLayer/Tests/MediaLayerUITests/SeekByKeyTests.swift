@@ -35,7 +35,7 @@ private func open(_ slot: SeekSlot) throws -> MediaLayer {
     dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
     fetcher: TestFetcher(), settings: SeekSettings(), slots: slot,
     device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
-    defaults: defaultLimits(), pool: defaultPoolSettings()
+    defaults: defaultLimits(), pool: defaultPoolSettings(), audioFocus: .exclusive
   ))
 }
 

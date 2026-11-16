@@ -43,7 +43,7 @@ struct ReloadTests {
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
       fetcher: TestFetcher(), settings: ReloadSettings(), slots: slot,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
-      defaults: defaultLimits(), pool: defaultPoolSettings()
+      defaults: defaultLimits(), pool: defaultPoolSettings(), audioFocus: .exclusive
     ))
     let key = "file:///clip.mp4"
     let events = media.playerEvents()

@@ -44,7 +44,7 @@ struct ImageIdentityTests {
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
       fetcher: origin, settings: IdentitySettings(), slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
-      defaults: defaultLimits(), pool: defaultPoolSettings(), namespaceHeaders: ["Authorization"]
+      defaults: defaultLimits(), pool: defaultPoolSettings(), namespaceHeaders: ["Authorization"], audioFocus: .exclusive
     ))
     ImageMemory.install(ImageCache(), on: media)
     let pipeline = MediaImagePipeline.make(places: media)

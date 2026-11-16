@@ -66,7 +66,7 @@ struct CacheStrategyTests {
       slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
       defaults: defaultLimits(),
-      pool: defaultPoolSettings()
+      pool: defaultPoolSettings(), audioFocus: .exclusive
     ))
     let clip = MediaItem(kind: .video, url: "https://o.test/clip.mp4", headers: [:], cover: nil, blurHash: nil, strategy: .whole)
 

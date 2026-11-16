@@ -68,7 +68,7 @@ struct WholeHoldTests {
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
       fetcher: origin, settings: HoldSettings(), slots: nil,
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
-      defaults: limits, pool: defaultPoolSettings()
+      defaults: limits, pool: defaultPoolSettings(), audioFocus: .exclusive
     ))
     let hold = MediaWholeHold()
     let (first, second) = (photo("a.jpg"), photo("b.jpg"))
