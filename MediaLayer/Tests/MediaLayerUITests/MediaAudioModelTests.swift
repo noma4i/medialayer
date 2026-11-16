@@ -12,7 +12,7 @@ private final class SystemSession: AudioSessionPort, @unchecked Sendable {
   private var active = false
   private var interrupted = false
   private var changes = 0
-  private var sinks: [AsyncStream<Void>.Continuation] = []
+  private var sinks: [AsyncStream<SystemAudioEvent>.Continuation] = []
 
   var state: (plan: SessionPlan, active: Bool, interrupted: Bool) { lock.withLock { (plan, active, interrupted) } }
 
@@ -33,8 +33,8 @@ private final class SystemSession: AudioSessionPort, @unchecked Sendable {
 
   var systemChanges: Int { lock.withLock { changes } }
 
-  func systemEvents() -> AsyncStream<Void> {
-    let (stream, continuation) = AsyncStream<Void>.makeStream()
+  func systemEvents() -> AsyncStream<SystemAudioEvent> {
+    let (stream, continuation) = AsyncStream<SystemAudioEvent>.makeStream()
     lock.withLock { sinks.append(continuation) }
     return stream
   }
@@ -43,25 +43,56 @@ private final class SystemSession: AudioSessionPort, @unchecked Sendable {
 
   func volumeChanges() -> AsyncStream<Float> { AsyncStream { _ in } }
 
-  func callKitActivates() { change { active = true } }
+  func callKitActivates() { lock.withLock { active = true }; TestSignal.shared.fire() }
 
-  func callKitDeactivates() { change { active = false } }
+  func callKitDeactivates() { lock.withLock { active = false }; TestSignal.shared.fire() }
 
-  func interruptionBegins() { change { active = false; interrupted = true } }
+  func interruptionBegins() { change(.interruptionBegan) { active = false; interrupted = true } }
 
-  func interruptionEnds() { change { interrupted = false } }
+  func interruptionEnds() { change(.interruptionEnded) { interrupted = false } }
 
-  func mediaServicesReset() { change { active = false; plan = Self.quiet } }
+  func mediaServicesReset() { change(.mediaServicesReset) { active = false; plan = Self.quiet } }
 
-  func routeChanges() { change {} }
+  func routeChanges() { change(.routeChanged) {} }
 
-  private func change(_ effect: () -> Void) {
-    let targets = lock.withLock { () -> [AsyncStream<Void>.Continuation] in
+  private func change(_ event: SystemAudioEvent, _ effect: () -> Void) {
+    let targets = lock.withLock { () -> [AsyncStream<SystemAudioEvent>.Continuation] in
       effect()
-      changes += 1
+      if case .routeChanged = event {} else { changes += 1 }
       return sinks
     }
-    for sink in targets { sink.yield() }
+    for sink in targets { sink.yield(event) }
+    TestSignal.shared.fire()
+  }
+}
+
+private final class SystemMicrophoneModel: MicrophonePort, @unchecked Sendable {
+  private let lock = NSLock()
+  private var state = MicrophoneState()
+  private var sinks: [AsyncStream<String>.Continuation] = []
+
+  func current() -> MicrophoneState { lock.withLock { state } }
+
+  func changes() -> AsyncStream<String> {
+    let (stream, continuation) = AsyncStream<String>.makeStream()
+    lock.withLock { sinks.append(continuation) }
+    return stream
+  }
+
+  var calls: Set<UUID> { lock.withLock { state.calls } }
+
+  func permission(_ granted: Bool) { change("permission") { $0.permissionGranted = granted } }
+
+  func callBegins(_ id: UUID) { change("call") { $0.calls.insert(id) } }
+
+  func callEnds(_ id: UUID) { change("call") { $0.calls.remove(id) } }
+
+  private func change(_ source: String, _ effect: (inout MicrophoneState) -> Void) {
+    let targets = lock.withLock { () -> [AsyncStream<String>.Continuation] in
+      effect(&state)
+      return sinks
+    }
+    for sink in targets { sink.yield(source) }
     TestSignal.shared.fire()
   }
 }
@@ -147,6 +178,7 @@ private enum Step: CaseIterable {
   case playerAudible, playerSilent
   case interruptionBegins, interruptionEnds, mediaServicesReset, routeChanges
   case callStarts, callSystemActivates, callSystemDeactivates, callSpeaker, callEnds
+  case externalCallBegins, externalCallEnds
 }
 
 private final class Live: @unchecked Sendable {
@@ -170,6 +202,9 @@ private final class Live: @unchecked Sendable {
 
 private final class World {
   let system = SystemSession()
+  let microphone = SystemMicrophoneModel()
+  var externalCall: UUID?
+  var callUUID: UUID?
   let audio: MediaAudioSession
   let center = NotificationCenter()
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent("audio-model-\(UUID().uuidString)")
@@ -192,7 +227,7 @@ private final class World {
   var ticks: UInt64 = 0
 
   init() {
-    audio = MediaAudioSession(focus: .mix, port: system, releaseDelay: .zero)
+    audio = MediaAudioSession(focus: .mix, port: system, releaseDelay: .zero, microphonePort: microphone)
     voice = World.recorder(audio, refuses: false)
   }
 
@@ -233,7 +268,18 @@ private final class World {
     return now.active && live.value
   }
 
+  var externalCallLive: Bool { externalCall != nil && externalCall != callUUID }
+
+  func microphoneConverged() -> Bool {
+    let value = audio.microphone.current
+    if call != nil { return value == .ownCall }
+    if externalCallLive { return value == .externalCall }
+    if system.state.interrupted { return value == .available || value == .otherApp }
+    return value == .available
+  }
+
   func converged() -> Bool {
+    guard microphoneConverged() else { return false }
     if cameraShown && foreground && camera?.state.phase == .opening { return false }
     guard audio.isRecording == wantsMicrophone else { return false }
 
@@ -294,9 +340,11 @@ private final class World {
       _ = await starting.value
     case .voiceDenied:
       if !voice.isRecording {
-        voice = World.recorder(audio, refuses: true)
-        try? await voice.start(to: file())
-        voice = World.recorder(audio, refuses: false)
+        microphone.permission(false)
+        let refused = World.recorder(audio, refuses: false)
+        try? await refused.start(to: file())
+        microphone.permission(true)
+        guard !refused.isRecording else { throw MediaError.Unexpected(detail: "a recording started without the microphone permission") }
       }
     case .playerAudible:
       let slot = UInt32.random(in: 1...3, using: &random)
@@ -315,10 +363,26 @@ private final class World {
       system.mediaServicesReset()
     case .routeChanges:
       system.routeChanges()
+    case .externalCallBegins:
+      guard externalCall == nil else { return }
+      let id = UUID()
+      externalCall = id
+      microphone.callBegins(id)
+      if !voice.isRecording {
+        let refused = World.recorder(audio, refuses: false)
+        try? await refused.start(to: file())
+        guard !refused.isRecording else { throw MediaError.Unexpected(detail: "a recording started during an external call") }
+      }
+    case .externalCallEnds:
+      guard let id = externalCall else { return }
+      externalCall = nil
+      microphone.callEnds(id)
     case .callStarts:
       guard call == nil else { return }
       let managed = Bool.random(using: &random)
-      if let hold = await audio.holdCall(managedBySystem: managed) {
+      let uuid: UUID? = managed ? UUID() : nil
+      if let hold = await audio.holdCall(managedBySystem: managed, callUUID: uuid) {
+        callUUID = uuid
         call = hold
         callManaged = managed
         callSpeaker = false
@@ -343,6 +407,7 @@ private final class World {
     case .callEnds:
       guard let ending = call else { return }
       call = nil
+      callUUID = nil
       ending.release()
       if callManaged && callKitLive {
         callKitLive = false
@@ -381,6 +446,8 @@ struct MediaAudioModelTests {
       if !world.converged() { return }
     }
     world.system.interruptionEnds()
+    if let id = world.externalCall { world.microphone.callEnds(id) }
+    world.externalCall = nil
     world.call?.release()
     world.call = nil
     if world.callKitLive { world.system.callKitDeactivates() }
