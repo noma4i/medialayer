@@ -105,6 +105,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
   private var communication = false
   private val inputs = ArrayDeque<AudioInput>()
   private var processing = false
+  @Volatile internal var volumeMultiplier: (Float) -> Unit = {}
 
   init {
     (ports.focus as? AudioSystem)?.handler = handler
@@ -178,6 +179,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
           calls[action.id]?.update(action.state)
           if (action.state == CallState.ENDED) calls.remove(action.id)
         }
+        is AudioAction.VolumeMultiplier -> volumeMultiplier(action.value)
         else -> Unit
       }
     }

@@ -49,6 +49,8 @@ internal abstract class ExoPlayerSlotRig {
 
   protected fun factory(startMuted: Boolean = true, focus: MediaAudioFocus = MediaAudioFocus.Mix) =
     ExoPlayerSlotFactory(context, OkHttpClient(), startMuted = startMuted).onMainLooper().also {
+      it.clock = FakeClock(true)
+      it.renderersFactory = fakeRenderersFactory()
       val fixture = AudioFixture(context, focus, focusPort)
       audioFixtures.add(fixture)
       it.link = fixture.link

@@ -15,11 +15,16 @@ import org.robolectric.Shadows.shadowOf
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(MediaLayerTestRunner::class)
 internal class ExoPlayerSlotAudioTest : ExoPlayerSlotRig() {
+  private fun ready(slot: ExoPlayerSlot) {
+    androidx.media3.test.utils.robolectric.TestPlayerRunHelper.advance(slot.player!!)
+      .withTimeoutMs(2_000).untilState(androidx.media3.common.Player.STATE_READY)
+  }
+
   @Test
   fun muteAndUnmuteChangeOnlyTheVolumeAndNeverTouchAudioFocus() {
     val slot = factory(startMuted = false, focus = MediaAudioFocus.Exclusive).createSlot(0u)
     val audio = shadowOf(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
-    slot.load("k", route); slot.play(); idle()
+    slot.load("k", route); slot.play(); idle(); ready(slot)
     TestSignal.await("link focus", 5_000) { focusPort.calls.contains("request GAIN MEDIA") }
     assertNull(audio.lastAudioFocusRequest)
     assertEquals(listOf("request GAIN MEDIA"), focusPort.calls.toList())
@@ -54,7 +59,7 @@ internal class ExoPlayerSlotAudioTest : ExoPlayerSlotRig() {
 
     assertEquals(emptyList<String>(), focusPort.calls.toList())
 
-    slot.play(); settleAudioFocus()
+    slot.play(); settleAudioFocus(); ready(slot)
 
     TestSignal.await("link focus", 5_000) { focusPort.calls.contains("request GAIN MEDIA") }
     assertEquals(listOf("request GAIN MEDIA"), focusPort.calls.toList())
@@ -64,7 +69,7 @@ internal class ExoPlayerSlotAudioTest : ExoPlayerSlotRig() {
   @Test
   fun duckFollowsMutePauseAndUnloadOfTheSlot() {
     val slot = factory(startMuted = false, focus = MediaAudioFocus.Duck).createSlot(0u)
-    slot.load("k", route); slot.play(); idle()
+    slot.load("k", route); slot.play(); idle(); ready(slot)
 
     slot.mute(); idle(); advanceFocus(300)
 
@@ -91,7 +96,7 @@ internal class ExoPlayerSlotAudioTest : ExoPlayerSlotRig() {
   fun aMutedSlotStartedBySilentNeverTakesTheFocus() {
     val slot = factory(startMuted = true, focus = MediaAudioFocus.Duck).createSlot(0u)
 
-    slot.load("k", route); slot.play(); idle(); advanceFocus(1000)
+    slot.load("k", route); slot.play(); idle(); ready(slot); advanceFocus(1000)
 
     assertEquals(emptyList<String>(), focusPort.calls.toList())
   }
@@ -100,7 +105,7 @@ internal class ExoPlayerSlotAudioTest : ExoPlayerSlotRig() {
   fun aSlotThatIsReleasedGivesItsFocusBack() {
     val factory = factory(startMuted = false, focus = MediaAudioFocus.Duck)
     val slot = factory.createSlot(0u)
-    slot.load("k", route); slot.play(); idle()
+    slot.load("k", route); slot.play(); idle(); ready(slot)
 
     slot.disposing(); idle(); advanceFocus(300)
 

@@ -89,6 +89,13 @@ class ExoPlayerSlotFactory(
   val videoOutputCounters: VideoOutputCounters? = null
 ) : PlayerSlotFactory {
   @Volatile internal var link: AudioLink? = null
+    set(value) {
+      field?.volumeMultiplier = {}
+      field = value
+      value?.volumeMultiplier = ::setVolumeMultiplier
+    }
+  private val activeSlots = ConcurrentHashMap.newKeySet<ExoPlayerSlot>()
+  @Volatile private var multiplier = 1f
   internal val appContext: Context = context.applicationContext
   internal val allocator = DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE)
   internal var renderersFactory: RenderersFactory = DefaultRenderersFactory(appContext).setEnableDecoderFallback(true)
@@ -108,12 +115,20 @@ class ExoPlayerSlotFactory(
   override suspend fun create(slot: UInt): CreatedPlayer = CreatedPlayer(createSlot(slot))
 
   @Synchronized
-  internal fun createSlot(slot: UInt): ExoPlayerSlot = ExoPlayerSlot(slot, this)
+  internal fun createSlot(slot: UInt): ExoPlayerSlot = ExoPlayerSlot(slot, this).also { activeSlots.add(it); it.setVolumeMultiplier(multiplier) }
+
+  private fun setVolumeMultiplier(value: Float) {
+    multiplier = value
+    activeSlots.forEach { it.setVolumeMultiplier(value) }
+  }
+
+  internal fun forget(slot: ExoPlayerSlot) { activeSlots.remove(slot) }
 
   @Synchronized
   fun release() {
     closed = true
     events = null
     link = null
+    activeSlots.clear()
   }
 }

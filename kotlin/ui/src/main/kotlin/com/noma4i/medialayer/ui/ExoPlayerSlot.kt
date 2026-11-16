@@ -25,6 +25,8 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
   @Volatile private var key: String? = null
   @Volatile private var wantsPlay = false
   @Volatile private var volumeNow = 1f
+  private var muted = host.startMuted
+  private var multiplier = 1f
   private var hasBeenReady = false
   @Volatile private var released = false
   private var viewToken: ULong? = null
@@ -61,7 +63,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
       reportAudible()
     }
 
-    override fun onIsPlayingChanged(isPlaying: Boolean) = refresh()
+    override fun onIsPlayingChanged(isPlaying: Boolean) { refresh(); reportAudible() }
 
     override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) = refresh()
 
@@ -119,8 +121,8 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
     SlotCall.Preroll -> doPreroll()
     SlotCall.Play -> doPlay()
     SlotCall.Pause -> doPause()
-    SlotCall.Mute -> { player?.volume = 0f; Unit }
-    SlotCall.Unmute -> { player?.volume = 1f; Unit }
+    SlotCall.Mute -> { muted = true; updateVolume() }
+    SlotCall.Unmute -> { muted = false; updateVolume() }
     is SlotCall.Attach -> doAttach(command.viewToken)
     SlotCall.Detach -> doDetach()
     is SlotCall.Seek -> { player?.seekTo(command.positionMs.toLong()); Unit }
@@ -237,6 +239,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
   private fun releaseNow() {
     if (released) return
     released = true
+    host.forget(this)
     host.link?.audible(id.toULong(), false)
     hideFromView()
     player?.removeListener(housekeeping)
@@ -272,10 +275,11 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
       val exo = ExoPlayer.Builder(host.appContext, host.renderersFactory)
         .setLoadControl(control)
         .setAudioAttributes(attributes, false)
+        .setHandleAudioBecomingNoisy(false)
         .setClock(host.clock)
         .setLooper(looper)
         .build()
-      exo.volume = if (host.startMuted) 0f else 1f
+      exo.volume = if (muted) 0f else multiplier
       volumeNow = exo.volume
       output = LooperPlayer(exo)
       exo.addListener(housekeeping)
@@ -314,8 +318,12 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
 
   private fun reportAudible() {
     val exo = player ?: return
-    host.link?.audible(id.toULong(), exo.volume > 0f && exo.playWhenReady && exo.mediaItemCount > 0 && exo.playbackState != Player.STATE_ENDED)
+    host.link?.audible(id.toULong(), exo.volume > 0f && exo.isPlaying)
   }
+
+  internal fun setVolumeMultiplier(value: Float) { commands.post { multiplier = value; updateVolume() } }
+
+  private fun updateVolume() { player?.volume = if (muted) 0f else multiplier }
 
   private fun refresh() {
     val exo = player ?: return
