@@ -19,3 +19,4 @@ MediaLayer/Package.resolved
 /.orca-artifacts
 
 /kotlin/src/test/kotlin/app/media/
+__pycache__/

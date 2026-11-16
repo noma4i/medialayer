@@ -21,6 +21,7 @@ def check_android_build_arguments():
         root = Path(directory)
         (root / "scripts").mkdir()
         shutil.copy2(source / "scripts/release_android.sh", root / "scripts/release_android.sh")
+        (root / "scripts/release_evidence.py").write_text('print("tree")\n')
         (root / "scripts/build_kotlin.sh").write_text('#!/bin/bash\nprintf "%s\\n" "$#" "$@" > "$(dirname "$0")/arguments"\nexit 73\n')
         result = subprocess.run(["bash", str(root / "scripts/release_android.sh"), "3.26.2", str(root / "out")], capture_output=True, text=True)
         assert result.returncode == 73, f"build stub was not reached: {result.stderr}"
@@ -32,6 +33,7 @@ def run_case(publish):
         root = Path(directory)
         (root / "scripts").mkdir()
         shutil.copy2(script, root / "scripts/release.sh")
+        (root / "scripts/release_evidence.py").write_text('import pathlib, sys\nif sys.argv[1] == "tree": print("tree")\nif sys.argv[1] == "stage": (pathlib.Path(sys.argv[2]) / "source-evidence.json").write_text("{}")\n')
         (root / "scripts/release.sh").chmod(0o755)
         for name in ("check_docs.sh", "check_zoo.sh"):
             (root / "scripts" / name).write_text("#!/bin/sh\nexit 0\n")
@@ -167,7 +169,7 @@ if a[:2]==["release","download"]:
         if not publish:
             hidden = root / "testing-hidden"
             shutil.move(str(android / "maven/com/noma4i/medialayer-testing"), str(hidden))
-            refused = subprocess.run(["bash", str(root / "scripts/release.sh"), "3.26.2", "--android", str(android)], cwd="/", env=env, capture_output=True, text=True)
+            refused = subprocess.run(["bash", str(root / "scripts/release.sh"), "3.26.2", "--android", str(android), "--report", "checks.json"], cwd="/", env=env, capture_output=True, text=True)
             shutil.move(str(hidden), str(android / "maven/com/noma4i/medialayer-testing"))
             if refused.returncode == 0 or "medialayer-testing" not in refused.stderr:
                 raise AssertionError("release accepted a stage without medialayer-testing")
@@ -176,7 +178,10 @@ if a[:2]==["release","download"]:
             raise AssertionError("release accepted a missing --android argument")
         if event_file.exists() and "gh " in event_file.read_text():
             raise AssertionError("gh ran without Android artifacts")
-        cmd = ["bash", str(root / "scripts/release.sh"), "3.26.2"] + (["--publish"] if publish else []) + ["--android", str(android)]
+        prepared = subprocess.run(["bash", str(root / "scripts/release.sh"), "3.26.2", "--prepare", "--android", str(android)], cwd="/", env=env, capture_output=True, text=True)
+        if prepared.returncode:
+            raise AssertionError(f"prepare failed: {prepared.stderr}")
+        cmd = ["bash", str(root / "scripts/release.sh"), "3.26.2"] + (["--publish"] if publish else []) + ["--android", str(android), "--report", "checks.json"]
         result = subprocess.run(cmd, cwd="/", env=env, capture_output=True, text=True)
         if result.returncode:
             raise AssertionError(f"rc={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}")

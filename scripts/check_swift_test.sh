@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # check_swift_test.sh [<simulator UDID> | <xcodebuild destination> [<extra xcodebuild argument>...]]: the Swift package tests on an iOS Simulator.
-# Without an argument the first booted iPhone simulator runs them, else the first available one. Extra arguments such as -only-testing:<target>/<suite> go to xcodebuild.
+# Without an argument the first booted iPhone simulator runs them, else the first available one. Extra arguments such as -only-testing:<target>/<suite> or -derivedDataPath <dir> go to xcodebuild.
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -18,4 +18,8 @@ case "$destination" in
   *) destination="platform=iOS Simulator,id=$destination" ;;
 esac
 if [ "$#" -gt 0 ]; then shift; fi
-exec xcodebuild test -workspace "$root/MediaLayer" -scheme MediaLayer-Package -destination "$destination" -derivedDataPath "$root/.orca-artifacts/DD.noindex" "$@"
+derived=(-derivedDataPath "$root/.orca-artifacts/DD.noindex")
+for argument in "$@"; do
+  if [ "$argument" = -derivedDataPath ]; then derived=(); fi
+done
+exec xcodebuild test -workspace "$root/MediaLayer" -scheme MediaLayer-Package -destination "$destination" ${derived[@]+"${derived[@]}"} "$@"

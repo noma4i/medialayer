@@ -130,7 +130,6 @@ for platform, modes, host_os, target_dir, custom_library in cases:
             work = Path(directory).resolve()
             shutil.copytree(root / "scripts", work / "scripts")
             script = work / "scripts" / f"build_{platform}.sh"
-            script.write_text(script.read_text().replace('export PATH="/opt/homebrew/opt/rustup/bin:$PATH"', ""))
             (work / "scripts/swift_cancellation.py").write_text("")
             (work / "core").mkdir()
             (work / "bin").mkdir()

@@ -1,0 +1,101 @@
+# symbol | twin or platform idiom | reason
+kotlin:com/noma4i/medialayer/ui/MediaCameraPreviewKt.rememberMediaCamera | platform idiom | Compose owns camera lifetime
+kotlin:com/noma4i/medialayer/ui/MediaCropperKt.rememberMediaCrop | platform idiom | Compose owns crop lifetime
+kotlin:com/noma4i/medialayer/ui/MediaImageLoaderKt.mediaImageLoader | platform idiom | Android Context configures Coil
+kotlin:com/noma4i/medialayer/ui/SharedPreferencesSettings | swift:UserDefaultsSettings | whole: SharedPreferences and UserDefaults stores differ in constructor
+kotlin:com/noma4i/medialayer/ui/ExoPlayerSlot | swift:AVQueuePlayerSlot | whole: Media3 and AVFoundation slots differ in constructor dependencies and members
+kotlin:com/noma4i/medialayer/ui/ExoPlayerSlotFactory | swift:AVQueuePlayerSlotFactory | whole: Media3 and AVFoundation slot factories differ in constructor dependencies and members
+kotlin:com/noma4i/medialayer/ui/OkHttpFetcher | swift:URLSessionFetcher | whole: OkHttp and URLSession fetchers differ in client and constants
+kotlin:com/noma4i/medialayer/MediaException | swift:MediaError | UniFFI error type named per platform
+kotlin:com/noma4i/medialayer/ui/AudioControl | swift:AudioPlayback | Audio control surface named per platform
+kotlin:com/noma4i/medialayer/ui/MediaToneState | platform idiom | Compose state holder, Swift gives ToneUpdate directly
+kotlin:com/noma4i/medialayer/ui/Repeats | swift:ImageAnimation.Repeats | Animation repeat policy
+kotlin:com/noma4i/medialayer/ui/RestFrame | swift:ImageAnimation.RestFrame | Animation rest frame policy
+kotlin:com/noma4i/medialayer/ui/ReadaheadLoadControl | platform idiom | Media3 LoadControl has no AVFoundation counterpart
+kotlin:com/noma4i/medialayer/ui/LoadControlConfig | platform idiom | Configures the Media3 LoadControl
+kotlin:com/noma4i/medialayer/ui/CallEndpointPort | platform idiom | Android Telecom call endpoint
+kotlin:com/noma4i/medialayer/ui/CallEndpointResult | platform idiom | Android Telecom call endpoint result
+kotlin:com/noma4i/medialayer/ui/SlotPlayers | platform idiom | Compose reads ExoPlayer instances per place
+kotlin:com/noma4i/medialayer/ui/VideoOutputCounters | platform idiom | Counters of the Media3 video output
+kotlin:com/noma4i/medialayer/ui/ViewHandle | platform idiom | Android view token for a slot player
+kotlin:com/noma4i/medialayer/ui/ImageBytes | platform idiom | Coil fetcher adapter
+kotlin:com/noma4i/medialayer/NativeCallbacks | platform idiom | JNA callback installation
+kotlin:com/noma4i/medialayer/InternalException | platform idiom | UniFFI JNA internal error
+swift:View | platform idiom | SwiftUI view modifiers map to Compose composables
+swift:PlaceHandle | platform idiom | Swift protocol over MediaPlace for injection
+swift:WindowHandle | platform idiom | Swift protocol over MediaWindow for injection
+swift:MediaPlaces | platform idiom | Swift protocol over the layer places API for injection
+swift:HostLayers | platform idiom | CALayer hosts for AVPlayer
+swift:LoadedSlots | platform idiom | AVPlayer slot lookup
+swift:MediaContext | platform idiom | SwiftUI environment context
+swift:MediaImagePipeline | platform idiom | Nuke pipeline factory
+swift:ImageMemoryReleaser | platform idiom | Nuke cache releaser
+swift:PlaceholderPixels | platform idiom | CGImage placeholder pixels
+swift:PlatformImage | platform idiom | UIImage alias
+swift:PlayerEventsLink | platform idiom | AVPlayer event binding
+swift:SystemSignalNames | platform idiom | NotificationCenter names
+swift:CameraFrame | platform idiom | AVCapture sample frame
+swift:CameraFrameObservation | platform idiom | AVCapture frame observation
+swift:WithMediaCameraState | platform idiom | SwiftUI wrapper for camera states
+swift:WithMediaTone | platform idiom | SwiftUI wrapper for tone
+swift:MediaAudioProgress | platform idiom | SwiftUI wrapper for playhead
+swift:EnvironmentValues | platform idiom | SwiftUI environment key
+kotlin:com/noma4i/medialayer/ui/MediaWindowKt | platform idiom | Compose windows are Swift View modifiers
+kotlin:com/noma4i/medialayer/ui/WholeDeclaredKt | platform idiom | Compose declaration is a Swift View modifier
+kotlin:com/noma4i/medialayer/ui/PlaybackSuspendedKt | platform idiom | Compose suspension is a Swift View modifier
+kotlin:com/noma4i/medialayer/ui/MediaKt | platform idiom | Compose provider is a Swift View modifier
+kotlin:com/noma4i/medialayer/ui/CapturedClip.File | swift:CapturedClip.url | File on Android, URL on iOS
+kotlin:com/noma4i/medialayer/ui/CapturedPhoto.File | swift:CapturedPhoto.url | File on Android, URL on iOS
+kotlin:com/noma4i/medialayer/ui/PreparedMedia.File | swift:PreparedMedia.url | File on Android, URL on iOS
+kotlin:com/noma4i/medialayer/ui/VoiceRecording.File | swift:VoiceRecording.url | File on Android, URL on iOS
+kotlin:com/noma4i/medialayer/MediaSourceKt.toItem | swift:MediaSource.item | Kotlin extension function, Swift protocol extension property
+kotlin:com/noma4i/medialayer/MedialayerKt.TraceSink | swift:setTraceSink | Kotlin property of the sink, Swift setter function
+kotlin:com/noma4i/medialayer/MedialayerKt.use | platform idiom | Kotlin Closeable helper for UniFFI objects
+kotlin:com/noma4i/medialayer/ToneUpdate$Value | swift:ToneUpdate.tone | Same case named per platform
+kotlin:com/noma4i/medialayer/testing/TestFetcher.<init> ()V | platform idiom | Kotlin default-argument constructor
+kotlin:com/noma4i/medialayer/testing/TestFetcher.serveAsset | platform idiom | Android assets have no iOS counterpart
+kotlin:com/noma4i/medialayer/ui/AudioPlayhead.<init> | swift:AudioPlayhead.init | Constructor of the same value
+kotlin:com/noma4i/medialayer/ui/CapturedClip.<init> | platform idiom | Kotlin public constructor of File and size, Swift memberwise init is internal
+kotlin:com/noma4i/medialayer/ui/CapturedPhoto.<init> | platform idiom | Kotlin public constructor of File and size, Swift memberwise init is internal
+kotlin:com/noma4i/medialayer/ui/VoiceRecording.<init> | platform idiom | Kotlin public constructor of File, Swift memberwise init is internal
+kotlin:com/noma4i/medialayer/ui/MediaCropResult.<init> | platform idiom | Kotlin public constructor with RectF, Swift memberwise init is internal
+kotlin:com/noma4i/medialayer/ui/MediaCropSnapshot.<init> | platform idiom | Kotlin public constructor with RectF, Swift memberwise init is internal
+kotlin:com/noma4i/medialayer/ui/ImageAnimation.<init> ()V | platform idiom | Kotlin default constructor of a value with defaults
+kotlin:com/noma4i/medialayer/ui/MediaAudioKt.rememberPlayheadProgress | platform idiom | Compose state of the playhead, Swift has MediaAudioProgress
+kotlin:com/noma4i/medialayer/ui/MediaCallAudio.close | swift:MediaCallAudio.end | Ends the call audio
+kotlin:com/noma4i/medialayer/ui/MediaCallAudio.onState | platform idiom | Callback registration, Swift gives the states stream
+kotlin:com/noma4i/medialayer/ui/MediaCallKind$Telecom | swift:MediaCallKind.callKit | Call system case named per platform
+kotlin:com/noma4i/medialayer/ui/MediaCamera$Companion.isAvailable | swift:MediaCamera.isAvailable | Availability check, Kotlin needs Context
+kotlin:com/noma4i/medialayer/ui/MediaCamera.<init> | swift:MediaCamera.init | Constructor, Kotlin needs Context
+kotlin:com/noma4i/medialayer/ui/MediaCamera.close | platform idiom | Kotlin releases the camera explicitly, Swift on deinit
+kotlin:com/noma4i/medialayer/ui/MediaCamera.zoomBy | swift:MediaCamera.zoom | Zoom by a factor
+kotlin:com/noma4i/medialayer/ui/MediaCamera.SensorToView | platform idiom | Android analyzer frames need the sensor matrix
+swift:MediaCamera.states | platform idiom | Kotlin exposes the state as a property
+kotlin:com/noma4i/medialayer/ui/MediaCrop.AllowsRotation | platform idiom | Constructor argument kept as a property, Swift keeps it internal
+kotlin:com/noma4i/medialayer/ui/MediaImageDecode.decode (Landroid/net/Uri;Ljava/lang/Integer;Lkotlin/coroutines/Continuation;)Ljava/lang/Object; | platform idiom | Android content Uri overload
+kotlin:com/noma4i/medialayer/ui/MediaImageExportKt.image | platform idiom | Coil export, Swift has MediaContext.image
+kotlin:com/noma4i/medialayer/ui/MediaLayerOpenKt.open | swift:MediaLayer.open | Open with platform dependencies
+kotlin:com/noma4i/medialayer/ui/MediaLayerOpenKt.readVolume | platform idiom | Swift keeps Media.audio, docs/app-migration.md
+kotlin:com/noma4i/medialayer/ui/MediaLayerOpenKt.volumeRaises | platform idiom | Swift keeps Media.audio, docs/app-migration.md
+swift:MediaAudioSession | platform idiom | Swift keeps Media.audio, docs/app-migration.md
+swift:Media.audio | platform idiom | Swift keeps Media.audio, docs/app-migration.md
+kotlin:com/noma4i/medialayer/ui/MediaToneKt.rememberMediaTone | platform idiom | Compose state of the tone, Swift has WithMediaTone
+kotlin:com/noma4i/medialayer/ui/PlayerSnapshotKt.getSlotPlayers | platform idiom | Compose reads ExoPlayer instances per place
+kotlin:com/noma4i/medialayer/ui/MediaVoiceRecorder.<init> | swift:MediaVoiceRecorder.init | Constructor, Kotlin needs Context
+swift:CaptureProfile.photo | platform idiom | Swift sugar for captureProfile(kind:)
+swift:CaptureProfile.moment | platform idiom | Swift sugar for captureProfile(kind:)
+swift:CaptureProfile.circle | platform idiom | Swift sugar for captureProfile(kind:)
+swift:MediaError.errorDescription | platform idiom | LocalizedError, Kotlin uses message
+swift:MediaLayer.close | platform idiom | Swift releases on deinit, Kotlin closes the UniFFI object
+swift:MediaLayer.encodeImage(_:exifOrientation:format:quality:) | platform idiom | CGImage with EXIF tag, Kotlin Bitmap is upright
+swift:MediaLayer.mountPlace | platform idiom | Witness of MediaPlaces
+swift:MediaLayer.mountVideoWindow | platform idiom | Witness of MediaPlaces
+swift:MediaLayer.mountImageWindow | platform idiom | Witness of MediaPlaces
+swift:MediaShape | platform idiom | SwiftUI shape, Kotlin passes a Modifier
+swift:MediaSize | platform idiom | Kotlin uses Pair of Int
+kotlin:com/noma4i/medialayer/MediaLayer$Companion.open | swift:MediaLayer.open | Open with the core configuration
+kotlin:com/noma4i/medialayer/MediaSourceValue$Companion.asset | swift:MediaSourceValue.bundled | Bundled resource: Android asset or Swift bundle
+kotlin:com/noma4i/medialayer/MediaSourceValue$Companion.raw | swift:MediaSourceValue.bundled | Bundled resource: Android raw resource or Swift bundle
+kotlin:com/noma4i/medialayer/MediaSourceValue$Companion.file | swift:MediaSourceValue.file | Local file source, Kotlin also takes a File
+kotlin:com/noma4i/medialayer/ui/MediaImageLoad.DEFAULT_TIMEOUT_MS | swift:MediaImageLoad.defaultTimeout | Milliseconds in Kotlin, Duration in Swift
+kotlin:com/noma4i/medialayer/ui/MediaVoiceRecorder.LEVEL_INTERVAL_MS | platform idiom | Kotlin constant of the default constructor argument, Swift has a default argument

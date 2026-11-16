@@ -122,6 +122,25 @@ spawn = re.compile(r"(?:\btokio::spawn|\.spawn|\bspawn_blocking|\.spawn_blocking
 OWNED_BY = ("AbortOnDrop::new(", "tasks.spawn(", "connections.spawn(", "set.spawn(")
 
 
+def block_end(text, start):
+    depth = 0
+    for index in range(start, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+    return len(text)
+
+
+join_set_fields = defaultdict(set)
+for text in texts.values():
+    for match in re.finditer(r"\bstruct\s+(\w+)\s*\{", text):
+        body = text[match.end():block_end(text, match.end() - 1)]
+        join_set_fields[match.group(1)].update(re.findall(r"\b(\w+)\s*:\s*(?:\w+::)*JoinSet\s*<", body))
+
+
 def statement_end(text, start):
     depth = 0
     for index in range(start, len(text)):
@@ -145,10 +164,16 @@ unowned = defaultdict(int)
 sites = defaultdict(list)
 for path in production:
     text = texts[path]
+    implementations = [(match.end(), block_end(text, match.end() - 1), match.group(1))
+                       for match in re.finditer(r"\bimpl\s+(\w+)\s*\{", text)]
     for match in spawn.finditer(text):
         begin = statement_start(text, match.start())
         end = statement_end(text, match.end() - 1)
         statement = text[begin: end]
+        receiver = re.search(r"\bself\.(\w+)\s*$", text[begin:match.start()])
+        if receiver and any(start <= match.start() < stop and receiver.group(1) in join_set_fields[name]
+                            for start, stop, name in implementations):
+            continue
         if any(owner in statement for owner in OWNED_BY):
             continue
         if text[end: end + 60].lstrip().startswith(".await"):

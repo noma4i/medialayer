@@ -6,7 +6,6 @@
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
 
 remove_tree() {
   python3 -c 'import os, shutil, sys; os.path.isdir(sys.argv[1]) and shutil.rmtree(sys.argv[1])' "$1"

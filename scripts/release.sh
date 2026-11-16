@@ -8,25 +8,30 @@ fail() { printf 'release: %s\n' "$*" >&2; exit 1; }
 version="$1"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'version must be x.y.z'
 publish=""
+prepare=""
+report=""
 android_dir=""
 shift
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --publish) [ -z "$publish" ] || fail 'duplicate --publish'; publish=--publish; shift ;;
+    --prepare) [ -z "$prepare" ] || fail 'duplicate --prepare'; prepare=--prepare; shift ;;
+    --report) [ -z "$report" ] && [ "$#" -ge 2 ] || fail 'missing report'; report="$2"; shift 2 ;;
     --android) [ -z "$android_dir" ] && [ "$#" -ge 2 ] || fail 'usage: release.sh <version> [--publish] --android <result-dir>'; android_dir="$2"; shift 2 ;;
     *) fail 'usage: release.sh <version> [--publish] --android <result-dir>' ;;
   esac
 done
+[ -z "$prepare" ] || [ -z "$publish" ] || fail '--prepare cannot publish'
+[ -n "$prepare" ] || [ -n "$report" ] || fail 'checks report is required'
 [ -n "$android_dir" ] || fail 'Android release result is required: pass --android <result-dir>'
 android_dir="$(cd -- "$android_dir" && pwd -P)" || fail 'Android release result directory not found'
-[ -z "$(git status --porcelain)" ] || fail 'working tree is not clean'
+[ -z "$(git status --porcelain -- . ':(exclude)MediaLayer/Sources/MediaLayer/medialayer.swift')" ] || fail 'working tree is not clean'
 [ "$(git branch --show-current)" = master ] || fail 'branch must be master'
 previous_tag="$(git describe --tags --abbrev=0 --exclude "$version")" || fail 'previous tag not found'
 subjects="$(git log --format=%s "$previous_tag"..HEAD)" || fail 'cannot read commits since previous tag'
 [ "$(printf '%s\n' "$subjects" | grep -Fxc "Release $version" || true)" = 1 ] || fail "expected exactly one Release $version commit since $previous_tag"
 [ "$(sed -n '/^\[package\]/,/^\[/s/^version = "\([^"]*\)"$/\1/p' core/Cargo.toml)" = "$version" ] || fail 'core version does not match'
 grep -Fq "## $version - " CHANGELOG.md || fail 'changelog heading missing'
-for check in check_docs check_zoo; do bash "scripts/$check.sh" || fail "$check failed"; done
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -58,14 +63,15 @@ grep -Fq '<artifactId>medialayer</artifactId>' "$android_dir/maven/com/noma4i/me
 grep -Fq '<artifactId>medialayer</artifactId>' "$android_dir/maven/com/noma4i/medialayer-testing/$version/medialayer-testing-$version.pom" || fail 'medialayer-testing POM missing medialayer dependency'
 printf 'Android artifacts checked: %s\n' "$android_dir"
 
-bash scripts/build_ios.sh
-
 stage="$root/target/release-$version"
 attachments=(MediaLayerFFI.xcframework.zip medialayer.swift medialayer-android.zip medialayer-gen-macos-universal)
 if [ -d "$stage" ]; then
   for file in "${attachments[@]}" SHA256SUMS; do [ -s "$stage/$file" ] || fail "incomplete existing output: $stage/$file"; done
   (cd "$stage" && shasum -a 256 -c SHA256SUMS)
 else
+  [ -n "$prepare" ] || fail 'release stage is missing: use --prepare before the checks report'
+  source_tree="$(python3 scripts/release_evidence.py tree)" || fail 'source tree is not clean'
+  bash scripts/build_ios.sh
   mkdir -p "$stage"
   cp "$android_archive" "$stage/medialayer-android.zip"
   (cd MediaLayer && zip -qry "$stage/MediaLayerFFI.xcframework.zip" MediaLayerFFI.xcframework)
@@ -76,7 +82,19 @@ else
   lipo -create target/{aarch64-apple-darwin,x86_64-apple-darwin}/release/medialayer-gen -output "$stage/medialayer-gen-macos-universal"
   chmod +x "$stage/medialayer-gen-macos-universal"
   (cd "$stage" && shasum -a 256 "${attachments[@]}" > SHA256SUMS)
+  python3 scripts/release_evidence.py stage "$stage" "$source_tree" || fail 'cannot record release stage source'
 fi
+[ -z "$prepare" ] || { printf 'Prepared release artifacts: %s\n' "$stage"; exit 0; }
+source_ref=HEAD
+if [ "$(git log -1 --format=%s)" = "Package release $version" ]; then
+  package_files="$(git diff --name-only HEAD^ HEAD | LC_ALL=C sort)"
+  [ -n "$package_files" ] || fail 'package commit is empty'
+  while IFS= read -r file; do
+    case "$file" in MediaLayer/Sources/MediaLayer/medialayer.swift | Package.swift) ;; *) fail 'package commit contains unexpected changes' ;; esac
+  done <<< "$package_files"
+  source_ref='HEAD^'
+fi
+python3 scripts/release_evidence.py verify "$report" "$android_dir" "$stage" "$source_ref" || fail 'checks report does not match release'
 
 mkdir -p "$tmp/archive"
 unzip -q "$stage/MediaLayerFFI.xcframework.zip" -d "$tmp/archive"
@@ -177,7 +195,7 @@ notes="$stage/NOTES.md"
 awk -v heading="## $version - " 'index($0, heading)==1 {found=1; next} found && /^## / {exit} found {print}' CHANGELOG.md > "$notes"
 [ -s "$notes" ] || fail 'release notes are empty'
 stage_files="$(find "$stage" -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort)"
-expected_stage_files="$(printf '%s\n' "${attachments[@]}" SHA256SUMS NOTES.md | LC_ALL=C sort)"
+expected_stage_files="$(printf '%s\n' "${attachments[@]}" SHA256SUMS NOTES.md source-evidence.json | LC_ALL=C sort)"
 [ "$stage_files" = "$expected_stage_files" ] || fail "unexpected files in release stage: $stage_files"
 
 maven_checkout="$tmp/maven-branch"

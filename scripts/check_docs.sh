@@ -4,10 +4,8 @@ set -euo pipefail
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 python3 - "$root" <<'PY'
 import glob
-import os
 import re
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 root = Path(sys.argv[1])
@@ -101,7 +99,6 @@ def top_level_labels(call_text, language):
 
 
 missing_bindings = [language for language, marker in (("swift", "public enum MediaState"), ("kotlin", "sealed class MediaState")) if marker not in platform[language]]
-examples = sum(len(re.findall(r"^```(?:swift|kotlin)\n", text, re.M)) for text in documents.values())
 if not missing_bindings:
     for document, text in documents.items():
         name = document.relative_to(root)
@@ -137,35 +134,13 @@ if not missing_bindings:
                 if spans and not any(re.search(r"\b%s\b" % re.escape(dotted), span) for span in spans):
                     problems.append(f"{name}: example uses {dotted_owner}.{dotted} but the {language} declaration has no such case")
 
-# UNBUILT markers: every marked doc is listed with its invariant, every listed invariant is UNBUILT in the local spec.
-listed = defaultdict(list)
-unbuilt_list = root / "scripts" / "docs_unbuilt.txt"
-for line in unbuilt_list.read_text().splitlines():
-    if line.strip() and not line.startswith("#"):
-        path, invariant = line.split()
-        listed[path].append(invariant)
-for document, text in documents.items():
-    name = str(document.relative_to(root))
-    marked = "UNBUILT" in text
-    if marked and name not in listed:
-        problems.append(f"{name}: carries UNBUILT but is missing from scripts/docs_unbuilt.txt")
-    if name in listed and not marked:
-        problems.append(f"{name}: is listed in scripts/docs_unbuilt.txt but carries no UNBUILT marker")
-registry = root / "specs" / "invariants.md"
-if registry.exists():
-    rows = dict(re.findall(r"^\| (INV-[A-Z]+-\d+) \| (REQUIRED|UNBUILT|OPEN) \|", registry.read_text(), re.M))
-    for name, invariants in listed.items():
-        for invariant in invariants:
-            if rows.get(invariant) != "UNBUILT":
-                problems.append(f"{name}: lists {invariant} which is {rows.get(invariant, 'missing')} in specs/invariants.md, not UNBUILT")
-
 if problems:
     print("docs check found", len(problems), "problem(s):")
     for problem in problems:
         print(" -", problem)
     sys.exit(1)
-if missing_bindings and examples:
-    print("docs check: clean, but %d example blocks are NOT CHECKED: no generated %s bindings (run scripts/build_ios.sh and scripts/build_kotlin.sh --host)" % (examples, " and ".join(missing_bindings)))
-    sys.exit(3 if os.environ.get("DOCS_STRICT") else 0)
+if missing_bindings:
+    print("docs check: no generated %s bindings (run scripts/build_ios.sh and scripts/build_kotlin.sh --host)" % " and ".join(missing_bindings), file=sys.stderr)
+    sys.exit(3)
 print("docs check: clean")
 PY

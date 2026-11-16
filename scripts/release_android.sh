@@ -6,14 +6,15 @@ fail() { printf 'release_android: %s\n' "$*" >&2; exit 1; }
 [ "$#" -eq 2 ] || fail 'usage: release_android.sh <version> <out-dir>'
 version="$1"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] || fail 'version must be x.y.z with an optional qualifier'
+source_tree="$(python3 "$root/scripts/release_evidence.py" tree)" || fail 'source tree is not clean'
 out_dir="$(mkdir -p -- "$2" && cd -- "$2" && pwd -P)"
 if [ -n "$(find "$out_dir" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
   fail "output directory is not empty: $out_dir"
 fi
 
 bash "$root/scripts/build_kotlin.sh"
-gradle="${GRADLE:-$(ls -d "${HOME:?}"/.gradle/wrapper/dists/gradle-9.*-bin/*/gradle-9.*/bin/gradle 2>/dev/null | sort -V | tail -1)}"
-[ -x "$gradle" ] || fail 'Gradle 9 not found: set GRADLE'
+gradle="${GRADLE:-gradle}"
+command -v "$gradle" >/dev/null || fail 'Gradle 9 not found: set GRADLE'
 staging="$out_dir/maven"
 mkdir -p "$staging"
 "$gradle" -p "$root/kotlin" --no-watch-fs -PreleaseVersion="$version" -PstagingRepo="$staging" :publishReleasePublicationToStagingRepository :ui:publishReleasePublicationToStagingRepository :testing:publishReleasePublicationToStagingRepository
@@ -60,4 +61,5 @@ for entry in \
   src/main/kotlin/com/noma4i/medialayer/medialayer.kt; do
   grep -Fxq "$entry" <<< "$archive_entries" || fail "Android archive missing $entry"
 done
+python3 "$root/scripts/release_evidence.py" android "$out_dir" "$source_tree"
 printf 'Android release artifacts: %s\n' "$out_dir"
