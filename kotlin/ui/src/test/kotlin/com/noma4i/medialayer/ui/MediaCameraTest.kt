@@ -54,6 +54,7 @@ private class FakeBackend : CaptureBackend {
   val log = CopyOnWriteArrayList<String>()
   val mainCalls = AtomicInteger()
   @Volatile private var sink: (CaptureEvent) -> Unit = {}
+  @Volatile private var audioSink: (CaptureAudioIssue) -> Unit = {}
   @Volatile var tap: ImageAnalysis.Analyzer? = null
   @Volatile var recordingFile: File? = null
   @Volatile var photoFails = false
@@ -63,6 +64,8 @@ private class FakeBackend : CaptureBackend {
   override val photoSize: PixelSize? = PixelSize(3000u, 4000u)
 
   fun emit(event: CaptureEvent) = sink(event)
+
+  fun audioIssue(issue: CaptureAudioIssue) = audioSink(issue)
 
   fun count(entry: String) = log.count { it == entry }
 
@@ -75,6 +78,8 @@ private class FakeBackend : CaptureBackend {
   override fun setSink(sink: (CaptureEvent) -> Unit) {
     this.sink = sink
   }
+
+  override fun setAudioIssueSink(sink: (CaptureAudioIssue) -> Unit) { audioSink = sink }
 
   override fun setHost(view: PreviewView?, owner: LifecycleOwner?) = Unit
 
@@ -313,6 +318,20 @@ class MediaCameraTest {
     } finally {
       rig.fixture.port.send(FocusSignal.PhoneCall(false))
     }
+  }
+
+  @Test
+  fun inv_audio_43_aTakeThatLosesItsMicrophoneSoundIsThrownAwayWithTheSilentRefusal() = runBlocking {
+    val rig = rig(moment)
+    ready(rig)
+    rig.camera.startRecording()
+
+    rig.backend.audioIssue(CaptureAudioIssue.SILENCED)
+
+    eventually("the take ended") { rig.camera.state.value.phase != CameraPhase.RECORDING }
+    val ended = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
+    assertEquals(CameraRefusal.MICROPHONE_SILENT to cameraRefusalText(CameraRefusal.MICROPHONE_SILENT), ended.reason to ended.detail)
+    assertTrue(rig.files().isEmpty())
   }
 
   @Test
