@@ -231,8 +231,7 @@ fn inv_audio_22_an_own_call_takes_one_core_hold_and_its_own_mode_is_never_an_ext
     assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
     assert_eq!(world.send(I::CommunicationMode { active: true }), vec![]);
     assert_eq!(world.settle(I::CallEnded { id: 7 }), vec![A::CallHold { on: false }, DEACTIVATE, A::CallState { id: 7, state: CallState::Ended }, available(MicrophoneAvailability::Available)], "free at once, before the mode callback");
-    assert_eq!(world.send(I::CommunicationMode { active: true }), vec![], "the late mode of the own call is ours");
-    assert_eq!(world.send(I::CommunicationMode { active: false }), vec![]);
+    assert_eq!(world.send(I::CommunicationMode { active: false }), vec![], "the own mode is cleared after the release");
     assert_eq!(world.send(I::CommunicationMode { active: true }), vec![A::CallHold { on: true }, available(MicrophoneAvailability::ExternalCall)], "a later foreign mode is external");
 }
 
@@ -542,7 +541,7 @@ fn inv_audio_32_a_recording_is_admitted_only_after_its_session_is_applied() {
     let mut world = World::new();
     let start = world.raw(I::Capture { id: 1, kind: RecordingKind::Voice });
     let generation = start.iter().find_map(generation_of).unwrap();
-    assert_eq!(world.send(I::Applied { generation, result: AppliedResult::Failed { code: 561017449 } }), vec![A::Refuse { id: 1, reason: RecordingRefusal::MicrophoneBusy }, A::ForgetPaused], "a refused activation refuses the recording and opens the gate");
+    assert_eq!(world.send(I::Applied { generation, result: AppliedResult::Failed { code: 561017449 } }), vec![A::Refuse { id: 1, reason: RecordingRefusal::MicrophoneBusy }, A::ForgetPaused, DEACTIVATE], "a refused activation refuses the recording, opens the gate and releases what the platform may hold");
     let mut call = World::new();
     call.send(I::Capture { id: 1, kind: RecordingKind::Voice });
     assert_eq!(call.send(I::PhoneCall { active: true }).first(), Some(&A::Refuse { id: 1, reason: RecordingRefusal::InCall }), "a call before the admission refuses it");
@@ -551,7 +550,8 @@ fn inv_audio_32_a_recording_is_admitted_only_after_its_session_is_applied() {
 #[test]
 fn inv_audio_45_a_refused_or_delayed_answer_is_a_state_and_brings_no_new_request() {
     let asks = |actions: &[AudioAction]| actions.iter().any(|action| matches!(action, A::Apply { .. }));
-    let mut world = World::playing();
+    let mut world = World::new();
+    world.raw(I::Audible { slot: 0, on: true });
     let delayed = world.send(answer(&world, FocusAnswer::Delayed));
     assert!(!asks(&delayed), "a delayed request with playback demand: {delayed:?}");
     let gain = world.send(I::Focus { change: FocusChange::Gain });
