@@ -355,7 +355,7 @@ fn inv_capture_13_the_costs_are_rasters_of_the_session_and_of_the_shot() {
     assert_eq!(capture_cost(photo_profile()), px(1080, 1920) * 2);
     assert_eq!(shot_cost(4000, 3000), Some(px(4000, 3000) * 2));
     assert_eq!((shot_cost(0, 10), shot_cost(16_385, 1)), (None, None));
-    for reason in [CameraRefusal::PermissionDenied, CameraRefusal::NoCamera, CameraRefusal::Busy, CameraRefusal::ConfigureFailed, CameraRefusal::NotReady, CameraRefusal::TooShort, CameraRefusal::RecordFailed, CameraRefusal::PhotoFailed, CameraRefusal::Memory, CameraRefusal::InCall] {
+    for reason in [CameraRefusal::PermissionDenied, CameraRefusal::NoCamera, CameraRefusal::Busy, CameraRefusal::MicrophoneBusy, CameraRefusal::ConfigureFailed, CameraRefusal::NotReady, CameraRefusal::TooShort, CameraRefusal::RecordFailed, CameraRefusal::PhotoFailed, CameraRefusal::Memory, CameraRefusal::InCall] {
         assert!(!camera_refusal_text(reason).is_empty());
     }
 }
