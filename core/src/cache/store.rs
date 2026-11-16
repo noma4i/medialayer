@@ -76,6 +76,10 @@ impl Cache {
         writer.commit().await
     }
 
+    pub(crate) fn report_store_failure(&self, kind: Kind, key: &str, error: &CacheError) {
+        self.inner.report(kind, key.to_owned(), error);
+    }
+
     pub async fn begin_write(&self, key: &str, kind: Kind) -> Result<Writer, CacheError> {
         Writer::start(self.inner.clone(), key, kind).await
     }
@@ -141,25 +145,41 @@ impl Cache {
     pub async fn remove(&self, key: &str) -> bool {
         self.ready().await;
         self.inner.state().invalidate_writers(|writing, _| writing == key);
-        remove_names(&self.inner, vec![file_name(key)]).await == 1
+        remove_names(&self.inner, vec![file_name(key)]).await.0 == 1
     }
 
     pub async fn purge_prefix(&self, prefix: &str) -> usize {
         self.ready().await;
         let mut names = self.inner.state().invalidate_writers(|key, _| key.starts_with(prefix));
         names.extend(names_where(&self.inner, |key, _| key.starts_with(prefix)).await);
-        remove_names(&self.inner, names).await
+        remove_names(&self.inner, names).await.0
     }
 
     pub async fn clear(&self, kind: Option<Kind>) -> usize {
+        self.clear_checked(kind).await.0
+    }
+
+    pub async fn clear_checked(&self, kind: Option<Kind>) -> (usize, bool) {
         self.ready().await;
         let mut names = self.inner.state().invalidate_writers(|_, writing_kind| kind.is_none_or(|wanted| wanted == writing_kind));
         names.extend(names_where(&self.inner, |_, entry_kind| kind.is_none_or(|wanted| entry_kind == wanted)).await);
-        remove_names(&self.inner, names).await
+        let (removed, complete) = remove_names(&self.inner, names).await;
+        let orphaned = super::inner::retry_orphans(&self.inner, kind).await;
+        (removed, complete && orphaned)
     }
 
     pub async fn stats(&self) -> CacheStats {
         let mut stats = self.inner.state().stats();
+        let orphaned = self.inner.orphaned.lock().await;
+        let bytes: u64 = orphaned.values().map(|(size, _)| size).sum();
+        stats.total_bytes += bytes;
+        stats.file_count += orphaned.len() as u64;
+        for (size, kind) in orphaned.values() {
+            if let Some(kind_stats) = kind.and_then(|kind| stats.per_kind.get_mut(&kind)) {
+                kind_stats.bytes += size;
+                kind_stats.files += 1;
+            }
+        }
         stats.max_hold = Duration::from_nanos(self.inner.max_hold.load(Ordering::Relaxed));
         stats.eviction_backlog = self.inner.eviction_backlog.load(Ordering::Relaxed);
         stats

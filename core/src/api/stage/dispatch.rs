@@ -94,7 +94,7 @@ impl Stage {
                 next_action(&mut recovery, Event::Source { key: key.clone(), via_proxy_hls }, self.now());
                 state.slot_keys.insert(*slot, key.clone());
                 let generation = state.next_generation();
-                state.loaded.insert(key.clone(), Loaded { held: held.clone(), slot: *slot, generation, recovery, source, route: route.clone(), seeked: None });
+                state.loaded.insert(key.clone(), Loaded { held: held.clone(), slot: *slot, generation, recovery, source, route: route.clone(), seeked: None, failed: false });
                 state.pending_wanted.remove(key);
                 let resume = state.positions.take(key);
                 calls.extend(self.load_calls(state, key, resume));
@@ -121,6 +121,7 @@ impl Stage {
                 if let Some(key) = state.slot_keys.get(slot).cloned() {
                     if let (Command::Play { .. }, Some(loaded)) = (&command, state.loaded.get_mut(&key)) {
                         loaded.seeked = None;
+                        loaded.failed = false;
                         self.inner.routes.nudge_window(&loaded.source.url);
                         resumed.push((*slot, key.clone(), loaded.generation));
                     }

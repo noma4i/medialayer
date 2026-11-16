@@ -128,21 +128,21 @@ fn inv_audio_15_the_end_of_an_interruption_resumes_only_when_the_system_says_so(
 #[test]
 fn inv_audio_16_a_lost_focus_is_a_state_the_library_does_not_fight() {
     let mut world = World::playing();
-    assert_eq!(world.send(I::Focus { change: FocusChange::Loss }), vec![A::PauseAll { reason: PauseReason::FocusLost }, A::ForgetPaused, DEACTIVATE]);
+    assert_eq!(world.send(I::Focus { change: FocusChange::Loss }), vec![A::PauseAll { reason: PauseReason::FocusLost }, A::ForgetPaused, DEACTIVATE, available(MicrophoneAvailability::OtherApp)]);
     assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
     for input in [I::Route { reason: RouteReason::NewDeviceAvailable, lost_private_output: false }, I::Foreground { on: true }, I::Focus { change: FocusChange::Gain }] {
         let label = format!("{input:?}");
         assert_eq!(world.send(input), vec![], "{label}: no request without a new intent");
     }
-    assert_eq!(world.settle(I::Audible { slot: 0, on: true }), vec![apply(PLAYBACK)]);
+    assert_eq!(world.settle(I::Audible { slot: 0, on: true }), vec![apply(PLAYBACK), available(MicrophoneAvailability::Available)]);
 }
 
 #[test]
 fn inv_audio_17_a_transient_loss_pauses_until_the_gain_and_a_duck_lowers_the_volume() {
     let mut world = World::playing();
-    assert_eq!(world.send(I::Focus { change: FocusChange::LossTransient }), vec![A::PauseAll { reason: PauseReason::Interrupted }]);
+    assert_eq!(world.send(I::Focus { change: FocusChange::LossTransient }), vec![A::PauseAll { reason: PauseReason::Interrupted }, available(MicrophoneAvailability::OtherApp)]);
     assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![], "the focus request stays while paused");
-    assert_eq!(world.send(I::Focus { change: FocusChange::Gain }), vec![A::ResumePaused], "the request was kept, the session stays until the players report");
+    assert_eq!(world.send(I::Focus { change: FocusChange::Gain }), vec![A::ResumePaused, available(MicrophoneAvailability::Available)], "the request was kept, the session stays until the players report");
     assert_eq!(world.send(I::Audible { slot: 0, on: true }), vec![]);
     assert_eq!(world.send(I::Focus { change: FocusChange::LossTransientDuck }), vec![A::VolumeMultiplier { value: 0.2 }]);
     assert_eq!(world.send(I::Focus { change: FocusChange::Gain }), vec![A::VolumeMultiplier { value: 1.0 }]);
@@ -153,9 +153,9 @@ fn inv_audio_18_a_focus_request_refused_in_the_background_waits_for_the_foregrou
     let mut world = World::new();
     assert_eq!(world.send(I::Foreground { on: false }), vec![]);
     assert_eq!(world.send(I::Audible { slot: 0, on: true }), vec![apply(PLAYBACK)]);
-    assert_eq!(world.send(answer(&world, FocusAnswer::Failed)), vec![A::PauseAll { reason: PauseReason::Interrupted }]);
+    assert_eq!(world.send(answer(&world, FocusAnswer::Failed)), vec![A::PauseAll { reason: PauseReason::Interrupted }, available(MicrophoneAvailability::OtherApp)]);
     assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
-    assert_eq!(world.settle(I::Foreground { on: true }), vec![apply(PLAYBACK), A::ResumePaused]);
+    assert_eq!(world.settle(I::Foreground { on: true }), vec![apply(PLAYBACK), available(MicrophoneAvailability::Available), A::ResumePaused]);
     assert_eq!(world.send(I::Audible { slot: 0, on: true }), vec![]);
     assert_eq!(World::new().send(I::FocusRequest { generation: 7, answer: FocusAnswer::Delayed }), vec![], "an answer to no request changes nothing");
 }
@@ -194,7 +194,7 @@ fn inv_audio_20_one_recording_of_each_kind_pauses_playback_and_camera_and_voice_
     assert_eq!(world.settle(I::Capture { id: 3, kind: RecordingKind::Video }), vec![apply(video), A::Admit { id: 3 }], "camera and voice hold the microphone together");
     assert_eq!(world.settle(I::CaptureEnded { id: 3 }), vec![apply(voice.clone())], "the voice recording keeps its session");
     assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
-    assert_eq!(world.send(I::InterruptionBegan), vec![A::Revoke { id: 1, reason: RecordingRefusal::Interrupted }, A::ForgetPaused, available(MicrophoneAvailability::OtherApp)]);
+    assert_eq!(world.send(I::InterruptionBegan), vec![A::Revoke { id: 1, reason: RecordingRefusal::Interrupted }, A::PauseAll { reason: PauseReason::Interrupted }, A::ForgetPaused, available(MicrophoneAvailability::OtherApp)]);
     assert_eq!(world.send(I::InterruptionEnded { should_resume: true }), vec![available(MicrophoneAvailability::Available)], "the end of an interruption never resumes what the recording paused");
     assert_eq!(world.settle(I::Capture { id: 4, kind: RecordingKind::Voice }), vec![A::PauseAll { reason: PauseReason::Capture }, apply(voice), A::Admit { id: 4 }], "a recording closes the playback gate while nothing sounds");
     assert_eq!(world.settle(I::CaptureEnded { id: 4 }), vec![A::ForgetPaused, DEACTIVATE], "its end opens the gate and resumes nothing");
@@ -204,15 +204,15 @@ fn inv_audio_20_one_recording_of_each_kind_pauses_playback_and_camera_and_voice_
 fn inv_audio_21_every_loss_of_the_microphone_revokes_the_running_recording_with_its_reason() {
     let revoke = |reason| A::Revoke { id: 1, reason };
     let cases: Vec<(AudioInput, Vec<AudioAction>)> = vec![
-        (I::InterruptionBegan, vec![revoke(RecordingRefusal::Interrupted), A::ForgetPaused, available(MicrophoneAvailability::OtherApp)]),
-        (I::Focus { change: FocusChange::Loss }, vec![revoke(RecordingRefusal::Interrupted), A::ForgetPaused, DEACTIVATE]),
-        (I::Focus { change: FocusChange::LossTransient }, vec![revoke(RecordingRefusal::Interrupted), A::ForgetPaused, DEACTIVATE]),
+        (I::InterruptionBegan, vec![revoke(RecordingRefusal::Interrupted), A::PauseAll { reason: PauseReason::Interrupted }, A::ForgetPaused, available(MicrophoneAvailability::OtherApp)]),
+        (I::Focus { change: FocusChange::Loss }, vec![revoke(RecordingRefusal::Interrupted), A::PauseAll { reason: PauseReason::FocusLost }, A::ForgetPaused, DEACTIVATE, available(MicrophoneAvailability::OtherApp)]),
+        (I::Focus { change: FocusChange::LossTransient }, vec![revoke(RecordingRefusal::Interrupted), A::PauseAll { reason: PauseReason::Interrupted }, A::ForgetPaused, DEACTIVATE, available(MicrophoneAvailability::OtherApp)]),
         (I::Silenced { id: 1 }, vec![revoke(RecordingRefusal::MicrophoneSilent), A::ForgetPaused, DEACTIVATE]),
         (I::PhoneCall { active: true }, vec![revoke(RecordingRefusal::InCall), A::ForgetPaused, A::CallHold { on: true }, DEACTIVATE, available(MicrophoneAvailability::ExternalCall)]),
         (I::ObservedCalls { uuids: vec!["cellular".into()] }, vec![revoke(RecordingRefusal::InCall), A::ForgetPaused, A::CallHold { on: true }, DEACTIVATE, available(MicrophoneAvailability::ExternalCall)]),
         (I::CallStarted { id: 7, kind: CallKind::Unmanaged, speaker: false }, vec![revoke(RecordingRefusal::InCall), A::ForgetPaused, A::CallHold { on: true }, apply(SessionWant::Call { kind: CallKind::Unmanaged, speaker: false }), A::CallState { id: 7, state: CallState::Connecting }, available(MicrophoneAvailability::OwnCall)]),
         (I::Permission { granted: false }, vec![revoke(RecordingRefusal::PermissionDenied), A::ForgetPaused, DEACTIVATE, available(MicrophoneAvailability::PermissionDenied)]),
-        (I::MediaReset, vec![revoke(RecordingRefusal::Interrupted), A::ForgetPaused]),
+        (I::MediaReset, vec![revoke(RecordingRefusal::Interrupted), A::PauseAll { reason: PauseReason::MediaReset }, A::ForgetPaused]),
     ];
     for (input, expected) in cases {
         let mut world = World::new();
@@ -261,7 +261,7 @@ fn inv_audio_24_a_callkit_call_releases_the_session_and_lets_the_system_activate
     assert_eq!(world.send(I::CallStarted { id: 7, kind: own_callkit(), speaker: false }), vec![A::CallHold { on: true }, DEACTIVATE, configure(call), state(CallState::Connecting), available(MicrophoneAvailability::OwnCall)]);
     assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
     assert_eq!(world.send(I::CallSystemActivated { id: 7 }), vec![state(CallState::Live)]);
-    assert_eq!(world.send(I::InterruptionBegan), vec![state(CallState::Interrupted)]);
+    assert_eq!(world.send(I::InterruptionBegan), vec![A::PauseAll { reason: PauseReason::Interrupted }, state(CallState::Interrupted)]);
     assert_eq!(world.send(I::CallSystemActivated { id: 7 }), vec![state(CallState::Live)]);
     assert_eq!(world.send(I::CallSystemDeactivated { id: 7 }), vec![state(CallState::Interrupted)]);
     assert_eq!(world.settle(I::CallEnded { id: 7 }), vec![A::CallHold { on: false }, DEACTIVATE, state(CallState::Ended), available(MicrophoneAvailability::Available)]);
@@ -273,7 +273,6 @@ fn inv_audio_25_a_telecom_call_leaves_focus_mode_and_route_to_telecom() {
     let state = |state| A::CallState { id: 7, state };
     assert_eq!(world.send(I::CallStarted { id: 7, kind: CallKind::Telecom, speaker: true }), vec![A::CallHold { on: true }, DEACTIVATE, state(CallState::Connecting), available(MicrophoneAvailability::OwnCall)]);
     assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
-    assert_eq!(world.send(I::CallSpeaker { id: 7, speaker: false }), vec![]);
     assert_eq!(world.send(I::CallSystemActivated { id: 7 }), vec![state(CallState::Live)]);
     assert_eq!(world.send(I::CallSystemDeactivated { id: 7 }), vec![state(CallState::Interrupted)]);
     assert_eq!(world.send(I::CallEnded { id: 7 }), vec![A::CallHold { on: false }, state(CallState::Ended), available(MicrophoneAvailability::Available)]);
@@ -300,7 +299,7 @@ fn inv_audio_27_a_media_reset_drops_every_player_and_waits_for_a_new_intent() {
     let mut world = World::playing();
     world.send(I::InterruptionBegan);
     assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
-    assert_eq!(world.send(I::MediaReset), vec![A::ForgetPaused, available(MicrophoneAvailability::Available)]);
+    assert_eq!(world.send(I::MediaReset), vec![A::PauseAll { reason: PauseReason::MediaReset }, A::ForgetPaused, available(MicrophoneAvailability::Available)]);
     assert_eq!(world.settle(I::Audible { slot: 0, on: true }), vec![apply(PLAYBACK)]);
     assert_eq!(World::playing().send(I::MediaReset), vec![A::PauseAll { reason: PauseReason::MediaReset }, A::ForgetPaused]);
 }
@@ -316,7 +315,7 @@ fn inv_audio_28_availability_is_one_value_derived_from_every_input() {
     assert_eq!(world.send(I::OtherRecording { active: false }), vec![available(MicrophoneAvailability::Available)]);
     let call = SessionWant::Call { kind: CallKind::Unmanaged, speaker: false };
     assert_eq!(world.settle(I::CallStarted { id: 7, kind: CallKind::Unmanaged, speaker: false }), vec![A::CallHold { on: true }, apply(call), A::CallState { id: 7, state: CallState::Connecting }, available(MicrophoneAvailability::OwnCall), A::CallState { id: 7, state: CallState::Live }]);
-    assert_eq!(world.send(I::PhoneCall { active: true }), vec![], "an own call stays OwnCall while an external one arrives");
+    assert_eq!(world.send(I::PhoneCall { active: true }), vec![A::CallState { id: 7, state: CallState::Interrupted }], "an external call interrupts the own call, which stays OwnCall");
     assert_eq!(world.settle(I::CallEnded { id: 7 }), vec![DEACTIVATE, A::CallState { id: 7, state: CallState::Ended }, available(MicrophoneAvailability::ExternalCall)]);
     assert_eq!(world.send(I::Permission { granted: true }), vec![], "an unchanged value is not sent again");
 }
@@ -465,6 +464,7 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
             let refusal = answers_flight_now(&input, world.owner.inflight()) && matches!(input, I::FocusRequest { answer: FocusAnswer::Delayed | FocusAnswer::Failed, .. } | I::Applied { result: AppliedResult::Failed { .. }, .. });
             let noisy = matches!(input, I::Noisy);
             let label = format!("{input:?}");
+            let silent_pause = !world.owner.paused_audible();
             let actions = world.raw(input);
             track(&actions, &mut admitted, &mut hold, &mut session_active, &mut last_availability);
             for action in &actions {
@@ -493,7 +493,7 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
             assert!(!(refusal && actions.iter().any(|action| matches!(action, A::Apply { .. }))), "the answer to a refusal asked the system again: {label} {actions:?}");
             assert!(!(owner.inflight().is_none() && matches!(owner.applied(), Some(SessionWant::Recording { .. })) && !owner.pending().is_empty()), "a capture waits although its recording session is applied: {label} {:?}", owner.pending());
             assert!(owner.captures().is_empty() || gate, "playback may start during a recording: {label} {actions:?}");
-            assert!(!actions.contains(&A::ResumePaused) || (owner.inflight().is_none() && owner.applied().is_some()), "the players resume before their session is applied: {label} {actions:?}");
+            assert!(!actions.contains(&A::ResumePaused) || silent_pause || (owner.inflight().is_none() && owner.applied().is_some()), "sounding players resume before their session is applied (a pause that covered no audible slot needs no session): {label} {actions:?}");
             assert!(owner.system() == System::Ducked || multiplier == 1.0, "the ducked volume outlived the duck: {label} {:?}", owner.system());
             assert!(!(noisy && owner.paused() == Some(PauseReason::Interrupted)), "a pause saved before the output was lost can resume on another output: {actions:?}");
             let running: std::collections::BTreeSet<_> = admitted.iter().map(|id| format!("{:?}", kinds[id])).collect();
@@ -541,7 +541,7 @@ fn inv_audio_32_a_recording_is_admitted_only_after_its_session_is_applied() {
     let mut world = World::new();
     let start = world.raw(I::Capture { id: 1, kind: RecordingKind::Voice });
     let generation = start.iter().find_map(generation_of).unwrap();
-    assert_eq!(world.send(I::Applied { generation, result: AppliedResult::Failed { code: 561017449 } }), vec![A::Refuse { id: 1, reason: RecordingRefusal::MicrophoneBusy }, A::ForgetPaused, DEACTIVATE], "a refused activation refuses the recording, opens the gate and releases what the platform may hold");
+    assert_eq!(world.send(I::Applied { generation, result: AppliedResult::Failed { code: 561017449 } }), vec![A::Refuse { id: 1, reason: RecordingRefusal::MicrophoneBusy }, A::ForgetPaused, DEACTIVATE, available(MicrophoneAvailability::OtherApp)], "a refused activation refuses the recording, opens the gate and releases what the platform may hold");
     let mut call = World::new();
     call.send(I::Capture { id: 1, kind: RecordingKind::Voice });
     assert_eq!(call.send(I::PhoneCall { active: true }).first(), Some(&A::Refuse { id: 1, reason: RecordingRefusal::InCall }), "a call before the admission refuses it");
@@ -683,4 +683,166 @@ fn inv_audio_57_a_lost_private_output_pauses_even_while_a_request_is_in_flight()
     assert!(world.owner.inflight().is_some());
     let lost = world.send(I::Route { reason: RouteReason::OldDeviceUnavailable, lost_private_output: true });
     assert!(lost.contains(&A::PauseAll { reason: PauseReason::OutputLost }), "{lost:?}");
+}
+
+fn call_states(actions: &[AudioAction], id: u64) -> Vec<CallState> {
+    actions.iter().filter_map(|action| match action { A::CallState { id: call, state } if *call == id => Some(*state), _ => None }).collect()
+}
+
+fn availabilities(actions: &[AudioAction]) -> Vec<MicrophoneAvailability> {
+    actions.iter().filter_map(|action| match action { A::Availability { value } => Some(*value), _ => None }).collect()
+}
+
+fn live_call(kind: CallKind) -> World {
+    let mut world = World::new();
+    world.settle(I::CallStarted { id: 7, kind: kind.clone(), speaker: false });
+    if kind != CallKind::Unmanaged {
+        world.send(I::CallSystemActivated { id: 7 });
+    }
+    world
+}
+
+fn unrelated() -> AudioInput {
+    I::Route { reason: RouteReason::Other, lost_private_output: false }
+}
+
+type Step = fn(&mut World) -> Vec<AudioAction>;
+
+#[test]
+fn inv_call_15_a_lost_session_interrupts_a_live_own_call_until_a_valid_reactivation() {
+    let losses: Vec<(CallKind, &str, Step)> = vec![
+        (CallKind::Unmanaged, "focus loss", (|world: &mut World| world.send(I::Focus { change: FocusChange::Loss })) as Step),
+        (CallKind::Unmanaged, "transient focus loss", (|world: &mut World| world.send(I::Focus { change: FocusChange::LossTransient })) as Step),
+        (CallKind::Unmanaged, "media reset", (|world: &mut World| world.send(I::MediaReset)) as Step),
+        (CallKind::Unmanaged, "failed apply of its session", (|world: &mut World| {
+            let generation = world.raw(I::CallSpeaker { id: 7, speaker: true }).iter().find_map(generation_of).expect("the unmanaged speaker asks for its session");
+            world.send(I::Applied { generation, result: AppliedResult::Failed { code: 1 } })
+        }) as Step),
+        (CallKind::Unmanaged, "external GSM", (|world: &mut World| world.send(I::PhoneCall { active: true })) as Step),
+        (CallKind::Unmanaged, "system deactivation", (|world: &mut World| world.send(I::CallSystemDeactivated { id: 7 })) as Step),
+        (own_callkit(), "media reset", (|world: &mut World| world.send(I::MediaReset)) as Step),
+        (own_callkit(), "external GSM", (|world: &mut World| world.send(I::PhoneCall { active: true })) as Step),
+        (CallKind::Telecom, "external GSM", (|world: &mut World| world.send(I::PhoneCall { active: true })) as Step),
+    ];
+    for (kind, name, lose) in losses {
+        let mut world = live_call(kind.clone());
+        assert_eq!(call_states(&lose(&mut world), 7), vec![CallState::Interrupted], "{kind:?} {name}");
+        assert_eq!(call_states(&world.send(unrelated()), 7), vec![], "{kind:?} {name}: an unrelated event does not make the call live");
+    }
+
+    let mut unmanaged = live_call(CallKind::Unmanaged);
+    let reset = unmanaged.raw(I::MediaReset);
+    let generation = reset.iter().find_map(generation_of).expect("the reset call asks for its session again");
+    assert_eq!(call_states(&unmanaged.send(I::Applied { generation, result: AppliedResult::Ok }), 7), vec![CallState::Live], "an unmanaged call is live again only on its applied session");
+
+    let mut callkit = live_call(own_callkit());
+    callkit.settle(I::MediaReset);
+    assert_eq!(call_states(&callkit.send(I::CallSystemActivated { id: 7 }), 7), vec![CallState::Live], "a CallKit call is live again only on the system activation");
+
+    let mut telecom = live_call(CallKind::Telecom);
+    telecom.send(I::PhoneCall { active: true });
+    assert_eq!(call_states(&telecom.send(I::PhoneCall { active: false }), 7), vec![], "the end of the external call is no activation");
+    assert_eq!(call_states(&telecom.send(I::CallSystemActivated { id: 7 }), 7), vec![CallState::Live]);
+}
+
+#[test]
+fn inv_call_16_a_managed_call_routes_the_speaker_without_a_new_session_and_the_newest_call_wins() {
+    for kind in [own_callkit(), CallKind::Telecom] {
+        let mut world = live_call(kind.clone());
+        assert_eq!(world.send(I::CallSpeaker { id: 7, speaker: true }), vec![A::Route { speaker: true }], "{kind:?}");
+        assert_eq!(world.send(unrelated()), vec![], "{kind:?}: the speaker asks for no session later");
+        assert_eq!(world.send(I::CallSpeaker { id: 7, speaker: false }), vec![A::Route { speaker: false }], "{kind:?}");
+    }
+    let mut world = live_call(own_callkit());
+    world.settle(I::CallStarted { id: 8, kind: CallKind::CallKit { uuid: "second".into() }, speaker: false });
+    world.send(I::CallSystemActivated { id: 8 });
+    assert_eq!(world.send(I::CallSpeaker { id: 7, speaker: true }), vec![], "an older call does not route the session of the newest");
+    assert_eq!(world.send(I::CallSpeaker { id: 8, speaker: true }), vec![A::Route { speaker: true }]);
+}
+
+#[test]
+fn inv_audio_60_every_blocked_session_reports_the_microphone_as_taken_until_its_way_out() {
+    let cases: Vec<(&str, Step, Step)> = vec![
+        ("refused activation", (|world: &mut World| {
+            let generation = world.raw(I::Audible { slot: 0, on: true }).iter().find_map(generation_of).unwrap();
+            world.send(I::Applied { generation, result: AppliedResult::Failed { code: 1 } })
+        }) as Step, (|world: &mut World| world.settle(I::Foreground { on: true })) as Step),
+        ("failed focus request", (|world: &mut World| {
+            world.raw(I::Audible { slot: 0, on: true });
+            let refused = answer(world, FocusAnswer::Failed);
+            world.send(refused)
+        }) as Step, (|world: &mut World| world.settle(I::Foreground { on: true })) as Step),
+        ("delayed focus request", (|world: &mut World| {
+            world.raw(I::Audible { slot: 0, on: true });
+            let delayed = answer(world, FocusAnswer::Delayed);
+            world.send(delayed)
+        }) as Step, (|world: &mut World| world.send(I::Focus { change: FocusChange::Gain })) as Step),
+        ("transient focus loss", (|world: &mut World| {
+            world.settle(I::Audible { slot: 0, on: true });
+            world.send(I::Focus { change: FocusChange::LossTransient })
+        }) as Step, (|world: &mut World| world.send(I::Focus { change: FocusChange::Gain })) as Step),
+        ("permanent focus loss", (|world: &mut World| {
+            world.settle(I::Audible { slot: 0, on: true });
+            world.send(I::Focus { change: FocusChange::Loss })
+        }) as Step, (|world: &mut World| world.settle(I::Audible { slot: 1, on: true })) as Step),
+    ];
+    for (name, lose, recover) in cases {
+        let mut world = World::new();
+        assert_eq!(availabilities(&lose(&mut world)), vec![MicrophoneAvailability::OtherApp], "{name}");
+        assert_eq!(availabilities(&recover(&mut world)), vec![MicrophoneAvailability::Available], "{name}: the way out gives the microphone back");
+    }
+}
+
+#[test]
+fn inv_audio_61_a_capture_of_a_kind_the_held_plan_does_not_cover_is_admitted_after_its_own_plan() {
+    let video = SessionWant::Recording { kind: RecordingKind::Video };
+    let mut world = World::new();
+    world.settle(I::Capture { id: 1, kind: RecordingKind::Voice });
+    let start = world.raw(I::Capture { id: 2, kind: RecordingKind::Video });
+    assert_eq!(plain(start.clone()), vec![apply(video.clone())], "the video waits for the plan that records video");
+    let generation = start.iter().find_map(generation_of).unwrap();
+    assert_eq!(world.send(I::Applied { generation, result: AppliedResult::Ok }), vec![A::Admit { id: 2 }]);
+
+    let mut failed = World::new();
+    failed.settle(I::Capture { id: 1, kind: RecordingKind::Voice });
+    let start = failed.raw(I::Capture { id: 2, kind: RecordingKind::Video });
+    assert_eq!(plain(start.clone()), vec![apply(video)]);
+    let generation = start.iter().find_map(generation_of).unwrap();
+    let refused = failed.send(I::Applied { generation, result: AppliedResult::Failed { code: 1 } });
+    assert!(refused.contains(&A::Refuse { id: 2, reason: RecordingRefusal::MicrophoneBusy }) && !refused.iter().any(|action| matches!(action, A::Admit { .. })), "{refused:?}");
+}
+
+#[test]
+fn inv_audio_62_every_native_failure_reaches_the_app_once_in_order() {
+    let sources = [FailureSource::Session, FailureSource::Focus, FailureSource::Speaker, FailureSource::Device, FailureSource::Recorder, FailureSource::Camera, FailureSource::File];
+    let failures: Vec<NativeFailure> = sources.iter().enumerate().map(|(index, source)| NativeFailure { source: *source, domain: format!("domain{index}"), code: -(index as i64) - 1, message: format!("failure {index}") }).collect();
+    let mut world = World::playing();
+    let mut seen = Vec::new();
+    for failure in &failures {
+        seen.extend(world.send(I::Failure { failure: failure.clone() }));
+    }
+    seen.extend(world.send(I::Failure { failure: failures[0].clone() }));
+    let mut expected: Vec<AudioAction> = failures.iter().cloned().map(|failure| A::Failure { failure }).collect();
+    expected.push(A::Failure { failure: failures[0].clone() });
+    assert_eq!(seen, expected, "one event per failure, a repeated failure is not folded");
+}
+
+#[test]
+fn inv_voice_13_a_voice_error_carries_its_typed_reason_and_the_shared_text() {
+    use crate::api::MediaError;
+    use crate::send_prep::{voice_error, voice_refusal_text, VoiceRefusal};
+    for reason in [VoiceRefusal::PermissionDenied, VoiceRefusal::MicrophoneBusy, VoiceRefusal::Empty, VoiceRefusal::InCall, VoiceRefusal::Interrupted, VoiceRefusal::MicrophoneSilent] {
+        assert_eq!(voice_error(reason), MediaError::Voice { detail: voice_refusal_text(reason), reason }, "{reason:?}");
+    }
+}
+
+#[test]
+fn inv_call_17_a_new_call_is_a_new_intent_that_leaves_a_permanently_lost_focus() {
+    let mut world = World::playing();
+    world.send(I::Focus { change: FocusChange::Loss });
+    world.send(I::Audible { slot: 0, on: false });
+
+    let started = world.raw(I::CallStarted { id: 7, kind: CallKind::Unmanaged, speaker: false });
+
+    assert!(started.iter().any(|action| generation_of(action).is_some()), "the new call asks for its session: {started:?}");
 }

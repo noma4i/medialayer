@@ -14,7 +14,7 @@ pub use photo::{jpeg_quality, photo_turn, PhotoTurn};
 pub use photo_plan::{photo_plan, CropFractions, PhotoEdit, PhotoPlan, PixelRect};
 pub use plan::{default_video_limits, plan_video, BitrateStep, VideoLimits, VideoPlan, VideoSource};
 pub use video_metadata::video_metadata_to_strip;
-pub use voice::{voice_encoder_settings, voice_level, voice_limit_ms, voice_refusal_text, VoiceEncoderSettings, VoiceRefusal};
+pub use voice::{voice_encoder_settings, voice_error, voice_level, voice_limit_ms, voice_refusal_text, voice_too_short, VoiceEncoderSettings, VoiceOutcome, VoicePhase, VoiceRefusal, VoiceState};
 
 #[cfg(test)]
 mod send_tests;

@@ -184,3 +184,29 @@ fn inv_ffi_06_an_image_prefetched_by_a_window_is_a_cache_hit_for_fetch_image() {
     assert_eq!(fetched.unwrap().bytes, b"origin bytes".to_vec());
     assert_eq!(origin.seen.lock().unwrap().len(), 1);
 }
+
+#[test]
+fn inv_cache_35_a_cached_file_the_disk_refuses_to_remove_fails_clear_and_is_one_store_failure() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let (layer, _origin) = origin_layer(dir.path());
+    let reported: Arc<Reported> = shared();
+    let _subscription = layer.subscribe_failures(reported.clone());
+    let url = "https://o.test/kept.jpg";
+    let caller = caller();
+    caller.block_on(layer.fetch_image(url.to_string(), HashMap::new())).unwrap();
+    assert!(reported.seen().is_empty(), "{:?}", reported.seen());
+    let writable = std::fs::metadata(dir.path()).unwrap().permissions();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+
+    let cleared = caller.block_on(layer.clear(None));
+    let kept = caller.block_on(layer.is_cached(MediaItem::bare(url, crate::api::Kind::Image)));
+    std::fs::set_permissions(dir.path(), writable).unwrap();
+
+    assert!(matches!(cleared, Err(MediaError::Unexpected { .. })), "clear reported success for a file it could not remove: {cleared:?}");
+    let failures: Vec<_> = reported.seen().into_iter().filter(|failure| failure.url == url).collect();
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert_eq!(failures[0].stage, crate::failures::FailureStage::Store, "{failures:?}");
+    assert!(kept, "the file left on disk dropped out of the cache");
+    caller.block_on(layer.await_closed());
+}

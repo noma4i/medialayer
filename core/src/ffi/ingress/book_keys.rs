@@ -17,6 +17,7 @@ pub(super) struct Applied {
 #[derive(Default)]
 pub(super) struct KeyOwners {
     pub(super) owners: usize,
+    pub(super) owner_ids: BTreeSet<u64>,
     pub(super) visible: BTreeMap<u64, u64>,
     pub(super) playing: usize,
     pub(super) peeking: usize,

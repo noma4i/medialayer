@@ -16,7 +16,7 @@ pub trait SettingsStore: Send + Sync {
 pub trait CacheControl: Send + Sync {
     async fn stats(&self) -> cache::CacheStats;
     async fn set_limits(&self, limits: Limits) -> Result<(), LimitsError>;
-    async fn clear(&self, kind: Option<cache::Kind>);
+    async fn clear(&self, kind: Option<cache::Kind>) -> Result<(), crate::api::MediaError>;
     async fn purge(&self, url: &str);
     async fn evict_now(&self);
     async fn contains(&self, key: &str) -> bool;

@@ -10,6 +10,7 @@ struct Place {
     machine: StateMachine<Lifecycle>,
     is_declared: bool,
     hub: Option<Hub<MediaState>>,
+    attempt: u64,
 }
 
 #[cfg(test)]
@@ -18,7 +19,7 @@ mod cleanup_tests;
 
 impl Place {
     fn idle() -> Place {
-        Place { machine: Lifecycle.state_machine(), is_declared: false, hub: None }
+        Place { machine: Lifecycle.state_machine(), is_declared: false, hub: None, attempt: 0 }
     }
 
     fn state(&self) -> MediaState {
@@ -81,6 +82,19 @@ impl Places {
                 entries.remove(&key);
             }
         })
+    }
+
+    pub fn attempt(&self, key: &str) -> u64 {
+        self.entries().get(key).map_or(0, |place| place.attempt)
+    }
+
+    pub fn retry(&self, key: &str) -> bool {
+        let mut entries = self.entries();
+        let Some(place) = entries.get_mut(key) else { return false };
+        if !matches!(place.state(), MediaState::Failed { .. }) { return false; }
+        place.attempt = place.attempt.saturating_add(1);
+        place.signal(Signal::Loading);
+        true
     }
 
     pub fn is_declared(&self, key: &str) -> bool {

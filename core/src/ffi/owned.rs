@@ -1,24 +1,32 @@
-use super::ingress::{Declared, PlaceInput, InputQueue, WindowKind};
-use super::layer::WindowReadyListener;
+use super::ingress::{Declared, PlaceInput, InputQueue, OwnerKind, Subscribing, WindowKind};
+use super::layer::{PlaybackListener, WindowReadyListener};
 use super::rows::RowLayout;
 use crate::api::{MediaError, MediaItem, MediaState};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// One mounted place: immutable item, unique id, released at most once.
 #[derive(uniffi::Object)]
 pub struct MediaPlace {
     queue: Arc<InputQueue>,
     owner: u64,
+    next_owner: Arc<AtomicU64>,
 }
 
 impl MediaPlace {
-    pub(super) fn new(queue: Arc<InputQueue>, owner: u64) -> MediaPlace {
-        MediaPlace { queue, owner }
+    pub(super) fn new(queue: Arc<InputQueue>, owner: u64, next_owner: Arc<AtomicU64>) -> MediaPlace {
+        MediaPlace { queue, owner, next_owner }
     }
 }
 
 #[uniffi::export]
 impl MediaPlace {
+    pub fn subscribe_playback(&self, listener: Arc<dyn PlaybackListener>) -> Result<Arc<crate::api::Subscription>, MediaError> {
+        let owner = self.next_owner.fetch_add(1, Ordering::Relaxed);
+        self.queue.open(owner, OwnerKind::Subscription, Declared::Subscribe { owner, subscribing: Subscribing::Playback { place: self.owner, listener } })?;
+        let queue = self.queue.clone();
+        Ok(Arc::new(crate::api::Subscription::cancelling(move || queue.release(owner))))
+    }
     pub fn update(&self, input: PlaceInput) -> Result<(), MediaError> {
         self.queue.submit(Declared::PlaceUpdate { owner: self.owner, input })
     }
@@ -34,6 +42,33 @@ impl MediaPlace {
     pub fn release(&self) {
         self.queue.release(self.owner);
     }
+}
+
+#[derive(uniffi::Object)]
+pub struct MediaPlayer { place: Arc<MediaPlace>, input: Mutex<PlaceInput> }
+
+impl MediaPlayer {
+    pub(super) fn new(place: Arc<MediaPlace>) -> Self {
+        Self { place, input: Mutex::new(PlaceInput { visible: true, ..PlaceInput::default() }) }
+    }
+}
+
+#[uniffi::export]
+impl MediaPlayer {
+    pub fn subscribe_playback(&self, listener: Arc<dyn PlaybackListener>) -> Result<Arc<crate::api::Subscription>, MediaError> { self.place.subscribe_playback(listener) }
+    pub fn play(&self) -> Result<(), MediaError> {
+        let mut input = self.input.lock().unwrap_or_else(PoisonError::into_inner);
+        input.playing = true;
+        input.play_generation = input.play_generation.wrapping_add(1);
+        self.place.update(input.clone())
+    }
+    pub fn pause(&self) -> Result<(), MediaError> {
+        let mut input = self.input.lock().unwrap_or_else(PoisonError::into_inner);
+        input.playing = false;
+        self.place.update(input.clone())
+    }
+    pub fn seek(&self, fraction: f64) -> Result<(), MediaError> { self.place.seek(fraction) }
+    pub fn release(&self) { self.place.release(); }
 }
 
 impl Drop for MediaPlace {

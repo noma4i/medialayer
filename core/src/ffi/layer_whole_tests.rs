@@ -29,6 +29,7 @@ impl BodyReader for Endless {
 impl Fetcher for Hanging {
     async fn fetch(&self, request: super::FetchRequest) -> Result<super::FetchResponse, MediaError> {
         self.fetched.lock().unwrap().push(request.url);
+        crate::test_signal::fire();
         Ok(super::FetchResponse { status: 200, headers: HashMap::new(), body: Arc::new(Endless(self.released.clone())) })
     }
 }
@@ -158,4 +159,37 @@ fn inv_capture_13_a_session_hold_shares_the_budget_with_decodes_and_a_release_ad
         assert_eq!(decode.await.unwrap().bytes(), 40 << 20);
         assert!(matches!(layer.reserve_capture(1 << 30).await, Err(MediaError::Overloaded { .. })));
     });
+}
+
+#[test]
+fn inv_strategy_31_every_source_the_full_whole_queue_refuses_is_one_load_failure_for_the_app() {
+    let dir = tempfile::tempdir().unwrap();
+    let origin = Arc::new(Hanging::default());
+    let mut open = config(dir.path(), origin.clone(), shared::<FakeSettings>(), None);
+    open.defaults = Limits { dedupe_max_entries: 1, ..default_limits() };
+    let layer = MediaLayer::open(open).unwrap();
+    let reported: Arc<Reported> = shared();
+    let _subscription = layer.subscribe_failures(reported.clone());
+    let declaration = layer.open_whole_declaration().unwrap();
+    let names = ["first.jpg", "second.jpg", "third.jpg"];
+
+    declaration.add(names.iter().map(|name| whole_photo(name)).collect()).unwrap();
+
+    let caller = caller();
+    caller.block_on(eventually(|| reported.seen().len() == 2 && names.iter().map(|name| origin.fetches(name)).sum::<usize>() == 1));
+    let refused: Vec<(crate::api::Kind, String, crate::failures::FailureStage)> =
+        reported.seen().into_iter().map(|failure| (failure.kind, failure.url, failure.stage)).collect();
+    let loaded: Vec<&str> = names.iter().copied().filter(|name| origin.fetches(name) == 1).collect();
+    let mut expected: Vec<_> = names
+        .iter()
+        .filter(|name| !loaded.contains(*name))
+        .map(|name| (crate::api::Kind::Image, format!("https://o.test/{name}"), crate::failures::FailureStage::Load))
+        .collect();
+    let mut refused_sorted = refused.clone();
+    refused_sorted.sort_by(|a, b| a.1.cmp(&b.1));
+    expected.sort_by(|a, b| a.1.cmp(&b.1));
+    assert_eq!(refused_sorted, expected, "loaded {loaded:?}, reported {refused:?}");
+    caller.block_on(layer.stats()).unwrap();
+    assert_eq!(reported.seen().len(), 2, "a refused source was reported more than once: {:?}", reported.seen());
+    declaration.release();
 }

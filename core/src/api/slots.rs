@@ -78,6 +78,7 @@ impl SlotCall {
 struct Shared {
     queue: Queue,
     life: Mutex<SlotLife>,
+    pause_id: u64,
 }
 
 impl Shared {
@@ -112,6 +113,7 @@ struct Lanes {
     live: HashMap<usize, Lane>,
     closing: Vec<Lane>,
     is_closed: bool,
+    pause_barrier: Option<(u64, tokio::sync::watch::Sender<(u64, std::collections::BTreeMap<u64, (u64, u64)>)>)>,
 }
 
 pub struct SlotRunner {
@@ -150,12 +152,25 @@ impl SlotRunner {
             let old = lanes.live.remove(&slot);
             lanes.closing.extend(old);
         }
+        let barrier = if call == SlotCall::Pause { lanes.pause_barrier.clone() } else { None };
         let lane = lanes.live.entry(slot).or_insert_with(|| {
-            let shared = Arc::new(Shared { queue: Queue::default(), life: Mutex::new(SlotLife::new()) });
+            static NEXT_PAUSE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+            let shared = Arc::new(Shared { queue: Queue::default(), life: Mutex::new(SlotLife::new()), pause_id: NEXT_PAUSE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) });
             let task = self.handle.spawn(run_lane(players, slot, shared.clone(), Arc::downgrade(&self.lanes)));
             Lane { shared, _task: AbortOnDrop::new(task), #[cfg(test)] taken_task: None }
         });
         lane.shared.queue.push(call, held);
+        if let Some((sequence, progress)) = barrier { lane.shared.queue.marker(lane.shared.pause_id, sequence, progress); }
+    }
+
+    pub(crate) fn begin_pause_barrier(&self, sequence: u64, progress: tokio::sync::watch::Sender<(u64, std::collections::BTreeMap<u64, (u64, u64)>)>) {
+        self.lanes().pause_barrier = Some((sequence, progress));
+    }
+
+    pub(crate) fn end_pause_barrier(&self) {
+        if let Some((sequence, progress)) = self.lanes().pause_barrier.take() {
+            progress.send_modify(|state| state.0 = state.0.max(sequence));
+        }
     }
 
     pub fn dispose(&self, slot: usize) {

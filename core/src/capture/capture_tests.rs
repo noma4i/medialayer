@@ -154,9 +154,13 @@ fn drive(profile: CaptureProfile, run: CaptureRun, events: &[CaptureEvent]) -> (
     (run, actions)
 }
 
-fn ready(profile: CaptureProfile) -> CaptureRun {
+fn opened(profile: CaptureProfile) -> CaptureRun {
     let open = [CaptureEvent::DemandOn, CaptureEvent::Opened { has_flash: true, zoom_min: 1.0, zoom_max: 30.0 }, CaptureEvent::Streaming { on: true }];
     drive(profile, capture_run(CameraLens::Back), &open).0
+}
+
+fn ready(profile: CaptureProfile) -> CaptureRun {
+    drive(profile, opened(profile), &[CaptureEvent::AudioFlow { flowing: true }]).0
 }
 
 fn recording(profile: CaptureProfile) -> CaptureRun {
@@ -471,4 +475,62 @@ fn inv_capture_33_the_silence_of_a_take_ends_with_it_and_the_next_start_follows_
 
     let (still, actions) = drive(profile, silent_take(), &[CaptureEvent::AudioFlow { flowing: false }, CaptureEvent::Start]);
     assert_eq!((actions, still.state.fault), (Vec::new(), Some(CameraRefusal::MicrophoneSilent)), "a sensor that still hears silence after the take refuses the next start");
+}
+
+#[test]
+fn inv_capture_35_every_take_ends_with_one_outcome_that_names_it() {
+    let profile = moment();
+    let started = |run: CaptureRun| drive(profile, run, &[CaptureEvent::AudioFlow { flowing: true }, CaptureEvent::Start, CaptureEvent::RecordStarted]).0;
+    let first = started(ready(profile));
+    let take = first.state.take.expect("a started take has an id");
+    assert_eq!(first.state.outcome, None, "a running take has no outcome yet");
+
+    let (limited, actions) = drive(profile, first, &[CaptureEvent::RecordFinished { end: RecordEnd::LimitReached }, CaptureEvent::RecordSettled { duration_ms: Some(10_000) }]);
+    assert_eq!((actions, limited.state.take, limited.state.outcome), (vec![CaptureAction::ReadClip, CaptureAction::Deliver], Some(take), Some(TakeOutcome::Captured { take })), "the limit delivers the clip without a stop");
+
+    let second = started(limited);
+    let next = second.state.take.expect("the next take has an id");
+    assert_ne!(next, take, "a new take has a new id");
+    assert_eq!(second.state.outcome, None, "a new take clears the outcome of the last one");
+    let (revoked, _) = drive(profile, second, &[CaptureEvent::Revoked { reason: CameraRefusal::InCall }, CaptureEvent::RecordFinished { end: RecordEnd::Completed }]);
+    assert_eq!((revoked.state.take, revoked.state.outcome), (Some(next), Some(TakeOutcome::Refused { reason: CameraRefusal::InCall })));
+
+    let third = started(revoked);
+    let lost_take = third.state.take.expect("the third take has an id");
+    let (lost, actions) = drive(profile, third, &[CaptureEvent::Fault { kind: FaultKind::Reset }]);
+    assert_eq!((actions, phase(&lost), lost.state.take, lost.state.outcome), (vec![CaptureAction::Restart { lens: CameraLens::Back }], CameraPhase::Opening, Some(lost_take), Some(TakeOutcome::Lost { reason: CameraRefusal::Interrupted })), "a recoverable reset loses the take before the camera opens again");
+    let reopened = drive(profile, lost, &[CaptureEvent::Opened { has_flash: true, zoom_min: 1.0, zoom_max: 30.0 }, CaptureEvent::Streaming { on: true }]).0;
+    assert_eq!((phase(&reopened), reopened.state.take, reopened.state.outcome), (CameraPhase::Ready, Some(lost_take), Some(TakeOutcome::Lost { reason: CameraRefusal::Interrupted })), "the outcome survives the recovery");
+    let (failed, _) = drive(profile, started(reopened), &[CaptureEvent::Fault { kind: FaultKind::Reset }]);
+    assert_eq!((phase(&failed), failed.state.outcome), (CameraPhase::Failed, Some(TakeOutcome::Refused { reason: CameraRefusal::Busy })), "a reset past the recovery refuses the take with the fault");
+}
+
+#[test]
+fn inv_capture_36_a_take_records_only_after_positive_microphone_sound() {
+    let profile = moment();
+    let (pending, actions) = drive(profile, opened(profile), &[CaptureEvent::Start, CaptureEvent::RecordStarted]);
+    assert_eq!((actions, phase(&pending)), (vec![CaptureAction::BeginRecording], CameraPhase::Ready), "a microphone not heard yet keeps the take out of Recording (CameraX reports sound only during a take)");
+    assert_eq!(phase(&drive(profile, pending, &[CaptureEvent::AudioFlow { flowing: true }]).0), CameraPhase::Recording);
+
+    let (silent, actions) = drive(profile, pending, &[CaptureEvent::RecordFinished { end: RecordEnd::Completed }]);
+    assert_eq!((actions, silent.state.fault, silent.state.outcome, phase(&silent)), (vec![CaptureAction::Discard], Some(CameraRefusal::MicrophoneSilent), Some(TakeOutcome::Refused { reason: CameraRefusal::MicrophoneSilent }), CameraPhase::Ready), "a take that ends without sound gives no clip");
+
+    let quiet = CaptureProfile { audio: false, ..moment() };
+    assert_eq!(phase(&drive(quiet, opened(quiet), &[CaptureEvent::Start, CaptureEvent::RecordStarted]).0), CameraPhase::Recording, "a profile without sound does not wait for the microphone");
+}
+
+#[test]
+fn inv_capture_37_closing_the_layer_ends_a_running_take_closes_the_camera_and_ignores_later_events() {
+    let profile = moment();
+    let running = drive(profile, ready(profile), &[CaptureEvent::Start, CaptureEvent::RecordStarted]).0;
+    let take = running.state.take;
+
+    let (closed, actions) = drive(profile, running, &[CaptureEvent::LayerClosed]);
+    assert_eq!((actions, phase(&closed), closed.state.take, closed.state.outcome), (vec![CaptureAction::EndRecording { discard: true }, CaptureAction::Unbind], CameraPhase::Closed, take, Some(TakeOutcome::Refused { reason: CameraRefusal::Interrupted })));
+
+    let (after, actions) = drive(profile, closed, &[CaptureEvent::DemandOn, CaptureEvent::Start, CaptureEvent::Photo]);
+    assert_eq!((actions, phase(&after)), (vec![], CameraPhase::Closed), "a closed camera never opens again");
+
+    let (idle, actions) = drive(profile, capture_run(CameraLens::Back), &[CaptureEvent::LayerClosed]);
+    assert_eq!((actions, phase(&idle)), (vec![], CameraPhase::Closed), "an idle camera closes without unbinding");
 }

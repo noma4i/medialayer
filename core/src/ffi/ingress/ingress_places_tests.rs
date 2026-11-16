@@ -221,3 +221,52 @@ fn inv_ingress_36_without_any_rate_opinion_a_key_returns_to_normal_speed() {
     caller.block_on(eventually(|| slot.calls().iter().rposition(|call| matches!(call, SlotCall::Rate { .. })).is_some_and(|last| slot.calls()[last] == SlotCall::Rate { rate: 1.0 })));
     drop(plain);
 }
+
+#[test]
+fn inv_ingress_57_retry_reloads_only_a_failed_key() {
+    struct States(std::sync::Mutex<Vec<MediaState>>);
+    impl crate::ffi::StateListener for States {
+        fn changed(&self, state: MediaState) {
+            self.0.lock().unwrap().push(state);
+        }
+        fn failed(&self, _: MediaError) {}
+    }
+    struct Attempts(std::sync::Mutex<Vec<u64>>);
+    impl crate::ffi::PlaybackListener for Attempts {
+        fn changed(&self, state: crate::api::PlaybackState) {
+            self.0.lock().unwrap().push(state.attempt);
+        }
+        fn failed(&self, _: MediaError) {}
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let layer = MediaLayer::build(config(dir.path(), None, None), Pause::new()).unwrap();
+    let caller = caller();
+    caller.block_on(layer.limits()).unwrap();
+    let rows = [
+        ("https://o.test/ready.jpg", MediaState::Ready, MediaState::Ready, 0),
+        ("https://o.test/failed.jpg", MediaState::Failed { detail: "the network dropped".to_string() }, MediaState::Loading, 1),
+    ];
+    let mut held = Vec::new();
+    for (url, reported, _, _) in &rows {
+        let states = Arc::new(States(Default::default()));
+        let subscription = layer.subscribe_state(url.to_string(), states.clone()).unwrap();
+        let place = layer.open_place(MediaItem::bare(url, crate::api::Kind::Image)).unwrap();
+        let attempts = Arc::new(Attempts(Default::default()));
+        let playback = place.subscribe_playback(attempts.clone()).unwrap();
+        place.item_state(MediaState::Loading).unwrap();
+        place.item_state(reported.clone()).unwrap();
+        caller.block_on(eventually(|| states.0.lock().unwrap().last() == Some(reported)));
+        held.push((states, attempts, subscription, playback, place));
+    }
+
+    for (url, _, _, _) in &rows {
+        caller.block_on(layer.retry(MediaItem::bare(url, crate::api::Kind::Image))).unwrap();
+    }
+    caller.block_on(layer.stats()).unwrap();
+
+    for ((url, _, state, attempt), (states, attempts, _, _, _)) in rows.iter().zip(&held).rev() {
+        caller.block_on(eventually(|| states.0.lock().unwrap().last() == Some(state) && attempts.0.lock().unwrap().last() == Some(attempt)));
+        assert_eq!(states.0.lock().unwrap().last(), Some(state), "{url}");
+        assert_eq!(attempts.0.lock().unwrap().last(), Some(attempt), "{url}");
+    }
+}

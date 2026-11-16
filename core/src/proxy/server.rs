@@ -13,6 +13,7 @@ use tokio::sync::{oneshot, watch};
 use tokio::task::JoinSet;
 
 const ACCEPT_RETRY: Duration = Duration::from_millis(10);
+const ACCEPT_RETRY_MAX: Duration = Duration::from_secs(1);
 
 struct AliveGuard(Arc<AtomicBool>);
 
@@ -48,16 +49,36 @@ async fn bind_any() -> Result<TcpListener, ProxyError> {
 
 async fn accept_loop(inner: Arc<ProxyShared>, socket: TcpListener, mut shutdown: watch::Receiver<bool>) {
     let _alive = AliveGuard(inner.alive.clone());
+    let address = socket.local_addr().ok();
     let mut connections = JoinSet::new();
+    let mut retry = ACCEPT_RETRY;
+    let mut failing = false;
     loop {
         tokio::select! {
             _ = shutdown.changed() => break,
             accepted = socket.accept() => match accepted {
                 Ok((stream, _)) => {
+                    retry = ACCEPT_RETRY;
+                    failing = false;
                     let guard = LiveGuard::new(&inner.live);
                     connections.spawn(serve_connection(inner.clone(), stream, guard));
                 }
-                Err(_) => tokio::time::sleep(ACCEPT_RETRY).await,
+                Err(error) => {
+                    if !failing {
+                        inner.config.failures.report(crate::failures::MediaFailure {
+                            kind: crate::api::Kind::Video,
+                            url: address.map_or_else(String::new, |address| format!("http://{address}")),
+                            stage: crate::failures::FailureStage::Store,
+                            reason: format!("proxy listener refused connections: {error}"),
+                        });
+                        failing = true;
+                    }
+                    tokio::select! {
+                        _ = shutdown.changed() => break,
+                        _ = tokio::time::sleep(retry) => {}
+                    }
+                    retry = (retry * 2).min(ACCEPT_RETRY_MAX);
+                }
             },
             Some(_) = connections.join_next(), if !connections.is_empty() => {}
         }

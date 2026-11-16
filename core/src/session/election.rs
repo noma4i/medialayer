@@ -110,12 +110,20 @@ impl Election {
     }
 
     pub fn set_intent(&mut self, key: &str, lease: u64, intent: Intent) -> Vec<LeaseOrder> {
+        self.update_intent(key, lease, intent, false)
+    }
+
+    pub(crate) fn renew_play(&mut self, key: &str, lease: u64) -> Vec<LeaseOrder> {
+        self.update_intent(key, lease, Intent::Play, true)
+    }
+
+    fn update_intent(&mut self, key: &str, lease: u64, intent: Intent, renew: bool) -> Vec<LeaseOrder> {
         let mut out = Vec::new();
         let sequence = self.next_sequence;
         let Some(session) = self.sessions.iter_mut().find(|session| session.lease == lease && session.key == key) else {
             return out;
         };
-        if session.intent == intent {
+        if session.intent == intent && !renew {
             return out;
         }
         session.intent = intent;

@@ -371,3 +371,24 @@ fn inv_ffi_17_closing_before_the_assembly_ends_cancels_it_and_still_releases_the
     assert_eq!(releaser.shutdowns.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert!(matches!(caller().block_on(layer.stats()), Err(MediaError::Closed)));
 }
+
+#[test]
+fn inv_failures_07_closing_the_layer_ends_every_failure_subscription_once_and_a_late_one_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let layer = MediaLayer::open(config(dir.path(), Arc::new(Offline), shared::<FakeSettings>(), None)).unwrap();
+    let early: Arc<Reported> = shared();
+    let _early = layer.subscribe_failures(early.clone());
+    let caller = caller();
+    caller.block_on(layer.stats()).unwrap();
+    assert_eq!(early.ended(), 0, "the failure subscription ended while the layer was open");
+
+    caller.block_on(layer.await_closed());
+
+    assert_eq!(early.ended(), 1, "closing the layer did not end the failure subscription");
+    let late: Arc<Reported> = shared();
+    let _late = layer.subscribe_failures(late.clone());
+    assert_eq!(late.ended(), 1, "a subscription made after the close stayed open");
+    layer.shutdown();
+    assert_eq!((early.ended(), late.ended()), (1, 1), "a second close ended a subscription again");
+    assert!(early.seen().is_empty() && late.seen().is_empty(), "{:?} {:?}", early.seen(), late.seen());
+}

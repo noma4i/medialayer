@@ -4,6 +4,11 @@
 
 ### Added
 
+- One core rule owns the audio session, audio focus, recording and calls on both platforms.
+- `callAudio(kind)` takes a CallKit, Telecom or unmanaged call with call states.
+- `microphoneAvailability` names who holds the microphone, including calls of other apps.
+- `VoiceRefusal` and `CameraRefusal` gain `interrupted` and `microphoneSilent`.
+- A video take with sound starts only while the microphone sound flows.
 - `MediaLayer.callAudio` holds a call and its audio session, with speaker and CallKit control.
 - `CameraRefusal.microphoneBusy` names a camera refusal caused by a busy microphone.
 - `MediaAudioSession.holdRecording()` gives a recording hold that its owner releases.
@@ -11,6 +16,14 @@
 
 ### Changed
 
+- A recording pauses playback, and its end resumes nothing.
+- A lost headphone or Bluetooth output pauses playback and keeps `Media.muted` unchanged.
+- An interruption resumes playback only when the system allows it.
+- Android players share one audio focus request held by the library.
+- The iOS recording session keeps headphones and Bluetooth as the output.
+- `callAudio(kind)` throws `Closed` after the layer closes, and Swift `callAudio` is `async throws`.
+- Kotlin `MediaVoiceRecorder.start` is a suspend function.
+- Audio session, focus and speaker errors reach `Media.failure` with their system domain and code.
 - The audio session follows the recording and playback demand after any system event.
 - Internal test hooks do no work in release builds.
 - The outcome of a recording is given once; a second stop is refused until the next start.
@@ -19,6 +32,14 @@
 
 ### Fixed
 
+- Sound returns after a recording, a call or an interruption without an end.
+- The first video note after a cold start records its sound or fails.
+- An own Android call is not counted as an external call.
+- A refused or delayed audio request recovers on a new sound, recording, call or volume reader.
+- A change of audio demand during a pending system request is not lost.
+- A switch from Bluetooth A2DP to HFP does not count as a lost output.
+- The camera releases its microphone and memory holds when its start is cancelled.
+- The end of an own call clears its communication mode on Android.
 - Only a lost headphone, Bluetooth or other private output turns the global mute on.
 - Sound comes back after a recording, an interruption or a media services reset.
 - An Android audio focus taken by the system is requested again.
@@ -43,6 +64,10 @@
 
 ### Removed
 
+- `callHold()`, replaced by external call detection and `callAudio(kind)`.
+- `callAudio(managedBySystem:)`, `liveChanges` and `live`, replaced by `callAudio(kind)` and `states`.
+- `MediaAudioSession.holdRecording()`, recorders hold the microphone themselves.
+- `SystemSignalNames.outputLost`.
 - `MediaAudioSession.activateRecording()` and `deactivateRecording()`, replaced by `holdRecording()`.
 
 ## 3.33.1 - 2026-11-14

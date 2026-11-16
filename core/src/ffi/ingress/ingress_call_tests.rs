@@ -53,7 +53,7 @@ impl Rig {
 
     /// Everything declared before this call is applied when it returns.
     fn settled(&self) {
-        let _ = self.caller.block_on(self.layer.play_url(MediaItem::bare_video("https://o.test/barrier.mp4")));
+        let _ = self.caller.block_on(self.layer.placeholder(MediaItem::bare_video("https://o.test/barrier.mp4"), false));
     }
 
     fn started(&self) -> (Arc<crate::ffi::MediaPlace>, Arc<MockSlot>) {
@@ -86,7 +86,7 @@ fn inv_call_02_a_play_declared_during_a_call_gives_no_play_and_a_play_declared_a
     assert_eq!(rig.plays(&slot), 0, "the stage played during a call");
 
     rig.external(false);
-    place.update(PlaceInput { visible: true, ..rig.playing() }).unwrap();
+    place.update(PlaceInput { visible: true, play_generation: 1, ..rig.playing() }).unwrap();
 
     rig.caller.block_on(eventually(|| rig.plays(&slot) == 1));
 }
@@ -103,7 +103,7 @@ fn inv_call_03_the_end_of_a_call_restores_nothing_for_a_place_that_kept_playing(
     rig.settled();
 
     assert_eq!(rig.plays(&slot), 1, "the release resumed the place");
-    place.update(PlaceInput { visible: true, ..rig.playing() }).unwrap();
+    place.update(PlaceInput { visible: true, play_generation: 1, ..rig.playing() }).unwrap();
     rig.caller.block_on(eventually(|| rig.plays(&slot) == 2));
 }
 
@@ -194,19 +194,25 @@ fn inv_call_14_the_start_of_a_call_pauses_a_running_peek() {
 }
 
 #[test]
-fn inv_call_05_play_url_is_refused_during_a_call_and_answers_after_the_last_call_ends() {
+fn inv_call_05_a_play_url_player_plays_nothing_while_any_call_runs_and_plays_after_the_last_ends() {
     let rig = Rig::new();
     rig.audio(AudioInput::CallStarted { id: 1, kind: CallKind::Unmanaged, speaker: false });
     rig.audio(AudioInput::CallStarted { id: 2, kind: CallKind::Unmanaged, speaker: false });
-    let item = MediaItem::bare_video(URL);
+    let player = rig.caller.block_on(rig.layer.play_url(MediaItem::bare_video(URL))).expect("a call does not refuse the player");
+    let slot = rig.slot();
 
-    assert!(matches!(rig.caller.block_on(rig.layer.play_url(item.clone())), Err(MediaError::InCall)));
+    player.play().unwrap();
     rig.audio(AudioInput::CallEnded { id: 1 });
     rig.audio(AudioInput::CallEnded { id: 1 });
-    assert!(matches!(rig.caller.block_on(rig.layer.play_url(item.clone())), Err(MediaError::InCall)), "one call left, the call runs");
+    player.play().unwrap();
+    rig.settled();
+    assert_eq!(rig.plays(&slot), 0, "one call left, the call runs: {:?}", slot.calls());
+
     rig.audio(AudioInput::CallEnded { id: 2 });
-
-    assert!(rig.caller.block_on(rig.layer.play_url(item)).is_ok());
+    rig.settled();
+    assert_eq!(rig.plays(&slot), 0, "the end of the call played the refused wish: {:?}", slot.calls());
+    player.play().unwrap();
+    rig.caller.block_on(eventually(|| rig.plays(&slot) == 1));
 }
 
 #[test]
@@ -260,7 +266,7 @@ fn inv_audio_30_a_pause_without_resume_forgets_and_only_a_new_declaration_plays(
     rig.settled();
     assert_eq!(rig.plays(&slot), 1, "the end resumed the key");
 
-    place.update(PlaceInput { visible: true, ..rig.playing() }).unwrap();
+    place.update(PlaceInput { visible: true, play_generation: 1, ..rig.playing() }).unwrap();
     rig.caller.block_on(eventually(|| rig.plays(&slot) == 2));
 }
 
@@ -271,7 +277,7 @@ fn inv_audio_31_a_recording_keeps_playback_paused_until_it_ends_and_resumes_noth
     let playback = SessionWant::Playback { focus: AudioFocus::Exclusive };
     assert_eq!(rig.audio(AudioInput::Audible { slot: 0, on: true }), vec![AudioAction::Apply { generation: 1, want: playback, activate: true }]);
     let recording = SessionWant::Recording { kind: RecordingKind::Voice };
-    assert_eq!(rig.audio(AudioInput::Capture { id: 1, kind: RecordingKind::Voice }), vec![AudioAction::Apply { generation: 2, want: recording, activate: true }]);
+    assert_eq!(rig.audio(AudioInput::Capture { id: 1, kind: RecordingKind::Voice }), vec![AudioAction::AwaitPaused { barrier: 1 }, AudioAction::Apply { generation: 2, want: recording, activate: true }]);
     assert_eq!(rig.audio(AudioInput::Applied { generation: 2, result: AppliedResult::Ok }), vec![AudioAction::Admit { id: 1 }]);
     rig.caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Pause)));
     place.update(PlaceInput { visible: true, ..rig.playing() }).unwrap();
@@ -284,7 +290,7 @@ fn inv_audio_31_a_recording_keeps_playback_paused_until_it_ends_and_resumes_noth
     rig.settled();
     assert_eq!(rig.plays(&slot), 1, "the end of the recording resumed the key");
 
-    place.update(PlaceInput { visible: true, ..rig.playing() }).unwrap();
+    place.update(PlaceInput { visible: true, play_generation: 1, ..rig.playing() }).unwrap();
     rig.caller.block_on(eventually(|| rig.plays(&slot) == 2));
 }
 
@@ -293,7 +299,7 @@ fn inv_audio_44_audio_inputs_outlive_the_layer_handle_and_answer_closed_after_it
     let rig = Rig::new();
     let inputs = rig.layer.audio_inputs();
     let actions = inputs.send(AudioInput::Capture { id: 1, kind: RecordingKind::Voice }).unwrap();
-    let [AudioAction::Apply { generation, want: SessionWant::Recording { kind: RecordingKind::Voice }, activate: true }] = actions[..] else { panic!("{actions:?}") };
+    let [AudioAction::AwaitPaused { .. }, AudioAction::Apply { generation, want: SessionWant::Recording { kind: RecordingKind::Voice }, activate: true }] = actions[..] else { panic!("{actions:?}") };
     rig.layer.shutdown();
     rig.caller.block_on(rig.layer.await_closed());
 

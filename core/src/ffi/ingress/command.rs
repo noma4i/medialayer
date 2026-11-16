@@ -4,7 +4,7 @@ use crate::api::{AbortOnDrop, Placeholder, MediaError, MediaItem, MediaState, Pl
 use crate::pool::PoolStats;
 use crate::image_size::ImageSize;
 use crate::proxy::ImageFetchResult;
-use super::super::layer::{StateListener, StatsListener, ToneListener, WindowReadyListener};
+use super::super::layer::{PlaybackListener, StateListener, StatsListener, ToneListener, WindowReadyListener};
 use std::collections::HashMap;
 use std::mem::size_of;
 use std::sync::Arc;
@@ -14,6 +14,8 @@ use tokio::sync::oneshot;
 pub struct PlaceInput {
     pub visible: bool,
     pub playing: bool,
+    #[uniffi(default = 0)]
+    pub play_generation: u64,
     pub group: Option<String>,
     pub peeking: bool,
     pub muted: Option<bool>,
@@ -32,11 +34,18 @@ pub(crate) enum OwnerKind {
 }
 
 pub(crate) enum CoreAudio {
-    PauseAll,
+    Barrier(Vec<AudioOp>, u64, tokio::sync::watch::Sender<(u64, std::collections::BTreeMap<u64, (u64, u64)>)>),
+    Op(AudioOp),
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum AudioOp {
+    PauseAll(crate::audio::PauseReason),
     ResumePaused,
     ForgetPaused,
     CallHold(bool),
 }
+
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WindowKind {
@@ -45,6 +54,7 @@ pub(crate) enum WindowKind {
 }
 
 pub(crate) enum Observer {
+    Playback(Arc<dyn PlaybackListener>),
     State(Arc<dyn StateListener>),
     Stats(Arc<dyn StatsListener>),
     Tone(Arc<dyn ToneListener>),
@@ -53,6 +63,7 @@ pub(crate) enum Observer {
 impl Observer {
     pub fn failed(&self, error: MediaError) {
         match self {
+            Observer::Playback(listener) => listener.failed(error),
             Observer::State(listener) => listener.failed(error),
             Observer::Stats(listener) => listener.failed(error),
             Observer::Tone(listener) => listener.failed(error),
@@ -61,6 +72,7 @@ impl Observer {
 }
 
 pub(crate) enum Subscribing {
+    Playback { place: u64, listener: Arc<dyn PlaybackListener> },
     State { key: String, listener: Arc<dyn StateListener> },
     Stats { listener: Arc<dyn StatsListener> },
     Tone { item: MediaItem, band: f32, listener: Arc<dyn ToneListener> },
@@ -76,7 +88,8 @@ pub(crate) enum PlayerEvent {
 
 /// A request whose logical part the executor fixes at its barrier.
 pub(crate) enum Query {
-    PlayUrl(MediaItem),
+    Retry(MediaItem),
+    ReadRoute(MediaItem),
     Refresh(MediaItem, PlaybackRoute),
     Pool,
     Cached(MediaItem),
@@ -100,6 +113,7 @@ pub(crate) enum Finished {
 }
 
 pub(crate) enum Answer {
+    Done,
     Route(PlaybackRoute),
     Pool(PoolStats),
     Placeholder(Placeholder),
@@ -164,7 +178,7 @@ const SLOT: u64 = size_of::<Declared>() as u64;
 impl Query {
     pub fn weight(&self) -> Bytes {
         match self {
-            Query::PlayUrl(item) | Query::Cached(item) | Query::Pixels(item) | Query::Tone(item, _) | Query::Placeholder(item, _) => weight::item(item),
+            Query::Retry(item) | Query::ReadRoute(item) | Query::Cached(item) | Query::Pixels(item) | Query::Tone(item, _) | Query::Placeholder(item, _) => weight::item(item),
             Query::Refresh(item, route) => weight::sum([weight::item(item), weight::string(&route.url), weight::headers(&route.headers)]),
             Query::Pool | Query::Decode(_) | Query::Capture(_) => Some(0),
             Query::Image { url, headers } | Query::ImageSize { url, headers } => weight::sum([weight::string(url), weight::headers(headers)]),
@@ -226,6 +240,7 @@ impl Declared {
             Declared::WholeAdd { items, .. } | Declared::WholeRemove { items, .. } => weight::sum(std::iter::once(weight::slots::<MediaItem>(items.capacity())).chain(items.iter().map(weight::item_heap))),
             Declared::Suspend { groups, .. } => weight::sum(std::iter::once(weight::slots::<String>(groups.capacity())).chain(groups.iter().map(weight::string))),
             Declared::Subscribe { subscribing, .. } => match subscribing {
+                Subscribing::Playback { .. } => Some(0),
                 Subscribing::State { key, .. } => weight::string(key),
                 Subscribing::Tone { item, .. } => weight::item_heap(item),
                 Subscribing::Stats { .. } => Some(0),

@@ -1,6 +1,7 @@
 use super::command::{Answer, CoreAudio, Declared, Finished, OwnerKind, PlaceInput, PlayerEvent, Query};
 use super::queue::{InputQueue, Reserve, EntryPlace};
-use crate::api::{placeholder_for, AbortOnDrop, MediaError, MediaItem, MediaState};
+use crate::api::{placeholder_for, AbortOnDrop, Hub, MediaError, MediaItem, MediaState, PlaybackState, PlayRefusal};
+use crate::audio::PauseReason;
 use tokio::runtime::Handle;
 use super::super::assembled::Assembled;
 use std::collections::{BTreeMap, HashMap};
@@ -8,10 +9,12 @@ use std::sync::Arc;
 use super::book_keys::*;
 pub(crate) use super::book_types::Book;
 use super::book_types::*;
+use super::audio_rule::{self, AudioGlobal, PlaceAudio};
 
 impl Book {
     pub fn new(assembled: Arc<Assembled>, queue: Arc<InputQueue>, handle: Handle) -> Book {
-        Book { assembled, queue, handle, seq: 0, places: HashMap::new(), keys: HashMap::new(), windows: HashMap::new(), video_order: BTreeMap::new(), video_applied: None, subscriptions: HashMap::new(), suspensions: HashMap::new(), in_call: false, paused: false, declarations: HashMap::new() }
+        assembled.stage.observe_playback();
+        Book { assembled, queue, handle, seq: 0, places: HashMap::new(), keys: HashMap::new(), windows: HashMap::new(), video_order: BTreeMap::new(), video_applied: None, subscriptions: HashMap::new(), suspensions: HashMap::new(), suspension_groups: HashMap::new(), allowed_groups: HashMap::new(), in_call: false, paused: false, pause_reason: None, declarations: HashMap::new(), deliveries: tokio::task::JoinSet::new() }
     }
 
     pub(super) fn next_seq(&mut self) -> u64 {
@@ -44,7 +47,11 @@ impl Book {
             Declared::ImageWindow { owner, active, pages } => self.image_window(owner, active, pages, reserve),
             Declared::Suspend { owner, groups } => {
                 self.assembled.stage.suspend(owner, &groups);
+                let groups: Vec<String> = groups.into_iter().map(|group| group.trim().to_string()).collect();
+                for group in groups.iter().collect::<std::collections::HashSet<_>>() { *self.allowed_groups.entry(group.clone()).or_default() += 1; }
+                self.suspension_groups.insert(owner, groups);
                 self.suspensions.insert(owner, reserve);
+                self.publish_states();
             }
             Declared::Audio(action) => self.audio(action),
             Declared::WholeOpen { owner } => {
@@ -70,11 +77,19 @@ impl Book {
     }
 
     /// Fixes the logical part of the answer here, behind every earlier declaration; any IO starts from that point as owned work.
-    pub(super) fn answer(&self, query: Query, reserve: Reserve, slot: EntryPlace) -> Answer {
+    pub(super) fn answer(&mut self, query: Query, reserve: Reserve, slot: EntryPlace) -> Answer {
         let assembled = self.assembled.clone();
         match query {
-            Query::PlayUrl(_) if self.in_call => Answer::Failed(MediaError::InCall),
-            Query::PlayUrl(item) => Answer::Route(assembled.routes.play_url(&item)),
+            Query::Retry(item) => {
+                if assembled.places.retry(&item.url) {
+                    assembled.stage.retry(&item);
+                    if let Some(keyed) = self.keys.get_mut(&item.url) { keyed.applied.playing = false; }
+                    self.flush(&item.url);
+                    self.publish_key(&item.url);
+                }
+                Answer::Done
+            }
+            Query::ReadRoute(item) => Answer::Route(assembled.routes.play_url(&item)),
             Query::Refresh(item, route) => Answer::Route(assembled.routes.refresh(&item, &route)),
             Query::Pool => Answer::Pool(assembled.pool_stats()),
             Query::Placeholder(item, ready) => Answer::Placeholder(placeholder_for(item, ready)),
@@ -115,7 +130,9 @@ impl Book {
         match kind {
             OwnerKind::Place => self.release_place(owner),
             OwnerKind::Window => self.release_window(owner),
-            OwnerKind::Subscription => drop(self.subscriptions.remove(&owner)),
+            OwnerKind::Subscription => {
+                if let Some(observed) = self.subscriptions.remove(&owner) { self.finish_delivery(observed, None); }
+            }
             OwnerKind::Declaration => {
                 self.declarations.remove(&owner);
                 self.assembled.stage.release_wholes_of(owner);
@@ -123,16 +140,31 @@ impl Book {
             OwnerKind::Suspension => {
                 self.assembled.stage.resume(owner);
                 self.suspensions.remove(&owner);
+                if let Some(groups) = self.suspension_groups.remove(&owner) {
+                    for group in groups.iter().collect::<std::collections::HashSet<_>>() {
+                        if let Some(count) = self.allowed_groups.get_mut(group) { *count -= 1; if *count == 0 { self.allowed_groups.remove(group); } }
+                    }
+                }
+                self.publish_states();
             }
         }
     }
 
     pub fn terminate(&mut self, error: &MediaError) {
-        for (owner, held) in self.subscriptions.drain() {
-            if self.queue.is_live(owner) {
-                held.listener.failed(error.clone());
-            }
+        for (owner, held) in std::mem::take(&mut self.subscriptions) {
+            let error = self.queue.is_live(owner).then(|| error.clone());
+            self.finish_delivery(held, error);
         }
+    }
+
+    pub(super) fn finish_delivery(&mut self, observed: Observed, error: Option<MediaError>) {
+        use std::sync::atomic::Ordering;
+        observed.delivery.closed.store(true, Ordering::Release);
+        while self.deliveries.try_join_next().is_some() {}
+        self.deliveries.spawn_blocking(move || {
+            let _running = observed.delivery.running.lock().unwrap_or_else(|error| error.into_inner());
+            if let Some(error) = error { observed.listener.failed(error); }
+        });
     }
 
     pub(super) fn release_all(&mut self) {
@@ -148,14 +180,28 @@ impl Book {
     pub(super) fn open_place(&mut self, owner: u64, item: MediaItem, reserve: Reserve) {
         let keyed = self.keys.entry(item.url.clone()).or_default();
         keyed.owners += 1;
-        self.places.insert(owner, Place { item, input: PlaceInput::default(), declared: 0, intent: 0, _opened: reserve, updated: Reserve::none() });
+        keyed.owner_ids.insert(owner);
+        let state = PlaybackState { playing: false, wish: false, reason: None, refused: None, attempt: 0 };
+        self.places.insert(owner, Place { item, input: PlaceInput::default(), declared: 0, intent: 0, _opened: reserve, updated: Reserve::none(), emitted: state.clone(), state, forgotten: None, playback: Hub::new(self.handle.clone()), watchers: Vec::new() });
     }
 
-    pub(super) fn update_place(&mut self, owner: u64, input: PlaceInput, reserve: Reserve) {
+    pub(super) fn update_place(&mut self, owner: u64, mut input: PlaceInput, reserve: Reserve) {
         let intent = self.next_seq();
         let Some(place) = self.places.get_mut(&owner) else { return };
+        let fresh = input.playing && (!place.input.playing || input.play_generation != place.input.play_generation) && place.forgotten != Some(input.play_generation);
+        if input.playing && place.forgotten == Some(input.play_generation) { input.playing = false; }
+        if fresh {
+            let refusal = if self.in_call { Some(PlayRefusal::InCall) } else if self.pause_reason == Some(PauseReason::Capture) { Some(PlayRefusal::Recording) } else { None };
+            place.state.reason = None;
+            place.state.refused = refusal.clone();
+            if refusal.is_some() { place.forgotten = Some(input.play_generation); input.playing = false; } else { place.forgotten = None; }
+        } else if !input.playing && place.forgotten.is_none() {
+            place.state.reason = None;
+            place.state.refused = None;
+        }
         let key = place.item.url.clone();
         let keyed = self.keys.entry(key.clone()).or_default();
+        let was_playing = keyed.applied.playing;
         let previous = std::mem::replace(&mut place.input, input.clone());
         place.updated = reserve;
         withdraw(keyed, owner, &previous, place.declared, place.intent);
@@ -163,33 +209,75 @@ impl Book {
         place.declared = if input.visible { intent } else { 0 };
         contribute(keyed, owner, &input, place.declared, intent);
         self.flush(&key);
+        if fresh && input.playing && was_playing && !self.in_call && !self.paused {
+            let groups = self.keys[&key].groups.keys().cloned().collect::<Vec<_>>();
+            self.assembled.stage.renew_playing(&key, &groups);
+        }
+        self.publish_key(&key);
     }
 
     fn audio(&mut self, action: CoreAudio) {
-        match action {
-            CoreAudio::PauseAll => { self.paused = true; self.flush_keys(); }
-            CoreAudio::ResumePaused => { self.paused = false; self.flush_keys(); }
-            CoreAudio::ForgetPaused => { self.forget_playback(); self.paused = false; self.flush_keys(); }
-            CoreAudio::CallHold(on) => {
-                if on && !self.in_call {
-                    self.in_call = true;
-                    self.assembled.stage.stop_all_playing();
-                    self.forget_playback();
-                    self.flush_keys();
-                } else if !on {
-                    self.in_call = false;
-                }
+        let action = match action {
+            CoreAudio::Op(action) => action,
+            CoreAudio::Barrier(actions, sequence, progress) => {
+                self.assembled.stage.begin_pause_barrier(sequence, progress);
+                for action in actions { self.audio(CoreAudio::Op(action)); }
+                self.assembled.stage.end_pause_barrier();
+                return;
+            }
+        };
+        let mut global = AudioGlobal { paused: self.paused, pause_reason: self.pause_reason, in_call: self.in_call };
+        let owners: Vec<u64> = self.places.keys().copied().collect();
+        let mut places: Vec<PlaceAudio> = owners.iter().map(|owner| {
+            let place = &self.places[owner];
+            PlaceAudio { playing: place.input.playing, peeking: place.input.peeking, forgotten: place.forgotten.is_some(), reason: place.state.reason }
+        }).collect();
+        let effects = audio_rule::step(&mut global, &mut places, &action);
+        self.paused = global.paused;
+        self.pause_reason = global.pause_reason;
+        self.in_call = global.in_call;
+        if effects.stop_all_playing { self.assembled.stage.stop_all_playing(); }
+        for (owner, audio) in owners.into_iter().zip(places) {
+            let Some(place) = self.places.get_mut(&owner) else { continue };
+            place.state.reason = audio.reason;
+            if effects.forget && (place.input.playing || place.input.peeking) {
+                let Some(keyed) = self.keys.get_mut(&place.item.url) else { continue };
+                withdraw(keyed, owner, &place.input, place.declared, place.intent);
+                place.input.playing = audio.playing;
+                place.input.peeking = audio.peeking;
+                place.forgotten = Some(place.input.play_generation);
+                contribute(keyed, owner, &place.input, place.declared, place.intent);
             }
         }
+        if effects.flush { self.flush_keys(); }
+        if effects.reset_players { self.reset_players(); }
+        if effects.publish { self.publish_states(); }
     }
 
-    fn forget_playback(&mut self) {
-        for (owner, place) in self.places.iter_mut().filter(|(_, place)| place.input.playing || place.input.peeking) {
-            let Some(keyed) = self.keys.get_mut(&place.item.url) else { continue };
-            withdraw(keyed, *owner, &place.input, place.declared, place.intent);
-            place.input.playing = false;
-            place.input.peeking = false;
-            contribute(keyed, *owner, &place.input, place.declared, place.intent);
+    fn publish_states(&mut self) {
+        let owners: Vec<u64> = self.places.keys().copied().collect();
+        self.publish_owners(owners);
+    }
+
+    pub(super) fn publish_key(&mut self, key: &str) {
+        let owners = self.keys.get(key).map(|keyed| keyed.owner_ids.iter().copied().collect()).unwrap_or_default();
+        self.publish_owners(owners);
+    }
+
+    fn publish_owners(&mut self, owners: Vec<u64>) {
+        for owner in owners {
+            let Some(place) = self.places.get_mut(&owner) else { continue };
+            let allows = |group: &str| self.allowed_groups.get(group).copied().unwrap_or(0) == self.suspensions.len();
+            let suspended = !self.suspensions.is_empty() && !place.input.group.as_deref().map_or_else(|| crate::session::Context::Ring.policy().groups.iter().any(|group| allows(group)), |group| allows(group.trim()));
+            let mut state = place.state.clone();
+            state.wish = place.input.playing;
+            state.attempt = self.assembled.places.attempt(&place.item.url);
+            state.playing = state.wish && !self.paused && !self.in_call && !suspended && self.assembled.stage.is_playing(&place.item.url);
+            if state.wish && suspended && !self.paused && !self.in_call { state.reason = Some(PauseReason::Suspended); }
+            else if state.reason == Some(PauseReason::Suspended) && !suspended { state.reason = None; }
+            else if state.wish && state.playing { state.reason = None; }
+            place.state = state.clone();
+            if state != place.emitted { place.emitted = state.clone(); place.playback.publish(state); }
         }
     }
 
@@ -200,14 +288,33 @@ impl Book {
         }
     }
 
+    fn reset_players(&mut self) {
+        self.assembled.stage.reset_players();
+        for keyed in self.keys.values_mut() {
+            keyed.applied.muted = None;
+            keyed.applied.pinned = false;
+        }
+        self.video_applied = None;
+        self.resolve_video();
+        self.flush_keys();
+    }
+
     pub(super) fn release_place(&mut self, owner: u64) {
         let Some(place) = self.places.remove(&owner) else { return };
+        for watcher in &place.watchers {
+            if let Some(observed) = self.subscriptions.remove(watcher) {
+                let error = self.queue.is_live(*watcher).then_some(MediaError::Closed);
+                self.finish_delivery(observed, error);
+            }
+        }
         let key = place.item.url.clone();
         if let Some(keyed) = self.keys.get_mut(&key) {
             withdraw(keyed, owner, &place.input, place.declared, place.intent);
             keyed.owners -= 1;
+            keyed.owner_ids.remove(&owner);
         }
         self.flush(&key);
+        self.publish_key(&key);
         if self.keys.get(&key).is_some_and(|keyed| keyed.owners == 0) {
             self.keys.remove(&key);
             if key.trim().is_empty() {

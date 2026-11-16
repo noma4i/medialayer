@@ -27,6 +27,7 @@ pub struct Prefetcher {
 impl Prefetcher {
     pub fn new(loader: Arc<dyn Loader>, limits: &Limits, ledger: PrefetchLedger, clock: Arc<dyn Clock>) -> Prefetcher {
         let shared = Shared {
+            failures: Mutex::new(Arc::default()),
             loader,
             tuning: Mutex::new(Tuning::from_limits(limits)),
             image_windows: Mutex::new(HashMap::new()),
@@ -49,6 +50,10 @@ impl Prefetcher {
         self.shared.gate.set_limit(limits.max_concurrent as usize);
         let window = Duration::from_secs(limits.dedupe_window_seconds.into());
         self.shared.state().ledger.set_limits(window, limits.dedupe_max_entries as usize);
+    }
+
+    pub fn set_failures(&self, failures: Arc<crate::failures::Failures>) {
+        *self.shared.failures.lock().unwrap_or_else(PoisonError::into_inner) = failures;
     }
 
     pub fn window_range(&self, active: usize, count: usize) -> Range<usize> {
@@ -211,6 +216,25 @@ impl Prefetcher {
         self.hold_whole(WINDOW_OWNER, source);
     }
 
+    pub fn retry(&self, source: &Source) {
+        let key = self.shared.loader.cache_key(&source.url, &source.headers);
+        let tuning = self.shared.tuning();
+        let now = Duration::from_millis(self.shared.clock.now_ms());
+        let mut state = self.shared.state();
+        let wanted: Vec<_> = state.last.iter().filter_map(|(window, (jobs, sources))| {
+            let job = jobs.iter().find(|job| job.key == key)?.clone();
+            Some((window.clone(), job, sources.get(&key)?.clone()))
+        }).collect();
+        if let Some(whole) = state.wholes.get(&key).map(|held| held.source.clone()) {
+            self.start_whole(&mut state, key.clone(), whole, now, true);
+        }
+        for (window, job, source) in wanted {
+            let jobs = state.windows.entry(window).or_default();
+            if !jobs.iter().any(|held| held.key == key) { jobs.push(job.clone()); }
+            self.start(&mut state, StartJob { key: key.clone(), source, distance: job.priority.unsigned_abs() as usize, entering: true }, now, &tuning);
+        }
+    }
+
     pub fn hold_whole(&self, owner: u64, source: Source) {
         if source.strategy != CacheStrategy::Whole {
             return;
@@ -221,7 +245,16 @@ impl Prefetcher {
         if !state.wholes.contains_key(&key) && state.wholes.len() >= self.shared.tuning().max_entries {
             state.ledger.counters.requested += 1;
             state.ledger.counters.failed += 1;
-            let _ = self.shared.events.send(Settled { url: source.url, outcome: Outcome::Failed("whole queue is full".into()) });
+            drop(state);
+            let reason = "whole queue is full".to_string();
+            let kind = match source.kind {
+                super::source::SourceKind::Image => crate::api::Kind::Image,
+                super::source::SourceKind::Video => crate::api::Kind::Video,
+                super::source::SourceKind::Audio => crate::api::Kind::Audio,
+            };
+            let failures = self.shared.failures.lock().unwrap_or_else(PoisonError::into_inner).clone();
+            failures.report(crate::failures::MediaFailure { kind, url: source.url.clone(), stage: crate::failures::FailureStage::Load, reason: reason.clone() });
+            let _ = self.shared.events.send(Settled { url: source.url, outcome: Outcome::Failed(reason) });
             return;
         }
         state.wholes.entry(key.clone()).or_insert_with(|| WholeHold { source: source.clone(), owners: HashSet::new() }).owners.insert(owner);

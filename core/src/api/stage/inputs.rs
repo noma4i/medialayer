@@ -17,6 +17,10 @@ const MIN_RATE: f32 = 0.25;
 const MAX_RATE: f32 = 4.0;
 
 impl Stage {
+    pub fn is_playing(&self, key: &str) -> bool {
+        self.state().reported_playing_key().as_deref() == Some(key)
+    }
+
     fn declare_whole<'a>(&self, sources: impl Iterator<Item = &'a MediaItem>) {
         for source in sources.filter(|source| source.strategy == CacheStrategy::Whole && source.is_remote()) {
             self.inner.prefetcher.keep_whole(source.for_prefetch());
@@ -135,6 +139,14 @@ impl Stage {
     }
 
     pub fn set_playing(&self, key: &str, playing: bool, groups: &[Option<String>]) {
+        self.apply_playing(key, playing, groups, false);
+    }
+
+    pub(crate) fn renew_playing(&self, key: &str, groups: &[Option<String>]) {
+        self.apply_playing(key, true, groups, true);
+    }
+
+    fn apply_playing(&self, key: &str, playing: bool, groups: &[Option<String>], renew: bool) {
         crate::trace!("stage", "set_playing {} {playing}", crate::trace::tail(key));
         let (state, commands) = {
             let mut state = self.state();
@@ -148,7 +160,7 @@ impl Stage {
                     groups = default;
                 }
                 let mut orders = state.election.set_groups(key, lease, groups);
-                orders.extend(state.election.set_intent(key, lease, Intent::Play));
+                orders.extend(if renew { state.election.renew_play(key, lease) } else { state.election.set_intent(key, lease, Intent::Play) });
                 let commands = state.commands_for(orders);
                 if !commands.iter().any(|command| matches!(command, Command::Play { .. })) {
                     crate::trace!("stage", "play dropped: {} {}", crate::trace::tail(key), state.election.blocked_reason(lease));
@@ -385,6 +397,18 @@ impl Stage {
         };
         self.dispatch_with(state, commands, false, Vec::new());
         self.inner.prefetcher.forget_windows();
+    }
+
+    pub fn reset_players(&self) {
+        let mut state = self.state();
+        let commands = state.ring.release_all();
+        self.dispatch(state, commands);
+        for slot in 0..self.slot_count() { self.inner.runner.dispose(slot); }
+        let mut state = self.state();
+        let keys: Vec<String> = state.shown.keys().filter(|key| state.catalog.get(*key).is_some_and(|source| source.kind != Kind::Image)).cloned().collect();
+        let mut commands = Vec::new();
+        for key in keys { commands.extend(state.ring.touch(self.now(), &key)); }
+        self.dispatch(state, commands);
     }
 }
 

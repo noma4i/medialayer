@@ -73,6 +73,7 @@ pub async fn write_index(inner: &Arc<CacheShared>) -> std::io::Result<()> {
         inner.state().changes.retain(|_, changed| *changed > revision);
     }
     pending.complete = result.is_ok();
+    if let Err(error) = &result { inner.report(super::entry::Kind::Image, inner.dir.join(INDEX_FILE).to_string_lossy().into_owned(), error); }
     result
 }
 

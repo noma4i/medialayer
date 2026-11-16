@@ -18,7 +18,7 @@ async fn inv_cache_27_controls_cancel_before_deleting() {
         *rig.cache.before_delete.lock().unwrap() = Some(Box::new(move || {
             assert_eq!(prefetch.forgotten.load(Ordering::SeqCst), 1);
         }));
-        if purge { rig.controls.purge("clip").await; } else { rig.controls.clear(None).await; }
+        if purge { rig.controls.purge("clip").await; } else { rig.controls.clear(None).await.unwrap(); }
     }
 }
 
@@ -166,8 +166,8 @@ async fn inv_api_07_stats_join_the_cache_and_the_pool() {
 async fn inv_api_07_clear_purge_and_evict_now_go_to_the_cache() {
     let rig = rig_with_saved(None);
 
-    rig.controls.clear(Some(Kind::Video)).await;
-    rig.controls.clear(None).await;
+    rig.controls.clear(Some(Kind::Video)).await.unwrap();
+    rig.controls.clear(None).await.unwrap();
     rig.controls.purge("https://cdn.test/a.mp4").await;
     rig.controls.evict_now().await;
 
@@ -183,7 +183,7 @@ async fn inv_strategy_12_clear_and_purge_make_the_prefetcher_forget_what_it_load
 
     rig.controls.purge("https://cdn.test/a.mp4").await;
     assert_eq!(rig.prefetch.forgotten.load(Ordering::SeqCst), 1);
-    rig.controls.clear(Some(Kind::Video)).await;
+    rig.controls.clear(Some(Kind::Video)).await.unwrap();
     assert_eq!(rig.prefetch.forgotten.load(Ordering::SeqCst), 2);
 }
 
@@ -192,13 +192,13 @@ async fn inv_image_03_clearing_everything_or_the_images_drops_the_decoder_memory
     let rig = rig_with_saved(None);
     let drops = || rig.release.drops.load(Ordering::SeqCst);
 
-    rig.controls.clear(Some(Kind::Video)).await;
-    rig.controls.clear(Some(Kind::Audio)).await;
+    rig.controls.clear(Some(Kind::Video)).await.unwrap();
+    rig.controls.clear(Some(Kind::Audio)).await.unwrap();
     assert_eq!(drops(), 0);
 
-    rig.controls.clear(Some(Kind::Image)).await;
+    rig.controls.clear(Some(Kind::Image)).await.unwrap();
     assert_eq!(drops(), 1);
-    rig.controls.clear(None).await;
+    rig.controls.clear(None).await.unwrap();
     assert_eq!(drops(), 2);
 }
 

@@ -4,6 +4,8 @@ use super::readiness::PageReadiness;
 use super::super::layer::WindowReadyListener;
 use crate::api::MediaItem;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
 use super::book_types::*;
 
 impl Book {
@@ -144,27 +146,44 @@ impl Book {
 
     pub(super) fn subscribe(&mut self, owner: u64, subscribing: Subscribing, reserve: Reserve) {
         let gate = self.queue.clone();
-        let live = move || gate.is_live(owner);
+        let delivery = Arc::new(Delivery { closed: AtomicBool::new(false), running: Mutex::new(()) });
+        let serial = delivery.clone();
         let (subscription, listener) = match subscribing {
+            Subscribing::Playback { place, listener } => {
+                let Some(place) = self.places.get_mut(&place) else { return listener.failed(crate::api::MediaError::Closed) };
+                place.watchers.push(owner);
+                let target = listener.clone();
+                let serial = serial.clone();
+                let gate = gate.clone();
+                let subscription = place.playback.subscribe(Arc::new(move |state| serial.send(&gate, owner, || target.changed(state))));
+                place.playback.publish(place.state.clone());
+                (subscription, Observer::Playback(listener))
+            }
             Subscribing::State { key, listener } => {
-                let deliver = listener.clone();
-                let subscription = self.assembled.places.subscribe(&key, Arc::new(move |state| if live() { deliver.changed(state) }));
+                let target = listener.clone();
+                let serial = serial.clone();
+                let gate = gate.clone();
+                let subscription = self.assembled.places.subscribe(&key, Arc::new(move |state| serial.send(&gate, owner, || target.changed(state))));
                 (subscription, Observer::State(listener))
             }
             Subscribing::Stats { listener } => {
-                let deliver = listener.clone();
-                let subscription = self.assembled.controls.subscribe_stats(Arc::new(move |stats| if live() { deliver.changed(stats) }));
+                let target = listener.clone();
+                let serial = serial.clone();
+                let gate = gate.clone();
+                let subscription = self.assembled.controls.subscribe_stats(Arc::new(move |stats| serial.send(&gate, owner, || target.changed(stats))));
                 (subscription, Observer::Stats(listener))
             }
             Subscribing::Tone { item, band, listener } => {
-                let deliver = listener.clone();
-                let subscribed = self.assembled.tones.subscribe(&item, band, Arc::new(move |tone| if live() { deliver.changed(tone) }));
+                let target = listener.clone();
+                let serial = serial.clone();
+                let gate = gate.clone();
+                let subscribed = self.assembled.tones.subscribe(&item, band, Arc::new(move |tone| serial.send(&gate, owner, || target.changed(tone))));
                 match subscribed {
                     Ok(subscription) => (subscription, Observer::Tone(listener)),
                     Err(error) => return listener.failed(error.into()),
                 }
             }
         };
-        self.subscriptions.insert(owner, Observed { _subscription: subscription, listener, _reserve: reserve });
+        self.subscriptions.insert(owner, Observed { _subscription: subscription, listener, _reserve: reserve, delivery });
     }
 }

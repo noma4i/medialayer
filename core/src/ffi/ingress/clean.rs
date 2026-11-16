@@ -21,13 +21,14 @@ fn subscribing_to(subscribing: Subscribing) -> Subscribing {
     match subscribing {
         Subscribing::State { key, listener } => Subscribing::State { key: clean_url(&key), listener },
         Subscribing::Tone { item, band, listener } => Subscribing::Tone { item: clean_item(item), band, listener },
-        stats @ Subscribing::Stats { .. } => stats,
+        other @ (Subscribing::Stats { .. } | Subscribing::Playback { .. }) => other,
     }
 }
 
 fn query_of(query: Query) -> Query {
     match query {
-        Query::PlayUrl(item) => Query::PlayUrl(clean_item(item)),
+        Query::Retry(item) => Query::Retry(clean_item(item)),
+        Query::ReadRoute(item) => Query::ReadRoute(clean_item(item)),
         Query::Refresh(item, route) => Query::Refresh(clean_item(item), route),
         Query::Cached(item) => Query::Cached(clean_item(item)),
         Query::Tone(item, band) => Query::Tone(clean_item(item), band),

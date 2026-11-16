@@ -115,8 +115,8 @@ impl CacheControl for Cache {
         Cache::set_limits(self, limits).await
     }
 
-    async fn clear(&self, kind: Option<crate::cache::Kind>) {
-        Cache::clear(self, kind).await;
+    async fn clear(&self, kind: Option<crate::cache::Kind>) -> Result<(), crate::api::MediaError> {
+        if Cache::clear_checked(self, kind).await.1 { Ok(()) } else { Err(crate::api::MediaError::Unexpected { detail: "cache clear failed".to_string() }) }
     }
 
     async fn purge(&self, url: &str) {
@@ -192,9 +192,9 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
     let (limits, rejected) = crate::limits::resolve(defaults, saved.as_deref());
     let rejected = rejected.map(|error| format!("saved limits rejected: {error}"));
     let ledger = ledger_for(&limits, device);
-    let cache = Cache::open_with(dir, limits, CacheOptions { change: change.clone(), overrides: eviction_overrides, ..CacheOptions::default() });
+    let cache = Cache::open_with(dir, limits, CacheOptions { change: change.clone(), overrides: eviction_overrides, failures: failures.clone(), ..CacheOptions::default() });
     let store: Arc<dyn ByteStore> = Arc::new(CacheStore::new(cache.clone(), Arc::new(classify_kind)));
-    let mut proxy_config = ProxyConfig { ledger: ledger.clone(), namespace_headers, failures, ..ProxyConfig::from_limits(&limits) };
+    let mut proxy_config = ProxyConfig { ledger: ledger.clone(), namespace_headers, failures: failures.clone(), ..ProxyConfig::from_limits(&limits) };
     if let Some(headers) = forward_headers {
         proxy_config.policy.forwarded_headers = headers;
     }
@@ -204,6 +204,7 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
     let dedupe_window = Duration::from_secs(limits.dedupe_window_seconds.into());
     let prefetch_ledger = PrefetchLedger::new(dedupe_window, limits.dedupe_max_entries as usize);
     let prefetcher = Prefetcher::new(Arc::new(ProxyLoader::new(proxy.clone())), &limits, prefetch_ledger, clock.clone());
+    prefetcher.set_failures(failures);
     prefetcher.set_image_windows(image_windows.into_iter().collect());
     cache.on_evicted(prefetcher.eviction_listener());
     let routes = Arc::new(Routes::new(proxy.clone(), Arc::new(cache.clone())));

@@ -58,13 +58,14 @@ pub struct Writer {
 
 impl Writer {
     pub(super) async fn start(inner: Arc<CacheShared>, key: &str, kind: Kind) -> Result<Writer, CacheError> {
+        let _ = inner.ready.subscribe().wait_for(|ready| *ready).await;
         tokio::fs::create_dir_all(&inner.dir).await?;
         let name = file_name(key);
         let part = part_path(&inner.dir, &name, inner.part_sequence.fetch_add(1, Ordering::SeqCst));
         let registration = Registration::new(&inner, &name, key, kind, &part);
         let reservation = SpaceReservation::new(inner.clone());
         let mut writer = Writer { inner, key: key.to_string(), name, kind, meta: Meta::default(), part, _registration: registration, file: None, reservation, hasher: Sha256::new(), filled: 0, sums: Vec::new(), renamed: false, #[cfg(test)] io_calls: Arc::default() };
-        writer.file = Some(create_part(&writer.inner, &writer.part).await?);
+        writer.file = Some(create_part(&writer.inner, &writer.part, kind).await?);
         Ok(writer)
     }
 
@@ -106,7 +107,7 @@ impl Writer {
     pub async fn abort(mut self) {
         self.file.take();
         self.renamed = true;
-        delete_files(vec![self.part.clone()]).await;
+        delete_files(&self.inner, vec![(self.part.clone(), Some(self.kind))]).await;
     }
 
     pub async fn commit_exact(self, length: u64) -> Result<(), CacheError> {
@@ -138,6 +139,9 @@ impl Writer {
         }
         tokio::fs::rename(&self.part, bin_path(&inner.dir, &self.name)).await?;
         self.renamed = true;
+        if let Some((size, _)) = inner.orphaned.lock().await.remove(&bin_path(&inner.dir, &self.name)) {
+            inner.state().retained_bytes -= size;
+        }
         let now = inner.now();
         {
             let mut state = inner.state();
@@ -161,9 +165,10 @@ impl Writer {
 #[path = "writer_work_tests.rs"]
 mod chunk_work_tests;
 
-async fn create_part(inner: &Arc<CacheShared>, part: &Path) -> Result<Arc<std::fs::File>, CacheError> {
+async fn create_part(inner: &Arc<CacheShared>, part: &Path, kind: Kind) -> Result<Arc<std::fs::File>, CacheError> {
     let (sender, receiver) = oneshot::channel();
     let part = part.to_path_buf();
+    let tracked_inner = inner.clone();
     #[cfg(test)]
     inner.pending_parts.fetch_add(1, Ordering::SeqCst);
     #[cfg(test)]
@@ -175,7 +180,7 @@ async fn create_part(inner: &Arc<CacheShared>, part: &Path) -> Result<Arc<std::f
         };
         if let Err(Ok(abandoned)) = sender.send(created) {
             drop(abandoned);
-            delete_files(vec![part]).await;
+            delete_files(&tracked_inner, vec![(part, Some(kind))]).await;
         }
         #[cfg(test)]
         {
@@ -193,12 +198,14 @@ impl Drop for Writer {
         self.inner.writer_drops.fetch_add(1, Ordering::Relaxed);
         if !self.renamed {
             let part = self.part.clone();
+            let cleanup_inner = self.inner.clone();
+            let kind = self.kind;
             #[cfg(test)]
             self.inner.pending_parts.fetch_add(1, Ordering::SeqCst);
             #[cfg(test)]
             let tracked = self.inner.clone();
             self.inner.handle.spawn(async move {
-                delete_files(vec![part]).await;
+                delete_files(&cleanup_inner, vec![(part, Some(kind))]).await;
                 #[cfg(test)]
                 {
                     tracked.pending_parts.fetch_sub(1, Ordering::SeqCst);

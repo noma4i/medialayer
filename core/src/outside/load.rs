@@ -58,9 +58,11 @@ async fn load(mut request: ImageLoadRequest, fetcher: Arc<dyn fetch::Fetcher>, l
     .await
     .map_err(|_| MediaError::Timeout { detail: format!("no answer within {} ms", request.timeout_ms) })??;
     if fetched.source == ImageOrigin::Network {
-        let _ = cache.put(&key, Kind::Image, &fetched.bytes).await;
+        if let Err(error) = cache.put(&key, Kind::Image, &fetched.bytes).await {
+            cache.report_store_failure(Kind::Image, &request.url, &error);
+        }
     }
-    cache.flush().await.map_err(|error| MediaError::Unexpected { detail: error.to_string() })?;
+    let _ = cache.flush().await;
     Ok(fetched)
 }
 

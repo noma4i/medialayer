@@ -104,6 +104,7 @@ impl Tuning {
 }
 
 pub(super) struct Shared {
+    pub(super) failures: Mutex<Arc<crate::failures::Failures>>,
     pub(super) loader: Arc<dyn Loader>,
     pub(super) tuning: Mutex<Tuning>,
     pub(super) image_windows: Mutex<HashMap<String, PageWindow>>,

@@ -15,6 +15,8 @@ impl FailureListener for Collected {
     fn failed(&self, failure: MediaFailure) {
         self.0.lock().unwrap().push(failure);
     }
+
+    fn closed(&self) {}
 }
 
 async fn watched_rig() -> (Rig, Arc<Collected>, crate::api::Subscription) {

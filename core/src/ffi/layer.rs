@@ -5,7 +5,7 @@ use super::fetcher::{Fetcher, ForeignFetcher};
 use super::ingress::{run, Answer, Declared, Admitted, IngressLimits, Finished, OwnerKind, Pause, InputQueue, Query, Subscribing, WindowKind};
 use super::layer_life::LayerLife;
 use super::limits::{DeviceMemory, Evict, ImageWindow, Limits, PoolSettings};
-use super::owned::{MediaPlace, MediaWholeDeclaration, MediaWindow, PlaybackSuspension};
+use super::owned::{MediaPlace, MediaPlayer, MediaWholeDeclaration, MediaWindow, PlaybackSuspension};
 use crate::audio::{AudioFocus, AudioOwner};
 use super::ready::Ready;
 use crate::analysis::MediaTone;
@@ -87,9 +87,16 @@ pub trait StateListener: Send + Sync {
     fn failed(&self, error: MediaError);
 }
 
+#[uniffi::export(with_foreign)]
+pub trait PlaybackListener: Send + Sync {
+    fn changed(&self, state: crate::api::PlaybackState);
+    fn failed(&self, error: MediaError);
+}
+
 
 pub(super) struct Closing {
     handle: Handle,
+    failures: Arc<Failures>,
     life: Mutex<LayerLife>,
     pub(super) ready: Arc<Ready<Assembled>>,
     pub(super) queue: Arc<InputQueue>,
@@ -112,6 +119,7 @@ impl Closing {
         }
         let retired = self.ready.close();
         self.queue.end(MediaError::Closed);
+        self.failures.close();
         let closing = self.clone();
         self.handle.spawn(async move { closing.clean(retired).await });
     }
@@ -156,7 +164,7 @@ pub struct MediaLayer {
     namespace_headers: Vec<String>,
     image_stats: Arc<super::image::ImageCounters>,
     failures: Arc<Failures>,
-    next_owner: AtomicU64,
+    next_owner: Arc<AtomicU64>,
     controls: tokio::sync::Mutex<()>,
     audio: Arc<Mutex<AudioOwner>>,
 }
@@ -211,6 +219,7 @@ impl MediaLayer {
         let executor = AbortOnDrop::new(handle.spawn(run(queue.clone(), ready.clone(), pause)));
         let closing = Arc::new(Closing {
             handle: handle.clone(),
+            failures: failures.clone(),
             life: Mutex::new(LayerLife::new()),
             ready,
             queue,
@@ -221,7 +230,7 @@ impl MediaLayer {
             late: Mutex::new(None),
             closed: watch::channel(false).0,
         });
-        Arc::new(MediaLayer { handle, closing, namespace_headers, image_stats: super::image::ImageCounters::new(), failures, next_owner: AtomicU64::new(1), controls: tokio::sync::Mutex::new(()), audio: Arc::new(Mutex::new(AudioOwner::new(AudioFocus::Exclusive))) })
+        Arc::new(MediaLayer { handle, closing, namespace_headers, image_stats: super::image::ImageCounters::new(), failures, next_owner: Arc::new(AtomicU64::new(1)), controls: tokio::sync::Mutex::new(()), audio: Arc::new(Mutex::new(AudioOwner::new(AudioFocus::Exclusive))) })
     }
 
     #[cfg(test)]
@@ -317,13 +326,14 @@ impl MediaLayer {
         Ok((held, answer))
     }
 
-    async fn route(&self, query: Query) -> Result<PlaybackRoute, MediaError> {
+    async fn query_route(&self, query: Query) -> Result<PlaybackRoute, MediaError> {
         match self.ask(query).await?.1 {
             Answer::Route(route) => Ok(route),
             Answer::Failed(error) => Err(error),
             _ => Err(MediaError::Unexpected { detail: "the executor answered with another result".to_string() }),
         }
     }
+
 
     /// IO that the executor started from its snapshot. The work stays counted until it ends or the caller cancels it.
     async fn outcome(&self, query: Query) -> Result<Finished, MediaError> {
@@ -408,7 +418,7 @@ impl MediaLayer {
     }
 
     pub async fn clear(&self, kind: Option<Kind>) -> Result<(), MediaError> {
-        self.controlled(|assembled| async move { assembled.controls.clear(kind).await }).await
+        self.controlled(|assembled| async move { assembled.controls.clear(kind).await }).await?
     }
 
     pub async fn reset_user_data(&self) -> Result<(), MediaError> {
@@ -418,6 +428,14 @@ impl MediaLayer {
     pub async fn purge(&self, url: String) -> Result<(), MediaError> {
         let url = crate::api::clean_url(&url);
         self.controlled(|assembled| async move { assembled.controls.purge(&url).await }).await
+    }
+
+    pub async fn retry(&self, item: MediaItem) -> Result<(), MediaError> {
+        match self.ask(Query::Retry(item)).await?.1 {
+            Answer::Done => Ok(()),
+            Answer::Failed(error) => Err(error),
+            _ => Err(MediaError::Unexpected { detail: "the executor answered with another result".to_string() }),
+        }
     }
 
     pub async fn evict_now(&self) -> Result<(), MediaError> {
@@ -455,12 +473,17 @@ impl MediaLayer {
         matches!(self.outcome(Query::Pixels(source)).await, Ok(Finished::Pixels(true)))
     }
 
-    pub async fn play_url(&self, source: MediaItem) -> Result<PlaybackRoute, MediaError> {
-        self.route(Query::PlayUrl(source)).await
+    pub async fn play_url(&self, source: MediaItem) -> Result<Arc<MediaPlayer>, MediaError> {
+        self.query_route(Query::ReadRoute(source.clone())).await?;
+        Ok(Arc::new(MediaPlayer::new(self.open_place(source)?)))
+    }
+
+    pub async fn read_route(&self, item: MediaItem) -> Result<PlaybackRoute, MediaError> {
+        self.query_route(Query::ReadRoute(item)).await
     }
 
     pub async fn refresh_route(&self, source: MediaItem, route: PlaybackRoute) -> Result<PlaybackRoute, MediaError> {
-        self.route(Query::Refresh(source, route)).await
+        self.query_route(Query::Refresh(source, route)).await
     }
 
     pub async fn fetch_image(&self, url: String, headers: HashMap<String, String>) -> Result<crate::proxy::ImageFetchResult, MediaError> {
@@ -507,7 +530,7 @@ impl MediaLayer {
     pub fn open_place(&self, item: MediaItem) -> Result<Arc<MediaPlace>, MediaError> {
         let owner = self.owner();
         self.closing.queue.open(owner, OwnerKind::Place, Declared::PlaceOpen { owner, item })?;
-        Ok(Arc::new(MediaPlace::new(self.closing.queue.clone(), owner)))
+        Ok(Arc::new(MediaPlace::new(self.closing.queue.clone(), owner, self.next_owner.clone())))
     }
 
     pub fn open_whole_declaration(&self) -> Result<Arc<MediaWholeDeclaration>, MediaError> {

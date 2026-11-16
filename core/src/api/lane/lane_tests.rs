@@ -34,7 +34,7 @@ fn inv_api_01_inv_api_16_a_new_source_drops_every_command_for_the_old_one_but_ke
         ("a view and a seek stay for the current source", vec![Attach { view_token: 1 }, Detach, Seek { position_ms: 5 }], vec![Attach { view_token: 1 }, Detach, Seek { position_ms: 5 }]),
         ("a reload keeps its unload", vec![Unload, load("b")], vec![Unload, load("b")]),
         ("a second load after a reload keeps the unload", vec![Unload, load("a"), Play, load("b")], vec![Unload, load("b")]),
-        ("commands for the current source stay in order", vec![Preroll, Play, Pause, Mute], vec![Preroll, Play, Pause, Mute]),
+        ("a pause drops a play of the current source that has not run, the rest stays in order", vec![Preroll, Play, Pause, Mute], vec![Preroll, Pause, Mute]),
     ];
 
     for (name, calls, expected) in cases {

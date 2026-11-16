@@ -1,6 +1,18 @@
 use crate::cache;
 use crate::pool;
 
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct PlaybackState {
+    pub playing: bool,
+    pub wish: bool,
+    pub reason: Option<crate::audio::PauseReason>,
+    pub refused: Option<PlayRefusal>,
+    pub attempt: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, uniffi::Enum)]
+pub enum PlayRefusal { InCall, Recording }
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, uniffi::Enum)]
 pub enum Kind {
     Image,

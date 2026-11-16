@@ -34,7 +34,7 @@ pub(crate) use source::{clean_item, clean_url};
 pub use stage::{Stage, StageParts};
 pub use stats_feed::follow_stats;
 pub use tones::{CacheTones, Keying, TonePixels, TonePreparation, ToneStore, Tones, MEMO_ENTRIES};
-pub use types::{Kind, KindUsage, MediaState, MediaStats, Pressure, ReleaseCounts, SlotCounts};
+pub use types::{Kind, KindUsage, MediaState, MediaStats, PlaybackState, PlayRefusal, Pressure, ReleaseCounts, SlotCounts};
 
 #[cfg(test)]
 pub(crate) mod test_support;

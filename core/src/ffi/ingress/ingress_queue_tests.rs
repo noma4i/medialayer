@@ -99,7 +99,7 @@ fn inv_ingress_06_an_owner_closes_while_the_queue_is_full_and_frees_its_entries_
 #[test]
 fn inv_ingress_07_a_cancelled_query_keeps_its_place_and_parameters_until_the_executor_freed_them() {
     let queue = InputQueue::new(IngressLimits { entries: 2, owners: 2, bytes: u64::MAX });
-    let (first, _answer) = queue.query(Query::PlayUrl(MediaItem::bare_video("https://o.test/a.mp4"))).unwrap();
+    let (first, _answer) = queue.query(Query::ReadRoute(MediaItem::bare_video("https://o.test/a.mp4"))).unwrap();
     let (second, _other) = queue.query(Query::Pool).unwrap();
     assert!(queue.query(Query::Pool).is_err());
 
@@ -120,7 +120,7 @@ fn inv_ingress_20_repeated_query_and_cancel_cannot_pass_the_limit_while_the_exec
     let queue = InputQueue::new(IngressLimits { entries: 3, owners: 2, bytes: u64::MAX });
     let item = MediaItem::bare_video("https://o.test/a.mp4");
 
-    let admitted = (0..50).filter(|_| queue.query(Query::PlayUrl(item.clone())).map(drop).is_ok()).count();
+    let admitted = (0..50).filter(|_| queue.query(Query::ReadRoute(item.clone())).map(drop).is_ok()).count();
 
     assert_eq!(admitted, 3);
     freed(&queue);
@@ -268,13 +268,28 @@ fn inv_ingress_33_a_refused_payload_is_dropped_after_the_lock_is_released() {
 fn inv_audio_46_audio_commands_need_no_room_so_the_end_of_a_call_or_a_recording_is_never_refused() {
     let queue = InputQueue::new(IngressLimits { entries: 8, owners: 4, bytes: 4_096 });
     opened(&queue, 1);
-    queue.submit_audio(vec![Declared::Audio(CoreAudio::CallHold(true)), Declared::Audio(CoreAudio::PauseAll)]).unwrap();
+    queue.submit_audio(vec![Declared::Audio(CoreAudio::Op(AudioOp::CallHold(true))), Declared::Audio(CoreAudio::Op(AudioOp::PauseAll(crate::audio::PauseReason::Capture)))]).unwrap();
     while queue.submit(Declared::PlaceSeek { owner: 1, fraction: 0.5 }).is_ok() {}
 
-    queue.submit_audio(vec![Declared::Audio(CoreAudio::CallHold(false))]).unwrap();
-    queue.submit_audio(vec![Declared::Audio(CoreAudio::ForgetPaused)]).unwrap();
+    queue.submit_audio(vec![Declared::Audio(CoreAudio::Op(AudioOp::CallHold(false)))]).unwrap();
+    queue.submit_audio(vec![Declared::Audio(CoreAudio::Op(AudioOp::ForgetPaused))]).unwrap();
 
     let order = queued(&queue);
     let audio: Vec<_> = order.iter().copied().filter(|name| *name != "seek" && *name != "open").collect();
     assert_eq!(audio, vec!["call-hold", "pause-all", "call-end", "forget-paused"], "{order:?}");
+}
+
+#[test]
+fn inv_ingress_55_audio_commands_fold_to_a_bounded_tail_and_a_release_still_enters() {
+    let queue = InputQueue::new(IngressLimits { entries: 8, owners: 4, bytes: 4_096 });
+    opened(&queue, 1);
+    for _ in 0..10_000 {
+        queue.submit_audio(vec![Declared::Audio(CoreAudio::Op(AudioOp::CallHold(true))), Declared::Audio(CoreAudio::Op(AudioOp::PauseAll(crate::audio::PauseReason::InCall)))]).unwrap();
+        queue.submit_audio(vec![Declared::Audio(CoreAudio::Op(AudioOp::CallHold(false))), Declared::Audio(CoreAudio::Op(AudioOp::ForgetPaused))]).unwrap();
+    }
+    queue.release(1);
+    let order = queued(&queue);
+    let audio = order.iter().filter(|name| name.starts_with("call-") || matches!(**name, "pause-all" | "forget-paused" | "resume-paused")).count();
+    assert!(audio <= 8, "the audio tail has its own bound, the entry limit: {audio} in {order:?}");
+    assert_eq!(order.last().copied(), Some("release"), "{order:?}");
 }

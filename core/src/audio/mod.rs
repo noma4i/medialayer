@@ -39,6 +39,7 @@ pub struct AudioOwner {
     session: StateMachine<session::Session>,
     generation: u64,
     paused: Option<Paused>,
+    paused_audible: bool,
     resuming: bool,
     last_availability: MicrophoneAvailability,
     hold: bool,
@@ -63,6 +64,7 @@ impl AudioOwner {
             session: session::Session.state_machine(),
             generation: 0,
             paused: None,
+            paused_audible: false,
             resuming: false,
             last_availability: MicrophoneAvailability::Available,
             hold: false,
@@ -98,7 +100,7 @@ impl AudioOwner {
             MicrophoneAvailability::OwnCall
         } else if self.external() {
             MicrophoneAvailability::ExternalCall
-        } else if self.other_recording || self.system() == System::Interrupted {
+        } else if self.other_recording || matches!(self.system(), System::Interrupted | System::FocusLost | System::Transient | System::WaitForeground) || session::blocked(&self.session) {
             MicrophoneAvailability::OtherApp
         } else {
             MicrophoneAvailability::Available
@@ -122,7 +124,7 @@ impl AudioOwner {
                 return Some(SessionWant::Recording { kind });
             }
         }
-        if (!self.audible.is_empty() || self.paused.is_some() || self.resuming)
+        if (!self.audible.is_empty() || (self.paused.is_some() && self.paused_audible) || self.resuming)
             && matches!(
                 self.system(),
                 System::Free | System::Ducked | System::Transient
@@ -143,15 +145,15 @@ impl AudioOwner {
         }
     }
     fn pause(&mut self, reason: PauseReason, actions: &mut Vec<AudioAction>) {
-        if !self.audible.is_empty() || reason == PauseReason::Capture {
-            actions.push(AudioAction::PauseAll { reason });
-            if matches!(reason, PauseReason::Capture | PauseReason::Interrupted) {
-                self.paused = Some(if reason == PauseReason::Capture { Paused::Capture } else { Paused::Interrupted { resume: false } });
-            }
+        actions.push(AudioAction::PauseAll { reason });
+        if matches!(reason, PauseReason::Capture | PauseReason::Interrupted) && self.paused != Some(Paused::Capture) {
+            self.paused_audible |= !self.audible.is_empty();
+            self.paused = Some(if reason == PauseReason::Capture { Paused::Capture } else { Paused::Interrupted { resume: false } });
         }
         if !matches!(reason, PauseReason::Capture | PauseReason::Interrupted) && self.paused != Some(Paused::Capture) && (self.paused.is_some() || !self.audible.is_empty()) {
             actions.push(AudioAction::ForgetPaused);
             self.paused = None;
+            self.paused_audible = false;
         }
     }
     fn finish_interruption(&mut self, resume: bool, actions: &mut Vec<AudioAction>) {
@@ -161,6 +163,7 @@ impl AudioOwner {
             } else {
                 actions.push(AudioAction::ForgetPaused);
                 self.paused = None;
+                self.paused_audible = false;
             }
         }
     }
@@ -169,6 +172,14 @@ impl AudioOwner {
             if call.state != state {
                 call.state = state;
                 actions.push(AudioAction::CallState { id, state });
+            }
+        }
+    }
+    fn interrupt_calls(&mut self, actions: &mut Vec<AudioAction>) {
+        for call in &mut self.calls {
+            if call.state == CallState::Live {
+                call.state = CallState::Interrupted;
+                actions.push(AudioAction::CallState { id: call.id, state: call.state });
             }
         }
     }
@@ -193,13 +204,17 @@ impl AudioOwner {
     fn paused(&self) -> Option<PauseReason> {
         self.paused.map(|value| match value { Paused::Capture => PauseReason::Capture, Paused::Interrupted { .. } => PauseReason::Interrupted })
     }
+    #[cfg(test)]
+    fn paused_audible(&self) -> bool { self.paused.is_some() && self.paused_audible }
     pub fn step(&mut self, input: AudioInput) -> Vec<AudioAction> {
         use AudioInput as I;
+        if let I::Failure { failure } = input { return vec![AudioAction::Failure { failure }]; }
         if matches!(&input, I::FocusRequest { generation, .. } | I::Applied { generation, .. } if session::inflight(&self.session) != Some(*generation)) {
             return Vec::new();
         }
         if matches!(&input, I::FocusRequest { .. }) && !session::asking(&self.session) { return Vec::new(); }
         let next = !matches!(input, I::Applied { .. } | I::FocusRequest { .. });
+        let call_applied = matches!(&input, I::Applied { result: AppliedResult::Ok, .. } | I::FocusRequest { answer: FocusAnswer::Granted, .. });
         let own_before = session::own_mode(&self.session);
         let mut fresh = matches!(&input, I::InterruptionEnded { .. } | I::ResumptionRecommendation { .. } | I::Focus { change: FocusChange::Gain } | I::Foreground { on: true } | I::MediaReset);
         let mut actions = Vec::new();
@@ -210,6 +225,7 @@ impl AudioOwner {
             self.session_event(session::SessionEvent::Other, &mut actions);
         }
         match input {
+            I::Failure { failure } => actions.push(AudioAction::Failure { failure }),
             I::VolumeReadStarted { id } => { fresh = self.volume_readers.insert(id); }
             I::VolumeReadEnded { id } => { self.volume_readers.remove(&id); }
             I::Audible { slot, on } => {
@@ -253,6 +269,7 @@ impl AudioOwner {
             }
             I::CallStarted { id, kind, speaker } => {
                 fresh = !self.calls.iter().any(|call| call.id == id);
+                if fresh && self.system() == System::FocusLost { self.system_event(SystemEvent::NewDemand, &mut actions); }
                 self.calls.retain(|call| call.id != id);
                 self.calls.push(Call {
                     id,
@@ -267,9 +284,13 @@ impl AudioOwner {
                 self.revoke(RecordingRefusal::InCall, &mut actions);
             }
             I::CallSpeaker { id, speaker } => {
+                let newest = self.calls.last().is_some_and(|call| call.id == id);
                 if let Some(call) = self.calls.iter_mut().find(|call| call.id == id) {
-                    if call.kind != CallKind::Telecom {
-                        call.speaker = speaker;
+                    let changed = call.speaker != speaker;
+                    call.speaker = speaker;
+                    if newest && changed && call.kind != CallKind::Unmanaged {
+                        self.session_event(session::SessionEvent::ManagedSpeaker(speaker), &mut actions);
+                        actions.push(AudioAction::Route { speaker });
                     }
                 }
             }
@@ -300,11 +321,13 @@ impl AudioOwner {
                 let asking = session::applied(&self.session).is_some();
                 self.session_event(session::SessionEvent::Applied { generation, result: result.clone() }, &mut actions);
                 if asking && matches!(result, AppliedResult::Failed { .. }) {
+                    self.interrupt_calls(&mut actions);
                     self.system_event(SystemEvent::AppliedFailed, &mut actions);
                     self.revoke(RecordingRefusal::MicrophoneBusy, &mut actions);
                     if matches!(self.paused, Some(Paused::Interrupted { resume: true })) {
                         actions.push(AudioAction::ForgetPaused);
                         self.paused = None;
+                        self.paused_audible = false;
                     }
                     if !self.audible.is_empty() { self.pause(PauseReason::Interrupted, &mut actions); }
                 }
@@ -314,15 +337,7 @@ impl AudioOwner {
                 self.session_event(session::SessionEvent::Reset, &mut actions);
                 self.revoke(RecordingRefusal::Interrupted, &mut actions);
                 self.pause(PauseReason::Interrupted, &mut actions);
-                for call in &mut self.calls {
-                    if call.state == CallState::Live {
-                        call.state = CallState::Interrupted;
-                        actions.push(AudioAction::CallState {
-                            id: call.id,
-                            state: call.state,
-                        });
-                    }
-                }
+                self.interrupt_calls(&mut actions);
             }
             I::InterruptionEnded { should_resume } => {
                 self.system_event(SystemEvent::InterruptionEnded(should_resume), &mut actions);
@@ -332,11 +347,13 @@ impl AudioOwner {
             }
             I::Focus { change } => match change {
                 FocusChange::Loss => {
+                    self.interrupt_calls(&mut actions);
                     self.system_event(SystemEvent::Focus(change), &mut actions);
                     self.revoke(RecordingRefusal::Interrupted, &mut actions);
                     self.pause(PauseReason::FocusLost, &mut actions);
                 }
                 FocusChange::LossTransient => {
+                    self.interrupt_calls(&mut actions);
                     self.system_event(SystemEvent::Focus(change), &mut actions);
                     self.revoke(RecordingRefusal::Interrupted, &mut actions);
                     self.pause(PauseReason::Interrupted, &mut actions);
@@ -359,18 +376,16 @@ impl AudioOwner {
                 }
             }
             I::MediaReset => {
+                self.interrupt_calls(&mut actions);
                 self.session_event(session::SessionEvent::Reset, &mut actions);
                 self.system_event(SystemEvent::MediaReset, &mut actions);
                 self.revoke(RecordingRefusal::Interrupted, &mut actions);
-                if !self.audible.is_empty() {
-                    actions.push(AudioAction::PauseAll {
-                        reason: PauseReason::MediaReset,
-                    });
-                }
+                actions.push(AudioAction::PauseAll { reason: PauseReason::MediaReset });
                 if self.paused.is_some() || !self.audible.is_empty() {
                     actions.push(AudioAction::ForgetPaused);
                 }
                 self.paused = None;
+                self.paused_audible = false;
                 self.audible.clear();
             }
             I::Route {
@@ -392,6 +407,7 @@ impl AudioOwner {
             }
             I::PhoneCall { active } => {
                 self.phone = active;
+                if active { self.interrupt_calls(&mut actions); }
                 if self.external() {
                     self.revoke(RecordingRefusal::InCall, &mut actions);
                 }
@@ -425,12 +441,12 @@ impl AudioOwner {
             self.comm_mode = false;
         }
         if let Some(held) = session::held(&self.session) {
-            if matches!(held, SessionWant::Recording { .. }) {
-                for (id, _) in &self.captures {
-                    if self.pending.remove(id) { actions.push(AudioAction::Admit { id: *id }); }
+            if let SessionWant::Recording { kind: held_kind } = held {
+                for (id, kind) in &self.captures {
+                    if (held_kind == RecordingKind::Video || held_kind == *kind) && self.pending.remove(id) { actions.push(AudioAction::Admit { id: *id }); }
                 }
             }
-            if matches!(held, SessionWant::Call { kind: CallKind::Unmanaged, .. }) {
+            if call_applied && matches!(held, SessionWant::Call { kind: CallKind::Unmanaged, .. }) {
                 if let Some(call) = self.calls.last() {
                     if call.kind == CallKind::Unmanaged && matches!(call.state, CallState::Connecting | CallState::Interrupted) {
                         self.call_state(call.id, CallState::Live, &mut actions);
@@ -441,6 +457,7 @@ impl AudioOwner {
         if self.captures.is_empty() && self.paused == Some(Paused::Capture) {
             actions.push(AudioAction::ForgetPaused);
             self.paused = None;
+            self.paused_audible = false;
         }
         if fresh && (session::blocked(&self.session) || self.system() == System::WaitForeground) {
             self.system_event(SystemEvent::NewDemand, &mut actions);
@@ -448,10 +465,11 @@ impl AudioOwner {
         let want = self.want();
         self.session_event(session::SessionEvent::Reconcile { want, may_ask: self.may_ask(), fresh, next }, &mut actions);
         if own_before && !session::own_mode(&self.session) { self.comm_mode = false; }
-        if self.paused == Some(Paused::Interrupted { resume: true }) && session::held(&self.session).is_some() && session::held(&self.session) == self.want() {
+        if self.paused == Some(Paused::Interrupted { resume: true }) && ((session::held(&self.session).is_some() && session::held(&self.session) == self.want()) || (!self.paused_audible && self.want().is_none() && self.system() == System::Free)) {
             actions.push(AudioAction::ResumePaused);
             self.paused = None;
-            self.resuming = true;
+            self.resuming = self.paused_audible;
+            self.paused_audible = false;
         }
         let hold = !self.calls.is_empty() || self.external();
         if hold != self.hold {
@@ -471,6 +489,7 @@ impl AudioOwner {
             AudioAction::PauseAll { .. } => 2,
             AudioAction::ForgetPaused => 3,
             AudioAction::CallHold { .. } => 4,
+            AudioAction::AwaitPaused { .. } => 5,
             AudioAction::Deactivate { .. } => 5,
             AudioAction::Apply { .. } => 6,
             AudioAction::Admit { .. } => 7,
@@ -478,6 +497,7 @@ impl AudioOwner {
             AudioAction::VolumeMultiplier { .. } => 9,
             AudioAction::CallState { .. } => 10,
             AudioAction::Availability { .. } => 11,
+            AudioAction::Route { .. } | AudioAction::Failure { .. } => 12,
         });
         actions
     }

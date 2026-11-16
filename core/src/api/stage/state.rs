@@ -20,6 +20,7 @@ pub(super) struct Loaded {
     pub(super) source: MediaItem,
     pub(super) route: PlaybackRoute,
     pub(super) seeked: Option<u64>,
+    pub(super) failed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -199,6 +200,11 @@ impl StageState {
         self.keys_by_lease.get(&self.election.active()?).cloned()
     }
 
+    pub(super) fn reported_playing_key(&self) -> Option<String> {
+        let key = self.playing_key()?;
+        self.loaded.get(&key).is_some_and(|loaded| !loaded.failed).then_some(key)
+    }
+
     pub(super) fn is_playing(&self, key: &str) -> bool {
         self.leases.get(key).is_some_and(|lease| self.election.active() == Some(*lease))
     }
@@ -238,6 +244,7 @@ pub(super) struct StageGuard<'a> {
     pub(super) inner: &'a Inner,
     pub(super) is_changed: bool,
     pub(super) is_quiet: bool,
+    pub(super) playing: Option<String>,
 }
 
 impl Deref for StageGuard<'_> {
@@ -259,6 +266,14 @@ impl Drop for StageGuard<'_> {
     fn drop(&mut self) {
         if !self.is_changed {
             return;
+        }
+        let observing = self.inner.playback_observed.load(std::sync::atomic::Ordering::Acquire);
+        let playing = observing.then(|| self.guard.reported_playing_key()).flatten();
+        if observing && playing != self.playing {
+            let mut changes = self.inner.playback_changes.lock().unwrap_or_else(|error| error.into_inner());
+            changes.extend(self.playing.take());
+            changes.extend(playing);
+            self.inner.playback_wake.notify_one();
         }
         self.inner.change.mark();
         if !self.is_quiet && self.guard.has_pending_restore() {

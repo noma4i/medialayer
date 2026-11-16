@@ -56,6 +56,7 @@ pub async fn evict_to(inner: &Arc<CacheShared>, target: u64) -> usize {
     if !over(inner, target) {
         return 0;
     }
+    super::inner::retry_orphans(inner, None).await;
     let _backlog = BacklogReset(&inner.eviction_backlog);
     let mut evicted = 0;
     let mut excluded = std::collections::HashSet::new();
@@ -109,23 +110,37 @@ async fn evict_one(inner: &Arc<CacheShared>, name: &str, version: u64) -> bool {
 }
 
 pub(super) async fn unlink(inner: &CacheShared, name: &str) -> bool {
-    let result = match tokio::fs::remove_file(bin_path(&inner.dir, name)).await {
-        Ok(()) => true,
-        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+    let path = bin_path(&inner.dir, name);
+    let result = match tokio::fs::remove_file(&path).await {
+        Ok(()) => { inner.unlink_failed.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&path); true },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => { inner.unlink_failed.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&path); true },
+        Err(error) => {
+            let item = inner.state().slot(name).map(|slot| (slot.entry.kind, slot.key.clone()));
+            let first = inner.unlink_failed.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(path);
+            if first {
+                if let Some((kind, key)) = item { inner.report(kind, key, error); }
+            }
+            false
+        }
     };
     #[cfg(test)]
     crate::test_signal::fire();
     result
 }
 
-pub async fn remove_names(inner: &Arc<CacheShared>, names: Vec<String>) -> usize {
+pub async fn remove_names(inner: &Arc<CacheShared>, names: Vec<String>) -> (usize, bool) {
     let mut removed = 0;
+    let mut complete = true;
     for (position, name) in names.iter().enumerate() {
         let _stripe = inner.stripe(name).lock().await;
         let present = inner.state().contains(name);
-        if present && unlink(inner, name).await {
-            inner.state().take(name);
-            removed += 1;
+        if present {
+            if unlink(inner, name).await {
+                inner.state().take(name);
+                removed += 1;
+            } else {
+                complete = false;
+            }
         }
         if (position + 1).is_multiple_of(YIELD_EVERY) {
             tokio::task::yield_now().await;
@@ -134,7 +149,7 @@ pub async fn remove_names(inner: &Arc<CacheShared>, names: Vec<String>) -> usize
     if removed > 0 {
         mark_dirty(inner);
     }
-    removed
+    (removed, complete)
 }
 
 pub async fn names_where(inner: &CacheShared, wanted: impl Fn(&str, Kind) -> bool) -> Vec<String> {

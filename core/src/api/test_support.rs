@@ -117,9 +117,10 @@ impl CacheControl for FakeCache {
         Ok(())
     }
 
-    async fn clear(&self, kind: Option<cache::Kind>) {
+    async fn clear(&self, kind: Option<cache::Kind>) -> Result<(), crate::api::MediaError> {
         if let Some(check) = &*self.before_delete.lock().unwrap() { check(); }
         self.cleared.lock().unwrap().push(kind);
+        Ok(())
     }
 
     async fn purge(&self, url: &str) {
@@ -317,6 +318,7 @@ pub struct MockSlot {
     pub gate: Arc<LoadGate>,
     pub seek_gate: Arc<LoadGate>,
     pub unload_gate: Arc<LoadGate>,
+    pub pause_gate: Arc<LoadGate>,
     pub dispose_gate: Arc<LoadGate>,
     pub live: AtomicUsize,
     pub disposed: AtomicUsize,
@@ -387,6 +389,9 @@ impl PlayerSlot for MockSlot {
         if matches!(command, SlotCall::Unload) {
             self.unload_gate.pass().await;
         }
+        if matches!(command, SlotCall::Pause) {
+            self.pause_gate.pass().await;
+        }
         match command {
             SlotCall::Load { .. } => {
                 self.live.fetch_add(1, Ordering::SeqCst);
@@ -433,6 +438,7 @@ pub struct MockFactory {
     pub gate: Arc<LoadGate>,
     pub seek_gate: Arc<LoadGate>,
     pub unload_gate: Arc<LoadGate>,
+    pub pause_gate: Arc<LoadGate>,
     pub dispose_gate: Arc<LoadGate>,
     pub create_gate: Arc<LoadGate>,
     pub disposals: Arc<AtomicUsize>,
@@ -475,6 +481,7 @@ impl PlayerSlotFactory for MockFactory {
             gate: self.gate.clone(),
             seek_gate: self.seek_gate.clone(),
             unload_gate: self.unload_gate.clone(),
+            pause_gate: self.pause_gate.clone(),
             dispose_gate: self.dispose_gate.clone(),
             live: AtomicUsize::new(0),
             disposed: AtomicUsize::new(0),

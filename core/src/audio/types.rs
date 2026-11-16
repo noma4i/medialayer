@@ -72,6 +72,8 @@ pub enum PauseReason {
     FocusLost,
     OutputLost,
     MediaReset,
+    InCall,
+    Suspended,
 }
 #[derive(uniffi::Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CallState {
@@ -80,8 +82,16 @@ pub enum CallState {
     Interrupted,
     Ended,
 }
+/// The output a call's audio goes to, as the platform applied it.
+#[derive(uniffi::Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallRoute { Speaker, Receiver, Other, Failed }
+#[derive(uniffi::Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureSource { Session, Focus, Speaker, Device, Recorder, Camera, File }
+#[derive(uniffi::Record, Debug, Clone, PartialEq, Eq)]
+pub struct NativeFailure { pub source: FailureSource, pub domain: String, pub code: i64, pub message: String }
 #[derive(uniffi::Enum, Debug, Clone, PartialEq)]
 pub enum AudioInput {
+    Failure { failure: NativeFailure },
     VolumeReadStarted {
         id: u64,
     },
@@ -165,6 +175,9 @@ pub enum AudioInput {
 }
 #[derive(uniffi::Enum, Debug, Clone, PartialEq)]
 pub enum AudioAction {
+    AwaitPaused { barrier: u64 },
+    Failure { failure: NativeFailure },
+    Route { speaker: bool },
     Revoke {
         id: u64,
         reason: RecordingRefusal,

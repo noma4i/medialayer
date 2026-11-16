@@ -9,6 +9,7 @@ pub(super) enum SessionEvent {
     Applied { generation: u64, result: AppliedResult },
     Focus { generation: u64, answer: FocusAnswer },
     CallActivated(SessionWant),
+    ManagedSpeaker(bool),
     Gain,
     Other,
     Reset,
@@ -54,6 +55,7 @@ impl Session {
     #[state(superstate = "any")]
     fn asking(g: &mut u64, w: &mut SessionWant, event: &SessionEvent, context: &mut SessionContext<'_>) -> Outcome<State> {
         match event {
+            SessionEvent::ManagedSpeaker(speaker) if matches!(w, SessionWant::Call { kind: CallKind::CallKit { .. }, .. }) => { if let SessionWant::Call { speaker: current, .. } = w { *current = *speaker; } Handled }
             SessionEvent::Reconcile { want: None, .. } => Transition(release(context, own(w))),
             SessionEvent::Reconcile { want: Some(want), may_ask, fresh, .. } if want != w && (*may_ask || *fresh) => Transition(ask(want.clone(), context, true)),
             SessionEvent::Applied { generation, result: AppliedResult::Ok } if generation == g => Transition(State::held(w.clone())),
@@ -67,6 +69,7 @@ impl Session {
     #[state(superstate = "any")]
     fn held(w: &mut SessionWant, event: &SessionEvent, context: &mut SessionContext<'_>) -> Outcome<State> {
         match event {
+            SessionEvent::ManagedSpeaker(speaker) if matches!(w, SessionWant::Call { kind: CallKind::CallKit { .. }, .. }) => { if let SessionWant::Call { speaker: current, .. } = w { *current = *speaker; } Handled }
             SessionEvent::Reconcile { want: None, .. } => Transition(release(context, own(w))),
             SessionEvent::Reconcile { want: Some(want), may_ask, fresh, .. } if want != w && (*may_ask || *fresh) => Transition(ask(want.clone(), context, true)),
             _ => Super,

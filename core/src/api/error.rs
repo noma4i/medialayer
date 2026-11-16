@@ -17,13 +17,11 @@ pub enum MediaError {
     #[error("invalid suspension: {detail}")]
     InvalidSuspension { detail: String },
     #[error("voice: {detail}")]
-    Voice { detail: String },
+    Voice { detail: String, reason: crate::send_prep::VoiceRefusal },
     #[error("camera: {detail}")]
     Camera { reason: crate::capture::CameraRefusal, detail: String, recorded_ms: Option<u64> },
     #[error("overloaded: {detail}")]
     Overloaded { detail: String },
-    #[error("a call is running, there is no playback")]
-    InCall,
     #[error("the media layer is closed")]
     Closed,
     #[error("unexpected: {detail}")]

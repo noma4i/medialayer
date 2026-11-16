@@ -17,6 +17,7 @@ pub struct Options {
     pub chunk_size: usize,
     pub persist_delay: Duration,
     pub change: Arc<Change>,
+    pub failures: Arc<crate::failures::Failures>,
 }
 
 impl Default for Options {
@@ -28,6 +29,7 @@ impl Default for Options {
             chunk_size: DEFAULT_CHUNK_SIZE,
             persist_delay: DEFAULT_PERSIST_DELAY,
             change: Change::new(),
+            failures: Arc::default(),
         }
     }
 }

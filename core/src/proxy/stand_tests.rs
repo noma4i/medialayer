@@ -278,6 +278,7 @@ async fn inv_proxy_02_inv_proxy_03_inv_proxy_06_inv_proxy_11_clients_ranges_cuts
     let quiet = async {
         loop {
             let seen = crate::test_signal::current();
+            proxy.forget_downloads(None);
             let stats = cache.stats().await;
             if proxy.live_tasks() == 0
                 && proxy.inner.slots.in_use() == 0

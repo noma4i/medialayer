@@ -1,4 +1,6 @@
 mod book;
+mod audio_compose;
+mod audio_rule;
 mod book_keys;
 mod book_types;
 mod book_windows;
@@ -10,7 +12,7 @@ mod queue;
 pub(super) mod readiness;
 mod weight;
 
-pub(crate) use command::{Answer, CoreAudio, Declared, Finished, OwnerKind, PlayerEvent, Query, Subscribing, WindowKind};
+pub(crate) use command::{Answer, AudioOp, CoreAudio, Declared, Finished, OwnerKind, PlayerEvent, Query, Subscribing, WindowKind};
 pub use command::PlaceInput;
 pub(crate) use executor::{run, Pause};
 pub use limits::IngressLimits;
@@ -22,6 +24,8 @@ mod ingress_harness;
 mod ingress_call_tests;
 #[cfg(test)]
 mod ingress_close_tests;
+#[cfg(test)]
+mod ingress_playback_tests;
 #[cfg(test)]
 mod ingress_places_tests;
 #[cfg(test)]

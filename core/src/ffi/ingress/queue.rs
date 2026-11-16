@@ -1,9 +1,11 @@
-use super::command::{Answer, Declared, Fold, Merge, OwnerKind, Query};
+use super::audio_compose::{compose, prepare};
+use super::command::{Answer, CoreAudio, Declared, Fold, Merge, OwnerKind, Query};
 use super::limits::IngressLimits;
 use crate::api::MediaError;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard};
 use tokio::sync::{oneshot, watch, Notify};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 struct Entry {
     command: Declared,
@@ -48,6 +50,21 @@ struct Inner {
 }
 
 impl Inner {
+    fn compose_audio(&mut self, limit: usize) {
+        let mut run: Vec<_> = self.entries.iter().rev().take_while(|(_, entry)| {
+            matches!(entry.command, Declared::Audio(CoreAudio::Op(_)))
+        }).map(|(seq, _)| *seq).collect();
+        if run.len() < limit { return; }
+        run.reverse();
+        let mut events = Vec::with_capacity(run.len());
+        for seq in &run {
+            if let Some(Entry { command: Declared::Audio(CoreAudio::Op(event)), .. }) = self.entries.remove(seq) { events.push(event); }
+        }
+        for (seq, event) in run.into_iter().zip(compose(events)) {
+            self.entries.insert(seq, Entry { command: Declared::Audio(CoreAudio::Op(event)), bytes: 0, fold: None, owner: None });
+        }
+    }
+
     /// Drops accounting. A mismatch while open is a defect: the layer ends with an error instead of hiding it.
     fn reduce(&mut self, bytes: u64, counted: usize) {
         match (self.bytes.checked_sub(bytes), self.counted.checked_sub(counted)) {
@@ -106,6 +123,8 @@ pub(crate) struct InputQueue {
     limits: IngressLimits,
     wake: Notify,
     ended: watch::Sender<bool>,
+    pause_sequence: AtomicU64,
+    pause_progress: watch::Sender<(u64, BTreeMap<u64, (u64, u64)>)>,
 }
 
 /// Reserved bytes of data an executor-owned record keeps. Released when the record drops or is replaced.
@@ -180,6 +199,8 @@ impl InputQueue {
             limits,
             wake: Notify::new(),
             ended: watch::channel(false).0,
+            pause_sequence: AtomicU64::new(1),
+            pause_progress: watch::channel((0, BTreeMap::new())).0,
         })
     }
 
@@ -193,6 +214,14 @@ impl InputQueue {
 
     pub fn ended(&self) -> watch::Receiver<bool> {
         self.ended.subscribe()
+    }
+
+    pub fn next_pause(&self) -> u64 {
+        self.pause_sequence.fetch_add(1, Ordering::Relaxed)
+    }
+
+    pub fn pause_progress(&self) -> watch::Sender<(u64, BTreeMap<u64, (u64, u64)>)> {
+        self.pause_progress.clone()
     }
 
     pub fn end(&self, error: MediaError) {
@@ -281,13 +310,19 @@ impl InputQueue {
     }
 
     pub fn submit_audio(&self, commands: Vec<Declared>) -> Result<(), MediaError> {
+        if !commands.is_empty() { prepare(); }
         let mut inner = self.inner();
         if let Phase::Ended(error) = &inner.phase { return Err(error.clone()); }
+        if commands.iter().any(|command| matches!(command, Declared::Audio(CoreAudio::Barrier(..))))
+            && inner.entries.values().filter(|entry| matches!(entry.command, Declared::Audio(CoreAudio::Barrier(..)))).count() >= self.limits.entries as usize {
+            return Err(Self::overloaded("audio barrier"));
+        }
         for command in commands {
             let seq = inner.seq;
             inner.seq += 1;
             inner.entries.insert(seq, Entry { command, bytes: 0, fold: None, owner: None });
             inner.epoch += 1;
+            inner.compose_audio(self.limits.entries as usize);
         }
         drop(inner);
         self.wake.notify_one();

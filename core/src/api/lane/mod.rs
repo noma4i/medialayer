@@ -11,11 +11,12 @@ pub const LANE_CAPACITY: usize = 16;
 pub struct Queued {
     pub call: SlotCall,
     pub held: Option<Held>,
+    marker: Option<(u64, u64, tokio::sync::watch::Sender<(u64, std::collections::BTreeMap<u64, (u64, u64)>)>)>,
 }
 
 impl Queued {
     fn bare(call: SlotCall) -> Queued {
-        Queued { call, held: None }
+        Queued { call, held: None, marker: None }
     }
 }
 
@@ -31,6 +32,7 @@ struct Pending {
     in_flight: bool,
     source_revision: u64,
     is_disposing: bool,
+    progress: Option<(u64, tokio::sync::watch::Sender<(u64, std::collections::BTreeMap<u64, (u64, u64)>)>)>,
 }
 
 #[derive(Default)]
@@ -53,17 +55,40 @@ impl Queue {
         if replaces_source {
             state.source_revision += 1;
             let pending = &mut state.calls;
+            let protected = pending.iter().rposition(|queued| queued.marker.is_some()).map_or(0, |index| index + 1);
+            let mut suffix = pending.split_off(protected);
+            let pending = &mut suffix;
             let sound = pending.iter().rfind(|queued| matches!(queued.call, SlotCall::Mute | SlotCall::Unmute)).map(|queued| Queued::bare(queued.call.clone()));
             let release = pending.iter().any(|queued| queued.call == SlotCall::Unload).then(|| Queued::bare(SlotCall::Unload)).filter(|_| matches!(call, SlotCall::Load { .. }));
             stale = std::mem::take(pending);
             pending.extend(sound);
             pending.extend(release);
+            state.calls.extend(suffix);
         }
         let pending = &mut state.calls;
-        pending.push_back(Queued { call, held });
+        if call == SlotCall::Pause {
+            let protected = pending.iter().rposition(|queued| queued.marker.is_some()).map_or(0, |index| index + 1);
+            let mut suffix = pending.split_off(protected);
+            suffix.retain(|queued| queued.call != SlotCall::Play);
+            pending.extend(suffix);
+        }
+        pending.push_back(Queued { call, held, marker: None });
         if pending.len() > LANE_CAPACITY {
-            let folded = fold(pending);
-            stale.extend(std::mem::replace(pending, folded));
+            let protected = pending.iter().rposition(|queued| queued.marker.is_some()).map_or(0, |index| index + 1);
+            let suffix = pending.split_off(protected);
+            let folded = fold(&suffix);
+            stale.extend(suffix);
+            pending.extend(folded);
+            if let Some(marker_index) = protected.checked_sub(1) {
+                let suffix = pending.split_off(marker_index + 1);
+                if let Some(marker) = pending.pop_back() {
+                    let prefix = std::mem::take(pending);
+                    pending.extend(fold(&prefix));
+                    pending.push_back(marker);
+                    stale.extend(prefix);
+                }
+                pending.extend(suffix);
+            }
         }
         drop(state);
         drop(stale);
@@ -73,6 +98,18 @@ impl Queue {
         }
     }
 
+    pub fn marker(&self, id: u64, sequence: u64, progress: tokio::sync::watch::Sender<(u64, std::collections::BTreeMap<u64, (u64, u64)>)>) {
+        let mut state = self.pending();
+        if !state.is_disposing {
+            state.calls.retain(|queued| queued.marker.is_none());
+            progress.send_modify(|state| state.1.entry(id).or_default().0 = sequence);
+            state.progress = Some((id, progress.clone()));
+            state.calls.push_back(Queued { call: SlotCall::Pause, held: None, marker: Some((id, sequence, progress)) });
+        }
+        drop(state);
+        self.wake.notify_one();
+    }
+
     pub fn dispose(&self) {
         let mut state = self.pending();
         if state.is_disposing {
@@ -80,7 +117,8 @@ impl Queue {
         }
         state.is_disposing = true;
         state.source_revision += 1;
-        let stale = std::mem::take(&mut state.calls);
+        let protected = state.calls.iter().rposition(|queued| queued.marker.is_some()).map_or(0, |index| index + 1);
+        let stale = state.calls.split_off(protected);
         drop(state);
         drop(stale);
         self.wake.notify_one();
@@ -90,7 +128,13 @@ impl Queue {
     pub fn take(&self) -> Option<Next> {
         let mut state = self.pending();
         let revision = state.source_revision;
-        if let Some(Queued { call, held }) = state.calls.pop_front() {
+        while let Some(Queued { call, held, marker }) = state.calls.pop_front() {
+            if let Some((id, sequence, progress)) = marker {
+                progress.send_modify(|state| {
+                    if let Some((_, acked)) = state.1.get_mut(&id) { *acked = (*acked).max(sequence); }
+                });
+                continue;
+            }
             state.in_flight = true;
             return Some(Next::Call { call, held, revision });
         }
@@ -125,7 +169,10 @@ impl Queue {
 
     pub fn settle(&self) {
         self.is_settled.store(true, Ordering::SeqCst);
-        self.pending().in_flight = false;
+        let mut state = self.pending();
+        state.in_flight = false;
+        if let Some((id, progress)) = state.progress.take() { progress.send_modify(|state| { state.1.remove(&id); }); }
+        drop(state);
         self.settled.notify_waiters();
         #[cfg(test)]
         crate::test_signal::fire();

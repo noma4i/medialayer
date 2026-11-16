@@ -28,7 +28,7 @@ impl SystemMachine {
     }
     #[state(superstate = "any")]
     fn focus_lost(event: &SystemEvent) -> Outcome<State> {
-        match event { SystemEvent::Audible(true) | SystemEvent::Capture => Transition(State::free()), _ => Super }
+        match event { SystemEvent::Audible(true) | SystemEvent::Capture | SystemEvent::NewDemand => Transition(State::free()), _ => Super }
     }
     #[state(superstate = "any")]
     fn transient(context: &mut Exit, event: &SystemEvent) -> Outcome<State> {

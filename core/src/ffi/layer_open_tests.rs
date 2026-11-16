@@ -103,7 +103,7 @@ fn inv_ffi_02_a_play_url_routes_the_platform_fetcher_through_the_proxy_into_the_
     };
     let caller = caller();
 
-    let route = caller.block_on(layer.play_url(source.clone())).unwrap();
+    let route = caller.block_on(layer.read_route(source.clone())).unwrap();
     let parsed = Url::parse(&route.url).unwrap();
     let port = parsed.port().unwrap();
     let reply = caller.block_on(test_client::get(port, &format!("{}?{}", parsed.path(), parsed.query().unwrap_or_default())));

@@ -36,6 +36,7 @@ fn answer(commands: Vec<Declared>, error: &MediaError) {
             Declared::Subscribe { owner: _, subscribing } => {
                 use super::command::Subscribing;
                 match subscribing {
+                    Subscribing::Playback { listener, .. } => listener.failed(error.clone()),
                     Subscribing::State { listener, .. } => listener.failed(error.clone()),
                     Subscribing::Stats { listener } => listener.failed(error.clone()),
                     Subscribing::Tone { listener, .. } => listener.failed(error.clone()),
@@ -77,6 +78,7 @@ pub(crate) async fn run(queue: Arc<InputQueue>, ready: Arc<Ready<Assembled>>, pa
     loop {
         pause.passed().await;
         free(&queue);
+        for key in book.assembled.stage.take_playback_changes() { book.publish_key(&key); }
         match queue.next() {
             Upcoming::Release(owner, kind) => {
                 book.release(owner, kind);
@@ -87,10 +89,16 @@ pub(crate) async fn run(queue: Arc<InputQueue>, ready: Arc<Ready<Assembled>>, pa
                     book.apply(popped.command, popped.reserve, popped.slot);
                 }
             }
-            Upcoming::Idle => queue.wake().notified().await,
+            Upcoming::Idle => tokio::select! {
+                _ = queue.wake().notified() => {},
+                _ = book.assembled.stage.playback_wake().notified() => {},
+            },
             Upcoming::Ended(error) => {
                 book.terminate(&error);
                 answer(queue.drain(), &error);
+                let mut deliveries = std::mem::take(&mut book.deliveries);
+                drop(book);
+                while deliveries.join_next().await.is_some() {}
                 return;
             }
         }

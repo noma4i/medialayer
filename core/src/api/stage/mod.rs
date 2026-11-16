@@ -17,10 +17,10 @@ use crate::pool::Ring;
 use crate::prefetch::Prefetcher;
 use crate::session::{Election, WatchdogConfig};
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use tokio::runtime::Handle;
-use tokio::sync::watch;
+use tokio::sync::{watch, Notify};
 use super::guard::AbortOnDrop;
 use self::dispatch::tick_loop;
 use self::state::{Armed, Declaration, LoadId, StageState, StageGuard, Work};
@@ -56,6 +56,9 @@ struct Inner {
     wakes: AtomicU64,
     seeks: Mutex<HashMap<String, (u64, std::time::Instant)>>,
     hints: Mutex<HashMap<usize, u64>>,
+    playback_changes: Mutex<HashSet<String>>,
+    playback_wake: Notify,
+    playback_observed: AtomicBool,
     #[cfg(test)]
     action_completed: tokio::sync::Notify,
     #[cfg(test)]
@@ -68,6 +71,14 @@ pub struct Stage {
 }
 
 impl Stage {
+    pub(crate) fn begin_pause_barrier(&self, sequence: u64, progress: tokio::sync::watch::Sender<(u64, std::collections::BTreeMap<u64, (u64, u64)>)>) {
+        self.inner.runner.begin_pause_barrier(sequence, progress);
+    }
+
+    pub(crate) fn end_pause_barrier(&self) {
+        self.inner.runner.end_pause_barrier();
+    }
+
     pub fn new(handle: Handle, parts: StageParts) -> Stage {
         let state = StageState {
             ring: parts.ring,
@@ -112,6 +123,9 @@ impl Stage {
             wakes: AtomicU64::new(0),
             seeks: Mutex::new(HashMap::new()),
             hints: Mutex::new(HashMap::new()),
+            playback_changes: Mutex::new(HashSet::new()),
+            playback_wake: Notify::new(),
+            playback_observed: AtomicBool::new(false),
             #[cfg(test)]
             action_completed: tokio::sync::Notify::new(),
             #[cfg(test)]
@@ -248,11 +262,23 @@ impl Stage {
     }
 
     fn state(&self) -> StageGuard<'_> {
-        StageGuard { guard: self.inner.state.lock().unwrap_or_else(PoisonError::into_inner), inner: &self.inner, is_changed: false, is_quiet: false }
+        let guard = self.inner.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let playing = self.inner.playback_observed.load(Ordering::Acquire).then(|| guard.reported_playing_key()).flatten();
+        StageGuard { guard, inner: &self.inner, is_changed: false, is_quiet: false, playing }
     }
 
     fn state_quiet(&self) -> StageGuard<'_> {
-        StageGuard { guard: self.inner.state.lock().unwrap_or_else(PoisonError::into_inner), inner: &self.inner, is_changed: false, is_quiet: true }
+        let guard = self.inner.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let playing = self.inner.playback_observed.load(Ordering::Acquire).then(|| guard.reported_playing_key()).flatten();
+        StageGuard { guard, inner: &self.inner, is_changed: false, is_quiet: true, playing }
+    }
+
+    pub(crate) fn playback_wake(&self) -> &Notify { &self.inner.playback_wake }
+
+    pub(crate) fn observe_playback(&self) { self.inner.playback_observed.store(true, Ordering::Release); }
+
+    pub(crate) fn take_playback_changes(&self) -> HashSet<String> {
+        std::mem::take(&mut *self.inner.playback_changes.lock().unwrap_or_else(PoisonError::into_inner))
     }
 
     fn now(&self) -> u64 {

@@ -17,9 +17,16 @@ struct Listing {
 }
 
 pub async fn load(inner: Arc<CacheShared>) {
-    let _ = tokio::fs::create_dir_all(&inner.dir).await;
+    if let Err(error) = tokio::fs::create_dir_all(&inner.dir).await {
+        inner.report(super::entry::Kind::Image, inner.dir.to_string_lossy().into_owned(), error);
+    }
     let dir = inner.dir.clone();
     let listing = tokio::task::spawn_blocking(move || list_dir(&dir)).await.unwrap_or(Listing { bins: HashSet::new(), parts: Vec::new() });
+    for path in &listing.parts {
+        if let Some(sequence) = path.file_name().and_then(|name| name.to_str()).and_then(|name| name.strip_suffix(PART_SUFFIX)).and_then(|name| name.rsplit('.').next()).and_then(|part| part.parse::<u64>().ok()) {
+            inner.part_sequence.fetch_max(sequence.saturating_add(1), std::sync::atomic::Ordering::SeqCst);
+        }
+    }
     if let Ok(file) = tokio::fs::File::open(inner.dir.join(INDEX_FILE)).await {
         let mut reader = tokio::io::BufReader::new(file);
         let mut line = String::new();
@@ -98,7 +105,7 @@ async fn remove_leftovers(inner: &Arc<CacheShared>, listing: Listing) {
         let state = inner.state();
         listing.parts.into_iter().filter(|path| !state.live_parts.contains(path)).collect()
     };
-    delete_files(dead_parts).await;
+    delete_files(inner, dead_parts.into_iter().map(|path| (path, None)).collect()).await;
     for name in listing.bins {
         remove_orphan(inner, &name).await;
         tokio::task::yield_now().await;
@@ -110,5 +117,5 @@ async fn remove_orphan(inner: &Arc<CacheShared>, name: &str) {
     if inner.state().contains(name) {
         return;
     }
-    let _ = tokio::fs::remove_file(bin_path(&inner.dir, name)).await;
+    delete_files(inner, vec![(bin_path(&inner.dir, name), None)]).await;
 }

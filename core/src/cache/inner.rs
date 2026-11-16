@@ -4,7 +4,7 @@ use super::state::{Item, State};
 use crate::change::Change;
 use crate::limits::{EvictionStrategy, Limits};
 use std::collections::hash_map::DefaultHasher;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::ops::{Deref, DerefMut};
@@ -58,6 +58,7 @@ pub struct CacheShared {
     pub kind_priority: [Kind; 3],
     pub persist_delay: Duration,
     pub change: Arc<Change>,
+    pub failures: Arc<crate::failures::Failures>,
     pub handle: Handle,
     pub part_sequence: AtomicU64,
     pub max_hold: AtomicU64,
@@ -69,6 +70,9 @@ pub struct CacheShared {
     pub persist_lock: tokio::sync::Mutex<super::save::SavedIndex>,
     pub generation: AtomicU64,
     pub evicted: Mutex<Option<Arc<dyn Fn(&str) + Send + Sync>>>,
+    pub orphaned: tokio::sync::Mutex<HashMap<PathBuf, (u64, Option<Kind>)>>,
+    pub cleanup: tokio::sync::Mutex<()>,
+    pub unlink_failed: Mutex<HashSet<PathBuf>>,
     state: Mutex<State>,
     stripes: Vec<Arc<tokio::sync::Mutex<()>>>,
 }
@@ -126,6 +130,7 @@ impl CacheShared {
             kind_priority: options.kind_priority,
             persist_delay: options.persist_delay,
             change: options.change,
+            failures: options.failures,
             handle,
             part_sequence: AtomicU64::new(0),
             max_hold: AtomicU64::new(0),
@@ -137,6 +142,9 @@ impl CacheShared {
             persist_lock: tokio::sync::Mutex::new(super::save::SavedIndex::default()),
             generation: AtomicU64::new(0),
             evicted: Mutex::new(None),
+            orphaned: tokio::sync::Mutex::new(HashMap::new()),
+            cleanup: tokio::sync::Mutex::new(()),
+            unlink_failed: Mutex::new(HashSet::new()),
             state: Mutex::new(state),
             stripes: (0..STRIPES).map(|_| Arc::new(tokio::sync::Mutex::new(()))).collect(),
         }
@@ -159,6 +167,10 @@ impl CacheShared {
 
     pub fn is_ready(&self) -> bool {
         *self.ready.borrow()
+    }
+
+    pub fn report(&self, kind: Kind, url: String, error: impl std::fmt::Display) {
+        self.failures.report(crate::failures::MediaFailure { kind: kind.into(), url, stage: crate::failures::FailureStage::Store, reason: error.to_string() });
     }
 }
 
@@ -207,16 +219,49 @@ pub async fn scan(inner: &CacheShared) -> Vec<Item> {
     }
 }
 
-pub async fn delete_files(paths: Vec<PathBuf>) {
-    if paths.is_empty() {
-        return;
-    }
-    let _ = tokio::task::spawn_blocking(move || {
-        for path in paths {
-            let _ = std::fs::remove_file(path);
+pub async fn delete_files(inner: &CacheShared, paths: Vec<(PathBuf, Option<Kind>)>) -> bool {
+    let _cleanup = inner.cleanup.lock().await;
+    let mut complete = true;
+    for (path, kind) in paths {
+        let result = tokio::fs::remove_file(&path).await;
+        match result {
+            Ok(()) => {
+                if let Some((size, _)) = inner.orphaned.lock().await.remove(&path) { inner.state().retained_bytes -= size; }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if let Some((size, _)) = inner.orphaned.lock().await.remove(&path) { inner.state().retained_bytes -= size; }
+            }
+            Err(error) => {
+                let size = tokio::fs::metadata(&path).await.map(|metadata| metadata.len()).unwrap_or(0);
+                let mut orphaned = inner.orphaned.lock().await;
+                if !orphaned.contains_key(&path) {
+                    orphaned.insert(path.clone(), (size, kind));
+                    inner.state().retained_bytes += size;
+                    drop(orphaned);
+                    inner.report(kind.unwrap_or(Kind::Image), path.to_string_lossy().into_owned(), error);
+                }
+                complete = false;
+            }
         }
-    })
-    .await;
+    }
     #[cfg(test)]
     crate::test_signal::fire();
+    complete
+}
+
+pub async fn retry_orphans(inner: &CacheShared, kind: Option<Kind>) -> bool {
+    let paths: Vec<_> = inner.orphaned.lock().await.iter()
+        .filter(|(_, (_, stored))| kind.is_none() || *stored == kind)
+        .map(|(path, (_, stored))| (path.clone(), *stored)).collect();
+    let mut complete = true;
+    for (path, stored) in paths {
+        if let Some(name) = path.file_name().and_then(|name| name.to_str()).and_then(super::naming::name_of_bin_file) {
+            let _stripe = inner.stripe(&name).lock().await;
+            if inner.state().contains(&name) { continue; }
+            complete &= delete_files(inner, vec![(path, stored)]).await;
+        } else {
+            complete &= delete_files(inner, vec![(path, stored)]).await;
+        }
+    }
+    complete
 }

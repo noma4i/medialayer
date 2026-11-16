@@ -111,3 +111,31 @@ pub(super) async fn pending_once(closed: impl std::future::Future<Output = ()>) 
         () = std::future::ready(()) => true,
     }
 }
+
+#[derive(Default)]
+pub(super) struct Reported {
+    pub(super) failures: Mutex<Vec<crate::failures::MediaFailure>>,
+    pub(super) ends: std::sync::atomic::AtomicUsize,
+}
+
+impl crate::failures::FailureListener for Reported {
+    fn failed(&self, failure: crate::failures::MediaFailure) {
+        self.failures.lock().unwrap().push(failure);
+        crate::test_signal::fire();
+    }
+
+    fn closed(&self) {
+        self.ends.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        crate::test_signal::fire();
+    }
+}
+
+impl Reported {
+    pub(super) fn ended(&self) -> usize {
+        self.ends.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub(super) fn seen(&self) -> Vec<crate::failures::MediaFailure> {
+        self.failures.lock().unwrap().clone()
+    }
+}

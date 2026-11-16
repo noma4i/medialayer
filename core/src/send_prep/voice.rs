@@ -12,6 +12,32 @@ pub enum VoiceRefusal {
     InCall,
     Interrupted,
     MicrophoneSilent,
+    TooShort,
+}
+
+/// Where a voice recorder is: no take, a take records, or a take ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum VoicePhase {
+    Idle,
+    Recording,
+    Stopping,
+}
+
+/// How a voice take ended.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum VoiceOutcome {
+    Recorded { path: String, duration_ms: u64 },
+    Refused { reason: VoiceRefusal },
+    Failed { failure: crate::audio::NativeFailure },
+}
+
+/// What the app sees of a voice recorder: the take number (0 before the first), its phase and how the last take ended.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct VoiceState {
+    pub take: u64,
+    pub phase: VoicePhase,
+    pub outcome: Option<VoiceOutcome>,
+    pub recorded_ms: u64,
 }
 
 /// How a voice recording is encoded, the same on both platforms: AAC in m4a.
@@ -38,8 +64,18 @@ pub fn voice_refusal_text(reason: VoiceRefusal) -> String {
         VoiceRefusal::InCall => "a call is running, there is no recording",
         VoiceRefusal::Interrupted => "the system interrupted the recording",
         VoiceRefusal::MicrophoneSilent => "the microphone gives no sound, the recording did not start",
+        VoiceRefusal::TooShort => "the recording is too short",
     }
     .to_string()
+}
+
+#[uniffi::export]
+pub fn voice_too_short(duration_ms: u64, min_take_ms: u64) -> bool {
+    duration_ms < min_take_ms
+}
+
+pub fn voice_error(reason: VoiceRefusal) -> crate::api::MediaError {
+    crate::api::MediaError::Voice { detail: voice_refusal_text(reason), reason }
 }
 
 /// The longest recording in milliseconds. An absent value gives 10 minutes, a value outside 1 second to 1 hour is brought into that range.

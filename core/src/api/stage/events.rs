@@ -16,6 +16,26 @@ enum Wake {
 }
 
 impl Stage {
+    pub fn retry(&self, item: &crate::api::MediaItem) {
+        self.inner.prefetcher.retry(&item.for_prefetch());
+        let id = {
+            let mut state = self.state();
+            state.tasks.remove(&item.url);
+            state.loaded.get_mut(&item.url).map(|loaded| {
+                loaded.recovery = crate::session::RecoveryState::new(self.inner.watchdog.clone());
+                crate::session::next_action(&mut loaded.recovery, Event::Source { key: item.url.clone(), via_proxy_hls: loaded.route.generation.is_some() && crate::hls::is_manifest_url(&item.url) }, self.now());
+                loaded.failed = false;
+                LoadId { key: item.url.clone(), slot: loaded.slot, generation: loaded.generation }
+            })
+        };
+        if let Some(id) = id { self.reload(&id, true); }
+        else if item.url.is_empty() { self.refuse_source(&item.url); }
+        else if item.kind != crate::api::Kind::Image {
+            let mut state = self.state();
+            let commands = state.ring.touch(self.now(), &item.url);
+            self.dispatch(state, commands);
+        }
+    }
     pub fn ready(&self, slot: usize, generation: u64) {
         crate::trace!("event", "ready slot={slot} generation={generation}");
         let Some(key) = self.feed_current(slot, generation, Event::Loaded) else { return };
@@ -107,6 +127,11 @@ impl Stage {
 
     pub fn failed(&self, slot: usize, generation: u64, status: i32, detail: String) {
         crate::trace!("event", "failed slot={slot} generation={generation} status={status} detail={detail}");
+        {
+            let mut state = self.state();
+            let Some(key) = Self::current_key(&state, slot, generation) else { return };
+            if let Some(loaded) = state.loaded.get_mut(&key) { loaded.failed = true; }
+        }
         let event = if status > 0 { Event::HttpError { status } } else { Event::PlaybackFailed { reason: detail } };
         if self.feed_current(slot, generation, event).is_some() {
             self.sync_foreground();
@@ -218,7 +243,12 @@ impl Stage {
             }
             Action::RefreshRoute => self.refresh_route(&id),
             Action::Fail(reason) => {
-                self.with_id(&id, |_| self.inner.places.failed(&id.key, &reason));
+                let mut state = self.state();
+                if !state.is_loaded_as(&id.key, id.slot, id.generation) { return; }
+                self.inner.places.failed(&id.key, &reason);
+                let orders = state.leases.get(&id.key).copied().map(|lease| state.election.set_intent(&id.key, lease, Intent::Idle)).unwrap_or_default();
+                let commands = state.commands_for(orders);
+                self.dispatch(state, commands);
             }
             Action::ForegroundPass => {
                 if let Some((is_ok, current)) = self.foreground_pass(&id) {
@@ -308,8 +338,10 @@ impl Stage {
                 }
             }
             let generation = state.next_generation();
+            let is_playing = state.is_playing(key);
             if let Some(loaded) = state.loaded.get_mut(key) {
                 loaded.generation = generation;
+                if is_playing { loaded.failed = false; }
             }
             if let Some(entries) = state.tasks.get_mut(key) {
                 entries.retain(|armed| !armed.work.is_timer() || armed.generation == generation);
@@ -317,7 +349,7 @@ impl Stage {
             let mut calls = vec![(id.slot, SlotCall::Unload)];
             let resume = state.positions.take(key);
             calls.extend(self.load_calls(&state, key, resume));
-            if state.is_playing(key) {
+            if is_playing {
                 calls.push((id.slot, SlotCall::Play));
             }
             (state, calls, LoadId { key: id.key.clone(), slot: id.slot, generation })

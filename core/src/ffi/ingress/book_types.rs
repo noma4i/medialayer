@@ -1,11 +1,12 @@
 use super::command::{Observer, PlaceInput};
 use super::queue::{InputQueue, Reserve};
 use super::readiness::PageReadiness;
-use crate::api::{MediaItem, Subscription};
+use crate::api::{Hub, MediaItem, PlaybackState, Subscription};
 use tokio::runtime::Handle;
 use super::super::assembled::Assembled;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use super::book_keys::*;
 
 pub(super) struct Place {
@@ -15,6 +16,11 @@ pub(super) struct Place {
     pub(super) intent: u64,
     pub(super) _opened: Reserve,
     pub(super) updated: Reserve,
+    pub(super) state: PlaybackState,
+    pub(super) emitted: PlaybackState,
+    pub(super) forgotten: Option<u64>,
+    pub(super) playback: Hub<PlaybackState>,
+    pub(super) watchers: Vec<u64>,
 }
 
 pub(super) struct VideoWindowState {
@@ -53,6 +59,19 @@ pub(super) struct Observed {
     pub(super) _subscription: Subscription,
     pub(super) listener: Observer,
     pub(super) _reserve: Reserve,
+    pub(super) delivery: Arc<Delivery>,
+}
+
+pub(super) struct Delivery {
+    pub(super) closed: AtomicBool,
+    pub(super) running: Mutex<()>,
+}
+
+impl Delivery {
+    pub(super) fn send(&self, queue: &InputQueue, owner: u64, work: impl FnOnce()) {
+        let _running = self.running.lock().unwrap_or_else(|error| error.into_inner());
+        if !self.closed.load(Ordering::Acquire) && queue.is_live(owner) { work(); }
+    }
 }
 
 /// Executor-owned state: aggregation per key, windows, subscriptions. Single-threaded, no locks.
@@ -68,7 +87,11 @@ pub(crate) struct Book {
     pub(super) video_applied: Option<(u64, u64)>,
     pub(super) subscriptions: HashMap<u64, Observed>,
     pub(super) suspensions: HashMap<u64, Reserve>,
+    pub(super) suspension_groups: HashMap<u64, Vec<String>>,
+    pub(super) allowed_groups: HashMap<String, usize>,
     pub(super) in_call: bool,
     pub(super) paused: bool,
+    pub(super) pause_reason: Option<crate::audio::PauseReason>,
     pub(super) declarations: HashMap<u64, Reserve>,
+    pub(super) deliveries: tokio::task::JoinSet<()>,
 }

@@ -107,19 +107,20 @@ impl Controls {
         MediaStats::collect(&self.ports.cache.stats().await, &pool, diagnostics)
     }
 
-    pub async fn clear(&self, kind: Option<Kind>) {
+    pub async fn clear(&self, kind: Option<Kind>) -> Result<(), MediaError> {
         self.ports.prefetch.forget_loaded(None);
-        self.ports.cache.clear(kind.map(Into::into)).await;
+        let result = self.ports.cache.clear(kind.map(Into::into)).await;
         self.ports.transport.forget_downloads(None);
         if matches!(kind, None | Some(Kind::Image)) {
             let release = self.ports.release.clone();
             let _ = tokio::task::spawn_blocking(move || release.drop_caches()).await;
         }
         self.publish_stats().await;
+        result
     }
 
     pub async fn reset_user_data(&self) -> Result<(), MediaError> {
-        self.clear(None).await;
+        self.clear(None).await?;
         self.reset_limits().await
     }
 
