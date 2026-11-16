@@ -256,24 +256,7 @@ struct AudioLinkTests {
     #expect(capture.starts == 0)
     #expect(!FileManager.default.fileExists(atPath: target.path))
   }
-}
 
-final class StatesSeen: @unchecked Sendable {
-  private let lock = NSLock()
-  private var seen: [CallState] = []
-  private var task: Task<Void, Never>?
-
-  init(_ states: AsyncStream<CallState>) {
-    task = Task { [weak self] in
-      for await state in states {
-        self?.lock.withLock { self?.seen.append(state) }
-        TestSignal.shared.fire()
-      }
-    }
-  }
-
-  var values: [CallState] { lock.withLock { seen } }
-  deinit { task?.cancel() }
   @Test
   func inv_audio_51_a_call_that_arrives_with_the_admission_leaves_the_microphone_untouched() async throws {
     let rig = try AudioRig()
@@ -323,6 +306,24 @@ final class StatesSeen: @unchecked Sendable {
 
     #expect(await states.value.last == .ended)
   }
+}
+
+final class StatesSeen: @unchecked Sendable {
+  private let lock = NSLock()
+  private var seen: [CallState] = []
+  private var task: Task<Void, Never>?
+
+  init(_ states: AsyncStream<CallState>) {
+    task = Task { [weak self] in
+      for await state in states {
+        self?.lock.withLock { self?.seen.append(state) }
+        TestSignal.shared.fire()
+      }
+    }
+  }
+
+  var values: [CallState] { lock.withLock { seen } }
+  deinit { task?.cancel() }
 
 }
 
