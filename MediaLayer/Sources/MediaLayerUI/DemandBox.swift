@@ -19,14 +19,6 @@ final class DemandBox: @unchecked Sendable {
 
   var recordings: Int { lock.withLock { demand.recordings.count } }
 
-  func activateUnlessManaged(_ action: () throws -> Void) rethrows -> Bool {
-    try lock.withLock {
-      guard demand.managedCalls.isEmpty else { return false }
-      try action()
-      return true
-    }
-  }
-
   func changes(for id: UUID) -> AsyncStream<Bool> {
     AsyncStream { continuation in
       let listener = UUID()

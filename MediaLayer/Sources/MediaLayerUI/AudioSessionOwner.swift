@@ -85,7 +85,7 @@ actor AudioSessionOwner {
     }
     if managed { needsRelease = true; return .done }
     do {
-      guard try box.activateUnlessManaged({ try port.setActive(true) }) else { return .done }
+      try port.setActive(true)
     } catch {
       needsRelease = true
       MediaTrace.emit("audio", "activate failed \(error)")
@@ -100,7 +100,7 @@ actor AudioSessionOwner {
   private func release() -> Step {
     guard needsRelease else { return .done }
     do {
-      guard try box.activateUnlessManaged({ try port.setActive(false) }) else { return .done }
+      try port.setActive(false)
     } catch {
       MediaTrace.emit("audio", "deactivate busy \(error)")
       return .busy
