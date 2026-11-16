@@ -20,7 +20,7 @@ Every change that MediaLayer makes by itself reaches the app as a stream or a st
 | `MediaError.InCall` thrown by `playUrl` during a call | `playUrl` gives the player, its `play()` sets `state.refused` to `inCall` |
 | Kotlin `MediaCallKind.Telecom` object | `MediaCallKind.Telecom(CallEndpointPort.of(callControlScope))` with the `CallControlScope` of `addCall` |
 | Your own playing flag beside `audio.isPlaying` | `audio.isPlaying` is the truth of the core: false until the player plays, false after a pause by MediaLayer. Swift `AudioPlayback` gets `play()` and `pause()` beside `toggle()` |
-| Your own `keepsScreenAwake` (Swift) or `KeepScreenAwake` (Kotlin) from a playing flag | Remove it: the library keeps the screen on while a place plays |
+| Your own `keepsScreenAwake` (Swift) or `KeepScreenAwake` (Kotlin) from a playing flag | Remove it: the library keeps the screen on while a place plays with sound, a voice take runs, a camera preview is on screen or a call runs, and a muted place does not hold it |
 | Your own "video plays" flag | `MediaVideo(onPlaybackChange:)` (Swift), `MediaVideo(onPlaybackChange = ...)` (Kotlin) with `PlaybackState` |
 | A wait on `stop()` or `stopRecording()` to learn how a take ended | `MediaVoiceRecorder.states` with `VoiceState.outcome`, `MediaCamera.states` (Kotlin `state`) with `CameraState.take` and `outcome`, the clip from `clip(take:)` |
 | `Media.failure` as the feed of an error tracker | `Media.failures`, one `NativeFailure` per error (see [Failures](failures.md)) |

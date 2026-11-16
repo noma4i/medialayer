@@ -409,7 +409,7 @@ Audio does not depend on the size or position of its view. Progress, seek and th
 | `reason` | Why a wished play is paused: `capture`, `interrupted`, `focusLost`, `outputLost`, `mediaReset`, `inCall`, `suspended`. Nil while it plays |
 | `refused` | Why the last `play()` was refused: `inCall` or `recording`. Nil after a play that was taken |
 
-The screen stays on while at least one `MediaVideo` or `MediaAudio` place has `playing` true, and the app sets no keep-awake of its own.
+The screen stays on while at least one `MediaVideo` or `MediaAudio` place plays with sound, while a `MediaVoiceRecorder` take runs, while a `MediaCamera` preview is on screen and while a `MediaCallAudio` call runs, and the app sets no keep-awake of its own. A muted place does not hold the screen, nor does a place while `Media.muted` is true. The `playUrl` player does not hold it.
 
 ### Swift
 
