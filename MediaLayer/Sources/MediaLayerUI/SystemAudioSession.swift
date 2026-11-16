@@ -36,7 +36,8 @@ struct SystemAudioSession: AudioSessionPort {
         case .override: reason = .override
         default: reason = .other
         }
-        sink(.routeChanged(reason, hadPrivateOutput: hadPrivateOutput(previous)))
+        let current = session.currentRoute.outputs.map(\.portType)
+        sink(.routeChanged(reason, hadPrivateOutput: hadPrivateOutput(previous) && !hadPrivateOutput(current)))
       })
       if #available(iOS 27.0, *) {
         tokens.append(center.addObserver(forName: AVAudioSession.resumptionRecommendationNotification, object: session, queue: nil) { note in

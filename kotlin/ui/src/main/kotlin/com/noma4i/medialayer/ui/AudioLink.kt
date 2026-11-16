@@ -165,7 +165,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
                 communication = true
               }
               if (answer == FocusAnswer.GRANTED) process(AudioInput.Applied(action.generation, AppliedResult.Ok))
-              else process(AudioInput.FocusRequest(answer))
+              else process(AudioInput.FocusRequest(action.generation, answer))
             } else {
               process(AudioInput.Applied(action.generation, AppliedResult.Ok))
             }

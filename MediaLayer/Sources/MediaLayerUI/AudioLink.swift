@@ -218,7 +218,7 @@ final class AudioLink: @unchecked Sendable {
     case .mediaServicesReset: send(.mediaReset)
     case let .routeChanged(reason, hadPrivateOutput):
       inbox.async {
-        self.process(.route(reason: reason, hadPrivateOutput: hadPrivateOutput))
+        self.process(.route(reason: reason, lostPrivateOutput: hadPrivateOutput))
         if self.unmanagedSpeakers.values.contains(true) { self.overrideSpeaker(true) }
       }
     }

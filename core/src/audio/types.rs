@@ -132,12 +132,13 @@ pub enum AudioInput {
         change: FocusChange,
     },
     FocusRequest {
+        generation: u64,
         answer: FocusAnswer,
     },
     MediaReset,
     Route {
         reason: RouteReason,
-        had_private_output: bool,
+        lost_private_output: bool,
     },
     Noisy,
     ObservedCalls {
