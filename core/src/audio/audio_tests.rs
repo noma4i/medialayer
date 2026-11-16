@@ -181,15 +181,19 @@ fn inv_audio_19_a_lost_private_output_pauses_and_the_routes_of_an_own_change_are
 }
 
 #[test]
-fn inv_audio_20_a_recording_is_admitted_alone_pauses_playback_and_does_not_resume_it() {
+fn inv_audio_20_one_recording_of_each_kind_pauses_playback_and_camera_and_voice_hold_the_microphone_together() {
     let mut world = World::playing();
-    assert_eq!(world.settle(I::Capture { id: 1, kind: RecordingKind::Voice }), vec![A::PauseAll { reason: PauseReason::Capture }, apply(SessionWant::Recording { kind: RecordingKind::Voice }), A::Admit { id: 1 }]);
-    assert_eq!(world.send(I::Capture { id: 2, kind: RecordingKind::Video }), vec![A::Refuse { id: 2, reason: RecordingRefusal::MicrophoneBusy }]);
+    let voice = SessionWant::Recording { kind: RecordingKind::Voice };
+    let video = SessionWant::Recording { kind: RecordingKind::Video };
+    assert_eq!(world.settle(I::Capture { id: 1, kind: RecordingKind::Voice }), vec![A::PauseAll { reason: PauseReason::Capture }, apply(voice.clone()), A::Admit { id: 1 }]);
+    assert_eq!(world.send(I::Capture { id: 2, kind: RecordingKind::Voice }), vec![A::Refuse { id: 2, reason: RecordingRefusal::MicrophoneBusy }], "one recording of a kind");
+    assert_eq!(world.settle(I::Capture { id: 3, kind: RecordingKind::Video }), vec![apply(video), A::Admit { id: 3 }], "camera and voice hold the microphone together");
+    assert_eq!(world.settle(I::CaptureEnded { id: 3 }), vec![apply(voice.clone())], "the voice recording keeps its session");
     assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
     assert_eq!(world.send(I::InterruptionBegan), vec![A::Revoke { id: 1, reason: RecordingRefusal::Interrupted }, A::ForgetPaused, available(MicrophoneAvailability::OtherApp)]);
     assert_eq!(world.send(I::InterruptionEnded { should_resume: true }), vec![available(MicrophoneAvailability::Available)], "the end of an interruption never resumes what the recording paused");
-    assert_eq!(world.settle(I::Capture { id: 3, kind: RecordingKind::Voice }), vec![apply(SessionWant::Recording { kind: RecordingKind::Voice }), A::Admit { id: 3 }]);
-    assert_eq!(world.settle(I::CaptureEnded { id: 3 }), vec![DEACTIVATE]);
+    assert_eq!(world.settle(I::Capture { id: 4, kind: RecordingKind::Voice }), vec![apply(voice), A::Admit { id: 4 }]);
+    assert_eq!(world.settle(I::CaptureEnded { id: 4 }), vec![DEACTIVATE]);
 }
 
 #[test]
@@ -376,19 +380,17 @@ fn system_deactivates(input: &AudioInput) -> bool {
 }
 
 #[test]
-fn inv_audio_12_any_sequence_keeps_one_recording_one_hold_and_ends_released() {
-    let mut dice = crate::seeded::Dice::new("inv_audio_12_any_sequence_keeps_one_recording_one_hold_and_ends_released");
+fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_released() {
+    let mut dice = crate::seeded::Dice::new("inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_released");
     for _ in 0..200 {
         let mut world = World::new();
         let (mut next_id, mut started, mut admitted, mut hold, mut session_active) = (0u64, Vec::new(), Vec::<u64>::new(), false, false);
         let mut last_availability = MicrophoneAvailability::Available;
+        let mut kinds = std::collections::HashMap::new();
         let track = |actions: &[AudioAction], admitted: &mut Vec<u64>, hold: &mut bool, session_active: &mut bool, last_availability: &mut MicrophoneAvailability| {
             for action in actions {
                 match action {
-                    A::Admit { id } => {
-                        assert!(admitted.is_empty(), "a second recording was admitted while {admitted:?} runs: {actions:?}");
-                        admitted.push(*id);
-                    }
+                    A::Admit { id } => admitted.push(*id),
                     A::Revoke { id, .. } => {
                         assert!(admitted.contains(id), "revoked {id} that does not run: {actions:?}");
                         admitted.retain(|running| running != id);
@@ -412,6 +414,9 @@ fn inv_audio_12_any_sequence_keeps_one_recording_one_hold_and_ends_released() {
             if let I::CallStarted { id, .. } = &input {
                 started.push(*id);
             }
+            if let I::Capture { id, kind } = &input {
+                kinds.insert(*id, *kind);
+            }
             if let I::CaptureEnded { id } = &input {
                 admitted.retain(|running| running != id);
             }
@@ -420,6 +425,8 @@ fn inv_audio_12_any_sequence_keeps_one_recording_one_hold_and_ends_released() {
             }
             let actions = world.raw(input);
             track(&actions, &mut admitted, &mut hold, &mut session_active, &mut last_availability);
+            let running: std::collections::BTreeSet<_> = admitted.iter().map(|id| format!("{:?}", kinds[id])).collect();
+            assert_eq!(running.len(), admitted.len(), "two recordings of one kind run: {admitted:?} {actions:?}");
         }
         let mut ending = vec![I::PhoneCall { active: false }, I::CommunicationMode { active: false }, I::ObservedCalls { uuids: vec![] }, I::OtherRecording { active: false }, I::Permission { granted: true }];
         ending.extend(started.iter().map(|id| I::CallEnded { id: *id }));
