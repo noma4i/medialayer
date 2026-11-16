@@ -57,6 +57,7 @@ class NativeCallbackThreadTest {
     NativeCallbacks.install()
     val media = MediaLayer.open(
       OpenConfig(
+      audioFocus = com.noma4i.medialayer.AudioFocus.EXCLUSIVE,
         dir = Files.createTempDirectory("medialayer").toString(),
         fetcher = TestFetcher(),
         settings = IdleSettings(),

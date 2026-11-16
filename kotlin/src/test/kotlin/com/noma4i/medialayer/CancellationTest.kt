@@ -32,6 +32,7 @@ class CancellationTest {
       override fun remove(key: String) {}
     }
     val media = MediaLayer.open(OpenConfig(
+      audioFocus = com.noma4i.medialayer.AudioFocus.EXCLUSIVE,
       dir = Files.createTempDirectory("medialayer-cancel").toString(),
       fetcher = fetcher, settings = settings, slots = null,
       device = DeviceMemory(4096u, null, false),

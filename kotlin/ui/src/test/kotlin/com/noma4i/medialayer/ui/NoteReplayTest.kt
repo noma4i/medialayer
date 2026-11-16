@@ -55,6 +55,7 @@ class NoteReplayTest {
   private val slot = NoteSlot()
   private val loader = mediaImageLoader(context, ImageBytes { _, _ -> ImageFetchResult(pngBytes(), ImageOrigin.NETWORK) })
   private val layer = MediaLayer.open(OpenConfig(
+      audioFocus = com.noma4i.medialayer.AudioFocus.EXCLUSIVE,
     dir = Files.createTempDirectory("note-replay").toString(),
     fetcher = TestFetcher(),
     settings = SharedPreferencesSettings(context, "note-replay"), slots = slot,

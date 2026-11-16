@@ -48,6 +48,7 @@ class PlaybackSuspendedTest {
 
   private fun openLayer(ingress: IngressLimits? = null): MediaLayer {
     val layer = MediaLayer.open(OpenConfig(
+      audioFocus = com.noma4i.medialayer.AudioFocus.EXCLUSIVE,
       dir = Files.createTempDirectory("suspended").toString(),
       fetcher = TestFetcher(),
       settings = SharedPreferencesSettings(context, "suspended"), slots = slot,

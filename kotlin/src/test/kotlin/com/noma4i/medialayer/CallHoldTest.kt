@@ -35,6 +35,7 @@ private val ITEM = MediaItem(Kind.VIDEO, CLIP, emptyMap(), null, null, strategy 
 
 private suspend fun openPlaying(slot: CallSlot): MediaLayer {
   val media = MediaLayer.open(OpenConfig(
+      audioFocus = com.noma4i.medialayer.AudioFocus.EXCLUSIVE,
     dir = Files.createTempDirectory("call").toString(),
     fetcher = TestFetcher(), settings = CallSettings(), slots = slot,
     device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings()

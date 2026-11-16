@@ -54,6 +54,7 @@ class MountedGroupTest {
   private val slot = TransportSlot()
   private val loader = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) })
   private val layer = MediaLayer.open(OpenConfig(
+      audioFocus = com.noma4i.medialayer.AudioFocus.EXCLUSIVE,
     dir = Files.createTempDirectory("mounted-group").toString(),
     fetcher = TestFetcher(),
     settings = SharedPreferencesSettings(context, "mounted-group"), slots = slot,

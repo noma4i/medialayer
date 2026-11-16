@@ -152,6 +152,7 @@ class MediaLayerBridgeTest {
   private fun openWith(fetcher: Fetcher, slots: PlayerSlotFactory, silent: Boolean): MediaLayer =
     MediaLayer.open(
       OpenConfig(
+      audioFocus = com.noma4i.medialayer.AudioFocus.EXCLUSIVE,
         dir = Files.createTempDirectory("medialayer").toString(),
         fetcher = fetcher,
         settings = MemorySettings(),
@@ -168,6 +169,7 @@ class MediaLayerBridgeTest {
     val fetcher = TestFetcher()
     val media = MediaLayer.open(
       OpenConfig(
+      audioFocus = com.noma4i.medialayer.AudioFocus.EXCLUSIVE,
         dir = Files.createTempDirectory("medialayer").toString(),
         fetcher = object : Fetcher {
           override suspend fun fetch(request: FetchRequest): FetchResponse = try {
@@ -255,6 +257,7 @@ class MediaLayerBridgeTest {
   private fun open(settings: MemorySettings): MediaLayer =
     MediaLayer.open(
       OpenConfig(
+      audioFocus = com.noma4i.medialayer.AudioFocus.EXCLUSIVE,
         dir = Files.createTempDirectory("medialayer").toString(),
         fetcher = TestFetcher(),
         settings = settings,
@@ -290,6 +293,7 @@ class MediaLayerBridgeTest {
     val settings = MemorySettings()
     val media = MediaLayer.open(
       OpenConfig(
+      audioFocus = com.noma4i.medialayer.AudioFocus.EXCLUSIVE,
         dir = Files.createTempDirectory("medialayer").toString(),
         fetcher = RangeIgnoringOrigin(),
         settings = settings,

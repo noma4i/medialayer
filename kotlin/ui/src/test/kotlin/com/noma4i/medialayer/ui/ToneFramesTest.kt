@@ -71,6 +71,7 @@ class ToneFramesTest {
         }
       }).build()
     val media = MediaLayer.open(OpenConfig(
+      audioFocus = com.noma4i.medialayer.AudioFocus.EXCLUSIVE,
       dir = Files.createTempDirectory("tone-demand").toString(),
       fetcher = TestFetcher(),
       settings = SharedPreferencesSettings(context, "tone-demand"), slots = null,

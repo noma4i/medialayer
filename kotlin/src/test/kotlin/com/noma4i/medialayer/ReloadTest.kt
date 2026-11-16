@@ -41,6 +41,7 @@ class ReloadTest {
   fun inv_api_06_reload_restores_the_attached_view_before_playing() = runBlocking {
     val slot = ReloadSlot()
     val media = MediaLayer.open(OpenConfig(
+      audioFocus = com.noma4i.medialayer.AudioFocus.EXCLUSIVE,
       dir = Files.createTempDirectory("reload").toString(),
       fetcher = TestFetcher(), settings = ReloadSettings(), slots = slot,
       device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings()

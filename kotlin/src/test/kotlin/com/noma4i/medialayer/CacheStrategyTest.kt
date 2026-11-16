@@ -56,6 +56,7 @@ class CacheStrategyTest {
     val origin = RangeOrigin()
     val media = MediaLayer.open(
       OpenConfig(
+      audioFocus = com.noma4i.medialayer.AudioFocus.EXCLUSIVE,
         dir = Files.createTempDirectory("medialayer").toString(),
         fetcher = origin,
         settings = StrategySettings(),

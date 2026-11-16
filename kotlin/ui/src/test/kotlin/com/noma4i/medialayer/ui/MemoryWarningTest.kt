@@ -31,6 +31,7 @@ class MemoryWarningTest {
     val cache = checkNotNull(loader.memoryCache)
     val dropped = CompletableDeferred<Unit>()
     val media = MediaLayer.open(OpenConfig(
+      audioFocus = com.noma4i.medialayer.AudioFocus.EXCLUSIVE,
       dir = Files.createTempDirectory("memory-warning").toString(),
       fetcher = TestFetcher(),
       settings = SharedPreferencesSettings(context, "memory-warning"), slots = null,

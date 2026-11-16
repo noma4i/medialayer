@@ -49,6 +49,7 @@ class WholeHoldTest {
   fun inv_strategy_21_a_hold_opens_adds_and_closes_the_declaration() = runBlocking {
     val origin = HeldOrigin()
     val media = MediaLayer.open(OpenConfig(
+      audioFocus = com.noma4i.medialayer.AudioFocus.EXCLUSIVE,
       dir = Files.createTempDirectory("whole-hold").toString(),
       fetcher = origin,
       settings = object : SettingsStore {

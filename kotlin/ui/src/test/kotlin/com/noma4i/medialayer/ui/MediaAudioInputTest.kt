@@ -128,6 +128,7 @@ class MediaAudioInputTest {
   private val slot = InputSlot()
   private val loader = mediaImageLoader(context, ImageBytes { _, _ -> com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) })
   private val layer = MediaLayer.open(OpenConfig(
+      audioFocus = com.noma4i.medialayer.AudioFocus.EXCLUSIVE,
     dir = Files.createTempDirectory("audio-input").toString(),
     fetcher = TestFetcher(),
     settings = SharedPreferencesSettings(context, "audio-input"), slots = slot,

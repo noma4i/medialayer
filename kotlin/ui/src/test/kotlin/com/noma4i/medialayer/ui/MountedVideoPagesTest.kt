@@ -50,6 +50,7 @@ class MountedVideoPagesTest {
   private val slot = CountingSlot()
   private val loader = mediaImageLoader(context, ImageBytes { _, _ -> ImageFetchResult(pngBytes(), ImageOrigin.NETWORK) })
   private val layer = MediaLayer.open(OpenConfig(
+      audioFocus = com.noma4i.medialayer.AudioFocus.EXCLUSIVE,
     dir = Files.createTempDirectory("mounted-pages").toString(),
     fetcher = TestFetcher(),
     settings = SharedPreferencesSettings(context, "mounted-pages"), slots = slot,
