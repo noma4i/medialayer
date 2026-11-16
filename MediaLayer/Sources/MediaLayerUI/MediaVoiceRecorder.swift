@@ -93,23 +93,22 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     let session = audio()
     if let availability = session?.microphone.current, availability != .available { throw Self.refusal(availability) }
     if calls.inCall { throw Self.inCall() }
-    let hold = await session?.holdRecording()
-    if session != nil && hold == nil {
-      throw Self.refusal(session?.microphone.current ?? .otherApp)
-    }
+    let hold: MediaRecordingHold?
+    do { hold = try await session?.acquireRecording() }
+    catch let refused as RecordingUnavailable { throw Self.refusal(refused.availability) }
     do {
       try await capture.start(file: file, maxDurationMs: maxDurationMs) { [weak self] in self?.limitReached() }
     } catch let refused as VoiceRefused {
       hold?.release()
       _ = await session?.settled()
       try? FileManager.default.removeItem(at: file)
-      if refused.reason == .microphoneBusy { session?.microphone.refused() }
       if refused.reason == .permissionDenied { throw Self.refusal(.permissionDenied) }
-      throw Self.refusal(session?.microphone.current ?? .otherApp)
+      throw MediaError.Voice(detail: voiceRefusalText(reason: refused.reason))
     } catch {
       hold?.release()
       _ = await session?.settled()
       try? FileManager.default.removeItem(at: file)
+      if let refused = session?.recordingRefusal(error) { throw Self.refusal(refused.availability) }
       throw error
     }
     let current = Running(file: file, startedAt: clock())
@@ -230,14 +229,10 @@ final class SystemVoiceCapture: NSObject, VoiceCapture, AVAudioRecorderDelegate,
   func start(file: URL, maxDurationMs: UInt64, onLimit: @escaping @Sendable () -> Void) async throws {
     guard await Self.permitted() else { throw VoiceRefused(reason: .permissionDenied) }
     let made: AVAudioRecorder
-    do {
-      made = try AVAudioRecorder(url: file, settings: Self.settings)
-    } catch {
-      throw VoiceRefused(reason: .microphoneBusy)
-    }
+    made = try AVAudioRecorder(url: file, settings: Self.settings)
     made.delegate = self
     made.isMeteringEnabled = true
-    guard made.record(forDuration: TimeInterval(maxDurationMs) / 1000) else { throw VoiceRefused(reason: .microphoneBusy) }
+    guard made.record(forDuration: TimeInterval(maxDurationMs) / 1000) else { throw NSError(domain: "MediaLayer.VoiceCapture", code: 1) }
     lock.withLock {
       recorder = made
       self.onLimit = onLimit

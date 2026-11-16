@@ -11,13 +11,30 @@ struct MicrophoneState: Sendable, Equatable {
   var interrupted = false
 }
 
+struct MicrophoneEvent: Sendable {
+  let state: MicrophoneState
+  let source: String
+}
+
 protocol MicrophonePort: Sendable {
   func current() -> MicrophoneState
   func changes() -> AsyncStream<String>
+  func events() -> AsyncStream<MicrophoneEvent>
   func stop()
 }
 
-extension MicrophonePort { func stop() {} }
+extension MicrophonePort {
+  func stop() {}
+  func events() -> AsyncStream<MicrophoneEvent> {
+    let changes = changes()
+    return AsyncStream { continuation in
+      let task = Task {
+        for await source in changes { continuation.yield(MicrophoneEvent(state: current(), source: source)) }
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
+}
 
 struct AvailableMicrophone: MicrophonePort {
   func current() -> MicrophoneState { MicrophoneState() }
@@ -26,6 +43,7 @@ struct AvailableMicrophone: MicrophonePort {
 
 final class MicrophoneStatus: @unchecked Sendable {
   private let lock = NSLock()
+  private let delivery = NSRecursiveLock()
   private let port: MicrophonePort
   private let box: DemandBox
   private var own: [UUID: UUID?] = [:]
@@ -39,10 +57,10 @@ final class MicrophoneStatus: @unchecked Sendable {
   init(port: MicrophonePort, box: DemandBox) {
     self.port = port
     self.box = box
-    let changes = port.changes()
+    let changes = port.events()
     refresh("subscribe")
     events = Task { [weak self] in
-      for await source in changes { self?.systemChanged(source) }
+      for await event in changes { self?.systemChanged(event.source, state: event.state) }
     }
   }
 
@@ -55,6 +73,8 @@ final class MicrophoneStatus: @unchecked Sendable {
 
   var current: MicrophoneAvailability { lock.withLock { value } }
 
+  func refreshForRecording() { refresh("recording") }
+
   var changes: AsyncStream<MicrophoneAvailability> {
     refresh("subscribe")
     return AsyncStream { continuation in
@@ -65,11 +85,15 @@ final class MicrophoneStatus: @unchecked Sendable {
   }
 
   func setExternalListener(_ listener: @escaping @Sendable (Bool) -> Void) {
-    let active = lock.withLock { onExternal = listener; return external }
-    listener(active)
+    delivery.withLock {
+      let active = lock.withLock { onExternal = listener; return external }
+      listener(active)
+    }
   }
 
   func addCall(_ id: UUID, uuid: UUID?) {
+    delivery.lock()
+    defer { delivery.unlock() }
     lock.withLock {
       own[id] = .some(uuid)
       _ = box.update { demand in
@@ -81,22 +105,30 @@ final class MicrophoneStatus: @unchecked Sendable {
   }
 
   func removeCall(_ id: UUID) {
+    delivery.lock()
+    defer { delivery.unlock() }
     lock.withLock { own[id] = nil }
     refresh("ownCall")
   }
 
   func refused() {
+    delivery.lock()
+    defer { delivery.unlock() }
     lock.withLock { failure = true }
     refresh("recording refusal")
   }
 
-  func systemChanged(_ source: String) {
+  func systemChanged(_ source: String, state: MicrophoneState? = nil) {
+    delivery.lock()
+    defer { delivery.unlock() }
     lock.withLock { failure = false }
-    refresh(source)
+    refresh(source, state: state)
   }
 
-  private func refresh(_ source: String) {
-    let state = port.current()
+  private func refresh(_ source: String, state snapshot: MicrophoneState? = nil) {
+    delivery.lock()
+    defer { delivery.unlock() }
+    let state = snapshot ?? port.current()
     let result: (MicrophoneAvailability?, [AsyncStream<MicrophoneAvailability>.Continuation], Bool?, (@Sendable (Bool) -> Void)?) = lock.withLock {
       let externalNow = !state.calls.subtracting(Set(own.values.compactMap { $0 })).isEmpty || (state.interrupted && own.isEmpty)
       let next: MicrophoneAvailability

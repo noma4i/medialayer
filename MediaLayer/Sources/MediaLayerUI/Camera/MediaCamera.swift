@@ -132,17 +132,34 @@ public final class MediaCamera: @unchecked Sendable {
 
   /// Returns after the hardware started the recording. `NotReady` when the camera is not ready or the profile holds no video.
   public func startRecording() async throws {
-    if profile.audio, let availability = services.audio()?.microphone.current, availability != .available {
-      throw Self.microphoneRefusal(availability)
-    }
-    if calls.inCall { throw Self.refusal(.inCall) }
-    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-      queue.async {
-        guard self.startWaiter == nil else { return continuation.resume(throwing: Self.refusal(.notReady)) }
-        self.ended = nil
-        self.apply(.start)
-        if self.run.starting { self.startWaiter = continuation } else { continuation.resume(throwing: Self.refusal(.notReady)) }
+    do {
+      if profile.audio, let availability = services.audio()?.microphone.current, availability != .available {
+        throw Self.microphoneRefusal(availability)
       }
+      if calls.inCall { throw Self.refusal(.inCall) }
+      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        queue.async {
+          guard self.startWaiter == nil else { return continuation.resume(throwing: Self.refusal(.notReady)) }
+          self.ended = nil
+          self.apply(.start)
+          if self.run.starting { self.startWaiter = continuation } else { continuation.resume(throwing: Self.refusal(.notReady)) }
+        }
+      }
+    } catch {
+      await withCheckedContinuation { continuation in
+        queue.async {
+          if !self.run.started && !self.run.starting {
+            self.audioHold?.release()
+            self.audioHold = nil
+            self.calls.unregister(self.callId)
+            if let url = self.recordingURL { try? FileManager.default.removeItem(at: url) }
+            self.recordingURL = nil
+          }
+          continuation.resume()
+        }
+      }
+      _ = await services.audio()?.settled()
+      throw error
     }
   }
 
@@ -250,7 +267,6 @@ public final class MediaCamera: @unchecked Sendable {
   }
 
   private func apply(_ event: CaptureEvent) {
-    if case .refuse(reason: .microphoneBusy) = event { services.audio()?.microphone.refused() }
     let step = captureStep(run: run, event: event, profile: profile)
     run = step.run
     for action in step.actions { perform(action) }
@@ -277,7 +293,7 @@ public final class MediaCamera: @unchecked Sendable {
   private func settleWaiters() {
     if let waiter = startWaiter, !run.starting {
       startWaiter = nil
-      if run.started { waiter.resume() } else { waiter.resume(throwing: Self.refusal(.notReady)) }
+      if run.started { waiter.resume() } else { waiter.resume(throwing: Self.refusal(run.state.fault ?? .notReady)) }
     }
     if let waiter = photoWaiter, !run.state.shooting {
       photoWaiter = nil
@@ -332,7 +348,7 @@ public final class MediaCamera: @unchecked Sendable {
       clipInfo = nil
       backend.beginRecording(to: url, profile: profile, lens: run.state.lens)
       let callId = callId
-      if !calls.register(callId, { [weak self] in self?.post(.callStarted) }) { post(.callStarted) }
+      if !calls.register(callId, { [weak self] in self?.callStarted() }) { callStarted() }
     case .endRecording:
       backend.endRecording()
     case .readClip:
@@ -367,6 +383,14 @@ public final class MediaCamera: @unchecked Sendable {
     }
   }
 
+  private func callStarted() {
+    queue.async {
+      self.audioHold?.release()
+      self.audioHold = nil
+      self.apply(.callStarted)
+    }
+  }
+
   private func failWaiters() {
     let failure = Self.refusal(.notReady)
     if let waiter = photoWaiter { photoWaiter = nil; waiter.resume(throwing: failure) }
@@ -397,9 +421,11 @@ public final class MediaCamera: @unchecked Sendable {
           self.queue.async { if self.epoch == current { self.apply(.refuse(reason: Self.microphoneReason(availability))) } }
           return
         }
-        guard let hold = await audio.holdRecording() else {
+        let hold: MediaRecordingHold
+        do { hold = try await audio.acquireRecording() }
+        catch {
           release?()
-          let reason = Self.microphoneReason(audio.microphone.current)
+          let reason = (error as? RecordingUnavailable).map { Self.microphoneReason($0.availability) } ?? .notReady
           self.queue.async { if self.epoch == current { self.apply(.refuse(reason: reason)) } }
           return
         }
@@ -413,6 +439,12 @@ public final class MediaCamera: @unchecked Sendable {
         }
         if let release { self.sessionHold = release }
         if let session { self.audioHold = session }
+        if session != nil && !self.calls.register(self.callId, { [weak self] in self?.callStarted() }) {
+          self.audioHold?.release()
+          self.audioHold = nil
+          self.apply(.refuse(reason: .inCall))
+          return
+        }
         self.backend.bind(lens: lens, profile: self.profile)
         self.installTap()
       }
@@ -499,12 +531,12 @@ public final class MediaCamera: @unchecked Sendable {
     }
     recordingURL = nil
     clipInfo = nil
-    calls.unregister(callId)
+    if audioHold == nil { calls.unregister(callId) }
     ended = .success(CapturedClip(url: url, durationMs: length, frame: info.frame, lens: run.state.lens))
   }
 
   private func discard() {
-    calls.unregister(callId)
+    if audioHold == nil { calls.unregister(callId) }
     reading?.cancel()
     reading = nil
     if let url = recordingURL { try? FileManager.default.removeItem(at: url) }

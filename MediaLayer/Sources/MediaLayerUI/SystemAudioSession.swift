@@ -10,12 +10,20 @@ struct SystemAudioSession: AudioSessionPort {
     return SessionPlan(category: session.category, mode: session.mode, options: session.categoryOptions)
   }
 
-  func systemEvents() -> AsyncStream<Void> {
+  func systemEvents() -> AsyncStream<SystemAudioEvent> {
     AsyncStream { continuation in
       let center = NotificationCenter.default
       let session = AVAudioSession.sharedInstance()
       let tokens = [AVAudioSession.interruptionNotification, AVAudioSession.mediaServicesWereResetNotification, AVAudioSession.routeChangeNotification].map { name in
-        center.addObserver(forName: name, object: session, queue: nil) { _ in continuation.yield(()) }
+        center.addObserver(forName: name, object: session, queue: nil) { note in
+          if name == AVAudioSession.interruptionNotification {
+            guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+            continuation.yield(type == .began ? .interruptionBegan : .interruptionEnded)
+          } else {
+            continuation.yield(name == AVAudioSession.mediaServicesWereResetNotification ? .mediaServicesReset : .routeChanged)
+          }
+        }
       }
       continuation.onTermination = { _ in tokens.forEach { center.removeObserver($0) } }
     }

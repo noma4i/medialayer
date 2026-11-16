@@ -1,4 +1,9 @@
 import Foundation
+@preconcurrency import AVFoundation
+
+struct RecordingUnavailable: Error {
+  let availability: MicrophoneAvailability
+}
 
 public final class MediaRecordingHold: @unchecked Sendable {
   private let lock = NSLock()
@@ -82,7 +87,7 @@ public final class MediaAudioSession: Sendable {
     let owner = AudioSessionOwner(port: port, box: box, releaseDelay: releaseDelay)
     self.owner = owner
     let stream = port.systemEvents()
-    events = Task { for await _ in stream { await owner.request() } }
+    events = Task { for await event in stream { await owner.systemEvent(event) } }
   }
 
   deinit { events.cancel() }
@@ -94,21 +99,46 @@ public final class MediaAudioSession: Sendable {
   public var microphoneAvailability: AsyncStream<MicrophoneAvailability> { microphone.changes }
 
   public func holdRecording() async -> MediaRecordingHold? {
+    try? await acquireRecording()
+  }
+
+  func acquireRecording() async throws -> MediaRecordingHold {
+    microphone.refreshForRecording()
     let id = UUID()
-    guard box.update({ $0.microphoneAvailability == .available && $0.setRecording(id, true) }) else { return nil }
+    guard box.update({ $0.microphoneAvailability == .available && $0.setRecording(id, true) }) else {
+      throw RecordingUnavailable(availability: microphone.current)
+    }
     MediaTrace.emit("audio", "recording hold holders=\(box.recordings)")
     let hold = MediaRecordingHold { [box, owner] in
       _ = box.update { $0.setRecording(id, false) }
       MediaTrace.emit("audio", "recording release holders=\(box.recordings)")
       Task { await owner.request() }
     }
-    guard await owner.settle() else {
-      microphone.refused()
-      hold.release()
-      _ = await owner.settle()
-      return nil
+    let result = await owner.settleResult()
+    if case .success = result {
+      guard microphone.current == .available else {
+        hold.release()
+        _ = await owner.settle()
+        throw RecordingUnavailable(availability: microphone.current)
+      }
+      return hold
     }
-    return hold
+    hold.release()
+    _ = await owner.settle()
+    if case .activation(let error) = result {
+      if let unavailable = recordingRefusal(error) { throw unavailable }
+      throw error
+    }
+    if case .failure(let error) = result { throw error }
+    throw NSError(domain: "MediaLayer.AudioSession", code: 1)
+  }
+
+  func recordingRefusal(_ error: Error) -> RecordingUnavailable? {
+    let error = error as NSError
+    let codes = [AVAudioSession.ErrorCode.isBusy.rawValue, AVAudioSession.ErrorCode.cannotInterruptOthers.rawValue, AVAudioSession.ErrorCode.insufficientPriority.rawValue]
+    guard error.domain == NSOSStatusErrorDomain && codes.contains(error.code) else { return nil }
+    microphone.refused()
+    return RecordingUnavailable(availability: microphone.current)
   }
 
   func holdCall(managedBySystem: Bool, callUUID: UUID? = nil) async -> CallAudioHold? {

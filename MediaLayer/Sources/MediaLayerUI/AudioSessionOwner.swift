@@ -1,5 +1,8 @@
+import Foundation
+
 actor AudioSessionOwner {
-  enum Step { case done, busy, failed }
+  enum Outcome { case success, activation(Error), failure(Error) }
+  enum Step { case done, busy, activation(Error), failed(Error) }
   static let deactivateAttempts = 4
   static let deactivateRetry: Duration = .milliseconds(150)
   private let port: AudioSessionPort
@@ -9,7 +12,7 @@ actor AudioSessionOwner {
   private var seenChanges = 0
   private var requested = 0
   private var running = false
-  private var waiters: [(Int, CheckedContinuation<Bool, Never>)] = []
+  private var waiters: [(Int, CheckedContinuation<Outcome, Never>)] = []
 
   init(port: AudioSessionPort, box: DemandBox, releaseDelay: Duration) {
     self.port = port
@@ -25,7 +28,20 @@ actor AudioSessionOwner {
     }
   }
 
+  func systemEvent(_ event: SystemAudioEvent) {
+    if case .interruptionBegan = event {
+      _ = box.update { $0.systemLive = false; return true }
+      box.setLive(false)
+    }
+    request()
+  }
+
   func settle() async -> Bool {
+    if case .success = await settleResult() { return true }
+    return false
+  }
+
+  func settleResult() async -> Outcome {
     await withCheckedContinuation { continuation in
       request()
       waiters.append((requested, continuation))
@@ -46,18 +62,19 @@ actor AudioSessionOwner {
     }
   }
 
-  private func applyLatest() async -> Bool {
+  private func applyLatest() async -> Outcome {
     for _ in 0..<Self.deactivateAttempts {
       if box.target() == .idle && needsRelease && releaseDelay > .zero {
         try? await Task.sleep(for: releaseDelay)
       }
       switch apply(box.target()) {
-      case .done: return true
-      case .failed: return false
+      case .done: return .success
+      case .activation(let error): return .activation(error)
+      case .failed(let error): return .failure(error)
       case .busy: try? await Task.sleep(for: Self.deactivateRetry)
       }
     }
-    return false
+    return .failure(NSError(domain: "MediaLayer.AudioSession", code: 1))
   }
 
   private func apply(_ want: SessionTarget) -> Step {
@@ -65,8 +82,6 @@ actor AudioSessionOwner {
     if changes != seenChanges {
       seenChanges = changes
       needsRelease = true
-      _ = box.update { $0.systemLive = false; return true }
-      box.setLive(false)
     }
     let plan: SessionPlan
     let managed: Bool
@@ -79,7 +94,7 @@ actor AudioSessionOwner {
     if plan != port.currentPlan() {
       do { try port.setCategory(plan) } catch {
         MediaTrace.emit("audio", "category \(plan.trace) failed \(error)")
-        return .failed
+        return .failed(error)
       }
       MediaTrace.emit("audio", "category \(plan.trace)")
     }
@@ -89,7 +104,7 @@ actor AudioSessionOwner {
     } catch {
       needsRelease = true
       MediaTrace.emit("audio", "activate failed \(error)")
-      return .failed
+      return .activation(error)
     }
     MediaTrace.emit("audio", "active")
     needsRelease = true
