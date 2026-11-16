@@ -62,6 +62,7 @@ class MediaVoiceRecorder internal constructor(
   private var running: Running? = null
   private var ended: Result<VoiceRecording>? = null
   private var heldAudio: MediaAudioSession? = null
+  private var starting = false
   private val callListener = CallListener(::callBegan)
 
   private class Running(val file: File, val startedAt: Long, var poll: Job? = null)
@@ -72,9 +73,18 @@ class MediaVoiceRecorder internal constructor(
 
   fun start(file: File) {
     synchronized(lock) {
-      check(running == null) { "a recording is already running" }
+      check(running == null && !starting) { "a recording is already running" }
+      starting = true
       ended = null
     }
+    try {
+      begin(file)
+    } finally {
+      synchronized(lock) { starting = false }
+    }
+  }
+
+  private fun begin(file: File) {
     if (calls.inCall) throw inCall()
     val session = audio()
     if (session != null && !session.activateRecording()) throw MediaException.Voice(voiceRefusalText(VoiceRefusal.MICROPHONE_BUSY))

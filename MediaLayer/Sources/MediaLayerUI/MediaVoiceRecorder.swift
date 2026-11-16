@@ -46,6 +46,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
   private var finishing: Task<Result<VoiceRecording, Error>, Never>?
   private var ended: Result<VoiceRecording, Error>?
   private var held: MediaAudioSession?
+  private var starting = false
   private var sinks: [UUID: AsyncStream<Float>.Continuation] = [:]
 
   public convenience init(maxDuration: TimeInterval? = nil) {
@@ -84,9 +85,11 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
 
   public func start(to file: URL) async throws {
     try lock.withLock {
-      guard running == nil && finishing == nil else { throw MediaError.Unexpected(detail: "a recording is already running") }
+      guard running == nil && finishing == nil && !starting else { throw MediaError.Unexpected(detail: "a recording is already running") }
+      starting = true
       ended = nil
     }
+    defer { lock.withLock { starting = false } }
     if calls.inCall { throw Self.inCall() }
     let session = audio()
     if let session, !(await session.activateRecording()) {

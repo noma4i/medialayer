@@ -53,6 +53,48 @@ private final class FakeCapture: VoiceCapture, @unchecked Sendable {
   }
 }
 
+private final class FirstStartGate: VoiceCapture, @unchecked Sendable {
+  private let lock = NSLock()
+  private var calls = 0
+  private var file: URL?
+  private var opened: CheckedContinuation<Void, Never>?
+  private var isOpen = false
+  let entered = AsyncStream<Void>.makeStream()
+
+  func start(file: URL, maxDurationMs: UInt64, onLimit: @escaping @Sendable () -> Void) async throws {
+    let first = lock.withLock { () -> Bool in
+      calls += 1
+      if calls == 1 { self.file = file }
+      return calls == 1
+    }
+    guard first else { return }
+    entered.continuation.yield(())
+    await withCheckedContinuation { continuation in
+      let resume = lock.withLock { () -> Bool in
+        if isOpen { return true }
+        opened = continuation
+        return false
+      }
+      if resume { continuation.resume() }
+    }
+  }
+
+  func open() {
+    let waiting = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+      isOpen = true
+      defer { opened = nil }
+      return opened
+    }
+    waiting?.resume()
+  }
+
+  func peak() -> Float { 0.5 }
+
+  func stop() throws {
+    if let file = lock.withLock({ file }) { try Data([1, 2, 3]).write(to: file) }
+  }
+}
+
 private final class Ticks: @unchecked Sendable {
   private let lock = NSLock()
   private var value: UInt64 = 1000
@@ -165,6 +207,25 @@ struct MediaVoiceRecorderTests {
 
     try await recorder.start(to: file())
     #expect(session.isRecording)
+    ticks.advance(1000)
+    _ = try await recorder.stop()
+
+    #expect(!session.isRecording)
+  }
+
+  @Test
+  func aSecondStartWhileTheFirstIsStartingIsRefusedAndHoldsNoRecordingSession() async throws {
+    let session = MediaAudioSession(focus: .mix, port: FakeAudioSessionPort(), releaseDelay: .zero)
+    let capture = FirstStartGate()
+    let ticks = Ticks()
+    let recorder = makeRecorder(capture, ticks: ticks, audio: session)
+    let first = Task { try await recorder.start(to: file()) }
+    var entered = capture.entered.stream.makeAsyncIterator()
+    _ = await entered.next()
+
+    await #expect(throws: MediaError.self) { try await recorder.start(to: file()) }
+    capture.open()
+    try await first.value
     ticks.advance(1000)
     _ = try await recorder.stop()
 

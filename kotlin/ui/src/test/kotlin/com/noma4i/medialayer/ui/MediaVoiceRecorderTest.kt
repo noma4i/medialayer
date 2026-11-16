@@ -175,6 +175,37 @@ class MediaVoiceRecorderTest {
   }
 
   @Test
+  fun aSecondStartWhileTheFirstIsStartingIsRefusedAndHoldsNoRecordingSession() = runBlocking {
+    val session = MediaAudioSession(MediaAudioFocus.Mix, FakeFocusPort(), releaseDelayMs = 0)
+    val entered = java.util.concurrent.CountDownLatch(1)
+    val open = java.util.concurrent.CountDownLatch(1)
+    val calls = AtomicInteger()
+    var written: File? = null
+    val capture = object : VoiceCapture {
+      override fun start(file: File, maxDurationMs: Long, onLimit: () -> Unit) {
+        if (calls.incrementAndGet() != 1) return
+        written = file
+        entered.countDown()
+        open.await()
+      }
+      override fun peak(): Float = 0.5f
+      override fun stop() { written!!.writeBytes(byteArrayOf(1, 2, 3)) }
+    }
+    val ticks = VoiceTicks()
+    val recorder = makeRecorder(capture, ticks, audio = session)
+    val first = Thread { recorder.start(file()) }.apply { start() }
+    entered.await()
+
+    assertThrows(IllegalStateException::class.java) { recorder.start(file()) }
+    open.countDown()
+    first.join()
+    ticks.now += 1_000
+    recorder.stop()
+
+    assertFalse(session.isRecording)
+  }
+
+  @Test
   fun inv_voice_12_theEncoderIsSetTo44100HzOneChannelAnd128000BitPerSecond() {
     val calls = mutableListOf<String>()
 
