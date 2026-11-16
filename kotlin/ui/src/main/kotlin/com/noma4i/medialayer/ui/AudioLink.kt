@@ -139,6 +139,7 @@ internal class RecordingTicket(val id: ULong, private val end: (ULong) -> Unit) 
 
 class MediaCallAudio internal constructor(private val id: ULong, internal val kind: MediaCallKind, private val send: (AudioInput) -> Unit) : Closeable {
   private val closed = AtomicBoolean()
+  private val awake = ScreenAwakeHold().also { it.set(true) }
   private val state = MutableStateFlow(CallState.CONNECTING)
   private inner class StateObservation(var listener: ((CallState) -> Unit)?) : Closeable {
     override fun close() = synchronized(listeners) { listener = null; listeners.remove(this); Unit }
@@ -170,6 +171,7 @@ class MediaCallAudio internal constructor(private val id: ULong, internal val ki
     state.value = value
     val notify = listeners.mapNotNull { it.listener }
     if (value == CallState.ENDED) {
+      awake.set(false)
       listeners.forEach { it.listener = null }
       listeners.clear()
     }
@@ -178,7 +180,7 @@ class MediaCallAudio internal constructor(private val id: ULong, internal val ki
   fun setSpeaker(on: Boolean) { if (!closed.get()) send(AudioInput.CallSpeaker(id, on)) }
   fun systemActivated() { if (!closed.get()) send(AudioInput.CallSystemActivated(id)) }
   fun systemDeactivated() { if (!closed.get()) send(AudioInput.CallSystemDeactivated(id)) }
-  override fun close() { if (closed.compareAndSet(false, true)) send(AudioInput.CallEnded(id)) }
+  override fun close() { if (closed.compareAndSet(false, true)) { awake.set(false); send(AudioInput.CallEnded(id)) } }
 }
 
 internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, private val volume: VolumePort? = null) : Closeable {

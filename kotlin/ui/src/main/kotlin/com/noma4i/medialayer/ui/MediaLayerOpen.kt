@@ -121,6 +121,7 @@ internal fun openMediaLayer(
   install: () -> Unit = NativeCallbacks::install,
   open: (OpenConfig) -> MediaLayer
 ): Deferred<MediaLayer> {
+  ScreenWindows.know(context)
   val app = context.applicationContext
   var audio: AudioLink? = null
   val lock = Any()

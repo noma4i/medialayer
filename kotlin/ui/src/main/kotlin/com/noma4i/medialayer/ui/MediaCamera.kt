@@ -67,10 +67,11 @@ class MediaCamera internal constructor(
   lens: CameraLens,
   private val backend: CaptureBackend,
   private val services: CameraServices,
-  private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+  private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+  screen: ScreenAwake = ScreenAwake.shared
 ) : AutoCloseable {
   constructor(context: Context, profile: CaptureProfile, lens: CameraLens = CameraLens.BACK) :
-    this(profile, lens, CameraXBackend(context.applicationContext), CameraServices.live(context.applicationContext))
+    this(profile, lens, CameraXBackend(knowing(context)), CameraServices.live(context.applicationContext))
 
   init { checkCaptureProfile(profile) }
   private val queue = Executors.newSingleThreadExecutor { Thread(it, "medialayer-camera").apply { isDaemon = true } }
@@ -79,6 +80,7 @@ class MediaCamera internal constructor(
     false, false, null, false, false, false, null, false, null
   )
   private val published = MutableStateFlow(run.state)
+  private val awake = ScreenAwakeHold(ScreenHoldKind.ALWAYS, screen)
   private val hosts = HashSet<Any>()
   private var engaged = false
   private var closed = false
@@ -113,6 +115,7 @@ class MediaCamera internal constructor(
         ended?.getOrNull()?.file?.let(::deleteMediaFile)
         ended = null
         closed = true
+        awake.set(false)
         backend.close()
         scope.cancel()
       }
@@ -260,6 +263,7 @@ class MediaCamera internal constructor(
       ended?.getOrNull()?.file?.let(::deleteMediaFile)
       ended = null
       closed = true
+      awake.set(false)
       layerClose?.close()
       backend.close()
       scope.cancel()
@@ -272,6 +276,7 @@ class MediaCamera internal constructor(
       if (closed) return@enqueue
       backend.setHost(view, owner)
       hosts.add(host)
+      awake.set(true)
       reconcile()
     }
   }
@@ -279,6 +284,7 @@ class MediaCamera internal constructor(
   internal fun detachPreview(host: Any) {
     enqueue {
       hosts.remove(host)
+      awake.set(hosts.isNotEmpty())
       reconcile()
     }
   }

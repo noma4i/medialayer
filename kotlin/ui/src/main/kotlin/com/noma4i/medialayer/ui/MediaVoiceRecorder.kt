@@ -75,12 +75,18 @@ class MediaVoiceRecorder internal constructor(
   private val clock: () -> ULong = { SystemClock.elapsedRealtime().toULong() },
   private val levelIntervalMs: Long = LEVEL_INTERVAL_MS,
   private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-  private val minTakeMs: ULong = 0uL
+  private val minTakeMs: ULong = 0uL,
+  screen: ScreenAwake = ScreenAwake.shared
 ) {
-  constructor(context: Context, maxDurationMs: Long? = null, minTakeMs: ULong = 0uL) : this(SystemVoiceCapture(context.applicationContext), voiceLimitMs(maxDurationMs?.toULong()), minTakeMs = minTakeMs)
+  constructor(context: Context, maxDurationMs: Long? = null, minTakeMs: ULong = 0uL) : this(SystemVoiceCapture(knowing(context)), voiceLimitMs(maxDurationMs?.toULong()), minTakeMs = minTakeMs)
 
   private val wave = MutableSharedFlow<Float>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
   private val currentState = MutableStateFlow(VoiceState(0uL, VoicePhase.IDLE, null, 0uL))
+  private val awake = ScreenAwakeHold(ScreenHoldKind.ALWAYS, screen)
+  private fun publish(value: VoiceState) {
+    currentState.value = value
+    awake.set(value.phase != VoicePhase.IDLE)
+  }
   val state: StateFlow<VoiceState> = currentState
   val states: StateFlow<VoiceState> = state
   private val lock = Any()
@@ -115,7 +121,7 @@ class MediaVoiceRecorder internal constructor(
       synchronized(lock) { running }?.let { finish(it, voiceError(RecordingRefusal.INTERRUPTED)) }
       throw cancelled
     } catch (refused: MediaException.Voice) {
-      synchronized(lock) { currentState.value = VoiceState(currentState.value.take, VoicePhase.IDLE, VoiceOutcome.Refused(refused.reason), 0uL) }
+      synchronized(lock) { publish(VoiceState(currentState.value.take, VoicePhase.IDLE, VoiceOutcome.Refused(refused.reason), 0uL)) }
       throw refused
     } finally {
       synchronized(lock) { starting = false }
@@ -140,7 +146,7 @@ class MediaVoiceRecorder internal constructor(
           heldAudio = hold
           val current = Running(file, clock()).also {
             running = it
-            currentState.value = VoiceState(currentState.value.take + 1uL, VoicePhase.RECORDING, null, 0uL)
+            publish(VoiceState(currentState.value.take + 1uL, VoicePhase.RECORDING, null, 0uL))
             it.poll = scope.launch { pollLevels() }
           }
           revoked = hold.onRevoked { reason, done ->
@@ -229,7 +235,7 @@ class MediaVoiceRecorder internal constructor(
       outcome.exceptionOrNull() is MediaException.Voice -> VoiceOutcome.Refused((outcome.exceptionOrNull() as MediaException.Voice).reason)
       else -> VoiceOutcome.Failed(NativeFailure(FailureSource.RECORDER, "android.media.MediaRecorder", -1L, outcome.exceptionOrNull().toString()))
     }
-    currentState.value = VoiceState(currentState.value.take, VoicePhase.IDLE, published, 0uL)
+    publish(VoiceState(currentState.value.take, VoicePhase.IDLE, published, 0uL))
     onTestChange?.invoke()
     outcome
   }
@@ -240,7 +246,7 @@ class MediaVoiceRecorder internal constructor(
       try {
         wave.tryEmit(voiceLevel(capture.peak()))
         synchronized(lock) {
-          running?.let { currentState.value = VoiceState(currentState.value.take, VoicePhase.RECORDING, null, clock() - it.startedAt) }
+          running?.let { publish(VoiceState(currentState.value.take, VoicePhase.RECORDING, null, clock() - it.startedAt)) }
         }
       } catch (error: Exception) {
         val failure = NativeFailure(FailureSource.RECORDER, error.javaClass.name, -1L, error.message ?: error.toString())

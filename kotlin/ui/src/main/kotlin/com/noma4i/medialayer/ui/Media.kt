@@ -9,6 +9,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
@@ -67,6 +68,7 @@ object Media {
     val done: (Boolean) -> Unit = { accepted ->
       if (accepted && change.value != null) {
         acceptedMute = value
+        ScreenAwake.shared.setMuted(value)
         onTestChange?.invoke()
       }
       val more = synchronized(muteChanges) {
@@ -254,7 +256,8 @@ internal fun declarePlace(
   val failed by rememberUpdatedState(onFailed)
   val playback by rememberUpdatedState(onPlayback)
   val view = LocalView.current
-  val awake = remember(media, item) { ScreenAwakeHold(view) }
+  val awake = remember(media, item) { ScreenWindows.know(view.context); ScreenAwakeHold(ScreenHoldKind.SOUND).also { it.mute(muted == true) } }
+  SideEffect { awake.mute(muted == true) }
   val gate = remember(media, item) { DeliveryGate() }
   val mount = remember(media, item) {
     val token = gate.open()
