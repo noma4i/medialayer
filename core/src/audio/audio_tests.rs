@@ -284,6 +284,12 @@ fn inv_audio_26_a_busy_release_is_finished_by_the_next_event_without_a_timer() {
     let generation = idle.iter().find_map(generation_of).unwrap();
     assert_eq!(world.send(I::Applied { generation, result: AppliedResult::Busy }), vec![]);
     assert_eq!(world.send(I::Route { reason: RouteReason::CategoryChange, had_private_output: false }), vec![DEACTIVATE]);
+
+    let mut early = World::playing();
+    let idle = early.raw(I::Audible { slot: 0, on: false });
+    let generation = idle.iter().find_map(generation_of).unwrap();
+    assert_eq!(early.send(I::Route { reason: RouteReason::CategoryChange, had_private_output: false }), vec![], "the event arrives while the release is in flight");
+    assert_eq!(early.send(I::Applied { generation, result: AppliedResult::Busy }), vec![DEACTIVATE], "an event during the busy release already was the next event");
 }
 
 #[test]
