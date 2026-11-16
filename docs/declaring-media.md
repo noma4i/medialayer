@@ -575,8 +575,8 @@ On Swift, pass `true` for a CallKit-managed call. MediaLayer sets the category a
 ```swift
 let call = try await media.callAudio(managedBySystem: true)
 call.setSpeaker(true)
-call.systemActivated() // CXProviderDelegate provider(_:didActivate:)
-call.systemDeactivated() // CXProviderDelegate provider(_:didDeactivate:)
+call.systemActivated() // CallKit didActivate
+call.systemDeactivated() // CallKit didDeactivate
 call.end()
 ```
 
@@ -595,11 +595,16 @@ for await live in call.liveChanges {
 }
 ```
 
-On Kotlin, observe `live` and close the call when it ends:
+On Kotlin, take the call audio, set the route and close it when the call ends:
 
 ```kotlin
 val call = media.callAudio()
 call.setSpeaker(true)
-call.live.collect { live -> /* update call audio */ }
 call.close()
+```
+
+Observe `live` to start and stop the call audio of the calling library:
+
+```kotlin
+call.live.collect { live -> /* start or stop the call audio */ }
 ```
