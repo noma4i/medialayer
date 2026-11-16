@@ -8,6 +8,7 @@ pub(super) enum Event {
     Reconcile { want: Option<SessionWant>, may_ask: bool, fresh: bool, next: bool },
     Applied { generation: u64, result: AppliedResult },
     Focus { generation: u64, answer: FocusAnswer },
+    CallActivated(SessionWant),
     Gain,
     Other,
     Reset,
@@ -51,12 +52,15 @@ impl Session {
         }
     }
     #[state(superstate = "any")]
-    fn asking(g: &mut u64, w: &mut SessionWant, event: &Event) -> Outcome<State> {
+    fn asking(g: &mut u64, w: &mut SessionWant, event: &Event, context: &mut Context<'_>) -> Outcome<State> {
         match event {
+            Event::Reconcile { want: None, .. } => Transition(release(context, own(w))),
+            Event::Reconcile { want: Some(want), may_ask, fresh, .. } if want != w && (*may_ask || *fresh) => Transition(ask(want.clone(), context, true)),
             Event::Applied { generation, result: AppliedResult::Ok } if generation == g => Transition(State::held(w.clone())),
             Event::Focus { generation, answer: FocusAnswer::Granted } if generation == g => Transition(State::held(w.clone())),
             Event::Focus { generation, answer: FocusAnswer::Delayed } if generation == g => Transition(State::delayed(w.clone())),
-            Event::Applied { generation, result: AppliedResult::Failed { .. } } | Event::Focus { generation, answer: FocusAnswer::Failed } if generation == g => Transition(State::refused()),
+            Event::Applied { generation, result: AppliedResult::Failed { .. } } if generation == g => Transition(State::refused(true)),
+            Event::Focus { generation, answer: FocusAnswer::Failed } if generation == g => Transition(State::refused(false)),
             _ => Super,
         }
     }
@@ -78,9 +82,10 @@ impl Session {
         }
     }
     #[state(superstate = "any")]
-    fn refused(event: &Event, context: &mut Context<'_>) -> Outcome<State> {
+    fn refused(residue: &mut bool, event: &Event, context: &mut Context<'_>) -> Outcome<State> {
         match event {
-            Event::Reconcile { want: None, .. } => Transition(release(context, false)),
+            Event::Reconcile { want: None, .. } if *residue => Transition(release(context, false)),
+            Event::Reconcile { want: None, .. } => Transition(State::idle()),
             Event::Reconcile { want: Some(want), fresh: true, .. } => Transition(ask(want.clone(), context, false)),
             _ => Super,
         }
@@ -88,6 +93,7 @@ impl Session {
     #[state(superstate = "any")]
     fn releasing(g: &mut u64, heard: &mut bool, own_mode: &mut bool, event: &Event, context: &mut Context<'_>) -> Outcome<State> {
         match event {
+            Event::Reconcile { want: Some(want), may_ask, fresh, .. } if *may_ask || *fresh => Transition(ask(want.clone(), context, false)),
             Event::Applied { generation, result: AppliedResult::Ok | AppliedResult::Failed { .. } } if generation == g => Transition(State::idle()),
             Event::Applied { generation, result: AppliedResult::Busy } if generation == g && *heard => Transition(release(context, *own_mode)),
             Event::Applied { generation, result: AppliedResult::Busy } if generation == g => Transition(State::lingering()),
@@ -105,7 +111,7 @@ impl Session {
     }
     #[superstate]
     fn any(event: &Event) -> Outcome<State> {
-        match event { Event::Reset => Transition(State::idle()), _ => Handled }
+        match event { Event::Reset => Transition(State::idle()), Event::CallActivated(want) => Transition(State::held(want.clone())), _ => Handled }
     }
 }
 
@@ -119,8 +125,9 @@ pub(super) fn held(machine: &StateMachine<Session>) -> Option<SessionWant> {
     match machine.state() { State::Held { w } => Some(w.clone()), _ => None }
 }
 pub(super) fn blocked(machine: &StateMachine<Session>) -> bool {
-    matches!(machine.state(), State::Refused {} | State::Delayed { .. })
+    matches!(machine.state(), State::Refused { .. } | State::Delayed { .. })
 }
+pub(super) fn asking(machine: &StateMachine<Session>) -> bool { matches!(machine.state(), State::Asking { .. }) }
 pub(super) fn lingering(machine: &StateMachine<Session>) -> bool { matches!(machine.state(), State::Lingering {}) }
 pub(super) fn own_mode(machine: &StateMachine<Session>) -> bool {
     match machine.state() {

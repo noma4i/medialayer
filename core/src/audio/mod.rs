@@ -198,9 +198,10 @@ impl AudioOwner {
         if matches!(&input, I::FocusRequest { generation, .. } | I::Applied { generation, .. } if session::inflight(&self.session) != Some(*generation)) {
             return Vec::new();
         }
+        if matches!(&input, I::FocusRequest { .. }) && !session::asking(&self.session) { return Vec::new(); }
         let next = !matches!(input, I::Applied { .. } | I::FocusRequest { .. });
         let own_before = session::own_mode(&self.session);
-        let mut fresh = matches!(&input, I::CallSystemActivated { .. } | I::InterruptionEnded { .. } | I::ResumptionRecommendation { .. } | I::Focus { change: FocusChange::Gain } | I::Foreground { on: true } | I::MediaReset);
+        let mut fresh = matches!(&input, I::InterruptionEnded { .. } | I::ResumptionRecommendation { .. } | I::Focus { change: FocusChange::Gain } | I::Foreground { on: true } | I::MediaReset);
         let mut actions = Vec::new();
         if !matches!(input, I::Applied { .. }) {
             self.resuming = false;
@@ -283,10 +284,10 @@ impl AudioOwner {
             }
             I::CallSystemActivated { id } => {
                 if let Some(call) = self.calls.iter().find(|call| call.id == id) {
+                    fresh = true;
                     if matches!(call.kind, CallKind::CallKit { .. }) {
-                        if let Some(generation) = session::inflight(&self.session) {
-                            self.session_event(session::Event::Applied { generation, result: AppliedResult::Ok }, &mut actions);
-                        }
+                        let want = SessionWant::Call { kind: call.kind.clone(), speaker: call.speaker };
+                        self.session_event(session::Event::CallActivated(want), &mut actions);
                     }
                     self.system_event(SystemEvent::CallSystemActivated, &mut actions);
                     self.call_state(id, CallState::Live, &mut actions);
@@ -441,11 +442,12 @@ impl AudioOwner {
             actions.push(AudioAction::ForgetPaused);
             self.paused = None;
         }
-        if fresh && session::blocked(&self.session) {
+        if fresh && (session::blocked(&self.session) || self.system() == System::WaitForeground) {
             self.system_event(SystemEvent::NewDemand, &mut actions);
         }
         let want = self.want();
         self.session_event(session::Event::Reconcile { want, may_ask: self.may_ask(), fresh, next }, &mut actions);
+        if own_before && !session::own_mode(&self.session) { self.comm_mode = false; }
         if self.paused == Some(Paused::Interrupted { resume: true }) && session::held(&self.session).is_some() && session::held(&self.session) == self.want() {
             actions.push(AudioAction::ResumePaused);
             self.paused = None;
