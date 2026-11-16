@@ -18,8 +18,11 @@ internal class SystemAudioFocus(context: Context) : AudioFocusPort {
     val gain = when (kind) {
       FocusKind.Duck -> AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
       FocusKind.Recording -> AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
+      FocusKind.Call -> AudioManager.AUDIOFOCUS_GAIN
     }
-    val attributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MOVIE).build()
+    val attributes = AudioAttributes.Builder()
+      .setUsage(if (kind == FocusKind.Call) AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_MEDIA)
+      .setContentType(if (kind == FocusKind.Call) AudioAttributes.CONTENT_TYPE_SPEECH else AudioAttributes.CONTENT_TYPE_MOVIE).build()
     val request = AudioFocusRequest.Builder(gain).setAudioAttributes(attributes).setOnAudioFocusChangeListener { change ->
       if (change < 0) {
         lost.incrementAndGet()
@@ -38,5 +41,16 @@ internal class SystemAudioFocus(context: Context) : AudioFocusPort {
   override fun abandon() {
     current?.let(manager::abandonAudioFocusRequest)
     current = null
+  }
+
+  override fun setCommunication(on: Boolean, speaker: Boolean) {
+    if (on) {
+      manager.mode = AudioManager.MODE_IN_COMMUNICATION
+      val device = manager.availableCommunicationDevices.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+      if (speaker && device != null) manager.setCommunicationDevice(device) else manager.clearCommunicationDevice()
+    } else {
+      manager.clearCommunicationDevice()
+      manager.mode = AudioManager.MODE_NORMAL
+    }
   }
 }

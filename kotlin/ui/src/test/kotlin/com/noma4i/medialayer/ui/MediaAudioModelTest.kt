@@ -45,6 +45,8 @@ private class SystemFocus : AudioFocusPort {
     synchronized(lock) { listener = action }
   }
 
+  override fun setCommunication(on: Boolean, speaker: Boolean) = Unit
+
   override fun request(kind: FocusKind): Boolean {
     val granted = synchronized(lock) {
       if (!taken) holder = kind

@@ -10,12 +10,15 @@ internal class AudioFocusOwner(
   private val port: AudioFocusPort,
   private val want: () -> FocusKind?,
   private val releaseDelayMs: Long,
-  private val scope: CoroutineScope
+  private val scope: CoroutineScope,
+  private val communication: () -> Pair<Boolean, Boolean>,
+  private val callLive: (Boolean) -> Unit
 ) {
   private val lock = Any()
   private var held: FocusKind? = null
   private var pending: Job? = null
   private var seenLosses = 0
+  private var appliedCommunication = false to false
 
   fun reconcile(): Boolean = synchronized(lock) {
     val target = want()
@@ -23,6 +26,13 @@ internal class AudioFocusOwner(
     if (losses != seenLosses) {
       seenLosses = losses
       held = null
+      callLive(false)
+      if (communication().first) appliedCommunication = false to false
+    }
+    val desiredCommunication = communication()
+    if (desiredCommunication != appliedCommunication) {
+      port.setCommunication(desiredCommunication.first, desiredCommunication.second)
+      appliedCommunication = desiredCommunication
     }
     if (target == null) {
       if (held != null && pending == null) scheduleRelease()
@@ -31,12 +41,13 @@ internal class AudioFocusOwner(
     if (held != target) {
       val granted = runCatching { port.request(target) }.getOrDefault(false)
       MediaTrace.emit("audio") { "focus $target granted=$granted" }
-      if (!granted) return false
+      if (!granted) { callLive(false); return false }
     }
 
     pending?.cancel()
     pending = null
     held = target
+    callLive(target == FocusKind.Call)
     true
   }
 
@@ -48,6 +59,11 @@ internal class AudioFocusOwner(
       MediaTrace.emit("audio") { "focus abandoned" }
     }
     held = null
+    callLive(false)
+    if (appliedCommunication.first) {
+      port.setCommunication(false, false)
+      appliedCommunication = false to false
+    }
   }
 
   private fun scheduleRelease() {

@@ -2,7 +2,10 @@ package com.noma4i.medialayer.ui
 
 import com.noma4i.medialayer.CallHold
 import com.noma4i.medialayer.MediaLayer
+import com.noma4i.medialayer.MediaException
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /** What a running recording does when a call begins: it stops and ends with the in-call refusal of the core. */
 internal fun interface CallListener {
@@ -67,4 +70,25 @@ internal fun MediaLayer.callHold(gate: CallGate): MediaCallHold {
   val core = holdCall()
   gate.hold()
   return MediaCallHold(core, gate)
+}
+
+class MediaCallAudio internal constructor(private val call: MediaCallHold, private val audio: CallAudioHold?) : AutoCloseable {
+  private val closed = AtomicBoolean()
+  val live: StateFlow<Boolean> = audio?.live ?: MutableStateFlow(false)
+  fun setSpeaker(on: Boolean) { audio?.setSpeaker(on) }
+  override fun close() {
+    if (!closed.compareAndSet(false, true)) return
+    audio?.close()
+    call.close()
+  }
+}
+
+fun MediaLayer.callAudio(): MediaCallAudio {
+  val call = callHold()
+  val session = Media.audio ?: return MediaCallAudio(call, null)
+  val audio = session.holdCall() ?: run {
+    call.close()
+    throw MediaException.Unexpected("call audio refused")
+  }
+  return MediaCallAudio(call, audio)
 }

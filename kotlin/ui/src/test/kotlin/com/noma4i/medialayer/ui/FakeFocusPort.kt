@@ -25,4 +25,8 @@ internal class FakeFocusPort(var grant: Boolean = true, var throwOnRecording: Bo
   override fun abandon() {
     calls.add("abandon")
   }
+
+  override fun setCommunication(on: Boolean, speaker: Boolean) {
+    calls.add("communication on=$on speaker=$speaker")
+  }
 }
