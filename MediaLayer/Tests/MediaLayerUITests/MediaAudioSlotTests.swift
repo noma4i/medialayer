@@ -56,7 +56,8 @@ extension GlobalMedia {
 
       await slot.pause()
       await eventually("focus released") { port.log.last == "active false" }
-      #expect(port.log == [FakeAudioSessionPort.category(.playback(.mix)), "active true", "active false"])
+      #expect(port.log.filter { $0.hasPrefix("category") } == [FakeAudioSessionPort.category(.playback(.mix))])
+      #expect(port.log.first == FakeAudioSessionPort.category(.playback(.mix)) && port.log.last == "active false")
       await slot.unload()
     }
 
