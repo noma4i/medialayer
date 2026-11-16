@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import MediaLayer
+import MediaLayerTesting
 import Testing
 @testable import MediaLayerUI
 
