@@ -21,6 +21,7 @@ struct Call {
 pub struct AudioOwner {
     focus: AudioFocus,
     audible: BTreeSet<u64>,
+    volume_readers: BTreeSet<u64>,
     captures: Vec<(u64, RecordingKind)>,
     calls: Vec<Call>,
     observed: BTreeSet<String>,
@@ -47,6 +48,7 @@ impl AudioOwner {
         Self {
             focus,
             audible: BTreeSet::new(),
+            volume_readers: BTreeSet::new(),
             captures: Vec::new(),
             calls: Vec::new(),
             observed: BTreeSet::new(),
@@ -128,6 +130,11 @@ impl AudioOwner {
             )
         {
             return Some(SessionWant::Playback { focus: self.focus });
+        }
+        if !self.volume_readers.is_empty()
+            && matches!(self.system(), System::Free | System::Ducked | System::Transient)
+        {
+            return Some(SessionWant::Playback { focus: AudioFocus::Mix });
         }
         None
     }
@@ -222,6 +229,8 @@ impl AudioOwner {
         let mut actions = Vec::new();
         let mut defer_reconcile = false;
         match input {
+            I::VolumeReadStarted { id } => { self.volume_readers.insert(id); }
+            I::VolumeReadEnded { id } => { self.volume_readers.remove(&id); }
             I::Audible { slot, on } => {
                 if on {
                     self.audible.insert(slot);

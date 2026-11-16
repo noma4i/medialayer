@@ -82,6 +82,12 @@ pub enum CallState {
 }
 #[derive(uniffi::Enum, Debug, Clone, PartialEq)]
 pub enum AudioInput {
+    VolumeReadStarted {
+        id: u64,
+    },
+    VolumeReadEnded {
+        id: u64,
+    },
     Audible {
         slot: u64,
         on: bool,
