@@ -2,10 +2,7 @@ package com.noma4i.medialayer.ui
 
 import com.noma4i.medialayer.testing.TestFetcher
 import android.content.Context
-import android.content.Intent
 import android.graphics.Bitmap
-import android.media.AudioManager
-import androidx.compose.runtime.snapshots.Snapshot
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.test.core.app.ApplicationProvider
@@ -17,8 +14,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -52,29 +47,6 @@ class MemoryWarningTest {
     withTimeout(10_000) { dropped.await() }
     assertEquals(0, cache.keys.size)
     loader.shutdown()
-  }
-
-  @Test
-  fun inv_audio_05_losing_the_audio_output_turns_the_global_mute_on() {
-    val context = ApplicationProvider.getApplicationContext<Context>()
-    val owner = object : LifecycleOwner { override val lifecycle = LifecycleRegistry(this) }
-    val signals = SystemSignals(context, RecordingEvents(), owner.lifecycle)
-    val looper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
-    val scratch = Snapshot.takeMutableSnapshot()
-    signals.register()
-    try {
-      scratch.enter {
-        context.sendBroadcast(Intent(Intent.ACTION_HEADSET_PLUG))
-        looper.idle()
-        assertFalse(Media.muted)
-        context.sendBroadcast(Intent(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
-        looper.idle()
-        assertTrue(Media.muted)
-      }
-    } finally {
-      kotlinx.coroutines.runBlocking { signals.unregister() }
-      scratch.dispose()
-    }
   }
 
   @Test

@@ -11,28 +11,24 @@ public struct SystemSignalNames {
   public var memoryWarning: Notification.Name
   public var background: Notification.Name
   public var foreground: Notification.Name
-  public var outputLost: Notification.Name
 
-  public init(memoryWarning: Notification.Name, background: Notification.Name, foreground: Notification.Name, outputLost: Notification.Name) {
+  public init(memoryWarning: Notification.Name, background: Notification.Name, foreground: Notification.Name) {
     self.memoryWarning = memoryWarning
     self.background = background
     self.foreground = foreground
-    self.outputLost = outputLost
   }
 
   #if canImport(UIKit)
   public static let system = SystemSignalNames(
     memoryWarning: UIApplication.didReceiveMemoryWarningNotification,
     background: UIApplication.didEnterBackgroundNotification,
-    foreground: UIApplication.willEnterForegroundNotification,
-    outputLost: AVAudioSession.routeChangeNotification
+    foreground: UIApplication.willEnterForegroundNotification
   )
   #else
   public static let system = SystemSignalNames(
     memoryWarning: Notification.Name("MediaLayerMemoryWarning"),
     background: NSApplication.didResignActiveNotification,
-    foreground: NSApplication.didBecomeActiveNotification,
-    outputLost: Notification.Name("MediaLayerOutputLost")
+    foreground: NSApplication.didBecomeActiveNotification
   )
   #endif
 }
@@ -57,17 +53,6 @@ final class SystemSignals {
   deinit {
     stop()
   }
-
-  #if canImport(UIKit)
-  static func isOutputLost(reason: UInt?, previous: [AVAudioSession.Port], current: [AVAudioSession.Port]) -> Bool {
-    guard reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue else { return false }
-    let privateOutputs: Set<AVAudioSession.Port> = [
-      .headphones, .bluetoothA2DP, .bluetoothHFP, .bluetoothLE, .usbAudio,
-      .carAudio, .airPlay, .lineOut, .HDMI
-    ]
-    return previous.contains { privateOutputs.contains($0) && !current.contains($0) }
-  }
-  #endif
 
   func stop() {
     tokens.forEach { center.removeObserver($0) }

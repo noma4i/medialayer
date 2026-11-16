@@ -205,7 +205,7 @@ extension GlobalMedia {
       let center = NotificationCenter()
       let names = SystemSignalNames(
         memoryWarning: Notification.Name("suspend.memory"), background: Notification.Name("suspend.background"),
-        foreground: Notification.Name("suspend.foreground"), outputLost: Notification.Name("suspend.outputLost")
+        foreground: Notification.Name("suspend.foreground")
       )
       rig.media.followSystem(events: rig.media.playerEvents(), link: PlayerEventsLink(), center: center, names: names)
 

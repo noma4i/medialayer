@@ -159,8 +159,7 @@ private struct Rig {
 private let names = SystemSignalNames(
   memoryWarning: Notification.Name("camera.test.memory"),
   background: Notification.Name("camera.test.background"),
-  foreground: Notification.Name("camera.test.foreground"),
-  outputLost: Notification.Name("camera.test.output")
+  foreground: Notification.Name("camera.test.foreground")
 )
 
 private func jpeg() -> Data {
