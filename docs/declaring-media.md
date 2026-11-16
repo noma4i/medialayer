@@ -608,6 +608,9 @@ Observe `live` to start and stop the call audio of the calling library:
 ```kotlin
 call.live.collect { live -> /* start or stop the call audio */ }
 ```
+
+For a call that Core-Telecom runs, pass `managedBySystem = true`. Telecom owns the audio mode, the route and the focus. MediaLayer only pauses players and refuses recording while the call lives, `setSpeaker` does nothing and `live` stays true until `close`. Playback returns when Telecom gives the audio mode back. Take it with `media.callAudio(managedBySystem = true)` and close it when Telecom ends the call.
+
 ## Microphone
 
 Observe `media.microphoneAvailability` to show a busy overlay and disable recording buttons whenever the value is not available. Do not observe calls or microphone use separately. Take `callAudio` for your own call.
