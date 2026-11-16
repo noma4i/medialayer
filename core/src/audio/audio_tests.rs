@@ -57,6 +57,10 @@ fn plain(actions: Vec<AudioAction>) -> Vec<AudioAction> {
     }).collect()
 }
 
+fn answer(world: &World, answer: FocusAnswer) -> AudioInput {
+    I::FocusRequest { generation: world.owner.inflight.expect("a request is in flight"), answer }
+}
+
 fn apply(want: SessionWant) -> AudioAction {
     A::Apply { generation: 0, want, activate: true }
 }
@@ -126,7 +130,7 @@ fn inv_audio_16_a_lost_focus_is_a_state_the_library_does_not_fight() {
     let mut world = World::playing();
     assert_eq!(world.send(I::Focus { change: FocusChange::Loss }), vec![A::PauseAll { reason: PauseReason::FocusLost }, A::ForgetPaused, DEACTIVATE]);
     assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
-    for input in [I::Route { reason: RouteReason::NewDeviceAvailable, had_private_output: false }, I::Foreground { on: true }, I::Focus { change: FocusChange::Gain }] {
+    for input in [I::Route { reason: RouteReason::NewDeviceAvailable, lost_private_output: false }, I::Foreground { on: true }, I::Focus { change: FocusChange::Gain }] {
         let label = format!("{input:?}");
         assert_eq!(world.send(input), vec![], "{label}: no request without a new intent");
     }
@@ -149,11 +153,11 @@ fn inv_audio_18_a_focus_request_refused_in_the_background_waits_for_the_foregrou
     let mut world = World::new();
     assert_eq!(world.send(I::Foreground { on: false }), vec![]);
     assert_eq!(world.send(I::Audible { slot: 0, on: true }), vec![apply(PLAYBACK)]);
-    assert_eq!(world.send(I::FocusRequest { answer: FocusAnswer::Failed }), vec![A::PauseAll { reason: PauseReason::Interrupted }]);
+    assert_eq!(world.send(answer(&world, FocusAnswer::Failed)), vec![A::PauseAll { reason: PauseReason::Interrupted }]);
     assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
     assert_eq!(world.settle(I::Foreground { on: true }), vec![apply(PLAYBACK), A::ResumePaused]);
     assert_eq!(world.send(I::Audible { slot: 0, on: true }), vec![]);
-    assert_eq!(World::new().send(I::FocusRequest { answer: FocusAnswer::Delayed }), vec![], "a delayed request waits for the gain");
+    assert_eq!(World::new().send(I::FocusRequest { generation: 7, answer: FocusAnswer::Delayed }), vec![], "an answer to no request changes nothing");
 }
 
 #[test]
@@ -161,7 +165,7 @@ fn inv_audio_19_a_lost_private_output_pauses_and_the_routes_of_an_own_change_are
     let mut world = World::playing();
     let start = world.raw(I::Capture { id: 1, kind: RecordingKind::Video });
     assert_eq!(plain(start.clone()), vec![A::PauseAll { reason: PauseReason::Capture }, apply(SessionWant::Recording { kind: RecordingKind::Video })], "the admission waits for the session");
-    assert_eq!(world.send(I::Route { reason: RouteReason::OldDeviceUnavailable, had_private_output: true }), vec![], "a route inside the own change is ours");
+    assert_eq!(world.send(I::Route { reason: RouteReason::OldDeviceUnavailable, lost_private_output: false }), vec![], "a route that keeps a private output (A2DP to HFP inside the own change) is no loss");
     let generation = start.iter().find_map(generation_of).unwrap();
     assert_eq!(world.send(I::Applied { generation, result: AppliedResult::Ok }), vec![A::Admit { id: 1 }]);
     assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
@@ -175,7 +179,7 @@ fn inv_audio_19_a_lost_private_output_pauses_and_the_routes_of_an_own_change_are
         (RouteReason::Override, true, vec![]),
         (RouteReason::NewDeviceAvailable, true, vec![]),
     ] {
-        assert_eq!(world.send(I::Route { reason, had_private_output: private }), expected, "{reason:?} private={private}");
+        assert_eq!(world.send(I::Route { reason, lost_private_output: private }), expected, "{reason:?} private={private}");
     }
     assert_eq!(world.send(I::Noisy), lost);
 }
@@ -283,12 +287,12 @@ fn inv_audio_26_a_busy_release_is_finished_by_the_next_event_without_a_timer() {
     assert_eq!(plain(idle.clone()), vec![DEACTIVATE]);
     let generation = idle.iter().find_map(generation_of).unwrap();
     assert_eq!(world.send(I::Applied { generation, result: AppliedResult::Busy }), vec![]);
-    assert_eq!(world.send(I::Route { reason: RouteReason::CategoryChange, had_private_output: false }), vec![DEACTIVATE]);
+    assert_eq!(world.send(I::Route { reason: RouteReason::CategoryChange, lost_private_output: false }), vec![DEACTIVATE]);
 
     let mut early = World::playing();
     let idle = early.raw(I::Audible { slot: 0, on: false });
     let generation = idle.iter().find_map(generation_of).unwrap();
-    assert_eq!(early.send(I::Route { reason: RouteReason::CategoryChange, had_private_output: false }), vec![], "the event arrives while the release is in flight");
+    assert_eq!(early.send(I::Route { reason: RouteReason::CategoryChange, lost_private_output: false }), vec![], "the event arrives while the release is in flight");
     assert_eq!(early.send(I::Applied { generation, result: AppliedResult::Busy }), vec![DEACTIVATE], "an event during the busy release already was the next event");
 }
 
@@ -358,9 +362,9 @@ fn random_input(dice: &mut crate::seeded::Dice, next_id: &mut u64, started: &[u6
         11 => I::InterruptionEnded { should_resume: dice.percent(50) },
         12 => I::ResumptionRecommendation { should_resume: dice.percent(50) },
         13 => I::Focus { change: [FocusChange::Gain, FocusChange::LossTransient, FocusChange::LossTransientDuck, FocusChange::Loss][dice.index(4)] },
-        14 => I::FocusRequest { answer: [FocusAnswer::Granted, FocusAnswer::Delayed, FocusAnswer::Failed][dice.index(3)] },
+        14 => I::FocusRequest { generation: dice.below(40), answer: [FocusAnswer::Granted, FocusAnswer::Delayed, FocusAnswer::Failed][dice.index(3)] },
         15 => I::MediaReset,
-        16 => I::Route { reason: [RouteReason::OldDeviceUnavailable, RouteReason::NewDeviceAvailable, RouteReason::CategoryChange, RouteReason::Override, RouteReason::Other][dice.index(5)], had_private_output: dice.percent(50) },
+        16 => I::Route { reason: [RouteReason::OldDeviceUnavailable, RouteReason::NewDeviceAvailable, RouteReason::CategoryChange, RouteReason::Override, RouteReason::Other][dice.index(5)], lost_private_output: dice.percent(50) },
         17 => I::Noisy,
         18 => I::ObservedCalls { uuids: if dice.percent(50) { vec![] } else { vec![format!("own{}", dice.between(1, (*next_id).max(1))), "cellular".into()][..1 + dice.index(2)].to_vec() } },
         19 => I::PhoneCall { active: dice.percent(40) },
@@ -374,13 +378,20 @@ fn random_input(dice: &mut crate::seeded::Dice, next_id: &mut u64, started: &[u6
     }
 }
 
+fn answers_flight_now(input: &AudioInput, inflight: Option<u64>) -> bool {
+    match input {
+        I::Applied { generation, .. } | I::FocusRequest { generation, .. } => Some(*generation) == inflight,
+        _ => true,
+    }
+}
+
 fn system_deactivates(input: &AudioInput) -> bool {
     matches!(
         input,
         I::InterruptionBegan
             | I::MediaReset
             | I::CallSystemDeactivated { .. }
-            | I::FocusRequest { answer: FocusAnswer::Failed }
+            | I::FocusRequest { answer: FocusAnswer::Failed, .. }
             | I::Applied { result: AppliedResult::Failed { .. }, .. }
     )
 }
@@ -420,6 +431,11 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
         };
         for _ in 0..60 {
             let mut input = random_input(&mut dice, &mut next_id, &started);
+            if let (I::FocusRequest { generation, .. }, Some(inflight)) = (&mut input, world.owner.inflight) {
+                if dice.percent(70) {
+                    *generation = inflight;
+                }
+            }
             if let (I::Applied { generation, result }, Some(inflight)) = (&mut input, world.owner.inflight) {
                 if dice.percent(70) {
                     *generation = inflight;
@@ -447,7 +463,7 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
             if system_deactivates(&input) {
                 session_active = false;
             }
-            let refusal = matches!(input, I::FocusRequest { answer: FocusAnswer::Delayed | FocusAnswer::Failed } | I::Applied { result: AppliedResult::Failed { .. }, .. });
+            let refusal = answers_flight_now(&input, world.owner.inflight) && matches!(input, I::FocusRequest { answer: FocusAnswer::Delayed | FocusAnswer::Failed, .. } | I::Applied { result: AppliedResult::Failed { .. }, .. });
             let noisy = matches!(input, I::Noisy);
             let label = format!("{input:?}");
             let actions = world.raw(input);
@@ -489,7 +505,7 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
         ending.extend((1..=next_id).map(|id| I::CaptureEnded { id }));
         ending.extend((0..3).map(|slot| I::Audible { slot, on: false }));
         ending.extend((1..=3).map(|id| I::VolumeReadEnded { id }));
-        ending.extend([I::InterruptionEnded { should_resume: false }, I::Focus { change: FocusChange::Gain }, I::Foreground { on: true }, I::Route { reason: RouteReason::Other, had_private_output: false }]);
+        ending.extend([I::InterruptionEnded { should_resume: false }, I::Focus { change: FocusChange::Gain }, I::Foreground { on: true }, I::Route { reason: RouteReason::Other, lost_private_output: false }]);
         for input in ending {
             if let I::CaptureEnded { id } = &input {
                 admitted.retain(|running| running != id);
@@ -513,12 +529,13 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
 
 #[test]
 fn inv_audio_32_a_recording_is_admitted_only_after_its_session_is_applied() {
-    for result in [I::FocusRequest { answer: FocusAnswer::Failed }, I::FocusRequest { answer: FocusAnswer::Delayed }] {
+    for refusal in [FocusAnswer::Failed, FocusAnswer::Delayed] {
         let mut world = World::new();
-        let label = format!("{result:?}");
+        let label = format!("{refusal:?}");
         assert_eq!(world.send(I::Capture { id: 1, kind: RecordingKind::Voice }), vec![A::PauseAll { reason: PauseReason::Capture }, apply(SessionWant::Recording { kind: RecordingKind::Voice })], "{label}");
         assert_eq!(world.send(I::Capture { id: 2, kind: RecordingKind::Voice }), vec![A::Refuse { id: 2, reason: RecordingRefusal::MicrophoneBusy }], "{label}: one admission at a time");
-        let answer = world.send(result);
+        let refused = answer(&world, refusal);
+        let answer = world.send(refused);
         assert_eq!(answer.first(), Some(&A::Refuse { id: 1, reason: RecordingRefusal::MicrophoneBusy }), "{label}: {answer:?}");
         assert!(!answer.iter().any(|action| matches!(action, A::Admit { .. })), "{label}");
     }
@@ -535,14 +552,14 @@ fn inv_audio_32_a_recording_is_admitted_only_after_its_session_is_applied() {
 fn inv_audio_45_a_refused_or_delayed_answer_is_a_state_and_brings_no_new_request() {
     let asks = |actions: &[AudioAction]| actions.iter().any(|action| matches!(action, A::Apply { .. }));
     let mut world = World::playing();
-    let delayed = world.send(I::FocusRequest { answer: FocusAnswer::Delayed });
+    let delayed = world.send(answer(&world, FocusAnswer::Delayed));
     assert!(!asks(&delayed), "a delayed request with playback demand: {delayed:?}");
     let gain = world.send(I::Focus { change: FocusChange::Gain });
     assert!(gain.contains(&A::ResumePaused) && !asks(&gain), "the delayed gain resumes without a new request: {gain:?}");
 
     let mut call = World::new();
     assert!(asks(&call.send(I::CallStarted { id: 1, kind: CallKind::Unmanaged, speaker: false })));
-    let failed = call.send(I::FocusRequest { answer: FocusAnswer::Failed });
+    let failed = call.send(answer(&call, FocusAnswer::Failed));
     assert!(!asks(&failed), "a failed request with an own call: {failed:?}");
     assert!(!asks(&call.send(I::CallSpeaker { id: 1, speaker: true })), "a demand change of the same call is not a system event");
     assert_eq!(call.send(I::Foreground { on: true }).iter().filter(|action| matches!(action, A::Apply { .. })).count(), 1, "the foreground asks once");
@@ -552,8 +569,8 @@ fn inv_audio_45_a_refused_or_delayed_answer_is_a_state_and_brings_no_new_request
     let generation = start.iter().find_map(generation_of).unwrap();
     let refused = session.send(I::Applied { generation, result: AppliedResult::Failed { code: 561017449 } });
     assert!(!asks(&refused), "a refused activation with playback demand: {refused:?}");
-    assert!(!asks(&session.send(I::Audible { slot: 1, on: true })), "more playback demand is not a system event");
-    assert!(asks(&session.send(I::Foreground { on: true })), "the foreground asks again");
+    assert!(!asks(&session.send(I::Audible { slot: 0, on: true })), "the same sounding slot is no new demand");
+    assert!(asks(&session.send(I::Audible { slot: 1, on: true })), "a newly sounding slot is a new demand and asks again");
 }
 
 #[test]
@@ -611,11 +628,59 @@ fn inv_audio_49_a_voice_and_a_video_capture_asked_together_are_both_admitted() {
 
 #[test]
 fn inv_audio_50_leaving_the_duck_by_any_path_restores_the_volume() {
-    for leave in [I::Focus { change: FocusChange::Loss }, I::Focus { change: FocusChange::LossTransient }, I::InterruptionBegan, I::MediaReset, I::FocusRequest { answer: FocusAnswer::Failed }] {
+    for leave in [I::Focus { change: FocusChange::Loss }, I::Focus { change: FocusChange::LossTransient }, I::InterruptionBegan, I::MediaReset] {
         let label = format!("{leave:?}");
         let mut world = World::playing();
         assert!(world.send(I::Focus { change: FocusChange::LossTransientDuck }).contains(&A::VolumeMultiplier { value: 0.2 }));
         let left = world.send(leave);
         assert!(left.contains(&A::VolumeMultiplier { value: 1.0 }), "{label}: {left:?}");
     }
+}
+
+#[test]
+fn inv_audio_54_releasing_is_never_blocked_and_a_new_demand_leaves_a_refused_state() {
+    let mut call = World::new();
+    call.send(I::CallStarted { id: 1, kind: CallKind::Unmanaged, speaker: false });
+    call.send(answer(&call, FocusAnswer::Delayed));
+    let ended = call.send(I::CallEnded { id: 1 });
+    assert!(ended.iter().any(|action| matches!(action, A::Deactivate { .. })), "the held delayed request of the ended call is released: {ended:?}");
+
+    let mut session = World::new();
+    session.send(I::Foreground { on: true });
+    let start = session.raw(I::Audible { slot: 0, on: true });
+    let generation = start.iter().find_map(generation_of).unwrap();
+    session.send(I::Applied { generation, result: AppliedResult::Failed { code: 1 } });
+    let reader = session.send(I::VolumeReadStarted { id: 1 });
+    assert!(reader.iter().any(|action| matches!(action, A::Apply { .. })), "a new volume reader is a new demand: {reader:?}");
+}
+
+#[test]
+fn inv_audio_55_the_own_communication_mode_ends_with_the_own_call() {
+    let mut world = World::new();
+    world.settle(I::CallStarted { id: 1, kind: CallKind::Unmanaged, speaker: false });
+    world.send(I::CommunicationMode { active: true });
+    world.settle(I::CallEnded { id: 1 });
+    let other = world.send(I::CommunicationMode { active: true });
+    assert!(other.contains(&available(MicrophoneAvailability::ExternalCall)) && other.contains(&A::CallHold { on: true }), "a communication mode after the own call ended belongs to another app: {other:?}");
+}
+
+#[test]
+fn inv_audio_56_an_answer_of_an_older_request_changes_nothing() {
+    let mut world = World::new();
+    let first = world.raw(I::Capture { id: 1, kind: RecordingKind::Voice });
+    let old = first.iter().find_map(generation_of).unwrap();
+    let second = world.raw(I::Capture { id: 2, kind: RecordingKind::Video });
+    let new = second.iter().find_map(generation_of).expect("the video capture asks for its session");
+    assert_eq!(world.send(I::FocusRequest { generation: old, answer: FocusAnswer::Failed }), vec![], "the stale refusal");
+    let admitted = world.send(I::Applied { generation: new, result: AppliedResult::Ok });
+    assert!(admitted.contains(&A::Admit { id: 1 }) && admitted.contains(&A::Admit { id: 2 }), "{admitted:?}");
+}
+
+#[test]
+fn inv_audio_57_a_lost_private_output_pauses_even_while_a_request_is_in_flight() {
+    let mut world = World::new();
+    world.raw(I::Audible { slot: 0, on: true });
+    assert!(world.owner.inflight.is_some());
+    let lost = world.send(I::Route { reason: RouteReason::OldDeviceUnavailable, lost_private_output: true });
+    assert!(lost.contains(&A::PauseAll { reason: PauseReason::OutputLost }), "{lost:?}");
 }
