@@ -47,6 +47,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import org.junit.After
 import org.junit.runner.RunWith
 
 private class FakeBackend : CaptureBackend {
@@ -138,7 +139,8 @@ private class Counters {
   }
 }
 
-private class Rig(val camera: MediaCamera, val backend: FakeBackend, val counters: Counters, val directory: File, val audio: MediaAudioSession) {
+private class Rig(val camera: MediaCamera, val backend: FakeBackend, val counters: Counters, val directory: File, val fixture: AudioFixture) {
+  val audio: AudioLink get() = fixture.link
   val host = Any()
 
   fun attach() = camera.attachPreview(host, null, null)
@@ -156,6 +158,8 @@ private fun eventually(condition: String, holds: () -> Boolean) {
 @OptIn(ExperimentalCoroutinesApi::class)
 class MediaCameraTest {
   private val context = ApplicationProvider.getApplicationContext<Application>()
+  private val fixtures = mutableListOf<AudioFixture>()
+  @After fun closeAudio() { fixtures.forEach { it.close() } }
 
   @get:Rule
   val compose = createComposeRule()
@@ -165,7 +169,8 @@ class MediaCameraTest {
     val counters = Counters()
     configure(backend, counters)
     val directory = File(context.cacheDir, "camera-${System.nanoTime()}")
-    val audio = MediaAudioSession(MediaAudioFocus.Mix, FakeFocusPort(), releaseDelayMs = 0)
+    val fixture = AudioFixture(context).also { fixtures.add(it) }
+    val audio = fixture.link
     val services = CameraServices(
       admitSession = { _ ->
         counters.checkThread()
@@ -203,7 +208,7 @@ class MediaCameraTest {
       },
       directory = directory
     )
-    return Rig(MediaCamera(profile, lens, backend, services, scope), backend, counters, directory, audio)
+    return Rig(MediaCamera(profile, lens, backend, services, scope), backend, counters, directory, fixture)
   }
 
   private fun ready(rig: Rig) {
@@ -295,7 +300,8 @@ class MediaCameraTest {
     ready(rig)
     rig.camera.startRecording()
 
-    Media.calls.hold()
+    rig.fixture.port.send(FocusSignal.PhoneCall(true))
+    eventually("call revokes recording") { !rig.audio.isRecording }
     try {
       val ended = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
       assertEquals(CameraRefusal.IN_CALL to cameraRefusalText(CameraRefusal.IN_CALL), ended.reason to ended.detail)
@@ -305,7 +311,7 @@ class MediaCameraTest {
       val refused = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.startRecording() } }
       assertEquals(CameraRefusal.IN_CALL, refused.reason)
     } finally {
-      Media.calls.release()
+      rig.fixture.port.send(FocusSignal.PhoneCall(false))
     }
   }
 

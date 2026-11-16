@@ -26,7 +26,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-private class Admission {
+private class CropAdmission {
   val asked = CopyOnWriteArrayList<Long>()
   val closed = AtomicInteger()
   var refuses = false
@@ -256,7 +256,7 @@ class MediaCropTest {
   @Test
   fun inv_crop_14_thePhotoForTheScreenTakesTheMemoryBudgetAndGivesItBack() = runBlocking {
     val file = jpegFile(200, 100)
-    val admission = Admission()
+    val admission = CropAdmission()
     val crop = MediaCrop(chat) { }
 
     val bitmap = crop.load(MediaSourceValue.file(file, Kind.IMAGE), 100, admission.admit)
@@ -268,7 +268,7 @@ class MediaCropTest {
     assertEquals(1, admission.closed.get())
     assertEquals(PixelSize(100u, 50u), PixelSize(bitmap!!.width.toUInt(), bitmap.height.toUInt()))
 
-    val refused = Admission().apply { refuses = true }
+    val refused = CropAdmission().apply { refuses = true }
     val blocked = MediaCrop { }
     assertNull(blocked.load(MediaSourceValue.file(file, Kind.IMAGE), 100, refused.admit))
     assertTrue(!blocked.isReady)

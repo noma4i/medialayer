@@ -86,9 +86,9 @@ class ExoPlayerSlotFactory(
   callFactory: Call.Factory = OkHttpClient(),
   val startMuted: Boolean = false,
   val loadControl: LoadControlConfig = LoadControlConfig(),
-  val audio: MediaAudioSession = MediaAudioSession(context, MediaAudioFocus.Mix),
   val videoOutputCounters: VideoOutputCounters? = null
 ) : PlayerSlotFactory {
+  @Volatile internal var link: AudioLink? = null
   internal val appContext: Context = context.applicationContext
   internal val allocator = DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE)
   internal var renderersFactory: RenderersFactory = DefaultRenderersFactory(appContext).setEnableDecoderFallback(true)
@@ -114,6 +114,6 @@ class ExoPlayerSlotFactory(
   fun release() {
     closed = true
     events = null
-    audio.close()
+    link = null
   }
 }

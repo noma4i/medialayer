@@ -53,11 +53,11 @@ class CallHoldTest {
   fun inv_call_12_aCallHoldPausesThePlaybackAndItsReleaseDoesNotResumeIt() = runBlocking {
     val slot = CallSlot()
     openPlaying(slot).use { media ->
-      val hold = media.holdCall()
+      media.audio(AudioInput.CallStarted(1uL, CallKind.Telecom, false))
       assertEquals("pause", withTimeout(10_000) { slot.log.receive() })
       assertThrows(MediaException.InCall::class.java) { runBlocking { media.playUrl(ITEM) } }
 
-      hold.release()
+      media.audio(AudioInput.CallEnded(1uL))
       media.playUrl(ITEM)
       assertTrue("the release resumed the playback", slot.log.tryReceive().isFailure)
 

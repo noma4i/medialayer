@@ -8,13 +8,30 @@ import androidx.media3.test.utils.FakeClock
 import androidx.media3.test.utils.FakeMediaSource
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.TestScope
-import kotlinx.coroutines.test.advanceTimeBy
-import kotlinx.coroutines.test.runCurrent
 import com.noma4i.medialayer.PlaybackRoute
+import com.noma4i.medialayer.AudioFocus
+import com.noma4i.medialayer.DeviceMemory
+import com.noma4i.medialayer.MediaLayer
+import com.noma4i.medialayer.OpenConfig
+import com.noma4i.medialayer.defaultLimits
+import com.noma4i.medialayer.defaultPoolSettings
+import java.nio.file.Files
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.robolectric.Shadows.shadowOf
+
+internal typealias TestFetcher = com.noma4i.medialayer.testing.TestFetcher
+
+internal class AudioFixture(context: Context, focus: MediaAudioFocus = MediaAudioFocus.Mix, val port: RecordingFocusPort = RecordingFocusPort(), volume: VolumePort? = null) : AutoCloseable {
+  val core = MediaLayer.open(OpenConfig(
+    dir = Files.createTempDirectory("audio-fixture").toString(), fetcher = TestFetcher(),
+    settings = SharedPreferencesSettings(context, "audio-fixture-${System.nanoTime()}"), slots = null,
+    device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings(),
+    audioFocus = when (focus) { MediaAudioFocus.Mix -> AudioFocus.MIX; MediaAudioFocus.Duck -> AudioFocus.DUCK; MediaAudioFocus.Exclusive -> AudioFocus.EXCLUSIVE }
+  ))
+  val link = AudioLink(core, AudioPorts(port, GrantedPermission), volume)
+  override fun close() { link.close(); core.close() }
+}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 internal abstract class ExoPlayerSlotRig {
@@ -23,20 +40,18 @@ internal abstract class ExoPlayerSlotRig {
   protected val route = PlaybackRoute("http://127.0.0.1:9/a.mp4", emptyMap(), null, false, true)
   protected val factories = mutableListOf<ExoPlayerSlotFactory>()
 
-  protected val focusPort = FakeFocusPort()
-  protected val focusScope = TestScope()
+  protected val focusPort = RecordingFocusPort()
+  private val audioFixtures = mutableListOf<AudioFixture>()
 
-  protected fun session(focus: MediaAudioFocus) = MediaAudioSession(focus, focusPort, 300, focusScope)
+  protected fun settleAudioFocus() = idle()
 
-  protected fun settleAudioFocus() = repeat(20) { idle(); Thread.sleep(10) }
-
-  protected fun advanceFocus(ms: Long) {
-    focusScope.advanceTimeBy(ms)
-    focusScope.runCurrent()
-  }
+  protected fun advanceFocus(ms: Long) = idle()
 
   protected fun factory(startMuted: Boolean = true, focus: MediaAudioFocus = MediaAudioFocus.Mix) =
-    ExoPlayerSlotFactory(context, OkHttpClient(), startMuted = startMuted, audio = session(focus)).onMainLooper().also {
+    ExoPlayerSlotFactory(context, OkHttpClient(), startMuted = startMuted).onMainLooper().also {
+      val fixture = AudioFixture(context, focus, focusPort)
+      audioFixtures.add(fixture)
+      it.link = fixture.link
       it.mediaSourceFor = { FakeMediaSource() }
       it.bind(events)
       factories.add(it)
@@ -51,7 +66,7 @@ internal abstract class ExoPlayerSlotRig {
   }
 
   @After
-  fun releaseEverything() { factories.forEach { it.release() }; idle() }
+  fun releaseEverything() { factories.forEach { it.release() }; audioFixtures.forEach { it.close() }; idle() }
 
   protected fun playUntilReady(clock: FakeClock, slot: ExoPlayerSlot) {
     androidx.media3.test.utils.robolectric.TestPlayerRunHelper.advance(slot.player!!)

@@ -26,6 +26,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.After
 import org.junit.runner.RunWith
 
 private class VoiceFakeCapture(private val refusal: VoiceRefusal? = null, private val peaks: List<Float> = listOf(0.5f)) : VoiceCapture {
@@ -34,11 +35,11 @@ private class VoiceFakeCapture(private val refusal: VoiceRefusal? = null, privat
   var limitMs = 0L
   private var file: File? = null
 
-  override fun start(file: File, maxDurationMs: Long, onLimit: () -> Unit) {
+  override fun start(file: File, maxDurationMs: ULong, onLimit: () -> Unit) {
     refusal?.let { throw VoiceRefused(it) }
     this.file = file
     limit = onLimit
-    limitMs = maxDurationMs
+    limitMs = maxDurationMs.toLong()
     TestSignal.fire()
   }
 
@@ -62,11 +63,15 @@ private class VoiceTicks(var now: Long = 1_000) {
 class MediaVoiceRecorderTest {
   private val context = ApplicationProvider.getApplicationContext<Application>()
   private val scope = CoroutineScope(Dispatchers.Default)
+  private val fixtures = mutableListOf<AudioFixture>()
+
+  private fun audio(port: RecordingFocusPort = RecordingFocusPort()): AudioLink = AudioFixture(context, port = port).also { fixtures.add(it) }.link
+  @After fun closeAudio() { fixtures.forEach { it.close() } }
 
   private fun file(): File = File.createTempFile("voice", ".m4a").apply { delete(); deleteOnExit() }
 
-  private fun makeRecorder(capture: VoiceCapture, ticks: VoiceTicks = VoiceTicks(), audio: MediaAudioSession? = null, maxMs: Long = 60_000) =
-    MediaVoiceRecorder(capture, maxMs, { audio }, ticks::read, 5, scope)
+  private fun makeRecorder(capture: VoiceCapture, ticks: VoiceTicks = VoiceTicks(), audio: AudioLink = audio(), maxMs: Long = 60_000) =
+    MediaVoiceRecorder(capture, maxMs.toULong(), { audio }, { ticks.read().toULong() }, 5, scope)
 
   @Test
   fun inv_voice_04_aRecordingGivesAnExistingFileAndALengthAboveZero() = runBlocking {
@@ -106,7 +111,8 @@ class MediaVoiceRecorderTest {
   fun inv_voice_06_theLevelIsNotReadInRestOrAfterTheRecordingEnds() = runTest {
     val capture = VoiceFakeCapture()
     val ticks = VoiceTicks()
-    val recorder = MediaVoiceRecorder(capture, 60_000, { null }, ticks::read, 5, backgroundScope)
+    val audio = audio()
+    val recorder = MediaVoiceRecorder(capture, 60_000u, { audio }, { ticks.read().toULong() }, 5, backgroundScope)
     advanceTimeBy(1_000)
     runCurrent()
     assertEquals(0, capture.reads.get())
@@ -141,15 +147,14 @@ class MediaVoiceRecorderTest {
 
   @Test
   fun inv_voice_07_theSystemCaptureWithoutTheMicrophonePermissionIsRefused() {
-    val failure = assertThrows(VoiceRefused::class.java) { SystemVoiceCapture(context).start(file(), 1_000) {} }
+    val failure = assertThrows(VoiceRefused::class.java) { SystemVoiceCapture(context).start(file(), 1_000uL) {} }
 
     assertEquals(VoiceRefusal.PERMISSION_DENIED, failure.reason)
   }
 
   @Test
   fun inv_voice_08_theRecordingTakesTheAudioFocusAndGivesItBackAtTheEnd() = runBlocking {
-    val port = FakeFocusPort()
-    val session = MediaAudioSession(MediaAudioFocus.Mix, port, releaseDelayMs = 0)
+    val session = audio()
     val ticks = VoiceTicks()
     val recorder = makeRecorder(VoiceFakeCapture(), ticks, audio = session)
 
@@ -163,7 +168,7 @@ class MediaVoiceRecorderTest {
 
   @Test
   fun inv_voice_08_aRefusedAudioFocusIsABusyMicrophoneAndStartsNoCapture() {
-    val session = MediaAudioSession(MediaAudioFocus.Mix, FakeFocusPort(grant = false), releaseDelayMs = 0)
+    val session = audio(RecordingFocusPort().also { it.answer = com.noma4i.medialayer.FocusAnswer.FAILED })
     val capture = VoiceFakeCapture()
     val recorder = makeRecorder(capture, audio = session)
 
@@ -176,13 +181,13 @@ class MediaVoiceRecorderTest {
 
   @Test
   fun aSecondStartWhileTheFirstIsStartingIsRefusedAndHoldsNoRecordingSession() = runBlocking {
-    val session = MediaAudioSession(MediaAudioFocus.Mix, FakeFocusPort(), releaseDelayMs = 0)
+    val session = audio()
     val entered = java.util.concurrent.CountDownLatch(1)
     val open = java.util.concurrent.CountDownLatch(1)
     val calls = AtomicInteger()
     var written: File? = null
     val capture = object : VoiceCapture {
-      override fun start(file: File, maxDurationMs: Long, onLimit: () -> Unit) {
+      override fun start(file: File, maxDurationMs: ULong, onLimit: () -> Unit) {
         if (calls.incrementAndGet() != 1) return
         written = file
         entered.countDown()
@@ -238,7 +243,7 @@ class MediaVoiceRecorderTest {
   @Test
   fun inv_voice_10_aRecordingWithoutSoundIsAMediaExceptionAndLeavesNoFile() = runBlocking {
     val capture = object : VoiceCapture {
-      override fun start(file: File, maxDurationMs: Long, onLimit: () -> Unit) {}
+      override fun start(file: File, maxDurationMs: ULong, onLimit: () -> Unit) {}
       override fun peak(): Float = 0f
       override fun stop() {}
     }

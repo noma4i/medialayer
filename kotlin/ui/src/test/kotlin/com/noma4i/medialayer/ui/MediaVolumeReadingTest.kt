@@ -9,6 +9,10 @@ import kotlinx.coroutines.flow.toList
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import org.junit.After
+import org.junit.runner.RunWith
+import androidx.test.core.app.ApplicationProvider
+import android.content.Context
 
 private class FakeVolumePort(var current: Float?) : VolumePort {
   val listeners = mutableListOf<() -> Unit>()
@@ -27,8 +31,11 @@ private class FakeVolumePort(var current: Float?) : VolumePort {
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(MediaLayerTestRunner::class)
 class MediaVolumeReadingTest {
-  private fun session(volume: VolumePort?) = MediaAudioSession(MediaAudioFocus.Mix, FakeFocusPort(), 300, kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Job()), volume)
+  private val fixtures = mutableListOf<AudioFixture>()
+  private fun session(volume: VolumePort?) = AudioFixture(ApplicationProvider.getApplicationContext<Context>(), volume = volume).also { fixtures.add(it) }.link
+  @After fun closeAudio() { fixtures.forEach { it.close() } }
 
   @Test
   fun inv_android_11_readVolume_gives_the_initial_value_and_each_change_and_cancel_unsubscribes() = runTest(UnconfinedTestDispatcher()) {

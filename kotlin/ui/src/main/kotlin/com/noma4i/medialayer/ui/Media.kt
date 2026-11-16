@@ -36,10 +36,7 @@ object Media {
   var failure: MediaException? by mutableStateOf(null)
     internal set
 
-  var audio: MediaAudioSession? = null
-    internal set
-
-  internal val calls = CallGate()
+  internal var link: AudioLink? = null
 }
 
 internal class ScreenVisibility {

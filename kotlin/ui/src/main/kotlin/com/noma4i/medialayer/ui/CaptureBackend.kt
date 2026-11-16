@@ -56,7 +56,7 @@ internal interface CaptureBackend {
 internal class CameraServices(
   val admitSession: suspend (Long) -> AutoCloseable,
   val admitShot: suspend (Long) -> AutoCloseable,
-  val audio: () -> MediaAudioSession?,
+  val audio: () -> AudioLink?,
   val clipInfo: suspend (File) -> MediaInfo?,
   val uprightVideo: suspend (File) -> Unit,
   val upright: suspend (File, Double) -> File,
@@ -72,7 +72,7 @@ internal class CameraServices(
           AutoCloseable { hold.release() }
         },
         admitShot = { bytes -> environment().media.decodeAdmit()(bytes) },
-        audio = { Media.audio },
+        audio = { Media.link },
         clipInfo = { file -> runCatching { readMediaInfo(context, "file://${file.absolutePath}") }.getOrNull() },
         uprightVideo = { file -> uprightVideoAt(context, file) },
         upright = { raw, quality -> prepareImageAt(directory, raw, quality, environment().media.decodeAdmit()).file },

@@ -7,7 +7,6 @@ import android.media.AudioManager
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -21,17 +20,17 @@ internal class ExoPlayerSlotAudioTest : ExoPlayerSlotRig() {
     val slot = factory(startMuted = false, focus = MediaAudioFocus.Exclusive).createSlot(0u)
     val audio = shadowOf(context.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
     slot.load("k", route); slot.play(); idle()
-    androidx.media3.test.utils.robolectric.TestPlayerRunHelper.runUntilPlaybackState(slot.player!!, androidx.media3.common.Player.STATE_READY)
-    untilIdle(slot) { audio.lastAudioFocusRequest != null }
-    val grant = audio.lastAudioFocusRequest
-    assertEquals(AudioManager.AUDIOFOCUS_GAIN, grant!!.audioFocusRequest.focusGain)
-    assertEquals(emptyList<String>(), focusPort.calls.toList())
+    TestSignal.await("link focus", 5_000) { focusPort.calls.contains("request GAIN MEDIA") }
+    assertNull(audio.lastAudioFocusRequest)
+    assertEquals(listOf("request GAIN MEDIA"), focusPort.calls.toList())
 
     repeat(10) { slot.mute(); idle(); assertEquals(0f, slot.player!!.volume, 0f); slot.unmute(); idle(); assertEquals(1f, slot.player!!.volume, 0f) }
+    TestSignal.await("focus after volume changes", 5_000) { focusPort.calls.size == 21 }
+    focusPort.calls.clear()
     slot.unload(); idle()
-    untilIdle(slot) { audio.lastAbandonedAudioFocusRequest != null }
-
-    assertSame(grant, audio.lastAudioFocusRequest)
+    TestSignal.await("focus abandoned after unload", 5_000) { focusPort.calls.toList() == listOf("abandon") }
+    assertEquals(listOf("abandon"), focusPort.calls.toList())
+    assertNull(audio.lastAudioFocusRequest)
   }
 
   @Test
@@ -57,7 +56,8 @@ internal class ExoPlayerSlotAudioTest : ExoPlayerSlotRig() {
 
     slot.play(); settleAudioFocus()
 
-    assertEquals(listOf("request:Duck"), focusPort.calls.toList())
+    TestSignal.await("link focus", 5_000) { focusPort.calls.contains("request GAIN MEDIA") }
+    assertEquals(listOf("request GAIN MEDIA"), focusPort.calls.toList())
     assertNull(audio.lastAudioFocusRequest)
   }
 
@@ -68,19 +68,23 @@ internal class ExoPlayerSlotAudioTest : ExoPlayerSlotRig() {
 
     slot.mute(); idle(); advanceFocus(300)
 
-    assertEquals(listOf("request:Duck", "abandon"), focusPort.calls.toList())
+    TestSignal.await("abandon muted", 5_000) { focusPort.calls.size >= 2 }
+    assertEquals(listOf("request GAIN MEDIA", "abandon"), focusPort.calls.toList())
 
     slot.unmute(); idle()
 
-    assertEquals(listOf("request:Duck", "abandon", "request:Duck"), focusPort.calls.toList())
+    TestSignal.await("focus unmuted", 5_000) { focusPort.calls.size >= 3 }
+    assertEquals(listOf("request GAIN MEDIA", "abandon", "request GAIN MEDIA"), focusPort.calls.toList())
 
     slot.pause(); idle(); advanceFocus(300)
 
-    assertEquals(listOf("request:Duck", "abandon", "request:Duck", "abandon"), focusPort.calls.toList())
+    TestSignal.await("abandon paused", 5_000) { focusPort.calls.size >= 4 }
+    assertEquals(listOf("request GAIN MEDIA", "abandon", "request GAIN MEDIA", "abandon"), focusPort.calls.toList())
 
     slot.play(); idle(); slot.unload(); idle(); advanceFocus(300)
 
-    assertEquals(listOf("request:Duck", "abandon", "request:Duck", "abandon", "request:Duck", "abandon"), focusPort.calls.toList())
+    TestSignal.await("abandon unloaded", 5_000) { focusPort.calls.size >= 6 }
+    assertEquals(listOf("request GAIN MEDIA", "abandon", "request GAIN MEDIA", "abandon", "request GAIN MEDIA", "abandon"), focusPort.calls.toList())
   }
 
   @Test
@@ -100,7 +104,8 @@ internal class ExoPlayerSlotAudioTest : ExoPlayerSlotRig() {
 
     slot.disposing(); idle(); advanceFocus(300)
 
-    assertEquals(listOf("request:Duck", "abandon"), focusPort.calls.toList())
+    TestSignal.await("abandon disposed", 5_000) { focusPort.calls.size >= 2 }
+    assertEquals(listOf("request GAIN MEDIA", "abandon"), focusPort.calls.toList())
   }
 
   @Test

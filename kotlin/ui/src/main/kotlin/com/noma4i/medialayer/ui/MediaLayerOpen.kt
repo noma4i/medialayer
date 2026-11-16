@@ -1,23 +1,21 @@
 package com.noma4i.medialayer.ui
 
 import android.app.ActivityManager
-import android.content.BroadcastReceiver
 import android.content.ComponentCallbacks2
 import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.content.res.Configuration
-import android.media.AudioManager
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Trace
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.noma4i.medialayer.DeviceMemory
+import com.noma4i.medialayer.AudioFocus
 import com.noma4i.medialayer.Fetcher
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.MemoryReleaser
@@ -51,7 +49,7 @@ import okhttp3.OkHttpClient
 
 internal class HeldResources(val signals: SystemSignals?, val factory: ExoPlayerSlotFactory?, val imageLoader: ImageLoader?, val layer: MediaLayer?)
 
-internal class Binding(val factory: ExoPlayerSlotFactory, val signals: SystemSignals, val imageLoader: ImageLoader)
+internal class Binding(val factory: ExoPlayerSlotFactory, val signals: SystemSignals, val imageLoader: ImageLoader, val link: AudioLink)
 
 private val bindings: MutableMap<MediaLayer, Binding> = Collections.synchronizedMap(WeakHashMap())
 
@@ -59,7 +57,10 @@ private val openScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
 internal val MediaLayer.binding: Binding? get() = bindings[this]
 
-val MediaLayer.microphoneAvailability get() = checkNotNull(Media.audio) { "MediaLayer is closed" }.microphoneAvailability
+val MediaLayer.microphoneAvailability get() = checkNotNull(binding?.link) { "MediaLayer is closed" }.microphoneAvailability
+fun MediaLayer.callAudio(kind: MediaCallKind): MediaCallAudio = (binding?.link ?: throw com.noma4i.medialayer.MediaException.Closed()).call(kind)
+fun MediaLayer.readVolume(): MediaVolumeReading? = (binding?.link ?: throw com.noma4i.medialayer.MediaException.Closed()).readVolume()
+fun MediaLayer.volumeRaises() = (binding?.link ?: throw com.noma4i.medialayer.MediaException.Closed()).volumeRaises()
 
 fun MediaLayer.Companion.open(
   context: Context,
@@ -106,13 +107,12 @@ internal fun openMediaLayer(
   open: (OpenConfig) -> MediaLayer
 ): Deferred<MediaLayer> {
   val app = context.applicationContext
-  val audio = MediaAudioSession(app, audioFocus)
+  var audio: AudioLink? = null
   val lock = Any()
   var factory: ExoPlayerSlotFactory? = null
   var reference: WeakReference<MediaLayer>? = null
   var imageLoader: ImageLoader? = null
   var signals: SystemSignals? = null
-  var externalCall: MediaCallHold? = null
   fun detach(): HeldResources = synchronized(lock) {
     HeldResources(signals, factory, imageLoader, reference?.get()).also {
       signals = null
@@ -121,12 +121,11 @@ internal fun openMediaLayer(
     }
   }
   fun finish(held: HeldResources) {
-    audio.onExternalCall { }
-    synchronized(lock) { externalCall?.close(); externalCall = null }
-    held.factory?.release() ?: audio.close()
+    held.factory?.release()
+    audio?.close()
     held.imageLoader?.shutdown()
     held.layer?.let { bindings.remove(it) }
-    if (Media.audio === audio) Media.audio = null
+    if (Media.link === audio) Media.link = null
     onTestChange?.invoke()
   }
   val releaser = object : MemoryReleaser {
@@ -144,7 +143,6 @@ internal fun openMediaLayer(
       }
     }
   }
-  Media.audio = audio
   val created = AtomicReference<MediaLayer?>()
   val opened = openScope.async {
     val client by lazy(LazyThreadSafetyMode.NONE) { OkHttpClient() }
@@ -154,7 +152,7 @@ internal fun openMediaLayer(
     val device: DeviceMemory
     try {
       codecWarmup.start()
-      slots = ExoPlayerSlotFactory(app, callFactory ?: client, startMuted = emulator, audio = audio, videoOutputCounters = videoOutputCounters)
+      slots = ExoPlayerSlotFactory(app, callFactory ?: client, startMuted = emulator, videoOutputCounters = videoOutputCounters)
       synchronized(lock) { factory = slots }
       dir = File(app.cacheDir, "medialayer").apply { mkdirs() }
       CaptureFiles.sweepOrphans(CaptureFiles.directory(app))
@@ -181,13 +179,20 @@ internal fun openMediaLayer(
       evictImage = resolved.evictImage,
       evictAudio = resolved.evictAudio,
       memoryReleaser = releaser,
-      silent = emulator
+      silent = emulator,
+      audioFocus = when (audioFocus) { MediaAudioFocus.Exclusive -> AudioFocus.EXCLUSIVE; MediaAudioFocus.Duck -> AudioFocus.DUCK; MediaAudioFocus.Mix -> AudioFocus.MIX }
     )
     ensureActive()
     Trace.beginSection("MediaLayer.open.ffi")
     val layer = try { open(config) } finally { Trace.endSection() }
     created.set(layer)
     ensureActive()
+    val link = AudioLink(layer, AudioPorts(AudioSystem(app), object : MicrophonePermissionPort {
+      override fun granted() = app.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    }), SystemVolume(app))
+    audio = link
+    slots.link = link
+    Media.link = link
     synchronized(lock) { reference = WeakReference(layer) }
     val loader = mediaImageLoader(app, ImageBytes { url, headers ->
       val media = reference?.get() ?: throw CancellationException("MediaLayer was closed")
@@ -198,13 +203,9 @@ internal fun openMediaLayer(
     val events = layer.playerEvents()
     ensureActive()
     slots.bind(events)
-    audio.onExternalCall { active -> synchronized(lock) {
-      if (active && externalCall == null) externalCall = layer.callHold()
-      if (!active) { externalCall?.close(); externalCall = null }
-    } }
-    val registered = SystemSignals(app, events, lifecycle, audio::foreground).also { it.register() }
+    val registered = SystemSignals(app, events, lifecycle, link::foreground).also { it.register() }
     synchronized(lock) { signals = registered }
-    bindings[layer] = Binding(slots, registered, loader)
+    bindings[layer] = Binding(slots, registered, loader, link)
     layer
   }
   opened.invokeOnCompletion { failure ->
@@ -232,22 +233,16 @@ internal class SystemSignals(
   private val context: Context,
   private val events: PlayerEventsInterface,
   private val lifecycle: Lifecycle,
-  private val microphoneForeground: () -> Unit = {}
+  private val microphoneForeground: (Boolean) -> Unit = {}
 ) : ComponentCallbacks2, DefaultLifecycleObserver {
   private val registrationLock = Any()
   private var registered = false
   private var unregistered = false
-  private val outputLost = object : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent) {
-      if (intent.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) Media.muted = true
-    }
-  }
 
   fun register(): Unit = synchronized(registrationLock) {
     if (registered || unregistered) return
     SystemReduceMotion.install(context)
     context.registerComponentCallbacks(this)
-    ContextCompat.registerReceiver(context, outputLost, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), ContextCompat.RECEIVER_NOT_EXPORTED)
     registered = true
     onMain { synchronized(registrationLock) { if (registered) lifecycle.addObserver(this) } }
   }
@@ -258,7 +253,6 @@ internal class SystemSignals(
       registered = false
       unregistered = true
       context.unregisterComponentCallbacks(this@SystemSignals)
-      context.unregisterReceiver(outputLost)
       lifecycle.removeObserver(this@SystemSignals)
     }
   }
@@ -276,14 +270,14 @@ internal class SystemSignals(
 
   override fun onStart(owner: LifecycleOwner) {
     isBackground.set(false)
-    microphoneForeground()
+    microphoneForeground(true)
     events.foreground()
   }
 
   override fun onStop(owner: LifecycleOwner) = goBackground()
 
   private fun goBackground() {
-    if (isBackground.compareAndSet(false, true)) events.background()
+    if (isBackground.compareAndSet(false, true)) { microphoneForeground(false); events.background() }
   }
 
   private fun pressure(level: Int): Pressure? = when {
