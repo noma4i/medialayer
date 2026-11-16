@@ -15,14 +15,14 @@ You normally do not call pool operations. You declare places with `MediaVideo` (
 let intro = try media.openPlace(item: introItem)
 try intro.update(input: PlaceInput(visible: false, playing: false, group: nil, peeking: false, muted: nil, rate: nil, pinned: true, viewToken: nil))
 intro.release()
-media.releaseAll()
+try media.releaseAll()
 ```
 
 ### Kotlin
 
 ```kotlin
 val intro = media.openPlace(introItem)
-intro.update(PlaceInput(false, false, null, false, null, null, true, null))
+intro.update(PlaceInput(visible = false, playing = false, group = null, peeking = false, muted = null, rate = null, pinned = true, viewToken = null))
 intro.release()
 media.releaseAll()
 ```

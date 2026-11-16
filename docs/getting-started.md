@@ -83,18 +83,18 @@ class ExampleApp : Application() {
 }
 ```
 
-### Подключение без кода готовности
+### Setup without readiness code
 
-Приложение не пишет машину готовности слоя. Четыре правила:
+The app does not write a readiness state machine for `MediaLayer`. Four rules:
 
-- Умолчания `open`: Swift берёт `URLSessionFetcher()` и `UserDefaultsSettings()`, Kotlin берёт `OkHttpFetcher` и `SharedPreferencesSettings(context)`. Явный `fetcher` или `settings` заменяет умолчание.
-- Swift `.mediaLayer(opening: Task<MediaLayer, Error>)` рисует содержимое сразу. Виды медиа не объявляют места, пока слой не открыт, потом монтируются сами. Ошибка открытия видна в `Media.failure`. Kotlin `MediaLayerProvider(Deferred)` ведёт себя так же и пишет любую ошибку открытия в `Media.failure` (не `MediaException` приходит как `MediaException.Unexpected`).
-- Процессный контекст: вид без провайдера в дереве (корень вне дерева, тост, окно) берёт контекст последнего установленного провайдера процесса. Контекст окружения сильнее процессного. Снятие провайдера снимает процессный контекст, если он текущий. Без обоих контекстов Kotlin бросает ошибку «Wrap the screen in MediaLayerProvider», Swift не рисует медиа.
-- Слой из UI: Swift `@Environment(\.mediaLayer)` и Kotlin `currentMediaLayer()` отдают `MediaLayer?`. Значение `nil` значит, что слой ещё не готов. Оба учитывают процессный контекст.
+- `open` defaults: Swift takes `URLSessionFetcher()` and `UserDefaultsSettings()`, Kotlin takes `OkHttpFetcher` and `SharedPreferencesSettings(context)`. An explicit `fetcher` or `settings` replaces the default.
+- Swift `.mediaLayer(opening: Task<MediaLayer, Error>)` draws the content at once. Media views do not declare places until `MediaLayer` is open, then they mount by themselves. An open error shows in `Media.failure`. Kotlin `MediaLayerProvider(Deferred)` works the same way and writes any open error to `Media.failure` (an error that is not a `MediaException` arrives as `MediaException.Unexpected`).
+- Process context: a view without `MediaLayerProvider` in its tree (a root outside the tree, a toast, a window) takes the context of the last installed `MediaLayerProvider` of the process. The environment context wins over the process context. Removing `MediaLayerProvider` removes the process context if it is the current one. Without both contexts Kotlin throws "Wrap the screen in MediaLayerProvider" and Swift draws no media.
+- `MediaLayer` from UI: Swift `@Environment(\.mediaLayer)` and Kotlin `currentMediaLayer()` return `MediaLayer?`. `nil` means `MediaLayer` is not ready yet. Both use the process context.
 
-Открытие возвращается без ожидания сборки ядра. Swift `open` это `async`, Kotlin `open` возвращает `Deferred<MediaLayer>`. Загрузка нативной библиотеки, разбор `spec` и сборка ядра идут вне главного потока. Android создаёт платформенные объекты и каталог кэша на потоке вызова. `MediaLayerProvider` принимает `Deferred` и показывает содержимое, когда слой готов. Передайте `spec` для значений из `.mdl` ([media files](media-files.md)).
+Open returns without waiting for the core assembly. Swift `open` is `async`, Kotlin `open` returns `Deferred<MediaLayer>`. Loading the native library, parsing `spec` and assembling the core run off the main thread. Android creates the platform objects and the cache directory on the calling thread. `MediaLayerProvider` takes the `Deferred` and shows the content when `MediaLayer` is ready. Pass `spec` for the values from `.mdl` ([media files](media-files.md)).
 
-Android создаёт общий `OkHttpClient` для стандартного fetcher и плееров. Явные `fetcher` и `callFactory` заменяют соответствующую зависимость.
+Android creates one shared `OkHttpClient` for the default fetcher and the players. An explicit `fetcher` and `callFactory` replace the matching dependency.
 
 ## Open with full control
 
@@ -115,7 +115,8 @@ let media = try MediaLayer.open(config: OpenConfig(
   pool: defaultPoolSettings(),
   namespaceHeaders: ["Authorization"],
   memoryReleaser: nil,
-  silent: false
+  silent: false,
+  audioFocus: .exclusive
 ))
 ```
 
@@ -125,14 +126,15 @@ let media = try MediaLayer.open(config: OpenConfig(
 val media = MediaLayer.open(OpenConfig(
   dir = cacheDir.path,
   fetcher = OkHttpFetcher(okHttpClient),
-  settings = SharedPreferencesSettings(this),
-  slots = ExoPlayerSlotFactory(this),
+  settings = SharedPreferencesSettings(context),
+  slots = ExoPlayerSlotFactory(context),
   device = DeviceMemory(totalMb = 3072u, heapClassMb = 256u, lowRam = false),
   defaults = defaultLimits(),
   pool = defaultPoolSettings(),
   namespaceHeaders = listOf("Authorization"),
   memoryReleaser = null,
-  silent = false
+  silent = false,
+  audioFocus = AudioFocus.EXCLUSIVE
 ))
 ```
 

@@ -1,18 +1,18 @@
-# Профиль release
+# Release profile
 
-Корневой Cargo.toml задаёт codegen-units = 1.
-Остаются стандартные opt-level = 3, LTO = false и panic = "unwind".
-UniFFI перехватывает паники, поэтому panic = "abort" запрещён.
+The root Cargo.toml sets codegen-units = 1.
+The default opt-level = 3, LTO = false and panic = "unwind" stay.
+UniFFI catches panics, so panic = "abort" is not allowed.
 
-Сравнение включает Android arm64-v8a, armeabi-v7a и iOS device.
-На одинаковых исходниках codegen-units = 1 уменьшает все 3 файла.
-LTO почти не меняет Android .so и увеличивает iOS .a.
-opt-level = "s" увеличивает все 3 файла относительно opt-level = 3.
-Счётчики обработанных байтов и сегментов совпадают.
-Замеры времени при фоновой нагрузке не доказывают ускорение.
+The comparison covers Android arm64-v8a, armeabi-v7a and iOS device.
+On the same sources codegen-units = 1 makes all 3 files smaller.
+LTO barely changes the Android .so and makes the iOS .a larger.
+opt-level = "s" makes all 3 files larger than opt-level = 3.
+The counters of processed bytes and segments are equal.
+Timings under background load do not prove a speedup.
 
-strip = "symbols" удаляет метаданные UniFFI из iOS .a.
-strip = "debuginfo" не изменил проверенные файлы относительно стандартного профиля без debug-информации.
-Дополнительное удаление символов не включено, имена остаются доступны для диагностики.
-Проверяй bindgen и равенство medialayer.swift и medialayer.kt после изменения профиля.
-Проверяй размер итогового приложения отдельно от размера статической библиотеки.
+strip = "symbols" removes the UniFFI metadata from the iOS .a.
+strip = "debuginfo" did not change the checked files compared to the default profile without debug info.
+Extra symbol stripping is off, so names stay available for diagnostics.
+After a profile change, check bindgen and that medialayer.swift and medialayer.kt are equal.
+Check the size of the final app apart from the size of the static library.

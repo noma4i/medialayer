@@ -115,13 +115,14 @@ A window named like an `image` block takes the range of that block (`prefetch wi
 #### Swift
 
 ```swift
-.mediaImageWindow(name: "avatar", of: feed, rows: \.rows, sources: { [Avatar(url: $0.avatarUrl)] }, active: row)
+ChatScreen()
+  .mediaImageWindow(name: "avatar", of: feed, rows: \.rows, sources: { [Avatar(url: $0.avatarUrl).item] }, active: rowIndex)
 ```
 
 #### Kotlin
 
 ```kotlin
-MediaImageWindow(name = "avatar", data = { feed.rows }, sources = { listOf(Avatar(url = it.avatarUrl)) }, active = row)
+MediaImageWindow(name = "avatar", data = { feed.rows }, sources = { listOf(Avatar(url = it.avatarUrl).toItem()) }, active = rowIndex)
 ```
 
 #### Visible rows
@@ -150,7 +151,16 @@ The window tells when its active page is prepared. A video window is ready when 
 #### Swift
 
 ```swift
-.mediaWindow(of: feed, rows: \.rows, source: { $0.video }, active: page, ready: $windowReady)
+struct FeedPage: View {
+  let feed: Feed
+  let page: Int
+  @State private var windowReady = false
+
+  var body: some View {
+    ChatScreen()
+      .mediaWindow(of: feed, rows: \.rows, source: { $0.video }, active: page, ready: $windowReady)
+  }
+}
 ```
 
 #### Kotlin
@@ -161,7 +171,7 @@ val windowReady = MediaWindow(data = { feed.rows }, source = { it.video }, activ
 
 ### Image size and memory
 
-`MediaImage` reads the size of its view and the screen scale and asks the decoder for exactly that many pixels, so a grid never decodes full-size photos. `contentMode` (Swift) and `contentScale` (Kotlin) choose between filling and fitting the view. The decoder keys memory by the core cache identity, decoded size and content mode. Selected namespace headers separate images, covers and animated frames in memory. An image that is already there shows in the first frame, without a placeholder. `imageMemoryBytes` задаёт явный бюджет. По умолчанию Android использует `min(128 MiB, 25% memoryClass)`, Swift использует 128 MiB. `clear()` and `clear(image)` also empty this memory.
+`MediaImage` reads the size of its view and the screen scale and asks the decoder for exactly that many pixels, so a grid never decodes full-size photos. `contentMode` (Swift) and `contentScale` (Kotlin) choose between filling and fitting the view. The decoder keys memory by the core cache identity, decoded size and content mode. Selected namespace headers separate images, covers and animated frames in memory. An image that is already there shows in the first frame, without a placeholder. `imageMemoryBytes` sets an explicit budget. By default Android uses `min(128 MiB, 25% memoryClass)` and Swift uses 128 MiB. `clear()` and `clear(image)` also empty this memory.
 
 ## `audio`
 
@@ -227,9 +237,9 @@ let media = try await MediaLayer.open(
 
 ```kotlin
 val media: Deferred<MediaLayer> = MediaLayer.open(
-  context = this,
+  context = context,
   spec = specJson,
-  settings = SharedPreferencesSettings(this)
+  settings = SharedPreferencesSettings(context)
 )
 ```
 
@@ -241,15 +251,15 @@ The library keeps every player muted on the iOS Simulator and on an Android emul
 
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
-| `fetcher` | Swift: обязательный, Kotlin: `null` | Сеть ядра. Android создаёт `OkHttpFetcher` с общим клиентом плееров |
+| `fetcher` | Swift: required, Kotlin: `null` | Core network. Android creates `OkHttpFetcher` with the client shared with the players |
 | `settings` | none | Local storage for saved limits |
 | `spec` | the defaults of the core | JSON from `medialayer-gen spec`. Gives the default limits, the pool settings and the namespace headers |
 | `directory` (Swift) | `Caches/MediaLayer` | Folder of the disk cache. The cache folder of the app on Kotlin |
-| `callFactory` (Kotlin) | `null` | Android создаёт общий клиент для стандартного fetcher и плееров. Явное значение заменяет клиент плееров |
+| `callFactory` (Kotlin) | `null` | Android creates one shared client for the default fetcher and the players. An explicit value replaces the players client |
 | `audioFocus` | `mix` | What the players do to other apps' music: `exclusive`, `mix` or `duck`. See [audio focus](audio-focus.md) |
-| `imageMemoryBytes` | Swift: 128 MiB, Kotlin: `null` | Android выбирает `min(128 MiB, 25% memoryClass)`. Явное положительное значение заменяет автоматический бюджет кэша |
+| `imageMemoryBytes` | Swift: 128 MiB, Kotlin: `null` | Android picks `min(128 MiB, 25% memoryClass)`. An explicit positive value replaces the automatic cache budget |
 
-Android разрешает ExoPlayer выбрать следующий доступный декодер после ошибки инициализации. Стандартный порядок декодеров сохраняется, программный вариант может увеличить расход CPU.
+Android lets ExoPlayer pick the next available decoder after an init error. The default decoder order stays. A software decoder can use more CPU.
 
 ## Local files
 

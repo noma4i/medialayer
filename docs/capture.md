@@ -38,7 +38,7 @@ struct MomentCamera: View {
 }
 ```
 
-`camera.state` and `camera.states` give the phase (`idle`, `opening`, `ready`, `recording`, `stopping`, `failed`), the length of the recording, flash, zoom, the side and the last refusal.
+`camera.state` and `camera.states` give the phase (`idle`, `opening`, `ready`, `recording`, `stopping`, `failed`, `closed`), the length of the recording, flash, zoom, the side, the last refusal, the number of the take and its outcome.
 `WithMediaCameraState(camera:)` follows it in a view. `takePhoto()` gives `CapturedPhoto`, `stopRecording()` gives `CapturedClip`, `cancelRecording()`, `setLens(_:)`, `setFlash(_:)` and `zoom(by:)` complete the commands.
 A command that does not fit the phase is ignored and `state` shows it.
 
@@ -61,12 +61,22 @@ fun MomentCamera() {
 - `startRecording` returns after the hardware started. `stopRecording` gives the clip (file, length, frame as the screen shows it). A recording that is too short, failed or thrown away is a `MediaError.Camera` with the reason. A recording that is too short also carries its length in `recordedMs` (milliseconds, `nil` for every other reason), and `CameraState.refusedMs` holds it until the next recording starts.
   The recording ends by itself at the limit, and `stopRecording` then gives that clip.
 - A lens change during a recording throws the recording away and binds the other side. Leaving the screen during a recording throws it away and deletes its file.
+- Each recording is a take with a number, `CameraState.take`. `CameraState.outcome` tells how the last take ended, also when nobody called `stopRecording`:
+
+  | Outcome | When | What the app does |
+  | --- | --- | --- |
+  | `captured(take)` | `stopRecording`, or the limit ended the take | `clip(take:)` (Swift) or `clip(take)` (Kotlin) gives the clip. The clip is given once: by `clip` or by `stopRecording` |
+  | `refused(reason)` | A call, an interruption, a silent microphone, a take that is too short, an unrecoverable fault, closing MediaLayer | Shows the reason, the file is deleted |
+  | `lost(reason)` | A recoverable fault of the camera during the take | The take is gone, the camera opens again by itself |
+
+  A take with sound starts only after the microphone gave sound: `phase` stays out of `recording` until then. A flash or zoom command that the system refused is a `camera` event of `Media.failures`, and `state` keeps the old flash and zoom.
+- Closing MediaLayer ends a running take with `refused(interrupted)`, releases the camera and sets `phase` to `closed`. A closed camera takes no command. Swift `states` ends.
 - The files of a capture live in `<cache>/capture` as `capture-<id>.jpg` and `capture-<id>.mp4`. A delivered file belongs to the app, files that nobody took are removed when `open` runs.
 
 ## Frames for a face search
 
 `observeFrames(maxPerSecond:_:)` (Swift, a `CVPixelBuffer` and its orientation) and `observeFrames(maxPerSecond, analyzer)` (Kotlin, an `ImageAnalysis.Analyzer`, with `camera.sensorToView`) give the frames of the preview
-to the app. The frame output exists only while somebody listens. The `onLayer` argument of the Swift `MediaCameraPreview` hands over the AVFoundation preview for the conversion of coordinates.
+to the app. The frame output exists only while somebody listens. An observer that starts during a take does not bind the recording again: on Android it gets frames after the take ends. The `onLayer` argument of the Swift `MediaCameraPreview` hands over the AVFoundation preview for the conversion of coordinates.
 
 ## Memory and threads
 

@@ -17,7 +17,7 @@ The photo never leaves the frame, the frame never leaves the photo. A fixed fram
 ```swift
 let crop = MediaCrop(aspect: CGSize(width: 1080, height: 1920)) { result in
   guard let result else { return dismiss() }
-  Task { photo = try await media.prepareImage(source, crop: result.crop, rotation: result.rotation, outputSize: CGSize(width: 1080, height: 1920)) }
+  Task { photo = try await media.prepareImage(source, crop: result.crop, outputSize: CGSize(width: 1080, height: 1920), rotation: result.rotation) }
 }
 
 MediaCropper(source: source, crop: crop, shape: .rect)

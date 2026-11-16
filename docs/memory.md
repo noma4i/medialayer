@@ -11,7 +11,7 @@ Memory is managed automatically. You do not call anything: there is no pressure 
 | Every player slot unloads its frames, buffers and decoder (the chosen slot keeps only its metadata, warm), prefetch stops, the image memory cache is dropped (the disk cache stays) | The app goes to the background: iOS background entry, Android process `onStop` or `onTrimMemory(TRIM_MEMORY_UI_HIDDEN)`, one path for both signals. Check: on the reference Android device Graphics EGL is 15 MB or less 5 s after the app goes to the background |
 | The chosen slot loads first, then the others one by one, images decode again on demand, the local proxy checks its own port and binds it again if the system closed it while the app slept | The app returns to the foreground |
 | Fewer slots (at least 2), fewer chunks ahead of the playing position | The device is low-memory: Android `isLowRamDevice` or little RAM, iOS little physical memory |
-| Everything stays under one limit | `memory` учитывает плееры и буферы прокси. Кэш картинок имеет отдельный бюджет: Android `min(128 MiB, 25% memoryClass)`, Swift 128 MiB |
+| Everything stays under one limit | `memory` counts players and proxy buffers. The image cache has its own budget: Android `min(128 MiB, 25% memoryClass)`, Swift 128 MiB |
 
 ## It cannot run the device out of memory
 
@@ -21,7 +21,7 @@ The limit is the smaller of your `memory` option and a share of what the device 
 
 Retention levels: `hot` plays or is next, `warm` keeps metadata, `cold` holds nothing.
 
-UNBUILT: the steps lower the slot count, the reach, the admission share and the chunks ahead of the playing position (down to 1) today. A lower bitrate does not exist. A low-memory device gets fewer slots and a shorter reach, not fewer parallel loads.
+the steps lower the slot count, the reach, the admission share and the chunks ahead of the playing position (down to 1) today. A lower bitrate does not exist. A low-memory device gets fewer slots and a shorter reach, not fewer parallel loads.
 
 ## Opening is enough
 
@@ -43,8 +43,8 @@ val media: Deferred<MediaLayer> = MediaLayer.open(
 )
 ```
 
-Android сохраняет `imageMemoryBytes` как явное положительное переопределение. Без него библиотека использует `ActivityManager.memoryClass`, включая устройства с `largeHeap`.
-Бюджет ограничивает сохранённые bitmap в Coil, но не сумму одновременных декодов и памяти ядра.
+Android keeps `imageMemoryBytes` as an explicit positive override. Without it the library uses `ActivityManager.memoryClass`, including devices with `largeHeap`.
+The budget limits the bitmaps stored in Coil. It does not limit the sum of concurrent decodes and core memory.
 
 On Android the context is how the library registers for `onTrimMemory`, `onLowMemory` and the app lifecycle. On iOS it observes the memory warning and the app lifecycle notifications.
 

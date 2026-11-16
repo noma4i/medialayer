@@ -47,8 +47,8 @@ try await media.setLimits(limits: limits)
 let stats = try await media.stats()
 print(stats.totalBytes, stats.fileCount)
 
-await media.clear(kind: .video)
-await media.purge(url: url)
+try await media.clear(kind: .video)
+try await media.purge(url: url)
 try await media.resetUserData()
 ```
 

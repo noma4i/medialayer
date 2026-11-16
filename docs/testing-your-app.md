@@ -1,39 +1,39 @@
-# Тесты приложения
+# Testing your app
 
-Библиотека отдаёт тестам приложения подменный fetcher и снимок плеера. Оба подключаются только в тестовой цели приложения.
+The library gives app tests a fake fetcher and a player snapshot. Add both only to the app test target.
 
-## Подключение
+## Setup
 
-| Платформа | Где подключить | Что даёт |
+| Platform | Where to add | What it gives |
 | --------- | -------------- | -------- |
-| Swift | Продукт `MediaLayerTesting` в тестовой цели | `TestFetcher` |
+| Swift | Product `MediaLayerTesting` in the test target | `TestFetcher` |
 | Kotlin | `testImplementation(project(":testing"))` or `androidTestImplementation("com.noma4i:medialayer-testing:X.Y.Z")` | `TestFetcher` (`com.noma4i.medialayer.testing`) |
 | Swift | `MediaLayerUI` | `LoadedSlots.snapshot(for:)`, `PlayerSnapshot` |
 | Kotlin | `kotlin/ui` | `MediaLayer.slotPlayers?.snapshot(key)`, `PlayerSnapshot` |
 
 ## TestFetcher
 
-`TestFetcher` отдаёт заданные байты, файл или ассет по URL и честно отвечает на `Range`.
+`TestFetcher` returns the given bytes, file or asset by URL and answers `Range` correctly.
 
-| Запрос | Ответ |
+| Request | Response |
 | ------ | ----- |
-| Без `Range` | 200, `Content-Length`, `Accept-Ranges: bytes` |
-| `Range` внутри тела | 206, `Content-Range: bytes s-e/всего`, конец включительный |
-| Конец за пределом тела | 206, конец сжат до последнего байта |
-| Начало за пределом тела | 416, `Content-Range: bytes */всего`, пустое тело |
-| URL не задан | ошибка `Fetch("offline")` |
+| No `Range` | 200, `Content-Length`, `Accept-Ranges: bytes` |
+| `Range` inside the body | 206, `Content-Range: bytes s-e/total`, inclusive end |
+| End past the body | 206, end clamped to the last byte |
+| Start past the body | 416, `Content-Range: bytes */total`, empty body |
+| URL not set | error `Fetch("offline")` |
 
-| Swift | Kotlin | Смысл |
+| Swift | Kotlin | Meaning |
 | ----- | ------ | ----- |
-| `serve(_:at:contentType:)` | `serve(url, data, contentType)` | байты |
-| `serveFile(_:at:contentType:)` | `serveFile(url, file, contentType)`, `serveAsset(url, assets, name, contentType)` | файл, ассет приложения |
-| `delay(_:for:)` | `delay(url, millis)` | задержка до ответа, отмена прерывает её |
-| `fail(_:detail:)` | `fail(url, detail)` | ошибка `Fetch` для URL |
-| `requests`, `requestCount(for:)` | `requests`, `requestCount(url)` | все запросы в порядке прихода |
+| `serve(_:at:contentType:)` | `serve(url, data, contentType)` | bytes |
+| `serveFile(_:at:contentType:)` | `serveFile(url, file, contentType)`, `serveAsset(url, assets, name, contentType)` | file, app asset |
+| `delay(_:for:)` | `delay(url, millis)` | delay before the response, cancel interrupts it |
+| `fail(_:detail:)` | `fail(url, detail)` | `Fetch` error for the URL |
+| `requests`, `requestCount(for:)` | `requests`, `requestCount(url)` | all requests in arrival order |
 
-## Снимок плеера
+## Player snapshot
 
-`PlayerSnapshot(key, isPlaying, isMuted, positionMs, rate)` читает состояние слота, который держит ключ. `isPlaying` это команда play без pause, не факт кадров. Нет слота у ключа: `nil`. Чтение не требует главного потока.
+`PlayerSnapshot(key, isPlaying, isMuted, positionMs, rate)` reads the state of the slot that holds the key. `isPlaying` means a play command without a pause, not that frames are drawn. No slot for the key: `nil`. Reading does not need the main thread.
 
 Swift: `LoadedSlots.of(places).snapshot(for: key)`. Kotlin: `media.slotPlayers?.snapshot(key)`.
 

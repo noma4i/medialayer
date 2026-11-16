@@ -45,9 +45,25 @@ When the last heard player stops, MediaLayer ends the session and tells the othe
 | The previous route had a private output and the new route has none | Pauses every playing place at any time. `Media.muted` does not change. A switch from A2DP to HFP is not a loss |
 | The media services reset (iOS) | Drops every player and plays nothing until a place declares play again |
 
+MediaLayer changes the audio session only after the players it pauses have stopped: a call, a recording or a deactivation never starts while a player still sounds. Closing MediaLayer ends the wait.
+
+Every pause and every forgotten play wish shows in the `PlaybackState` of the place or `playUrl` player, so the Play button always shows the truth: `audio.playback` and `audio.isPlaying` (Swift `AudioPlayback`, Kotlin `AudioControl`), `onPlaybackChange` of `MediaVideo`, and `state` of a `playUrl` player.
+
+| Event | `reason` | `wish` after it |
+| ----- | -------- | --------------- |
+| A recording starts | `capture` | Kept while the recording runs, false when it ends: the end of a recording plays nothing back |
+| An interruption or a temporary loss of focus | `interrupted` | Kept until the interruption ends: true with the permission to resume, false without it |
+| Another app takes the focus for good | `focusLost` | False |
+| A lost private output | `outputLost` | False |
+| A reset of the media services | `mediaReset` | False |
+| A call | `inCall` | False |
+| A playback suspension | `suspended` | Kept, the place plays again when the suspension ends |
+
+A `play()` during a call or a recording is refused: `refused` is `inCall` or `recording`, `wish` stays false, and the next `play()` after the call or the recording plays. MediaLayer plays one source at a time, so a place that starts playing pauses the place that played.
+
 A refused or delayed request leaves that state on a system event or a new demand. A newly sounding place, a new recording, a new call, or a new volume reader is a new demand.
 
-Unexpected session, focus and speaker errors reach `Media.failure` with their system domain and code. iOS refusals `cannotInterruptOthers`, `insufficientPriority` and `cannotStartPlaying` are states, not failures. Android focus `FAILED` and `DELAYED` are also states. Closing MediaLayer is not a failure.
+Unexpected session, focus and speaker errors reach `Media.failures` with their system domain and code (see [Failures](failures.md)). iOS refusals `cannotInterruptOthers`, `insufficientPriority` and `cannotStartPlaying` are states, not failures. Android focus `FAILED` and `DELAYED` are also states. Closing MediaLayer is not a failure.
 
 ## Record
 
@@ -66,7 +82,7 @@ The refusals are `VoiceRefusal` and `CameraRefusal` cases with their text from t
 
 ## Call
 
-A call has the highest priority. While any call runs, every player pauses, a place that declares play gets no play, `playUrl` fails with `MediaError.InCall`, and recordings stop or are refused with `inCall`. The end of a call restores nothing: a place plays after its owner declares play again. See [Calls](declaring-media.md#calls) for the API.
+A call has the highest priority. While any call runs, every player pauses, a place that declares play gets no play, the `play()` of a `playUrl` player is refused with `refused = inCall`, and recordings stop or are refused with `inCall`. The end of a call restores nothing: a place plays after its owner declares play again. See [Calls](declaring-media.md#calls) for the API.
 
 | Call | iOS | Android |
 | ---- | --- | ------- |
@@ -79,7 +95,7 @@ Ending your own call clears its communication mode. A later communication mode b
 
 ## Read the volume
 
-`readVolume` gives the current system volume and a stream of the changes, for example to unmute when the user presses volume up. While the stream lives and nothing is heard, MediaLayer keeps a session that mixes and never ducks. End the stream and the session goes back to idle. No polling runs.
+`readVolume` gives the current system volume and a stream of the changes, for example to unmute when the user presses volume up. While the stream lives and nothing is heard, MediaLayer keeps a session that mixes and never ducks. End the stream and the session goes back to idle. No polling runs. Closing MediaLayer ends the stream.
 
 ### Swift
 
@@ -102,7 +118,7 @@ reading.changes.collect { volume -> /* react */ }
 ### Swift
 
 ```swift
-for await _ in await Media.audio?.volumeRaises() ?? AsyncStream { $0.finish() } { Media.muted = false }
+for await _ in await Media.audio?.volumeRaises() ?? AsyncStream { $0.finish() } { try Media.setMuted(false) }
 ```
 
 ### Kotlin

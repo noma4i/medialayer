@@ -17,12 +17,12 @@ All behavior is in the Rust core (`core/`). Swift (`MediaLayer/`) and Kotlin (`k
 | `image` | Image bytes for image loaders: fetch through the core, store in the one disk cache, decode BlurHash |
 | `controls` | Limits, statistics, clear, purge, eviction on demand |
 
-`Playlist::parse` разбирает base URL и текст 1 раз для ответа и prefetch.
-Proxy хранит до 256 планов по ключу namespace и версии закреплённой записи.
-Память планов учитывает `Ledger`, live использует текущий TTL.
-Замена версии, purge, clear, смена лимитов и перезапуск снимают сохранённые планы.
-Отписка `Hub` удаляет слушателя по id, рассылка не копирует список.
-Очередь слота берёт до 16 готовых команд на один `spawn_blocking`, проверяя очередь перед каждой следующей командой.
+`Playlist::parse` parses the base URL and the text once for the response and for prefetch.
+The proxy keeps up to 256 plans keyed by namespace and the version of the pinned entry.
+`Ledger` counts the memory of the plans. Live playlists use the current TTL.
+A version change, purge, clear, a limits change and a restart drop the stored plans.
+`Hub` unsubscribe removes the listener by id. Broadcast does not copy the list.
+The slot queue takes up to 16 ready commands per `spawn_blocking` and checks the queue before each next command.
 
 ## Stall watchdog
 

@@ -1,10 +1,10 @@
 # Threading and performance
 
-Сеть и сборка ядра работают в потоках библиотеки. Загрузка нативной библиотеки, `NativeCallbacks.install()`, чтение defaults и вызов ядра идут вне потока вызова: Kotlin на `Dispatchers.Default`, Swift в отдельной задаче.
-Android создаёт платформенные объекты и каталог кэша на потоке вызова, подписку на Lifecycle ставит на главный поток. `open` возвращает `Deferred<MediaLayer>` (Swift: `async`), приложение ждёт его через `MediaLayerProvider` или `await`. Порядок объявлений не меняется: они идут после готовности слоя. Возврат не ждёт завершения `assemble` ядра.
+Network and core assembly run on library threads. Loading the native library, `NativeCallbacks.install()`, reading defaults and the core call run off the calling thread: Kotlin on `Dispatchers.Default`, Swift in a separate task.
+Android creates the platform objects and the cache directory on the calling thread and adds the Lifecycle subscription on the main thread. `open` returns `Deferred<MediaLayer>` (Swift: `async`), and the app waits for it through `MediaLayerProvider` or `await`. The order of declarations does not change: they run after `MediaLayer` is ready. The return does not wait for the core `assemble` to end.
 
-Android Trace отмечает `MediaLayer.open.platform` на потоке вызова, `MediaLayer.open.jna`, `MediaLayer.open.defaults` и вложенный `MediaLayer.open.ffi` на потоке библиотеки.
-Секции закрываются при исключении. Системная трассировка управляет записью, библиотека не включает её самостоятельно.
+Android Trace marks `MediaLayer.open.platform` on the calling thread, and `MediaLayer.open.jna`, `MediaLayer.open.defaults` and the nested `MediaLayer.open.ffi` on the library thread.
+Sections close on an exception. System tracing controls recording. The library does not turn it on by itself.
 
 | Guarantee | Meaning |
 | --------- | ------- |
@@ -17,7 +17,7 @@ Android Trace отмечает `MediaLayer.open.platform` на потоке вы
 | Listeners | Called from library threads with the latest state only; hop to the main thread yourself |
 | Cancel | Releases the caller's work and subscriptions. A shared download continues while another caller needs it |
 
-UNBUILT: deferred work. Eviction starts right after a write that reaches the budget, the library has no idle signal yet, and the far prefetch window is not delayed.
+deferred work. Eviction starts right after a write that reaches the budget, the library has no idle signal yet, and the far prefetch window is not delayed.
 
 Throwing Swift calls and Kotlin suspend calls forward cancellation to Rust. Non-throwing Swift calls finish normally when their task is cancelled.
 
@@ -26,8 +26,8 @@ On iOS native player creation and access run on the main thread. On Android ever
 ### Swift
 
 ```swift
-for await stats in media.statsStream() {
-  await MainActor.run { self.cacheBytes = stats.totalBytes }
+for try await stats in media.statsStream() {
+  await MainActor.run { cacheBytes = stats.totalBytes }
 }
 ```
 

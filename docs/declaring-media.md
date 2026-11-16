@@ -84,7 +84,7 @@ MediaSourceValue.file(recording.fileUrl, kind: .video)                         /
 MediaSourceValue.remote(user.avatarUrl, kind: .image, blurHash: user.blurHash)  // http or https text or URL
 MediaSourceValue.bundled("welcome", extension: "m4v", kind: .video)            // bundle resource, Bundle.main by default
 MediaSourceValue.bundled("banner", extension: "webp", kind: .image)            // bundle image file
-MediaSourceValue(url: row.url, kind: .image, size: MediaSize(width: 288, height: 288), strategy: .whole)
+MediaSourceValue(url: entry.url, kind: .image, size: MediaSize(width: 288, height: 288), strategy: .whole)
 ```
 
 ### Kotlin
@@ -95,7 +95,7 @@ MediaSourceValue.remote(user.avatarUrl, Kind.IMAGE, blurHash = user.blurHash)
 MediaSourceValue.raw(context, R.raw.welcome, Kind.VIDEO)                       // res/raw
 MediaSourceValue.asset("welcome.m4v", Kind.VIDEO)                              // assets
 MediaSourceValue.raw(context, R.drawable.banner, Kind.IMAGE)                   // res/drawable raster image
-MediaSourceValue(row.url, Kind.IMAGE, size = 288 to 288, strategy = CacheStrategy.WHOLE)
+MediaSourceValue(entry.url, Kind.IMAGE, size = 288 to 288, strategy = CacheStrategy.WHOLE)
 ```
 
 - A path or a `file://` text becomes one canonical `file://` url. A relative path, a web url or an empty text gives an empty url. A web url stays only when it is a valid `http` or `https` text with a host, anything else gives an empty url.
@@ -247,13 +247,26 @@ val avatar = MediaImageLoad.loadBitmap(avatarUrl, cacheDirectory, side = 96, cir
 
 ## Recording a voice message
 
-`MediaVoiceRecorder` records the microphone into an m4a file (AAC at 44.1 kHz, one channel, 128 kbit/s). `start` takes the audio focus for recording from `Media.audio` and `stop` gives it back. `levels` gives the wave level from 0 to 1 while the recording runs, from one formula of the core, and nothing at rest. The recording ends by itself at the longest length (default 10 minutes, set between 1 second and 1 hour). A refused microphone permission, a busy microphone and a recording without sound throw `MediaError.Voice` (Swift) or `MediaException.Voice` (Kotlin) with the same text on both platforms.
+`MediaVoiceRecorder` records the microphone into an m4a file (AAC at 44.1 kHz, one channel, 128 kbit/s). The recorder takes the recording session from MediaLayer when `start` runs and gives it back when the take ends. `levels` gives the wave level from 0 to 1 while the recording runs, from one formula of the core, and nothing at rest. The recording ends by itself at the longest length (default 10 minutes, set between 1 second and 1 hour). A refused start throws `MediaError.Voice(detail, reason)` (Swift) or `MediaException.Voice` (Kotlin) with the same text and the same `VoiceRefusal` on both platforms.
+
+`state` and `states` publish `recordedMs` while a take records, and 0 when idle. Set `minTakeMs` on the recorder to refuse a shorter take with `tooShort` and delete its file. The default is 0, with no minimum.
+
+`state` and `states` (Swift `AsyncStream<VoiceState>`, Kotlin `StateFlow<VoiceState>`) show every take, also one that ended without a `stop()` call. `VoiceState` has `take` (the number of the take, 0 before the first), `phase` (`idle`, `recording`) and `outcome` of the last take:
+
+| Outcome | When | File |
+| ------- | ---- | ---- |
+| `recorded(path, durationMs)` | `stop()`, or the longest length reached | Kept, it belongs to the app |
+| `refused(reason)` | A call, an interruption, a silent microphone, a revoked permission, closing MediaLayer, an empty take | Deleted |
+| `failed(NativeFailure)` | The system recorder reported an error | Deleted, the error also reaches `Media.failures` |
+
+The terminal state comes first, then `levels` ends. After the take ended by itself, `stop()` gives the same outcome. A file that could not be deleted is a `file` event of `Media.failures`.
 
 ```swift
 let recorder = MediaVoiceRecorder(maxDuration: 120)
 try await recorder.start(to: fileURL)
 for await level in recorder.levels { draw(level) }
 let voice = try await recorder.stop()   // VoiceRecording(url, durationMs)
+for await state in recorder.states where state.outcome != nil { show(state.outcome) }
 ```
 
 ```kotlin
@@ -261,6 +274,7 @@ val recorder = MediaVoiceRecorder(context, maxDurationMs = 120_000)
 recorder.start(file)
 recorder.levels.collect { level -> draw(level) }
 val voice = recorder.stop()   // VoiceRecording(file, durationMs)
+recorder.states.collect { state -> state.outcome?.let(::show) }
 ```
 
 ## Image as a value
@@ -281,7 +295,7 @@ val avatar = media.image(context, Avatar(url = user.avatarUrl), width = 44f, hei
 
 Swift: `MediaContext.image(for:points:scale:)`. Kotlin: `MediaLayer.image(context, source, width, height, density)` is a `suspend` function. Width and height are in points (dp). Shared `imagePixelSize` derives decode dimensions from placement and display scale, with placement rounded up to multiples of 8. `source.size` describes source dimensions and caps decoding without upscaling. Crop preserves the source ratio while covering placement, and Fit preserves it while fitting inside placement. Each dimension is limited to 16384 pixels. A 1080x1920 source in a 352x352 placement decodes at 352x626 for Crop or 198x352 for Fit. The app must not call this export method for a list of views: use `MediaImage` there.
 
-## Изображения в списках и сетках
+## Images in lists and grids
 
 Set `source.size` to the source dimensions in pixels when available.
 With declared dimensions, Kotlin `MediaImage` uses `Box` and Coil's placement size resolver.
@@ -296,25 +310,25 @@ Counters update on image events and perform no work while idle.
 `fetchImage` returns `ImageFetchResult`, containing `bytes` and `source` (`Cache`, `Network`, or `Local`).
 Disk hits count results that the core served from its cache, excluding local files and memory hits.
 
-Все изображения сообщают состояние ядру и передают пиксели для вычисления тона.
-BlurHash загружается только для видимого изображения до `Ready`.
-После `Ready` библиотека убирает BlurHash без повторного запроса заглушки.
+Every image reports its state to the core and hands over its pixels for the tone.
+BlurHash loads only for a visible image before `Ready`.
+After `Ready` the library removes the BlurHash without a new placeholder request.
 
-Видимость определяет библиотека, приложение не передаёт её параметром.
-До размещения, вне окна и при остановленной Activity запрос Coil не загружает и не декодирует изображение.
-Уход из окна или состояния `STARTED` отменяет текущую загрузку и снимает заявку видимости.
-Вход в окно возобновляет отменённую загрузку.
-Изображения с общим URL сохраняют заявку ядру до ухода последнего видимого изображения.
+The library decides the visibility, the app passes no parameter for it.
+Before placement, outside the window and while the Activity is stopped, the Coil request does not load or decode the image.
+Leaving the window or the `STARTED` state cancels the running load and withdraws the visibility claim.
+Entering the window resumes the cancelled load.
+Images with one URL keep their claim in the core until the last visible image leaves.
 
-Пример Kotlin:
+Kotlin example:
 
     MediaImage(
       source = MomentThumb(url = moment.thumbUrl, blurHash = moment.blurHash, size = 352 to 352),
       modifier = Modifier.aspectRatio(1f)
     )
 
-Swift `MediaLayerUI` не имеет параметра `weight`.
-Стоимость Swift `MediaImage` в сетке требует отдельного измерения.
+Swift `MediaLayerUI` has no `weight` parameter.
+The cost of a Swift `MediaImage` in a grid is measured separately.
 
 ## Video output
 
@@ -355,7 +369,9 @@ MediaAudio(VoiceNote(url = message.audioUrl)) { audio ->
 }
 ```
 
-`playing` starts the audio when it is true and stays false by default. Both platforms apply a change of `playing` to the mounted audio: the same `audio` object plays or pauses, and nothing is mounted again. While `playing` keeps its value, a rerender, a new `rate`, `muted` or `group` leave the buttons alone: a local `toggle()` stays in force, and so do `play()` and `pause()` on Kotlin. A new source starts a new `audio` that follows the current `playing`.
+`playing` starts the audio when it is true and stays false by default. Both platforms apply a change of `playing` to the mounted audio: the same `audio` object plays or pauses, and nothing is mounted again. While `playing` keeps its value, a rerender, a new `rate`, `muted` or `group` leave the buttons alone: a local `toggle()` stays in force and so do `play()` and `pause()`. A new source starts a new `audio` that follows the current `playing`.
+
+`audio.isPlaying` is the truth of the core, not the last button press. It is false until the player really plays, and it turns false when MediaLayer pauses the audio by itself: a recording, a call, an interruption, a lost focus, a lost headphone, a playback suspension, a reset of the media services. MediaLayer plays one source at a time, so a place that starts playing pauses the audio and `isPlaying` turns false. The button then shows Play, and one press of `play()` or `toggle()` plays again. A press of Play while a call or a recording runs plays nothing and `isPlaying` stays false.
 
 While an audio plays, its progress updates 4 times per second. A paused audio updates for 1 second after it appears or after a seek, then stops, so a chat full of voice notes does not wake up every 250 milliseconds.
 
@@ -369,7 +385,7 @@ MediaAudioProgress(audio) { fraction in
 
 ```kotlin
 val fraction = rememberPlayheadProgress(audio)
-Box(Modifier.drawBehind { drawRect(Color.Black, size = Size(size.width * fraction.value, 4f)) })
+Box(Modifier.drawBehind { drawRect(Color.Black, size = androidx.compose.ui.geometry.Size(size.width * fraction.value, 4f)) })
 ```
 
 `onEnd` runs each time the audio reaches its end, once per end. At the end the library rewinds the audio to the start and pauses it: `isPlaying` is false and `progress` is 0. A new `play` starts from the beginning. The app does not rewind or pause the audio itself.
@@ -381,6 +397,37 @@ A seek by fraction chosen before the audio loads is applied when the player repo
 A source without a mounted view seeks by key: `MediaLayer.seek(key, fraction)` on Kotlin and `seek(key:fraction:)` on `MediaPlaces` on Swift. The key is the source URL. The call works for any key, not loaded or paused too, and the position is applied when the key loads. A call made after MediaLayer closed, or while the input is full, throws and the caller sees the error. Several calls for one key before the next event keep the last fraction. A fraction outside 0..1 is clamped, a NaN or infinite fraction is ignored. `MediaPlace.seek` of a mounted place works as before.
 
 Audio does not depend on the size or position of its view. Progress, seek and the end of the audio work in a 0 x 0 host and in a view that is off screen. Only the app going to the background pauses the progress updates.
+
+## Player without a view
+
+`playUrl(source)` gives a player of MediaLayer for a source that has no view, for example a sound in the background of a screen. The player plays from the same pool, cache and proxy as a place. `play()`, `pause()`, `seek(fraction)` and `release()` drive it. `state` and `states` give its `PlaybackState`, the same value that drives `audio.playback` and `onPlaybackChange`. `release()` ends the player: Swift `states` ends and the Kotlin `state` keeps its last value. An app that plays the URL in its own player reads the proxy URL with `readRoute(item)` instead.
+
+| `PlaybackState` field | Meaning |
+| --------------------- | ------- |
+| `playing` | The player really plays now |
+| `wish` | The owner asked to play and MediaLayer did not forget it. False after a call, a lost focus for good, a lost headphone or a reset: the next `play()` plays |
+| `reason` | Why a wished play is paused: `capture`, `interrupted`, `focusLost`, `outputLost`, `mediaReset`, `inCall`, `suspended`. Nil while it plays |
+| `refused` | Why the last `play()` was refused: `inCall` or `recording`. Nil after a play that was taken |
+
+The screen stays on while at least one `MediaVideo` or `MediaAudio` place has `playing` true, and the app sets no keep-awake of its own.
+
+### Swift
+
+```swift
+let player = try await media.playUrl(source: VoiceNote(url: url).item)
+try player.play()
+for await state in player.states { showPlaying(state.playing) }
+player.release()
+```
+
+### Kotlin
+
+```kotlin
+val player = media.playUrl(VoiceNote(url = url).toItem())
+player.play()
+player.state.collect { state -> showPlaying(state.playing) }
+player.release()
+```
 
 ## One-shot video
 
@@ -454,6 +501,7 @@ MediaAudio(VoiceNote(url = message.audioUrl), rate = 1.5f) { audio ->
 | `group` | video, audio | Optional name of the place group, for example `chat`. A playback suspension can allow a group and keep its places playing |
 | `loop` | video | True (default) repeats the video. False plays it once and ends in the `ended` state |
 | `onFirstFrame` | video | Runs when the first frame is on screen. Once per load |
+| `onPlaybackChange` | video | Runs with the new `PlaybackState` when the player really starts or stops playing, or its wish or reason changes, whoever stopped it: the owner, a call, a recording, an interruption or another place. Once per change |
 | `onEnd` | video, audio | Runs each time a one-shot video or an audio reaches its end. An audio is already rewound to the start and paused |
 | `rate` | audio | Playback speed, 0.25 to 4, default 1 |
 | content closure | all | Optional. Receives the `MediaState` to draw your own loading and error views |
@@ -544,7 +592,7 @@ You report only whether a place is visible or active. Prefetch, preroll, handoff
 
 ## Calls
 
-While a call runs, MediaLayer plays nothing and records nothing. Every player is paused, a place that declares play gets no play, `playUrl` fails with `MediaError.InCall`, a running `MediaVoiceRecorder` and a running video recording of `MediaCamera` stop with the in-call refusal and delete their file, and a new recording is refused with the same refusal before it touches the microphone. A photo is not a recording and is not refused. The end of a call restores nothing: a place plays again when its owner declares play.
+While a call runs, MediaLayer plays nothing and records nothing. Every player is paused, a place that declares play gets no play, `play()` of a `playUrl` player is refused with `refused = inCall`, a running `MediaVoiceRecorder` and a running video recording of `MediaCamera` stop with the in-call refusal and delete their file, and a new recording is refused with the same refusal before it touches the microphone. A photo is not a recording and is not refused. The end of a call restores nothing: a place plays again when its owner declares play.
 
 A call of the phone or of another app does all of this by itself. For your own call, take `callAudio` when the call starts and end it when the call ends. MediaLayer then owns its audio session or focus. Swift `callAudio(_:)` is `async throws` and throws `MediaError.Closed` after close. Kotlin throws `MediaException.Closed` after close. Closing MediaLayer is not a failure.
 
@@ -552,10 +600,11 @@ A call of the phone or of another app does all of this by itself. For your own c
 
 ```swift
 let call = try await media.callAudio(.callKit(callUUID)) // or .unmanaged
-call.setSpeaker(true)        // an unmanaged call: the speaker, kept after route changes
+call.setSpeaker(true)        // the speaker: CallKit and unmanaged calls, kept after route changes
 call.systemActivated()       // CallKit didActivate
 call.systemDeactivated()     // CallKit didDeactivate
 for await state in call.states { /* connecting, live, interrupted, ended */ }
+for await route in call.route { /* speaker, receiver, other, failed */ }
 call.end()                   // also when the object is released
 ```
 
@@ -576,11 +625,14 @@ for await state in call.states {
 
 ### Kotlin
 
+Use the `callControlScope` passed to your Telecom call.
+
 ```kotlin
-val call = media.callAudio(MediaCallKind.Telecom) // or MediaCallKind.Unmanaged
+val call = media.callAudio(MediaCallKind.Telecom(CallEndpointPort.of(callControlScope))) // or MediaCallKind.Unmanaged
 call.systemActivated()   // Telecom onSetActive
 call.systemDeactivated() // Telecom onSetInactive
-call.setSpeaker(true)    // an unmanaged call; Telecom routes its own call
+call.setSpeaker(true)    // Telecom: an endpoint change through the CallControlScope, unmanaged: the communication device
+call.route.collect { route -> /* SPEAKER, RECEIVER, OTHER, FAILED */ }
 call.close()             // the call ended
 ```
 
@@ -590,12 +642,51 @@ Start the audio of your calling library on `LIVE` and stop it on `INTERRUPTED` o
 call.states.collect { state -> if (state == CallState.LIVE) startCallAudio() else stopCallAudio() }
 ```
 
-A Core-Telecom call leaves focus, audio mode and route to Telecom. An unmanaged call gets `AUDIOFOCUS_GAIN_TRANSIENT`, the communication mode and the speaker through `setCommunicationDevice`, and all of them are cleared when the call ends. A later communication mode belongs to another app.
+A Core-Telecom call leaves focus and audio mode to Telecom. `MediaCallKind.Telecom` takes a `CallEndpointPort`: `CallEndpointPort.of(scope)` wraps the `CallControlScope` of `addCall`, and `setSpeaker` asks it for the speaker or earpiece endpoint. An unmanaged call gets `AUDIOFOCUS_GAIN_TRANSIENT`, the communication mode and the speaker through `setCommunicationDevice`, and all of them are cleared when the call ends. A later communication mode belongs to another app.
+
+`states` gives the current state first. It turns `interrupted` when the call loses its audio: an interruption of the system, a lost audio focus (also a temporary loss), a reset of the media services, a session that the system refused to apply, `systemDeactivated`, and a phone call or a call of another app during your call. It turns `live` again only on `systemActivated` (CallKit, Telecom) or on a new session that MediaLayer applied (unmanaged). It ends with `ended` after `end()`, `close()` or closing MediaLayer, and the stream ends. `route` gives the output after each `setSpeaker`: `speaker`, `receiver`, or `failed` when the system refused it. A refused route also reaches `Media.failures` as a `speaker` event.
 
 ## Microphone
 
 Observe `media.microphoneAvailability` to show a busy overlay and disable recording buttons whenever the value is not `available`. Do not observe calls or microphone use separately.
 
-Swift exposes an `AsyncStream<MicrophoneAvailability>` that first yields the current value. Kotlin exposes a `StateFlow<MicrophoneAvailability>`. The values, in priority order: `permissionDenied`, `ownCall`, `externalCall`, `otherApp` (another app records, or the system interrupted the audio), `available`.
+Swift exposes an `AsyncStream<MicrophoneAvailability>` and Kotlin a `Flow<MicrophoneAvailability>`. Both first give the current value. The values, in priority order:
 
-Unexpected session, focus and speaker errors reach `Media.failure` with their system domain and code. iOS `cannotInterruptOthers`, `insufficientPriority` and `cannotStartPlaying` and Android focus `FAILED` and `DELAYED` are states, not failures. A system event or a new demand leaves a refused or delayed state. New demand includes a newly sounding place, recording, call or volume reader.
+| Value | When |
+| ----- | ---- |
+| `permissionDenied` | The microphone permission is not granted. Android sees a change at once, iOS reads the permission on open and on each return to the foreground |
+| `ownCall` | Your `callAudio` call runs |
+| `externalCall` | A phone call or a call of another app runs |
+| `otherApp` | Another app records (Android), the system interrupted the audio, the audio focus is lost (also for a while), the system refused or delayed the session, or the session waits for the app to come back to the foreground |
+| `available` | None of the above |
+
+The value goes back to `available` by itself when its cause ends: the end of the interruption, a focus gain, a new demand, the return to the foreground. Closing MediaLayer ends the stream. After close Swift gives a stream that ends at once and Kotlin throws `MediaException.Closed`.
+
+Unexpected session, focus and speaker errors reach `Media.failures` with their system domain and code (see [Failures](failures.md)). iOS `cannotInterruptOthers`, `insufficientPriority` and `cannotStartPlaying` and Android focus `FAILED` and `DELAYED` are states, not failures. A system event or a new demand leaves a refused or delayed state. New demand includes a newly sounding place, recording, call or volume reader.
+
+## Closing MediaLayer
+
+Closing MediaLayer ends every resource it owns, and each object shows it through its own signal:
+
+| Object | What the app sees |
+| ------ | ----------------- |
+| `MediaVoiceRecorder` | A running take ends with `refused(interrupted)`, its file is deleted |
+| `MediaCamera` | A running take ends with `refused(interrupted)`, the camera is released, `state.phase` is `closed` (Swift `states` ends) |
+| `MediaCallAudio` | `states` gives `ended` and ends. Swift `route` ends |
+| `readVolume`, `volumeRaises` | The streams end |
+| `microphoneAvailability` | The stream ends |
+| `playUrl` player, mounted places | Their playback states stop: Swift `states` ends, the Kotlin `state` keeps its last value |
+
+A place or a `playUrl` player that is released ends its own playback states the same way.
+
+## Retry a failed source
+
+Retry keeps the existing places and their playback wishes.
+
+```swift
+try await Media.retry(source)
+```
+
+```kotlin
+Media.retry(source)
+```
