@@ -5,6 +5,8 @@ struct SessionPlan: Equatable {
   let mode: AVAudioSession.Mode
   let options: AVAudioSession.CategoryOptions
 
+  var trace: String { "\(category.rawValue) \(mode.rawValue) options=\(options.rawValue)" }
+
   static let recording = SessionPlan(category: .playAndRecord, mode: .default, options: [.defaultToSpeaker])
 
   static func playback(_ focus: MediaAudioFocus) -> SessionPlan {

@@ -15,14 +15,24 @@ internal class AudioFocusOwner(
   private val lock = Any()
   private var held: FocusKind? = null
   private var pending: Job? = null
+  private var seenLosses = 0
 
   fun reconcile(): Boolean = synchronized(lock) {
     val target = want()
+    val losses = port.losses
+    if (losses != seenLosses) {
+      seenLosses = losses
+      held = null
+    }
     if (target == null) {
       if (held != null && pending == null) scheduleRelease()
       return true
     }
-    if (held != target && !runCatching { port.request(target) }.getOrDefault(false)) return false
+    if (held != target) {
+      val granted = runCatching { port.request(target) }.getOrDefault(false)
+      MediaTrace.emit("audio") { "focus $target granted=$granted" }
+      if (!granted) return false
+    }
 
     pending?.cancel()
     pending = null
@@ -33,7 +43,10 @@ internal class AudioFocusOwner(
   fun close() = synchronized(lock) {
     pending?.cancel()
     pending = null
-    if (held != null) port.abandon()
+    if (held != null) {
+      port.abandon()
+      MediaTrace.emit("audio") { "focus abandoned" }
+    }
     held = null
   }
 
@@ -53,6 +66,7 @@ internal class AudioFocusOwner(
       if (want() != null || held == null) return
 
       port.abandon()
+      MediaTrace.emit("audio") { "focus abandoned" }
       held = null
     }
   }

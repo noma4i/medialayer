@@ -7,6 +7,10 @@ func uprightVideo(at url: URL) async throws {
     let asset = AVURLAsset(url: url)
     guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw UprightVideoError.invalidVideo }
     let (transform, size, bitrate, descriptions) = try await track.load(.preferredTransform, .naturalSize, .estimatedDataRate, .formatDescriptions)
+    if MediaTrace.isOn {
+      let audioTracks = (try? await asset.loadTracks(withMediaType: .audio).count) ?? 0
+      MediaTrace.emit("camera", "clip audioTracks=\(audioTracks) rewrite=\(transform != .identity)")
+    }
     guard transform != .identity else { return }
     guard let format = descriptions.first else { throw UprightVideoError.invalidVideo }
     let codec: AVVideoCodecType

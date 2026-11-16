@@ -37,6 +37,19 @@ struct MediaAudioSessionTests {
   }
 
   @Test
+  func aSessionTheSystemDeactivatedIsSetAgainByTheNextPlay() async {
+    let port = FakeAudioSessionPort()
+    let session = MediaAudioSession(focus: .mix, port: port, releaseDelay: .zero)
+    session.setAudible(slot: 1, true)
+    #expect(await session.settled())
+
+    port.systemDeactivates()
+    #expect(await session.settled())
+
+    #expect(port.log == [category(.mix), "active true", "system deactivated", category(.mix), "active true"])
+  }
+
+  @Test
   func recordingUsesItsOwnPlanAndLeavesTheCategoryAloneWhenItEnds() async {
     let port = FakeAudioSessionPort()
     let session = MediaAudioSession(focus: .mix, port: port, releaseDelay: .zero)

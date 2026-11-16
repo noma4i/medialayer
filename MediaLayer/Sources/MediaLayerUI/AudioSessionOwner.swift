@@ -9,6 +9,7 @@ actor AudioSessionOwner {
   private let releaseDelay: Duration
   private var category: SessionPlan?
   private var active: Bool? = false
+  private var seenChanges = 0
 
   init(port: AudioSessionPort, box: DemandBox, releaseDelay: Duration) {
     self.port = port
@@ -33,16 +34,32 @@ actor AudioSessionOwner {
   }
 
   private func apply(_ want: SessionTarget) -> Step {
+    let changes = port.systemChanges
+    if changes != seenChanges {
+      seenChanges = changes
+      category = nil
+      active = nil
+    }
     guard case .active(let plan) = want else { return release() }
 
     if plan != category {
-      guard (try? port.setCategory(plan)) != nil else { return .failed }
-
+      do {
+        try port.setCategory(plan)
+      } catch {
+        MediaTrace.emit("audio", "category \(plan.trace) failed \(error)")
+        return .failed
+      }
+      MediaTrace.emit("audio", "category \(plan.trace)")
       category = plan
     }
     if active != true {
-      guard (try? port.setActive(true)) != nil else { return .failed }
-
+      do {
+        try port.setActive(true)
+      } catch {
+        MediaTrace.emit("audio", "activate failed \(error)")
+        return .failed
+      }
+      MediaTrace.emit("audio", "active")
       active = true
     }
     return .done
@@ -50,12 +67,15 @@ actor AudioSessionOwner {
 
   private func release() -> Step {
     guard active != false else { return .done }
-    guard (try? port.setActive(false)) != nil else {
+    do {
+      try port.setActive(false)
+    } catch {
+      MediaTrace.emit("audio", "deactivate busy \(error)")
       active = nil
       category = nil
       return .busy
     }
-
+    MediaTrace.emit("audio", "inactive")
     active = false
     return .done
   }

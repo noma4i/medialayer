@@ -43,6 +43,17 @@ class MediaAudioSessionTest {
   }
 
   @Test
+  fun aFocusTheSystemTookIsRequestedAgainByTheNextAudibleSlot() {
+    val session = session(MediaAudioFocus.Duck)
+    session.setAudible(1u, true)
+
+    port.lose()
+    session.setAudible(2u, true)
+
+    assertEquals(listOf("request:Duck", "lost", "request:Duck"), port.calls.toList())
+  }
+
+  @Test
   fun onlyTheFirstAudibleSlotRequestsTheDuckFocus() {
     val session = session(MediaAudioFocus.Duck)
 

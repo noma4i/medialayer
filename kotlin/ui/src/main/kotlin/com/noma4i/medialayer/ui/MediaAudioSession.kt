@@ -24,7 +24,8 @@ class MediaAudioSession internal constructor(
   val isRecording: Boolean get() = synchronized(demand) { demand.recording }
 
   fun activateRecording(): Boolean = synchronized(recordingLock) {
-    synchronized(demand) { demand.setRecording(true) }
+    val holders = synchronized(demand) { demand.setRecording(true); demand.recordings }
+    MediaTrace.emit("audio") { "recording hold holders=$holders" }
     if (owner.reconcile()) return@synchronized true
 
     synchronized(demand) { demand.setRecording(false) }
@@ -37,12 +38,13 @@ class MediaAudioSession internal constructor(
   fun volumeRaises(): Flow<Unit> = volume?.raises() ?: emptyFlow()
 
   fun deactivateRecording(): Unit = synchronized(recordingLock) {
-    synchronized(demand) { demand.setRecording(false) }
+    val holders = synchronized(demand) { demand.setRecording(false); demand.recordings }
+    MediaTrace.emit("audio") { "recording release holders=$holders" }
     owner.reconcile()
   }
 
   internal fun setAudible(slot: UInt, value: Boolean) {
-    synchronized(demand) { demand.setAudible(slot, value) }
+    if (synchronized(demand) { demand.setAudible(slot, value) }) MediaTrace.emit("audio") { "audible slot=$slot $value" }
     owner.reconcile()
   }
 

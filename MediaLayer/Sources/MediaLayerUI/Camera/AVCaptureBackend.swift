@@ -124,6 +124,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     lock.withLock { chosenPhotoSize = choice?.photoSize }
     installFrameOutput()
     if !session.isRunning { session.startRunning() }
+    MediaTrace.emit("camera", "bind audio=\(profile.audio) microphone=\(session.inputs.contains { $0.ports.contains { $0.mediaType == .audio } }) audioConnection=\(movie?.connection(with: .audio).map { "\($0.isEnabled) active=\($0.isActive)" } ?? "none")")
     let hasFlash = profile.mode == .photo ? device.isFlashAvailable : device.hasTorch
     emit(.opened(hasFlash: hasFlash, zoomMin: Float(device.minAvailableVideoZoomFactor), zoomMax: Float(device.maxAvailableVideoZoomFactor)))
     emit(.streaming(on: session.isRunning))
@@ -349,6 +350,7 @@ private final class MovieDelegate: NSObject, AVCaptureFileOutputRecordingDelegat
   }
 
   func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
+    MediaTrace.emit("camera", "take finished audioConnections=\(connections.filter { $0.inputPorts.contains { $0.mediaType == .audio } }.count) error=\(error.map { "\($0)" } ?? "none")")
     let end = Self.end(of: error)
     guard end == .completed || end == .limitReached else {
       try? FileManager.default.removeItem(at: outputFileURL)

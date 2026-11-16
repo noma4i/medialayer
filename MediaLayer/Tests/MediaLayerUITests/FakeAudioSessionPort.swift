@@ -11,6 +11,7 @@ final class FakeAudioSessionPort: AudioSessionPort, @unchecked Sendable {
   private var failingCategories: Set<AVAudioSession.Category>
   private var currentCategory: AVAudioSession.Category?
   private var volumeEnded = false
+  private var changes = 0
 
   init(busyDeactivations: Int = 0, failingCategories: Set<AVAudioSession.Category> = []) {
     self.busyDeactivations = busyDeactivations
@@ -44,6 +45,13 @@ final class FakeAudioSessionPort: AudioSessionPort, @unchecked Sendable {
       }
     }
     record("active \(active)")
+  }
+
+  var systemChanges: Int { lock.withLock { changes } }
+
+  func systemDeactivates() {
+    lock.withLock { changes += 1 }
+    record("system deactivated")
   }
 
   func outputVolume() -> Float { 0.5 }

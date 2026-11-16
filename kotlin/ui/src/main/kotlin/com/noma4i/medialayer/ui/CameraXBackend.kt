@@ -225,6 +225,7 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
         recordedNanos = 0
         var pending = output.prepareRecording(context, FileOutputOptions.Builder(file).setDurationLimitMillis(profile.maxDurationMs.toLong()).build())
         if (profile.audio) pending = pending.withAudioEnabled()
+        MediaTrace.emit("camera") { "take audio=${profile.audio}" }
         recording = pending.start(main) { event ->
           when (event) {
             is VideoRecordEvent.Start -> sink(CaptureEvent.RecordStarted)

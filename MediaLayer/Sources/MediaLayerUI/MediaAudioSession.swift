@@ -23,6 +23,7 @@ public final class MediaAudioSession: Sendable {
 
   public func activateRecording() async -> Bool {
     _ = box.update { $0.setRecording(true) }
+    MediaTrace.emit("audio", "recording hold holders=\(box.recordings)")
     guard await owner.reconcile() else {
       _ = box.update { $0.setRecording(false) }
       _ = await owner.reconcile()
@@ -50,12 +51,14 @@ public final class MediaAudioSession: Sendable {
 
   public func deactivateRecording() async {
     _ = box.update { $0.setRecording(false) }
+    MediaTrace.emit("audio", "recording release holders=\(box.recordings)")
     _ = await owner.reconcile()
   }
 
   func setAudible(slot: UInt32, _ value: Bool) {
     guard box.update({ $0.setAudible(slot: slot, value) }) else { return }
 
+    MediaTrace.emit("audio", "audible slot=\(slot) \(value)")
     Task { [owner] in _ = await owner.reconcile() }
   }
 

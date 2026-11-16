@@ -8,6 +8,8 @@ import android.media.AudioManager
 internal class SystemAudioFocus(context: Context) : AudioFocusPort {
   private val manager = context.applicationContext.getSystemService(AudioManager::class.java)
   private var current: AudioFocusRequest? = null
+  private val lost = java.util.concurrent.atomic.AtomicInteger()
+  override val losses: Int get() = lost.get()
 
   override fun request(kind: FocusKind): Boolean {
     val gain = when (kind) {
@@ -15,7 +17,12 @@ internal class SystemAudioFocus(context: Context) : AudioFocusPort {
       FocusKind.Recording -> AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
     }
     val attributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MOVIE).build()
-    val request = AudioFocusRequest.Builder(gain).setAudioAttributes(attributes).build()
+    val request = AudioFocusRequest.Builder(gain).setAudioAttributes(attributes).setOnAudioFocusChangeListener { change ->
+      if (change < 0) {
+        lost.incrementAndGet()
+        MediaTrace.emit("audio") { "focus lost $change" }
+      }
+    }.build()
     if (manager.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return false
 
     val previous = current
