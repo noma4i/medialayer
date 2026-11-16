@@ -24,6 +24,6 @@ internal suspend fun admitReporting(admit: DecodeAdmit, bytes: Long): AutoClosea
   try {
     admit(bytes)
   } catch (refused: MediaException) {
-    Media.failure = refused
+    Media.recordFailure(refused)
     throw refused
   }

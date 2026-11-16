@@ -60,7 +60,6 @@ internal class AudioSystem(private val context: Context) : AudioFocusPort, AutoC
   }
   override fun request(plan: FocusPlan): FocusAnswer = focusOperation {
     val previous = active
-    if (previous?.owner === this && previous.plan == plan) return@focusOperation previous.answer
     previous?.let { it.owner.audio.abandonAudioFocusRequest(it.request) }
     active = null
     val gain = when (plan.gain) {
@@ -70,9 +69,13 @@ internal class AudioSystem(private val context: Context) : AudioFocusPort, AutoC
     }
     val usage = if (plan.usage == FocusUsage.MEDIA) AudioAttributes.USAGE_MEDIA else AudioAttributes.USAGE_VOICE_COMMUNICATION
     val attributes = AudioAttributes.Builder().setUsage(usage).build()
+    val identity = Any()
     val request = AudioFocusRequest.Builder(gain).setAudioAttributes(attributes).setAcceptsDelayedFocusGain(true)
       .setOnAudioFocusChangeListener({ value ->
-        if (value == AudioManager.AUDIOFOCUS_GAIN) focusOperation { active?.takeIf { it.owner === this }?.answer = FocusAnswer.GRANTED }
+        val current = focusOperation {
+          active?.let { it.owner === this && it.identity === identity } == true
+        }
+        if (!current) return@setOnAudioFocusChangeListener
         val change = when (value) {
           AudioManager.AUDIOFOCUS_GAIN -> FocusChange.GAIN
           AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> FocusChange.LOSS_TRANSIENT
@@ -86,19 +89,25 @@ internal class AudioSystem(private val context: Context) : AudioFocusPort, AutoC
       AudioManager.AUDIOFOCUS_REQUEST_DELAYED -> FocusAnswer.DELAYED
       else -> FocusAnswer.FAILED
     }
-    if (answer != FocusAnswer.FAILED) active = ActiveFocus(this, plan, request, answer)
+    if (answer != FocusAnswer.FAILED) active = ActiveFocus(this, request, identity)
     answer
   }
   override fun abandon() = focusOperation {
     active?.takeIf { it.owner === this }?.let { audio.abandonAudioFocusRequest(it.request); active = null }
     Unit
   }
-  override fun setCommunication(on: Boolean, speaker: Boolean) {
-    if (on) {
-      audio.mode = AudioManager.MODE_IN_COMMUNICATION
-      val device = audio.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-      if (speaker && device != null) audio.setCommunicationDevice(device) else audio.clearCommunicationDevice()
-    } else { audio.clearCommunicationDevice(); audio.mode = AudioManager.MODE_NORMAL }
+  override fun enterCommunication(speaker: Boolean) {
+    audio.mode = AudioManager.MODE_IN_COMMUNICATION
+    val device = audio.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+    if (speaker && device != null) audio.setCommunicationDevice(device) else audio.clearCommunicationDevice()
+  }
+  override fun leaveCommunication() {
+    var failure: Exception? = null
+    try { audio.mode = AudioManager.MODE_NORMAL } catch (error: Exception) { failure = error }
+    try { audio.clearCommunicationDevice() } catch (error: Exception) {
+      if (failure == null) failure = error else failure.addSuppressed(error)
+    }
+    failure?.let { throw it }
   }
   override fun close() {
     abandon()
@@ -107,7 +116,7 @@ internal class AudioSystem(private val context: Context) : AudioFocusPort, AutoC
     if (phoneRegistered) phone?.unregisterTelephonyCallback(phoneListener)
     context.unregisterReceiver(noisy)
   }
-  private data class ActiveFocus(val owner: AudioSystem, val plan: FocusPlan, val request: AudioFocusRequest, var answer: FocusAnswer)
+  private data class ActiveFocus(val owner: AudioSystem, val request: AudioFocusRequest, val identity: Any)
   private companion object {
     val focusTail = java.util.concurrent.atomic.AtomicReference(java.util.concurrent.CompletableFuture.completedFuture(Unit))
     var active: ActiveFocus? = null

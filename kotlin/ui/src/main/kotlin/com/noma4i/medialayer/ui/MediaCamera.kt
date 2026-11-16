@@ -444,50 +444,52 @@ class MediaCamera internal constructor(
     binding?.cancel()
     binding = scope.launch {
       var hold: AutoCloseable? = null
-      if (needsHold) {
-        try {
-          hold = services.admitSession(captureCost(profile).toLong())
-        } catch (failure: Exception) {
-          if (failure is kotlinx.coroutines.CancellationException) throw failure
-          enqueue { if (epoch == current) apply(CaptureEvent.Refuse(CameraRefusal.MEMORY)) }
-          return@launch
-        }
-      }
       var session: RecordingTicket? = null
-      if (needsAudio) {
-        val audio = services.audio()
-        if (audio == null) {
-          hold?.close()
-          enqueue { if (epoch == current) apply(CaptureEvent.Refuse(CameraRefusal.NOT_READY)) }
-          return@launch
-        }
-        val admission = try { audio.admit(RecordingKind.VIDEO) } catch (_: MediaException.Closed) {
-          hold?.close()
-          enqueue { if (epoch == current) apply(CaptureEvent.Refuse(CameraRefusal.NOT_READY)) }
-          return@launch
-        }
-        when (admission) {
-          is Admission.Admitted -> session = admission.ticket
-          is Admission.Refused -> {
-            hold?.close()
-            enqueue { if (epoch == current) apply(CaptureEvent.Refuse(microphoneRefusal(admission.reason).reason)) }
+      try {
+        if (needsHold) {
+          try {
+            hold = services.admitSession(captureCost(profile).toLong())
+          } catch (failure: Exception) {
+            if (failure is kotlinx.coroutines.CancellationException) throw failure
+            enqueue { if (epoch == current) apply(CaptureEvent.Refuse(CameraRefusal.MEMORY)) }
             return@launch
           }
         }
-      }
-      if (!enqueue {
-        if (epoch != current || closed) {
-          hold?.close()
-          session?.close()
-          return@enqueue
+        if (needsAudio) {
+          val audio = services.audio()
+          if (audio == null) {
+            enqueue { if (epoch == current) apply(CaptureEvent.Refuse(CameraRefusal.NOT_READY)) }
+            return@launch
+          }
+          val admission = try { audio.admit(RecordingKind.VIDEO) } catch (_: MediaException.Closed) {
+            enqueue { if (epoch == current) apply(CaptureEvent.Refuse(CameraRefusal.NOT_READY)) }
+            return@launch
+          }
+          when (admission) {
+            is Admission.Admitted -> session = admission.ticket
+            is Admission.Refused -> {
+              enqueue { if (epoch == current) apply(CaptureEvent.Refuse(microphoneRefusal(admission.reason).reason)) }
+              return@launch
+            }
+          }
         }
-        hold?.let { sessionHold = it }
-        session?.let { installAudio(it) }
-        backend.bind(lens, profile)
-        installTap()
-      }) {
-        hold?.close()
-        session?.close()
+        val admittedHold = hold
+        val admittedSession = session
+        if (enqueue {
+          if (epoch != current || closed) {
+            try { admittedHold?.close() } finally { admittedSession?.close() }
+            return@enqueue
+          }
+          admittedHold?.let { sessionHold = it }
+          admittedSession?.let { installAudio(it) }
+          backend.bind(lens, profile)
+          installTap()
+        }) {
+          hold = null
+          session = null
+        }
+      } finally {
+        try { hold?.close() } finally { session?.close() }
       }
     }
   }

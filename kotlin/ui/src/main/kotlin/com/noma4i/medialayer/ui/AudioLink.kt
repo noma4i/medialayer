@@ -44,7 +44,8 @@ internal interface AudioFocusPort {
   fun listen(sink: (FocusSignal) -> Unit)
   fun request(plan: FocusPlan): FocusAnswer
   fun abandon()
-  fun setCommunication(on: Boolean, speaker: Boolean)
+  fun enterCommunication(speaker: Boolean)
+  fun leaveCommunication()
 }
 internal interface MicrophonePermissionPort { fun granted(): Boolean }
 internal data class AudioPorts(val focus: AudioFocusPort, val permission: MicrophonePermissionPort)
@@ -140,6 +141,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
   }
   private fun applyInput(input: AudioInput) {
     val actions = try { audioInputs.send(input) } catch (failure: MediaException) {
+      Media.recordFailure(failure)
       pending.values.forEach { it.completeExceptionally(failure) }
       pending.clear()
       return
@@ -150,8 +152,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
           try {
             val plan = FocusPlan.of(action.want)
             if (communication && plan?.communication != true) {
-              ports.focus.setCommunication(false, false)
-              communication = false
+              try { ports.focus.leaveCommunication() } finally { communication = false }
             }
             if (plan == null && focusHeld) {
               ports.focus.abandon()
@@ -160,24 +161,29 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
             if (plan != null) {
               val answer = ports.focus.request(plan)
               focusHeld = answer != FocusAnswer.FAILED
-              if (plan.communication) {
-                ports.focus.setCommunication(true, (action.want as SessionWant.Call).speaker)
+              if (plan.communication && focusHeld) {
                 communication = true
+                ports.focus.enterCommunication((action.want as SessionWant.Call).speaker)
+              } else if (communication && !focusHeld) {
+                try { ports.focus.leaveCommunication() } finally { communication = false }
               }
               if (answer == FocusAnswer.GRANTED) process(AudioInput.Applied(action.generation, AppliedResult.Ok))
-              else process(AudioInput.FocusRequest(action.generation, answer))
+              else process(AudioInput.FocusRequest(generation = action.generation, answer = answer))
             } else {
               process(AudioInput.Applied(action.generation, AppliedResult.Ok))
             }
-          } catch (failure: Exception) { process(AudioInput.Applied(action.generation, AppliedResult.Failed(-1))) }
+          } catch (failure: Exception) { Media.recordFailure(failure); process(AudioInput.Applied(action.generation, AppliedResult.Failed(-1))) }
         }
         is AudioAction.Deactivate -> {
+          var abandoned = true
           try {
-            if (communication) { ports.focus.setCommunication(false, false); communication = false }
             ports.focus.abandon()
             focusHeld = false
-            process(AudioInput.Applied(action.generation, AppliedResult.Ok))
-          } catch (failure: Exception) { process(AudioInput.Applied(action.generation, AppliedResult.Failed(-1))) }
+          } catch (failure: Exception) { abandoned = false; Media.recordFailure(failure) }
+          if (communication) {
+            try { ports.focus.leaveCommunication() } catch (failure: Exception) { Media.recordFailure(failure) } finally { communication = false }
+          }
+          process(AudioInput.Applied(action.generation, if (abandoned) AppliedResult.Ok else AppliedResult.Failed(-1)))
         }
         is AudioAction.Admit -> pending.remove(action.id)?.complete(Admission.Admitted(RecordingTicket(action.id, ::endTicket).also {
           tickets[action.id] = it
@@ -243,20 +249,21 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
       try {
         pending.values.forEach { it.completeExceptionally(MediaException.Closed()) }
         pending.clear()
-        tickets.values.toList().forEach { it.revoke(RecordingRefusal.INTERRUPTED) }
-        calls.values.toList().forEach { it.update(CallState.ENDED) }
+        tickets.values.toList().forEach { runCatching { it.revoke(RecordingRefusal.INTERRUPTED) }.onFailure(Media::recordFailure) }
+        calls.values.toList().forEach { runCatching { it.update(CallState.ENDED) }.onFailure(Media::recordFailure) }
         calls.clear()
-        if (communication) ports.focus.setCommunication(false, false)
-        ports.focus.abandon()
-        (ports.focus as? AutoCloseable)?.close()
-        thread.quitSafely()
-      } finally { done.countDown() }
+        runCatching { ports.focus.abandon() }.onFailure(Media::recordFailure)
+        if (communication) {
+          try { ports.focus.leaveCommunication() } catch (failure: Exception) { Media.recordFailure(failure) } finally { communication = false }
+        }
+        runCatching { (ports.focus as? AutoCloseable)?.close() }.onFailure(Media::recordFailure)
+      } catch (failure: Throwable) { Media.recordFailure(failure) } finally { thread.quitSafely(); done.countDown() }
     }
     val onThread = Looper.myLooper() == thread.looper
     synchronized(postLock) {
       if (!closed.compareAndSet(false, true)) return
-      if (!onThread) check(handler.post(finish))
+      if (!onThread && !handler.post(finish)) { thread.quitSafely(); return }
     }
-    if (onThread) finish() else check(done.await(5, TimeUnit.SECONDS))
+    if (onThread) finish() else try { done.await(5, TimeUnit.SECONDS) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
   }
 }

@@ -36,6 +36,11 @@ object Media {
   var failure: MediaException? by mutableStateOf(null)
     internal set
 
+  internal fun recordFailure(failure: Throwable) {
+    if (failure is MediaException.Closed) return
+    this.failure = failure as? MediaException ?: MediaException.Unexpected(failure.toString()).also { it.initCause(failure) }
+  }
+
   internal var link: AudioLink? = null
 }
 
@@ -118,7 +123,7 @@ fun MediaLayerProvider(opened: Deferred<MediaLayer>, imageLoader: ImageLoader? =
     } catch (error: CancellationException) {
       throw error
     } catch (error: Throwable) {
-      Media.failure = error as? MediaException ?: MediaException.Unexpected(error.toString())
+      Media.recordFailure(error)
     }
   }
   MediaLayerEnvironment(ready, imageLoader, players, content)
@@ -140,7 +145,7 @@ private fun MediaLayerEnvironment(media: MediaLayer?, imageLoader: ImageLoader?,
       try {
         it.setTonePreparation(ToneFrames(it, context.applicationContext, loader))
       } catch (error: MediaException) {
-        Media.failure = error
+        Media.recordFailure(error)
       }
       MediaEnvironment(it, players ?: binding?.factory?.players, loader, it.imageStats())
     }
@@ -152,7 +157,7 @@ private fun MediaLayerEnvironment(media: MediaLayer?, imageLoader: ImageLoader?,
         media.setMutedAll(muted)
         Media.failure = null
       } catch (error: MediaException) {
-        Media.failure = error
+        Media.recordFailure(error)
       }
     }
     onDispose { }

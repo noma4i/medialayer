@@ -19,7 +19,7 @@ internal class SuspensionHold {
       media.suspendPlayback(allowGroups)
     } catch (error: MediaException) {
       groups = null
-      Media.failure = error
+      Media.recordFailure(error)
       return
     }
     held?.release()

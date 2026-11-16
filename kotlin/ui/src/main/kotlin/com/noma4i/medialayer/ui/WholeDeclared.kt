@@ -28,7 +28,7 @@ class MediaWholeHold {
       held = next
       Media.failure = null
     } catch (error: MediaException) {
-      Media.failure = error
+      Media.recordFailure(error)
     }
   }
 
