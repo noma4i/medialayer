@@ -263,3 +263,18 @@ fn inv_ingress_33_a_refused_payload_is_dropped_after_the_lock_is_released() {
     assert!(matches!(verdict, Err(MediaError::Overloaded { .. })));
     assert!(bytes_unlocked.load(std::sync::atomic::Ordering::SeqCst), "the payload refused by bytes was dropped under the lock");
 }
+
+#[test]
+fn inv_audio_46_audio_commands_need_no_room_so_the_end_of_a_call_or_a_recording_is_never_refused() {
+    let queue = InputQueue::new(IngressLimits { entries: 8, owners: 4, bytes: 4_096 });
+    opened(&queue, 1);
+    queue.submit_audio(vec![Declared::Audio(CoreAudio::CallHold(true)), Declared::Audio(CoreAudio::PauseAll)]).unwrap();
+    while queue.submit(Declared::PlaceSeek { owner: 1, fraction: 0.5 }).is_ok() {}
+
+    queue.submit_audio(vec![Declared::Audio(CoreAudio::CallHold(false))]).unwrap();
+    queue.submit_audio(vec![Declared::Audio(CoreAudio::ForgetPaused)]).unwrap();
+
+    let order = queued(&queue);
+    let audio: Vec<_> = order.iter().copied().filter(|name| *name != "seek" && *name != "open").collect();
+    assert_eq!(audio, vec!["call-hold", "pause-all", "call-end", "forget-paused"], "{order:?}");
+}

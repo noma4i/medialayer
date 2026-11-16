@@ -112,7 +112,7 @@ fn inv_audio_15_the_end_of_an_interruption_resumes_only_when_the_system_says_so(
         assert_eq!(world.send(I::InterruptionBegan), pause, "{label}");
         assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
         if resumes {
-            assert_eq!(world.settle(end), vec![apply(PLAYBACK), A::ResumePaused, available(MicrophoneAvailability::Available)], "{label}: the session comes back before the players");
+            assert_eq!(world.settle(end), vec![apply(PLAYBACK), available(MicrophoneAvailability::Available), A::ResumePaused], "{label}: the players resume after their session is applied");
             assert_eq!(world.send(I::Audible { slot: 0, on: true }), vec![], "{label}");
         } else {
             assert_eq!(world.send(end), vec![A::ForgetPaused, available(MicrophoneAvailability::Available)], "{label}");
@@ -151,7 +151,7 @@ fn inv_audio_18_a_focus_request_refused_in_the_background_waits_for_the_foregrou
     assert_eq!(world.send(I::Audible { slot: 0, on: true }), vec![apply(PLAYBACK)]);
     assert_eq!(world.send(I::FocusRequest { answer: FocusAnswer::Failed }), vec![A::PauseAll { reason: PauseReason::Interrupted }]);
     assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
-    assert_eq!(world.send(I::Foreground { on: true }), vec![apply(PLAYBACK), A::ResumePaused]);
+    assert_eq!(world.settle(I::Foreground { on: true }), vec![apply(PLAYBACK), A::ResumePaused]);
     assert_eq!(world.send(I::Audible { slot: 0, on: true }), vec![]);
     assert_eq!(World::new().send(I::FocusRequest { answer: FocusAnswer::Delayed }), vec![], "a delayed request waits for the gain");
 }
@@ -387,6 +387,7 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
         let (mut next_id, mut started, mut admitted, mut hold, mut session_active) = (0u64, Vec::new(), Vec::<u64>::new(), false, false);
         let mut last_availability = MicrophoneAvailability::Available;
         let mut kinds = std::collections::HashMap::new();
+        let (mut gate, mut multiplier) = (false, 1.0f32);
         let track = |actions: &[AudioAction], admitted: &mut Vec<u64>, hold: &mut bool, session_active: &mut bool, last_availability: &mut MicrophoneAvailability| {
             for action in actions {
                 match action {
@@ -423,8 +424,26 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
             if system_deactivates(&input) {
                 session_active = false;
             }
+            let refusal = matches!(input, I::FocusRequest { answer: FocusAnswer::Delayed | FocusAnswer::Failed } | I::Applied { result: AppliedResult::Failed { .. }, .. });
+            let noisy = matches!(input, I::Noisy);
+            let label = format!("{input:?}");
             let actions = world.raw(input);
             track(&actions, &mut admitted, &mut hold, &mut session_active, &mut last_availability);
+            for action in &actions {
+                match action {
+                    A::PauseAll { .. } => gate = true,
+                    A::ForgetPaused | A::ResumePaused => gate = false,
+                    A::VolumeMultiplier { value } => multiplier = *value,
+                    _ => {}
+                }
+            }
+            let owner = &world.owner;
+            assert!(!(refusal && actions.iter().any(|action| matches!(action, A::Apply { .. }))), "the answer to a refusal asked the system again: {label} {actions:?}");
+            assert!(!(owner.inflight.is_none() && matches!(owner.applied, Some(SessionWant::Recording { .. })) && !owner.pending.is_empty()), "a capture waits although its recording session is applied: {label} {:?}", owner.pending);
+            assert!(owner.captures.is_empty() || gate, "playback may start during a recording: {label} {actions:?}");
+            assert!(!actions.contains(&A::ResumePaused) || (owner.inflight.is_none() && owner.applied.is_some()), "the players resume before their session is applied: {label} {actions:?}");
+            assert!(owner.system() == System::Ducked || multiplier == 1.0, "the ducked volume outlived the duck: {label} {:?}", owner.system());
+            assert!(!(noisy && owner.paused == Some(PauseReason::Interrupted)), "a pause saved before the output was lost can resume on another output: {actions:?}");
             let running: std::collections::BTreeSet<_> = admitted.iter().map(|id| format!("{:?}", kinds[id])).collect();
             assert_eq!(running.len(), admitted.len(), "two recordings of one kind run: {admitted:?} {actions:?}");
         }
@@ -473,4 +492,93 @@ fn inv_audio_32_a_recording_is_admitted_only_after_its_session_is_applied() {
     let mut call = World::new();
     call.send(I::Capture { id: 1, kind: RecordingKind::Voice });
     assert_eq!(call.send(I::PhoneCall { active: true }).first(), Some(&A::Refuse { id: 1, reason: RecordingRefusal::InCall }), "a call before the admission refuses it");
+}
+
+#[test]
+fn inv_audio_45_a_refused_or_delayed_answer_is_a_state_and_brings_no_new_request() {
+    let asks = |actions: &[AudioAction]| actions.iter().any(|action| matches!(action, A::Apply { .. }));
+    let mut world = World::playing();
+    let delayed = world.send(I::FocusRequest { answer: FocusAnswer::Delayed });
+    assert!(!asks(&delayed), "a delayed request with playback demand: {delayed:?}");
+    let gain = world.send(I::Focus { change: FocusChange::Gain });
+    assert!(gain.contains(&A::ResumePaused) && !asks(&gain), "the delayed gain resumes without a new request: {gain:?}");
+
+    let mut call = World::new();
+    assert!(asks(&call.send(I::CallStarted { id: 1, kind: CallKind::Unmanaged, speaker: false })));
+    let failed = call.send(I::FocusRequest { answer: FocusAnswer::Failed });
+    assert!(!asks(&failed), "a failed request with an own call: {failed:?}");
+    assert!(!asks(&call.send(I::CallSpeaker { id: 1, speaker: true })), "a demand change of the same call is not a system event");
+    assert_eq!(call.send(I::Foreground { on: true }).iter().filter(|action| matches!(action, A::Apply { .. })).count(), 1, "the foreground asks once");
+
+    let mut session = World::new();
+    let start = session.raw(I::Audible { slot: 0, on: true });
+    let generation = start.iter().find_map(generation_of).unwrap();
+    let refused = session.send(I::Applied { generation, result: AppliedResult::Failed { code: 561017449 } });
+    assert!(!asks(&refused), "a refused activation with playback demand: {refused:?}");
+    assert!(!asks(&session.send(I::Audible { slot: 1, on: true })), "more playback demand is not a system event");
+    assert!(asks(&session.send(I::Foreground { on: true })), "the foreground asks again");
+}
+
+#[test]
+fn inv_audio_47_resumed_players_wait_for_their_applied_session() {
+    for result in [AppliedResult::Ok, AppliedResult::Failed { code: 1 }] {
+        let label = format!("{result:?}");
+        let mut world = World::playing();
+        world.send(I::InterruptionBegan);
+        world.send(I::Audible { slot: 0, on: false });
+        let end = world.raw(I::InterruptionEnded { should_resume: true });
+        assert!(!end.contains(&A::ResumePaused), "{label}: resumed before the session: {end:?}");
+        let generation = end.iter().find_map(generation_of).expect("the resumed demand asks for its session");
+        let applied = world.send(I::Applied { generation, result: result.clone() });
+        if matches!(result, AppliedResult::Ok) {
+            assert!(applied.contains(&A::ResumePaused), "{label}: {applied:?}");
+        } else {
+            assert!(!applied.contains(&A::ResumePaused) && applied.contains(&A::ForgetPaused), "{label}: a refused session forgets the pause: {applied:?}");
+        }
+    }
+}
+
+#[test]
+fn inv_audio_48_the_recording_gate_and_an_output_loss_do_not_depend_on_a_sounding_slot() {
+    let mut idle = World::new();
+    let start = idle.settle(I::Capture { id: 1, kind: RecordingKind::Voice });
+    assert!(start.contains(&A::PauseAll { reason: PauseReason::Capture }), "a recording closes the playback gate while nothing sounds: {start:?}");
+    assert!(idle.settle(I::CaptureEnded { id: 1 }).contains(&A::ForgetPaused), "its end opens the gate and resumes nothing");
+
+    let mut world = World::playing();
+    world.send(I::Focus { change: FocusChange::LossTransient });
+    world.send(I::Audible { slot: 0, on: false });
+    assert!(world.send(I::Noisy).contains(&A::ForgetPaused), "the output left during the transient loss");
+    let gain = world.send(I::Focus { change: FocusChange::Gain });
+    assert!(!gain.contains(&A::ResumePaused), "nothing resumes on the speaker: {gain:?}");
+}
+
+#[test]
+fn inv_audio_49_a_voice_and_a_video_capture_asked_together_are_both_admitted() {
+    let mut world = World::new();
+    let mut generations: Vec<u64> = Vec::new();
+    generations.extend(world.raw(I::Capture { id: 1, kind: RecordingKind::Voice }).iter().filter_map(generation_of));
+    generations.extend(world.raw(I::Capture { id: 2, kind: RecordingKind::Video }).iter().filter_map(generation_of));
+    let mut admitted = Vec::new();
+    while let Some(generation) = generations.pop() {
+        for action in world.raw(I::Applied { generation, result: AppliedResult::Ok }) {
+            match action {
+                A::Admit { id } => admitted.push(id),
+                other => generations.extend(generation_of(&other)),
+            }
+        }
+    }
+    admitted.sort();
+    assert_eq!(admitted, vec![1, 2]);
+}
+
+#[test]
+fn inv_audio_50_leaving_the_duck_by_any_path_restores_the_volume() {
+    for leave in [I::Focus { change: FocusChange::Loss }, I::Focus { change: FocusChange::LossTransient }, I::InterruptionBegan, I::MediaReset, I::FocusRequest { answer: FocusAnswer::Failed }] {
+        let label = format!("{leave:?}");
+        let mut world = World::playing();
+        assert!(world.send(I::Focus { change: FocusChange::LossTransientDuck }).contains(&A::VolumeMultiplier { value: 0.2 }));
+        let left = world.send(leave);
+        assert!(left.contains(&A::VolumeMultiplier { value: 1.0 }), "{label}: {left:?}");
+    }
 }

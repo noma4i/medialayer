@@ -458,3 +458,17 @@ fn inv_capture_32_a_take_starts_only_while_its_microphone_sound_flows_and_losing
     let muted = drive(quiet, ready(quiet), &[CaptureEvent::AudioFlow { flowing: false }]).0;
     assert_eq!(drive(quiet, muted, &[CaptureEvent::Start]).1, vec![CaptureAction::BeginRecording], "a profile without sound does not wait for the microphone");
 }
+
+#[test]
+fn inv_capture_33_the_silence_of_a_take_ends_with_it_and_the_next_start_follows_the_sensor() {
+    let profile = moment();
+    let silent_take = || {
+        let flowing = drive(profile, ready(profile), &[CaptureEvent::AudioFlow { flowing: true }]).0;
+        drive(profile, flowing, &[CaptureEvent::Start, CaptureEvent::RecordStarted, CaptureEvent::AudioFlow { flowing: false }, CaptureEvent::RecordFinished { end: RecordEnd::Completed }]).0
+    };
+    let (_, actions) = drive(profile, silent_take(), &[CaptureEvent::Start]);
+    assert_eq!(actions, vec![CaptureAction::BeginRecording], "a sensor that reports only during a take (CameraX AudioStats) does not lock the camera after a silent take");
+
+    let (still, actions) = drive(profile, silent_take(), &[CaptureEvent::AudioFlow { flowing: false }, CaptureEvent::Start]);
+    assert_eq!((actions, still.state.fault), (Vec::new(), Some(CameraRefusal::MicrophoneSilent)), "a sensor that still hears silence after the take refuses the next start");
+}
