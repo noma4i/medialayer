@@ -316,3 +316,143 @@ fn inv_audio_32_a_video_recording_starts_and_lasts_only_while_the_microphone_sou
     assert_eq!(world.settle(I::Capture { id: 3, kind: RecordingKind::Video }), vec![apply(SessionWant::Recording { kind: RecordingKind::Video }), A::Admit { id: 3 }]);
     assert_eq!(world.send(I::MicrophoneFlow { flowing: false }), vec![A::Revoke { id: 3, reason: RecordingRefusal::MicrophoneSilent }, DEACTIVATE]);
 }
+
+#[test]
+fn inv_audio_33_a_volume_reader_holds_a_mixing_session_only_while_nothing_sounds() {
+    let mut world = World::with(AudioFocus::Duck);
+    let mix = SessionWant::Playback { focus: AudioFocus::Mix };
+    assert_eq!(world.settle(I::VolumeReadStarted { id: 1 }), vec![apply(mix.clone())]);
+    assert_eq!(world.settle(I::Audible { slot: 0, on: true }), vec![apply(SessionWant::Playback { focus: AudioFocus::Duck })], "sounding playback takes its own focus");
+    assert_eq!(world.settle(I::Audible { slot: 0, on: false }), vec![apply(mix)]);
+    assert_eq!(world.send(I::VolumeReadStarted { id: 2 }), vec![]);
+    assert_eq!(world.send(I::VolumeReadEnded { id: 1 }), vec![]);
+    assert_eq!(world.settle(I::VolumeReadEnded { id: 2 }), vec![DEACTIVATE]);
+}
+
+fn random_input(dice: &mut crate::seeded::Dice, next_id: &mut u64, started: &[u64]) -> AudioInput {
+    let pick_call = |dice: &mut crate::seeded::Dice| started.get(dice.index(started.len().max(1))).copied().unwrap_or(1);
+    match dice.below(29) {
+        27 => I::VolumeReadStarted { id: dice.between(1, 3) },
+        28 => I::VolumeReadEnded { id: dice.between(1, 3) },
+        0 | 1 => I::Audible { slot: dice.below(3), on: dice.percent(60) },
+        2 | 3 => {
+            *next_id += 1;
+            I::Capture { id: *next_id, kind: if dice.percent(50) { RecordingKind::Voice } else { RecordingKind::Video } }
+        }
+        4 => I::CaptureEnded { id: dice.between(1, (*next_id).max(1)) },
+        5 => {
+            *next_id += 1;
+            let kind = match dice.below(3) {
+                0 => CallKind::CallKit { uuid: format!("own{next_id}") },
+                1 => CallKind::Telecom,
+                _ => CallKind::Unmanaged,
+            };
+            I::CallStarted { id: *next_id, kind, speaker: dice.percent(50) }
+        }
+        6 => I::CallEnded { id: pick_call(dice) },
+        7 => I::CallSystemActivated { id: pick_call(dice) },
+        8 => I::CallSystemDeactivated { id: pick_call(dice) },
+        9 => I::CallSpeaker { id: pick_call(dice), speaker: dice.percent(50) },
+        10 => I::InterruptionBegan,
+        11 => I::InterruptionEnded { should_resume: dice.percent(50) },
+        12 => I::ResumptionRecommendation { should_resume: dice.percent(50) },
+        13 => I::Focus { change: [FocusChange::Gain, FocusChange::LossTransient, FocusChange::LossTransientDuck, FocusChange::Loss][dice.index(4)] },
+        14 => I::FocusRequest { answer: [FocusAnswer::Granted, FocusAnswer::Delayed, FocusAnswer::Failed][dice.index(3)] },
+        15 => I::MediaReset,
+        16 => I::Route { reason: [RouteReason::OldDeviceUnavailable, RouteReason::NewDeviceAvailable, RouteReason::CategoryChange, RouteReason::Override, RouteReason::Other][dice.index(5)], had_private_output: dice.percent(50) },
+        17 => I::Noisy,
+        18 => I::ObservedCalls { uuids: if dice.percent(50) { vec![] } else { vec![format!("own{}", dice.between(1, (*next_id).max(1))), "cellular".into()][..1 + dice.index(2)].to_vec() } },
+        19 => I::PhoneCall { active: dice.percent(40) },
+        20 => I::CommunicationMode { active: dice.percent(40) },
+        21 => I::Permission { granted: dice.percent(80) },
+        22 => I::OtherRecording { active: dice.percent(30) },
+        23 => I::Silenced { id: dice.between(1, (*next_id).max(1)) },
+        24 => I::MicrophoneFlow { flowing: dice.percent(70) },
+        25 => I::Foreground { on: dice.percent(70) },
+        _ => I::Applied { generation: dice.below(40), result: [AppliedResult::Ok, AppliedResult::Busy, AppliedResult::Failed { code: 1 }][dice.index(3)] },
+    }
+}
+
+fn system_deactivates(input: &AudioInput) -> bool {
+    matches!(
+        input,
+        I::InterruptionBegan
+            | I::MediaReset
+            | I::CallSystemDeactivated { .. }
+            | I::FocusRequest { answer: FocusAnswer::Failed }
+            | I::Applied { result: AppliedResult::Failed { .. }, .. }
+    )
+}
+
+#[test]
+fn inv_audio_12_any_sequence_keeps_one_recording_one_hold_and_ends_released() {
+    let mut dice = crate::seeded::Dice::new("inv_audio_12_any_sequence_keeps_one_recording_one_hold_and_ends_released");
+    for _ in 0..200 {
+        let mut world = World::new();
+        let (mut next_id, mut started, mut admitted, mut hold, mut session_active) = (0u64, Vec::new(), Vec::<u64>::new(), false, false);
+        let mut last_availability = MicrophoneAvailability::Available;
+        let track = |actions: &[AudioAction], admitted: &mut Vec<u64>, hold: &mut bool, session_active: &mut bool, last_availability: &mut MicrophoneAvailability| {
+            for action in actions {
+                match action {
+                    A::Admit { id } => {
+                        assert!(admitted.is_empty(), "a second recording was admitted while {admitted:?} runs: {actions:?}");
+                        admitted.push(*id);
+                    }
+                    A::Revoke { id, .. } => {
+                        assert!(admitted.contains(id), "revoked {id} that does not run: {actions:?}");
+                        admitted.retain(|running| running != id);
+                    }
+                    A::CallHold { on } => {
+                        assert_ne!(*on, *hold, "the core hold repeated its value: {actions:?}");
+                        *hold = *on;
+                    }
+                    A::Apply { activate, .. } => *session_active = *activate,
+                    A::Deactivate { .. } => *session_active = false,
+                    A::Availability { value } => {
+                        assert_ne!(*value, *last_availability, "an unchanged availability was sent: {actions:?}");
+                        *last_availability = *value;
+                    }
+                    _ => {}
+                }
+            }
+        };
+        for _ in 0..60 {
+            let input = random_input(&mut dice, &mut next_id, &started);
+            if let I::CallStarted { id, .. } = &input {
+                started.push(*id);
+            }
+            if let I::CaptureEnded { id } = &input {
+                admitted.retain(|running| running != id);
+            }
+            if system_deactivates(&input) {
+                session_active = false;
+            }
+            let actions = world.raw(input);
+            track(&actions, &mut admitted, &mut hold, &mut session_active, &mut last_availability);
+        }
+        let mut ending = vec![I::PhoneCall { active: false }, I::CommunicationMode { active: false }, I::ObservedCalls { uuids: vec![] }, I::OtherRecording { active: false }, I::Permission { granted: true }];
+        ending.extend(started.iter().map(|id| I::CallEnded { id: *id }));
+        ending.extend(admitted.clone().into_iter().map(|id| I::CaptureEnded { id }));
+        ending.extend((0..3).map(|slot| I::Audible { slot, on: false }));
+        ending.extend((1..=3).map(|id| I::VolumeReadEnded { id }));
+        ending.extend([I::InterruptionEnded { should_resume: false }, I::Focus { change: FocusChange::Gain }, I::Foreground { on: true }, I::MicrophoneFlow { flowing: true }, I::Route { reason: RouteReason::Other, had_private_output: false }]);
+        for input in ending {
+            if let I::CaptureEnded { id } = &input {
+                admitted.retain(|running| running != id);
+            }
+            if system_deactivates(&input) {
+                session_active = false;
+            }
+            let mut chunk = world.raw(input);
+            loop {
+                track(&chunk, &mut admitted, &mut hold, &mut session_active, &mut last_availability);
+                let Some(generation) = chunk.iter().rev().find_map(generation_of) else { break };
+                chunk = world.raw(I::Applied { generation, result: AppliedResult::Ok });
+            }
+        }
+        assert!(!hold, "the core hold stayed after every call ended");
+        assert!(!session_active, "the session stayed active after every demand ended");
+        assert_eq!(last_availability, MicrophoneAvailability::Available);
+        assert_eq!(world.raw(I::Capture { id: 999, kind: RecordingKind::Voice }).last(), Some(&A::Admit { id: 999 }), "the microphone is free at the end");
+    }
+}
