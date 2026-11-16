@@ -495,7 +495,7 @@ Every place takes `playing` and `muted`. A player that is not playing stays prep
 
 A pager declares the neighbour page that the finger is dragging into with `peeking: true`. The player of that page plays muted beside the page that plays, so the drag shows a moving picture. When the page becomes `playing` its player keeps running and gets its sound, with no restart. When `peeking` ends without `playing`, the player pauses. One page peeks at a time, and a page that plays never peeks.
 
-When the app loses a private audio output (headphones or Bluetooth on iOS, `ACTION_AUDIO_BECOMING_NOISY` on Android), MediaLayer pauses every playing place and forgets the play wish. `Media.muted` does not change. A place plays again after its owner declares play. See [audio focus](audio-focus.md).
+When the previous route had a private output and the new route has none, MediaLayer pauses every playing place at any time and forgets the play wish. A switch from A2DP to HFP is not a loss. `Media.muted` does not change. A place plays again after its owner declares play. See [audio focus](audio-focus.md).
 
 ## Suspending playback
 
@@ -546,12 +546,12 @@ You report only whether a place is visible or active. Prefetch, preroll, handoff
 
 While a call runs, MediaLayer plays nothing and records nothing. Every player is paused, a place that declares play gets no play, `playUrl` fails with `MediaError.InCall`, a running `MediaVoiceRecorder` and a running video recording of `MediaCamera` stop with the in-call refusal and delete their file, and a new recording is refused with the same refusal before it touches the microphone. A photo is not a recording and is not refused. The end of a call restores nothing: a place plays again when its owner declares play.
 
-A call of the phone or of another app does all of this by itself. For your own call, take `callAudio` when the call starts and end it when the call ends. MediaLayer then owns its audio session or focus.
+A call of the phone or of another app does all of this by itself. For your own call, take `callAudio` when the call starts and end it when the call ends. MediaLayer then owns its audio session or focus. Swift `callAudio(_:)` is `async throws` and throws `MediaError.Closed` after close. Kotlin throws `MediaException.Closed` after close. Closing MediaLayer is not a failure.
 
 ### Swift
 
 ```swift
-let call = await media.callAudio(.callKit(callUUID)) // or .unmanaged
+let call = try await media.callAudio(.callKit(callUUID)) // or .unmanaged
 call.setSpeaker(true)        // an unmanaged call: the speaker, kept after route changes
 call.systemActivated()       // CallKit didActivate
 call.systemDeactivated()     // CallKit didDeactivate
@@ -590,10 +590,12 @@ Start the audio of your calling library on `LIVE` and stop it on `INTERRUPTED` o
 call.states.collect { state -> if (state == CallState.LIVE) startCallAudio() else stopCallAudio() }
 ```
 
-A Core-Telecom call leaves focus, audio mode and route to Telecom. An unmanaged call gets `AUDIOFOCUS_GAIN_TRANSIENT`, the communication mode and the speaker through `setCommunicationDevice`, and all of them are cleared when the call ends.
+A Core-Telecom call leaves focus, audio mode and route to Telecom. An unmanaged call gets `AUDIOFOCUS_GAIN_TRANSIENT`, the communication mode and the speaker through `setCommunicationDevice`, and all of them are cleared when the call ends. A later communication mode belongs to another app.
 
 ## Microphone
 
 Observe `media.microphoneAvailability` to show a busy overlay and disable recording buttons whenever the value is not `available`. Do not observe calls or microphone use separately.
 
 Swift exposes an `AsyncStream<MicrophoneAvailability>` that first yields the current value. Kotlin exposes a `StateFlow<MicrophoneAvailability>`. The values, in priority order: `permissionDenied`, `ownCall`, `externalCall`, `otherApp` (another app records, or the system interrupted the audio), `available`.
+
+Unexpected session, focus and speaker errors reach `Media.failure` with their system domain and code. iOS `cannotInterruptOthers`, `insufficientPriority` and `cannotStartPlaying` and Android focus `FAILED` and `DELAYED` are states, not failures. A system event or a new demand leaves a refused or delayed state. New demand includes a newly sounding place, recording, call or volume reader.

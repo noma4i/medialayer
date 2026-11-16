@@ -20,8 +20,10 @@ MediaLayer owns the audio session (iOS) and the audio focus (Android) for playba
 
 Take the call audio when your call starts and end it when the call ends. While any call runs, every player is paused and recording is refused. The end of a call restores nothing.
 
+Swift `callAudio(_:)` is `async throws` and throws `MediaError.Closed` after close. Kotlin throws `MediaException.Closed` after close. Closing MediaLayer is not a failure. Ending your own call clears its communication mode. A later communication mode belongs to another app.
+
 ```swift
-let call = await media.callAudio(.callKit(callUUID)) // or .unmanaged
+let call = try await media.callAudio(.callKit(callUUID)) // or .unmanaged
 call.systemActivated()   // CallKit didActivate
 call.systemDeactivated() // CallKit didDeactivate
 call.end()
@@ -39,6 +41,10 @@ Start the call audio of WebRTC or of your calling library when `states` gives `l
 ### Microphone
 
 Observe `microphoneAvailability` and disable the record buttons while the value is not `available`.
+
+Unexpected session, focus and speaker errors reach `Media.failure` with their system domain and code. iOS `cannotInterruptOthers`, `insufficientPriority` and `cannotStartPlaying` and Android focus `FAILED` and `DELAYED` are states, not failures. A system event or a new demand leaves a refused or delayed state. A newly sounding place, recording, call or volume reader is a new demand.
+
+Loss of a private output pauses playback at any time. Loss means the previous route had a private output and the new route has none. A switch from A2DP to HFP is not a loss.
 
 | Value | What the app shows |
 | ----- | ------------------ |

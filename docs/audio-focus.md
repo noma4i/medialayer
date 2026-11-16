@@ -42,8 +42,12 @@ When the last heard player stops, MediaLayer ends the session and tells the othe
 | The interruption ends without that permission, or the app returns to the foreground while it was interrupted | Plays nothing until a place declares play again |
 | Another app takes the focus for good (Android) | Pauses, forgets the play wish, and asks for focus only on a new play |
 | A request is ducked (Android) | Plays at 20 percent volume until the focus returns |
-| Headphones, Bluetooth or another private output leave | Pauses every playing place. `Media.muted` does not change |
+| The previous route had a private output and the new route has none | Pauses every playing place at any time. `Media.muted` does not change. A switch from A2DP to HFP is not a loss |
 | The media services reset (iOS) | Drops every player and plays nothing until a place declares play again |
+
+A refused or delayed request leaves that state on a system event or a new demand. A newly sounding place, a new recording, a new call, or a new volume reader is a new demand.
+
+Unexpected session, focus and speaker errors reach `Media.failure` with their system domain and code. iOS refusals `cannotInterruptOthers`, `insufficientPriority` and `cannotStartPlaying` are states, not failures. Android focus `FAILED` and `DELAYED` are also states. Closing MediaLayer is not a failure.
 
 ## Record
 
@@ -70,6 +74,8 @@ A call has the highest priority. While any call runs, every player pauses, a pla
 | Your Core-Telecom call | - | Telecom owns focus, mode and route. MediaLayer only pauses and refuses recording |
 | Your own call without the system | MediaLayer activates `playAndRecord` with `voiceChat` | MediaLayer requests `AUDIOFOCUS_GAIN_TRANSIENT` and sets the communication mode |
 | A call of the phone or of another app | Seen through `CXCallObserver` | Seen through the phone call state and the communication mode of another app |
+
+Ending your own call clears its communication mode. A later communication mode belongs to another app.
 
 ## Read the volume
 
