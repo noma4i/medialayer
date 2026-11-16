@@ -183,7 +183,7 @@ struct AudioLinkTests {
     rig.link.audible(slot: 0, true)
     await eventually("playing") { rig.session.log.count == 1 }
     let clip = MediaItem(kind: .video, url: "https://o.test/v.mp4", headers: [:], cover: nil, blurHash: nil, strategy: .window)
-    var call: MediaCallAudio? = await rig.link.call(.callKit(UUID()))
+    var call: MediaCallAudio? = try await rig.link.call(.callKit(UUID()))
     let states = StatesSeen(call!.states)
     await eventually("configured for CallKit") {
       Array(rig.session.log.suffix(2)) == ["deactivate", "apply AVAudioSessionCategoryPlayAndRecord AVAudioSessionModeVoiceChat activate=false"]
@@ -201,7 +201,7 @@ struct AudioLinkTests {
   @Test
   func inv_audio_39_an_unmanaged_speaker_overrides_the_output_again_after_each_route_change() async throws {
     let rig = try AudioRig()
-    let call = await rig.link.call(.unmanaged)
+    let call = try await rig.link.call(.unmanaged)
     call.setSpeaker(true)
     await eventually("speaker") { rig.session.log.last == "speaker true" }
 
@@ -298,7 +298,7 @@ struct AudioLinkTests {
     #expect(await revoked.value == .interrupted)
 
     let callRig = try AudioRig()
-    let call = await callRig.link.call(.unmanaged)
+    let call = try await callRig.link.call(.unmanaged)
     let states = Task { () -> [CallState] in
       var seen: [CallState] = []
       for await state in call.states { seen.append(state) }

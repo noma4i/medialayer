@@ -77,7 +77,7 @@ public enum Media {
   /// The last refusal of the core to apply the global mute, or nil after a success.
   public static var failure: MediaError? { flag.failure }
 
-  static func recordOpenFailure(_ error: Error) {
+  static func recordFailure(_ error: Error) {
     flag.failure = mediaError(error)
   }
 
@@ -180,7 +180,7 @@ private struct OpeningMediaLayerModifier: ViewModifier {
           ProcessMediaContext.shared.install(ready)
         } catch {
           guard !Task.isCancelled else { return }
-          Media.recordOpenFailure(error)
+          Media.recordFailure(error)
         }
       }
       .onDisappear { context.map(ProcessMediaContext.shared.remove) }

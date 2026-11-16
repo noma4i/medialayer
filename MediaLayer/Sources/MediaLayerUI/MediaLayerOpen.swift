@@ -136,11 +136,11 @@ extension MediaLayer {
     (objc_getAssociatedObject(self, &lifetimeKey) as? SystemSignals)?.audio?.availability ?? AsyncStream { $0.finish() }
   }
 
-  public func callAudio(_ kind: MediaCallKind) async -> MediaCallAudio {
+  public func callAudio(_ kind: MediaCallKind) async throws -> MediaCallAudio {
     guard let audio = (objc_getAssociatedObject(self, &lifetimeKey) as? SystemSignals)?.audio else {
-      preconditionFailure("The media layer is closed")
+      throw MediaError.Closed
     }
-    return await audio.call(kind)
+    return try await audio.call(kind)
   }
 
   func followSystem(events: PlayerEventsProtocol, link: PlayerEventsLink, center: NotificationCenter, names: SystemSignalNames, audio: AudioLink? = nil) {

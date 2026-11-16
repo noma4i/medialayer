@@ -3,6 +3,17 @@
 import Foundation
 import MediaLayer
 
+func recordSessionFailure(_ error: Error) {
+  let value = error as NSError
+  if value.domain == NSOSStatusErrorDomain && [
+    AVAudioSession.ErrorCode.cannotInterruptOthers.rawValue,
+    AVAudioSession.ErrorCode.insufficientPriority.rawValue,
+    AVAudioSession.ErrorCode.cannotStartPlaying.rawValue,
+    AVAudioSession.ErrorCode.isBusy.rawValue
+  ].contains(value.code) { return }
+  Media.recordFailure(MediaError.Unexpected(detail: "\(value.domain) \(value.code) \(value.localizedDescription)"))
+}
+
 struct SystemAudioSession: AudioSessionPort {
   private let rest: SessionPlan
 
@@ -56,7 +67,7 @@ struct SystemAudioSession: AudioSessionPort {
       do { try session.setActive(true) }
       catch {
         do { try session.setCategory(rest.category, mode: rest.mode, options: rest.options) }
-        catch { Media.recordOpenFailure(error) }
+        catch { recordSessionFailure(error) }
         throw error
       }
     }
@@ -69,7 +80,6 @@ struct SystemAudioSession: AudioSessionPort {
     } catch {
       let value = error as NSError
       if value.domain == NSOSStatusErrorDomain && value.code == AVAudioSession.ErrorCode.isBusy.rawValue {
-        Media.recordOpenFailure(error)
         throw AudioSessionBusy()
       }
       throw error

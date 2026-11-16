@@ -23,7 +23,7 @@ final class SuspensionHold {
       Media.clearFailure()
     } catch {
       applied = nil
-      Media.recordOpenFailure(error)
+      Media.recordFailure(error)
     }
   }
 

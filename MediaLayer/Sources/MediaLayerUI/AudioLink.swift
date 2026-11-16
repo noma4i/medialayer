@@ -66,9 +66,10 @@ final class AudioLink: @unchecked Sendable {
     }
   }
 
-  func call(_ kind: MediaCallKind) async -> MediaCallAudio {
-    await withCheckedContinuation { continuation in
+  func call(_ kind: MediaCallKind) async throws -> MediaCallAudio {
+    try await withCheckedThrowingContinuation { continuation in
       inbox.async {
+        guard !self.closed else { continuation.resume(throwing: MediaError.Closed); return }
         let id = self.allocate()
         let (stream, sink) = AsyncStream<CallState>.makeStream()
         self.calls[id] = sink
@@ -152,7 +153,11 @@ final class AudioLink: @unchecked Sendable {
       self.availabilitySinks.values.forEach { $0.finish() }
       self.availabilitySinks.removeAll()
       self.sessionQueue.async {
-        if self.sessionConfigured { try? self.ports.session.deactivate(); self.sessionConfigured = false }
+        if self.sessionConfigured {
+          do { try self.ports.session.deactivate(); self.sessionConfigured = false }
+          catch is AudioSessionBusy {}
+          catch { recordSessionFailure(error) }
+        }
       }
     }
   }
@@ -169,7 +174,7 @@ final class AudioLink: @unchecked Sendable {
       pending.removeAll()
       return
     } catch {
-      Media.recordOpenFailure(error)
+      Media.recordFailure(error)
       pending.values.forEach { $0.resume(returning: .failure(error)) }
       pending.removeAll()
       return
@@ -181,7 +186,7 @@ final class AudioLink: @unchecked Sendable {
         sessionQueue.async {
           let result: AppliedResult
           do { try self.ports.session.apply(plan, activate: activate); self.sessionConfigured = true; result = .ok }
-          catch { result = .failed(code: Int64((error as NSError).code)) }
+          catch { recordSessionFailure(error); result = .failed(code: Int64((error as NSError).code)) }
           self.send(.applied(generation: generation, result: result))
         }
       case let .deactivate(generation):
@@ -189,7 +194,7 @@ final class AudioLink: @unchecked Sendable {
           let result: AppliedResult
           do { try self.ports.session.deactivate(); self.sessionConfigured = false; result = .ok }
           catch is AudioSessionBusy { result = .busy }
-          catch { result = .failed(code: Int64((error as NSError).code)) }
+          catch { recordSessionFailure(error); result = .failed(code: Int64((error as NSError).code)) }
           self.send(.applied(generation: generation, result: result))
         }
       case let .admit(id):
@@ -225,7 +230,10 @@ final class AudioLink: @unchecked Sendable {
   }
 
   private func overrideSpeaker(_ on: Bool) {
-    sessionQueue.async { try? self.ports.session.overrideSpeaker(on) }
+    sessionQueue.async {
+      do { try self.ports.session.overrideSpeaker(on) }
+      catch { recordSessionFailure(error) }
+    }
   }
 }
 

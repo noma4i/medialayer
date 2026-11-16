@@ -4,6 +4,50 @@ import Foundation
 import ImageIO
 import MediaLayer
 
+private final class CameraBindHolds: @unchecked Sendable {
+  private let lock = NSLock()
+  private var closed = false
+  private var release: CameraServices.Release?
+  private var ticket: RecordingTicket?
+
+  func install(_ release: @escaping CameraServices.Release) -> Bool {
+    let accepted = lock.withLock {
+      guard !closed else { return false }
+      self.release = release
+      return true
+    }
+    if !accepted { release() }
+    return accepted
+  }
+
+  func install(_ ticket: RecordingTicket) -> Bool {
+    let accepted = lock.withLock {
+      guard !closed else { return false }
+      self.ticket = ticket
+      return true
+    }
+    if !accepted { ticket.end() }
+    return accepted
+  }
+
+  func take() -> (CameraServices.Release?, RecordingTicket?)? {
+    lock.withLock {
+      guard !closed else { return nil }
+      closed = true
+      let result = (release, ticket)
+      release = nil
+      ticket = nil
+      return result
+    }
+  }
+
+  func close() {
+    guard let (release, ticket) = take() else { return }
+    release?()
+    ticket?.end()
+  }
+}
+
 /// A photo from the camera: an upright JPEG file (the EXIF turn is applied, the mirror is not), its size after the turn and the side it was taken from.
 public struct CapturedPhoto: Sendable, Equatable {
   public let url: URL
@@ -430,38 +474,42 @@ public final class MediaCamera: @unchecked Sendable {
     let needsHold = sessionHold == nil
     let needsAudio = profile.audio && audioHold == nil
     binding?.cancel()
-    binding = Task { [services, profile] in
-      var release: CameraServices.Release?
-      if needsHold {
-        do {
-          release = try await services.admitSession(captureCost(profile: profile))
-        } catch {
-          self.queue.async { if self.epoch == current { self.apply(.refuse(reason: .memory)) } }
-          return
-        }
+    let holds = CameraBindHolds()
+    binding = Task { [services, profile, holds] in
+      await withTaskCancellationHandler {
+        await self.bindHolds(services: services, profile: profile, lens: lens, current: current, needsHold: needsHold, needsAudio: needsAudio, holds: holds)
+      } onCancel: { holds.close() }
+    }
+  }
+
+  private func bindHolds(services: CameraServices, profile: CaptureProfile, lens: CameraLens, current: Int, needsHold: Bool, needsAudio: Bool, holds: CameraBindHolds) async {
+    defer { holds.close() }
+    if needsHold {
+      do {
+        let release = try await services.admitSession(captureCost(profile: profile))
+        guard holds.install(release) else { return }
+      } catch {
+        queue.async { if self.epoch == current { self.apply(.refuse(reason: .memory)) } }
+        return
       }
-      var session: RecordingTicket?
-      if needsAudio {
-        guard let link = services.link() else {
-          release?()
-          self.queue.async { if self.epoch == current { self.apply(.refuse(reason: .notReady)) } }
-          return
-        }
-        switch await link.admit(.video) {
-        case let .success(ticket): session = ticket
-        case let .failure(error):
-          release?()
-          let reason = (error as? RecordingRefusal).map(Self.microphoneReason) ?? .notReady
-          self.queue.async { if self.epoch == current { self.apply(.refuse(reason: reason)) } }
-          return
-        }
+    }
+    if needsAudio {
+      guard let link = services.link() else {
+        queue.async { if self.epoch == current { self.apply(.refuse(reason: .notReady)) } }
+        return
       }
-      self.queue.async {
-        guard self.epoch == current else {
-          release?()
-          session?.end()
-          return
-        }
+      switch await link.admit(.video) {
+      case let .success(ticket): guard holds.install(ticket) else { return }
+      case let .failure(error):
+        let reason = (error as? RecordingRefusal).map(Self.microphoneReason) ?? .notReady
+        queue.async { if self.epoch == current { self.apply(.refuse(reason: reason)) } }
+        return
+      }
+    }
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+      queue.async {
+        defer { continuation.resume() }
+        guard self.epoch == current, let (release, session) = holds.take() else { return }
         if let release { self.sessionHold = release }
         if let session { self.audioHold = session; self.watch(session) }
         self.backend.bind(lens: lens, profile: self.profile)

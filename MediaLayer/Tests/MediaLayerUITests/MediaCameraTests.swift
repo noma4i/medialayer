@@ -315,7 +315,7 @@ struct MediaCameraTests {
     await ready(rig)
     try await rig.camera.startRecording()
 
-    let call = await rig.audio.link.call(.unmanaged)
+    let call = try await rig.audio.link.call(.unmanaged)
     defer { call.end() }
     await eventually("recording revoked") { rig.camera.state.phase == .ready }
     do {

@@ -116,7 +116,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
       do {
         try hold.start {}
       } catch {
-        do { try capture.stop() } catch { Media.recordOpenFailure(error) }
+        do { try capture.stop() } catch { Media.recordFailure(error) }
         throw error
       }
     } catch let reason as RecordingRefusal {

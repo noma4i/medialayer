@@ -24,7 +24,7 @@ final class FrameCache: @unchecked Sendable {
     do {
       return try await reserve(bytes)
     } catch let error as MediaError {
-      await MainActor.run { Media.recordOpenFailure(error) }
+      await MainActor.run { Media.recordFailure(error) }
       return nil
     } catch {
       return nil

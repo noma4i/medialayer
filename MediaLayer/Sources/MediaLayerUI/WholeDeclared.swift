@@ -25,7 +25,7 @@ public final class MediaWholeHold {
       held = next
       Media.clearFailure()
     } catch {
-      Media.recordOpenFailure(error)
+      Media.recordFailure(error)
     }
   }
 
