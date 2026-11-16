@@ -1,27 +1,28 @@
 # Audio focus
 
-MediaLayer can own the sound policy of your players: whether another app's music keeps playing, gets quieter, or stops while a place plays. You choose the policy once, when you call `open`. The app writes no audio session code for playback.
+MediaLayer owns the sound of your app: the audio session on iOS and the audio focus on Android, for playback, voice and video recording, and calls. You choose the playback policy once, when you call `open`. The app writes no audio session or audio focus code.
 
 | Question | Answer |
 | -------- | ------ |
-| Who chooses the policy | The app, once, in `open` |
-| Who talks to the platform | MediaLayer. On iOS one private actor owns every `AVAudioSession` call, none runs on the main thread |
+| Who decides | One rule in the core, the same on iOS and Android. The platforms only pass system events in and run what the rule answers |
+| Who talks to the platform | MediaLayer. No `AVAudioSession` or `AudioManager` call runs on the main thread |
 | Default | `mix`: your sound plays beside other apps and never stops or lowers their music |
 | Does `muted` change the policy | No. A muted place never takes the focus. Mute and focus are separate |
+| Does a lost headphone change `Media.muted` | No. `Media.muted` is only the user's flag |
 
 ## Policies
 
 | Policy | Other app's music | iOS session | Android focus |
 | ------ | ----------------- | ----------- | ------------- |
-| `exclusive` | Stops while a place plays | `playback`, mode `moviePlayback`, no options | Media3 requests `AUDIOFOCUS_GAIN` |
-| `mix` | Keeps playing at full volume | `playback`, mode `moviePlayback`, `mixWithOthers` | No request. The player does not hold the focus |
-| `duck` | Gets quieter while a place plays, then returns | as `mix` plus `duckOthers` | MediaLayer requests `AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK` for the first heard place and abandons it 300 ms after the last one. The player does not hold the focus |
+| `exclusive` | Stops while a place plays | `playback`, mode `moviePlayback`, no options | One `AUDIOFOCUS_GAIN` request for the app |
+| `mix` | Keeps playing at full volume | `playback`, mode `moviePlayback`, `mixWithOthers` | No request |
+| `duck` | Gets quieter while a place plays, then returns | as `mix` plus `duckOthers` | One `AUDIOFOCUS_GAIN` request for the app |
 
-Use `mix` when your app must never interrupt the user. MediaLayer writes nothing to the audio session while no place is heard, so a category your app set stays as it is. Use `duck` only when the user should hear your sound over the music.
+On Android MediaLayer holds one focus request for the whole app. The players never request focus themselves, so two players can never take the focus from each other.
 
 ## When a place takes the focus
 
-A place takes the focus only while its player is heard. A player is heard when it is not muted, it is playing or waiting to play, and it holds an item.
+A place takes the focus only while its player is heard. A player is heard when it really plays (iOS `timeControlStatus` is playing, Android `isPlaying`), it is not muted, and it holds an item.
 
 | Place | Takes the focus |
 | ----- | --------------- |
@@ -30,71 +31,49 @@ A place takes the focus only while its player is heard. A player is heard when i
 | Paused, ended or unloaded player | No |
 | Image or GIF | No |
 
-When the last heard player stops, MediaLayer ends the session and tells the other apps. That is what makes ducked music come back. MediaLayer waits 300 ms before it releases, so a pager that pauses one page and starts the next never lets the music back up in between.
+When the last heard player stops, MediaLayer ends the session and tells the other apps, so ducked music comes back. On iOS the session then rests in the playback category of your policy, so a player that starts later always plays through the right output.
 
-## Choose the policy
+## What the system does to playback
 
-### Swift
-
-```swift
-let media = try await MediaLayer.open(
-    fetcher: fetcher,
-    settings: settings,
-    audioFocus: .mix
-)
-```
-
-### Kotlin
-
-```kotlin
-val media: Deferred<MediaLayer> = MediaLayer.open(
-    context, fetcher, settings,
-    audioFocus = MediaAudioFocus.Mix
-)
-```
+| Event | What MediaLayer does |
+| ----- | -------------------- |
+| An interruption (an alarm, Siri, a call screen) or a temporary loss of focus | Pauses every playing place |
+| The interruption ends and the system allows a resume | Plays the same places again |
+| The interruption ends without that permission, or the app returns to the foreground while it was interrupted | Plays nothing until a place declares play again |
+| Another app takes the focus for good (Android) | Pauses, forgets the play wish, and asks for focus only on a new play |
+| A request is ducked (Android) | Plays at 20 percent volume until the focus returns |
+| Headphones, Bluetooth or another private output leave | Pauses every playing place. `Media.muted` does not change |
+| The media services reset (iOS) | Drops every player and plays nothing until a place declares play again |
 
 ## Record
 
-Recording has its own call and its own plan. It does not follow the playback policy, and it never mixes or ducks.
+A voice recording or a video recording has its own session. It does not follow the playback policy, and it never mixes or ducks.
 
 | Question | Answer |
 | -------- | ------ |
-| What does recording set | iOS: category `playAndRecord`, mode `default`, option `defaultToSpeaker`. Android: `AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE` |
-| When | While a `holdRecording` token is live |
-| What does releasing the token do | Ends the recording session. The next heard place sets the playback category again |
-| Does the playback policy change recording | No. Recording works with every policy |
-| Returns | A token, or `nil` on iOS and `null` on Android when the system refuses recording focus |
+| What does recording set | iOS: `playAndRecord`, mode `default` for voice and `videoRecording` for video, option `allowBluetoothA2DP` (headphones stay the output). Android: `AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE` |
+| Playback during a recording | Paused when the recording starts. The end of the recording plays nothing back |
+| When is a recording admitted | Only after the session for it is in place. If the system refuses it, the start fails with `microphoneBusy` and no microphone is taken |
+| How many recordings | One of each kind. A camera and a voice recorder can hold the microphone together |
+| Camera | A camera with sound holds its recording session from the preview on |
+| What stops a running recording | A call, an interruption, a lost focus, a denied permission, a silenced microphone. The recording ends with that refusal and its file is deleted |
 
-### Swift
-
-```swift
-guard let hold = await Media.audio.holdRecording() else { return }
-// record
-hold.release()
-```
-
-### Kotlin
-
-```kotlin
-// Request RECORD_AUDIO and record with your own recorder as before. The library only holds the focus.
-val hold = Media.audio!!.holdRecording() ?: return
-// record
-hold.close()
-```
-
-On Android recording asks for `AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE`, so other apps pause while you record. Closing the token abandons it after 300 ms and the playback focus of the policy returns when a place is heard.
+The refusals are `VoiceRefusal` and `CameraRefusal` cases with their text from the core: `inCall`, `interrupted`, `microphoneSilent`, `microphoneBusy`, `permissionDenied`. A video take with sound starts only while the microphone sound flows, and a take whose sound stops is thrown away with `microphoneSilent`: a silent clip never reaches the app.
 
 ## Call
 
-A call takes priority over recording, audible places and volume readers. On iOS its plan uses `playAndRecord`, `voiceChat` and `allowBluetoothHFP`. Speaker routing adds `defaultToSpeaker`. CallKit-managed calls let the system activate the session. On Android a call requests `AUDIOFOCUS_GAIN` with voice communication attributes and sets communication mode and routing. Ending the call restores the current demand. See [Calls](declaring-media.md#calls) for the API and WebRTC order.
+A call has the highest priority. While any call runs, every player pauses, a place that declares play gets no play, `playUrl` fails with `MediaError.InCall`, and recordings stop or are refused with `inCall`. The end of a call restores nothing: a place plays after its owner declares play again. See [Calls](declaring-media.md#calls) for the API.
 
-An external system call is also a call source. It holds the same playback and recording restriction until that call ends. Observe [microphone availability](declaring-media.md#microphone) for recording controls.
+| Call | iOS | Android |
+| ---- | --- | ------- |
+| Your CallKit call | MediaLayer releases its session and only sets `playAndRecord` with `voiceChat`. CallKit activates it | - |
+| Your Core-Telecom call | - | Telecom owns focus, mode and route. MediaLayer only pauses and refuses recording |
+| Your own call without the system | MediaLayer activates `playAndRecord` with `voiceChat` | MediaLayer requests `AUDIOFOCUS_GAIN_TRANSIENT` and sets the communication mode |
+| A call of the phone or of another app | Seen through `CXCallObserver` | Seen through the phone call state and the communication mode of another app |
 
 ## Read the volume
 
-`readVolume` gives the current system volume and a stream of the changes, for example to unmute when the user presses volume up. While the stream lives, MediaLayer keeps a session that mixes and never ducks, even under `duck`. End the stream and the session goes back to idle.
-
-Kotlin gives the volume of `STREAM_MUSIC` as a value from 0 to 1, as Swift does. `readVolume` returns null when the system reports no volume range. The system observer is registered when the stream is collected and removed when the collector is cancelled. No polling runs and no audio focus is requested.
+`readVolume` gives the current system volume and a stream of the changes, for example to unmute when the user presses volume up. While the stream lives and nothing is heard, MediaLayer keeps a session that mixes and never ducks. End the stream and the session goes back to idle. No polling runs.
 
 ### Swift
 
@@ -106,24 +85,36 @@ for await volume in reading.changes { /* react */ }
 ### Kotlin
 
 ```kotlin
-val reading = Media.audio!!.readVolume() ?: return
-val initial = reading.initial
+val reading = media.readVolume() ?: return
 reading.changes.collect { volume -> /* react */ }
 ```
 
 ## React to volume up
 
-`volumeRaises` gives one event for each rise of the system volume, for example to unmute when the user presses volume up. A fall, or a rise of 0.001 or less, gives no event. The core holds this one rule, so both platforms agree. The system observer is on while the stream is read and off when it ends. No polling runs.
+`volumeRaises` gives one event for each rise of the system volume. A fall, or a rise of 0.001 or less, gives no event. The core holds this rule, so both platforms agree.
 
 ### Swift
 
 ```swift
-guard let raises = await Media.audio?.volumeRaises() else { return }
-for await _ in raises { Media.muted = false }
+for await _ in await Media.audio?.volumeRaises() ?? AsyncStream { $0.finish() } { Media.muted = false }
 ```
 
 ### Kotlin
 
 ```kotlin
-Media.audio!!.volumeRaises().collect { Media.muted = false }
+media.volumeRaises().collect { Media.muted = false }
+```
+
+## Choose the policy
+
+### Swift
+
+```swift
+let media = try await MediaLayer.open(fetcher: fetcher, settings: settings, audioFocus: .mix)
+```
+
+### Kotlin
+
+```kotlin
+val media: Deferred<MediaLayer> = MediaLayer.open(context, fetcher, settings, audioFocus = MediaAudioFocus.Mix)
 ```

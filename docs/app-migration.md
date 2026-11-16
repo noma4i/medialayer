@@ -1,0 +1,72 @@
+# App migration
+
+What an app changes when it moves to a new MediaLayer version. Each section names the removed API, its replacement, and what the app shows.
+
+## 3.38.0: one audio owner
+
+MediaLayer owns the audio session (iOS) and the audio focus (Android) for playback, recording and calls. The app keeps no audio session, focus, call or microphone state of its own.
+
+### Remove
+
+| Removed | Replacement |
+| ------- | ----------- |
+| `MediaLayer.callHold()`, `MediaCallHold` | Nothing for a phone call or a call of another app: MediaLayer sees it. Your own call: `callAudio` |
+| `callAudio(managedBySystem:callUUID:)`, `liveChanges`, Kotlin `callAudio(managedBySystem)`, `live` | `callAudio(kind)` and its `states` |
+| `MediaAudioSession.holdRecording()`, `MediaRecordingHold` | Nothing: `MediaVoiceRecorder` and `MediaCamera` hold the microphone themselves |
+| Your own `AVAudioSession` category or `setActive` calls, your own `requestAudioFocus` | Nothing |
+| Your own mute on a lost headphone | Nothing: MediaLayer pauses the players and keeps `Media.muted` as the user set it |
+
+### Calls
+
+Take the call audio when your call starts and end it when the call ends. While any call runs, every player is paused and recording is refused. The end of a call restores nothing.
+
+```swift
+let call = await media.callAudio(.callKit(callUUID)) // or .unmanaged
+call.systemActivated()   // CallKit didActivate
+call.systemDeactivated() // CallKit didDeactivate
+call.end()
+```
+
+```kotlin
+val call = media.callAudio(MediaCallKind.Telecom) // or MediaCallKind.Unmanaged
+call.systemActivated()   // Telecom onSetActive
+call.systemDeactivated() // Telecom onSetInactive
+call.close()
+```
+
+Start the call audio of WebRTC or of your calling library when `states` gives `live`, and stop it on `interrupted` or `ended`. The full order is in [Calls](declaring-media.md#calls).
+
+### Microphone
+
+Observe `microphoneAvailability` and disable the record buttons while the value is not `available`.
+
+| Value | What the app shows |
+| ----- | ------------------ |
+| `available` | Record buttons enabled |
+| `ownCall` | Record buttons disabled, your call screen is visible |
+| `externalCall` | A banner: the microphone is busy with a call |
+| `otherApp` | A banner: another app uses the microphone or the system interrupted the audio |
+| `permissionDenied` | A prompt that opens the settings |
+
+```swift
+for await value in media.microphoneAvailability { recordEnabled = value == .available }
+```
+
+```kotlin
+media.microphoneAvailability.collect { recordEnabled = it == MicrophoneAvailability.AVAILABLE }
+```
+
+### Recording refusals
+
+`VoiceRefusal` and `CameraRefusal` have two new cases. A refused or stopped recording leaves no file.
+
+| Refusal | When | What the app shows |
+| ------- | ---- | ------------------ |
+| `interrupted` | The system interrupted the audio (an alarm, Siri, a call screen) during the recording, or before it started | "Recording stopped", the user records again |
+| `microphoneSilent` | The microphone gave no sound when a video take started, or its sound stopped during the take | "No sound from the microphone", the user records again |
+| `inCall` | A call runs | The call banner |
+| `microphoneBusy` | The system refused the recording session, or another app records | The busy banner |
+
+### Playback
+
+Recording pauses every player, and the end of a recording plays nothing back. An interruption that the system allows to resume plays the same places again. A lost headphone or Bluetooth output pauses the players. In all other cases a place plays after its owner declares play again.

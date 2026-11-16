@@ -544,48 +544,27 @@ You report only whether a place is visible or active. Prefetch, preroll, handoff
 
 ## Calls
 
-While a call runs, MediaLayer plays nothing and records nothing. Take a call hold when the call starts and release it when the call ends. While at least one hold is alive, every player is paused, a place that declares play gets no play, `playUrl` fails with `MediaError.InCall`, a running `MediaVoiceRecorder` and a running video recording of `MediaCamera` stop with the in-call refusal and delete their file, and a new recording is refused with the same refusal before it touches the microphone. A photo is not a recording and is not refused.
+While a call runs, MediaLayer plays nothing and records nothing. Every player is paused, a place that declares play gets no play, `playUrl` fails with `MediaError.InCall`, a running `MediaVoiceRecorder` and a running video recording of `MediaCamera` stop with the in-call refusal and delete their file, and a new recording is refused with the same refusal before it touches the microphone. A photo is not a recording and is not refused. The end of a call restores nothing: a place plays again when its owner declares play.
 
-Releasing the last hold restores nothing. A place plays again when its owner declares play after the release: an update of a place that still says `playing` does it. Suspensions and calls are independent: a suspension released during a call restores nothing.
+A call of the phone or of another app does all of this by itself. For your own call, take `callAudio` when the call starts and end it when the call ends. MediaLayer then owns its audio session or focus.
 
 ### Swift
 
 ```swift
-let call = try media.callHold()
-// the call runs
-call.release()
+let call = await media.callAudio(.callKit(callUUID)) // or .unmanaged
+call.setSpeaker(true)        // an unmanaged call: the speaker, kept after route changes
+call.systemActivated()       // CallKit didActivate
+call.systemDeactivated()     // CallKit didDeactivate
+for await state in call.states { /* connecting, live, interrupted, ended */ }
+call.end()                   // also when the object is released
 ```
 
-### Kotlin
-
-```kotlin
-val call = media.callHold()
-// the call runs
-call.release()
-```
-
-The hold also releases when it is deallocated (Swift) or closed (Kotlin `use`).
-
-### Call audio
-
-Use `callAudio` to hold both the call and its audio session. MediaLayer owns the session and focus for playback, recording and calls. A call has priority over recording and playback. Ending it returns audio ownership to the current demand. A place needs a new play declaration after the call.
-
-On Swift, pass `true` and the CallKit UUID for a CallKit-managed call. MediaLayer sets the category and CallKit activates the session. Forward CallKit activation and deactivation to the call. For an unmanaged call, pass `false` and MediaLayer activates the session.
-
-```swift
-let call = try await media.callAudio(managedBySystem: true, callUUID: callUUID)
-call.setSpeaker(true)
-call.systemActivated() // CallKit didActivate
-call.systemDeactivated() // CallKit didDeactivate
-call.end()
-```
-
-At app start, set `RTCAudioSession.sharedInstance().useManualAudio = true`. The app never calls `RTCAudioSession` setCategory or setActive and never touches `AVAudioSession`. Forward `liveChanges` to WebRTC in this order:
+For a CallKit call MediaLayer releases its own session, sets `playAndRecord` with `voiceChat` and lets CallKit activate it, so `didActivate` always comes. At app start set `RTCAudioSession.sharedInstance().useManualAudio = true`. The app never calls `RTCAudioSession` setCategory or setActive and never touches `AVAudioSession`. Start the WebRTC audio when `states` gives `live` and stop it on `interrupted` or `ended`:
 
 ```swift
 let rtc = RTCAudioSession.sharedInstance()
-for await live in call.liveChanges {
-  if live {
+for await state in call.states {
+  if state == .live {
     rtc.audioSessionDidActivate(AVAudioSession.sharedInstance())
     rtc.isAudioEnabled = true
   } else {
@@ -595,26 +574,26 @@ for await live in call.liveChanges {
 }
 ```
 
-On Kotlin, take the call audio, set the route and close it when the call ends:
+### Kotlin
 
 ```kotlin
-val call = media.callAudio()
-call.setSpeaker(true)
-call.close()
+val call = media.callAudio(MediaCallKind.Telecom) // or MediaCallKind.Unmanaged
+call.systemActivated()   // Telecom onSetActive
+call.systemDeactivated() // Telecom onSetInactive
+call.setSpeaker(true)    // an unmanaged call; Telecom routes its own call
+call.close()             // the call ended
 ```
 
-Observe `live` to start and stop the call audio of the calling library:
+Start the audio of your calling library on `LIVE` and stop it on `INTERRUPTED` or `ENDED`:
 
 ```kotlin
-call.live.collect { live -> /* start or stop the call audio */ }
+call.states.collect { state -> if (state == CallState.LIVE) startCallAudio() else stopCallAudio() }
 ```
 
-For a call that Core-Telecom runs, pass `managedBySystem = true`. Telecom owns the audio mode, the route and the focus. MediaLayer only pauses players and refuses recording while the call lives, `setSpeaker` does nothing and `live` stays true until `close`. Playback returns when Telecom gives the audio mode back. Take it with `media.callAudio(managedBySystem = true)` and close it when Telecom ends the call.
+A Core-Telecom call leaves focus, audio mode and route to Telecom. An unmanaged call gets `AUDIOFOCUS_GAIN_TRANSIENT`, the communication mode and the speaker through `setCommunicationDevice`, and all of them are cleared when the call ends.
 
 ## Microphone
 
-Observe `media.microphoneAvailability` to show a busy overlay and disable recording buttons whenever the value is not available. Do not observe calls or microphone use separately. Take `callAudio` for your own call.
+Observe `media.microphoneAvailability` to show a busy overlay and disable recording buttons whenever the value is not `available`. Do not observe calls or microphone use separately.
 
-Swift exposes an `AsyncStream<MicrophoneAvailability>` that first yields the current value. Kotlin exposes a `StateFlow<MicrophoneAvailability>`. The values are available, own call, external call, other app and permission denied. Permission denial has the highest priority, followed by own call, external call and another app.
-
-An external call pauses players and stops active recordings with the in-call refusal. The recording file is deleted. New recordings are refused before the microphone is taken. When the external call ends, playback resumes only after a new play declaration.
+Swift exposes an `AsyncStream<MicrophoneAvailability>` that first yields the current value. Kotlin exposes a `StateFlow<MicrophoneAvailability>`. The values, in priority order: `permissionDenied`, `ownCall`, `externalCall`, `otherApp` (another app records, or the system interrupted the audio), `available`.
