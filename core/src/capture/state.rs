@@ -310,6 +310,7 @@ impl Machine {
     }
 
     fn record_finished(&mut self, end: RecordEnd) {
+        self.run.audio_flowing = true;
         self.run.starting = false;
         self.run.end = Some(end);
         self.run.state.phase = CameraPhase::Stopping;
