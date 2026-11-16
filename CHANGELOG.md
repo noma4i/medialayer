@@ -60,6 +60,7 @@
 
 ### Fixed
 
+- A place that starts playing while a camera preview or recording holds the session plays at once.
 - The screen stays on while a place plays with sound, a voice take, a camera preview or a call runs.
 - `isPlaying` shows paused after the library pauses a place.
 - A muted or buffering place pauses on a call, recording or interruption.

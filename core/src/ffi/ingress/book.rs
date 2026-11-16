@@ -10,6 +10,7 @@ use super::book_keys::*;
 pub(crate) use super::book_types::Book;
 use super::book_types::*;
 use super::audio_rule::{self, AudioGlobal, PlaceAudio};
+use super::AudioOp;
 
 impl Book {
     pub fn new(assembled: Arc<Assembled>, queue: Arc<InputQueue>, handle: Handle) -> Book {
@@ -186,6 +187,8 @@ impl Book {
     }
 
     pub(super) fn update_place(&mut self, owner: u64, mut input: PlaceInput, reserve: Reserve) {
+        let starts = self.places.get(&owner).is_some_and(|place| input.playing && (!place.input.playing || input.play_generation != place.input.play_generation) && place.forgotten != Some(input.play_generation));
+        if starts && !self.in_call && self.pause_reason == Some(PauseReason::Capture) { self.audio(CoreAudio::Op(AudioOp::ForgetPaused)); }
         let intent = self.next_seq();
         let Some(place) = self.places.get_mut(&owner) else { return };
         let fresh = input.playing && (!place.input.playing || input.play_generation != place.input.play_generation) && place.forgotten != Some(input.play_generation);
@@ -240,7 +243,7 @@ impl Book {
         for (owner, audio) in owners.into_iter().zip(places) {
             let Some(place) = self.places.get_mut(&owner) else { continue };
             place.state.reason = audio.reason;
-            if effects.forget && (place.input.playing || place.input.peeking) {
+            if effects.forget && (place.input.playing || place.input.peeking) && !audio.playing && !audio.peeking {
                 let Some(keyed) = self.keys.get_mut(&place.item.url) else { continue };
                 withdraw(keyed, owner, &place.input, place.declared, place.intent);
                 place.input.playing = audio.playing;

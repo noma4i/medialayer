@@ -64,7 +64,7 @@ pub(super) fn step(global: &mut AudioGlobal, places: &mut [PlaceAudio], op: &Aud
         AudioOp::CallHold(true) => {}
     }
     if effects.forget {
-        for place in places.iter_mut().filter(|place| place.playing || place.peeking) {
+        for place in places.iter_mut().filter(|place| place.reason.is_some() || (place.peeking && !place.playing)) {
             place.playing = false;
             place.peeking = false;
             place.forgotten = true;

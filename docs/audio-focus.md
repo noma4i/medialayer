@@ -51,7 +51,7 @@ Every pause and every forgotten play wish shows in the `PlaybackState` of the pl
 
 | Event | `reason` | `wish` after it |
 | ----- | -------- | --------------- |
-| A recording starts | `capture` | Kept while the recording runs, false when it ends: the end of a recording plays nothing back |
+| A recording starts | `capture` | Kept while the recording runs, false when it ends or when another place starts: the end of a recording plays nothing back |
 | An interruption or a temporary loss of focus | `interrupted` | Kept until the interruption ends: true with the permission to resume, false without it |
 | Another app takes the focus for good | `focusLost` | False |
 | A lost private output | `outputLost` | False |
@@ -59,7 +59,7 @@ Every pause and every forgotten play wish shows in the `PlaybackState` of the pl
 | A call | `inCall` | False |
 | A playback suspension | `suspended` | Kept, the place plays again when the suspension ends |
 
-A `play()` during a call or a recording is refused: `refused` is `inCall` or `recording`, `wish` stays false, and the next `play()` after the call or the recording plays. MediaLayer plays one source at a time, so a place that starts playing pauses the place that played.
+A `play()` during a call is refused: `refused` is `inCall`, `wish` stays false, and the next `play()` after the call plays. A place that starts playing while a recording or a camera preview holds the session plays at once, and the places paused by the recording stay paused with `wish` false. MediaLayer plays one source at a time, so a place that starts playing pauses the place that played.
 
 A refused or delayed request leaves that state on a system event or a new demand. A newly sounding place, a new recording, a new call, or a new volume reader is a new demand.
 
