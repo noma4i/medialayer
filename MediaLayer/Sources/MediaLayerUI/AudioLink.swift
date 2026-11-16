@@ -1,7 +1,7 @@
 import Foundation
 import MediaLayer
 
-extension RecordingRefusal: @retroactive Error {}
+extension RecordingRefusal: Error {}
 
 public enum MediaCallKind: Sendable {
   case callKit(UUID)

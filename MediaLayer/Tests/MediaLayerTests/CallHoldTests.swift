@@ -52,11 +52,11 @@ struct CallHoldTests {
     var events = slot.log.stream.makeAsyncIterator()
     #expect(await events.next() == "play")
 
-    let hold = try media.holdCall()
+    _ = try media.audio(input: .callStarted(id: 1, kind: .unmanaged, speaker: false))
     #expect(await events.next() == "pause")
     await #expect(throws: MediaError.self) { _ = try await media.playUrl(source: item) }
 
-    hold.release()
+    _ = try media.audio(input: .callEnded(id: 1))
     _ = try await media.playUrl(source: item)
     #expect(slot.plays == 1, "the release resumed the playback")
     media.setPlaying(key: clip, playing: true, groups: [nil])
