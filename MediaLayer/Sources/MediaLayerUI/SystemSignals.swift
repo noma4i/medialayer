@@ -49,7 +49,17 @@ final class SystemSignals {
       center.addObserver(forName: names.memoryWarning, object: nil, queue: nil) { _ in events.memoryWarning(level: .critical) },
       center.addObserver(forName: names.background, object: nil, queue: nil) { _ in events.background() },
       center.addObserver(forName: names.foreground, object: nil, queue: nil) { _ in events.foreground() },
-      center.addObserver(forName: names.outputLost, object: nil, queue: nil) { note in if Self.isOutputLost(note) { onOutputLost() } }
+      center.addObserver(forName: names.outputLost, object: nil, queue: nil) { note in
+        #if canImport(UIKit)
+        let reason = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+        let previous = (note.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription)?.outputs.map(\.portType) ?? []
+        let current = AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portType)
+        if Self.isOutputLost(reason: reason, previous: previous, current: current) {
+          MediaTrace.emit("audio", "output lost previous=\(previous) current=\(current)")
+          onOutputLost()
+        }
+        #endif
+      }
     ]
   }
 
@@ -57,14 +67,16 @@ final class SystemSignals {
     stop()
   }
 
-  static func isOutputLost(_ note: Notification) -> Bool {
-    #if canImport(UIKit)
-    let reason = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
-    return reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue
-    #else
-    return true
-    #endif
+  #if canImport(UIKit)
+  static func isOutputLost(reason: UInt?, previous: [AVAudioSession.Port], current: [AVAudioSession.Port]) -> Bool {
+    guard reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue else { return false }
+    let privateOutputs: Set<AVAudioSession.Port> = [
+      .headphones, .bluetoothA2DP, .bluetoothHFP, .bluetoothLE, .usbAudio,
+      .carAudio, .airPlay, .lineOut, .HDMI
+    ]
+    return previous.contains { privateOutputs.contains($0) && !current.contains($0) }
   }
+  #endif
 
   func stop() {
     tokens.forEach { center.removeObserver($0) }
