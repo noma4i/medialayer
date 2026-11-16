@@ -1,11 +1,13 @@
 package com.noma4i.medialayer
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.flowOn
 
 suspend fun MediaLayer.imageSize(source: MediaSource): ImageSize? = imageSize(source.url, source.headers)
 
@@ -13,22 +15,23 @@ suspend fun MediaLayer.imageSize(source: MediaSource): ImageSize? = imageSize(so
 fun MediaLayer.failureFlow(): Flow<MediaFailure> = callbackFlow {
   val subscription = subscribeFailures(object : FailureListener {
     override fun failed(failure: MediaFailure) { trySend(failure) }
+    override fun closed() { close() }
   })
   awaitClose { subscription.close() }
-}.buffer(Channel.UNLIMITED)
+}.buffer(Channel.UNLIMITED).flowOn(Dispatchers.Default)
 
 fun MediaLayer.statsFlow(): Flow<MediaStats> = callbackFlow {
   val subscription = try {
     subscribeStats(object : StatsListener {
       override fun changed(stats: MediaStats) { trySend(stats) }
-      override fun failed(error: MediaException) { close() }
+      override fun failed(error: MediaException) { if (error is MediaException.Closed) close() else close(error) }
     })
   } catch (error: MediaException) {
-    close()
+    if (error is MediaException.Closed) close() else close(error)
     null
   }
   awaitClose { subscription?.close() }
-}.conflate()
+}.conflate().flowOn(Dispatchers.Default)
 
 fun MediaLayer.stateFlow(key: String): Flow<MediaState> = callbackFlow {
   val subscription = try {
@@ -42,7 +45,7 @@ fun MediaLayer.stateFlow(key: String): Flow<MediaState> = callbackFlow {
     null
   }
   awaitClose { subscription?.close() }
-}.conflate()
+}.conflate().flowOn(Dispatchers.Default)
 
 sealed interface ToneUpdate {
   data class Value(val tone: MediaTone?) : ToneUpdate
@@ -62,7 +65,7 @@ fun MediaLayer.toneFlow(source: MediaItem, band: Float): Flow<ToneUpdate> = call
     null
   }
   awaitClose { subscription?.close() }
-}.conflate()
+}.conflate().flowOn(Dispatchers.Default)
 
 val MediaState.isFailed: Boolean get() = this is MediaState.Failed
 

@@ -9,7 +9,8 @@ import android.provider.Settings
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.channels.Channel
 
 class MediaVolumeReading internal constructor(val initial: Float, val changes: Flow<Float>)
 
@@ -20,6 +21,7 @@ internal interface VolumePort {
 }
 
 internal class SystemVolume(context: Context) : VolumePort {
+  lateinit var handler: Handler
   private val resolver = context.applicationContext.contentResolver
   private val manager = context.applicationContext.getSystemService(AudioManager::class.java)
 
@@ -31,7 +33,7 @@ internal class SystemVolume(context: Context) : VolumePort {
   }
 
   override fun observe(onChange: () -> Unit): () -> Unit {
-    val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+    val observer = object : ContentObserver(handler) {
       override fun onChange(selfChange: Boolean) = onChange()
     }
     resolver.registerContentObserver(Settings.System.CONTENT_URI, true, observer)
@@ -39,14 +41,14 @@ internal class SystemVolume(context: Context) : VolumePort {
   }
 }
 
-internal fun VolumePort.reading(): MediaVolumeReading? {
-  val initial = level() ?: return null
+internal fun VolumePort.reading(initial: Float, handler: Handler): MediaVolumeReading {
   val changes = callbackFlow {
     var last = initial
-    val publish = { level()?.takeIf { it != last }?.let { last = it; trySend(it) }; Unit }
+    val read = { level()?.takeIf { it != last }?.let { last = it; trySend(it) }; Unit }
+    val publish = { if (Looper.myLooper() == handler.looper) read() else { handler.post { read() }; Unit } }
     val stop = observe(publish)
     publish()
     awaitClose { stop() }
-  }.conflate()
+  }.buffer(Channel.UNLIMITED)
   return MediaVolumeReading(initial, changes)
 }

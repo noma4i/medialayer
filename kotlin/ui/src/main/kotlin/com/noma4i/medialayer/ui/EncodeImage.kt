@@ -54,7 +54,7 @@ internal suspend fun encodeBitmapAt(cache: File, bitmap: Bitmap, format: ImageFo
     try {
       output.outputStream().use { encodeBitmap(bitmap, ExifInterface.ORIENTATION_NORMAL, format, quality, admit, it) }
     } catch (error: Throwable) {
-      output.delete()
+      deleteMediaFile(output)
       throw error
     }
     PreparedMedia(output, true)

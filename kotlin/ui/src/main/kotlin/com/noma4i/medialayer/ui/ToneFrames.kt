@@ -66,7 +66,7 @@ internal class ToneFrames(media: MediaLayer, private val context: Context, priva
       val bitmap = if (source.kind == Kind.IMAGE || source.cover != null) {
         image(media, source)
       } else if (source.kind == Kind.VIDEO) {
-        frames.first(media.playUrl(source))
+        frames.first(media.readRoute(source))
       } else null
       if (bitmap == null) return@withContext null
       try {

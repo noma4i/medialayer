@@ -3,6 +3,8 @@ package com.noma4i.medialayer.ui
 import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import com.noma4i.medialayer.MediaException
+import com.noma4i.medialayer.VoiceOutcome
+import com.noma4i.medialayer.VoicePhase
 import com.noma4i.medialayer.VoiceRefusal
 import com.noma4i.medialayer.voiceLevel
 import com.noma4i.medialayer.voiceRefusalText
@@ -70,8 +72,40 @@ class MediaVoiceRecorderTest {
 
   private fun file(): File = File.createTempFile("voice", ".m4a").apply { delete(); deleteOnExit() }
 
-  private fun makeRecorder(capture: VoiceCapture, ticks: VoiceTicks = VoiceTicks(), audio: AudioLink = audio(), maxMs: Long = 60_000) =
-    MediaVoiceRecorder(capture, maxMs.toULong(), { audio }, { ticks.read().toULong() }, 5, scope)
+  private fun makeRecorder(capture: VoiceCapture, ticks: VoiceTicks = VoiceTicks(), audio: AudioLink = audio(), maxMs: Long = 60_000, minTakeMs: ULong = 0uL) =
+    MediaVoiceRecorder(capture, maxMs.toULong(), { audio }, { ticks.read().toULong() }, 5, scope, minTakeMs)
+
+  @Test
+  fun inv_audio_69_voice_state_publishes_recorded_time() = runTest {
+    val ticks = VoiceTicks()
+    val audio = audio()
+    val recorder = MediaVoiceRecorder(VoiceFakeCapture(), 60_000u, { audio }, { ticks.read().toULong() }, 5, backgroundScope)
+
+    recorder.start(file())
+    ticks.now += 1_200
+    advanceTimeBy(10)
+    runCurrent()
+    val recording = recorder.state.value
+    recorder.stop()
+
+    assertEquals(VoicePhase.RECORDING to 1_200uL, recording.phase to recording.recordedMs)
+    assertEquals(VoicePhase.IDLE to 0uL, recorder.state.value.phase to recorder.state.value.recordedMs)
+  }
+
+  @Test
+  fun inv_audio_70_a_short_voice_take_is_refused_and_deleted() {
+    val ticks = VoiceTicks()
+    val recorder = makeRecorder(VoiceFakeCapture(), ticks, minTakeMs = 1_000uL)
+    val target = file()
+
+    runBlocking { recorder.start(target) }
+    ticks.now += 400
+    val error = assertThrows(MediaException.Voice::class.java) { runBlocking { recorder.stop() } }
+
+    assertEquals(VoiceRefusal.TOO_SHORT, error.reason)
+    assertEquals(VoiceOutcome.Refused(VoiceRefusal.TOO_SHORT), recorder.state.value.outcome)
+    assertFalse(target.exists())
+  }
 
   @Test
   fun inv_voice_04_aRecordingGivesAnExistingFileAndALengthAboveZero() = runBlocking {

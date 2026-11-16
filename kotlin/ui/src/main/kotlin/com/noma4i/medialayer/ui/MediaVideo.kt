@@ -48,6 +48,7 @@ import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.Placeholder
 import com.noma4i.medialayer.PlayheadReport
+import com.noma4i.medialayer.PlaybackState
 import com.noma4i.medialayer.isRendered
 import com.noma4i.medialayer.MediaItem
 import com.noma4i.medialayer.MediaLayer
@@ -177,6 +178,7 @@ fun MediaVideo(
   onFirstFrame: () -> Unit = {},
   onEnd: () -> Unit = {},
   onProgress: ((Double) -> Unit)? = null,
+  onPlaybackChange: (PlaybackState) -> Unit = {},
   content: @Composable (MediaState) -> Unit = {}
 ) {
   if (currentEnvironmentOrNull() == null) {
@@ -186,7 +188,9 @@ fun MediaVideo(
   val environment = LocalMediaEnvironment.current
   val screen = rememberScreenVisibility(source.url)
   var view by remember(environment, source.url) { mutableStateOf<ViewHandle?>(null) }
-  val state = rememberPlace(source, playing, muted, loop, peeking, screen.visible, group, viewToken = view?.token)
+  var generation by remember(environment, source.url) { mutableStateOf(0uL) }
+  LaunchedEffect(playing) { if (playing) generation++ }
+  val state = rememberPlace(source, playing, muted, loop, peeking, screen.visible, group, viewToken = view?.token, playGeneration = generation, onPlayback = onPlaybackChange)
   val edges = remember(source.url) { VideoEdges() }
   val shownFrame = remember { ShownFrame() }
   val frameShown = shownFrame.advance(source.url, state)

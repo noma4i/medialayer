@@ -1,6 +1,8 @@
 package com.noma4i.medialayer.ui
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -14,19 +16,31 @@ import org.junit.runner.RunWith
 import androidx.test.core.app.ApplicationProvider
 import android.content.Context
 
-private class FakeVolumePort(var current: Float?) : VolumePort {
-  val listeners = mutableListOf<() -> Unit>()
+private class FakeVolumePort(@Volatile var current: Float?) : VolumePort {
+  val listeners = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
 
   override fun level(): Float? = current
 
   override fun observe(onChange: () -> Unit): () -> Unit {
     listeners.add(onChange)
-    return { listeners.remove(onChange) }
+    TestSignal.fire()
+    return { listeners.remove(onChange); TestSignal.fire() }
   }
+
+  fun observers(count: Int) = TestSignal.await("$count volume observers", 5_000) { listeners.size == count }
 
   fun change(value: Float) {
     current = value
     listeners.toList().forEach { it() }
+  }
+}
+
+/** The read of the change and the raise check that it queued both ran on the audio thread. */
+private suspend fun AudioLink.audioThreadPassed() {
+  repeat(2) {
+    val passed = CompletableDeferred<Unit>()
+    check(handler.post { passed.complete(Unit) })
+    passed.await()
   }
 }
 
@@ -41,18 +55,19 @@ class MediaVolumeReadingTest {
   fun inv_android_11_readVolume_gives_the_initial_value_and_each_change_and_cancel_unsubscribes() = runTest(UnconfinedTestDispatcher()) {
     val port = FakeVolumePort(0.4f)
     val reading = session(port).readVolume()!!
-    val seen = mutableListOf<Float>()
+    val seen = Channel<Float>(Channel.UNLIMITED)
 
     assertEquals(0.4f, reading.initial)
-    assertEquals(0, port.listeners.size)
-    val job = launch { reading.changes.collect { seen.add(it) } }
-    assertEquals(1, port.listeners.size)
+    port.observers(0)
+    val job = launch { reading.changes.collect { seen.send(it) } }
+    port.observers(1)
     port.change(0.6f)
+    assertEquals(0.6f, seen.receive())
     port.change(0.8f)
-    assertEquals(listOf(0.6f, 0.8f), seen)
+    assertEquals(0.8f, seen.receive())
     job.cancel()
 
-    assertEquals(0, port.listeners.size)
+    port.observers(0)
   }
 
   @Test
@@ -70,22 +85,24 @@ class MediaVolumeReadingTest {
   @Test
   fun inv_audio_10_volumeRaises_emits_on_a_rise_only_and_cancel_unsubscribes() = runTest(UnconfinedTestDispatcher()) {
     val port = FakeVolumePort(0.4f)
-    val flow = session(port).volumeRaises()
-    var raises = 0
+    val link = session(port)
+    val flow = link.volumeRaises()
+    val raises = Channel<Float>(Channel.UNLIMITED)
 
-    assertEquals(0, port.listeners.size)
-    val job = launch { flow.collect { raises += 1 } }
-    assertEquals(1, port.listeners.size)
+    port.observers(0)
+    val job = launch { flow.collect { raises.send(port.current!!) } }
+    port.observers(1)
     port.change(0.6f)
-    assertEquals(1, raises)
+    assertEquals(0.6f, raises.receive())
     port.change(0.3f)
+    link.audioThreadPassed()
     port.change(0.3005f)
-    assertEquals(1, raises)
+    link.audioThreadPassed()
     port.change(0.5f)
-    assertEquals(2, raises)
+    assertEquals("a fall or a step under the threshold raised the volume", 0.5f, raises.receive())
     job.cancel()
 
-    assertEquals(0, port.listeners.size)
+    port.observers(0)
   }
 
   @Test

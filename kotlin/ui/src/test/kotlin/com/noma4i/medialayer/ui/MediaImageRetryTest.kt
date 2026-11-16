@@ -17,6 +17,7 @@ import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -63,5 +64,23 @@ class MediaImageRetryTest {
     assertEquals(2, fetches.get())
     drainFfi()
     assertEquals(1uL, layer.imageStats().snapshot().decodes)
+  }
+
+  @Test
+  fun inv_api_59_retry_reloads_a_failed_place_without_remount() {
+    var shown: MediaState = MediaState.Idle
+    rule.setContent {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
+        MediaImage(photo, Modifier.size(50.dp)) { state -> shown = state }
+      }
+    }
+    rule.waitUntil(5000) { looper.idle(); shown is MediaState.Failed }
+
+    runBlocking { Media.retry(photo) }
+    rule.waitUntil(5000) { looper.idle(); shown == MediaState.Ready }
+
+    assertEquals(2, fetches.get())
+    assertEquals(listOf("retry:${photo.url}"), layer.calls.filter { it.startsWith("retry:") })
+    assertEquals(1, layer.calls.count { it == "visible:${photo.url}:true" })
   }
 }

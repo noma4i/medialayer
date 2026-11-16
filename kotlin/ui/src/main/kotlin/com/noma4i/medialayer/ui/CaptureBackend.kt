@@ -15,6 +15,16 @@ import com.noma4i.medialayer.isCaptureOrphan
 import java.io.File
 import java.util.UUID
 
+internal fun deleteMediaFile(file: File): Boolean = try {
+  if (!file.exists() || file.delete()) true else {
+    Media.recordNativeFailure(com.noma4i.medialayer.NativeFailure(com.noma4i.medialayer.FailureSource.FILE, "java.io.File", 0L, "Failed to delete ${file.path}"))
+    false
+  }
+} catch (error: Exception) {
+  Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.FILE, error)
+  false
+}
+
 internal enum class CaptureAudioIssue { PERMISSION_DENIED, SOURCE_ERROR, ENCODER_ERROR, SILENCED, ACTIVE }
 
 /**
@@ -22,6 +32,7 @@ internal enum class CaptureAudioIssue { PERMISSION_DENIED, SOURCE_ERROR, ENCODER
  * `bind` ends with `Opened` and `Streaming`, or with `Refuse`. A finished or failed recording ends with `RecordFinished`.
  */
 internal interface CaptureBackend {
+  fun close() = Unit
   val photoSize: PixelSize?
 
   fun setSink(sink: (CaptureEvent) -> Unit)
@@ -44,11 +55,23 @@ internal interface CaptureBackend {
 
   fun endRecording()
 
+  fun endRecording(done: () -> Unit) { try { endRecording() } finally { done() } }
+
+  fun awaitRecordingStopped(done: () -> Unit) = done()
+
   fun recordedMs(): Long
 
   fun setTorch(on: Boolean)
 
+  fun setTorch(on: Boolean, done: (Throwable?) -> Unit) {
+    try { setTorch(on); done(null) } catch (error: Exception) { done(error) }
+  }
+
   fun setZoom(ratio: Float)
+
+  fun setZoom(ratio: Float, done: (Throwable?) -> Unit) {
+    try { setZoom(ratio); done(null) } catch (error: Exception) { done(error) }
+  }
 
   fun setFrameTap(analyzer: ImageAnalysis.Analyzer?)
 
@@ -76,7 +99,7 @@ internal class CameraServices(
         },
         admitShot = { bytes -> environment().media.decodeAdmit()(bytes) },
         audio = { Media.link },
-        clipInfo = { file -> runCatching { readMediaInfo(context, "file://${file.absolutePath}") }.getOrNull() },
+        clipInfo = { file -> readMediaInfo(context, "file://${file.absolutePath}") },
         uprightVideo = { file -> uprightVideoAt(context, file) },
         upright = { raw, quality -> prepareImageAt(directory, raw, quality, environment().media.decodeAdmit()).file },
         directory = directory
@@ -90,12 +113,12 @@ internal object CaptureFiles {
   fun directory(context: Context): File = File(context.cacheDir, "capture")
 
   fun name(kind: CaptureFileKind, directory: File): File {
-    directory.mkdirs()
+    if (!directory.isDirectory && !directory.mkdirs() && !directory.isDirectory) throw java.io.IOException("Cannot create capture directory: $directory")
     return File(directory, captureFileName(kind, UUID.randomUUID().toString()))
   }
 
   /** Removes the files a capture of an earlier run left behind. Runs when the layer opens, when no camera of this run holds a file yet. */
   fun sweepOrphans(directory: File) {
-    directory.listFiles()?.filter { isCaptureOrphan(it.name) }?.forEach { it.delete() }
+    directory.listFiles()?.filter { isCaptureOrphan(it.name) }?.forEach { deleteMediaFile(it) }
   }
 }

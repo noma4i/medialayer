@@ -15,10 +15,17 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
+import com.noma4i.medialayer.PlaybackState
 import com.noma4i.medialayer.PlayheadAnchor
 import com.noma4i.medialayer.PlayheadReport
 import com.noma4i.medialayer.playheadNext
 import kotlinx.coroutines.flow.flowOf
+
+internal fun audioSounding(playing: Boolean, state: MediaState): Boolean =
+  playing && (state is MediaState.Ready || state is MediaState.Rendered)
+
+internal fun audioBuffering(wish: Boolean, state: MediaState): Boolean =
+  wish && (state is MediaState.Idle || state is MediaState.Loading)
 
 @Stable
 class AudioPlayhead internal constructor(val anchor: PlayheadAnchor = PlayheadAnchor(0.0, 0uL, 0.0)) {
@@ -33,31 +40,41 @@ class AudioPlayhead internal constructor(val anchor: PlayheadAnchor = PlayheadAn
 @Stable
 class AudioControl internal constructor(playing: Boolean, private val seekTo: (Double) -> Unit) {
   private var declared = playing
+  internal var requested by mutableStateOf(playing)
+    private set
+  internal var generation by mutableStateOf(0uL)
+    private set
   private var jumpPending = false
+  private var playheadVersion = 0L
+  private val playheadReports = ArrayDeque<Pair<Long, PlayheadReport>>()
+  private var computingPlayhead = false
 
   var rate: Float by mutableFloatStateOf(1f)
 
   var state: MediaState by mutableStateOf(MediaState.Idle)
     internal set
-  var isPlaying: Boolean by mutableStateOf(playing)
+  var playback: PlaybackState by mutableStateOf(PlaybackState(false, false, null, null, 0uL))
     private set
+  val isPlaying: Boolean get() = playback.playing
   var progress: Float by mutableFloatStateOf(0f)
     internal set
   var playhead: AudioPlayhead by mutableStateOf(AudioPlayhead())
     private set
 
-  fun play() { isPlaying = true }
+  fun play() { requested = true; generation++ }
 
-  fun pause() { isPlaying = false }
+  fun pause() { requested = false }
 
-  fun toggle() { isPlaying = !isPlaying }
+  fun toggle() { if (isPlaying) pause() else play() }
 
-  val isSounding: Boolean get() = isPlaying && (state is MediaState.Ready || state is MediaState.Rendered)
+  val isSounding: Boolean get() = audioSounding(isPlaying, state)
 
-  val isBuffering: Boolean get() = isPlaying && (state is MediaState.Idle || state is MediaState.Loading)
+  val isBuffering: Boolean get() = audioBuffering(playback.wish, state)
 
   internal fun ended() {
-    isPlaying = false
+    playheadVersion++
+    playheadReports.clear()
+    requested = false
     progress = 0f
     jumpPending = true
     playhead = AudioPlayhead()
@@ -74,17 +91,38 @@ class AudioControl internal constructor(playing: Boolean, private val seekTo: (D
         if (progress != value) progress = value
       }
     }
-    playhead = AudioPlayhead(playheadNext(playhead.anchor, next))
+    playheadReports.addLast(playheadVersion to next)
+    calculatePlayhead()
+  }
+
+  private fun calculatePlayhead() {
+    if (computingPlayhead || playheadReports.isEmpty()) return
+    val (version, report) = playheadReports.removeFirst()
+    if (version != playheadVersion) return calculatePlayhead()
+    val anchor = playhead.anchor
+    computingPlayhead = true
+    inputExecutor.execute {
+      val result = playheadNext(anchor, report)
+      android.os.Handler(android.os.Looper.getMainLooper()).post {
+        if (version == playheadVersion) playhead = AudioPlayhead(result)
+        computingPlayhead = false
+        calculatePlayhead()
+      }
+    }
   }
 
   internal fun follow(playing: Boolean) {
     if (declared == playing) return
     declared = playing
-    isPlaying = playing
+    if (playing) play() else pause()
   }
+
+  internal fun playback(state: PlaybackState) { playback = state }
 
   fun seek(fraction: Float) {
     if (!fraction.isFinite()) return
+    playheadVersion++
+    playheadReports.clear()
     val clamped = fraction.coerceIn(0f, 1f)
     progress = clamped
     jumpPending = true
@@ -121,7 +159,7 @@ fun MediaAudio(source: MediaSource, playing: Boolean = false, muted: Boolean = f
   val control = remember(environment, source.url) { AudioControl(playing) { mounted.value?.seek(it) }.also { it.rate = rate } }
   LaunchedEffect(rate) { control.rate = rate }
   LaunchedEffect(control, playing) { control.follow(playing) }
-  val state = rememberPlace(source, control.isPlaying, muted, group = group, rate = control.rate, mounted = mounted)
+  val state = rememberPlace(source, control.requested, muted, group = group, rate = control.rate, mounted = mounted, playGeneration = control.generation, onPlayback = control::playback)
   if (control.state != state) control.state = state
   val sourceKey = rememberSourceKey(source)
   val player by remember(environment, sourceKey) { sourceKey?.let { environment.players?.player(it) } ?: flowOf(null) }.collectAsState(null)

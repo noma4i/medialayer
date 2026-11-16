@@ -5,6 +5,7 @@ buildscript {
   }
   dependencies {
     classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.21")
+    classpath("org.jetbrains.kotlinx:binary-compatibility-validator:0.18.2")
   }
 }
 
@@ -14,6 +15,20 @@ plugins {
 }
 
 group = "com.noma4i"
+
+allprojects {
+  val apiSchemaRuntime = configurations.create("apiSchemaRuntime")
+  dependencies.add(apiSchemaRuntime.name, "org.ow2.asm:asm:9.6")
+  dependencies.add(apiSchemaRuntime.name, "org.ow2.asm:asm-tree:9.6")
+  dependencies.add(apiSchemaRuntime.name, "org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.21")
+  tasks.register<kotlinx.validation.KotlinApiBuildTask>("dumpPublicApi") {
+    val compile = tasks.named("compileReleaseKotlin")
+    dependsOn(compile)
+    inputClassesDirs.from(compile.map { it.outputs.files })
+    runtimeClasspath.from(apiSchemaRuntime)
+    outputApiFile.set(layout.buildDirectory.file("api/public.api"))
+  }
+}
 
 android {
   namespace = "com.noma4i.medialayer"

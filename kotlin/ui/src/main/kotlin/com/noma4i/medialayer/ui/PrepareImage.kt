@@ -91,7 +91,7 @@ private suspend fun decodeUpright(file: File, quality: Double, cache: File, matr
     output.outputStream().use { check(drawn.compress(Bitmap.CompressFormat.JPEG, (jpegQuality(quality) * 100).roundToInt(), it)) { "the photo does not encode" } }
     return output
   } catch (error: Throwable) {
-    output.delete()
+    deleteMediaFile(output)
     throw error
   } finally {
     if (turned !== source) source.recycle()

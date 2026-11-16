@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -362,6 +363,43 @@ class MediaLayerBridgeTest {
   }
 
   @Test
+  fun inv_failures_07_the_failure_flow_ends_when_the_layer_closes_and_a_late_one_ends_at_once() = runBlocking {
+    val media = open(MemorySettings())
+    val early = async(Dispatchers.Unconfined) { media.failureFlow().toList() }
+
+    media.awaitClosed()
+
+    val seen = withTimeout(5000) { early.await() + media.failureFlow().toList() }
+    assertEquals(emptyList<MediaFailure>(), seen)
+  }
+
+  @Test
+  fun inv_failures_08_a_stats_flow_the_input_queue_refuses_ends_with_overloaded_and_one_after_the_close_ends_without_an_error() = runBlocking {
+    val media = MediaLayer.open(
+      OpenConfig(
+        audioFocus = com.noma4i.medialayer.AudioFocus.EXCLUSIVE,
+        dir = Files.createTempDirectory("medialayer").toString(),
+        fetcher = TestFetcher(),
+        settings = MemorySettings(),
+        slots = null,
+        device = DeviceMemory(totalMb = 4096u, heapClassMb = null, lowRam = false),
+        defaults = defaultLimits(),
+        pool = defaultPoolSettings(),
+        ingress = IngressLimits(entries = 64u, owners = 1u, bytes = 1uL shl 20)
+      )
+    )
+    val place = media.openPlace(MediaItem(Kind.VIDEO, "https://o.test/held.mp4", emptyMap(), null, null, strategy = CacheStrategy.WINDOW))
+
+    val refused = withTimeout(5000) { runCatching { media.statsFlow().toList() } }
+
+    assertTrue("the refused flow ended without its error: $refused", refused.exceptionOrNull() is MediaException.Overloaded)
+    place.release()
+    media.awaitClosed()
+    val afterClose = withTimeout(5000) { runCatching { media.statsFlow().toList() } }
+    assertTrue("the close ended a flow with an error: $afterClose", afterClose.isSuccess)
+  }
+
+  @Test
   fun stateFlowStartsIdleForAnUndeclaredPlace() = runBlocking {
     val media = open(MemorySettings())
 
@@ -371,11 +409,11 @@ class MediaLayerBridgeTest {
   }
 
   @Test
-  fun playUrlGoesThroughTheLocalProxyAndTheVideoPlaceholderIsTheFirstFrame() = runBlocking {
+  fun aReadRouteGoesThroughTheLocalProxyAndTheVideoPlaceholderIsTheFirstFrame() = runBlocking {
     val media = open(MemorySettings())
     val source = MediaItem(Kind.VIDEO, "https://o.test/a.mp4", emptyMap(), null, null, strategy = CacheStrategy.WINDOW)
 
-    val route = media.playUrl(source)
+    val route = media.readRoute(source)
 
     assertTrue(route.url.startsWith("http://127.0.0.1:"))
     assertEquals(Placeholder.FirstFrame, placeholderFor(source, false))
@@ -384,7 +422,7 @@ class MediaLayerBridgeTest {
   @Test
   fun aPlatformHttpClientReadsTheFetcherBytesThroughTheLoopbackProxy() = runBlocking {
     openWith(RangeIgnoringOrigin(), LoggingSlots(), silent = true).use { media ->
-      val route = media.playUrl(MediaItem(Kind.AUDIO, "https://o.test/voice.m4a", emptyMap(), null, null, strategy = CacheStrategy.WINDOW))
+      val route = media.readRoute(MediaItem(Kind.AUDIO, "https://o.test/voice.m4a", emptyMap(), null, null, strategy = CacheStrategy.WINDOW))
       val connection = java.net.URL(route.url).openConnection() as java.net.HttpURLConnection
       connection.setRequestProperty("Range", "bytes=0-1")
 

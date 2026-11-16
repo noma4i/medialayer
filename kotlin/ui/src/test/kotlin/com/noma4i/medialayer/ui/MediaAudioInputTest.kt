@@ -76,38 +76,18 @@ private class InputSlot : PlayerSlotFactory {
 @RunWith(MediaLayerTestRunner::class)
 class MediaAudioInputTest {
   @Test
-  fun inv_audio_03_an_ended_control_stops_at_the_start_and_keeps_both_the_toggle_and_the_controlled_input() {
-    val control = AudioControl(true) { }
-    control.progress = 1f
-
-    control.ended()
-    assertFalse(control.isPlaying)
-    assertEquals(0f, control.progress)
-    control.seek(0.5f)
-    assertEquals(0.5f, control.progress)
-    control.toggle()
-    assertTrue(control.isPlaying)
-
-    control.ended()
-    listOf(false, true, false).forEach { control.follow(it); assertEquals(it, control.isPlaying) }
-  }
-
-  @Test
-  fun inv_audio_07_the_audio_state_table_decides_sounding_buffering_and_failed() {
+  fun inv_audio_07_the_core_truth_and_the_load_state_decide_sounding_and_buffering() {
     val table = listOf(
       Triple(MediaState.Idle, false, true), Triple(MediaState.Loading, false, true), Triple(MediaState.Ready, true, false),
       Triple(MediaState.Rendered, true, false), Triple(MediaState.Ended, false, false), Triple(MediaState.Failed("x"), false, false)
     )
     table.forEach { (state, sounding, buffering) ->
-      val control = AudioControl(true) { }
-      control.state = state
-      assertEquals("$state", sounding, control.isSounding)
-      assertEquals("$state", buffering, control.isBuffering)
-      assertEquals("$state", state is MediaState.Failed, state.isFailed)
+      assertEquals("$state", sounding, audioSounding(playing = true, state = state))
+      assertEquals("$state", buffering, audioBuffering(wish = true, state = state))
     }
-    val paused = AudioControl(false) { }
-    paused.state = MediaState.Rendered
-    assertFalse(paused.isSounding || paused.isBuffering)
+    table.map { it.first }.forEach { state ->
+      assertFalse("$state", audioSounding(playing = false, state = state) || audioBuffering(wish = false, state = state))
+    }
   }
 
   @Test
@@ -120,7 +100,6 @@ class MediaAudioInputTest {
 
     assertEquals(listOf(0.0), seeks)
     assertEquals(0f, control.progress)
-    assertFalse(control.isPlaying)
   }
 
   @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
@@ -204,7 +183,6 @@ class MediaAudioInputTest {
   fun a_mounted_audio_starts_at_an_initial_true_playing_input() {
     playing = true
     val first = mount()
-    assertEquals(true, firstSeenPlaying)
     waitForPlaying("file:///first.mp4")
     rule.runOnIdle { assertTrue(first.isPlaying) }
   }

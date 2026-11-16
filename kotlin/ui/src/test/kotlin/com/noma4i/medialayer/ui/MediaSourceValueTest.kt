@@ -98,7 +98,7 @@ class MediaSourceValueTest {
         override fun failed(error: MediaException) = Unit
       })
       val place = media.openPlace(source.toItem())
-      place.update(PlaceInput(true, false, null, false, null, null, false, null))
+      place.update(PlaceInput(true, false, 0uL, null, false, null, null, false, null))
 
       assertTrue("${source.url}: $details", failed.await(5, TimeUnit.SECONDS))
       place.release()

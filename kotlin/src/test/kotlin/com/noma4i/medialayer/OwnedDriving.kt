@@ -19,7 +19,7 @@ internal class OwnedDriving(private val media: MediaLayer) {
   @Synchronized
   fun edit(key: String, item: MediaItem? = null, change: (PlaceInput) -> PlaceInput) {
     val place = places.getOrPut(key) { media.openPlace(item ?: MediaItem(com.noma4i.medialayer.Kind.VIDEO, key, emptyMap(), null, null, strategy = com.noma4i.medialayer.CacheStrategy.WINDOW)) }
-    val input = change(inputs[key] ?: PlaceInput(false, false, null, false, null, null, false, null))
+    val input = change(inputs[key] ?: PlaceInput(false, false, 0uL, null, false, null, null, false, null))
     inputs[key] = input
     place.update(input)
   }
@@ -46,7 +46,7 @@ internal fun MediaLayer.visible(source: MediaItem, visible: Boolean) {
 }
 
 internal fun MediaLayer.setPlaying(key: String, playing: Boolean, groups: List<String?> = emptyList()) =
-  driving.edit(key) { it.copy(playing = playing, group = groups.filterNotNull().firstOrNull()) }
+  driving.edit(key) { it.copy(playing = playing, playGeneration = if (playing) it.playGeneration + 1uL else it.playGeneration, group = groups.filterNotNull().firstOrNull()) }
 
 internal fun MediaLayer.setPeeking(key: String, peeking: Boolean) = driving.edit(key) { it.copy(peeking = peeking) }
 

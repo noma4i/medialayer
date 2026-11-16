@@ -35,8 +35,9 @@ internal suspend fun uprightVideoAt(context: Context, file: File) {
     retriever.release()
   }
   val output = File.createTempFile("upright-", ".mp4", file.absoluteFile.parentFile)
+  var cleanup = true
   try {
-    if (!output.delete()) throw IOException("cannot prepare video output")
+    if (!deleteMediaFile(output)) { cleanup = false; throw IOException("cannot prepare video output") }
     withContext(Dispatchers.Main.immediate) {
       suspendCancellableCoroutine<Unit> { continuation ->
         val encoder = DefaultEncoderFactory.Builder(context)
@@ -60,6 +61,6 @@ internal suspend fun uprightVideoAt(context: Context, file: File) {
     }
     if (!output.renameTo(file)) throw IOException("cannot replace the video")
   } finally {
-    output.delete()
+    if (cleanup) deleteMediaFile(output)
   }
 }

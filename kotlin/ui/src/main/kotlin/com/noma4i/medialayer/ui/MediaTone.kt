@@ -12,8 +12,6 @@ import com.noma4i.medialayer.MediaTone
 import com.noma4i.medialayer.ToneUpdate
 import com.noma4i.medialayer.toItem
 import com.noma4i.medialayer.toneFlow
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.flowOn
 
 data class MediaToneState(val tone: MediaTone? = null, val error: MediaException? = null)
 
@@ -35,7 +33,7 @@ fun rememberMediaTone(source: MediaSource?, band: Float): State<MediaToneState> 
     if (followed.item != item) state.value = MediaToneState()
     followed.item = item
     if (item == null) return@LaunchedEffect
-    media.toneFlow(item, band).flowOn(Dispatchers.Default).collect { update ->
+    media.toneFlow(item, band).collect { update ->
       state.value = when (update) {
         is ToneUpdate.Value -> MediaToneState(update.tone)
         is ToneUpdate.Failed -> state.value.copy(error = update.error)

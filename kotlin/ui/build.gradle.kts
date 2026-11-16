@@ -71,6 +71,7 @@ dependencies {
   implementation("androidx.media3:media3-datasource-okhttp:1.11.1")
   implementation("androidx.media3:media3-ui-compose:1.11.1")
   implementation("androidx.core:core-ktx:1.19.1")
+  api("androidx.core:core-telecom:1.1.0")
   implementation("androidx.lifecycle:lifecycle-process:2.10.0")
   implementation("androidx.camera:camera-camera2:1.6.2")
   implementation("androidx.camera:camera-lifecycle:1.6.2")

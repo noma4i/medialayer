@@ -59,7 +59,7 @@ class LocalFileWithoutWindowTest {
   private fun image(url: String) = MediaItem(Kind.IMAGE, url, emptyMap(), null, null, strategy = CacheStrategy.WINDOW)
 
   private fun show(place: com.noma4i.medialayer.MediaPlace) =
-    place.update(PlaceInput(true, false, null, false, null, null, false, null))
+    place.update(PlaceInput(true, false, 0uL, null, false, null, null, false, null))
 
   @Test
   fun inv_api_47_a_lone_local_video_place_loads_its_slot_without_a_window() {
@@ -73,7 +73,7 @@ class LocalFileWithoutWindowTest {
     val item = MediaItem(Kind.VIDEO, key, emptyMap(), null, null, strategy = CacheStrategy.WINDOW)
 
     val place = media.openPlace(item)
-    place.update(PlaceInput(true, true, null, false, true, null, false, null))
+    place.update(PlaceInput(true, true, 0uL, null, false, true, null, false, null))
 
     untilMain { counters.snapshot()["livePlayers"] == 1L }
     assertNotNull(runBlocking { binding.factory.players.player(key).first() })

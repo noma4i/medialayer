@@ -72,8 +72,12 @@ class MediaCamera internal constructor(
   constructor(context: Context, profile: CaptureProfile, lens: CameraLens = CameraLens.BACK) :
     this(profile, lens, CameraXBackend(context.applicationContext), CameraServices.live(context.applicationContext))
 
+  init { checkCaptureProfile(profile) }
   private val queue = Executors.newSingleThreadExecutor { Thread(it, "medialayer-camera").apply { isDaemon = true } }
-  private var run: CaptureRun = captureRun(lens)
+  private var run = CaptureRun(
+    CameraState(CameraPhase.IDLE, lens, false, false, 1f, 1f, 1f, 0uL, false, null, null, null, null),
+    false, false, null, false, false, false, null, false, null
+  )
   private val published = MutableStateFlow(run.state)
   private val hosts = HashSet<Any>()
   private var engaged = false
@@ -83,6 +87,7 @@ class MediaCamera internal constructor(
   private var audioHold: RecordingTicket? = null
   private var audioFailure: RecordingRefusal? = null
   private var retiringAudio: RecordingTicket? = null
+  private var recordingStopped: (() -> Unit)? = null
   private var audioRevocation: java.io.Closeable? = null
   private var binding: Job? = null
   private var shooting: Job? = null
@@ -98,11 +103,36 @@ class MediaCamera internal constructor(
   private var stopWaiter: CompletableDeferred<CapturedClip>? = null
   private val observers = ConcurrentHashMap<String, Observer>()
   private var frameTapOn = false
+  private var frameTapPending = false
+  private var commandGeneration = 0L
+  private val layerClose = services.audio()?.onClose {
+    val done = java.util.concurrent.CountDownLatch(1)
+    if (enqueue {
+      if (!closed) {
+        apply(CaptureEvent.LayerClosed)
+        ended?.getOrNull()?.file?.let(::deleteMediaFile)
+        ended = null
+        closed = true
+        backend.close()
+        scope.cancel()
+      }
+      done.countDown()
+    }) done.await()
+  }
 
   private class Observer(val perSecond: Double, val analyzer: ImageAnalysis.Analyzer, @Volatile var last: ULong? = null)
 
   init {
-    checkCaptureProfile(profile)
+    queue.execute {
+      try {
+        run = captureRun(lens)
+        published.value = run.state
+      } catch (error: Exception) {
+        run = run.copy(state = run.state.copy(phase = CameraPhase.FAILED))
+        published.value = run.state
+        Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, error)
+      }
+    }
     backend.setSink { event -> post(event) }
     backend.setAudioIssueSink { issue -> enqueue { microphoneFailed(issue) } }
   }
@@ -131,11 +161,15 @@ class MediaCamera internal constructor(
   suspend fun startRecording() {
     if (profile.audio) ensureAudio()
     val waiter = CompletableDeferred<Unit>()
+    val cancelled = java.util.concurrent.atomic.AtomicBoolean()
+    val take = java.util.concurrent.atomic.AtomicReference<ULong?>()
     val queued = enqueue {
+      if (cancelled.get()) return@enqueue
       if (startWaiter != null || closed) {
         waiter.completeExceptionally(refusal(CameraRefusal.NOT_READY))
         return@enqueue
       }
+      ended?.getOrNull()?.file?.let(::deleteMediaFile)
       ended = null
       startFailure = null
       if (profile.audio && audioHold == null) {
@@ -143,10 +177,18 @@ class MediaCamera internal constructor(
         return@enqueue
       }
       apply(CaptureEvent.Start)
+      take.set(run.state.take)
       if (run.starting) startWaiter = waiter else waiter.completeExceptionally(startFailure ?: refusal(CameraRefusal.NOT_READY))
     }
     if (!queued) throw refusal(CameraRefusal.NOT_READY)
-    waiter.await()
+    try { waiter.await() } catch (failure: kotlinx.coroutines.CancellationException) {
+      cancelled.set(true)
+      enqueue {
+        if (startWaiter === waiter) startWaiter = null
+        if (take.get() != null && run.state.take == take.get() && (run.starting || run.started)) apply(CaptureEvent.Cancel)
+      }
+      throw failure
+    }
   }
 
   /**
@@ -173,6 +215,20 @@ class MediaCamera internal constructor(
     return waiter.await()
   }
 
+  fun clip(take: ULong): CapturedClip? {
+    val done = java.util.concurrent.CountDownLatch(1)
+    var result: CapturedClip? = null
+    if (!enqueue {
+      if (run.state.take == take) {
+        result = ended?.getOrNull()
+        if (result != null) ended = null
+      }
+      done.countDown()
+    }) return null
+    done.await()
+    return result
+  }
+
   /** Throws the recording away and deletes its file. */
   fun cancelRecording() = post(CaptureEvent.Cancel)
 
@@ -189,10 +245,10 @@ class MediaCamera internal constructor(
   fun observeFrames(maxPerSecond: Double, analyzer: ImageAnalysis.Analyzer): AutoCloseable {
     val id = UUID.randomUUID().toString()
     observers[id] = Observer(maxPerSecond, analyzer)
-    enqueue { installTap() }
+    enqueue { updateTap() }
     return AutoCloseable {
       observers.remove(id)
-      enqueue { installTap() }
+      enqueue { updateTap() }
     }
   }
 
@@ -201,7 +257,11 @@ class MediaCamera internal constructor(
       if (closed) return@enqueue
       hosts.clear()
       reconcile()
+      ended?.getOrNull()?.file?.let(::deleteMediaFile)
+      ended = null
       closed = true
+      layerClose?.close()
+      backend.close()
       scope.cancel()
     }
     queue.shutdown()
@@ -272,17 +332,21 @@ class MediaCamera internal constructor(
     audioRevocation?.close()
     audioHold = ticket
     audioFailure = null
-    audioRevocation = ticket.onRevoked { reason -> enqueue {
-      if (audioHold !== ticket) return@enqueue
-      audioHold = null
-      audioFailure = reason
-      audioRevocation?.close()
-      audioRevocation = null
-      if (run.starting || run.started) {
-        retiringAudio = ticket
-        failMicrophone(microphoneRefusal(reason))
-      } else ticket.close()
-    } }
+    audioRevocation = ticket.onRevoked { reason, done ->
+      if (!enqueue {
+        if (audioHold !== ticket) { done(); return@enqueue }
+        audioHold = null
+        audioFailure = reason
+        audioRevocation?.close()
+        audioRevocation = null
+        if (run.starting || run.started) {
+          retiringAudio = ticket
+          recordingStopped = done
+          failMicrophone(microphoneRefusal(reason))
+          recordingStopped?.let { pending -> recordingStopped = null; backend.awaitRecordingStopped(pending) }
+        } else { ticket.close(); done() }
+      }) done()
+    }
   }
 
   private fun post(event: CaptureEvent) {
@@ -313,9 +377,28 @@ class MediaCamera internal constructor(
 
   private fun apply(event: CaptureEvent) {
     val cancelReading = if (event == CaptureEvent.Cancel) reading else null
+    val previous = run
     val step = captureStep(run, event, profile)
+    val command = step.actions.singleOrNull()
+    if (command is CaptureAction.SetTorch || command is CaptureAction.SetZoom) {
+      val generation = ++commandGeneration
+      val done: (Throwable?) -> Unit = { failure -> enqueue {
+        if (failure != null) Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, failure)
+        else if (generation == commandGeneration && !closed) {
+            val state = if (command is CaptureAction.SetTorch) run.state.copy(flash = step.run.state.flash) else run.state.copy(zoom = step.run.state.zoom)
+            run = run.copy(state = state)
+            published.value = state
+        }
+      } }
+      if (command is CaptureAction.SetTorch) backend.setTorch(command.on, done)
+      else backend.setZoom((command as CaptureAction.SetZoom).ratio, done)
+      return
+    }
     run = step.run
-    step.actions.forEach(::perform)
+    try { step.actions.forEach(::perform) } catch (failure: Exception) {
+      run = previous
+      Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, failure)
+    }
     if (cancelReading != null) {
       cancelReading.invokeOnCompletion {
         enqueue {
@@ -329,6 +412,7 @@ class MediaCamera internal constructor(
       return
     }
     published.value = run.state
+    if (frameTapPending && !run.starting && !run.started) { frameTapPending = false; installTap() }
     onTestChange?.invoke()
     settleWaiters()
     syncTicker()
@@ -336,9 +420,9 @@ class MediaCamera internal constructor(
 
   private fun settleWaiters() {
     startWaiter?.let { waiter ->
-      if (!run.starting) {
+      if (run.state.phase == CameraPhase.RECORDING || (!run.starting && !run.started)) {
         startWaiter = null
-        if (run.started) waiter.complete(Unit) else waiter.completeExceptionally(startFailure ?: refusal(run.state.fault ?: CameraRefusal.NOT_READY))
+        if (run.state.phase == CameraPhase.RECORDING) waiter.complete(Unit) else waiter.completeExceptionally(startFailure ?: refusal(run.state.fault ?: CameraRefusal.NOT_READY))
       }
     }
     photoWaiter?.let { waiter ->
@@ -378,6 +462,10 @@ class MediaCamera internal constructor(
     when (action) {
       is CaptureAction.Bind -> open(action.lens)
       is CaptureAction.Restart -> {
+        if (run.state.outcome != null) {
+          ended = Result.failure(refusal(CameraRefusal.INTERRUPTED))
+          stopWaiter?.let { stopWaiter = null; it.completeExceptionally(refusal(CameraRefusal.INTERRUPTED)) }
+        }
         teardownHardware()
         open(action.lens)
       }
@@ -400,7 +488,11 @@ class MediaCamera internal constructor(
           if (refused != null) enqueue { failMicrophone(microphoneRefusal(refused)) }
         }
       }
-      is CaptureAction.EndRecording -> backend.endRecording()
+      is CaptureAction.EndRecording -> {
+        val stopped = recordingStopped
+        recordingStopped = null
+        if (stopped == null) backend.endRecording() else backend.endRecording(stopped)
+      }
       CaptureAction.ReadClip -> readClip()
       CaptureAction.Deliver -> deliver()
       CaptureAction.Discard -> discard()
@@ -413,7 +505,7 @@ class MediaCamera internal constructor(
     backend.unbind()
     reading?.cancel()
     reading = null
-    recordingFile?.delete()
+    recordingFile?.let(::deleteMediaFile)
     recordingFile = null
     clipInfo = null
   }
@@ -501,14 +593,14 @@ class MediaCamera internal constructor(
     val bytes = backend.photoSize?.let { shotCost(it.width, it.height) } ?: captureCost(profile)
     shooting = scope.launch {
       fun finish(outcome: Result<CapturedPhoto>) {
-        enqueue {
+        if (!enqueue {
           if (epoch != current || closed) {
-            outcome.getOrNull()?.file?.delete()
+            outcome.getOrNull()?.file?.let(::deleteMediaFile)
             return@enqueue
           }
           photoOutcome = outcome
           apply(CaptureEvent.PhotoDone(outcome.isSuccess))
-        }
+        }) outcome.getOrNull()?.file?.let(::deleteMediaFile)
       }
       val hold = try {
         services.admitShot(bytes.toLong())
@@ -516,23 +608,28 @@ class MediaCamera internal constructor(
         if (failure is kotlinx.coroutines.CancellationException) throw failure
         return@launch finish(Result.failure(refusal(CameraRefusal.MEMORY)))
       }
-      val file = CaptureFiles.name(CaptureFileKind.PHOTO, services.directory)
+      val file = try { CaptureFiles.name(CaptureFileKind.PHOTO, services.directory) } catch (failure: Exception) {
+        hold.close()
+        Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.FILE, failure)
+        return@launch finish(Result.failure(refusal(CameraRefusal.PHOTO_FAILED)))
+      }
       val raw = File(file.path + ".raw")
       try {
         backend.takePhoto(raw, flash, profile)
         hold.close()
         val made = services.upright(raw, profile.photoQuality.toDouble() / 100)
-        raw.delete()
+        deleteMediaFile(raw)
         check(made.renameTo(file)) { "the photo file cannot be moved" }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }.also { BitmapFactory.decodeFile(file.path, it) }
         finish(Result.success(CapturedPhoto(file, bounds.outWidth, bounds.outHeight, lens)))
       } catch (failure: Exception) {
         hold.close()
-        file.delete()
+        deleteMediaFile(file)
         if (failure is kotlinx.coroutines.CancellationException) throw failure
+        Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, failure)
         finish(Result.failure(refusal(CameraRefusal.PHOTO_FAILED)))
       } finally {
-        raw.delete()
+        deleteMediaFile(raw)
       }
     }
   }
@@ -546,6 +643,7 @@ class MediaCamera internal constructor(
         services.clipInfo(file)
       } catch (failure: Exception) {
         if (failure is kotlinx.coroutines.CancellationException) throw failure
+        Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, failure)
         null
       }
       enqueue {
@@ -573,10 +671,14 @@ class MediaCamera internal constructor(
     retiringAudio = null
     reading?.cancel()
     reading = null
-    recordingFile?.delete()
+    recordingFile?.let(::deleteMediaFile)
     recordingFile = null
     clipInfo = null
     ended = Result.failure(refusal(run.state.fault ?: CameraRefusal.NOT_READY, run.state.refusedMs))
+  }
+
+  private fun updateTap() {
+    if (run.starting || run.started) frameTapPending = true else installTap()
   }
 
   private fun installTap() {
@@ -588,10 +690,20 @@ class MediaCamera internal constructor(
     frameTapOn = true
     backend.setFrameTap(object : ImageAnalysis.Analyzer {
       override fun analyze(image: ImageProxy) {
-        val now = (System.nanoTime() / 1_000_000L).toULong()
-        val targets = observers.values.filter { frameGate(it.last, now, it.perSecond) }.onEach { it.last = now }
-        if (targets.isEmpty()) return image.close()
-        targets.first().analyzer.analyze(image)
+        if (!enqueue {
+          val now = (System.nanoTime() / 1_000_000L).toULong()
+          val targets = observers.values.filter { frameGate(it.last, now, it.perSecond) }.onEach { it.last = now }
+          if (targets.isEmpty()) image.close() else {
+            val remaining = java.util.concurrent.atomic.AtomicInteger(targets.size)
+            targets.forEach { target ->
+              val closed = java.util.concurrent.atomic.AtomicBoolean()
+              val shared = object : ImageProxy by image {
+                override fun close() { if (closed.compareAndSet(false, true) && remaining.decrementAndGet() == 0) image.close() }
+              }
+              try { target.analyzer.analyze(shared) } catch (error: Exception) { shared.close(); Media.recordFailure(error) }
+            }
+          }
+        }) image.close()
       }
 
       override fun getTargetCoordinateSystem(): Int = observers.values.firstOrNull()?.analyzer?.targetCoordinateSystem ?: ImageAnalysis.COORDINATE_SYSTEM_ORIGINAL

@@ -3,21 +3,68 @@ package com.noma4i.medialayer.ui
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import androidx.core.telecom.CallControlScope
+import androidx.core.telecom.CallControlResult
+import androidx.core.telecom.CallException
+import androidx.core.telecom.CallEndpointCompat
 import com.noma4i.medialayer.*
 import java.io.Closeable
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.transformWhile
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.asCoroutineDispatcher
 
-enum class MediaCallKind { Telecom, Unmanaged }
+interface CallEndpointPort {
+  fun select(speaker: Boolean, done: (CallEndpointResult) -> Unit)
+  companion object { fun of(scope: CallControlScope): CallEndpointPort = TelecomEndpoint(scope) }
+}
+
+sealed interface CallEndpointResult {
+  data object Applied : CallEndpointResult
+  data class Failed(val failure: NativeFailure) : CallEndpointResult
+}
+
+sealed interface MediaCallKind {
+  data object Unmanaged : MediaCallKind
+  class Telecom(val control: CallEndpointPort) : MediaCallKind
+}
+
+private class TelecomEndpoint(private val call: CallControlScope) : CallEndpointPort {
+  private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+  override fun select(speaker: Boolean, done: (CallEndpointResult) -> Unit) {
+    scope.launch {
+      val applied = try {
+        val type = if (speaker) CallEndpointCompat.TYPE_SPEAKER else CallEndpointCompat.TYPE_EARPIECE
+        val endpoint = call.availableEndpoints.first().firstOrNull { it.type == type } ?: error("Endpoint unavailable")
+        when (val result = call.requestEndpointChange(endpoint)) {
+          is CallControlResult.Success -> CallEndpointResult.Applied
+          is CallControlResult.Error -> CallEndpointResult.Failed(NativeFailure(FailureSource.SPEAKER, "androidx.core.telecom", result.errorCode.toLong(), result.toString()))
+        }
+      } catch (error: CancellationException) { throw error } catch (error: Exception) {
+        CallEndpointResult.Failed(NativeFailure(FailureSource.SPEAKER, error.javaClass.name, (error as? CallException)?.code?.toLong() ?: 0L, error.message ?: error.toString()))
+      }
+      done(applied)
+    }
+  }
+}
 
 internal enum class FocusGain { GAIN, GAIN_TRANSIENT, GAIN_TRANSIENT_EXCLUSIVE }
 internal enum class FocusUsage { MEDIA, VOICE_COMMUNICATION }
@@ -47,7 +94,10 @@ internal interface AudioFocusPort {
   fun enterCommunication(speaker: Boolean)
   fun leaveCommunication()
 }
-internal interface MicrophonePermissionPort { fun granted(): Boolean }
+internal interface MicrophonePermissionPort {
+  fun granted(): Boolean
+  fun listen(sink: (Boolean) -> Unit) = Unit
+}
 internal data class AudioPorts(val focus: AudioFocusPort, val permission: MicrophonePermissionPort)
 internal sealed interface Admission {
   data class Admitted(val ticket: RecordingTicket) : Admission
@@ -56,16 +106,28 @@ internal sealed interface Admission {
 
 internal class RecordingTicket(val id: ULong, private val end: (ULong) -> Unit) : Closeable {
   private val closed = AtomicBoolean()
-  private val listeners = LinkedHashSet<(RecordingRefusal) -> Unit>()
+  private val listeners = LinkedHashSet<(RecordingRefusal, () -> Unit) -> Unit>()
   private var reason: RecordingRefusal? = null
-  fun onRevoked(listener: (RecordingRefusal) -> Unit): Closeable {
-    synchronized(listeners) { listeners.add(listener); reason?.let(listener) }
+  private val stopped = CompletableDeferred<Unit>()
+  fun onRevoked(listener: (RecordingRefusal, () -> Unit) -> Unit): Closeable {
+    val existing = synchronized(listeners) { listeners.add(listener); reason }
+    existing?.let { listener(it) {} }
     return Closeable { synchronized(listeners) { listeners.remove(listener) } }
   }
-  internal fun revoke(value: RecordingRefusal) = synchronized(listeners) {
-    if (reason != null) return@synchronized
-    reason = value
-    listeners.toList().forEach { it(value) }
+  internal suspend fun revoke(value: RecordingRefusal) {
+    val notify = synchronized(listeners) {
+      if (reason != null) return@synchronized null
+      reason = value
+      listeners.toList()
+    }
+    if (notify != null) {
+      val acknowledgements = notify.map { listener ->
+        CompletableDeferred<Unit>().also { done -> listener(value) { done.complete(Unit) } }
+      }
+      acknowledgements.forEach { it.await() }
+      stopped.complete(Unit)
+    }
+    stopped.await()
   }
   fun start(work: () -> Unit): RecordingRefusal? = synchronized(listeners) {
     reason?.let { return@synchronized it }
@@ -75,17 +137,43 @@ internal class RecordingTicket(val id: ULong, private val end: (ULong) -> Unit) 
   override fun close() { if (closed.compareAndSet(false, true)) end(id) }
 }
 
-class MediaCallAudio internal constructor(private val id: ULong, private val send: (AudioInput) -> Unit) : Closeable {
+class MediaCallAudio internal constructor(private val id: ULong, internal val kind: MediaCallKind, private val send: (AudioInput) -> Unit) : Closeable {
   private val closed = AtomicBoolean()
   private val state = MutableStateFlow(CallState.CONNECTING)
-  private val listeners = LinkedHashSet<(CallState) -> Unit>()
-  val states: StateFlow<CallState> = state
-  fun onState(listener: (CallState) -> Unit): Closeable {
-    synchronized(listeners) { listeners.add(listener); listener(state.value) }
-    return Closeable { synchronized(listeners) { listeners.remove(listener) } }
+  private inner class StateObservation(var listener: ((CallState) -> Unit)?) : Closeable {
+    override fun close() = synchronized(listeners) { listener = null; listeners.remove(this); Unit }
+  }
+  private val listeners = LinkedHashSet<StateObservation>()
+  val states: Flow<CallState> = kotlinx.coroutines.flow.callbackFlow {
+    val observation = onState { trySend(it); if (it == CallState.ENDED) channel.close() }
+    awaitClose { observation.close() }
+  }.buffer(Channel.UNLIMITED)
+  private val currentRoute = MutableStateFlow(CallRoute.RECEIVER)
+  val route: Flow<CallRoute> = kotlinx.coroutines.flow.callbackFlow {
+    val job = launch { currentRoute.collect { trySend(it) } }
+    val observation = onState { if (it == CallState.ENDED) channel.close() }
+    awaitClose { job.cancel(); observation.close() }
+  }
+  internal fun route(value: CallRoute) { currentRoute.value = value }
+  fun onState(listener: (CallState) -> Unit): Closeable = synchronized(listeners) {
+    if (state.value == CallState.ENDED) {
+      listener(CallState.ENDED)
+      return@synchronized Closeable { }
+    }
+    val observation = StateObservation(listener)
+    listeners.add(observation)
+    listener(state.value)
+    observation
   }
   internal fun update(value: CallState) = synchronized(listeners) {
-    if (state.value != value) { state.value = value; listeners.toList().forEach { it(value) } }
+    if (state.value == CallState.ENDED || state.value == value) return@synchronized
+    state.value = value
+    val notify = listeners.mapNotNull { it.listener }
+    if (value == CallState.ENDED) {
+      listeners.forEach { it.listener = null }
+      listeners.clear()
+    }
+    notify.forEach { it(value) }
   }
   fun setSpeaker(on: Boolean) { if (!closed.get()) send(AudioInput.CallSpeaker(id, on)) }
   fun systemActivated() { if (!closed.get()) send(AudioInput.CallSystemActivated(id)) }
@@ -95,27 +183,40 @@ class MediaCallAudio internal constructor(private val id: ULong, private val sen
 
 internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, private val volume: VolumePort? = null) : Closeable {
   private val audioInputs = core.audioInputs()
+  private val core = java.lang.ref.WeakReference(core)
   private val thread = HandlerThread("MediaLayer audio").also { it.start() }
   internal val handler = Handler(thread.looper)
+  private val audioDispatcher = java.util.concurrent.Executor { handler.post(it) }.asCoroutineDispatcher()
+  private val audioScope = CoroutineScope(SupervisorJob() + audioDispatcher)
   private val nextId = AtomicLong()
   private val closed = AtomicBoolean()
+  internal val isClosed: Boolean get() = closed.get()
+  internal val acceptsMute: Boolean get() = !closed.get() && core.get()?.uniffiIsDestroyed == false
   private val postLock = Any()
   private val pending = HashMap<ULong, CompletableDeferred<Admission>>()
   private val tickets = HashMap<ULong, RecordingTicket>()
   private val recordingCount = AtomicInteger()
   internal val isRecording: Boolean get() = recordingCount.get() != 0
-  private val calls = HashMap<ULong, MediaCallAudio>()
+  private val calls = LinkedHashMap<ULong, MediaCallAudio>()
+  private val closeListeners = LinkedHashSet<() -> Unit>()
+  private val closeDone = CompletableDeferred<Unit>()
+  private var closeCompleted = false
   private val availability = MutableStateFlow(MicrophoneAvailability.AVAILABLE)
-  val microphoneAvailability: StateFlow<MicrophoneAvailability> = availability
+  val microphoneAvailability: Flow<MicrophoneAvailability> = kotlinx.coroutines.flow.callbackFlow {
+    val observation = onAvailability { trySend(it) }
+    val close = onClose { channel.close() }
+    awaitClose { observation.close(); close.close() }
+  }
   private val listeners = LinkedHashSet<(MicrophoneAvailability) -> Unit>()
   private var communication = false
   private var focusHeld = false
-  private val inputs = ArrayDeque<AudioInput>()
+  private val actions = ArrayDeque<AudioAction>()
   private var processing = false
   @Volatile internal var volumeMultiplier: (Float) -> Unit = {}
 
   init {
     (ports.focus as? AudioSystem)?.handler = handler
+    (volume as? SystemVolume)?.handler = handler
     ports.focus.listen { signal ->
       send(when (signal) {
         is FocusSignal.Change -> AudioInput.Focus(signal.value)
@@ -126,6 +227,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
         is FocusSignal.Silenced -> AudioInput.Silenced(signal.id)
       })
     }
+    ports.permission.listen { send(AudioInput.Permission(it)) }
     send(AudioInput.Permission(ports.permission.granted()))
   }
   private fun id() = nextId.incrementAndGet().toULong()
@@ -134,21 +236,33 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
     if (Looper.myLooper() == thread.looper && !closed.get()) process(input) else enqueue { process(input) }
   }
   private fun process(input: AudioInput) {
-    inputs.addLast(input)
-    if (processing) return
-    processing = true
-    try { while (inputs.isNotEmpty()) applyInput(inputs.removeFirst()) } finally { processing = false }
-  }
-  private fun applyInput(input: AudioInput) {
-    val actions = try { audioInputs.send(input) } catch (failure: MediaException) {
+    val next = try { audioInputs.send(input) } catch (failure: MediaException) {
       Media.recordFailure(failure)
       pending.values.forEach { it.completeExceptionally(failure) }
       pending.clear()
       return
     }
-    actions.forEach { action ->
+    actions.addAll(next)
+    if (processing) return
+    processing = true
+    audioScope.launch(start = CoroutineStart.UNDISPATCHED) {
+      try { while (!closed.get() && actions.isNotEmpty()) applyAction(actions.removeFirst()) } finally { processing = false }
+    }
+  }
+  private suspend fun applyAction(action: AudioAction) {
       when (action) {
+        is AudioAction.AwaitPaused -> audioInputs.paused(action.barrier)
+        is AudioAction.Failure -> Media.recordNativeFailure(action.failure)
+        is AudioAction.Route -> {
+          val call = calls.values.lastOrNull()
+          val endpoint = (call?.kind as? MediaCallKind.Telecom)?.control
+          endpoint?.select(action.speaker) { applied ->
+            call.route(if (applied is CallEndpointResult.Failed) CallRoute.FAILED else if (action.speaker) CallRoute.SPEAKER else CallRoute.RECEIVER)
+            if (applied is CallEndpointResult.Failed) Media.recordNativeFailure(applied.failure)
+          }
+        }
         is AudioAction.Apply -> {
+          var source = FailureSource.FOCUS
           try {
             val plan = FocusPlan.of(action.want)
             if (communication && plan?.communication != true) {
@@ -163,7 +277,10 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
               focusHeld = answer != FocusAnswer.FAILED
               if (plan.communication && focusHeld) {
                 communication = true
-                ports.focus.enterCommunication((action.want as SessionWant.Call).speaker)
+                source = FailureSource.SPEAKER
+                val speaker = (action.want as SessionWant.Call).speaker
+                ports.focus.enterCommunication(speaker)
+                calls.values.lastOrNull()?.route(if (speaker) CallRoute.SPEAKER else CallRoute.RECEIVER)
               } else if (communication && !focusHeld) {
                 try { ports.focus.leaveCommunication() } finally { communication = false }
               }
@@ -172,16 +289,20 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
             } else {
               process(AudioInput.Applied(action.generation, AppliedResult.Ok))
             }
-          } catch (failure: Exception) { Media.recordFailure(failure); process(AudioInput.Applied(action.generation, AppliedResult.Failed(-1))) }
+          } catch (failure: Exception) {
+            if (failure is FocusAbandonFailure) reportFocusFailure(failure) else Media.recordNativeFailure(source, failure)
+            if (source == FailureSource.SPEAKER) calls.values.lastOrNull()?.route(CallRoute.FAILED)
+            process(AudioInput.Applied(action.generation, AppliedResult.Failed(-1)))
+          }
         }
         is AudioAction.Deactivate -> {
           var abandoned = true
           try {
             ports.focus.abandon()
             focusHeld = false
-          } catch (failure: Exception) { abandoned = false; Media.recordFailure(failure) }
+          } catch (failure: Exception) { abandoned = false; reportFocusFailure(failure) }
           if (communication) {
-            try { ports.focus.leaveCommunication() } catch (failure: Exception) { Media.recordFailure(failure) } finally { communication = false }
+            try { ports.focus.leaveCommunication() } catch (failure: Exception) { Media.recordNativeFailure(FailureSource.SPEAKER, failure) } finally { communication = false }
           }
           process(AudioInput.Applied(action.generation, if (abandoned) AppliedResult.Ok else AppliedResult.Failed(-1)))
         }
@@ -200,11 +321,14 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
         is AudioAction.VolumeMultiplier -> volumeMultiplier(action.value)
         else -> Unit
       }
-    }
   }
   fun onAvailability(listener: (MicrophoneAvailability) -> Unit): Closeable {
     synchronized(listeners) { listeners.add(listener); listener(availability.value) }
     return Closeable { synchronized(listeners) { listeners.remove(listener) } }
+  }
+  private fun reportFocusFailure(failure: Throwable) {
+    if (failure is FocusAbandonFailure) Media.recordNativeFailure(NativeFailure(FailureSource.FOCUS, "android.media.AudioManager", failure.code.toLong(), failure.message ?: "Audio focus abandon refused"))
+    else Media.recordNativeFailure(FailureSource.FOCUS, failure)
   }
   suspend fun admit(kind: RecordingKind): Admission {
     val id = id()
@@ -226,44 +350,83 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
   } }
   fun call(kind: MediaCallKind): MediaCallAudio {
     val id = id()
-    val call = MediaCallAudio(id, ::send)
-    val coreKind = when (kind) { MediaCallKind.Telecom -> CallKind.Telecom; MediaCallKind.Unmanaged -> CallKind.Unmanaged }
+    val call = MediaCallAudio(id, kind, ::send)
+    val coreKind = when (kind) { is MediaCallKind.Telecom -> CallKind.Telecom; MediaCallKind.Unmanaged -> CallKind.Unmanaged }
     if (!enqueue { calls[id] = call; process(AudioInput.CallStarted(id, coreKind, false)) }) throw MediaException.Closed()
     return call
   }
   fun audible(slot: ULong, on: Boolean) = send(AudioInput.Audible(slot, on))
+  fun setMuted(value: Boolean, done: (Boolean) -> Unit) {
+    if (!enqueue {
+      val accepted = try { (core.get() ?: throw MediaException.Closed()).setMutedAll(value); true } catch (error: Exception) { Media.recordNativeFailure(FailureSource.SESSION, error); false }
+      done(accepted)
+    }) done(false)
+  }
+  fun onClose(listener: () -> Unit): Closeable {
+    synchronized(closeListeners) {
+      if (closeCompleted) listener() else closeListeners.add(listener)
+    }
+    return Closeable { synchronized(closeListeners) { closeListeners.remove(listener) } }
+  }
+  suspend fun awaitClosed() { closeDone.await() }
   fun foreground(on: Boolean) { if (on) { (ports.focus as? AudioSystem)?.refreshPhone(); send(AudioInput.Permission(ports.permission.granted())) }; send(AudioInput.Foreground(on)) }
-  fun readVolume(): MediaVolumeReading? {
-    val reading = volume?.reading() ?: return null
+  suspend fun readVolume(): MediaVolumeReading? {
+    val port = volume ?: return null
+    val initial = CompletableDeferred<Float?>()
+    if (!enqueue { runCatching { port.level() }.fold(initial::complete, initial::completeExceptionally) }) return null
+    val level = initial.await() ?: return null
+    if (closed.get()) return null
+    val reading = port.reading(level, handler)
     return MediaVolumeReading(reading.initial, withVolumeRead(reading.changes))
   }
-  fun volumeRaises(): Flow<Unit> = volume?.raises()?.let(::withVolumeRead) ?: emptyFlow()
-  private fun <T> withVolumeRead(source: Flow<T>): Flow<T> = flow {
+  fun volumeRaises(): Flow<Unit> = flow {
+    val reading = readVolume() ?: return@flow
+    var previous = reading.initial
+    reading.changes.transformWhile { current ->
+      val result = CompletableDeferred<Boolean>()
+      if (!enqueue { runCatching { isVolumeRaise(previous, current) }.fold(result::complete, result::completeExceptionally) }) return@transformWhile false
+      if (result.await()) emit(Unit)
+      previous = current
+      true
+    }.collect { emit(it) }
+  }
+  private fun <T> withVolumeRead(source: Flow<T>): Flow<T> = kotlinx.coroutines.flow.callbackFlow {
     val id = id()
-    send(AudioInput.VolumeReadStarted(id))
-    try { source.collect { emit(it) } } finally { send(AudioInput.VolumeReadEnded(id)) }
+    this@AudioLink.send(AudioInput.VolumeReadStarted(id))
+    val observer = launch { try { source.collect { send(it) } } finally { channel.close() } }
+    val close = onClose { channel.close() }
+    awaitClose {
+      observer.cancel()
+      close.close()
+      this@AudioLink.send(AudioInput.VolumeReadEnded(id))
+    }
   }
   override fun close() {
-    val done = CountDownLatch(1)
     val finish: () -> Unit = {
+      audioScope.launch {
       try {
         pending.values.forEach { it.completeExceptionally(MediaException.Closed()) }
         pending.clear()
-        tickets.values.toList().forEach { runCatching { it.revoke(RecordingRefusal.INTERRUPTED) }.onFailure(Media::recordFailure) }
-        calls.values.toList().forEach { runCatching { it.update(CallState.ENDED) }.onFailure(Media::recordFailure) }
-        calls.clear()
-        runCatching { ports.focus.abandon() }.onFailure(Media::recordFailure)
+        tickets.values.toList().map { ticket ->
+          async(start = CoroutineStart.UNDISPATCHED) { ticket.revoke(RecordingRefusal.INTERRUPTED) }
+        }.awaitAll()
+        runCatching { ports.focus.abandon() }.onFailure(::reportFocusFailure)
         if (communication) {
-          try { ports.focus.leaveCommunication() } catch (failure: Exception) { Media.recordFailure(failure) } finally { communication = false }
+          try { ports.focus.leaveCommunication() } catch (failure: Exception) { Media.recordNativeFailure(FailureSource.SPEAKER, failure) } finally { communication = false }
         }
         runCatching { (ports.focus as? AutoCloseable)?.close() }.onFailure(Media::recordFailure)
-      } catch (failure: Throwable) { Media.recordFailure(failure) } finally { thread.quitSafely(); done.countDown() }
+        runCatching { (ports.permission as? AutoCloseable)?.close() }.onFailure(Media::recordFailure)
+        calls.values.toList().forEach { runCatching { it.update(CallState.ENDED) }.onFailure(Media::recordFailure) }
+        calls.clear()
+        synchronized(closeListeners) { closeCompleted = true; closeListeners.toList().also { closeListeners.clear() } }.forEach { runCatching(it).onFailure(Media::recordFailure) }
+      } catch (failure: Throwable) { Media.recordFailure(failure) } finally { closeDone.complete(Unit); audioScope.cancel(); thread.quitSafely() }
+      }
     }
     val onThread = Looper.myLooper() == thread.looper
     synchronized(postLock) {
       if (!closed.compareAndSet(false, true)) return
       if (!onThread && !handler.post(finish)) { thread.quitSafely(); return }
     }
-    if (onThread) finish() else try { done.await(5, TimeUnit.SECONDS) } catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+    if (onThread) finish()
   }
 }

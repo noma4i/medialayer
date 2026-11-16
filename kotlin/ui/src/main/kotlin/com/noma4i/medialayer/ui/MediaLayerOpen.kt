@@ -36,12 +36,12 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ensureActive
 import coil3.ImageLoader
 import okhttp3.Call
@@ -51,15 +51,27 @@ internal class HeldResources(val signals: SystemSignals?, val factory: ExoPlayer
 
 internal class Binding(val factory: ExoPlayerSlotFactory, val signals: SystemSignals, val imageLoader: ImageLoader, val link: AudioLink)
 
+private class SystemMicrophonePermission(private val context: Context) : MicrophonePermissionPort, AutoCloseable {
+  private val appOps = context.getSystemService(android.app.AppOpsManager::class.java)
+  private var listener: android.app.AppOpsManager.OnOpChangedListener? = null
+  override fun granted() = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+  override fun listen(sink: (Boolean) -> Unit) {
+    val callback = android.app.AppOpsManager.OnOpChangedListener { _, _ -> sink(granted()) }
+    listener = callback
+    appOps.startWatchingMode(android.app.AppOpsManager.OPSTR_RECORD_AUDIO, context.packageName, callback)
+  }
+  override fun close() { listener?.let(appOps::stopWatchingMode); listener = null }
+}
+
 private val bindings: MutableMap<MediaLayer, Binding> = Collections.synchronizedMap(WeakHashMap())
 
 private val openScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
 internal val MediaLayer.binding: Binding? get() = bindings[this]
 
-val MediaLayer.microphoneAvailability get() = checkNotNull(binding?.link) { "MediaLayer is closed" }.microphoneAvailability
+val MediaLayer.microphoneAvailability get() = binding?.link?.takeUnless { it.isClosed }?.microphoneAvailability ?: kotlinx.coroutines.flow.emptyFlow()
 fun MediaLayer.callAudio(kind: MediaCallKind): MediaCallAudio = (binding?.link ?: throw com.noma4i.medialayer.MediaException.Closed()).call(kind)
-fun MediaLayer.readVolume(): MediaVolumeReading? = (binding?.link ?: throw com.noma4i.medialayer.MediaException.Closed()).readVolume()
+suspend fun MediaLayer.readVolume(): MediaVolumeReading? = (binding?.link ?: throw com.noma4i.medialayer.MediaException.Closed()).readVolume()
 fun MediaLayer.volumeRaises() = (binding?.link ?: throw com.noma4i.medialayer.MediaException.Closed()).volumeRaises()
 
 fun MediaLayer.Companion.open(
@@ -103,6 +115,9 @@ internal fun openMediaLayer(
   imageMemoryBytes: Int? = null,
   videoOutputCounters: VideoOutputCounters? = null,
   codecWarmup: CodecWarmup = CodecWarmup.process,
+  audioPorts: AudioPorts? = null,
+  volume: VolumePort? = null,
+  slotFactory: com.noma4i.medialayer.PlayerSlotFactory? = null,
   install: () -> Unit = NativeCallbacks::install,
   open: (OpenConfig) -> MediaLayer
 ): Deferred<MediaLayer> {
@@ -121,9 +136,11 @@ internal fun openMediaLayer(
     }
   }
   fun finish(held: HeldResources) {
-    held.factory?.release()
-    audio?.close()
-    held.imageLoader?.shutdown()
+    runCatching { held.factory?.release() }.onFailure { Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.DEVICE, it) }
+    runCatching { audio?.close() }.onFailure { Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.SESSION, it) }
+    runCatching { held.imageLoader?.shutdown() }.onFailure { Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.DEVICE, it) }
+  }
+  fun unpublish(held: HeldResources) {
     held.layer?.let { bindings.remove(it) }
     if (Media.link === audio) Media.link = null
     onTestChange?.invoke()
@@ -137,9 +154,10 @@ internal fun openMediaLayer(
     override suspend fun shutdown() {
       val held = detach()
       try {
-        held.signals?.unregister()
-      } finally {
         finish(held)
+        audio?.awaitClosed()
+      } finally {
+        try { held.signals?.unregister() } finally { unpublish(held) }
       }
     }
   }
@@ -168,7 +186,7 @@ internal fun openMediaLayer(
       dir = dir.path,
       fetcher = fetcher ?: OkHttpFetcher(client),
       settings = settings ?: SharedPreferencesSettings(app),
-      slots = slots,
+      slots = slotFactory ?: slots,
       device = device,
       defaults = resolved.defaults,
       pool = resolved.pool,
@@ -187,9 +205,8 @@ internal fun openMediaLayer(
     val layer = try { open(config) } finally { Trace.endSection() }
     created.set(layer)
     ensureActive()
-    val link = AudioLink(layer, AudioPorts(AudioSystem(app), object : MicrophonePermissionPort {
-      override fun granted() = app.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-    }), SystemVolume(app))
+    val link = AudioLink(layer, audioPorts ?: AudioPorts(AudioSystem(app), SystemMicrophonePermission(app)), volume ?: SystemVolume(app))
+    layer.setMutedAll(Media.muted)
     audio = link
     slots.link = link
     Media.link = link
@@ -214,7 +231,7 @@ internal fun openMediaLayer(
       layer?.close()
       val held = detach()
       finish(held)
-      held.signals?.let { openScope.launch { it.unregister() } }
+      openScope.launch { try { held.signals?.unregister() } finally { unpublish(held) } }
     }
   }
   return opened
@@ -247,14 +264,20 @@ internal class SystemSignals(
     onMain { synchronized(registrationLock) { if (registered) lifecycle.addObserver(this) } }
   }
 
-  suspend fun unregister() = withContext(Dispatchers.Main.immediate) {
-    synchronized(registrationLock) {
-      if (!registered) return@synchronized
-      registered = false
-      unregistered = true
-      context.unregisterComponentCallbacks(this@SystemSignals)
-      lifecycle.removeObserver(this@SystemSignals)
+  suspend fun unregister() {
+    val done = CompletableDeferred<Unit>()
+    onMain {
+      runCatching {
+        synchronized(registrationLock) {
+          if (!registered) return@synchronized
+          registered = false
+          unregistered = true
+          context.unregisterComponentCallbacks(this@SystemSignals)
+          lifecycle.removeObserver(this@SystemSignals)
+        }
+      }.fold({ done.complete(Unit) }, { done.completeExceptionally(it) })
     }
+    done.await()
   }
 
   private val isBackground = AtomicBoolean(false)

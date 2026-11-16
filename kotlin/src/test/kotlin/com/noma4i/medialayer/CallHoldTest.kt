@@ -6,7 +6,6 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -56,11 +55,15 @@ class CallHoldTest {
       val inputs = media.audioInputs()
       inputs.send(AudioInput.CallStarted(1uL, CallKind.Telecom, false))
       assertEquals("pause", withTimeout(10_000) { slot.log.receive() })
-      assertThrows(MediaException.InCall::class.java) { runBlocking { media.playUrl(ITEM) } }
+      val player = media.playUrl(ITEM)
+      player.play()
+      media.readRoute(ITEM)
+      assertTrue("a player played during the call", slot.log.tryReceive().isFailure)
 
       inputs.send(AudioInput.CallEnded(1uL))
-      media.playUrl(ITEM)
+      media.readRoute(ITEM)
       assertTrue("the release resumed the playback", slot.log.tryReceive().isFailure)
+      player.close()
 
       media.setPlaying(CLIP, true, listOf(null))
       assertEquals("play", withTimeout(10_000) { slot.log.receive() })

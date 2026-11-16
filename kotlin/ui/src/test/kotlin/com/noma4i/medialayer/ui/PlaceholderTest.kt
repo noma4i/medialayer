@@ -26,7 +26,6 @@ import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.NoHandle
 import com.noma4i.medialayer.Placeholder
-import com.noma4i.medialayer.PlaybackRoute
 import com.noma4i.medialayer.StateListener
 import com.noma4i.medialayer.Subscription
 import com.noma4i.medialayer.TonePreparation
@@ -104,7 +103,7 @@ private class ScriptedLayer(val label: String, private val events: Events, priva
   override suspend fun tonePixelsNeeded(source: MediaItem): Boolean = false
   override fun setMutedAll(muted: Boolean) {}
   override suspend fun fetchImage(url: String, headers: Map<String, String>): ImageFetchResult = throw kotlinx.coroutines.CancellationException("unused")
-  override suspend fun playUrl(source: MediaItem): PlaybackRoute = throw kotlinx.coroutines.CancellationException("unused")
+  override suspend fun playUrl(source: MediaItem): com.noma4i.medialayer.MediaPlayer = throw kotlinx.coroutines.CancellationException("unused")
   override fun close() {}
 }
 

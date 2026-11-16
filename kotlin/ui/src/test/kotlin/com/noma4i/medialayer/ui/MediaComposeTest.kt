@@ -109,9 +109,10 @@ class MediaComposeTest {
     settled()
 
     Media.muted = true
-    settled()
+    TestSignal.await("the core took the mute", 5_000) { layer.calls.contains("mutedAll:true") }
     Media.muted = false
 
+    TestSignal.await("the core took the unmute", 5_000) { layer.calls.count { it == "mutedAll:false" } == 2 }
     settled()
     assertEquals(listOf("mutedAll:false", "mutedAll:true", "mutedAll:false"), layer.calls.toList())
   }

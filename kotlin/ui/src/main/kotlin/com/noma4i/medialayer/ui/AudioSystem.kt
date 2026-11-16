@@ -31,7 +31,7 @@ internal class AudioSystem(private val context: Context) : AudioFocusPort, AutoC
   }
   private val recording = object : AudioManager.AudioRecordingCallback() {
     override fun onRecordingConfigChanged(configs: MutableList<AudioRecordingConfiguration>) {
-      if (!ownRecording) sink(FocusSignal.OtherRecording(configs.isNotEmpty()))
+      sink(FocusSignal.OtherRecording(configs.size > if (ownRecording) 1 else 0))
     }
   }
   private val phoneListener = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
@@ -60,7 +60,12 @@ internal class AudioSystem(private val context: Context) : AudioFocusPort, AutoC
   }
   override fun request(plan: FocusPlan): FocusAnswer = focusOperation {
     val previous = active
-    previous?.let { it.owner.audio.abandonAudioFocusRequest(it.request) }
+    previous?.let {
+      try { it.owner.abandonActive(it) } catch (failure: Exception) {
+        if (failure is FocusAbandonFailure) Media.recordNativeFailure(com.noma4i.medialayer.NativeFailure(com.noma4i.medialayer.FailureSource.FOCUS, "android.media.AudioManager", failure.code.toLong(), failure.message ?: "Audio focus abandon refused"))
+        else Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.FOCUS, failure)
+      }
+    }
     active = null
     val gain = when (plan.gain) {
       FocusGain.GAIN -> AudioManager.AUDIOFOCUS_GAIN
@@ -93,33 +98,46 @@ internal class AudioSystem(private val context: Context) : AudioFocusPort, AutoC
     answer
   }
   override fun abandon() = focusOperation {
-    active?.takeIf { it.owner === this }?.let { audio.abandonAudioFocusRequest(it.request); active = null }
+    active?.takeIf { it.owner === this }?.let { abandonActive(it) }
     Unit
   }
-  override fun enterCommunication(speaker: Boolean) {
+  private fun abandonActive(focus: ActiveFocus) {
+    val result = audio.abandonAudioFocusRequest(focus.request)
+    if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) throw FocusAbandonFailure(result)
+    active = null
+  }
+  override fun enterCommunication(speaker: Boolean) = focusOperation {
+    communicationOwner = this
     audio.mode = AudioManager.MODE_IN_COMMUNICATION
     val device = audio.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-    if (speaker && device != null) audio.setCommunicationDevice(device) else audio.clearCommunicationDevice()
+    if (speaker) {
+      check(device != null && audio.setCommunicationDevice(device)) { "Speaker device was refused" }
+    } else audio.clearCommunicationDevice()
   }
-  override fun leaveCommunication() {
+  override fun leaveCommunication() = focusOperation {
+    if (communicationOwner !== this) return@focusOperation
+    communicationOwner = null
     var failure: Exception? = null
     try { audio.mode = AudioManager.MODE_NORMAL } catch (error: Exception) { failure = error }
     try { audio.clearCommunicationDevice() } catch (error: Exception) {
       if (failure == null) failure = error else failure.addSuppressed(error)
     }
     failure?.let { throw it }
+    Unit
   }
   override fun close() {
-    abandon()
-    audio.removeOnModeChangedListener(mode)
-    audio.unregisterAudioRecordingCallback(recording)
-    if (phoneRegistered) phone?.unregisterTelephonyCallback(phoneListener)
-    context.unregisterReceiver(noisy)
+    listOf<() -> Unit>(
+      { audio.removeOnModeChangedListener(mode) },
+      { audio.unregisterAudioRecordingCallback(recording) },
+      { if (phoneRegistered) phone?.unregisterTelephonyCallback(phoneListener) },
+      { context.unregisterReceiver(noisy) }
+    ).forEach { step -> try { step() } catch (failure: Exception) { Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.SESSION, failure) } }
   }
   private data class ActiveFocus(val owner: AudioSystem, val request: AudioFocusRequest, val identity: Any)
   private companion object {
     val focusTail = java.util.concurrent.atomic.AtomicReference(java.util.concurrent.CompletableFuture.completedFuture(Unit))
     var active: ActiveFocus? = null
+    var communicationOwner: AudioSystem? = null
     fun <T> focusOperation(work: () -> T): T {
       val done = java.util.concurrent.CompletableFuture<Unit>()
       val previous = focusTail.getAndSet(done)
@@ -127,3 +145,5 @@ internal class AudioSystem(private val context: Context) : AudioFocusPort, AutoC
     }
   }
 }
+
+internal class FocusAbandonFailure(val code: Int) : Exception("Audio focus abandon refused")

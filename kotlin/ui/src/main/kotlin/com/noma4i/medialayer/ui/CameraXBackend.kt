@@ -64,6 +64,9 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
   private class Plan(val quality: Quality, val photoSize: PixelSize?, val frameRate: FpsRange)
 
   private val main = ContextCompat.getMainExecutor(context)
+  private val calculations = java.util.concurrent.Executors.newSingleThreadExecutor()
+  private val session = java.util.concurrent.atomic.AtomicLong()
+  private val take = java.util.concurrent.atomic.AtomicLong()
   @Volatile private var sink: (CaptureEvent) -> Unit = {}
   @Volatile private var audioIssue: (CaptureAudioIssue) -> Unit = {}
 
@@ -77,6 +80,7 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
   private var movie: VideoCapture<Recorder>? = null
   private var analysis: ImageAnalysis? = null
   private var recording: Recording? = null
+  private val stopCallbacks = mutableListOf<() -> Unit>()
   private var analyzer: ImageAnalysis.Analyzer? = null
   private var lastBind: Pair<CameraLens, CaptureProfile>? = null
   private var watchingStream = false
@@ -106,12 +110,14 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
 
   override fun bind(lens: CameraLens, profile: CaptureProfile) {
     lastBind = lens to profile
-    main.execute { bindNow(lens, profile) }
+    val generation = session.incrementAndGet()
+    main.execute { bindNow(lens, profile, generation) }
   }
 
   private fun granted(permission: String) = context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
 
-  private fun bindNow(lens: CameraLens, profile: CaptureProfile) {
+  private fun bindNow(lens: CameraLens, profile: CaptureProfile, generation: Long) {
+    if (generation != session.get()) return
     val host = view
     val lifecycle = owner
     if (host == null || lifecycle == null) return sink(CaptureEvent.Refuse(CameraRefusal.CONFIGURE_FAILED))
@@ -121,19 +127,37 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
     val future = ProcessCameraProvider.getInstance(context)
     future.addListener({
       try {
-        bindOn(future.get(), lens, profile, host, lifecycle)
-      } catch (_: Exception) {
-        sink(CaptureEvent.Refuse(CameraRefusal.CONFIGURE_FAILED))
+        if (generation != session.get()) return@addListener
+        val provider = future.get()
+        val selector = if (lens == CameraLens.FRONT) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
+        if (!provider.hasCamera(selector)) return@addListener sink(CaptureEvent.Refuse(CameraRefusal.NO_CAMERA))
+        val info = provider.getCameraInfo(selector)
+        calculations.execute {
+          try {
+            val plan = plan(info, profile)
+            val offered = if (Recorder.getVideoCapabilities(info).isStabilizationSupported) listOf(VideoStabilization.STANDARD, VideoStabilization.CINEMATIC) else emptyList()
+            val stabilization = stabilizationMode(profile.stabilization, offered)
+            main.execute {
+              if (generation == session.get()) try { bindOn(provider, lens, profile, host, lifecycle, plan, stabilization) } catch (error: Exception) { configureFailed(error) }
+            }
+          } catch (error: Exception) { if (generation == session.get()) configureFailed(error) }
+        }
+      } catch (error: Exception) {
+        if (generation == session.get()) configureFailed(error.cause ?: error)
       }
     }, main)
   }
 
-  private fun bindOn(provider: ProcessCameraProvider, lens: CameraLens, profile: CaptureProfile, host: PreviewView, lifecycle: LifecycleOwner) {
+  private fun configureFailed(error: Throwable) {
+    Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, error)
+    sink(CaptureEvent.Refuse(CameraRefusal.CONFIGURE_FAILED))
+  }
+
+  private fun bindOn(provider: ProcessCameraProvider, lens: CameraLens, profile: CaptureProfile, host: PreviewView, lifecycle: LifecycleOwner, plan: Plan?, stabilization: VideoStabilization?) {
     cameras = provider
     release(provider)
     val selector = if (lens == CameraLens.FRONT) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
     if (!provider.hasCamera(selector)) return sink(CaptureEvent.Refuse(CameraRefusal.NO_CAMERA))
-    val plan = plan(provider.getCameraInfo(selector), profile)
     photoSize = plan?.photoSize
     val made = Preview.Builder().setResolutionSelector(previewSelector(plan, profile)).build().apply { surfaceProvider = host.surfaceProvider }
     val cases = mutableListOf<UseCase>(made)
@@ -148,8 +172,7 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
       val builder = VideoCapture.Builder(Recorder.Builder().setQualitySelector(QualitySelector.from(quality, FallbackStrategy.lowerQualityOrHigherThan(quality))).build())
         .setMirrorMode(if (profile.mirrorFrontVideo) MirrorMode.MIRROR_MODE_ON_FRONT_ONLY else MirrorMode.MIRROR_MODE_OFF)
       plan?.let { builder.setTargetFrameRate(android.util.Range(it.frameRate.low.toInt(), it.frameRate.high.toInt())) }
-      val offered = if (Recorder.getVideoCapabilities(provider.getCameraInfo(selector)).isStabilizationSupported) listOf(VideoStabilization.STANDARD, VideoStabilization.CINEMATIC) else emptyList()
-      stabilizationMode(profile.stabilization, offered)?.let { builder.setVideoStabilizationEnabled(it != VideoStabilization.OFF) }
+      stabilization?.let { builder.setVideoStabilizationEnabled(it != VideoStabilization.OFF) }
       val capture = builder.build()
       movie = capture
       cases += capture
@@ -196,6 +219,8 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
   }
 
   override fun unbind() {
+    session.incrementAndGet()
+    take.incrementAndGet()
     lastBind = null
     main.execute {
       recording?.close()
@@ -207,6 +232,8 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
       }
     }
   }
+
+  override fun close() { calculations.shutdown() }
 
   override suspend fun takePhoto(file: File, flash: Boolean, profile: CaptureProfile) {
     val capture = photo ?: throw IllegalStateException("no photo use case is bound")
@@ -227,7 +254,10 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
   }
 
   override fun beginRecording(file: File, profile: CaptureProfile, lens: CameraLens, start: (() -> Unit) -> Unit) {
+    val generation = session.get()
+    val recordingGeneration = take.incrementAndGet()
     main.execute {
+      if (generation != session.get() || recordingGeneration != take.get()) return@execute
       start startRecording@{
       val output = movie?.output ?: return@startRecording sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
       try {
@@ -235,7 +265,11 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
         var pending = output.prepareRecording(context, FileOutputOptions.Builder(file).setDurationLimitMillis(profile.maxDurationMs.toLong()).build())
         if (profile.audio) pending = pending.withAudioEnabled()
         MediaTrace.emit("camera") { "take audio=${profile.audio}" }
-        recording = pending.start(main) { event ->
+        recording = pending.start(main) callback@{ event ->
+          if (generation != session.get() || recordingGeneration != take.get()) {
+            if (event is VideoRecordEvent.Finalize) completeStops()
+            return@callback
+          }
           if (profile.audio) {
             when (event.recordingStats.audioStats.audioState) {
               AudioStats.AUDIO_STATE_SOURCE_SILENCED -> audioIssue(CaptureAudioIssue.SILENCED)
@@ -249,15 +283,22 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
             is VideoRecordEvent.Status -> recordedNanos = event.recordingStats.recordedDurationNanos
             is VideoRecordEvent.Finalize -> {
               recording = null
+              if (endOf(event.error) == RecordEnd.FAILED) {
+                Media.recordNativeFailure(com.noma4i.medialayer.NativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, "androidx.camera.video.VideoRecordEvent.Finalize", event.error.toLong(), event.cause?.message ?: "Recording failed"))
+              }
               sink(CaptureEvent.RecordFinished(endOf(event.error)))
+              completeStops()
+              reconcileAnalysis()
             }
             else -> Unit
           }
         }
-      } catch (_: SecurityException) {
+      } catch (error: SecurityException) {
+        Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, error)
         audioIssue(CaptureAudioIssue.PERMISSION_DENIED)
         sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
-      } catch (_: Exception) {
+      } catch (error: Exception) {
+        Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, error)
         sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
       }
       }
@@ -268,22 +309,65 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
     main.execute { recording?.stop() }
   }
 
+  override fun endRecording(done: () -> Unit) {
+    main.execute {
+      val current = recording
+      if (current == null) done() else {
+        stopCallbacks.add(done)
+        try { current.stop() } catch (error: Exception) {
+          Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, error)
+          completeStops()
+        }
+      }
+    }
+  }
+
+  override fun awaitRecordingStopped(done: () -> Unit) {
+    main.execute { if (recording == null) done() else stopCallbacks.add(done) }
+  }
+
+  private fun completeStops() {
+    val callbacks = stopCallbacks.toList()
+    stopCallbacks.clear()
+    callbacks.forEach { it() }
+  }
+
   override fun recordedMs(): Long = recordedNanos / 1_000_000
 
   override fun setTorch(on: Boolean) {
     main.execute { camera?.cameraControl?.enableTorch(on) }
   }
 
+  override fun setTorch(on: Boolean, done: (Throwable?) -> Unit) {
+    main.execute {
+      val future = camera?.cameraControl?.enableTorch(on) ?: return@execute done(IllegalStateException("Camera is closed"))
+      future.addListener({ try { future.get(); done(null) } catch (error: Exception) { done(error.cause ?: error) } }, main)
+    }
+  }
+
   override fun setZoom(ratio: Float) {
     main.execute { camera?.cameraControl?.setZoomRatio(ratio) }
+  }
+
+  override fun setZoom(ratio: Float, done: (Throwable?) -> Unit) {
+    main.execute {
+      val future = camera?.cameraControl?.setZoomRatio(ratio) ?: return@execute done(IllegalStateException("Camera is closed"))
+      future.addListener({ try { future.get(); done(null) } catch (error: Exception) { done(error.cause ?: error) } }, main)
+    }
   }
 
   override fun setFrameTap(analyzer: ImageAnalysis.Analyzer?) {
     main.execute {
       if (this.analyzer === analyzer) return@execute
       this.analyzer = analyzer
-      lastBind?.let { (lens, profile) -> if (camera != null) bindNow(lens, profile) }
+      if (analyzer != null && analysis != null) analysis?.setAnalyzer(main, analyzer)
+      reconcileAnalysis()
     }
+  }
+
+  private fun reconcileAnalysis() {
+    if (recording != null || camera == null || (analysis != null) == (analyzer != null)) return
+    lastBind?.let { (lens, profile) -> bind(lens, profile) }
   }
 
   private fun plan(info: CameraInfo, profile: CaptureProfile): Plan? {

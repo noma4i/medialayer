@@ -1,5 +1,6 @@
 package com.noma4i.medialayer.ui
 
+import com.noma4i.medialayer.checkCaptureProfile
 import android.app.Application
 import android.graphics.Bitmap
 import android.os.Looper
@@ -25,6 +26,14 @@ import com.noma4i.medialayer.MediaInfo
 import com.noma4i.medialayer.PixelSize
 import com.noma4i.medialayer.RecordEnd
 import com.noma4i.medialayer.VideoStabilization
+import com.noma4i.medialayer.TakeOutcome
+import com.noma4i.medialayer.NativeFailure
+import com.noma4i.medialayer.FailureSource
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import com.noma4i.medialayer.cameraRefusalText
 import com.noma4i.medialayer.captureProfile
 import java.io.File
@@ -49,6 +58,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.After
 import org.junit.runner.RunWith
+import org.robolectric.Shadows.shadowOf
 
 private class FakeBackend : CaptureBackend {
   val log = CopyOnWriteArrayList<String>()
@@ -60,10 +70,15 @@ private class FakeBackend : CaptureBackend {
   @Volatile var photoFails = false
   @Volatile var hasFlash = true
   @Volatile var recordedProfile: CaptureProfile? = null
+  @Volatile var torchFailure: Exception? = null
+  @Volatile var zoomFailure: Exception? = null
   val recordedReads = AtomicInteger()
   override val photoSize: PixelSize? = PixelSize(3000u, 4000u)
 
   fun emit(event: CaptureEvent) = sink(event)
+
+  /** The microphone sound reported after a take begins, as CameraX AudioStats do; C4 turns it off to hold it. */
+  var soundOnRecord = true
 
   fun audioIssue(issue: CaptureAudioIssue) = audioSink(issue)
 
@@ -103,6 +118,7 @@ private class FakeBackend : CaptureBackend {
     recordingFile = file
     file.writeBytes(byteArrayOf(1, 2, 3))
     emit(CaptureEvent.RecordStarted)
+    if (soundOnRecord && profile.audio) audioIssue(CaptureAudioIssue.ACTIVE)
   }
 
   override fun endRecording() {
@@ -110,14 +126,41 @@ private class FakeBackend : CaptureBackend {
     emit(CaptureEvent.RecordFinished(RecordEnd.COMPLETED))
   }
 
+  /** While set, a stop of the take waits for [finalizeHeldStops], as CameraX waits for its Finalize event. */
+  @Volatile var holdStops = false
+  val heldStops = CopyOnWriteArrayList<() -> Unit>()
+
+  override fun endRecording(done: () -> Unit) {
+    if (!holdStops) return super.endRecording(done)
+    heldStops.add { emit(CaptureEvent.RecordFinished(RecordEnd.COMPLETED)); done() }
+    note("endRecording held")
+  }
+
+  override fun awaitRecordingStopped(done: () -> Unit) {
+    if (!holdStops) return done()
+    heldStops.add(done)
+    note("stop held")
+  }
+
+  fun finalizeHeldStops() {
+    holdStops = false
+    heldStops.toList().also { heldStops.clear() }.forEach { it() }
+  }
+
   override fun recordedMs(): Long {
     recordedReads.incrementAndGet()
     return 700
   }
 
-  override fun setTorch(on: Boolean) = note("torch $on")
+  override fun setTorch(on: Boolean) {
+    note("torch $on")
+    torchFailure?.let { throw it }
+  }
 
-  override fun setZoom(ratio: Float) = note("zoom $ratio")
+  override fun setZoom(ratio: Float) {
+    note("zoom $ratio")
+    zoomFailure?.let { throw it }
+  }
 
   override fun setFrameTap(analyzer: ImageAnalysis.Analyzer?) {
     tap = analyzer
@@ -170,14 +213,14 @@ class MediaCameraTest {
   @get:Rule
   val compose = createComposeRule()
 
-  private fun rig(profile: CaptureProfile = captureProfile(CaptureKind.PHOTO), lens: CameraLens = CameraLens.BACK, scope: CoroutineScope = CoroutineScope(Dispatchers.Default), configure: (FakeBackend, Counters) -> Unit = { _, _ -> }): Rig {
+  private fun rig(profile: CaptureProfile = captureProfile(CaptureKind.PHOTO), lens: CameraLens = CameraLens.BACK, scope: CoroutineScope = CoroutineScope(Dispatchers.Default), app: AppPath? = null, configure: (FakeBackend, Counters) -> Unit = { _, _ -> }): Rig {
     val backend = FakeBackend()
     val counters = Counters()
     configure(backend, counters)
     val directory = File(context.cacheDir, "camera-${System.nanoTime()}")
     val fixture = AudioFixture(context).also { fixtures.add(it) }
     fixture.port.answer = counters.focusAnswer
-    val audio = fixture.link
+    val audio: () -> AudioLink? = if (app != null) { { Media.link } } else { { fixture.link } }
     val services = CameraServices(
       admitSession = { _ ->
         counters.checkThread()
@@ -191,7 +234,7 @@ class MediaCameraTest {
         counters.taken.incrementAndGet()
         AutoCloseable { counters.released.incrementAndGet(); TestSignal.fire() }
       },
-      audio = { audio },
+      audio = audio,
       clipInfo = { _ ->
         counters.checkThread()
         counters.info
@@ -581,7 +624,8 @@ class MediaCameraTest {
   @Test
   fun inv_capture_09_aBadProfileMakesNoCamera() {
     val broken = captureProfile(CaptureKind.MOMENT).copy(videoSize = null)
-    assertThrows(MediaException::class.java) { MediaCamera(context, broken) }
+
+    assertThrows(MediaException.InvalidSpec::class.java) { MediaCamera(context, broken) }
   }
 
   @Test
@@ -614,5 +658,160 @@ class MediaCameraTest {
     assertEquals(listOf(recorded), rig.counters.straightened.toList())
     val again = runCatching { rig.camera.stopRecording() }.exceptionOrNull()
     assertEquals(CameraRefusal.NOT_READY, (again as? MediaException.Camera)?.reason)
+  }
+
+  private suspend fun settled(rig: Rig, phase: CameraPhase): com.noma4i.medialayer.CameraState =
+    withTimeout(5_000) { rig.camera.state.first { it.phase == phase && it.outcome != null } }
+
+  private suspend fun recordingTake(rig: Rig): ULong {
+    rig.camera.startRecording()
+    return checkNotNull(withTimeout(5_000) { rig.camera.state.first { it.phase == CameraPhase.RECORDING } }.take)
+  }
+
+  @Test
+  fun inv_capture_35_a_take_ended_by_the_limit_shows_its_captured_outcome_without_a_stop() = runBlocking {
+    val rig = rig(moment)
+    ready(rig)
+    val take = recordingTake(rig)
+
+    rig.backend.emit(CaptureEvent.RecordFinished(RecordEnd.LIMIT_REACHED))
+
+    val shown = settled(rig, CameraPhase.READY)
+    assertEquals(take to TakeOutcome.Captured(take), shown.take to shown.outcome)
+  }
+
+  @Test
+  fun inv_capture_36_every_thrown_away_take_shows_its_refusal_and_fault() = runBlocking {
+    AppPath().use { app ->
+      var call: MediaCallAudio? = null
+      val rows = listOf<Triple<CameraRefusal, CameraPhase, (Rig) -> Unit>>(
+        Triple(CameraRefusal.IN_CALL, CameraPhase.READY, { _ -> call = app.layer.callAudio(MediaCallKind.Unmanaged) }),
+        Triple(CameraRefusal.MICROPHONE_SILENT, CameraPhase.READY, { rig -> rig.backend.audioIssue(CaptureAudioIssue.SILENCED) }),
+        Triple(CameraRefusal.TOO_SHORT, CameraPhase.READY, { rig -> rig.counters.info = MediaInfo(400UL, null); rig.backend.emit(CaptureEvent.RecordFinished(RecordEnd.LIMIT_REACHED)) }),
+        Triple(CameraRefusal.CONFIGURE_FAILED, CameraPhase.FAILED, { rig -> rig.backend.emit(CaptureEvent.Fault(FaultKind.OTHER)) })
+      )
+      val seen = rows.map { (reason, phase, cause) ->
+        val rig = rig(moment, app = app)
+        ready(rig)
+        recordingTake(rig)
+
+        cause(rig)
+
+        val shown = settled(rig, phase)
+        call?.close()
+        call = null
+        rig.camera.close()
+        Triple(reason, shown.outcome, shown.fault)
+      }
+      assertEquals(rows.map { Triple(it.first, TakeOutcome.Refused(it.first), it.first) }, seen)
+    }
+  }
+
+  @Test
+  fun inv_capture_37_a_reset_during_a_take_shows_the_lost_take_and_opens_the_camera_again() = runBlocking {
+    val rig = rig(moment)
+    ready(rig)
+    recordingTake(rig)
+
+    rig.backend.emit(CaptureEvent.Fault(FaultKind.RESET))
+
+    assertEquals(TakeOutcome.Lost(CameraRefusal.INTERRUPTED), settled(rig, CameraPhase.READY).outcome)
+    assertEquals(2, rig.backend.count("bind BACK"))
+  }
+
+  @Test
+  fun inv_capture_38_a_take_shows_recording_only_after_the_microphone_sound_flows() = runBlocking {
+    val rig = rig(moment)
+    rig.backend.soundOnRecord = false
+    ready(rig)
+    val phases = CopyOnWriteArrayList<CameraPhase>()
+    val watch = launch(Dispatchers.Unconfined) { rig.camera.state.collect { phases.add(it.phase) } }
+    val starting = async(Dispatchers.Default) { rig.camera.startRecording() }
+    eventually("the hardware began the take") { rig.backend.count("record BACK") == 1 }
+    val beforeSound = phases.toList()
+
+    rig.backend.audioIssue(CaptureAudioIssue.ACTIVE)
+
+    withTimeout(5_000) { starting.await() }
+    withTimeout(5_000) { rig.camera.state.first { it.phase == CameraPhase.RECORDING } }
+    watch.cancel()
+    assertFalse("recording was shown before any sound: $beforeSound", beforeSound.contains(CameraPhase.RECORDING))
+  }
+
+  @Test
+  fun inv_capture_39_closing_the_layer_closes_a_previewed_camera_and_releases_it() = runBlocking {
+    val app = AppPath()
+    val rig = rig(moment, app = app)
+    ready(rig)
+
+    app.close()
+
+    assertEquals(CameraPhase.CLOSED, withTimeout(5_000) { rig.camera.state.first { it.phase == CameraPhase.CLOSED } }.phase)
+    eventually("released") { rig.backend.count("unbind") == 1 && rig.counters.released.get() == rig.counters.taken.get() }
+  }
+
+  @Test
+  fun inv_capture_40_a_flash_or_zoom_the_system_refuses_is_a_failure_event_and_the_state_keeps_the_old_value() = runBlocking {
+    AppPath().use { app ->
+      val rig = rig(moment, app = app)
+      ready(rig)
+      val failures = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { Media.failures.take(2).toList() }
+      rig.backend.torchFailure = IllegalStateException("torch busy")
+      rig.backend.zoomFailure = IllegalArgumentException("zoom out of range")
+
+      rig.camera.setFlash(true)
+      eventually("torch tried") { rig.backend.count("torch true") == 1 }
+      rig.camera.zoomBy(2.0)
+
+      assertEquals(listOf(
+        NativeFailure(FailureSource.CAMERA, "java.lang.IllegalStateException", 0L, "torch busy"),
+        NativeFailure(FailureSource.CAMERA, "java.lang.IllegalArgumentException", 0L, "zoom out of range")
+      ), withTimeout(5_000) { failures.await() })
+      assertEquals(false to 1f, rig.camera.state.value.flash to rig.camera.state.value.zoom)
+    }
+  }
+
+  @Test
+  fun inv_capture_41_a_frame_observer_that_arrives_during_a_take_gets_frames_after_it_without_a_rebind_of_the_recording() = runBlocking {
+    val rig = rig(moment)
+    ready(rig)
+    recordingTake(rig)
+    val binds = rig.backend.log.count { it.startsWith("bind") }
+
+    val listening = rig.camera.observeFrames(10.0, ImageAnalysis.Analyzer { it.close() })
+
+    assertNull("the frame output was added to the running recording", rig.backend.tap)
+    assertEquals("the running recording was bound again", binds, rig.backend.log.count { it.startsWith("bind") })
+    rig.camera.stopRecording()
+    eventually("the frame output stands after the take") { rig.backend.tap != null }
+    listening.close()
+  }
+
+  @Test
+  fun inv_audio_66_closing_the_layer_during_a_take_gives_the_focus_back_only_after_the_take_stopped() {
+    val app = AppPath()
+    val rig = rig(moment, app = app)
+    ready(rig)
+    val started = CoroutineScope(Dispatchers.Default).async { recordingTake(rig) }
+    started.invokeOnCompletion { TestSignal.fire() }
+    eventually("the take started") { shadowOf(Looper.getMainLooper()).idle(); started.isCompleted }
+    runBlocking { started.await() }
+    rig.backend.holdStops = true
+    val abandonsBefore = app.focus.calls.count { it == "abandon" }
+
+    val closed = CoroutineScope(Dispatchers.Default).async(start = CoroutineStart.UNDISPATCHED) { app.layer.awaitClosed() }
+    closed.invokeOnCompletion { TestSignal.fire() }
+    app.close()
+    eventually("the take is stopping") { rig.backend.heldStops.isNotEmpty() }
+
+    assertEquals("the focus was given back before the take stopped", abandonsBefore, app.focus.calls.count { it == "abandon" })
+    assertFalse("the layer closed before the take stopped", closed.isCompleted)
+    app.focus.calls.add("take stopped")
+    rig.backend.finalizeHeldStops()
+
+    eventually("the focus was given back") { app.focus.calls.count { it == "abandon" } > abandonsBefore }
+    eventually("the layer closed") { shadowOf(Looper.getMainLooper()).idle(); closed.isCompleted }
+    runBlocking { closed.await() }
+    assertEquals(listOf("take stopped", "abandon"), app.focus.calls.toList().takeLast(2))
   }
 }

@@ -60,6 +60,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.transformLatest
+import androidx.compose.runtime.setValue
 import kotlinx.coroutines.withContext
 
 @Composable
@@ -79,24 +80,25 @@ fun MediaImage(
   val screen = rememberScreenVisibility(source.url, LocalMediaEnvironment.current.stats)
   val item = source.toItem()
   val failure = remember { mutableStateOf<ScopedFailure?>(null) }
-  val mount = claimImage(source, item, screen, failure)
+  val attempt = remember(item) { mutableStateOf(0uL) }
+  val mount = claimImage(source, item, screen, failure, attempt)
   if (source.size != null) {
-    Box(modifier.then(screen.modifier)) { ImageBody(source, preview, item, mount, failure, null, 0L, screen, contentScale, animation, playbackRate, content) }
+    Box(modifier.then(screen.modifier)) { ImageBody(source, preview, item, mount, attempt, failure, null, 0L, screen, contentScale, animation, playbackRate, content) }
     return
   }
   val density = LocalDensity.current.density
   BoxWithConstraints(modifier.then(screen.modifier)) {
     val placementPixels = if (constraints.hasBoundedWidth && constraints.hasBoundedHeight) constraints.maxWidth.toLong() * constraints.maxHeight else 0L
-    ImageBody(source, preview, item, mount, failure, null, placementPixels, screen, contentScale, animation, playbackRate, content, decodeInput(constraints, density, source, contentScale))
+    ImageBody(source, preview, item, mount, attempt, failure, null, placementPixels, screen, contentScale, animation, playbackRate, content, decodeInput(constraints, density, source, contentScale))
   }
 }
 
 @Composable
-private fun claimImage(source: MediaSource, item: MediaItem, screen: ScreenVisibility, failure: MutableState<ScopedFailure?>): PlaceMount {
+private fun claimImage(source: MediaSource, item: MediaItem, screen: ScreenVisibility, failure: MutableState<ScopedFailure?>, attempt: MutableState<ULong>): PlaceMount {
   val environment = LocalMediaEnvironment.current
   val media = environment.media
   val stats = environment.stats
-  val mount = remember(media, item) { PlaceMount(media, item) { failure.value = ScopedFailure(item, MediaState.Failed(it.toString())) } }
+  val mount = remember(media, item) { PlaceMount(media, item, playback = { attempt.value = it.attempt }) { failure.value = ScopedFailure(item, MediaState.Failed(it.toString())) } }
   DisposableEffect(mount) { onDispose { mount.close() } }
   LaunchedEffect(mount, screen) {
     withContext(Dispatchers.Default) {
@@ -110,7 +112,7 @@ private fun claimImage(source: MediaSource, item: MediaItem, screen: ScreenVisib
 
 @Composable
 @OptIn(ExperimentalCoroutinesApi::class)
-private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaItem, mount: PlaceMount, failure: State<ScopedFailure?>, pixels: PixelSize?, placementPixels: Long, screen: ScreenVisibility, contentScale: ContentScale, animation: ImageAnimation, playbackRate: Double, content: @Composable (MediaState) -> Unit, dimensions: PixelSizeMemo.Args? = null) {
+private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaItem, mount: PlaceMount, attempt: State<ULong>, failure: State<ScopedFailure?>, pixels: PixelSize?, placementPixels: Long, screen: ScreenVisibility, contentScale: ContentScale, animation: ImageAnimation, playbackRate: Double, content: @Composable (MediaState) -> Unit, dimensions: PixelSizeMemo.Args? = null) {
   val context = LocalContext.current
   val environment = LocalMediaEnvironment.current
   val media = environment.media
@@ -122,7 +124,11 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
   val resting = if (rests) animation.rest else null
   val rate = playbackRateOf(playbackRate)
   val rated = playsAtRate(rate, resting)
-  val request = remember(media, source, pixels, scale, placementPixels, resting, animation.repeats, dimensions, rated) { imageRequest(context, source, pixels, scale, media, placementPixels, resting, animation.repeats, media.viewDecodeAdmit(), dimensions, rate) }
+  val loadTurn by attempt
+  val request = remember(media, source, pixels, scale, placementPixels, resting, animation.repeats, dimensions, rated, loadTurn) {
+    val request = imageRequest(context, source, pixels, scale, media, placementPixels, resting, animation.repeats, media.viewDecodeAdmit(), dimensions, rate)
+    if (loadTurn == 0uL) request else request.newBuilder().memoryCacheKeyExtra("retry", loadTurn.toString()).build()
+  }
   val state = remember(item) { mutableStateOf<MediaState>(MediaState.Idle) }
   val animated = remember { mutableStateOf<Animatable?>(null) }
   LaunchedEffect(failure.value, item) { failure.value.of(item)?.let { state.value = it } }

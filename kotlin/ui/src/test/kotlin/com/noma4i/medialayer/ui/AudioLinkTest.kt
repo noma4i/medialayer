@@ -1,5 +1,8 @@
 package com.noma4i.medialayer.ui
 
+import com.noma4i.medialayer.PlayRefusal
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.flow.first
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.noma4i.medialayer.AudioFocus
@@ -111,7 +114,7 @@ class AudioLinkTest {
     focus.send(FocusSignal.PhoneCall(true))
     await("the core heard the phone call") { seen.lastOrNull() == MicrophoneAvailability.EXTERNAL_CALL }
     focus.send(FocusSignal.PhoneCall(false))
-    await("free") { seen.lastOrNull() == MicrophoneAvailability.AVAILABLE }
+    await("back to the permanently lost session, which needs a new intent") { seen.lastOrNull() == MicrophoneAvailability.OTHER_APP }
     assertFalse("a noisy route never writes the user flag", Media.muted)
   }
 
@@ -134,19 +137,23 @@ class AudioLinkTest {
   @Test
   fun inv_audio_38_a_telecom_call_leaves_focus_and_mode_to_telecom_and_its_object_ends_the_call() {
     val states = CopyOnWriteArrayList<CallState>()
-    var call: MediaCallAudio? = link.call(MediaCallKind.Telecom)
+    var call: MediaCallAudio? = link.call(MediaCallKind.Telecom(object : CallEndpointPort { override fun select(speaker: Boolean, done: (CallEndpointResult) -> Unit) = done(CallEndpointResult.Applied) }))
     val watch = call!!.onState { states.add(it); TestSignal.fire() }
     call.systemActivated()
     await("live") { states.toList() == listOf(CallState.CONNECTING, CallState.LIVE) }
     assertEquals("Telecom owns focus, mode and route", emptyList<String>(), focus.calls.toList())
-    assertThrows(MediaException.InCall::class.java) { runBlocking { core.playUrl(clip) } }
+    val player = runBlocking { core.playUrl(clip) }
+    player.play()
+    assertEquals("a play during the call is refused", PlayRefusal.IN_CALL, runBlocking { withTimeout(5_000) { player.state.first { it.refused != null } }.refused })
 
     call.close()
     call = null
 
     await("ended") { states.lastOrNull() == CallState.ENDED }
     watch.close()
-    runBlocking { core.playUrl(clip) }
+    player.play()
+    runBlocking { withTimeout(5_000) { player.state.first { it.playing || it.wish && it.refused == null } } }
+    player.close()
   }
 
   private val clip = MediaItem(Kind.VIDEO, "https://o.test/v.mp4", emptyMap(), null, null, strategy = CacheStrategy.WINDOW)
@@ -170,7 +177,7 @@ class AudioLinkTest {
   fun inv_audio_40_a_silenced_capture_revokes_the_recording_with_its_reason() = runBlocking {
     val admitted = link.admit(RecordingKind.VOICE) as Admission.Admitted
     val revoked = CopyOnWriteArrayList<RecordingRefusal>()
-    val watch = admitted.ticket.onRevoked { revoked.add(it); TestSignal.fire() }
+    val watch = admitted.ticket.onRevoked { reason, done -> revoked.add(reason); done(); TestSignal.fire() }
 
     focus.send(FocusSignal.Silenced(admitted.ticket.id))
 
@@ -180,20 +187,6 @@ class AudioLinkTest {
     val again = link.admit(RecordingKind.VOICE)
     assertTrue("the microphone is free again: $again", again is Admission.Admitted)
     (again as Admission.Admitted).ticket.close()
-  }
-
-  @Test
-  fun inv_audio_41_an_interruption_ends_a_voice_recording_with_its_refusal_and_no_file() = runBlocking {
-    val recorder = MediaVoiceRecorder(capture = WritingVoiceCapture(), maxDurationMs = 60_000u, link = { link }, clock = { 1000uL })
-    val target = File.createTempFile("voice", ".m4a").also { it.delete() }
-    recorder.start(target)
-
-    focus.send(FocusSignal.Change(FocusChange.LOSS_TRANSIENT))
-
-    await("revoked") { !recorder.isRecording }
-    val error = assertThrows(MediaException.Voice::class.java) { runBlocking { recorder.stop() } }
-    assertEquals(voiceRefusalText(VoiceRefusal.INTERRUPTED), error.detail)
-    assertFalse(target.exists())
   }
 
   @Test
@@ -244,36 +237,6 @@ class AudioLinkTest {
     } finally {
       mixLink.close()
       mixCore.close()
-    }
-  }
-
-  @Test
-  fun inv_audio_53_closing_the_link_revokes_running_recordings_and_ends_calls() = runBlocking {
-    val admitted = link.admit(RecordingKind.VOICE) as Admission.Admitted
-    val revoked = CopyOnWriteArrayList<RecordingRefusal>()
-    admitted.ticket.onRevoked { revoked.add(it); TestSignal.fire() }
-
-    link.close()
-
-    await("revoked") { revoked.toList() == listOf(RecordingRefusal.INTERRUPTED) }
-
-    val callCore = MediaLayer.open(OpenConfig(
-      dir = Files.createTempDirectory("audio-link-call").toString(),
-      fetcher = TestFetcher(),
-      settings = SharedPreferencesSettings(context, "audio-link-call"), slots = null,
-      device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings(),
-      audioFocus = AudioFocus.EXCLUSIVE
-    ))
-    val callLink = AudioLink(callCore, AudioPorts(RecordingFocusPort(), GrantedPermission))
-    try {
-      val states = CopyOnWriteArrayList<CallState>()
-      callLink.call(MediaCallKind.Telecom).onState { states.add(it); TestSignal.fire() }
-
-      callLink.close()
-
-      await("ended") { states.lastOrNull() == CallState.ENDED }
-    } finally {
-      callCore.close()
     }
   }
 

@@ -132,6 +132,7 @@ class PlatformInputTest {
     val gate = CountDownLatch(1)
     layer.placeFactory = {
       object : com.noma4i.medialayer.MediaPlace(NoHandle) {
+        override fun subscribePlayback(listener: com.noma4i.medialayer.PlaybackListener) = com.noma4i.medialayer.Subscription(NoHandle)
         override fun update(input: com.noma4i.medialayer.PlaceInput) {
           updates.incrementAndGet()
           entered.countDown()
@@ -165,6 +166,7 @@ class PlatformInputTest {
     val gate = CountDownLatch(1)
     layer.placeFactory = {
       object : com.noma4i.medialayer.MediaPlace(NoHandle) {
+        override fun subscribePlayback(listener: com.noma4i.medialayer.PlaybackListener) = com.noma4i.medialayer.Subscription(NoHandle)
         override fun update(input: com.noma4i.medialayer.PlaceInput) { calls.add("update"); entered.countDown(); gate.await(5, TimeUnit.SECONDS) }
         override fun seek(fraction: Double) { calls.add("seek $fraction") }
         override fun itemState(state: com.noma4i.medialayer.MediaState) = Unit

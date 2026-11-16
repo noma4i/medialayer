@@ -83,7 +83,7 @@ internal suspend fun prepareVideoAt(context: Context, file: File, limits: VideoL
   try {
     videoExporter(VideoExport(context, file, output, transformSetup(plan, limits, facts), onProgress))
   } catch (error: Throwable) {
-    withContext(NonCancellable + prepareDispatcher) { output.delete() }
+    withContext(NonCancellable + prepareDispatcher) { deleteMediaFile(output) }
     throw error
   }
   onProgress?.invoke(1.0)

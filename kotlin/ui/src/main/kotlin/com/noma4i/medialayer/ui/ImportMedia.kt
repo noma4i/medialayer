@@ -70,7 +70,7 @@ internal suspend fun importMediaAt(context: Context, uri: Uri, openOutput: (File
       }
     }
   } catch (error: Throwable) {
-    withContext(NonCancellable + prepareDispatcher) { output?.delete() }
+    withContext(NonCancellable + prepareDispatcher) { output?.let(::deleteMediaFile) }
     if (error is CancellationException || error is MediaException) throw error
     throw MediaException.Fetch("the source cannot be imported: ${error.message}")
   }

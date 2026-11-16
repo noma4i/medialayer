@@ -61,6 +61,7 @@ internal fun drainFfi() {
 }
 
 internal class NullPlace : com.noma4i.medialayer.MediaPlace(NoHandle) {
+  override fun subscribePlayback(listener: com.noma4i.medialayer.PlaybackListener): Subscription = Subscription(NoHandle)
   override fun update(input: com.noma4i.medialayer.PlaceInput) = Unit
   override fun seek(fraction: Double) = Unit
   override fun itemState(state: MediaState) = Unit
@@ -81,7 +82,19 @@ internal class NullWindow : com.noma4i.medialayer.MediaWindow(NoHandle) {
 }
 
 private class RecordingPlace(private val layer: RecordingLayer, private val item: MediaItem) : com.noma4i.medialayer.MediaPlace(NoHandle) {
-  private var last = com.noma4i.medialayer.PlaceInput(false, false, null, false, null, null, false, null)
+  @Volatile private var playback: com.noma4i.medialayer.PlaybackListener? = null
+  @Volatile private var attempt = 0uL
+  val url: String get() = item.url
+  fun retried(turn: ULong) {
+    attempt = turn
+    playback?.changed(com.noma4i.medialayer.PlaybackState(last.playing, last.playing, null, null, attempt))
+  }
+  override fun subscribePlayback(listener: com.noma4i.medialayer.PlaybackListener): Subscription {
+    playback = listener
+    listener.changed(com.noma4i.medialayer.PlaybackState(last.playing, last.playing, null, null, attempt))
+    return Subscription(NoHandle)
+  }
+  private var last = com.noma4i.medialayer.PlaceInput(false, false, 0uL, null, false, null, null, false, null)
   private var released = false
 
   override fun update(input: com.noma4i.medialayer.PlaceInput) {
@@ -91,6 +104,9 @@ private class RecordingPlace(private val layer: RecordingLayer, private val item
     if (input.visible != before.visible) { layer.items.add(item); layer.calls.add("visible:$url:${input.visible}") }
     if (input.playing != before.playing || (input.playing && input.group != before.group)) {
       layer.calls.add("playing:$url:${input.playing}" + (input.group?.let { ":$it" } ?: ""))
+    }
+    if (input.playing != before.playing || input.playGeneration != before.playGeneration) {
+      playback?.changed(com.noma4i.medialayer.PlaybackState(input.playing, input.playing, null, null, attempt))
     }
     if (input.peeking != before.peeking) layer.calls.add("peeking:$url:${input.peeking}")
     input.muted?.takeIf { it != before.muted }?.let { layer.calls.add("muted:$url:$it") }
@@ -103,7 +119,11 @@ private class RecordingPlace(private val layer: RecordingLayer, private val item
 
   override fun seek(fraction: Double) { layer.calls.add("seek:${item.url}:$fraction") }
 
-  override fun itemState(state: MediaState) { layer.noteMain("itemState"); layer.calls.add("itemState:${item.url}:${state::class.simpleName}") }
+  override fun itemState(state: MediaState) {
+    layer.noteMain("itemState")
+    layer.calls.add("itemState:${item.url}:${state::class.simpleName}")
+    if (state is MediaState.Ended) playback?.changed(com.noma4i.medialayer.PlaybackState(false, false, null, null, attempt))
+  }
 
   override fun release() {
     if (released) return
@@ -143,7 +163,7 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
 
   @Volatile var placeFactory: ((MediaItem) -> com.noma4i.medialayer.MediaPlace)? = null
   @Volatile var placeError: com.noma4i.medialayer.MediaException? = null
-  override fun openPlace(item: MediaItem): com.noma4i.medialayer.MediaPlace { noteFfi("openPlace"); placeError?.let { throw it }; return placeFactory?.invoke(item) ?: RecordingPlace(this, item) }
+  override fun openPlace(item: MediaItem): com.noma4i.medialayer.MediaPlace { noteFfi("openPlace"); placeError?.let { throw it }; return placeFactory?.invoke(item) ?: RecordingPlace(this, item).also { recordingPlaces.add(it) } }
   override fun openVideoWindow(): com.noma4i.medialayer.MediaWindow = NullWindow()
   override fun openImageWindow(name: String, rowsPerPage: UInt, reversed: Boolean): com.noma4i.medialayer.MediaWindow = NullWindow()
   internal fun noteMain(call: String) = noteFfi(call)
@@ -167,6 +187,14 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
   }
 
   fun emit(key: String, state: MediaState) = listeners.filter { it.first == key }.forEach { it.second.changed(state) }
+  private val recordingPlaces = java.util.concurrent.CopyOnWriteArrayList<RecordingPlace>()
+  private val retries = AtomicInteger()
+  override suspend fun retry(item: MediaItem) {
+    calls.add("retry:${item.url}")
+    val turn = retries.incrementAndGet().toULong()
+    listeners.filter { it.first == item.url }.forEach { it.second.changed(MediaState.Loading) }
+    recordingPlaces.filter { it.url == item.url }.forEach { it.retried(turn) }
+  }
 
   override suspend fun fetchImage(url: String, headers: Map<String, String>): ImageFetchResult { noteFfi("fetchImage"); calls.add("fetchImage:$url"); return ImageFetchResult(image, ImageOrigin.NETWORK) }
   override suspend fun reserveDecode(bytes: ULong): com.noma4i.medialayer.DecodeHold = object : com.noma4i.medialayer.DecodeHold(NoHandle) {
@@ -186,7 +214,7 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
 
   override fun setTonePreparation(preparation: TonePreparation) { preparedTones = preparation }
   override suspend fun tonePixelsNeeded(source: MediaItem): Boolean { toneChecks.incrementAndGet(); return needsTone }
-  override suspend fun playUrl(source: MediaItem): PlaybackRoute = PlaybackRoute(source.url, source.headers, null, false, false)
+  override suspend fun readRoute(item: MediaItem): PlaybackRoute = PlaybackRoute(item.url, item.headers, null, false, false)
 
   override fun close() { closed = true }
 }
