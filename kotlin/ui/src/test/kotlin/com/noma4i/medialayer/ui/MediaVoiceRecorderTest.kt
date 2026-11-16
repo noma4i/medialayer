@@ -137,8 +137,8 @@ class MediaVoiceRecorderTest {
     val busy = makeRecorder(VoiceFakeCapture(refusal = VoiceRefusal.MICROPHONE_BUSY))
     val target = file()
 
-    val deniedError = assertThrows(MediaException.Voice::class.java) { denied.start(target) }
-    val busyError = assertThrows(MediaException.Voice::class.java) { busy.start(target) }
+    val deniedError = assertThrows(MediaException.Voice::class.java) { runBlocking { denied.start(target) } }
+    val busyError = assertThrows(MediaException.Voice::class.java) { runBlocking { busy.start(target) } }
 
     assertEquals(voiceRefusalText(VoiceRefusal.PERMISSION_DENIED), deniedError.detail)
     assertEquals(voiceRefusalText(VoiceRefusal.MICROPHONE_BUSY), busyError.detail)
@@ -172,7 +172,7 @@ class MediaVoiceRecorderTest {
     val capture = VoiceFakeCapture()
     val recorder = makeRecorder(capture, audio = session)
 
-    val error = assertThrows(MediaException.Voice::class.java) { recorder.start(file()) }
+    val error = assertThrows(MediaException.Voice::class.java) { runBlocking { recorder.start(file()) } }
 
     assertEquals(voiceRefusalText(VoiceRefusal.MICROPHONE_BUSY), error.detail)
     assertEquals(0L, capture.limitMs)
@@ -198,10 +198,10 @@ class MediaVoiceRecorderTest {
     }
     val ticks = VoiceTicks()
     val recorder = makeRecorder(capture, ticks, audio = session)
-    val first = Thread { recorder.start(file()) }.apply { start() }
+    val first = Thread { runBlocking { recorder.start(file()) } }.apply { start() }
     entered.await()
 
-    assertThrows(IllegalStateException::class.java) { recorder.start(file()) }
+    assertThrows(IllegalStateException::class.java) { runBlocking { recorder.start(file()) } }
     open.countDown()
     first.join()
     ticks.now += 1_000
