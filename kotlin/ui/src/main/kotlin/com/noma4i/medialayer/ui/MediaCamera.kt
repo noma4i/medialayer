@@ -247,7 +247,10 @@ class MediaCamera internal constructor(
     if (!enqueue { present.complete(audioHold != null) }) throw refusal(CameraRefusal.NOT_READY)
     if (present.await()) return
     val link = services.audio() ?: throw refusal(CameraRefusal.NOT_READY)
-    val ticket = when (val admission = link.admit(RecordingKind.VIDEO)) {
+    val admission = try { link.admit(RecordingKind.VIDEO) } catch (_: MediaException.Closed) {
+      throw refusal(CameraRefusal.NOT_READY)
+    }
+    val ticket = when (admission) {
       is Admission.Admitted -> admission.ticket
       is Admission.Refused -> throw microphoneRefusal(admission.reason)
     }
@@ -441,7 +444,12 @@ class MediaCamera internal constructor(
           enqueue { if (epoch == current) apply(CaptureEvent.Refuse(CameraRefusal.NOT_READY)) }
           return@launch
         }
-        when (val admission = audio.admit(RecordingKind.VIDEO)) {
+        val admission = try { audio.admit(RecordingKind.VIDEO) } catch (_: MediaException.Closed) {
+          hold?.close()
+          enqueue { if (epoch == current) apply(CaptureEvent.Refuse(CameraRefusal.NOT_READY)) }
+          return@launch
+        }
+        when (admission) {
           is Admission.Admitted -> session = admission.ticket
           is Admission.Refused -> {
             hold?.close()

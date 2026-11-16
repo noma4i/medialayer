@@ -115,8 +115,12 @@ private class RecordingPlace(private val layer: RecordingLayer, private val item
   override fun close() = Unit
 }
 
+internal class RecordingAudioInputs : com.noma4i.medialayer.AudioInputs(NoHandle) {
+  override fun send(input: com.noma4i.medialayer.AudioInput): List<com.noma4i.medialayer.AudioAction> = emptyList()
+}
+
 internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents()) : MediaLayer(NoHandle) {
-  override fun audio(input: com.noma4i.medialayer.AudioInput): List<com.noma4i.medialayer.AudioAction> = emptyList()
+  override fun audioInputs(): com.noma4i.medialayer.AudioInputs = RecordingAudioInputs()
   val cacheKeyReads = java.util.concurrent.atomic.AtomicInteger()
   val mainThreadFfi = CopyOnWriteArrayList<String>()
   private fun noteFfi(call: String) { noteMainThreadFfi(mainThreadFfi, call) }
