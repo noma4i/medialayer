@@ -400,11 +400,11 @@ fn inv_call_08_a_call_throws_a_running_recording_away_and_ends_it_with_the_in_ca
     let profile = moment();
     let recording = drive(profile, ready(profile), &[CaptureEvent::Start, CaptureEvent::RecordStarted]).0;
 
-    let (ended, actions) = drive(profile, recording, &[CaptureEvent::CallStarted, CaptureEvent::RecordFinished { end: RecordEnd::Completed }]);
+    let (ended, actions) = drive(profile, recording, &[CaptureEvent::Revoked { reason: CameraRefusal::InCall }, CaptureEvent::RecordFinished { end: RecordEnd::Completed }]);
     assert_eq!((actions, ended.state.fault, phase(&ended)), (vec![CaptureAction::EndRecording { discard: true }, CaptureAction::Discard], Some(CameraRefusal::InCall), CameraPhase::Ready));
 
     let idle = ready(profile);
-    let (untouched, actions) = drive(profile, idle, &[CaptureEvent::CallStarted]);
+    let (untouched, actions) = drive(profile, idle, &[CaptureEvent::Revoked { reason: CameraRefusal::InCall }]);
     assert_eq!((actions, untouched.state.fault, phase(&untouched)), (Vec::new(), None, CameraPhase::Ready), "a call without a recording changes nothing");
 }
 
@@ -438,4 +438,23 @@ fn inv_capture_30_a_lens_change_in_a_passing_phase_is_applied_when_that_phase_se
     assert_eq!((actions.len(), waiting.state.lens), (0, CameraLens::Back), "the lens waits for the photo");
     let (after, actions) = drive(photo, waiting, &[CaptureEvent::PhotoDone { ok: true }]);
     assert_eq!((actions, after.state.lens), (vec![CaptureAction::Bind { lens: CameraLens::Front }], CameraLens::Front), "photo then lens");
+}
+
+#[test]
+fn inv_capture_32_a_take_starts_only_while_its_microphone_sound_flows_and_losing_it_throws_the_take_away() {
+    let profile = moment();
+    let silent = drive(profile, ready(profile), &[CaptureEvent::AudioFlow { flowing: false }]).0;
+    let (refused, actions) = drive(profile, silent, &[CaptureEvent::Start]);
+    assert_eq!((actions, refused.state.fault, phase(&refused)), (Vec::new(), Some(CameraRefusal::MicrophoneSilent), CameraPhase::Ready));
+
+    let flowing = drive(profile, refused, &[CaptureEvent::AudioFlow { flowing: true }]).0;
+    let (started, actions) = drive(profile, flowing, &[CaptureEvent::Start, CaptureEvent::RecordStarted]);
+    assert_eq!((actions, phase(&started)), (vec![CaptureAction::BeginRecording], CameraPhase::Recording));
+
+    let (ended, actions) = drive(profile, started, &[CaptureEvent::AudioFlow { flowing: false }, CaptureEvent::RecordFinished { end: RecordEnd::Completed }]);
+    assert_eq!((actions, ended.state.fault, phase(&ended)), (vec![CaptureAction::EndRecording { discard: true }, CaptureAction::Discard], Some(CameraRefusal::MicrophoneSilent), CameraPhase::Ready));
+
+    let quiet = CaptureProfile { audio: false, ..moment() };
+    let muted = drive(quiet, ready(quiet), &[CaptureEvent::AudioFlow { flowing: false }]).0;
+    assert_eq!(drive(quiet, muted, &[CaptureEvent::Start]).1, vec![CaptureAction::BeginRecording], "a profile without sound does not wait for the microphone");
 }

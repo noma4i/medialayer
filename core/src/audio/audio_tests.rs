@@ -159,8 +159,11 @@ fn inv_audio_18_a_focus_request_refused_in_the_background_waits_for_the_foregrou
 #[test]
 fn inv_audio_19_a_lost_private_output_pauses_and_the_routes_of_an_own_change_are_not_a_loss() {
     let mut world = World::playing();
-    assert_eq!(world.send(I::Capture { id: 1, kind: RecordingKind::Video }), vec![A::PauseAll { reason: PauseReason::Capture }, apply(SessionWant::Recording { kind: RecordingKind::Video }), A::Admit { id: 1 }]);
+    let start = world.raw(I::Capture { id: 1, kind: RecordingKind::Video });
+    assert_eq!(plain(start.clone()), vec![A::PauseAll { reason: PauseReason::Capture }, apply(SessionWant::Recording { kind: RecordingKind::Video })], "the admission waits for the session");
     assert_eq!(world.send(I::Route { reason: RouteReason::OldDeviceUnavailable, had_private_output: true }), vec![], "a route inside the own change is ours");
+    let generation = start.iter().find_map(generation_of).unwrap();
+    assert_eq!(world.send(I::Applied { generation, result: AppliedResult::Ok }), vec![A::Admit { id: 1 }]);
     assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
     assert_eq!(world.settle(I::CaptureEnded { id: 1 }), vec![A::ForgetPaused, DEACTIVATE], "the end of the recording resumes nothing");
     assert_eq!(world.settle(I::Audible { slot: 0, on: true }), vec![apply(PLAYBACK)]);
@@ -306,18 +309,6 @@ fn inv_audio_28_availability_is_one_value_derived_from_every_input() {
 }
 
 #[test]
-fn inv_audio_32_a_video_recording_starts_and_lasts_only_while_the_microphone_sound_flows() {
-    let mut world = World::new();
-    assert_eq!(world.send(I::MicrophoneFlow { flowing: false }), vec![]);
-    assert_eq!(world.send(I::Capture { id: 1, kind: RecordingKind::Video }), vec![A::Refuse { id: 1, reason: RecordingRefusal::MicrophoneSilent }]);
-    assert_eq!(world.settle(I::Capture { id: 2, kind: RecordingKind::Voice }), vec![apply(SessionWant::Recording { kind: RecordingKind::Voice }), A::Admit { id: 2 }], "the camera sound does not gate a voice recording");
-    assert_eq!(world.settle(I::CaptureEnded { id: 2 }), vec![DEACTIVATE]);
-    assert_eq!(world.send(I::MicrophoneFlow { flowing: true }), vec![]);
-    assert_eq!(world.settle(I::Capture { id: 3, kind: RecordingKind::Video }), vec![apply(SessionWant::Recording { kind: RecordingKind::Video }), A::Admit { id: 3 }]);
-    assert_eq!(world.send(I::MicrophoneFlow { flowing: false }), vec![A::Revoke { id: 3, reason: RecordingRefusal::MicrophoneSilent }, DEACTIVATE]);
-}
-
-#[test]
 fn inv_audio_33_a_volume_reader_holds_a_mixing_session_only_while_nothing_sounds() {
     let mut world = World::with(AudioFocus::Duck);
     let mix = SessionWant::Playback { focus: AudioFocus::Mix };
@@ -367,7 +358,7 @@ fn random_input(dice: &mut crate::seeded::Dice, next_id: &mut u64, started: &[u6
         21 => I::Permission { granted: dice.percent(80) },
         22 => I::OtherRecording { active: dice.percent(30) },
         23 => I::Silenced { id: dice.between(1, (*next_id).max(1)) },
-        24 => I::MicrophoneFlow { flowing: dice.percent(70) },
+        24 => I::Noisy,
         25 => I::Foreground { on: dice.percent(70) },
         _ => I::Applied { generation: dice.below(40), result: [AppliedResult::Ok, AppliedResult::Busy, AppliedResult::Failed { code: 1 }][dice.index(3)] },
     }
@@ -432,10 +423,10 @@ fn inv_audio_12_any_sequence_keeps_one_recording_one_hold_and_ends_released() {
         }
         let mut ending = vec![I::PhoneCall { active: false }, I::CommunicationMode { active: false }, I::ObservedCalls { uuids: vec![] }, I::OtherRecording { active: false }, I::Permission { granted: true }];
         ending.extend(started.iter().map(|id| I::CallEnded { id: *id }));
-        ending.extend(admitted.clone().into_iter().map(|id| I::CaptureEnded { id }));
+        ending.extend((1..=next_id).map(|id| I::CaptureEnded { id }));
         ending.extend((0..3).map(|slot| I::Audible { slot, on: false }));
         ending.extend((1..=3).map(|id| I::VolumeReadEnded { id }));
-        ending.extend([I::InterruptionEnded { should_resume: false }, I::Focus { change: FocusChange::Gain }, I::Foreground { on: true }, I::MicrophoneFlow { flowing: true }, I::Route { reason: RouteReason::Other, had_private_output: false }]);
+        ending.extend([I::InterruptionEnded { should_resume: false }, I::Focus { change: FocusChange::Gain }, I::Foreground { on: true }, I::Route { reason: RouteReason::Other, had_private_output: false }]);
         for input in ending {
             if let I::CaptureEnded { id } = &input {
                 admitted.retain(|running| running != id);
@@ -453,6 +444,26 @@ fn inv_audio_12_any_sequence_keeps_one_recording_one_hold_and_ends_released() {
         assert!(!hold, "the core hold stayed after every call ended");
         assert!(!session_active, "the session stayed active after every demand ended");
         assert_eq!(last_availability, MicrophoneAvailability::Available);
-        assert_eq!(world.raw(I::Capture { id: 999, kind: RecordingKind::Voice }).last(), Some(&A::Admit { id: 999 }), "the microphone is free at the end");
+        assert!(world.settle(I::Capture { id: 999, kind: RecordingKind::Voice }).contains(&A::Admit { id: 999 }), "the microphone is free at the end");
     }
+}
+
+#[test]
+fn inv_audio_32_a_recording_is_admitted_only_after_its_session_is_applied() {
+    for result in [I::FocusRequest { answer: FocusAnswer::Failed }, I::FocusRequest { answer: FocusAnswer::Delayed }] {
+        let mut world = World::new();
+        let label = format!("{result:?}");
+        assert_eq!(world.send(I::Capture { id: 1, kind: RecordingKind::Voice }), vec![apply(SessionWant::Recording { kind: RecordingKind::Voice })], "{label}");
+        assert_eq!(world.send(I::Capture { id: 2, kind: RecordingKind::Voice }), vec![A::Refuse { id: 2, reason: RecordingRefusal::MicrophoneBusy }], "{label}: one admission at a time");
+        let answer = world.send(result);
+        assert_eq!(answer.first(), Some(&A::Refuse { id: 1, reason: RecordingRefusal::MicrophoneBusy }), "{label}: {answer:?}");
+        assert!(!answer.iter().any(|action| matches!(action, A::Admit { .. })), "{label}");
+    }
+    let mut world = World::new();
+    let start = world.raw(I::Capture { id: 1, kind: RecordingKind::Voice });
+    let generation = start.iter().find_map(generation_of).unwrap();
+    assert_eq!(world.send(I::Applied { generation, result: AppliedResult::Failed { code: 561017449 } }), vec![A::Refuse { id: 1, reason: RecordingRefusal::MicrophoneBusy }], "a refused activation refuses the recording");
+    let mut call = World::new();
+    call.send(I::Capture { id: 1, kind: RecordingKind::Voice });
+    assert_eq!(call.send(I::PhoneCall { active: true }).first(), Some(&A::Refuse { id: 1, reason: RecordingRefusal::InCall }), "a call before the admission refuses it");
 }

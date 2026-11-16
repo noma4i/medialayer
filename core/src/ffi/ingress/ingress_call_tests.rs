@@ -1,7 +1,7 @@
 use super::*;
 use crate::api::test_support::{eventually, MockFactory, MockSlot};
 use crate::api::{MediaError, MediaItem, PlayerSlotFactory, SlotCall};
-use crate::audio::{AudioAction, AudioFocus, AudioInput, CallKind, MicrophoneAvailability, RecordingKind, SessionWant};
+use crate::audio::{AppliedResult, AudioAction, AudioFocus, AudioInput, CallKind, MicrophoneAvailability, RecordingKind, SessionWant};
 use crate::ffi::MediaLayer;
 use std::sync::Arc;
 use super::ingress_harness::*;
@@ -265,7 +265,8 @@ fn inv_audio_31_a_recording_keeps_playback_paused_until_it_ends_and_resumes_noth
     let playback = SessionWant::Playback { focus: AudioFocus::Exclusive };
     assert_eq!(rig.audio(AudioInput::Audible { slot: 0, on: true }), vec![AudioAction::Apply { generation: 1, want: playback, activate: true }]);
     let recording = SessionWant::Recording { kind: RecordingKind::Voice };
-    assert_eq!(rig.audio(AudioInput::Capture { id: 1, kind: RecordingKind::Voice }), vec![AudioAction::Apply { generation: 2, want: recording, activate: true }, AudioAction::Admit { id: 1 }]);
+    assert_eq!(rig.audio(AudioInput::Capture { id: 1, kind: RecordingKind::Voice }), vec![AudioAction::Apply { generation: 2, want: recording, activate: true }]);
+    assert_eq!(rig.audio(AudioInput::Applied { generation: 2, result: AppliedResult::Ok }), vec![AudioAction::Admit { id: 1 }]);
     rig.caller.block_on(eventually(|| slot.calls().contains(&SlotCall::Pause)));
     place.update(PlaceInput { visible: true, ..rig.playing() }).unwrap();
     rig.settled();
