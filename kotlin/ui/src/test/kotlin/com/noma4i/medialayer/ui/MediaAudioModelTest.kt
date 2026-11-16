@@ -81,6 +81,33 @@ private class SystemFocus : AudioFocusPort {
   }
 }
 
+private class MicrophoneModel : MicrophonePort {
+  @Volatile private var change: ((MicrophoneState, String) -> Unit)? = null
+  @Volatile var state = MicrophoneState()
+    private set
+
+  override fun subscribe(change: (MicrophoneState, String) -> Unit) {
+    this.change = change
+    change(state, "subscribe")
+  }
+
+  override fun foreground() = Unit
+
+  override fun close() = Unit
+
+  fun permission(granted: Boolean) {
+    state = state.copy(permissionGranted = granted)
+    change?.invoke(state, "permission")
+    TestSignal.fire()
+  }
+
+  fun externalCall(live: Boolean) {
+    state = state.copy(externalCall = live)
+    change?.invoke(state, "mode")
+    TestSignal.fire()
+  }
+}
+
 private class ModelBackend(private val refuses: Boolean) : CaptureBackend {
   @Volatile private var sink: (CaptureEvent) -> Unit = {}
   override val photoSize: PixelSize? = PixelSize(3000u, 4000u)
@@ -143,13 +170,14 @@ private enum class Step {
   CameraShows, CameraHides, CameraRecords, CameraStops, CameraCancels, CameraDeniedShows, CameraCloses,
   VoiceStarts, VoiceStops, VoiceStartsTwice, VoiceStopsWhileStarting, VoiceDenied,
   PlayerAudible, PlayerSilent, SystemTakesFocus, SystemGivesFocusBack,
-  CallStarts, CallSpeaker, CallEnds
+  CallStarts, CallSpeaker, CallEnds, ExternalCallBegins, ExternalCallEnds
 }
 
 private class World(private val directory: File) {
   val system = SystemFocus()
+  val microphone = MicrophoneModel()
   val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-  val audio = MediaAudioSession(MediaAudioFocus.Duck, system, releaseDelayMs = 0, scope = scope)
+  val audio = MediaAudioSession(MediaAudioFocus.Duck, system, releaseDelayMs = 0, scope = scope, microphone = microphone)
   private val host = Any()
   private val clock = AtomicLong()
   var camera: MediaCamera? = null
@@ -158,6 +186,7 @@ private class World(private val directory: File) {
   val audible = HashSet<UInt>()
   var call: CallAudioHold? = null
   var callSpeaker = false
+  var callManaged = false
 
   fun recorder(refuses: Boolean) = MediaVoiceRecorder(ModelMicrophone(refuses), 60_000, { audio }, { clock.addAndGet(500) }, 5, scope)
 
@@ -182,8 +211,21 @@ private class World(private val directory: File) {
   fun converged(): Boolean {
     if (cameraShown && camera?.state?.value?.phase == CameraPhase.OPENING) return false
     if (audio.isRecording != wantsMicrophone) return false
-    if (system.takenBySystem) return call?.live?.value != true
-    call?.let { return system.held == FocusKind.Call && system.talk == (true to callSpeaker) && it.live.value }
+    if (system.takenBySystem) {
+      val current = call ?: return true
+      return if (callManaged) current.live.value else !current.live.value
+    }
+    val availability = audio.microphoneAvailability.value
+    val expected = when {
+      call != null -> MicrophoneAvailability.OWN_CALL
+      microphone.state.externalCall -> MicrophoneAvailability.EXTERNAL_CALL
+      else -> MicrophoneAvailability.AVAILABLE
+    }
+    if (availability != expected) return false
+    call?.let {
+      if (callManaged) return system.held != FocusKind.Call && !system.talk.first && it.live.value
+      return system.held == FocusKind.Call && system.talk == (true to callSpeaker) && it.live.value
+    }
     if (system.talk.first) return false
     return when {
       wantsMicrophone -> system.held == FocusKind.Recording
@@ -237,7 +279,11 @@ private class World(private val directory: File) {
         starting.await()
       }
       Step.VoiceDenied -> if (!voice.isRecording) {
-        runCatching { recorder(true).start(file()) }
+        microphone.permission(false)
+        val refused = recorder(false)
+        runCatching { refused.start(file()) }
+        check(!refused.isRecording) { "a recording started without the microphone permission" }
+        microphone.permission(true)
       }
       Step.PlayerAudible -> {
         val slot = random.nextInt(1, 4).toUInt()
@@ -250,13 +296,28 @@ private class World(private val directory: File) {
         audio.setAudible(slot, false)
       }
       Step.CallStarts -> if (call == null) {
-        call = audio.holdCall()
+        val managed = random.nextBoolean()
+        call = audio.holdCall(managedBySystem = managed)
+        callManaged = managed
         callSpeaker = false
       }
       Step.CallSpeaker -> call?.let {
-        callSpeaker = !callSpeaker
-        it.setSpeaker(callSpeaker)
+        if (callManaged) {
+          it.setSpeaker(random.nextBoolean())
+        } else {
+          callSpeaker = !callSpeaker
+          it.setSpeaker(callSpeaker)
+        }
       }
+      Step.ExternalCallBegins -> if (!microphone.state.externalCall) {
+        microphone.externalCall(true)
+        if (!voice.isRecording) {
+          val refused = recorder(false)
+          runCatching { refused.start(file()) }
+          check(!refused.isRecording) { "a recording started during an external call" }
+        }
+      }
+      Step.ExternalCallEnds -> if (microphone.state.externalCall) microphone.externalCall(false)
       Step.CallEnds -> {
         call?.close()
         call = null
@@ -290,6 +351,7 @@ class MediaAudioModelTest {
       }
     }
     world.system.systemGivesBack()
+    world.microphone.externalCall(false)
     world.call?.close()
     world.call = null
     world.camera?.close()
