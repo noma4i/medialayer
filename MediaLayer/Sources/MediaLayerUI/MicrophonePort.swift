@@ -20,11 +20,18 @@ protocol MicrophonePort: Sendable {
   func current() -> MicrophoneState
   func changes() -> AsyncStream<String>
   func events() -> AsyncStream<MicrophoneEvent>
+  func perform(_ action: @Sendable () -> Void)
+  func observe(_ action: @escaping @Sendable (MicrophoneEvent) -> Void) -> Task<Void, Never>?
   func stop()
 }
 
 extension MicrophonePort {
   func stop() {}
+  func perform(_ action: @Sendable () -> Void) { action() }
+  func observe(_ action: @escaping @Sendable (MicrophoneEvent) -> Void) -> Task<Void, Never>? {
+    let stream = events()
+    return Task { for await event in stream { action(event) } }
+  }
   func events() -> AsyncStream<MicrophoneEvent> {
     let changes = changes()
     return AsyncStream { continuation in
@@ -57,11 +64,8 @@ final class MicrophoneStatus: @unchecked Sendable {
   init(port: MicrophonePort, box: DemandBox) {
     self.port = port
     self.box = box
-    let changes = port.events()
+    events = port.observe { [weak self] event in self?.systemChanged(event.source, state: event.state) }
     refresh("subscribe")
-    events = Task { [weak self] in
-      for await event in changes { self?.systemChanged(event.source, state: event.state) }
-    }
   }
 
   deinit { events?.cancel() }
@@ -92,40 +96,49 @@ final class MicrophoneStatus: @unchecked Sendable {
   }
 
   func addCall(_ id: UUID, uuid: UUID?) {
-    delivery.lock()
-    defer { delivery.unlock() }
-    lock.withLock {
-      own[id] = .some(uuid)
-      _ = box.update { demand in
-        if demand.microphoneAvailability != .permissionDenied { demand.microphoneAvailability = .ownCall }
-        return true
+    port.perform { [self] in
+      lock.withLock {
+        own[id] = .some(uuid)
+        _ = box.update { demand in
+          if demand.microphoneAvailability != .permissionDenied { demand.microphoneAvailability = .ownCall }
+          return true
+        }
       }
+      apply("ownCall")
     }
-    refresh("ownCall")
   }
 
   func removeCall(_ id: UUID) {
-    delivery.lock()
-    defer { delivery.unlock() }
-    lock.withLock { own[id] = nil }
-    refresh("ownCall")
+    port.perform { [self] in
+      lock.withLock { own[id] = nil }
+      apply("ownCall")
+    }
   }
 
   func refused() {
-    delivery.lock()
-    defer { delivery.unlock() }
-    lock.withLock { failure = true }
-    refresh("recording refusal")
+    port.perform { [self] in
+      lock.withLock { failure = true }
+      apply("recording refusal")
+    }
   }
 
   func systemChanged(_ source: String, state: MicrophoneState? = nil) {
-    delivery.lock()
-    defer { delivery.unlock() }
-    lock.withLock { failure = false }
-    refresh(source, state: state)
+    if let state {
+      lock.withLock { failure = false }
+      apply(source, state: state)
+    } else {
+      port.perform { [self] in
+        lock.withLock { failure = false }
+        apply(source)
+      }
+    }
   }
 
   private func refresh(_ source: String, state snapshot: MicrophoneState? = nil) {
+    port.perform { [self] in apply(source, state: snapshot) }
+  }
+
+  private func apply(_ source: String, state snapshot: MicrophoneState? = nil) {
     delivery.lock()
     defer { delivery.unlock() }
     let state = snapshot ?? port.current()

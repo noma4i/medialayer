@@ -82,7 +82,14 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     if profile.audio {
       guard let microphone = AVCaptureDevice.default(for: .audio) else { return emit(.refuse(reason: .microphoneBusy)) }
       do { inputs.append(try AVCaptureDeviceInput(device: microphone)) }
-      catch { return emit(.refuse(reason: .microphoneBusy)) }
+      catch {
+        let error = error as NSError
+        if !authorized(.audio) || (error.domain == AVFoundationErrorDomain && error.code == AVError.applicationIsNotAuthorizedToUseDevice.rawValue) {
+          return emit(.refuse(reason: .permissionDenied))
+        }
+        let busy = [AVError.deviceInUseByAnotherApplication.rawValue, AVError.deviceAlreadyUsedByAnotherSession.rawValue, AVError.sessionHardwareCostOverage.rawValue]
+        return emit(.refuse(reason: error.domain == AVFoundationErrorDomain && busy.contains(error.code) ? .microphoneBusy : .configureFailed))
+      }
     }
     let photo = profile.mode == .photo ? AVCapturePhotoOutput() : nil
     let movie = profile.mode == .video ? AVCaptureMovieFileOutput() : nil

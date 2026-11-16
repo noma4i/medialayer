@@ -12,6 +12,7 @@ final class SystemMicrophone: NSObject, MicrophonePort, CXCallObserverDelegate, 
   private var tokens: [NSObjectProtocol] = []
   private var sinks: [UUID: AsyncStream<String>.Continuation] = [:]
   private var eventSinks: [UUID: AsyncStream<MicrophoneEvent>.Continuation] = [:]
+  private var listener: (@Sendable (MicrophoneEvent) -> Void)?
 
   override init() {
     super.init()
@@ -49,6 +50,13 @@ final class SystemMicrophone: NSObject, MicrophonePort, CXCallObserverDelegate, 
     )
   }
 
+  func perform(_ action: @Sendable () -> Void) { queue.sync(execute: action) }
+
+  func observe(_ action: @escaping @Sendable (MicrophoneEvent) -> Void) -> Task<Void, Never>? {
+    queue.sync { listener = action }
+    return nil
+  }
+
   func changes() -> AsyncStream<String> {
     AsyncStream { continuation in
       let id = UUID()
@@ -73,6 +81,7 @@ final class SystemMicrophone: NSObject, MicrophonePort, CXCallObserverDelegate, 
   private func emit(_ source: String) {
     lock.withLock { Array(sinks.values) }.forEach { $0.yield(source) }
     let event = MicrophoneEvent(state: current(), source: source)
+    listener?(event)
     lock.withLock { Array(eventSinks.values) }.forEach { $0.yield(event) }
   }
 }

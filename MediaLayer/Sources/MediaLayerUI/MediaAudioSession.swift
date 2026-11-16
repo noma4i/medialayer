@@ -103,7 +103,12 @@ public final class MediaAudioSession: Sendable {
   }
 
   func acquireRecording() async throws -> MediaRecordingHold {
-    microphone.refreshForRecording()
+    await withCheckedContinuation { continuation in
+      DispatchQueue.global().async { [microphone] in
+        microphone.refreshForRecording()
+        continuation.resume()
+      }
+    }
     let id = UUID()
     guard box.update({ $0.microphoneAvailability == .available && $0.setRecording(id, true) }) else {
       throw RecordingUnavailable(availability: microphone.current)
