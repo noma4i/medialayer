@@ -91,14 +91,19 @@ final class AudioLink: @unchecked Sendable {
         self.sessionQueue.async {
           let initial = self.ports.session.outputVolume()
           let changes = self.ports.session.volumeChanges()
-          let (stream, sink) = AsyncStream<Float>.makeStream()
-          let task = Task { for await volume in changes { sink.yield(volume) }; sink.finish() }
-          sink.onTermination = { [weak self] _ in
-            task.cancel()
-            self?.send(.volumeReadEnded(id: id))
-          }
+          let stream = self.volumeStream(changes, id: id)
           continuation.resume(returning: MediaVolumeReading(initial: initial, changes: stream))
         }
+      }
+    }
+  }
+
+  private func volumeStream(_ changes: AsyncStream<Float>, id: UInt64) -> AsyncStream<Float> {
+    AsyncStream { [weak self] sink in
+      let task = Task { for await volume in changes { sink.yield(volume) }; sink.finish() }
+      sink.onTermination = { _ in
+        task.cancel()
+        self?.send(.volumeReadEnded(id: id))
       }
     }
   }
