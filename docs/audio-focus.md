@@ -88,6 +88,8 @@ On Android recording asks for `AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE`, so other ap
 
 A call takes priority over recording, audible places and volume readers. On iOS its plan uses `playAndRecord`, `voiceChat` and `allowBluetoothHFP`. Speaker routing adds `defaultToSpeaker`. CallKit-managed calls let the system activate the session. On Android a call requests `AUDIOFOCUS_GAIN` with voice communication attributes and sets communication mode and routing. Ending the call restores the current demand. See [Calls](declaring-media.md#calls) for the API and WebRTC order.
 
+An external system call is also a call source. It holds the same playback and recording restriction until that call ends. Observe [microphone availability](declaring-media.md#microphone) for recording controls.
+
 ## Read the volume
 
 `readVolume` gives the current system volume and a stream of the changes, for example to unmute when the user presses volume up. While the stream lives, MediaLayer keeps a session that mixes and never ducks, even under `duck`. End the stream and the session goes back to idle.

@@ -570,10 +570,10 @@ The hold also releases when it is deallocated (Swift) or closed (Kotlin `use`).
 
 Use `callAudio` to hold both the call and its audio session. MediaLayer owns the session and focus for playback, recording and calls. A call has priority over recording and playback. Ending it returns audio ownership to the current demand. A place needs a new play declaration after the call.
 
-On Swift, pass `true` for a CallKit-managed call. MediaLayer sets the category and CallKit activates the session. Forward CallKit activation and deactivation to the call. For an unmanaged call, pass `false` and MediaLayer activates the session.
+On Swift, pass `true` and the CallKit UUID for a CallKit-managed call. MediaLayer sets the category and CallKit activates the session. Forward CallKit activation and deactivation to the call. For an unmanaged call, pass `false` and MediaLayer activates the session.
 
 ```swift
-let call = try await media.callAudio(managedBySystem: true)
+let call = try await media.callAudio(managedBySystem: true, callUUID: callUUID)
 call.setSpeaker(true)
 call.systemActivated() // CallKit didActivate
 call.systemDeactivated() // CallKit didDeactivate
@@ -608,3 +608,10 @@ Observe `live` to start and stop the call audio of the calling library:
 ```kotlin
 call.live.collect { live -> /* start or stop the call audio */ }
 ```
+## Microphone
+
+Observe `media.microphoneAvailability` to show a busy overlay and disable recording buttons whenever the value is not available. Do not observe calls or microphone use separately. Take `callAudio` for your own call.
+
+Swift exposes an `AsyncStream<MicrophoneAvailability>` that first yields the current value. Kotlin exposes a `StateFlow<MicrophoneAvailability>`. The values are available, own call, external call, other app and permission denied. Permission denial has the highest priority, followed by own call, external call and another app.
+
+An external call pauses players and stops active recordings with the in-call refusal. The recording file is deleted. New recordings are refused before the microphone is taken. When the external call ends, playback resumes only after a new play declaration.
