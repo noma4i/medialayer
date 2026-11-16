@@ -58,7 +58,7 @@ public enum Media {
   private static let flag = MutedFlag()
   nonisolated(unsafe) static weak var current: MediaPlaces?
   nonisolated(unsafe) public internal(set) static var audio: MediaAudioSession?
-  static let calls = CallGate()
+  nonisolated(unsafe) static var link: AudioLink?
 
   public static var muted: Bool { flag.value }
 

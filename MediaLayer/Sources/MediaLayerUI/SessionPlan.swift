@@ -23,21 +23,6 @@ struct SessionPlan: Equatable {
     }
   }
 
-  var trace: String { "\(category.rawValue) \(mode.rawValue) options=\(options.rawValue)" }
-
-  static let recording = SessionPlan(category: .playAndRecord, mode: .default, options: [.defaultToSpeaker])
-
-  static func call(speaker: Bool) -> SessionPlan {
-    SessionPlan(category: .playAndRecord, mode: .voiceChat, options: speaker ? [.allowBluetoothHFP, .defaultToSpeaker] : [.allowBluetoothHFP])
-  }
-
-  static func playback(_ focus: MediaAudioFocus) -> SessionPlan {
-    switch focus {
-    case .exclusive: SessionPlan(category: .playback, mode: .moviePlayback, options: [])
-    case .mix: SessionPlan(category: .playback, mode: .moviePlayback, options: [.mixWithOthers])
-    case .duck: SessionPlan(category: .playback, mode: .moviePlayback, options: [.mixWithOthers, .duckOthers])
-    }
-  }
 }
 
 func hadPrivateOutput(_ ports: [AVAudioSession.Port]) -> Bool {

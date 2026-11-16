@@ -53,16 +53,19 @@ extension MediaLayer {
   ) async throws -> MediaLayer {
     guard imageMemoryBytes > 0 else { throw MediaError.InvalidSpec(detail: "imageMemoryBytes must be positive") }
     let imageCache = ImageCache(costLimit: imageMemoryBytes)
-    let audio = MediaAudioSession(focus: audioFocus)
+    let audio = MediaAudioSession()
     let work = Task.detached(priority: .userInitiated) {
       let (config, factory) = try makeConfig(
-        defaults: try defaults(), fetcher: fetcher, settings: settings, directory: directory, silent: onSimulator, audio: audio, imageCache: imageCache
+        defaults: try defaults(), fetcher: fetcher, settings: settings, directory: directory, silent: onSimulator, audio: audio, audioFocus: audioFocus, imageCache: imageCache
       )
       let resources = config.memoryReleaser as? OpenedResources
       do {
         try Task.checkCancellation()
         let media = try build(config)
-        resources?.bind(media)
+        let link = AudioLink(core: media, ports: .system(focus: audioFocus.core))
+        audio.bind(link)
+        link.setVolumeMultiplier = { value in factory.slots.setVolumeMultiplier(value) }
+        resources?.bind(media, link: link)
         #if os(iOS)
         CaptureFiles.sweepOrphans()
         #endif
@@ -70,13 +73,13 @@ extension MediaLayer {
           media.close()
           throw CancellationError()
         }
-        return (config, factory, media)
+        return (config, factory, media, link)
       } catch {
         await resources?.shutdown()
         throw error
       }
     }
-    let (_, factory, media) = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+    let (_, factory, media, link) = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
     if Task.isCancelled {
       media.close()
       throw CancellationError()
@@ -85,9 +88,10 @@ extension MediaLayer {
     ImageMemory.install(imageCache, on: media)
     LoadedSlots.install(factory.slots, on: media)
     HostLayers.install(factory.hosts, on: media)
-    media.followSystem(events: media.playerEvents(), link: factory.events, center: .default, names: .system, audio: audio)
+    media.followSystem(events: media.playerEvents(), link: factory.events, center: .default, names: .system, audio: link)
     Media.current = media
     Media.audio = audio
+    Media.link = link
     return media
   }
 
@@ -98,6 +102,7 @@ extension MediaLayer {
     directory: URL?,
     silent: Bool,
     audio: MediaAudioSession? = nil,
+    audioFocus: MediaAudioFocus = .mix,
     imageCache: ImageCache = ImageCache(costLimit: MediaImagePipeline.defaultMemoryLimit)
   ) throws -> (OpenConfig, AVQueuePlayerSlotFactory) {
     let factory = AVQueuePlayerSlotFactory(startMuted: silent, audio: audio)
@@ -118,7 +123,8 @@ extension MediaLayer {
       evictImage: defaults.evictImage,
       evictAudio: defaults.evictAudio,
       memoryReleaser: OpenedResources(images: ImageMemoryReleaser(cache: imageCache), factory: factory, audio: audio),
-      silent: silent
+      silent: silent,
+      audioFocus: audioFocus.core
     )
     return (config, factory)
   }
@@ -128,14 +134,19 @@ extension MediaLayer {
   }
 
   public var microphoneAvailability: AsyncStream<MicrophoneAvailability> {
-    (objc_getAssociatedObject(self, &lifetimeKey) as? SystemSignals)?.audio?.microphoneAvailability ?? AsyncStream { $0.yield(.available); $0.finish() }
+    (objc_getAssociatedObject(self, &lifetimeKey) as? SystemSignals)?.audio?.availability ?? AsyncStream { $0.finish() }
   }
 
-  func followSystem(events: PlayerEventsProtocol, link: PlayerEventsLink, center: NotificationCenter, names: SystemSignalNames, audio: MediaAudioSession? = nil) {
+  public func callAudio(_ kind: MediaCallKind) async -> MediaCallAudio {
+    guard let audio = (objc_getAssociatedObject(self, &lifetimeKey) as? SystemSignals)?.audio else {
+      preconditionFailure("The media layer is closed")
+    }
+    return await audio.call(kind)
+  }
+
+  func followSystem(events: PlayerEventsProtocol, link: PlayerEventsLink, center: NotificationCenter, names: SystemSignalNames, audio: AudioLink? = nil) {
     link.bind(events)
-    let calls = ExternalCall(media: self)
-    audio?.microphone.setExternalListener { [weak calls] active in calls?.set(active) }
-    let signals = SystemSignals(events: events, center: center, names: names, audio: audio, onForeground: { audio?.microphone.systemChanged("foreground") }, onRelease: { calls.close(); link.bind(nil) })
+    let signals = SystemSignals(events: events, center: center, names: names, audio: audio, onRelease: { link.bind(nil) })
     objc_setAssociatedObject(self, &lifetimeKey, signals, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
   }
 
@@ -151,33 +162,13 @@ extension MediaLayer {
   }
 }
 
-private final class ExternalCall: @unchecked Sendable {
-  private let lock = NSLock()
-  private weak var media: MediaLayer?
-  private var hold: MediaCallHold?
-  private var closed = false
-
-  init(media: MediaLayer) { self.media = media }
-
-  func set(_ active: Bool) {
-    lock.withLock {
-      guard !closed else { return }
-      if active && hold == nil { hold = try? media?.callHold() }
-      if !active { hold?.release(); hold = nil }
-    }
-  }
-
-  func close() {
-    lock.withLock { closed = true; hold?.release(); hold = nil }
-  }
-}
-
 final class OpenedResources: MemoryReleaser, @unchecked Sendable {
   private let images: ImageMemoryReleaser
   private let factory: AVQueuePlayerSlotFactory
   private let audio: MediaAudioSession?
   private let lock = NSLock()
   private weak var media: MediaLayer?
+  private var link: AudioLink?
   private var isClosed = false
 
   init(images: ImageMemoryReleaser, factory: AVQueuePlayerSlotFactory, audio: MediaAudioSession?) {
@@ -186,8 +177,8 @@ final class OpenedResources: MemoryReleaser, @unchecked Sendable {
     self.audio = audio
   }
 
-  func bind(_ media: MediaLayer) {
-    lock.withLock { self.media = media }
+  func bind(_ media: MediaLayer, link: AudioLink) {
+    lock.withLock { self.media = media; self.link = link }
   }
 
   func dropMemoryCaches() {
@@ -202,10 +193,13 @@ final class OpenedResources: MemoryReleaser, @unchecked Sendable {
     }
     guard let media else { return }
     media?.stopFollowingSystem()
-    audio?.microphone.stop()
+    let link = lock.withLock { let link = self.link; self.link = nil; return link }
+    link?.close()
+    audio?.bind(nil)
     factory.release()
     images.shutdown()
     if let media, Media.current === media { Media.current = nil }
     if let audio, Media.audio === audio { Media.audio = nil }
+    if let link, Media.link === link { Media.link = nil }
   }
 }

@@ -21,6 +21,7 @@ public final class LoadedSlots: @unchecked Sendable {
 
   private let lock = NSLock()
   private var slots: [String: WeakSlot] = [:]
+  private var multiplier: Float = 1
   @MainActor lazy var progress = PlaybackProgress(slots: self)
 
   public init() {}
@@ -31,8 +32,14 @@ public final class LoadedSlots: @unchecked Sendable {
 
   public func snapshot(for key: String) -> PlayerSnapshot? { slot(for: key)?.snapshot() }
 
+  func setVolumeMultiplier(_ value: Float) {
+    let current = lock.withLock { multiplier = value; return slots.values.compactMap(\.value) }
+    DispatchQueue.main.async { current.forEach { $0.player.volume = value } }
+  }
+
   func assign(_ slot: AVQueuePlayerSlot, key: String) {
-    lock.withLock { slots[key] = WeakSlot(slot) }
+    let volume = lock.withLock { slots[key] = WeakSlot(slot); return multiplier }
+    DispatchQueue.main.async { slot.player.volume = volume }
     TestChange.fire()
     Task { @MainActor in progress.changed(key) }
   }

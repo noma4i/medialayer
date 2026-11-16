@@ -263,15 +263,11 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
   }
 
   private func applyPlay() async {
-    let shouldSettle = await MainActor.run { [self] in
-      guard !closed.isSet, !Task.isCancelled else { return false }
+    await MainActor.run { [self] in
+      guard !closed.isSet, !Task.isCancelled else { return }
       wantsPlay = true
       sampleLock.withLock { commanded.isPlaying = true }
-      let audible = !player.isMuted && player.currentItem != nil
-      if audible { audio?.setAudible(slot: id, true) }
-      return audible
     }
-    if shouldSettle, let audio { _ = await audio.settled() }
     await MainActor.run { [self] in
       guard !closed.isSet, !Task.isCancelled, wantsPlay else { return }
       MediaTrace.emit("player", "slot=\(id) play key=\(key.map(MediaTrace.tail) ?? "-")")
@@ -448,7 +444,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
       self?.onMain { [weak self] in
         guard let self else { return }
         refreshSample()
-        audio?.setAudible(slot: id, !player.isMuted && wantsPlay && player.currentItem != nil)
+        audio?.setAudible(slot: id, !player.isMuted && player.timeControlStatus == .playing)
       }
     }
     audibleObservations = [

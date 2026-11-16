@@ -54,7 +54,7 @@ struct CameraServices {
 
   var admitSession: @Sendable (UInt64) async throws -> Release
   var admitShot: @Sendable (UInt64) async throws -> Release
-  var audio: @Sendable () -> MediaAudioSession?
+  var link: @Sendable () -> AudioLink?
   var clipInfo: @Sendable (URL) async -> MediaInfo?
   var uprightVideo: @Sendable (URL) async throws -> Void
   var upright: @Sendable (URL, Double) async throws -> URL
@@ -75,7 +75,7 @@ struct CameraServices {
         let hold = try await layer.reserveDecode(bytes: bytes)
         return { hold.release() }
       },
-      audio: { Media.audio },
+      link: { Media.link },
       clipInfo: { url in
         guard let layer = Media.current as? MediaLayer else { return nil }
         return try? await layer.mediaInfo(MediaSourceValue.file(url, kind: .video))

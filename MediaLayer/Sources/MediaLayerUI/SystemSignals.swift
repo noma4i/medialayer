@@ -38,30 +38,19 @@ public struct SystemSignalNames {
 }
 
 final class SystemSignals {
-  let audio: MediaAudioSession?
+  let audio: AudioLink?
   private let center: NotificationCenter
   private var tokens: [NSObjectProtocol] = []
   private var onRelease: () -> Void
 
-  init(events: PlayerEventsProtocol, center: NotificationCenter, names: SystemSignalNames, audio: MediaAudioSession? = nil, onOutputLost: @escaping () -> Void = { try? Media.setMuted(true) }, onForeground: @escaping @Sendable () -> Void = {}, onRelease: @escaping () -> Void = {}) {
+  init(events: PlayerEventsProtocol, center: NotificationCenter, names: SystemSignalNames, audio: AudioLink? = nil, onRelease: @escaping () -> Void = {}) {
     self.center = center
     self.audio = audio
     self.onRelease = onRelease
     tokens = [
       center.addObserver(forName: names.memoryWarning, object: nil, queue: nil) { _ in events.memoryWarning(level: .critical) },
-      center.addObserver(forName: names.background, object: nil, queue: nil) { _ in events.background() },
-      center.addObserver(forName: names.foreground, object: nil, queue: nil) { _ in events.foreground(); onForeground() },
-      center.addObserver(forName: names.outputLost, object: nil, queue: nil) { note in
-        #if canImport(UIKit)
-        let reason = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
-        let previous = (note.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription)?.outputs.map(\.portType) ?? []
-        let current = AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portType)
-        if Self.isOutputLost(reason: reason, previous: previous, current: current) {
-          MediaTrace.emit("audio", "output lost previous=\(previous) current=\(current)")
-          onOutputLost()
-        }
-        #endif
-      }
+      center.addObserver(forName: names.background, object: nil, queue: nil) { _ in events.background(); audio?.foreground(false) },
+      center.addObserver(forName: names.foreground, object: nil, queue: nil) { _ in events.foreground(); audio?.foreground(true) }
     ]
   }
 

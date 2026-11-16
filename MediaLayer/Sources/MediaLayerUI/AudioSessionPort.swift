@@ -33,7 +33,7 @@ struct AudioPorts: Sendable {
   let calls: any CallObserverPort
   let permission: any MicrophonePermissionPort
 
-  static var system: AudioPorts {
-    AudioPorts(session: SystemAudioSession(), calls: SystemCallObserver(), permission: SystemMicrophonePermission())
+  static func system(focus: AudioFocus) -> AudioPorts {
+    AudioPorts(session: SystemAudioSession(focus: focus), calls: SystemCallObserver(), permission: SystemRecordingPermission())
   }
 }

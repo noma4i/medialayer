@@ -38,8 +38,6 @@ public final class MediaCamera: @unchecked Sendable {
   private let profile: CaptureProfile
   private let services: CameraServices
   private let backend: CaptureBackend
-  private let calls: CallGate
-  private let callId = UUID()
   private let queue = DispatchQueue(label: "com.noma4i.medialayer.camera")
   private let lock = NSLock()
   private var published: CameraState
@@ -51,7 +49,7 @@ public final class MediaCamera: @unchecked Sendable {
   private var engaged = false
   private var epoch = 0
   private var sessionHold: CameraServices.Release?
-  private var audioHold: MediaRecordingHold?
+  private var audioHold: RecordingTicket?
   private var binding: Task<Void, Never>?
   private var shooting: Task<Void, Never>?
   private var reading: Task<Void, Never>?
@@ -66,14 +64,13 @@ public final class MediaCamera: @unchecked Sendable {
   private var observers: [UUID: (rate: Double, last: UInt64?, handler: @Sendable (CameraFrame) -> Void)] = [:]
 
   public convenience init(profile: CaptureProfile, lens: CameraLens = .back) throws {
-    try self.init(profile: profile, lens: lens, backend: AVCaptureBackend(), services: .live, calls: Media.calls)
+    try self.init(profile: profile, lens: lens, backend: AVCaptureBackend(), services: .live)
   }
 
-  init(profile: CaptureProfile, lens: CameraLens, backend: CaptureBackend, services: CameraServices, calls: CallGate = Media.calls) throws {
+  init(profile: CaptureProfile, lens: CameraLens, backend: CaptureBackend, services: CameraServices) throws {
     self.profile = try checkCaptureProfile(profile: profile)
     self.services = services
     self.backend = backend
-    self.calls = calls
     run = captureRun(lens: lens)
     published = run.state
     backend.setSink { [weak self] event in self?.post(event) }
@@ -91,7 +88,7 @@ public final class MediaCamera: @unchecked Sendable {
     backend.unbind()
     for task in [binding, shooting, reading, ticker] { task?.cancel() }
     sessionHold?()
-    audioHold?.release()
+    audioHold?.end()
     if let url = recordingURL { try? FileManager.default.removeItem(at: url) }
   }
 
@@ -132,11 +129,8 @@ public final class MediaCamera: @unchecked Sendable {
 
   /// Returns after the hardware started the recording. `NotReady` when the camera is not ready or the profile holds no video.
   public func startRecording() async throws {
+    if profile.audio { try await ensureAudioTicket() }
     do {
-      if profile.audio, let availability = services.audio()?.microphone.current, availability != .available {
-        throw Self.microphoneRefusal(availability)
-      }
-      if calls.inCall { throw Self.refusal(.inCall) }
       try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
         queue.async {
           guard self.startWaiter == nil else { return continuation.resume(throwing: Self.refusal(.notReady)) }
@@ -149,16 +143,12 @@ public final class MediaCamera: @unchecked Sendable {
       await withCheckedContinuation { continuation in
         queue.async {
           if !self.run.started && !self.run.starting {
-            self.audioHold?.release()
-            self.audioHold = nil
-            self.calls.unregister(self.callId)
             if let url = self.recordingURL { try? FileManager.default.removeItem(at: url) }
             self.recordingURL = nil
           }
           continuation.resume()
         }
       }
-      _ = await services.audio()?.settled()
       throw error
     }
   }
@@ -236,16 +226,14 @@ public final class MediaCamera: @unchecked Sendable {
     MediaError.Camera(reason: reason, detail: cameraRefusalText(reason: reason), recordedMs: recordedMs)
   }
 
-  private static func microphoneReason(_ availability: MicrophoneAvailability) -> CameraRefusal {
-    switch availability {
-    case .ownCall, .externalCall: return .inCall
+  private static func microphoneReason(_ reason: RecordingRefusal) -> CameraRefusal {
+    switch reason {
+    case .inCall: return .inCall
+    case .interrupted: return .interrupted
+    case .microphoneSilent: return .microphoneSilent
     case .permissionDenied: return .permissionDenied
-    case .available, .otherApp: return .microphoneBusy
+    case .microphoneBusy: return .microphoneBusy
     }
-  }
-
-  private static func microphoneRefusal(_ availability: MicrophoneAvailability) -> MediaError {
-    refusal(microphoneReason(availability))
   }
 
   private func post(_ event: CaptureEvent) {
@@ -347,8 +335,6 @@ public final class MediaCamera: @unchecked Sendable {
       recordingURL = url
       clipInfo = nil
       backend.beginRecording(to: url, profile: profile, lens: run.state.lens)
-      let callId = callId
-      if !calls.register(callId, { [weak self] in self?.callStarted() }) { callStarted() }
     case .endRecording:
       backend.endRecording()
     case .readClip:
@@ -366,7 +352,6 @@ public final class MediaCamera: @unchecked Sendable {
 
   private func teardownHardware() {
     backend.unbind()
-    calls.unregister(callId)
     reading?.cancel()
     reading = nil
     if let url = recordingURL { try? FileManager.default.removeItem(at: url) }
@@ -379,16 +364,44 @@ public final class MediaCamera: @unchecked Sendable {
     sessionHold = nil
     if let audio = audioHold {
       audioHold = nil
-      audio.release()
+      audio.end()
     }
   }
 
-  private func callStarted() {
+  private func audioRevoked(_ reason: RecordingRefusal, ticket: RecordingTicket) {
     queue.async {
-      self.audioHold?.release()
+      guard self.audioHold === ticket else { return }
       self.audioHold = nil
       self.apply(.callStarted)
     }
+  }
+
+  private func watch(_ ticket: RecordingTicket) {
+    Task { [weak self] in
+      for await reason in ticket.revoked { self?.audioRevoked(reason, ticket: ticket) }
+    }
+  }
+
+  private func ensureAudioTicket() async throws {
+    let needed = await withCheckedContinuation { continuation in
+      queue.async { continuation.resume(returning: self.audioHold == nil) }
+    }
+    guard needed else { return }
+    guard let link = services.link() else { throw Self.refusal(.notReady) }
+    let ticket: RecordingTicket
+    switch await link.admit(.video) {
+    case let .success(value): ticket = value
+    case let .failure(reason): throw Self.refusal(Self.microphoneReason(reason))
+    }
+    let accepted = await withCheckedContinuation { continuation in
+      queue.async {
+        guard self.audioHold == nil, self.engaged else { continuation.resume(returning: false); return }
+        self.audioHold = ticket
+        self.watch(ticket)
+        continuation.resume(returning: true)
+      }
+    }
+    if !accepted { ticket.end(); throw Self.refusal(.notReady) }
   }
 
   private func failWaiters() {
@@ -413,38 +426,29 @@ public final class MediaCamera: @unchecked Sendable {
           return
         }
       }
-      var session: MediaRecordingHold?
-      if needsAudio, let audio = services.audio() {
-        let availability = audio.microphone.current
-        guard availability == .available else {
+      var session: RecordingTicket?
+      if needsAudio {
+        guard let link = services.link() else {
           release?()
-          self.queue.async { if self.epoch == current { self.apply(.refuse(reason: Self.microphoneReason(availability))) } }
+          self.queue.async { if self.epoch == current { self.apply(.refuse(reason: .notReady)) } }
           return
         }
-        let hold: MediaRecordingHold
-        do { hold = try await audio.acquireRecording() }
-        catch {
+        switch await link.admit(.video) {
+        case let .success(ticket): session = ticket
+        case let .failure(reason):
           release?()
-          let reason = (error as? RecordingUnavailable).map { Self.microphoneReason($0.availability) } ?? .notReady
-          self.queue.async { if self.epoch == current { self.apply(.refuse(reason: reason)) } }
+          self.queue.async { if self.epoch == current { self.apply(.refuse(reason: Self.microphoneReason(reason))) } }
           return
         }
-        session = hold
       }
       self.queue.async {
         guard self.epoch == current else {
           release?()
-          session?.release()
+          session?.end()
           return
         }
         if let release { self.sessionHold = release }
-        if let session { self.audioHold = session }
-        if session != nil && !self.calls.register(self.callId, { [weak self] in self?.callStarted() }) {
-          self.audioHold?.release()
-          self.audioHold = nil
-          self.apply(.refuse(reason: .inCall))
-          return
-        }
+        if let session { self.audioHold = session; self.watch(session) }
         self.backend.bind(lens: lens, profile: self.profile)
         self.installTap()
       }
@@ -531,12 +535,10 @@ public final class MediaCamera: @unchecked Sendable {
     }
     recordingURL = nil
     clipInfo = nil
-    if audioHold == nil { calls.unregister(callId) }
     ended = .success(CapturedClip(url: url, durationMs: length, frame: info.frame, lens: run.state.lens))
   }
 
   private func discard() {
-    if audioHold == nil { calls.unregister(callId) }
     reading?.cancel()
     reading = nil
     if let url = recordingURL { try? FileManager.default.removeItem(at: url) }

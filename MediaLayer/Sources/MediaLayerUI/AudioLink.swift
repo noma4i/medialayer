@@ -16,19 +16,20 @@ public enum MediaCallKind: Sendable {
 }
 
 final class AudioLink: @unchecked Sendable {
-  private let core: MediaLayer
+  private weak var core: MediaLayer?
   private let ports: AudioPorts
   private let inbox = DispatchQueue(label: "MediaLayer.audio.inbox")
   private let sessionQueue = DispatchQueue(label: "MediaLayer.audio.session")
   private var next: UInt64 = 0
   private var closed = false
   private var pending: [UInt64: CheckedContinuation<Result<RecordingTicket, RecordingRefusal>, Never>] = [:]
-  private var tickets: [UInt64: RecordingTicket] = [:]
+  private var tickets: [UInt64: WeakRecordingTicket] = [:]
   private var calls: [UInt64: AsyncStream<CallState>.Continuation] = [:]
   private var unmanagedSpeakers: [UInt64: Bool] = [:]
   private var availabilitySinks: [UUID: AsyncStream<MicrophoneAvailability>.Continuation] = [:]
   private var currentAvailability: MicrophoneAvailability = .available
   private var tasks: [Task<Void, Never>] = []
+  var setVolumeMultiplier: @Sendable (Float) -> Void = { _ in }
 
   init(core: MediaLayer, ports: AudioPorts) {
     self.core = core
@@ -81,6 +82,25 @@ final class AudioLink: @unchecked Sendable {
 
   func audible(slot: UInt64, _ on: Bool) { send(.audible(slot: slot, on: on)) }
   func microphoneFlow(_ flowing: Bool) { send(.microphoneFlow(flowing: flowing)) }
+  func readVolume() async -> MediaVolumeReading {
+    await withCheckedContinuation { continuation in
+      inbox.async {
+        let id = self.allocate()
+        self.process(.volumeReadStarted(id: id))
+        self.sessionQueue.async {
+          let initial = self.ports.session.outputVolume()
+          let changes = self.ports.session.volumeChanges()
+          let (stream, sink) = AsyncStream<Float>.makeStream()
+          let task = Task { for await volume in changes { sink.yield(volume) }; sink.finish() }
+          sink.onTermination = { [weak self] _ in
+            task.cancel()
+            self?.send(.volumeReadEnded(id: id))
+          }
+          continuation.resume(returning: MediaVolumeReading(initial: initial, changes: stream))
+        }
+      }
+    }
+  }
   func foreground(_ on: Bool) {
     if on { send(.permission(granted: ports.permission.granted())) }
     send(.foreground(on: on))
@@ -92,9 +112,9 @@ final class AudioLink: @unchecked Sendable {
     inbox.async {
       if self.unmanagedSpeakers[id] != nil {
         self.unmanagedSpeakers[id] = on
-        self.overrideSpeaker(on)
       }
       self.process(.callSpeaker(id: id, speaker: on))
+      if self.unmanagedSpeakers[id] != nil { self.overrideSpeaker(on) }
     }
   }
 
@@ -113,7 +133,7 @@ final class AudioLink: @unchecked Sendable {
       self.tasks.removeAll()
       self.pending.values.forEach { $0.resume(returning: .failure(.microphoneBusy)) }
       self.pending.removeAll()
-      self.tickets.values.forEach { $0.revoke(.interrupted) }
+      self.tickets.values.forEach { $0.value?.revoke(.interrupted) }
       self.tickets.removeAll()
       self.calls.values.forEach { $0.finish() }
       self.calls.removeAll()
@@ -126,7 +146,7 @@ final class AudioLink: @unchecked Sendable {
 
   private func process(_ input: AudioInput) {
     guard !closed else { return }
-    guard let actions = try? core.audio(input: input) else {
+    guard let actions = try? core?.audio(input: input) else {
       if case let .capture(id, _) = input { pending.removeValue(forKey: id)?.resume(returning: .failure(.microphoneBusy)) }
       return
     }
@@ -150,17 +170,18 @@ final class AudioLink: @unchecked Sendable {
         }
       case let .admit(id):
         let ticket = RecordingTicket(id: id, link: self)
-        tickets[id] = ticket
+        tickets[id] = WeakRecordingTicket(value: ticket)
         pending.removeValue(forKey: id)?.resume(returning: .success(ticket))
       case let .refuse(id, reason): pending.removeValue(forKey: id)?.resume(returning: .failure(reason))
-      case let .revoke(id, reason): tickets.removeValue(forKey: id)?.revoke(reason)
+      case let .revoke(id, reason): tickets.removeValue(forKey: id)?.value?.revoke(reason)
       case let .callState(id, state):
         calls[id]?.yield(state)
         if state == .ended { calls.removeValue(forKey: id)?.finish() }
       case let .availability(value):
         currentAvailability = value
         availabilitySinks.values.forEach { $0.yield(value) }
-      case .volumeMultiplier, .pauseAll, .forgetPaused, .callHold, .resumePaused: break
+      case let .volumeMultiplier(value): setVolumeMultiplier(value)
+      case .pauseAll, .forgetPaused, .callHold, .resumePaused: break
       }
     }
   }
@@ -182,6 +203,10 @@ final class AudioLink: @unchecked Sendable {
   private func overrideSpeaker(_ on: Bool) {
     sessionQueue.async { try? self.ports.session.overrideSpeaker(on) }
   }
+}
+
+private struct WeakRecordingTicket {
+  weak var value: RecordingTicket?
 }
 
 final class RecordingTicket: @unchecked Sendable {

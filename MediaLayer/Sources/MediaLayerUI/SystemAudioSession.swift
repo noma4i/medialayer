@@ -4,6 +4,10 @@ import Foundation
 import MediaLayer
 
 struct SystemAudioSession: AudioSessionPort {
+  private let rest: SessionPlan
+
+  init(focus: AudioFocus) { rest = .of(.playback(focus: focus)) }
+
   func systemEvents() -> AsyncStream<SystemAudioEvent> {
     AsyncStream { continuation in
       let center = NotificationCenter.default
@@ -54,6 +58,7 @@ struct SystemAudioSession: AudioSessionPort {
   func deactivate() throws {
     do {
       try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+      try AVAudioSession.sharedInstance().setCategory(rest.category, mode: rest.mode, options: rest.options)
     } catch {
       let value = error as NSError
       if value.domain == NSOSStatusErrorDomain && value.code == AVAudioSession.ErrorCode.isBusy.rawValue { throw AudioSessionBusy() }
@@ -83,7 +88,7 @@ private final class VolumeObservation: @unchecked Sendable {
   func invalidate() { token.invalidate() }
 }
 
-struct SystemMicrophonePermission: MicrophonePermissionPort {
+struct SystemRecordingPermission: MicrophonePermissionPort {
   func granted() -> Bool { AVAudioApplication.shared.recordPermission == .granted }
 }
 
