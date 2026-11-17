@@ -23,7 +23,8 @@ class VoiceTakeTest {
   private class Writer(val failOpen: Boolean = false, val failAppend: Boolean = false) : VoiceFileWriter {
     val calls = ArrayList<String>()
     var done: ((Result<Long>) -> Unit)? = null
-    override fun open(file: File, settings: VoiceEncoderSettings) { calls += "open"; if (failOpen) error("writer is not ready"); file.writeText("m4a") }
+    override fun prepare(settings: VoiceEncoderSettings, ready: (Result<Unit>) -> Unit) = Unit
+    override fun open(file: File) { calls += "open"; if (failOpen) error("writer is not ready"); file.writeText("m4a") }
     override fun append(chunk: PcmChunk) { calls += "append"; if (failAppend) error("no free input") }
     override fun finish(done: (Result<Long>) -> Unit) { calls += "finish"; this.done = done }
     override fun cancel() { calls += "cancel" }
@@ -111,13 +112,13 @@ class VoiceTakeTest {
     end(take)
     take.pcm(chunk())
     assertEquals(1, events.size)
-    assertEquals(emptyList<String>(), writer.calls)
+    assertEquals(listOf("cancel"), writer.calls)
     assertFalse(file.exists())
   }
 
   @Test
   fun aWriterThatIsNotReadyAndAPcmOfAnotherFormatAreOneFailureAndNoFile() {
-    listOf(Writer(failOpen = true) to listOf("open"), Writer(failAppend = true) to listOf("open", "append", "cancel")).forEach { (broken, calls) ->
+    listOf(Writer(failOpen = true) to listOf("open", "cancel"), Writer(failAppend = true) to listOf("open", "append", "cancel")).forEach { (broken, calls) ->
       events.clear()
       take(broken).apply { pcm(chunk()); pcm(chunk()) }
       assertEquals(listOf("failed"), events)
@@ -127,7 +128,7 @@ class VoiceTakeTest {
     events.clear()
     take().pcm(chunk(spec = spec.copy(sampleRate = 48_000)))
     assertEquals(listOf("failed"), events)
-    assertFalse(writer.calls.contains("open"))
+    assertEquals(listOf("cancel"), writer.calls)
   }
 
   @Test

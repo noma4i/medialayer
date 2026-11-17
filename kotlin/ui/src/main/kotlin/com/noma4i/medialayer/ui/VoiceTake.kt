@@ -44,7 +44,7 @@ internal class VoiceTake(
     val first = state == State.WAITING
     try {
       require(matches(chunk)) { "PCM does not match the voice encoder" }
-      if (first) writer.open(file, settings)
+      if (first) writer.open(file)
       state = State.OPEN
       writer.append(chunk)
     } catch (error: Throwable) {
@@ -82,7 +82,7 @@ internal class VoiceTake(
 
   private fun end(outcome: (VoiceTakeListener) -> Unit) {
     if (state == State.ENDED) return
-    if (state == State.OPEN) writer.cancel()
+    writer.cancel()
     state = State.ENDED
     file.delete()
     events += outcome
