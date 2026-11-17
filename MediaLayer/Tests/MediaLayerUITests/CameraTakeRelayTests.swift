@@ -134,6 +134,7 @@ struct CameraTakeRelayTests {
       ticket.revoke(.inCall)
       rig.open(fixture)
       #expect(await rig.nextRefusal() == .inCall)
+      #expect(await rig.next() == flow)
       expected = [flow] + expected
       await record(rig, fixture, url: last)
     case .cancelledMidTake:
