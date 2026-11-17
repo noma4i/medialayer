@@ -183,8 +183,8 @@ class CameraNativeDeviceTest {
     }
   }
 
-  private fun record(audio: Boolean, damage: Damage? = null) = runBlocking {
-    val profile = captureProfile(CaptureKind.MOMENT).copy(audio = audio)
+  private fun record(audio: Boolean, damage: Damage? = null, lens: CameraLens = CameraLens.BACK, kind: CaptureKind = CaptureKind.MOMENT, mirrored: Boolean = false) = runBlocking {
+    val profile = captureProfile(kind).copy(audio = audio).let { if (mirrored) it.copy(mirrorFrontVideo = true) else it }
     val failures = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { Media.failures.collect { reported.add(it) } }
     val hearing = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { checkNotNull(layer).microphoneAvailability.collect { heard.value += it } }
     val composed = CompletableDeferred<MediaCamera>()
@@ -193,7 +193,7 @@ class CameraNativeDeviceTest {
       activity.setContentView(ComposeView(activity).apply {
         setContent {
           MediaLayerProvider(checkNotNull(opened)) {
-            val made = remember { MediaCamera(profile, CameraLens.BACK, CameraXBackend(context), diagnosing(damage)) }
+            val made = remember { MediaCamera(profile, lens, CameraXBackend(context), diagnosing(damage)) }
             DisposableEffect(made) { onDispose { made.close() } }
             LaunchedEffect(made) { composed.complete(made) }
             MediaCameraPreview(made, Modifier.fillMaxSize())
@@ -246,6 +246,9 @@ class CameraNativeDeviceTest {
 
   @Test
   fun two_takes_with_sound_are_two_mp4_files_with_video_and_aac_packets() = record(audio = true)
+
+  @Test
+  fun two_circle_takes_from_the_front_camera_with_the_mirror_are_two_mp4_files_with_video_and_aac_packets() = record(audio = true, lens = CameraLens.FRONT, kind = CaptureKind.CIRCLE, mirrored = true)
 
   @Test
   fun two_takes_without_sound_are_two_mp4_files_with_video_packets_only() = record(audio = false)
