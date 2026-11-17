@@ -48,7 +48,7 @@ internal class VoiceTake(
       state = State.OPEN
       writer.append(chunk)
     } catch (error: Throwable) {
-      return@transition end { it.onFailed(failure(error)) }
+      return@transition end { it.onFailed(voiceFailure(error)) }
     }
     if (first) events += { it.onStarted() }
     frames += chunk.frames
@@ -67,14 +67,14 @@ internal class VoiceTake(
 
   fun lost() = transition { if (state == State.FINISHING) pending = pending ?: { it.onLost() } else end { it.onLost() } }
 
-  fun fail(error: Throwable) = fail(failure(error))
+  fun fail(error: Throwable) = fail(voiceFailure(error))
 
   fun fail(failure: NativeFailure) = transition { if (state == State.FINISHING) pending = pending ?: { it.onFailed(failure) } else end { it.onFailed(failure) } }
 
   private fun complete(result: Result<Long>) = transition {
     if (state != State.FINISHING) return@transition
     val done = result.getOrNull()
-    val failed: ((VoiceTakeListener) -> Unit)? = result.exceptionOrNull()?.let { error -> { it.onFailed(failure(error)) } }
+    val failed: ((VoiceTakeListener) -> Unit)? = result.exceptionOrNull()?.let { error -> { it.onFailed(voiceFailure(error)) } }
     val outcome = pending ?: failed
     state = State.ENDED
     if (outcome == null) events += { it.onFinished(file, done!!) } else { file.delete(); events += outcome }
@@ -97,11 +97,11 @@ internal class VoiceTake(
     }
   }
 
-  private fun failure(error: Throwable) = NativeFailure(FailureSource.RECORDER, "android.media.MediaCodec", 0, error.message ?: error.javaClass.name)
-
   private fun matches(chunk: PcmChunk): Boolean {
     val channels = Integer.bitCount(chunk.spec.channelMask)
     return chunk.spec.encoding == AudioFormat.ENCODING_PCM_16BIT && chunk.spec.sampleRate.toLong() == settings.sampleRateHz.toLong() &&
       channels.toLong() == settings.channels.toLong() && chunk.frames > 0 && chunk.data.remaining() == chunk.frames * channels * 2
   }
 }
+
+internal fun voiceFailure(error: Throwable) = NativeFailure(FailureSource.RECORDER, "android.media.MediaCodec", 0, error.message ?: error.javaClass.name)

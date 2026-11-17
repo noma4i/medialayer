@@ -29,6 +29,8 @@ internal class CameraAudioInput(
   private val spec: PcmSpec,
   private val tap: CameraAudioTap,
   private val issue: (CaptureAudioIssue) -> Unit,
+  kind: RecordingKind = RecordingKind.VIDEO,
+  private val failed: (NativeFailure) -> Unit = { Media.recordNativeFailure(it) },
   microphone: (RecordingAudioListener) -> CameraMicrophone
 ) : AudioInputOwner, RecordingAudioListener, AutoCloseable {
   private class Live(val core: ULong, val audio: Long)
@@ -38,7 +40,7 @@ internal class CameraAudioInput(
   private var live: Live? = null
   private var closed = false
   private var input: AudioInputHandle? = null
-  private val opened = link.openInput(RecordingKind.VIDEO, this)
+  private val opened = link.openInput(kind, this)
 
   val audioGeneration: Long? get() = synchronized(lock) { live?.audio }
 
@@ -49,7 +51,7 @@ internal class CameraAudioInput(
       live?.let { microphone.stop(it.audio) }
       live = null
       live = try { Live(generation, microphone.start(spec)) } catch (error: Exception) {
-        Media.recordNativeFailure(FailureSource.RECORDER, error)
+        failed(NativeFailure(FailureSource.RECORDER, error.javaClass.name, 0L, error.message ?: error.toString()))
         issue(CaptureAudioIssue.SOURCE_ERROR)
         input.restoreFailed(generation)
         null
@@ -74,7 +76,7 @@ internal class CameraAudioInput(
 
   override fun onFailed(generation: Long, failure: NativeFailure) = whileLive(generation) { handle, core ->
     live = null
-    Media.recordNativeFailure(failure)
+    failed(failure)
     issue(CaptureAudioIssue.SOURCE_ERROR)
     handle.restoreFailed(core)
   }
