@@ -128,10 +128,26 @@ class VoiceInputTest {
     assertFalse("a lost take leaves no file", file.exists())
     microphoneListener.onPcm(chunk(1))
     assertEquals("an old generation reaches nothing", listOf("prepare", "open", "append 1", "cancel"), writer.calls.toList())
-    microphoneListener.onPcm(chunk(2))
+    microphoneListener.onPcm(chunk(2, 16_384))
+    assertEquals("a PCM after the end feeds no peak", 0f, input.peak(), 0f)
     await("the next healthy PCM closes the owner") { microphone.calls == listOf("start 1", "stop 1", "start 2", "stop 2", "close") }
     assertEquals("no new take", listOf("started", "lost"), events.toList())
     assertEquals(listOf("prepare", "open", "append 1", "cancel"), writer.calls.toList())
+  }
+
+  @Test
+  fun a_loss_while_waiting_for_the_first_pcm_is_told_once_with_no_file_and_the_next_healthy_pcm_closes_the_owner() {
+    val input = input()
+    started(input)
+    microphoneListener.onSilenced(1, true)
+    await("lost, the restore is the core's") { events == listOf("lost") && microphone.calls == listOf("start 1", "stop 1", "start 2") }
+    microphoneListener.onSilenced(1, true)
+    microphoneListener.onPcm(chunk(2, 16_384))
+    await("the next healthy PCM closes the owner") { microphone.calls == listOf("start 1", "stop 1", "start 2", "stop 2", "close") }
+    assertEquals("no take, no peak", 0f, input.peak(), 0f)
+    assertEquals(listOf("lost"), events.toList())
+    assertEquals(listOf("prepare", "cancel"), writer.calls.toList())
+    assertFalse(file.exists())
   }
 
   @Test

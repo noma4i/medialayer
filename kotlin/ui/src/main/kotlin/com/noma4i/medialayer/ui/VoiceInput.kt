@@ -7,8 +7,7 @@ import java.io.File
 import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicInteger
 
-// One voice take over the input owner of the audio core: the codec is prepared without a file, the owner starts the microphone only after it is ready, and the take opens on the first live PCM of one generation.
-// A lost take is told once and the owner stays for the restore the core allows: the next healthy PCM of a later generation closes it and starts no take. Every other end closes the owner; the failure leaves once through `VoiceTakeListener.onFailed(NativeFailure)`: its owner records it.
+// One phase owner: PREPARING -> WAITING (owner open, no take) -> TAKING -> LOST (told once, owner lingers until the next healthy PCM) -> CLOSED; every transition and the owner's registration happen under one lock, every call out of it.
 internal class VoiceInput(
   private val link: AudioLink,
   private val spec: PcmSpec,
@@ -19,64 +18,73 @@ internal class VoiceInput(
   private val listener: VoiceTakeListener,
   private val microphone: (RecordingAudioListener) -> CameraMicrophone
 ) : CameraAudioTap, AutoCloseable {
+  private enum class Phase { PREPARING, WAITING, TAKING, LOST, CLOSED }
+
   private val lock = Any()
   private val peakBits = AtomicInteger()
+  private var phase = Phase.PREPARING
   private var owner: CameraAudioInput? = null
-  @Volatile private var take: VoiceTake? = null
+  private var take: VoiceTake? = null
   private var generation = -1L
-  private var ended = false
-  private var released = false
 
   private val out = object : VoiceTakeListener {
     override fun onStarted() = listener.onStarted()
     override fun onLimit() = listener.onLimit()
-    override fun onFinished(file: File, durationUs: Long) = end(true) { listener.onFinished(file, durationUs) }
-    override fun onFailed(failure: NativeFailure) = end(true) { listener.onFailed(failure) }
-    override fun onCancelled() = end(true) { listener.onCancelled() }
-    override fun onLost() = end(false) { listener.onLost() }
+    override fun onFinished(file: File, durationUs: Long) { if (leave(Phase.CLOSED, Phase.TAKING)) { release(); listener.onFinished(file, durationUs) } }
+    override fun onFailed(failure: NativeFailure) { if (leave(Phase.CLOSED, Phase.TAKING)) { release(); listener.onFailed(failure) } }
+    override fun onCancelled() { if (leave(Phase.CLOSED, Phase.TAKING)) { release(); listener.onCancelled() } }
+    override fun onLost() { if (leave(Phase.LOST, Phase.TAKING)) listener.onLost() }
   }
 
   /** The linear peak 0 to 1 of the take's PCM since the last call. */
   fun peak(): Float = peakBits.getAndSet(0) / 32768f
 
   fun start() {
-    try { writer.prepare(settings, ::prepared, ::writerFailed) } catch (error: Throwable) { withoutTake { it.onFailed(voiceFailure(error)) } }
+    try { writer.prepare(settings, ::prepared, { fail(voiceFailure(it)) }) } catch (error: Throwable) { fail(voiceFailure(error)) }
   }
 
-  fun finish() { take?.finish() ?: cancel() }
+  fun finish() {
+    val current = synchronized(lock) { if (phase == Phase.TAKING) take else null }
+    if (current != null) current.finish() else cancel()
+  }
 
   fun cancel() {
-    take?.cancel() ?: withoutTake { it.onCancelled() }
+    route({ endWaiting { it.onCancelled() } }, { it.cancel() }, { leave(Phase.CLOSED, Phase.LOST) })
     release()
   }
 
   override fun close() = cancel()
 
   private fun prepared(result: Result<Unit>) {
-    result.exceptionOrNull()?.let { return withoutTake { out -> out.onFailed(voiceFailure(it)) } }
-    if (synchronized(lock) { ended }) return
-    val made = CameraAudioInput(link, spec, this, ::issue, RecordingKind.VOICE, ::sourceFailed, microphone)
-    val stale = synchronized(lock) { if (released) true else { owner = made; false } }
-    if (stale) made.close()
+    result.exceptionOrNull()?.let { return fail(voiceFailure(it)) }
+    synchronized(lock) {
+      if (phase != Phase.PREPARING) return
+      owner = CameraAudioInput(link, spec, this, ::issue, RecordingKind.VOICE, ::fail, microphone)
+      phase = Phase.WAITING
+    }
   }
 
-  private fun issue(issue: CaptureAudioIssue) { if (issue == CaptureAudioIssue.SILENCED) take?.lost() }
+  private fun issue(issue: CaptureAudioIssue) {
+    if (issue == CaptureAudioIssue.SILENCED) route({ leave(Phase.LOST, Phase.PREPARING, Phase.WAITING).also { if (it) { writer.cancel(); listener.onLost() } } }, { it.lost() })
+  }
 
-  private fun writerFailed(error: Throwable) = sourceFailed(voiceFailure(error))
-
-  private fun sourceFailed(failure: NativeFailure) { take?.fail(failure) ?: withoutTake { it.onFailed(failure) } }
+  private fun fail(failure: NativeFailure) {
+    route({ endWaiting { it.onFailed(failure) } }, { it.fail(failure) }, { if (leave(Phase.CLOSED, Phase.LOST)) release() })
+  }
 
   override fun onTimebase(generation: Long, originNanos: Long) = Unit
 
   override fun onPcm(chunk: PcmChunk) {
-    val (current, later) = synchronized(lock) {
-      when {
-        take == null && !ended -> VoiceTake(chunk.generation, file, settings, limitUs, writer, out).also { take = it; generation = chunk.generation } to false
-        chunk.generation == generation -> take to false
-        else -> null to ended
+    var healthyAfterLoss = false
+    val current = synchronized(lock) {
+      when (phase) {
+        Phase.WAITING -> VoiceTake(chunk.generation, file, settings, limitUs, writer, out).also { take = it; generation = chunk.generation; phase = Phase.TAKING }
+        Phase.TAKING -> take.takeIf { chunk.generation == generation }
+        Phase.LOST -> null.also { healthyAfterLoss = true; phase = Phase.CLOSED }
+        else -> null
       }
     }
-    if (later) release()
+    if (healthyAfterLoss) release()
     current?.let { record(chunk); it.pcm(chunk) }
   }
 
@@ -87,21 +95,30 @@ internal class VoiceInput(
     peakBits.accumulateAndGet(peak, ::maxOf)
   }
 
-  // An end without a take holds the prepared codec: it is released with the end, never left to the owner's life.
-  private fun withoutTake(event: (VoiceTakeListener) -> Unit) {
-    if (take != null) return
-    writer.cancel()
-    event(out)
+  private fun route(waiting: () -> Boolean, taking: (VoiceTake) -> Unit, lost: () -> Unit = {}) {
+    while (true) {
+      val (now, current) = synchronized(lock) { phase to take }
+      when (now) {
+        Phase.PREPARING, Phase.WAITING -> if (waiting()) return
+        Phase.TAKING -> return taking(current!!)
+        Phase.LOST -> return lost()
+        Phase.CLOSED -> return
+      }
+    }
   }
 
-  private fun end(release: Boolean, deliver: () -> Unit) {
-    synchronized(lock) { if (ended) return; ended = true }
-    if (release) release()
-    deliver()
+  private fun endWaiting(event: (VoiceTakeListener) -> Unit): Boolean {
+    if (!leave(Phase.CLOSED, Phase.PREPARING, Phase.WAITING)) return false
+    writer.cancel()
+    release()
+    event(listener)
+    return true
   }
+
+  private fun leave(to: Phase, vararg from: Phase): Boolean = synchronized(lock) { (phase in from).also { if (it) phase = to } }
 
   private fun release() {
-    val last = synchronized(lock) { if (released) null else { released = true; owner.also { owner = null } } }
+    val last = synchronized(lock) { owner.also { owner = null } }
     last?.close()
   }
 }
