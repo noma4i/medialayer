@@ -37,7 +37,7 @@ While a place plays, the core samples its player and reloads it when the positio
 | Interface | Purpose |
 | --------- | ------- |
 | `Fetcher` | Network access: `fetch(request)` returns the status, the headers and a `BodyReader`. `range_start` and `range_end` follow HTTP: both ends are included. Ready-made: `URLSessionFetcher` on Swift, `OkHttpFetcher` on Kotlin |
-| `BodyReader` | Reads the body in chunks with `nextChunk()`. The core calls `release()` when the body ends or is dropped |
+| `BodyReader` | Reads the body in chunks with `nextChunk()`. The ready-made fetchers read the network into a bounded queue and hand over every byte already received, up to 64 KiB, per call. The core calls `release()` when the body ends or is dropped |
 | `SettingsStore` | Local storage for saved limits (read, write, remove a string by key). Ready-made: `UserDefaultsSettings`, `SharedPreferencesSettings` |
 | `PlayerSlotFactory` | Creates the native player of a slot. `create` is `async`: it may wait for the native thread |
 | `PlayerSlot` | `apply(command)` is `async` and returns after the native player took the `SlotCall` (`load`, `unload`, `preroll`, `play`, `pause`, `mute`, `unmute`, `attach`, `detach`, `seek`, `rate`, `readahead`). The core sends one command at a time per slot. `dispose` is `async` and returns after the native player is destroyed: observers, notifications, view, audio and source are gone, and the thread the slot owns has ended. The core calls it once for every player it created, when the pool shrinks and when the MediaLayer closes. A second `dispose` does nothing and a command after it is ignored. `sample` returns a ready snapshot. `load` carries the generation of the load. `PlaybackRoute` says whether the source is HLS and whether it loops |
