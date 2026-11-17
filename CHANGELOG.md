@@ -68,6 +68,7 @@
 
 - Android camera video on devices whose camera profile asks for an AAC profile no encoder declares (Samsung A16 front): the take uses AAC-LC like CameraX instead of failing with `CONFIGURE_FAILED`.
 - A lens change while the camera is failed starts a new attempt with that lens and clears the fault (iOS and Android).
+- Android camera: a microphone restart after the capture session closed no longer reports `the capture memory is closed` as a recorder failure; the microphone leases the memory of the current session, ends quietly when that session is closed, and the memory closes after the audio input and the take.
 - Response bodies reach the core in pieces of up to 64 KiB instead of single network reads.
 - An Android camera switched with the flash on becomes ready and lights the torch on the new lens.
 - A place that starts playing while a camera preview or recording holds the session plays at once.
