@@ -23,10 +23,10 @@ struct StreamingOrderTests {
   @Test
   func inv_memory_07_read_chunks_release_their_storage_before_compaction() async throws {
     let released = ReleasedChunks()
-    let body = StreamingBody(limit: 1 << 20, pause: {}, resume: {}, cancel: {})
+    let body = StreamingBody(limit: 16 << 20, pause: {}, resume: {}, cancel: {})
     for _ in 0..<128 {
-      let memory = UnsafeMutableRawPointer.allocate(byteCount: 1024, alignment: 16)
-      body.receive(Data(bytesNoCopy: memory, count: 1024, deallocator: .custom { pointer, _ in
+      let memory = UnsafeMutableRawPointer.allocate(byteCount: 65536, alignment: 16)
+      body.receive(Data(bytesNoCopy: memory, count: 65536, deallocator: .custom { pointer, _ in
         pointer.deallocate()
         released.record()
       }))
@@ -39,14 +39,26 @@ struct StreamingOrderTests {
 
   @Test
   func inv_proxy_06_chunk_queue_moves_at_most_linear_elements() async throws {
-    let body = StreamingBody(limit: 8192, pause: {}, resume: {}, cancel: {})
-    for index in 0 ..< 4096 { body.receive(Data([UInt8(index % 256)])) }
+    let body = StreamingBody(limit: 1 << 20, pause: {}, resume: {}, cancel: {})
+    let count = 4 * 65536 + 100
+    for index in 0 ..< count { body.receive(Data([UInt8(index % 256)])) }
     body.finish(nil)
-    for index in 0 ..< 4096 {
-      #expect(try await body.nextChunk() == Data([UInt8(index % 256)]))
-    }
-    #expect(try await body.nextChunk() == nil)
-    #expect(body.shiftedChunks <= 4096)
+    var read = 0
+    while let chunk = try await body.nextChunk() { read += chunk.count }
+    #expect(read == count)
+    #expect(body.shiftedChunks <= count)
+  }
+
+  @Test
+  func inv_proxy_44_ready_body_bytes_cross_in_64_kib_chunks() async throws {
+    let body = StreamingBody(limit: 2 << 20, pause: {}, resume: {}, cancel: {})
+    let payload = Data((0 ..< (1 << 20)).map { UInt8($0 % 251) })
+    for start in stride(from: 0, to: payload.count, by: 8192) { body.receive(payload[start ..< start + 8192]) }
+    body.finish(nil)
+    var chunks: [Data] = []
+    while let chunk = try await body.nextChunk() { chunks.append(chunk) }
+    #expect(chunks.map(\.count) == Array(repeating: 65536, count: 16))
+    #expect(chunks.reduce(Data(), +) == payload)
   }
 
   @Test

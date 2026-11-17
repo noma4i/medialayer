@@ -128,17 +128,17 @@ struct URLSessionFetcherTests {
   @Test
   func bodyPausesTheDownloadAtTheLimitAndResumesAfterDraining() async throws {
     let events = BodyEvents()
-    let body = StreamingBody(limit: 100, pause: events.paused, resume: events.resumed, cancel: {})
+    let body = StreamingBody(limit: 100_000, pause: events.paused, resume: events.resumed, cancel: {})
 
-    body.receive(Data(count: 60))
-    body.receive(Data(count: 60))
-    body.receive(Data(count: 60))
+    body.receive(Data(count: 40_000))
+    body.receive(Data(count: 40_000))
+    body.receive(Data(count: 40_000))
     #expect(events.counts == (1, 0))
-    _ = try await body.nextChunk()
+    #expect(try await body.nextChunk()?.count == 40_000)
     #expect(events.counts == (1, 0))
-    _ = try await body.nextChunk()
-    #expect(events.counts == (1, 0))
-    _ = try await body.nextChunk()
+    #expect(try await body.nextChunk()?.count == 40_000)
+    #expect(events.counts == (1, 1))
+    #expect(try await body.nextChunk()?.count == 40_000)
     #expect(events.counts == (1, 1))
   }
 }

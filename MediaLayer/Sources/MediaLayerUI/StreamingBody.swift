@@ -2,6 +2,7 @@ import Foundation
 import MediaLayer
 
 final class StreamingBody: BodyReader, @unchecked Sendable {
+  static let chunkLimit = 64 * 1024
   private let lock = NSLock()
   private let limit: Int
   private let pause: @Sendable () -> Void
@@ -88,9 +89,14 @@ final class StreamingBody: BodyReader, @unchecked Sendable {
     try await withTaskCancellationHandler {
       try await withCheckedThrowingContinuation { continuation in
         lock.lock()
-        if readIndex < chunks.count, let chunk = chunks[readIndex] {
+        if readIndex < chunks.count, var chunk = chunks[readIndex] {
           chunks[readIndex] = nil
           readIndex += 1
+          while readIndex < chunks.count, let next = chunks[readIndex], chunk.count + next.count <= Self.chunkLimit {
+            chunk.append(next)
+            chunks[readIndex] = nil
+            readIndex += 1
+          }
           if readIndex == chunks.count {
             chunks.removeAll(keepingCapacity: true)
             readIndex = 0

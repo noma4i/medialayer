@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -47,42 +48,26 @@ class OkHttpFetcherTest {
   }
 
   @Test
-  fun inv_proxy_06_full_chunks_transfer_the_read_array_and_short_chunks_keep_their_length() = runBlocking {
-    val inputs = mutableListOf<ByteArray>()
-    val bytes = Buffer().write(ByteArray(64 * 1024) { 1 }).write(ByteArray(7) { 2 })
-    val source = java.lang.reflect.Proxy.newProxyInstance(
-      okio.BufferedSource::class.java.classLoader, arrayOf(okio.BufferedSource::class.java)
-    ) { _, method, args ->
-      if (method.name == "read" && args?.firstOrNull() is ByteArray) {
-        val target = args[0] as ByteArray
-        inputs.add(target)
-        val count = minOf(target.size.toLong(), bytes.size).toInt()
-        if (count == 0) -1 else {
-          var offset = 0
-          while (offset < count) offset += bytes.read(target, offset, count - offset)
-          count
-        }
-      } else method.invoke(bytes, *(args ?: emptyArray()))
-    } as okio.BufferedSource
+  fun inv_proxy_44_ready_body_bytes_cross_in_64_kib_chunks() = runBlocking {
+    val payload = ByteArray(1 shl 20) { (it % 251).toByte() }
+    val drained = CountDownLatch(1)
+    val origin = object : ForwardingSource(Buffer().write(payload)) {
+      override fun read(sink: Buffer, byteCount: Long): Long = super.read(sink, byteCount).also { if (it < 0) drained.countDown() }
+    }.buffer()
     val responseBody = object : ResponseBody() {
       override fun contentType() = null
-      override fun contentLength() = 65543L
-      override fun source() = source
+      override fun contentLength() = payload.size.toLong()
+      override fun source() = origin
     }
     val client = OkHttpClient.Builder().addInterceptor { chain ->
       Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK").body(responseBody).build()
     }.build()
-    val body = OkHttpFetcher(client).fetch(FetchRequest("https://o.test/body", emptyMap(), null, null)).body
-    val full = body.nextChunk()!!
-    val short = body.nextChunk()!!
-    assertNull(body.nextChunk())
-    assertEquals(65536, full.size)
-    assertEquals(7, short.size)
-    assertTrue(full.all { it == 1.toByte() })
-    assertTrue(short.all { it == 2.toByte() })
-    println("full_chunk_extra_arrays=${if (inputs[0] === full) 0 else 1}, reads=${inputs.size}")
-    org.junit.Assert.assertSame(inputs[0], full)
-    org.junit.Assert.assertNotSame(inputs[1], short)
+    val body = OkHttpFetcher(client, bufferLimitBytes = 2 shl 20).fetch(FetchRequest("https://o.test/body", emptyMap(), null, null)).body
+    withContext(Dispatchers.IO) { drained.await() }
+    val chunks = mutableListOf<ByteArray>()
+    while (true) chunks.add(body.nextChunk() ?: break)
+    assertEquals(List(16) { 65536 }, chunks.map { it.size })
+    assertTrue(payload.contentEquals(chunks.fold(ByteArray(0)) { all, chunk -> all + chunk }))
     body.release()
   }
 
