@@ -4,7 +4,7 @@ import CoreMedia
 import Foundation
 import MediaLayer
 
-/// The hardware camera: one `AVCaptureSession` with the photo output or the movie output of the profile. Every call runs on its own serial queue, never on Main.
+/// The hardware camera: one `AVCaptureSession` with the photo output of the profile. A video take is written by `CameraTake` from the audio and video data outputs. Every call runs on its own serial queue, never on Main.
 final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
   let session = AVCaptureSession()
   private let queue = DispatchQueue(label: "com.noma4i.medialayer.camera.session")
@@ -13,14 +13,15 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
   private var sink: (@Sendable (CaptureEvent) -> Void)?
   private var camera: AVCaptureDevice?
   private var photoOutput: AVCapturePhotoOutput?
-  private var movieOutput: AVCaptureMovieFileOutput?
+  private var videoMode = false
   private var audioOutput: AVCaptureAudioDataOutput?
   private var audioFlowing = false
   private var audioInterrupted = false
   private var frameOutput: AVCaptureVideoDataOutput?
   private var rotation: AVCaptureDevice.RotationCoordinator?
-  private var recording: MovieDelegate?
-  private var takeID: UUID?
+  private var relay: CameraTakeRelay!
+  private var recordingOutput = false
+  private var stabilization: AVCaptureVideoStabilizationMode?
   private var photoDelegates: [UUID: PhotoDelegate] = [:]
   private var tap: (@Sendable (CVPixelBuffer, UInt64) -> Void)?
   private var chosenPhotoSize: PixelSize?
@@ -31,6 +32,13 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
 
   override init() {
     super.init()
+    relay = CameraTakeRelay(
+      queue: queue, emit: { [weak self] in self?.emit($0) },
+      idle: { [weak self] in
+        self?.recordingOutput = false
+        self?.installFrameOutput()
+      }
+    )
     session.automaticallyConfiguresApplicationAudioSession = false
     let center = NotificationCenter.default
     tokens = [
@@ -114,9 +122,10 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
       }
     }
     let photo = profile.mode == .photo ? AVCapturePhotoOutput() : nil
-    let movie = profile.mode == .video ? AVCaptureMovieFileOutput() : nil
     let audio = profile.audio ? AVCaptureAudioDataOutput() : nil
     audio?.setSampleBufferDelegate(self, queue: queue)
+    relay.cancel()
+    recordingOutput = false
     session.beginConfiguration()
     session.inputs.forEach(session.removeInput)
     session.outputs.forEach(session.removeOutput)
@@ -125,7 +134,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     frameOutput = nil
     var outputs: [AVCaptureOutput] = []
     if let photo { outputs.append(photo) }
-    if let movie { outputs.append(movie) }
     if let audio { outputs.append(audio) }
     let added = inputs.allSatisfy { session.canAddInput($0) } && outputs.allSatisfy { session.canAddOutput($0) }
     guard added else {
@@ -140,14 +148,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
       Media.recordNativeFailure(error, source: .camera)
       choice = nil
     }
-    if let connection = movie?.connection(with: .video) {
-      if connection.isVideoMirroringSupported {
-        connection.automaticallyAdjustsVideoMirroring = false
-        connection.isVideoMirrored = lens == .front && profile.mirrorFrontVideo
-      }
-      let supported = [VideoStabilization.standard, .cinematic].filter { device.activeFormat.isVideoStabilizationModeSupported($0.avMode) }
-      if let mode = stabilizationMode(requested: profile.stabilization, supported: supported) { connection.preferredVideoStabilizationMode = mode.avMode }
-    }
+    let supported = [VideoStabilization.standard, .cinematic].filter { device.activeFormat.isVideoStabilizationModeSupported($0.avMode) }
+    stabilization = profile.mode == .video ? stabilizationMode(requested: profile.stabilization, supported: supported)?.avMode : nil
     videoPort = inputs.first?.ports(for: .video, sourceDeviceType: device.deviceType, sourceDevicePosition: device.position).first
     previews.keys.forEach(linkPreview)
     session.commitConfiguration()
@@ -160,7 +162,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     }
     camera = device
     photoOutput = photo
-    movieOutput = movie
+    videoMode = profile.mode == .video
     audioOutput = audio
     audioFlowing = false
     audioInterrupted = false
@@ -172,7 +174,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     lock.withLock { chosenPhotoSize = choice?.photoSize }
     installFrameOutput()
     if !session.isRunning { session.startRunning() }
-    MediaTrace.emit("camera", "bind audio=\(profile.audio) microphone=\(session.inputs.contains { $0.ports.contains { $0.mediaType == .audio } }) audioConnection=\(movie?.connection(with: .audio).map { "\($0.isEnabled) active=\($0.isActive)" } ?? "none")")
+    MediaTrace.emit("camera", "bind audio=\(profile.audio) microphone=\(session.inputs.contains { $0.ports.contains { $0.mediaType == .audio } }) videoMode=\(profile.mode == .video)")
     let hasFlash = profile.mode == .photo ? device.isFlashAvailable : device.hasTorch
     emit(.opened(hasFlash: hasFlash, zoomMin: Float(device.minAvailableVideoZoomFactor), zoomMax: Float(device.maxAvailableVideoZoomFactor)))
     emit(.streaming(on: session.isRunning))
@@ -247,7 +249,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
 
   func unbind(completion: @escaping @Sendable () -> Void) {
     queue.async {
-      if self.movieOutput?.isRecording == true { self.movieOutput?.stopRecording() }
+      self.relay.cancel()
+      self.recordingOutput = false
       self.session.stopRunning()
       self.session.beginConfiguration()
       self.session.inputs.forEach(self.session.removeInput)
@@ -257,15 +260,14 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
       self.videoPort = nil
       self.camera = nil
       self.photoOutput = nil
-      self.movieOutput = nil
+      self.videoMode = false
+      self.stabilization = nil
       self.audioOutput = nil
       self.audioFlowing = false
       self.audioInterrupted = false
       self.emit(.microphoneFlow(true))
       self.frameOutput = nil
       self.rotation = nil
-      self.recording = nil
-      self.takeID = nil
       completion()
     }
   }
@@ -301,46 +303,46 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
   func beginRecording(to url: URL, profile: CaptureProfile, lens: CameraLens, ticket: RecordingTicket?, refused: @escaping @Sendable (RecordingRefusal) -> Void) {
     queue.async { [weak self] in
       guard let self else { return }
-      guard let output = self.movieOutput, !output.isRecording, self.session.isRunning else { return self.emit(.recordFinished(end: .failed)) }
-      if let connection = output.connection(with: .video) {
-        let angle = self.rotation?.videoRotationAngleForHorizonLevelCapture ?? 90
-        if connection.videoRotationAngle != angle && connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+      guard videoMode, camera != nil, !relay.isActive, session.isRunning else { return emit(.recordFinished(end: .failed)) }
+      recordingOutput = true
+      installFrameOutput()
+      guard let settings = takeSettings(profile: profile, lens: lens) else {
+        Media.recordNativeFailure(NSError(domain: AVFoundationErrorDomain, code: -1), source: .camera)
+        recordingOutput = false
+        installFrameOutput()
+        return emit(.recordFinished(end: .failed))
       }
-      output.maxRecordedDuration = CMTime(value: CMTimeValue(profile.maxDurationMs), timescale: 1000)
-      let takeID = UUID()
-      self.takeID = takeID
-      let delegate = MovieDelegate(onStart: { [weak self] in
-        self?.queue.async {
-          guard let self, self.takeID == takeID else { return }
-          self.emit(.recordStarted)
-          if let ticket, !ticket.isActive { self.endRecording() }
-        }
-      }, onFinish: { [weak self] end, error in
-        self?.queue.async {
-          guard let self, self.takeID == takeID else { return }
-          self.takeID = nil
-          if let error { Media.recordNativeFailure(error, source: .camera) }
-          self.emit(.recordFinished(end: end))
-        }
-      })
-      self.recording = delegate
-      do {
-        if let ticket { try ticket.start { output.startRecording(to: url, recordingDelegate: delegate) } }
-        else { output.startRecording(to: url, recordingDelegate: delegate) }
-      } catch let reason as RecordingRefusal { self.recording = nil; refused(reason) }
-      catch { self.recording = nil; Media.recordNativeFailure(error, source: .camera); refused(.interrupted) }
+      relay.begin(url: url, settings: settings, ticket: ticket, refused: refused)
     }
   }
 
-  func endRecording() {
-    queue.async {
-      if self.movieOutput?.isRecording == true { self.movieOutput?.stopRecording() }
+  /// The writer settings come from the recommended settings of the outputs for the chosen format. The turn and the mirror ride in the transform of the track, `uprightVideo` makes the file upright.
+  private func takeSettings(profile: CaptureProfile, lens: CameraLens) -> CameraTake.Settings? {
+    let fileType = AVFileType.mp4
+    guard let video = frameOutput?.recommendedVideoSettingsForAssetWriter(writingTo: fileType), let clock = session.synchronizationClock else { return nil }
+    var audio: [String: Any]?
+    if profile.audio {
+      guard let settings = audioOutput?.recommendedAudioSettingsForAssetWriter(writingTo: fileType) as? [String: Any] else { return nil }
+      audio = settings
     }
+    var transform = CGAffineTransform(rotationAngle: CGFloat(rotation?.videoRotationAngleForHorizonLevelCapture ?? 90) * .pi / 180)
+    if lens == .front && profile.mirrorFrontVideo { transform = transform.concatenating(CGAffineTransform(scaleX: -1, y: 1)) }
+    let budget = Int(clamping: captureCost(profile: profile))
+    return CameraTake.Settings(
+      video: video, audio: audio, transform: transform, maxDurationMs: profile.maxDurationMs, fileType: fileType,
+      fragmentInterval: Self.fragmentInterval, armPTS: CMClockGetTime(clock), maxPendingAudio: budget, maxPendingVideo: budget,
+      maxHeldAudio: budget, memoryBudgetBytes: budget
+    )
+  }
+
+  private static let fragmentInterval = CMTime(seconds: 10, preferredTimescale: 600)
+
+  func endRecording() {
+    queue.async { self.relay.stop() }
   }
 
   func recordedMs() -> UInt64 {
-    let seconds = movieOutput?.recordedDuration.seconds ?? 0
-    return seconds.isFinite && seconds > 0 ? UInt64(seconds * 1000) : 0
+    relay.recordedMs
   }
 
   func setTorch(_ on: Bool) throws {
@@ -367,7 +369,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
   }
 
   private func installFrameOutput() {
-    if lock.withLock({ tap }) == nil {
+    if lock.withLock({ tap }) == nil && !recordingOutput {
       guard let output = frameOutput else { return }
       session.beginConfiguration()
       session.removeOutput(output)
@@ -383,6 +385,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     if session.canAddOutput(output) {
       session.addOutput(output)
       frameOutput = output
+      if let stabilization { output.connection(with: .video)?.preferredVideoStabilizationMode = stabilization }
     }
     session.commitConfiguration()
   }
@@ -391,12 +394,15 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
 extension AVCaptureBackend: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
   func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
     if output is AVCaptureAudioDataOutput {
-      guard output === audioOutput, !audioInterrupted, !audioFlowing else { return }
+      guard output === audioOutput else { return }
+      relay.appendAudio(sampleBuffer)
+      guard !audioInterrupted, !audioFlowing else { return }
       audioFlowing = true
       MediaTrace.emit("camera", "first audio sample")
       emit(.microphoneFlow(true))
       return
     }
+    relay.appendVideo(sampleBuffer)
     guard let handler = lock.withLock({ tap }), let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
     let seconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
     handler(buffer, seconds.isFinite && seconds > 0 ? UInt64(seconds * 1000) : 0)
@@ -424,34 +430,6 @@ private final class PhotoDelegate: NSObject, AVCapturePhotoCaptureDelegate, @unc
       return done(.failure(MediaError.Camera(reason: .photoFailed, detail: cameraRefusalText(reason: .photoFailed), recordedMs: nil)))
     }
     done(.success(data))
-  }
-}
-
-private final class MovieDelegate: NSObject, AVCaptureFileOutputRecordingDelegate, @unchecked Sendable {
-  private let onStart: @Sendable () -> Void
-  private let onFinish: @Sendable (RecordEnd, Error?) -> Void
-
-  init(onStart: @escaping @Sendable () -> Void, onFinish: @escaping @Sendable (RecordEnd, Error?) -> Void) {
-    self.onStart = onStart
-    self.onFinish = onFinish
-  }
-
-  func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo fileURL: URL, from connections: [AVCaptureConnection]) {
-    onStart()
-  }
-
-  func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
-    MediaTrace.emit("camera", "take finished audioConnections=\(connections.filter { $0.inputPorts.contains { $0.mediaType == .audio } }.count) error=\(error.map { "\($0)" } ?? "none")")
-    let end = Self.end(of: error)
-    onFinish(end, end == .failed ? error : nil)
-  }
-
-  static func end(of error: Error?) -> RecordEnd {
-    guard let error else { return .completed }
-    let failure = error as NSError
-    if failure.code == AVError.maximumDurationReached.rawValue { return .limitReached }
-    if failure.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool == true { return .completed }
-    return .failed
   }
 }
 
