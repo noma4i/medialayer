@@ -101,6 +101,7 @@ struct CameraTakeRelayTests {
     rig.begin(fixture, url: url, ticket: ticket, audio: audio, maxDurationMs: maxDurationMs)
     #expect(!FileManager.default.fileExists(atPath: url.path))
     rig.open(fixture, audio: audio)
+    if audio, await rig.next() != .audioFlow(flowing: true) { Issue.record("no flow of the first pcm"); return }
     guard case .recordStarted? = await rig.next() else { Issue.record("no started"); return }
     rig.flow(fixture, audio: audio)
     if stop { rig.relay.stop() }
@@ -117,28 +118,31 @@ struct CameraTakeRelayTests {
     let first = url()
     let last = url()
     defer { [first, last].forEach { try? FileManager.default.removeItem(at: $0) } }
-    var expected: [CaptureEvent] = [.recordStarted, .recordFinished(end: .completed)]
+    let flow = CaptureEvent.audioFlow(flowing: true)
+    var expected: [CaptureEvent] = [flow, .recordStarted, .recordFinished(end: .completed)]
     switch scenario {
     case .audioAndVideo:
       await record(rig, fixture, url: last, ticket: ticket)
     case .videoOnly:
       await record(rig, fixture, url: last, audio: false)
+      expected = [.recordStarted, .recordFinished(end: .completed)]
     case .limit:
       await record(rig, fixture, url: last, maxDurationMs: 100, stop: false)
-      expected = [.recordStarted, .recordFinished(end: .limitReached)]
+      expected = [flow, .recordStarted, .recordFinished(end: .limitReached)]
     case .revokedTicket:
       rig.begin(fixture, url: first, ticket: ticket)
       ticket.revoke(.inCall)
       rig.open(fixture)
       #expect(await rig.nextRefusal() == .inCall)
+      expected = [flow] + expected
       await record(rig, fixture, url: last)
     case .cancelledMidTake:
       rig.begin(fixture, url: first)
       rig.open(fixture)
-      guard case .recordStarted? = await rig.next() else { Issue.record("no started"); return }
+      guard await rig.next() == flow, case .recordStarted? = await rig.next() else { Issue.record("no flow and started"); return }
       rig.relay.cancel()
       await record(rig, fixture, url: last)
-      expected = [.recordStarted, .recordStarted, .recordFinished(end: .completed)]
+      expected = [flow, .recordStarted, flow, .recordStarted, .recordFinished(end: .completed)]
     }
     let observed = await rig.settle()
     #expect(observed == expected)
