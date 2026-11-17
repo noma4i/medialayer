@@ -17,24 +17,19 @@ class VoiceTakeTest {
   private val settings = VoiceEncoderSettings(44_100u, 1u, 128_000u)
   private val spec = PcmSpec(MediaRecorder.AudioSource.MIC, 44_100, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
   private val file = File.createTempFile("voice-take", ".m4a").also { it.delete() }
+  private val events = ArrayList<String>()
+  private val writer = Writer()
 
-  /** The writer boundary: it records the calls and creates a file only when the take opens it, like the real one; the take never creates one. */
   private class Writer(val failOpen: Boolean = false) : VoiceFileWriter {
     val calls = ArrayList<String>()
     var done: ((Result<Long>) -> Unit)? = null
-    lateinit var target: File
-    override fun open(file: File, settings: VoiceEncoderSettings) {
-      calls += "open"
-      if (failOpen) throw IllegalStateException("writer is not ready")
-      target = file.also { it.writeText("m4a") }
-    }
+    override fun open(file: File, settings: VoiceEncoderSettings) { calls += "open"; if (failOpen) error("writer is not ready"); file.writeText("m4a") }
     override fun append(chunk: PcmChunk) { calls += "append" }
     override fun finish(done: (Result<Long>) -> Unit) { calls += "finish"; this.done = done }
     override fun cancel() { calls += "cancel" }
   }
 
-  private class Outcomes : VoiceTakeListener {
-    val events = ArrayList<String>()
+  private val listener = object : VoiceTakeListener {
     override fun onStarted() { events += "started" }
     override fun onLimit() { events += "limit" }
     override fun onFinished(file: File, durationUs: Long) { events += "finished:$durationUs" }
@@ -43,119 +38,98 @@ class VoiceTakeTest {
     override fun onLost() { events += "lost" }
   }
 
-  private fun chunk(generation: Long = 1, frames: Int = 441, spec: PcmSpec = this.spec) =
-    PcmChunk(generation, spec, ByteBuffer.allocate(frames * 2), frames, 0, 0)
+  private fun chunk(generation: Long = 1, spec: PcmSpec = this.spec) = PcmChunk(generation, spec, ByteBuffer.allocate(882), 441, 0, 0)
 
-  private fun take(writer: Writer, outcomes: Outcomes, limitUs: Long = Long.MAX_VALUE) = VoiceTake(1, file, settings, limitUs, writer, outcomes)
+  private fun take(writer: Writer = this.writer, limitUs: Long = Long.MAX_VALUE) = VoiceTake(1, file, settings, limitUs, writer, listener)
+
+  private val ends = listOf<Pair<String, (VoiceTake) -> Unit>>("cancelled" to { it.cancel() }, "lost" to { it.lost() }, "failed" to { it.fail(IllegalStateException("codec")) })
 
   @Test
-  fun noWriterAndNoFileBeforeTheFirstPcm() {
-    val writer = Writer()
-    take(writer, Outcomes())
+  fun theFirstPcmOpensTheWriterAndNothingExistsBefore() {
+    val take = take()
     assertEquals(emptyList<String>(), writer.calls)
     assertFalse(file.exists())
-  }
-
-  @Test
-  fun theFirstPcmOpensTheWriterAndStartsTheTake() {
-    val writer = Writer()
-    val outcomes = Outcomes()
-    val take = take(writer, outcomes)
     take.pcm(chunk(generation = 2))
-    assertEquals(emptyList<String>(), writer.calls)
     take.pcm(chunk())
     take.pcm(chunk())
     assertEquals(listOf("open", "append", "append"), writer.calls)
-    assertEquals(listOf("started"), outcomes.events)
+    assertEquals(listOf("started"), events)
   }
 
   @Test
-  fun finishDoesNotWaitForTheFileAndReportsOnce() {
-    val writer = Writer()
-    val outcomes = Outcomes()
-    val take = take(writer, outcomes)
+  fun finishReportsOnceWhenTheFileCloses() {
+    val take = take()
     take.pcm(chunk())
     take.finish()
-    assertEquals(listOf("started"), outcomes.events)
+    take.finish()
+    assertEquals(listOf("started"), events)
     writer.done!!(Result.success(10_000L))
+    writer.done!!(Result.success(20_000L))
     take.cancel()
     take.lost()
-    assertEquals(listOf("started", "finished:10000"), outcomes.events)
+    assertEquals(listOf("started", "finished:10000"), events)
+    assertEquals(1, writer.calls.count { it == "finish" })
     assertTrue(file.exists())
   }
 
   @Test
-  fun cancelWhileTheFileClosesRemovesItAfterTheCompletion() {
-    val writer = Writer()
-    val outcomes = Outcomes()
-    val take = take(writer, outcomes)
+  fun anEndDuringTheCloseRemovesTheFileAfterTheCompletion() = ends.forEach { (name, end) ->
+    events.clear()
+    val writer = Writer().also { it.calls.clear() }
+    val take = take(writer)
     take.pcm(chunk())
     take.finish()
+    end(take)
     take.cancel()
-    assertEquals(listOf("started"), outcomes.events)
+    assertEquals(listOf("started"), events)
     assertTrue(file.exists())
     writer.done!!(Result.success(10_000L))
-    assertEquals(listOf("started", "cancelled"), outcomes.events)
+    assertEquals(listOf("started", name), events)
     assertFalse(file.exists())
     assertFalse(writer.calls.contains("cancel"))
   }
 
   @Test
-  fun cancelLostAndFailureLeaveNoFileAndOneOutcome() {
-    val ends = listOf<(VoiceTake) -> Unit>({ it.cancel() }, { it.lost() }, { it.fail(IllegalStateException("codec")) })
-    val expected = listOf("cancelled", "lost", "failed")
-    ends.forEachIndexed { index, end ->
-      val writer = Writer()
-      val outcomes = Outcomes()
-      val take = take(writer, outcomes)
-      take.pcm(chunk())
-      assertTrue(file.exists())
-      end(take)
-      take.cancel()
-      take.lost()
-      assertEquals(listOf("started", expected[index]), outcomes.events)
-      assertFalse(file.exists())
-    }
+  fun anEndWhileRecordingLeavesNoFileAndOneOutcomeAndNoResume() = ends.forEach { (name, end) ->
+    events.clear()
+    val writer = Writer()
+    val take = take(writer)
+    take.pcm(chunk())
+    end(take)
+    take.pcm(chunk())
+    take.finish()
+    take.lost()
+    assertEquals(listOf("started", name), events)
+    assertEquals(listOf("open", "append", "cancel"), writer.calls)
+    assertFalse(file.exists())
   }
 
   @Test
-  fun endBeforeTheFirstPcmHasNoWriterCallAndNoFile() {
-    val writer = Writer()
-    val outcomes = Outcomes()
-    take(writer, outcomes).lost()
-    assertEquals(listOf("lost"), outcomes.events)
+  fun anEndBeforeTheFirstPcmHasNoWriterCallAndNoFile() = (ends.map { it.second } + { it: VoiceTake -> it.finish() }).forEach { end ->
+    events.clear()
+    val take = take()
+    end(take)
+    take.pcm(chunk())
+    assertEquals(1, events.size)
     assertEquals(emptyList<String>(), writer.calls)
     assertFalse(file.exists())
   }
 
   @Test
-  fun aWriterThatIsNotReadyIsOneFailureAndNoFile() {
-    val writer = Writer(failOpen = true)
-    val outcomes = Outcomes()
-    val take = take(writer, outcomes)
-    take.pcm(chunk())
-    take.pcm(chunk())
-    assertEquals(listOf("failed"), outcomes.events)
+  fun aWriterThatIsNotReadyAndAPcmOfAnotherFormatAreOneFailureAndNoFile() {
+    val unready = Writer(failOpen = true)
+    take(unready).apply { pcm(chunk()); pcm(chunk()) }
+    take().pcm(chunk(spec = spec.copy(sampleRate = 48_000)))
+    assertEquals(listOf("failed", "failed"), events)
+    assertEquals(listOf("open"), unready.calls)
+    assertFalse(writer.calls.contains("open"))
     assertFalse(file.exists())
   }
 
   @Test
-  fun aPcmOfAnotherFormatFailsBeforeTheWriterOpens() {
-    val writer = Writer()
-    val outcomes = Outcomes()
-    take(writer, outcomes).pcm(chunk(spec = spec.copy(sampleRate = 48_000)))
-    assertEquals(listOf("failed"), outcomes.events)
-    assertFalse(writer.calls.contains("open"))
-  }
-
-  @Test
   fun theLimitAsksForFinishOnce() {
-    val writer = Writer()
-    val outcomes = Outcomes()
-    val take = take(writer, outcomes, limitUs = 15_000)
-    take.pcm(chunk(frames = 441))
-    take.pcm(chunk(frames = 441))
-    take.pcm(chunk(frames = 441))
-    assertEquals(listOf("started", "limit"), outcomes.events)
+    val take = take(limitUs = 15_000)
+    repeat(3) { take.pcm(chunk()) }
+    assertEquals(listOf("started", "limit"), events)
   }
 }

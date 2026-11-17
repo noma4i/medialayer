@@ -6,7 +6,6 @@ import com.noma4i.medialayer.NativeFailure
 import com.noma4i.medialayer.VoiceEncoderSettings
 import java.io.File
 
-/** One outcome per take: `onStarted` can come first, then exactly one of `onFinished`, `onFailed`, `onCancelled`, `onLost`. `onLimit` asks for `finish`. */
 internal interface VoiceTakeListener {
   fun onStarted()
 
@@ -21,10 +20,7 @@ internal interface VoiceTakeListener {
   fun onLost()
 }
 
-/**
- * The PCM of one generation into one m4a. No file exists before the first PCM; the first PCM opens the writer. A cancel, a loss and an error leave no file.
- * The take holds no PCM and no lock across a writer call: `finish` returns at once and the result comes when the file is closed.
- */
+// One lock owns the phase and every writer call under it is non-blocking; events leave in transition order, outside the lock, and every transition after the end is dropped.
 internal class VoiceTake(
   private val generation: Long,
   private val file: File,
@@ -36,74 +32,77 @@ internal class VoiceTake(
   private enum class State { WAITING, OPEN, FINISHING, ENDED }
 
   private val lock = Any()
+  private val events = ArrayDeque<(VoiceTakeListener) -> Unit>()
+  private var delivering = false
   private var state = State.WAITING
-  private var cancelled = false
+  private var pending: ((VoiceTakeListener) -> Unit)? = null
   private var limited = false
   private var frames = 0L
 
-  /** Called one at a time by the source. */
-  fun pcm(chunk: PcmChunk) {
-    if (chunk.generation != generation) return
-    val first = synchronized(lock) {
-      if (state != State.WAITING && state != State.OPEN) return
-      (state == State.WAITING).also { state = State.OPEN }
-    }
+  fun pcm(chunk: PcmChunk) = transition {
+    if (chunk.generation != generation || (state != State.WAITING && state != State.OPEN)) return@transition
     try {
       require(matches(chunk)) { "PCM does not match the voice encoder" }
-      if (first) writer.open(file, settings)
+      if (state == State.WAITING) {
+        writer.open(file, settings)
+        state = State.OPEN
+        events += { it.onStarted() }
+      }
       writer.append(chunk)
     } catch (error: Throwable) {
-      return fail(error)
+      return@transition end { it.onFailed(failure(error)) }
     }
-    if (first) listener.onStarted()
     frames += chunk.frames
-    val overLimit = synchronized(lock) { (state == State.OPEN && !limited && frames * 1_000_000L / settings.sampleRateHz.toLong() >= limitUs).also { if (it) limited = true } }
-    if (overLimit) listener.onLimit()
+    if (!limited && frames * 1_000_000L / settings.sampleRateHz.toLong() >= limitUs) { limited = true; events += { it.onLimit() } }
   }
 
-  fun finish() {
-    val opened = synchronized(lock) {
-      if (state == State.OPEN) { state = State.FINISHING; true } else false
+  fun finish() = transition {
+    when (state) {
+      State.WAITING -> end { it.onCancelled() }
+      State.OPEN -> { state = State.FINISHING; writer.finish(::complete) }
+      else -> Unit
     }
-    if (opened) writer.finish(::complete) else end(false) { it.onCancelled() }
   }
 
-  fun cancel() = end(true) { it.onCancelled() }
+  fun cancel() = transition { if (state == State.FINISHING) pending = pending ?: { it.onCancelled() } else end { it.onCancelled() } }
 
-  /** The source is gone before the take finished. */
-  fun lost() = end(false) { it.onLost() }
+  fun lost() = transition { if (state == State.FINISHING) pending = pending ?: { it.onLost() } else end { it.onLost() } }
 
-  fun fail(error: Throwable) = fail(NativeFailure(FailureSource.RECORDER, "android.media.MediaCodec", 0, error.message ?: error.javaClass.name))
+  fun fail(error: Throwable) = fail(failure(error))
 
-  fun fail(failure: NativeFailure) = end(false) { it.onFailed(failure) }
+  fun fail(failure: NativeFailure) = transition { if (state == State.FINISHING) pending = pending ?: { it.onFailed(failure) } else end { it.onFailed(failure) } }
 
-  private fun matches(chunk: PcmChunk) =
-    chunk.spec.encoding == AudioFormat.ENCODING_PCM_16BIT && chunk.spec.sampleRate.toLong() == settings.sampleRateHz.toLong() &&
-      Integer.bitCount(chunk.spec.channelMask).toLong() == settings.channels.toLong() && chunk.frames > 0 &&
-      chunk.data.remaining() == chunk.frames * Integer.bitCount(chunk.spec.channelMask) * 2
-
-  private fun complete(result: Result<Long>) {
-    val wasCancelled = synchronized(lock) { state = State.ENDED; cancelled }
+  private fun complete(result: Result<Long>) = transition {
+    if (state != State.FINISHING) return@transition
     val done = result.getOrNull()
-    if (wasCancelled || done == null) file.delete()
-    when {
-      wasCancelled -> listener.onCancelled()
-      done != null -> listener.onFinished(file, done)
-      else -> listener.onFailed(NativeFailure(FailureSource.RECORDER, "android.media.MediaCodec", 0, result.exceptionOrNull()?.message ?: "the file did not close"))
+    val failed: ((VoiceTakeListener) -> Unit)? = result.exceptionOrNull()?.let { error -> { it.onFailed(failure(error)) } }
+    val outcome = pending ?: failed
+    state = State.ENDED
+    if (outcome == null) events += { it.onFinished(file, done!!) } else { file.delete(); events += outcome }
+  }
+
+  private fun end(outcome: (VoiceTakeListener) -> Unit) {
+    if (state == State.ENDED) return
+    if (state == State.OPEN) writer.cancel()
+    state = State.ENDED
+    file.delete()
+    events += outcome
+  }
+
+  private fun transition(change: () -> Unit) {
+    if (Thread.holdsLock(lock)) return change()
+    synchronized(lock) { change(); if (delivering) return else delivering = true }
+    while (true) {
+      val next = synchronized(lock) { events.removeFirstOrNull() ?: run { delivering = false; return } }
+      next(listener)
     }
   }
 
-  /** Ends a take that has not finished; a cancel during the close waits for it, so the closing file is removed after the native completion. */
-  private fun end(cancelling: Boolean, report: (VoiceTakeListener) -> Unit) {
-    val opened = synchronized(lock) {
-      when (state) {
-        State.ENDED -> return
-        State.FINISHING -> { if (cancelling) cancelled = true; return }
-        else -> (state == State.OPEN).also { state = State.ENDED }
-      }
-    }
-    if (opened) writer.cancel()
-    file.delete()
-    report(listener)
+  private fun failure(error: Throwable) = NativeFailure(FailureSource.RECORDER, "android.media.MediaCodec", 0, error.message ?: error.javaClass.name)
+
+  private fun matches(chunk: PcmChunk): Boolean {
+    val channels = Integer.bitCount(chunk.spec.channelMask)
+    return chunk.spec.encoding == AudioFormat.ENCODING_PCM_16BIT && chunk.spec.sampleRate.toLong() == settings.sampleRateHz.toLong() &&
+      channels.toLong() == settings.channels.toLong() && chunk.frames > 0 && chunk.data.remaining() == chunk.frames * channels * 2
   }
 }

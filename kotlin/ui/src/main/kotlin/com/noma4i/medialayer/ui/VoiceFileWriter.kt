@@ -4,145 +4,163 @@ import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import android.os.Handler
+import android.os.HandlerThread
 import com.noma4i.medialayer.VoiceEncoderSettings
 import java.io.File
 
-/** The file side of a voice take: the file appears at `open`, which the take calls with the first PCM, and is final only when `finish` reports. */
 internal interface VoiceFileWriter {
-  /** Throws when the writer is not ready; no file is left. */
   fun open(file: File, settings: VoiceEncoderSettings)
 
-  /** Consumes the chunk before it returns: the chunk data is reused by the next read. */
   fun append(chunk: PcmChunk)
 
-  /** Does not block: the result is the length of the audio in microseconds, once the file is closed. */
   fun finish(done: (Result<Long>) -> Unit)
 
-  /** Stops the writer, a running `append` or `finish` ends with an error the caller ignores. */
   fun cancel()
 }
 
-/** AAC in m4a through MediaCodec and MediaMuxer. The codec input is the only buffer: `append` waits for a free input and hands the PCM over. */
+// Nothing here waits: append hands the PCM to a free codec input or throws, the codec callbacks run on one thread, `done` and the take run outside `gate`.
 internal class MediaCodecVoiceFileWriter : VoiceFileWriter {
-  private val lock = Any()
-  @Volatile private var closed = false
+  private val gate = Any()
+  private val thread = HandlerThread("VoiceFileWriter")
+  private val free = ArrayDeque<Int>()
   private var codec: MediaCodec? = null
   private var muxer: MediaMuxer? = null
   private var track = -1
   private var muxing = false
+  private var closed = false
+  private var failure: Throwable? = null
+  private var eosPending = false
+  private var done: ((Result<Long>) -> Unit)? = null
   private var written = 0
   private var rate = 0
   private var baseUs = -1L
   private var endUs = 0L
-  private val info = MediaCodec.BufferInfo()
 
-  override fun open(file: File, settings: VoiceEncoderSettings) = synchronized(lock) {
+  override fun open(file: File, settings: VoiceEncoderSettings) = synchronized(gate) {
     try {
       rate = settings.sampleRateHz.toInt()
       val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, rate, settings.channels.toInt()).apply {
         setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
         setInteger(MediaFormat.KEY_BIT_RATE, settings.bitRate.toInt())
       }
+      thread.start()
       codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC).also {
+        it.setCallback(callback, Handler(thread.looper))
         it.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         it.start()
       }
       muxer = MediaMuxer(file.path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
     } catch (error: Throwable) {
-      release()
+      closeLocked()
       throw error
     }
   }
 
-  override fun append(chunk: PcmChunk) = synchronized(lock) {
-    try {
-      check(!closed) { "the writer is closed" }
-      val encoder = codec!!
-      val source = chunk.data.duplicate()
-      val bytesPerFrame = chunk.data.remaining() / chunk.frames
-      if (baseUs < 0) baseUs = chunk.ptsUs
-      var consumed = 0
-      while (source.hasRemaining()) {
-        val index = encoder.dequeueInputBuffer(-1)
-        val input = encoder.getInputBuffer(index)!!
-        val size = minOf(input.remaining(), source.remaining()).let { it - it % bytesPerFrame }
-        check(size > 0) { "audio input buffer holds no whole frame" }
-        val slice = source.duplicate().apply { limit(position() + size) }
-        input.put(slice)
-        source.position(source.position() + size)
-        val ptsUs = chunk.ptsUs - baseUs + consumed * 1_000_000L / rate
-        consumed += size / bytesPerFrame
-        endUs = ptsUs + size / bytesPerFrame * 1_000_000L / rate
-        encoder.queueInputBuffer(index, 0, size, ptsUs, 0)
-        drain(false)
-      }
-    } catch (error: Throwable) {
-      if (closed) return@synchronized
-      release()
-      throw error
+  override fun append(chunk: PcmChunk) = synchronized(gate) {
+    check(!closed) { failure?.message ?: "the writer is closed" }
+    val encoder = codec!!
+    val source = chunk.data.duplicate()
+    val bytesPerFrame = chunk.data.remaining() / chunk.frames
+    if (baseUs < 0) baseUs = chunk.ptsUs
+    var consumed = 0
+    while (source.hasRemaining()) {
+      check(free.isNotEmpty()) { "the encoder has no free input" }
+      val index = free.removeFirst()
+      val input = encoder.getInputBuffer(index)!!
+      val size = minOf(input.remaining(), source.remaining()).let { it - it % bytesPerFrame }
+      check(size > 0) { "audio input buffer holds no whole frame" }
+      input.put(source.duplicate().apply { limit(position() + size) })
+      source.position(source.position() + size)
+      val ptsUs = chunk.ptsUs - baseUs + consumed * 1_000_000L / rate
+      consumed += size / bytesPerFrame
+      endUs = ptsUs + size / bytesPerFrame * 1_000_000L / rate
+      encoder.queueInputBuffer(index, 0, size, ptsUs, 0)
     }
   }
 
   override fun finish(done: (Result<Long>) -> Unit) {
-    Thread({
-      done(runCatching {
-        synchronized(lock) {
-          try {
-            check(!closed) { "the writer is closed" }
-            val encoder = codec!!
-            encoder.queueInputBuffer(encoder.dequeueInputBuffer(-1), 0, 0, endUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-            drain(true)
-            check(written > 0) { "the take holds no audio" }
-            muxer!!.stop()
-            muxing = false
-            endUs
-          } finally {
-            release()
-          }
-        }
-      })
-    }, "VoiceFileWriter-finish").apply { isDaemon = true }.start()
-  }
-
-  override fun cancel() {
-    closed = true
-    try { codec?.stop() } catch (_: Throwable) {}
-    synchronized(lock) { release() }
-  }
-
-  private fun drain(untilEnd: Boolean) {
-    val encoder = codec!!
-    while (true) {
-      val index = encoder.dequeueOutputBuffer(info, if (untilEnd) -1 else 0)
-      when {
-        index == MediaCodec.INFO_TRY_AGAIN_LATER -> return
-        index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-          track = muxer!!.addTrack(encoder.outputFormat)
-          muxer!!.start()
-          muxing = true
-        }
-        index >= 0 -> {
-          val config = info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0
-          if (info.size > 0 && !config) {
-            val output = encoder.getOutputBuffer(index)!!.apply { position(info.offset); limit(info.offset + info.size) }
-            muxer!!.writeSampleData(track, output, info)
-            written++
-          }
-          encoder.releaseOutputBuffer(index, false)
-          if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return
-        }
-      }
+    val rejected = synchronized(gate) {
+      (closed).also { if (!it) { this.done = done; eosPending = true; queueEnd() } }
     }
+    if (rejected) done(Result.failure(failure ?: IllegalStateException("the writer is closed")))
   }
 
-  private fun release() {
+  override fun cancel() = synchronized(gate) {
+    done = null
+    closeLocked()
+  }
+
+  private fun queueEnd() {
+    if (!eosPending || free.isEmpty()) return
+    eosPending = false
+    codec!!.queueInputBuffer(free.removeFirst(), 0, 0, endUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+  }
+
+  private fun conclude(error: Throwable?) {
+    var result: Result<Long>? = null
+    val callback = synchronized(gate) {
+      if (closed) return
+      if (error != null) failure = error
+      result = if (error != null) Result.failure(error) else runCatching { check(written > 0) { "the take holds no audio" }; muxer!!.stop(); muxing = false; endUs }
+      done.also { done = null; closeLocked() }
+    }
+    callback?.invoke(result!!)
+  }
+
+  private fun closeLocked() {
     closed = true
-    try { codec?.stop() } catch (_: Throwable) {}
-    try { codec?.release() } catch (_: Throwable) {}
-    try { if (muxing) muxer?.stop() } catch (_: Throwable) {}
-    try { muxer?.release() } catch (_: Throwable) {}
+    free.clear()
+    val encoder = codec
+    val container = muxer
+    val wasMuxing = muxing
     codec = null
     muxer = null
     muxing = false
+    if (!thread.isAlive) return
+    Handler(thread.looper).post {
+      try { encoder?.stop() } catch (_: Throwable) {}
+      try { encoder?.release() } catch (_: Throwable) {}
+      try { if (wasMuxing) container?.stop() } catch (_: Throwable) {}
+      try { container?.release() } catch (_: Throwable) {}
+      thread.quitSafely()
+    }
+  }
+
+  private val callback = object : MediaCodec.Callback() {
+    override fun onInputBufferAvailable(codec: MediaCodec, index: Int) = synchronized(gate) {
+      if (closed) return@synchronized
+      free.addLast(index)
+      try { queueEnd() } catch (error: Throwable) { failure = error }
+    }
+
+    override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
+      var end = false
+      var error: Throwable? = null
+      synchronized(gate) {
+        if (closed) return
+        try {
+          if (info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
+            val output = codec.getOutputBuffer(index)!!.apply { position(info.offset); limit(info.offset + info.size) }
+            muxer!!.writeSampleData(track, output, info)
+            written++
+          }
+          codec.releaseOutputBuffer(index, false)
+          end = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+        } catch (thrown: Throwable) {
+          error = thrown
+        }
+      }
+      if (end || error != null) conclude(error)
+    }
+
+    override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
+      synchronized(gate) {
+        if (closed) return
+        try { track = muxer!!.addTrack(format); muxer!!.start(); muxing = true } catch (thrown: Throwable) { failure = thrown }
+      }
+    }
+
+    override fun onError(codec: MediaCodec, error: MediaCodec.CodecException) = conclude(error)
   }
 }
