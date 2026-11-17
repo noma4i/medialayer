@@ -536,7 +536,7 @@ fn inv_capture_37_closing_the_layer_ends_a_running_take_closes_the_camera_and_ig
 }
 
 #[test]
-fn inv_capture_38_a_failed_camera_is_settled_and_a_lens_change_starts_a_new_attempt() {
+fn inv_capture_43_a_failed_camera_is_settled_and_a_lens_change_starts_a_new_attempt() {
     let profile = moment();
     let failed = drive(profile, ready(profile), &[CaptureEvent::Fault { kind: FaultKind::Other }]).0;
     assert_eq!((phase(&failed), failed.state.fault), (CameraPhase::Failed, Some(CameraRefusal::ConfigureFailed)));
@@ -547,8 +547,8 @@ fn inv_capture_38_a_failed_camera_is_settled_and_a_lens_change_starts_a_new_atte
 }
 
 #[test]
-fn inv_capture_38_random_lens_and_fault_sequences_bind_once_per_lens_change_out_of_failed() {
-    let mut dice = crate::seeded::Dice::new("inv_capture_38_random_lens_and_fault_sequences_bind_once_per_lens_change_out_of_failed");
+fn inv_capture_43_random_lens_and_fault_sequences_bind_once_per_lens_change_out_of_failed() {
+    let mut dice = crate::seeded::Dice::new("inv_capture_43_random_lens_and_fault_sequences_bind_once_per_lens_change_out_of_failed");
     let profile = moment();
     for _ in 0..2_000 {
         let mut run = capture_run(CameraLens::Back);
