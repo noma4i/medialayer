@@ -98,6 +98,10 @@ private class FakeBackend : CaptureBackend {
 
   override fun setHost(view: PreviewView?, owner: LifecycleOwner?) = Unit
 
+  @Volatile var memory: CaptureMemory? = null
+
+  override fun useMemory(memory: CaptureMemory) { this.memory = memory }
+
   override fun bind(lens: CameraLens, profile: CaptureProfile) {
     note("bind $lens")
     emit(CaptureEvent.Opened(hasFlash, 1f, 20f))
@@ -276,6 +280,23 @@ class MediaCameraTest {
     rig.detach()
     eventually("released") { rig.counters.released.get() == 1 }
     assertEquals(1, rig.backend.count("unbind"))
+  }
+
+  @Test
+  fun inv_capture_13_theLedgerHoldStaysUntilTheBackendReturnedEveryLeaseAndARebindKeepsTheSameTotal() {
+    val rig = rig()
+    ready(rig)
+    val memory = rig.backend.memory!!
+    val lease = memory.lease(1024)
+    rig.camera.setLens(CameraLens.FRONT)
+    eventually("rebound") { rig.backend.count("bind FRONT") == 1 }
+    assertTrue("a rebind keeps the one total", rig.backend.memory === memory && rig.counters.taken.get() == 1)
+    rig.detach()
+    eventually("unbound") { rig.backend.count("unbind") == 1 }
+    runBlocking { rig.camera.awaitQueue() }
+    assertEquals("a lease still lives: the Ledger hold stays", 0, rig.counters.released.get())
+    lease.close()
+    eventually("the hold is given back after the last lease") { rig.counters.released.get() == 1 }
   }
 
   @Test
