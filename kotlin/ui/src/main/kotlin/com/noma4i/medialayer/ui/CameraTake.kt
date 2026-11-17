@@ -33,6 +33,8 @@ internal class CameraTakeSettings(
 internal interface CameraTakeListener {
   fun onBegan(generation: Long, inputSurface: Surface)
 
+  fun onVideoEncoded(generation: Long, ptsUs: Long)
+
   fun onStarted(generation: Long, baseUs: Long)
 
   fun onFinished(generation: Long, file: File, durationUs: Long)
@@ -213,6 +215,7 @@ internal class CameraTake(
         sample(kind, info.presentationTimeUs, info.flags, buffer)
       }
       codec.releaseOutputBuffer(index, false)
+      if (kind == VIDEO && info.size > 0 && !config) listener.onVideoEncoded(generation, info.presentationTimeUs)
       if (eos) {
         if (kind == VIDEO) videoDone = true else audioDone = true
         if (audioDone && videoDone) complete()
