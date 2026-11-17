@@ -24,6 +24,10 @@ private final class FakeBackend: CaptureBackend, @unchecked Sendable {
   var photoFails = false
   /// The preview microphone sensor hears sound once bound, as AVCaptureBackend reports from audio buffers; a test sends silence itself.
   var soundOnBind = true
+  /// The first PCM of a take, as the relay reports it to the core before the take starts; a test of a silent source turns it off.
+  var soundOnTake = true
+  /// A real file the take writes instead of three bytes.
+  var clipFile: URL?
   var photoSize: PixelSize? { PixelSize(width: 3000, height: 4000) }
 
   func setSink(_ sink: @escaping @Sendable (CaptureEvent) -> Void) { lock.withLock { self.sink = sink } }
@@ -68,7 +72,8 @@ private final class FakeBackend: CaptureBackend, @unchecked Sendable {
   func beginRecording(to url: URL, profile: CaptureProfile, lens: CameraLens) {
     note("record \(lens)")
     lock.withLock { recordingURL = url; recordedProfile = profile }
-    try? Data([1, 2, 3]).write(to: url)
+    if let clipFile { try? FileManager.default.copyItem(at: clipFile, to: url) } else { try? Data([1, 2, 3]).write(to: url) }
+    if profile.audio && soundOnTake { emit(.microphoneFlow(true)) }
     emit(.recordStarted)
   }
 
@@ -105,6 +110,17 @@ private final class Counters: @unchecked Sendable {
   var denySessions = false
   var denyShots = false
   var info: MediaInfo? = MediaInfo(durationMs: 2000, frame: ImageSize(width: 720, height: 1280))
+  /// Nil reads the real file with the real rule; a verdict answers for a file the test does not write.
+  var verdict: CoverageVerdict? = .covered
+  private var coverageAsked: [(url: URL, required: Bool)] = []
+  var coverageCalls: [(url: URL, required: Bool)] { lock.withLock { coverageAsked } }
+
+  func coverage(_ url: URL, _ required: Bool) async throws -> AudioCoverage {
+    lock.withLock { coverageAsked.append((url, required)) }
+    TestSignal.shared.fire()
+    guard let verdict else { return try await scanAudioCoverage(at: url, required: required) }
+    return AudioCoverage(verdict: required ? verdict : .skipped, samples: 0, firstUs: nil, lastUs: nil, gapAtUs: nil, gapUs: nil)
+  }
 
   var sessionsTaken: Int { lock.withLock { taken } }
   var released: Int { lock.withLock { given } }
@@ -208,6 +224,7 @@ private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .bac
       return counters.info
     },
     uprightVideo: { url in try await counters.straighten(url) },
+    audioCoverage: { url, required in try await counters.coverage(url, required) },
     upright: { raw, quality in
       counters.checkThread()
       counters.upright(quality)
@@ -389,24 +406,83 @@ struct MediaCameraTests {
   }
 
   @Test
-  func inv_capture_33_after_a_silent_take_the_next_start_follows_the_preview_sensor() async throws {
+  func inv_capture_50_the_rule_runs_on_the_raw_file_before_the_turn_and_on_the_final_file_after_it_and_not_without_audio() async throws {
     let rig = try makeRig(.moment)
     await ready(rig)
+    try await rig.camera.startRecording()
+    _ = try await rig.camera.stopRecording()
+    let calls = rig.counters.coverageCalls
+    #expect(calls.count == 2)
+    #expect(calls.allSatisfy { $0.required })
+    let quiet = try makeRig(.photo)
+    quiet.counters.verdict = nil
+    await ready(quiet)
+    #expect(quiet.counters.coverageCalls.isEmpty)
+  }
+
+  @Test
+  func inv_capture_50_a_real_clip_whose_pcm_misses_the_middle_is_refused_once_and_leaves_no_file_and_a_ready_preview() async throws {
+    let clip = try await CoverageClips.write(audio: CoverageClips.hole)
+    defer { try? FileManager.default.removeItem(at: clip) }
+    let rig = try makeRig(.moment) { backend, counters in
+      backend.clipFile = clip
+      counters.verdict = nil
+    }
+    await ready(rig)
+    try await rig.camera.startRecording()
+    do {
+      _ = try await rig.camera.stopRecording()
+      Issue.record("a clip with a hole in its sound was delivered")
+    } catch let MediaError.Camera(reason, _, _) {
+      #expect(reason == .microphoneSilent)
+    }
+    await eventually("ready again") { rig.camera.state.phase == .ready }
+    #expect(rig.camera.state.outcome == .refused(reason: .microphoneSilent))
+    #expect(files(rig).isEmpty)
+    #expect(rig.counters.coverageCalls.count == 1)
+    #expect(rig.counters.straightened.isEmpty)
+    #expect(rig.backend.count("unbind") == 0)
+  }
+
+  @Test
+  func inv_capture_50_a_real_clip_with_covered_sound_is_delivered_and_two_takes_on_one_source_each_start_on_their_own_pcm() async throws {
+    let clip = try await CoverageClips.write(audio: CoverageClips.whole)
+    defer { try? FileManager.default.removeItem(at: clip) }
+    let rig = try makeRig(.moment) { backend, counters in
+      backend.clipFile = clip
+      counters.verdict = nil
+    }
+    await ready(rig)
+    for _ in 0..<2 {
+      try await rig.camera.startRecording()
+      let delivered = try await rig.camera.stopRecording()
+      #expect(FileManager.default.fileExists(atPath: delivered.url.path))
+      try? FileManager.default.removeItem(at: delivered.url)
+    }
+    rig.backend.soundOnTake = false
+    let third = Task { try await rig.camera.startRecording() }
+    await eventually("the third take began") { rig.backend.count("record back") == 3 }
+    #expect(rig.camera.state.phase != .recording)
     rig.backend.emit(.microphoneFlow(true))
+    try await third.value
+    #expect(rig.camera.state.phase == .recording)
+  }
+
+  @Test
+  func inv_capture_33_after_a_silent_take_the_next_take_starts_only_on_its_own_fresh_pcm() async throws {
+    let rig = try makeRig(.moment)
+    await ready(rig)
     try await rig.camera.startRecording()
     rig.backend.emit(.microphoneFlow(false))
     await eventually("the take ended") { rig.camera.state.phase != .recording }
     _ = try? await rig.camera.stopRecording()
 
-    do {
-      try await rig.camera.startRecording()
-      Issue.record("a take started while the preview sensor still hears silence")
-    } catch let MediaError.Camera(reason, _, _) {
-      #expect(reason == .microphoneSilent)
-    }
-
+    rig.backend.soundOnTake = false
+    let silent = Task { try await rig.camera.startRecording() }
+    await eventually("the silent take began") { rig.backend.count("record back") == 2 }
+    #expect(rig.camera.state.phase != .recording)
     rig.backend.emit(.microphoneFlow(true))
-    try await rig.camera.startRecording()
+    try await silent.value
     await eventually("recording") { rig.camera.state.phase == .recording }
   }
 

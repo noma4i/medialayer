@@ -78,6 +78,7 @@ struct CameraServices {
   var link: @Sendable () -> AudioLink?
   var clipInfo: @Sendable (URL) async throws -> MediaInfo?
   var uprightVideo: @Sendable (URL) async throws -> Void
+  var audioCoverage: @Sendable (URL, Bool) async throws -> AudioCoverage
   var upright: @Sendable (URL, Double) async throws -> URL
   var directory: URL
   var center: NotificationCenter
@@ -102,6 +103,7 @@ struct CameraServices {
         return try await layer.mediaInfo(MediaSourceValue.file(url, kind: .video))
       },
       uprightVideo: { try await MediaLayerUI.uprightVideo(at: $0) },
+      audioCoverage: { try await scanAudioCoverage(at: $0, required: $1) },
       upright: { url, quality in
         guard let layer = Media.current as? MediaLayer else { throw MediaError.Closed }
         return try await layer.prepareImage(MediaSourceValue.file(url, kind: .image), quality: quality).url

@@ -96,7 +96,6 @@ public final class MediaCamera: @unchecked Sendable {
   private var sessionHold: CameraServices.Release?
   private var audioHold: RecordingTicket?
   private var revokedAudio: RecordingTicket?
-  private var microphoneFlowing = false
   private var audioInput: CameraAudioInput?
   private var microphoneFault: CameraRefusal?
   private var binding: Task<Void, Never>?
@@ -340,7 +339,6 @@ public final class MediaCamera: @unchecked Sendable {
       revokedAudio?.end()
       revokedAudio = nil
     }
-    if case let .audioFlow(flowing) = event { microphoneFlowing = flowing }
     let taking = run.starting || run.started
     let step = captureStep(run: run, event: event, profile: profile)
     do {
@@ -358,7 +356,6 @@ public final class MediaCamera: @unchecked Sendable {
     run = step.run
     for action in step.actions { perform(action) }
     if taking && !run.starting && !run.started && run.state.phase == .ready { installTap() }
-    if case .recordFinished = event { apply(.microphoneFlow(microphoneFlowing)) }
     if run.discard, run.end != nil, reading != nil {
       reading?.cancel()
       reading = nil
@@ -646,8 +643,10 @@ public final class MediaCamera: @unchecked Sendable {
     reading = Task { [services] in
       let info: MediaInfo?
       do {
+        if let refusal = try await self.audioRefusal(of: url) { return self.refuseClip(url, refusal) }
         try await services.uprightVideo(url)
         try Task.checkCancellation()
+        if let refusal = try await self.audioRefusal(of: url) { return self.refuseClip(url, refusal) }
         info = try await services.clipInfo(url)
       } catch {
         if !(error is CancellationError) { Media.recordNativeFailure(error, source: .camera) }
@@ -660,6 +659,21 @@ public final class MediaCamera: @unchecked Sendable {
         self.clipInfo = info
         self.apply(.recordSettled(durationMs: info?.durationMs))
       }
+    }
+  }
+
+  /// The rule of the core for the audio of the clip, before and after the turn of the video: the PCM that the file really decodes against its video.
+  private func audioRefusal(of url: URL) async throws -> CameraRefusal? {
+    let coverage = try await services.audioCoverage(url, profile.audio)
+    try Task.checkCancellation()
+    return audioCoverageRefusal(verdict: coverage.verdict)
+  }
+
+  /// A refusal reaches the core as the lost microphone of the take: the take is thrown away by the usual way, once, and the preview goes on.
+  private func refuseClip(_ url: URL, _ refusal: CameraRefusal) {
+    queue.async {
+      guard self.recordingURL == url, self.reading != nil else { return }
+      self.apply(.revoked(reason: refusal))
     }
   }
 

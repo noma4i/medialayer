@@ -62,6 +62,7 @@ final class CameraTakeRelay: @unchecked Sendable {
 
   private func confirm(_ generation: UInt64, ticket: RecordingTicket?, refused: @Sendable (RecordingRefusal) -> Void) {
     guard let take = live(generation) else { return }
+    emit(.audioFlow(flowing: true))
     do {
       if let ticket { try ticket.start { take.confirmBegin(generation: generation) } }
       else { take.confirmBegin(generation: generation) }
