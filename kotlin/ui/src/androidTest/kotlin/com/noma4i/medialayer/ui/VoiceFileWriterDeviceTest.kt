@@ -27,18 +27,17 @@ class VoiceFileWriterDeviceTest {
   private val spec = PcmSpec(MediaRecorder.AudioSource.MIC, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
   private val dir = InstrumentationRegistry.getInstrumentation().targetContext.cacheDir
   private val events = LinkedBlockingQueue<String>()
-  private val durations = LinkedBlockingQueue<Long>()
   private val listener = object : VoiceTakeListener {
     override fun onStarted() { events += "started" }
     override fun onLimit() { events += "limit" }
-    override fun onFinished(file: File, durationUs: Long) { durations += durationUs; events += "finished" }
+    override fun onFinished(file: File, durationUs: Long) { events += "finished" }
     override fun onFailed(failure: NativeFailure) { events += "failed:${failure.message}" }
     override fun onCancelled() { events += "cancelled" }
     override fun onLost() { events += "lost" }
   }
 
   private fun chunk(index: Int): PcmChunk {
-    val frames = 1024
+    val frames = CHUNK_FRAMES
     val data = ByteBuffer.allocateDirect(frames * 2).order(ByteOrder.LITTLE_ENDIAN)
     repeat(frames) { data.putShort((Math.sin(2 * Math.PI * 440 * (index * frames + it) / rate) * 12_000).toInt().toShort()) }
     data.flip()
@@ -63,7 +62,7 @@ class VoiceFileWriterDeviceTest {
   @Test
   fun finishGivesARealAacM4aAtTheCoreSettings() {
     val ready = LinkedBlockingQueue<Result<Unit>>()
-    val rig = rig("voice-device.m4a", 50) { it.finish() }
+    val rig = rig("voice-device.m4a", CHUNKS) { it.finish() }
     rig.writer.prepare(settings, { ready += it; assertFalse(rig.file.exists()) }, rig.take::fail)
     assertEquals("started", events.poll(10, TimeUnit.SECONDS))
     assertTrue(ready.poll(10, TimeUnit.SECONDS)!!.isSuccess)
@@ -75,10 +74,16 @@ class VoiceFileWriterDeviceTest {
       assertEquals(rate, format.getInteger(MediaFormat.KEY_SAMPLE_RATE))
       assertEquals(settings.channels.toInt(), format.getInteger(MediaFormat.KEY_CHANNEL_COUNT))
       assertEquals(1, extractor.trackCount)
+      extractor.selectTrack(0)
+      var lastUs = 0L
+      while (extractor.sampleTime >= 0) { lastUs = extractor.sampleTime; extractor.advance() }
+      val frameUs = AAC_FRAME_SAMPLES * 1_000_000L / rate
+      val expectedUs = CHUNKS * CHUNK_FRAMES * 1_000_000L / rate
+      assertTrue("file duration ${format.getLong(MediaFormat.KEY_DURATION)} vs $expectedUs", Math.abs(format.getLong(MediaFormat.KEY_DURATION) - expectedUs) <= frameUs)
+      assertTrue("last packet $lastUs vs $expectedUs", Math.abs(lastUs + frameUs - expectedUs) <= frameUs)
     } finally {
       extractor.release()
     }
-    assertTrue(durations.poll(10, TimeUnit.SECONDS)!! in 1_000_000L..1_300_000L)
   }
 
   @Test
@@ -109,5 +114,11 @@ class VoiceFileWriterDeviceTest {
     assertEquals("started", events.poll(10, TimeUnit.SECONDS))
     assertEquals("cancelled", events.poll(10, TimeUnit.SECONDS))
     assertFalse(rig.file.exists())
+  }
+
+  private companion object {
+    const val CHUNKS = 50
+    const val CHUNK_FRAMES = 1024
+    const val AAC_FRAME_SAMPLES = 1024
   }
 }
