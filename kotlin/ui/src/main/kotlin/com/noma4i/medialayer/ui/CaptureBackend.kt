@@ -47,6 +47,9 @@ internal interface CaptureBackend {
 
   fun unbind()
 
+  /** Calls back once the audio input, the microphone and the take of the last [unbind] are closed: the memory of the session closes after it. */
+  fun unbound(done: () -> Unit) = done()
+
   /** Writes the JPEG of a photo into [file]. */
   suspend fun takePhoto(file: File, flash: Boolean, profile: CaptureProfile)
 

@@ -12,6 +12,13 @@ import com.noma4i.medialayer.defaultLimits
 import com.noma4i.medialayer.defaultPoolSettings
 import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.Executor
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
@@ -105,5 +112,17 @@ class CameraAudioHoldTest {
     assertThrows(IllegalStateException::class.java) { hold.keep(spec(44_100)) }
     assertEquals(null, hold.generation)
     assertEquals(3, calls.size)
+  }
+
+  @Test
+  fun a_microphone_restarted_after_the_session_memory_closed_ends_quietly_with_no_failure() = runBlocking {
+    val memory = CaptureMemory(1L shl 20)
+    val quiet = CameraAudioHold({ link }, Tap, {}) { listener -> RecordingAudio(listener, memory::lease, Executor { it.run() }).asMicrophone() }
+    val failures = async(Dispatchers.Default) { withTimeoutOrNull(1_500) { Media.failures.take(1).toList() } }
+    memory.close()
+    quiet.keep(spec(44_100))
+    await("the restart met the closed memory and ended") { quiet.generation == null }
+    assertEquals("a closed session is no device failure", null, failures.await())
+    quiet.close()
   }
 }

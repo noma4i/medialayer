@@ -2,6 +2,9 @@ package com.noma4i.medialayer.ui
 
 import java.util.concurrent.atomic.AtomicBoolean
 
+/** The session of the memory ended: a lease asked after it is no device failure but the quiet end of its asker. */
+internal class CaptureMemoryClosed : IllegalStateException("the capture memory is closed")
+
 /** One admitted capture hold split into leases: the GL input, the microphone and the held take share [total]. `close(onDrained)` calls back once, outside the lock, after the last lease came back. */
 internal class CaptureMemory(val total: Long) : AutoCloseable {
   private val lock = Any()
@@ -14,7 +17,7 @@ internal class CaptureMemory(val total: Long) : AutoCloseable {
   val available: Long get() = synchronized(lock) { total - leasedBytes }
 
   fun lease(bytes: Long): AutoCloseable = synchronized(lock) {
-    check(!closed) { "the capture memory is closed" }
+    if (closed) throw CaptureMemoryClosed()
     require(bytes > 0) { "a lease asks for no bytes" }
     check(bytes <= total - leasedBytes) { "a lease of $bytes bytes does not fit the ${total - leasedBytes} bytes left of $total" }
     leasedBytes += bytes

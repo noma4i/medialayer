@@ -42,6 +42,9 @@ internal interface RecordingAudioListener {
   fun onSilenced(generation: Long, silenced: Boolean)
 
   fun onFailed(generation: Long, failure: NativeFailure)
+
+  /** The source ended on its own with no fault: the session it served is closed. */
+  fun onEnded(generation: Long) = Unit
 }
 
 internal class PcmSizeError(val code: Long, message: String) : Exception(message)
@@ -134,7 +137,7 @@ internal class RecordingAudio(
         val bytesPerFrame = sizes.bytesPerFrame
         val bufferBytes = sizes.bufferBytes
         val chunkBytes = sizes.chunkBytes
-        reserve = admit(sizes.lease)
+        reserve = try { admit(sizes.lease) } catch (_: CaptureMemoryClosed) { return end() }
         val made = AudioRecord.Builder()
           .setAudioSource(spec.audioSource)
           .setAudioFormat(AudioFormat.Builder().setSampleRate(spec.sampleRate).setChannelMask(spec.channelMask).setEncoding(spec.encoding).build())
@@ -200,6 +203,8 @@ internal class RecordingAudio(
       }
       true
     }
+
+    private fun end() = synchronized(deliverLock) { if (open.getAndSet(false)) listener.onEnded(generation) }
 
     private fun deliver(call: () -> Unit) = synchronized(deliverLock) { if (open.get()) call() }
 

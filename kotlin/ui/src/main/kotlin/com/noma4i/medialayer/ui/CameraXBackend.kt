@@ -178,7 +178,7 @@ internal class CameraXBackend(private val context: Context, private val audioLin
   @Volatile private var memory: CaptureMemory? = null
   private var analysis: ImageAnalysis? = null
   private val recording = CameraRecording(main, { sink(it) }) { generation, file, settings, listener -> CameraTake(generation, file, settings, leases(), listener) }
-  private val audio = CameraAudioHold({ audioLink() }, recording, { audioIssue(it) }) { listener -> RecordingAudio(listener, leases(), main).asMicrophone() }
+  private val audio = CameraAudioHold({ audioLink() }, recording, { audioIssue(it) }) { listener -> RecordingAudio(listener, ::lease, main).asMicrophone() }
   private var analyzer: ImageAnalysis.Analyzer? = null
   private var lastBind: Pair<CameraLens, CaptureProfile>? = null
   private var watchingStream = false
@@ -206,6 +206,9 @@ internal class CameraXBackend(private val context: Context, private val audioLin
   override fun useMemory(memory: CaptureMemory) { this.memory = memory }
 
   private fun leases(): (Long) -> AutoCloseable = checkNotNull(memory) { "no capture memory is admitted" }::lease
+
+  // The microphone asks the memory of the session that is current when it starts, never the one that was current when it was made.
+  private fun lease(bytes: Long): AutoCloseable = checkNotNull(memory) { "no capture memory is admitted" }.lease(bytes)
 
   override fun sensorToView(): Matrix? = view?.sensorToViewTransform
 
@@ -352,6 +355,8 @@ internal class CameraXBackend(private val context: Context, private val audioLin
       }
     }
   }
+
+  override fun unbound(done: () -> Unit) { main.execute(done) }
 
   override fun close() {
     calculations.shutdown()

@@ -81,6 +81,8 @@ internal class CameraAudioInput(
     handle.restoreFailed(core)
   }
 
+  override fun onEnded(generation: Long) = whileLive(generation) { _, _ -> live = null }
+
   override fun onTimebase(generation: Long, originNanos: Long) = whileLive(generation) { _, _ -> tap.onTimebase(generation, originNanos) }
 
   override fun onPcm(chunk: PcmChunk) = whileLive(chunk.generation) { _, _ -> tap.onPcm(chunk) }

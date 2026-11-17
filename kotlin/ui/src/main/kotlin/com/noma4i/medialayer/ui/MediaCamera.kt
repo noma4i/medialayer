@@ -528,7 +528,8 @@ class MediaCamera internal constructor(
     val memory = sessionMemory
     sessionHold = null
     sessionMemory = null
-    if (memory != null && hold != null) memory.close { hold.close() } else hold?.close()
+    // The audio input, the microphone and the take of the session are closed by the backend first; the memory and its hold go after them.
+    if (memory != null && hold != null) backend.unbound { memory.close { hold.close() } } else hold?.close()
     audioRevocation?.close()
     audioRevocation = null
     retiringAudio?.close()
