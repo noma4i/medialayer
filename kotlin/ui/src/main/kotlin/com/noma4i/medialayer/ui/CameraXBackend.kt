@@ -28,6 +28,8 @@ import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.core.UseCase
 import androidx.camera.core.UseCaseGroup
+import androidx.camera.core.impl.CameraInfoInternal
+import androidx.camera.core.impl.EncoderProfilesProxy
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -88,6 +90,7 @@ internal class Encoders(
   }
 }
 
+private const val SDR_BIT_DEPTH = 8
 private const val INTRA_FRAME_INTERVAL_SECONDS = 1
 private const val NO_CODEC_PROFILE = -1
 private const val AUDIO_SAMPLE_RATE_DEFAULT = 44_100
@@ -95,6 +98,20 @@ private const val AUDIO_CHANNEL_COUNT_DEFAULT = 1
 private const val AUDIO_BITRATE_BASE = 156_000
 private const val AUDIO_CHANNEL_COUNT_BASE = 2
 private const val AUDIO_SAMPLE_RATE_BASE = 48_000
+
+/** The encoders of a profile set: the first 8-bit SDR video profile and the AAC profile, or the default AAC of the core rule when the set holds none. Null when the set holds no SDR video. */
+internal fun encodersFrom(all: EncoderProfilesProxy?, audio: Boolean, timebase: VideoTimebase): Encoders? {
+  val video = all?.videoProfiles?.firstOrNull { it.bitDepth == SDR_BIT_DEPTH && it.hdrFormat == EncoderProfiles.VideoProfile.HDR_NONE } ?: return null
+  val sound = all.audioProfiles.firstOrNull { it.mediaType == MediaFormat.MIMETYPE_AUDIO_AAC }
+  return if (!audio) {
+    Encoders(video.mediaType, video.width, video.height, video.bitrate, video.frameRate, null, NO_CODEC_PROFILE, 0, 0, 0, timebase)
+  } else if (sound != null) {
+    Encoders(video.mediaType, video.width, video.height, video.bitrate, video.frameRate, sound.mediaType, sound.profile, sound.bitrate, sound.sampleRate, sound.channels, timebase)
+  } else {
+    val bitrate = (AUDIO_BITRATE_BASE * (AUDIO_CHANNEL_COUNT_DEFAULT.toDouble() / AUDIO_CHANNEL_COUNT_BASE) * (AUDIO_SAMPLE_RATE_DEFAULT.toDouble() / AUDIO_SAMPLE_RATE_BASE)).toInt()
+    Encoders(video.mediaType, video.width, video.height, video.bitrate, video.frameRate, MediaFormat.MIMETYPE_AUDIO_AAC, MediaCodecInfo.CodecProfileLevel.AACObjectLC, bitrate, AUDIO_SAMPLE_RATE_DEFAULT, AUDIO_CHANNEL_COUNT_DEFAULT, timebase)
+  }
+}
 
 internal fun uprightVertex(rotationDegrees: Int, mirror: Boolean): FloatArray = FloatArray(16).also {
   android.opengl.Matrix.setIdentityM(it, 0)
@@ -425,21 +442,13 @@ internal class CameraXBackend(private val context: Context, private val audioLin
     val choice = pickFormat(formatCandidates(formats.map { it.second }, jpeg, rates), profile) ?: return null
     val quality = formats[choice.index.toInt()].first
     val timebase = videoTimebaseOf(camera2.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE))
-    return Plan(quality, choice.photoSize, choice.frameRate, if (profile.mode == CaptureMode.VIDEO) encodersOf(camera2.cameraId, quality, profile.audio, timebase) else null)
+    return Plan(quality, choice.photoSize, choice.frameRate, if (profile.mode == CaptureMode.VIDEO) encodersOf(info, quality, profile.audio, timebase) else null)
   }
 
-  private fun encodersOf(cameraId: String, quality: Quality, audio: Boolean, timebase: VideoTimebase): Encoders? {
-    val all = CamcorderProfile.getAll(cameraId, CAMCORDER_QUALITIES.getValue(quality)) ?: return null
-    val video = all.videoProfiles.firstOrNull { it.bitDepth == SDR_BIT_DEPTH && it.hdrFormat == EncoderProfiles.VideoProfile.HDR_NONE } ?: return null
-    val sound = all.audioProfiles.firstOrNull { it.mediaType == MediaFormat.MIMETYPE_AUDIO_AAC }
-    val made = if (!audio) {
-      Encoders(video.mediaType, video.width, video.height, video.bitrate, video.frameRate, null, NO_CODEC_PROFILE, 0, 0, 0, timebase)
-    } else if (sound != null) {
-      Encoders(video.mediaType, video.width, video.height, video.bitrate, video.frameRate, sound.mediaType, sound.profile, sound.bitrate, sound.sampleRate, sound.channels, timebase)
-    } else {
-      val bitrate = (AUDIO_BITRATE_BASE * (AUDIO_CHANNEL_COUNT_DEFAULT.toDouble() / AUDIO_CHANNEL_COUNT_BASE) * (AUDIO_SAMPLE_RATE_DEFAULT.toDouble() / AUDIO_SAMPLE_RATE_BASE)).toInt()
-      Encoders(video.mediaType, video.width, video.height, video.bitrate, video.frameRate, MediaFormat.MIMETYPE_AUDIO_AAC, MediaCodecInfo.CodecProfileLevel.AACObjectLC, bitrate, AUDIO_SAMPLE_RATE_DEFAULT, AUDIO_CHANNEL_COUNT_DEFAULT, timebase)
-    }
+  /** The encoder profile comes from the provider of the CameraX camera, the one the CameraX recorder reads: it holds the profile of a camera the legacy `CamcorderProfile` has none for. */
+  @android.annotation.SuppressLint("RestrictedApi")
+  private fun encodersOf(info: CameraInfo, quality: Quality, audio: Boolean, timebase: VideoTimebase): Encoders? {
+    val made = encodersFrom((info as CameraInfoInternal).encoderProfilesProvider.getAll(CAMCORDER_QUALITIES.getValue(quality)), audio, timebase) ?: return null
     if (audio && MediaCodecList(MediaCodecList.REGULAR_CODECS).findEncoderForFormat(checkNotNull(made.audioFormat())) == null) return null
     return made
   }
@@ -473,7 +482,6 @@ internal class CameraXBackend(private val context: Context, private val audioLin
   private companion object {
     const val AE_MODE_ON_AUTO_FLASH_REDEYE = 4
     const val ASPECT_TOLERANCE = 0.02
-    const val SDR_BIT_DEPTH = 8
     const val BYTES_PER_PIXEL = 4L
     val QUALITIES = listOf(Quality.SD, Quality.HD, Quality.FHD, Quality.UHD)
     val CAMCORDER_QUALITIES = mapOf(Quality.SD to CamcorderProfile.QUALITY_480P, Quality.HD to CamcorderProfile.QUALITY_720P, Quality.FHD to CamcorderProfile.QUALITY_1080P, Quality.UHD to CamcorderProfile.QUALITY_2160P)
