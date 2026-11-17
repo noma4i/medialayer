@@ -117,7 +117,7 @@ internal class CameraTake(
     if (!acquire(size.toLong())) return failLater("PCM exceeds the memory reserve")
     val copy = ByteArray(size).also { chunk.data.duplicate().get(it) }
     handler.post {
-      if (ended.get()) return@post
+      if (ended.get() || audioEos) { held.addAndGet(-size.toLong()); return@post }
       live = true
       pending.addLast(Pcm(copy, 0, chunk.ptsUs, bytesPerFrame))
       drain()
@@ -180,8 +180,9 @@ internal class CameraTake(
     val codec = audioCodec ?: return
     val origin = originUs ?: return
     while (!ended.get() && originUs != null && freeInputs.isNotEmpty() && (pending.isNotEmpty() || (finishing && !audioEos))) {
-      val index = freeInputs.removeFirst()
       val head = pending.firstOrNull()
+      if (head == null && !audioReachesVideoEnd()) return
+      val index = freeInputs.removeFirst()
       if (head == null) {
         codec.queueInputBuffer(index, 0, 0, lastAudioInputUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
         audioEos = true
@@ -193,6 +194,7 @@ internal class CameraTake(
       buffer.put(head.bytes, head.offset, size)
       lastAudioInputUs = origin + head.ptsUs
       codec.queueInputBuffer(index, 0, size, lastAudioInputUs, 0)
+      audioEndUs = lastAudioInputUs + size / head.bytesPerFrame * 1_000_000L / settings.audio!!.getInteger(MediaFormat.KEY_SAMPLE_RATE)
       head.offset += size
       head.ptsUs += size / head.bytesPerFrame * 1_000_000L / settings.audio!!.getInteger(MediaFormat.KEY_SAMPLE_RATE)
       if (head.offset >= head.bytes.size) {
@@ -203,6 +205,12 @@ internal class CameraTake(
   }
 
   private var lastAudioInputUs = 0L
+  private var audioEndUs = 0L
+  private var videoEndUs = -1L
+
+  /** The audio of a take ends when its PCM covers the end of the last video sample: the video encoder flushes at once with the frames the camera already gave, the PCM of the same time reaches the take later, so the audio stream is closed only after it caught up. The video end is known after the video EOS. */
+  private fun audioReachesVideoEnd(): Boolean = videoEndUs < 0 || !videoDone || audioEndUs - baseUs >= videoEndUs
+
 
   private fun output(codec: MediaCodec, kind: Int, index: Int, info: MediaCodec.BufferInfo) {
     if (ended.get()) return
@@ -217,6 +225,7 @@ internal class CameraTake(
       if (kind == VIDEO && info.size > 0 && !config) listener.onVideoEncoded(generation, info.presentationTimeUs)
       if (eos) {
         if (kind == VIDEO) videoDone = true else audioDone = true
+        if (kind == VIDEO && hasAudio && !audioEos) { handler.postDelayed({ if (!ended.get() && !audioEos) fail(0, "the audio did not reach the end of the video") }, AUDIO_CATCH_UP_MS); drain() }
         if (audioDone && videoDone) complete()
       }
     } catch (error: Throwable) {
@@ -276,6 +285,7 @@ internal class CameraTake(
     val interval = if (lastPts[kind] >= 0) ptsUs - lastPts[kind] else 0L
     lastPts[kind] = ptsUs
     endUs = maxOf(endUs, ptsUs + interval)
+    if (kind == VIDEO) videoEndUs = ptsUs + interval
   }
 
   private fun complete() {
@@ -318,5 +328,7 @@ internal class CameraTake(
   private companion object {
     const val VIDEO = 0
     const val AUDIO = 1
+    /** A guard against an audio that never arrives, not a tolerance: the coverage rule of the core still decides on the file. */
+    const val AUDIO_CATCH_UP_MS = 2_000L
   }
 }
