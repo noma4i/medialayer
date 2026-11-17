@@ -288,9 +288,9 @@ class MediaVoiceRecorder internal constructor(
   }
 }
 
-/** The lease of the microphone from the budget of the core, as the camera takes it (`reserveCapture`). It runs on the hardware thread of [RecordingAudio], never on a caller's. */
-private fun reserveCaptureLease(bytes: Long): AutoCloseable {
-  val hold = runBlocking { (ProcessMediaEnvironment.current ?: throw MediaException.Closed()).media.reserveCapture(bytes.toULong()) }
+/** The budget of the core for one take, the way the camera asks it: one hold before the input opens. */
+private suspend fun reserveCaptureBytes(bytes: Long): AutoCloseable {
+  val hold = (ProcessMediaEnvironment.current ?: throw MediaException.Closed()).media.reserveCapture(bytes.toULong())
   return AutoCloseable { hold.release() }
 }
 
@@ -298,10 +298,11 @@ internal class SystemVoiceCapture(
   private val context: Context,
   private val link: () -> AudioLink? = { Media.link },
   private val writer: () -> VoiceFileWriter = { MediaCodecVoiceFileWriter() },
-  private val microphone: (RecordingAudioListener) -> CameraMicrophone = { RecordingAudio(it, ::reserveCaptureLease, context.mainExecutor).asMicrophone() }
+  private val reserve: suspend (Long) -> AutoCloseable = ::reserveCaptureBytes,
+  private val microphone: (RecordingAudioListener, (Long) -> AutoCloseable) -> CameraMicrophone = { listener, lease -> RecordingAudio(listener, lease, context.mainExecutor).asMicrophone() }
 ) : VoiceCapture {
   // A lost take leaves its input lingering for the restore of the core: it closes itself on the first healthy PCM, or when the next take replaces it.
-  private class Active(val input: VoiceInput, val done: CompletableDeferred<Unit>) { @Volatile var lost = false }
+  private class Active(val input: VoiceInput, val done: CompletableDeferred<Unit>, val release: () -> Unit) { @Volatile var lost = false }
 
   private val lock = Any()
   private var active: Active? = null
@@ -310,6 +311,13 @@ internal class SystemVoiceCapture(
     val audio = link() ?: throw MediaException.Closed()
     val settings = voiceEncoderSettings()
     val spec = PcmSpec(MediaRecorder.AudioSource.MIC, settings.sampleRateHz.toInt(), if (settings.channels.toInt() == 1) AudioFormat.CHANNEL_IN_MONO else AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
+    val cost = try { pcmSizes(spec).lease } catch (error: PcmSizeError) { throw VoiceNativeFailure(NativeFailure(FailureSource.RECORDER, "android.media.AudioRecord", error.code, error.message ?: "bad PCM spec")) }
+    val hold = try { reserve(cost) } catch (error: Exception) {
+      if (error is kotlinx.coroutines.CancellationException) throw error
+      throw VoiceNativeFailure(NativeFailure(FailureSource.RECORDER, error.javaClass.name, 0L, error.message ?: error.toString()))
+    }
+    val memory = CaptureMemory(cost)
+    val release = { memory.close { hold.close() } }
     val first = CompletableDeferred<Unit>()
     val done = CompletableDeferred<Unit>()
     fun ended(error: Exception) {
@@ -325,8 +333,12 @@ internal class SystemVoiceCapture(
       override fun onCancelled() { first.completeExceptionally(kotlinx.coroutines.CancellationException("the take was cancelled")); done.complete(Unit) }
       override fun onLost() { mine.lost = true; ended(VoiceRefused(VoiceRefusal.MICROPHONE_SILENT)) }
     }
-    val input = VoiceInput(audio, spec, settings, maxDurationMs.toLong() * 1_000L, file, writer(), listener, microphone)
-    mine = Active(input, done)
+    val input = VoiceInput(audio, spec, settings, maxDurationMs.toLong() * 1_000L, file, writer(), listener) { heard ->
+      val made = microphone(heard, memory::lease)
+      // The hold goes back after the last lease of the microphone: the owner closes it at the end of the take or of its restore.
+      object : CameraMicrophone by made { override fun close() { try { made.close() } finally { release() } } }
+    }
+    mine = Active(input, done, release)
     // Registered before the owner can act: its first word may come at once.
     val previous = synchronized(lock) { active.also { active = mine } }
     previous?.input?.cancel()
@@ -335,7 +347,7 @@ internal class SystemVoiceCapture(
       input.start()
       first.await()
     } catch (error: Throwable) {
-      if (!mine.lost) { leave(); input.cancel() }
+      if (!mine.lost) { leave(); input.cancel(); release() }
       throw error
     } finally {
       revoked.close()
@@ -344,13 +356,17 @@ internal class SystemVoiceCapture(
 
   override fun peak(): Float = synchronized(lock) { active }?.input?.peak() ?: 0f
 
-  override fun stop() { leave()?.takeUnless { it.lost }?.input?.cancel() }
+  override fun stop() { leave()?.takeUnless { it.lost }?.let { it.input.cancel(); it.release() } }
 
   override suspend fun finish() {
     val taking = leave() ?: return
     if (taking.lost) throw VoiceRefused(VoiceRefusal.MICROPHONE_SILENT)
-    taking.input.finish()
-    taking.done.await()
+    try {
+      taking.input.finish()
+      taking.done.await()
+    } finally {
+      taking.release()
+    }
   }
 
   private fun leave(): Active? = synchronized(lock) { active?.also { if (!it.lost) active = null } }

@@ -44,6 +44,31 @@ internal interface RecordingAudioListener {
   fun onFailed(generation: Long, failure: NativeFailure)
 }
 
+internal class PcmSizeError(val code: Long, message: String) : Exception(message)
+
+/** The buffer and the read chunk of a source in bytes, the chunk aligned to whole frames: what the source leases while it runs. */
+internal class PcmSizes(val bytesPerFrame: Int, val bufferBytes: Int, val chunkBytes: Int) {
+  val lease: Long get() = (bufferBytes + chunkBytes).toLong()
+}
+
+internal fun pcmSizes(spec: PcmSpec): PcmSizes {
+  val sample = when (spec.encoding) {
+    AudioFormat.ENCODING_PCM_8BIT -> 1
+    AudioFormat.ENCODING_PCM_16BIT -> 2
+    AudioFormat.ENCODING_PCM_FLOAT -> 4
+    else -> throw PcmSizeError(spec.encoding.toLong(), "unsupported encoding ${spec.encoding}")
+  }
+  val channels = Integer.bitCount(spec.channelMask)
+  if (channels <= 0 || spec.sampleRate <= 0) throw PcmSizeError(0, "bad channel mask ${spec.channelMask} or rate ${spec.sampleRate}")
+  val bytesPerFrame = sample * channels
+  val minimum = AudioRecord.getMinBufferSize(spec.sampleRate, spec.channelMask, spec.encoding)
+  if (minimum <= 0) throw PcmSizeError(minimum.toLong(), "AudioRecord.getMinBufferSize returned $minimum")
+  val bufferBytes = spec.bufferBytes ?: minimum
+  val chunkBytes = (spec.chunkBytes ?: minimum).let { it - it % bytesPerFrame }
+  if (chunkBytes <= 0 || bufferBytes <= 0) throw PcmSizeError(0, "no whole frame fits the buffer")
+  return PcmSizes(bytesPerFrame, bufferBytes, chunkBytes)
+}
+
 internal class RecordingAudio(
   private val listener: RecordingAudioListener,
   private val admit: (Long) -> AutoCloseable,
@@ -105,13 +130,11 @@ internal class RecordingAudio(
       var reserve: AutoCloseable? = null
       try {
         if (!open.get()) return
-        val bytesPerFrame = bytesPerFrame() ?: return
-        val minimum = AudioRecord.getMinBufferSize(spec.sampleRate, spec.channelMask, spec.encoding)
-        if (minimum <= 0) return fail(minimum.toLong(), "AudioRecord.getMinBufferSize returned $minimum")
-        val bufferBytes = spec.bufferBytes ?: minimum
-        val chunkBytes = (spec.chunkBytes ?: minimum).let { it - it % bytesPerFrame }
-        if (chunkBytes <= 0 || bufferBytes <= 0) return fail(0, "no whole frame fits the buffer")
-        reserve = admit((bufferBytes + chunkBytes).toLong())
+        val sizes = try { pcmSizes(spec) } catch (error: PcmSizeError) { return fail(error.code, error.message ?: "bad PCM spec") }
+        val bytesPerFrame = sizes.bytesPerFrame
+        val bufferBytes = sizes.bufferBytes
+        val chunkBytes = sizes.chunkBytes
+        reserve = admit(sizes.lease)
         val made = AudioRecord.Builder()
           .setAudioSource(spec.audioSource)
           .setAudioFormat(AudioFormat.Builder().setSampleRate(spec.sampleRate).setChannelMask(spec.channelMask).setEncoding(spec.encoding).build())
@@ -129,18 +152,6 @@ internal class RecordingAudio(
       } finally {
         release(reserve)
       }
-    }
-
-    private fun bytesPerFrame(): Int? {
-      val sample = when (spec.encoding) {
-        AudioFormat.ENCODING_PCM_8BIT -> 1
-        AudioFormat.ENCODING_PCM_16BIT -> 2
-        AudioFormat.ENCODING_PCM_FLOAT -> 4
-        else -> return null.also { fail(spec.encoding.toLong(), "unsupported encoding ${spec.encoding}") }
-      }
-      val channels = Integer.bitCount(spec.channelMask)
-      if (channels <= 0 || spec.sampleRate <= 0) return null.also { fail(0, "bad channel mask ${spec.channelMask} or rate ${spec.sampleRate}") }
-      return sample * channels
     }
 
     private fun readLoop(made: AudioRecord, chunkBytes: Int, bytesPerFrame: Int) {
