@@ -88,7 +88,8 @@ internal class CameraServices(
   val clipInfo: suspend (File) -> MediaInfo?,
   val uprightVideo: suspend (File) -> Unit,
   val upright: suspend (File, Double) -> File,
-  val directory: File
+  val directory: File,
+  val audioCoverage: suspend (File) -> com.noma4i.medialayer.AudioCoverage
 ) {
   companion object {
     fun live(context: Context): CameraServices {
@@ -104,7 +105,8 @@ internal class CameraServices(
         clipInfo = { file -> readMediaInfo(context, "file://${file.absolutePath}") },
         uprightVideo = { file -> uprightVideoAt(context, file) },
         upright = { raw, quality -> prepareImageAt(directory, raw, quality, environment().media.decodeAdmit()).file },
-        directory = directory
+        directory = directory,
+        audioCoverage = { file -> scanAudioCoverage(file) }
       )
     }
   }

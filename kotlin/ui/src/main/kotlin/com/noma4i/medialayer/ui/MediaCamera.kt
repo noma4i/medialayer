@@ -23,6 +23,7 @@ import com.noma4i.medialayer.MediaInfo
 import com.noma4i.medialayer.RecordingKind
 import com.noma4i.medialayer.RecordingRefusal
 import com.noma4i.medialayer.cameraRefusalText
+import com.noma4i.medialayer.audioCoverageRefusal
 import com.noma4i.medialayer.captureCost
 import com.noma4i.medialayer.captureRun
 import com.noma4i.medialayer.captureStep
@@ -655,9 +656,14 @@ class MediaCamera internal constructor(
     val file = recordingFile ?: return
     reading?.cancel()
     reading = scope.launch {
+      var silent: CameraRefusal? = null
       val info = try {
-        services.uprightVideo(file)
-        services.clipInfo(file)
+        silent = audioRefusal(file)
+        if (silent == null) {
+          services.uprightVideo(file)
+          silent = audioRefusal(file)
+        }
+        if (silent == null) services.clipInfo(file) else null
       } catch (failure: Exception) {
         if (failure is kotlinx.coroutines.CancellationException) throw failure
         Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, failure)
@@ -668,10 +674,15 @@ class MediaCamera internal constructor(
         if (reading?.isCancelled == true) return@enqueue
         reading = null
         clipInfo = info
+        silent?.let { apply(CaptureEvent.Revoked(it)) }
         apply(CaptureEvent.RecordSettled(info?.durationMs))
       }
     }
   }
+
+  /** The refusal of the core for the audio of a recorded file, null when it is covered or the profile holds no audio. The core owns the rule, the scan only reads the file. */
+  private suspend fun audioRefusal(file: File): CameraRefusal? =
+    if (!profile.audio) null else audioCoverageRefusal(services.audioCoverage(file).verdict)
 
   private fun deliver() {
     val file = recordingFile

@@ -118,7 +118,7 @@ class CameraNativeDeviceTest {
         readings.add("uprightVideo ${file.name} threw $error, after: ${describe(file)}")
         throw error
       }
-    }, live.upright, live.directory)
+    }, live.upright, live.directory, live.audioCoverage)
   }
 
   private fun record(audio: Boolean) = runBlocking {
