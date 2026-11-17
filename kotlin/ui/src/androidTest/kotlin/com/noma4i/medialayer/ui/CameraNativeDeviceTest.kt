@@ -120,8 +120,34 @@ class CameraNativeDeviceTest {
       }
     }, live.upright, live.directory, { file ->
       val seen = if (damage == null) file else damaged(file, damage).also { files.add(it) }
-      live.audioCoverage(seen).also { readings.add("coverage ${file.name} $damage = ${it.verdict}") }
+      live.audioCoverage(seen).also { readings.add("coverage ${file.name} $damage = $it timeline=${timeline(seen)}") }
     })
+  }
+
+  /** Per track: the container duration, the first and the last packet PTS, the packet count and the last packet size, read from the file as it is. */
+  private fun timeline(file: File): String {
+    val extractor = MediaExtractor()
+    try {
+      extractor.setDataSource(file.absolutePath)
+      val formats = (0 until extractor.trackCount).map { extractor.getTrackFormat(it) }
+      val first = LongArray(formats.size) { -1 }
+      val last = LongArray(formats.size) { -1 }
+      val count = IntArray(formats.size)
+      formats.indices.forEach { extractor.selectTrack(it) }
+      while (extractor.sampleTrackIndex >= 0) {
+        val track = extractor.sampleTrackIndex
+        val time = extractor.sampleTime
+        if (first[track] < 0) first[track] = time
+        last[track] = time
+        count[track]++
+        extractor.advance()
+      }
+      return formats.indices.joinToString("; ") { "${formats[it].getString(MediaFormat.KEY_MIME)} duration=${if (formats[it].containsKey(MediaFormat.KEY_DURATION)) formats[it].getLong(MediaFormat.KEY_DURATION) else null} first=${first[it]} last=${last[it]} packets=${count[it]}" }
+    } catch (error: Exception) {
+      return "unreadable $error"
+    } finally {
+      extractor.release()
+    }
   }
 
   private enum class Damage { HEAD, MIDDLE, TAIL }
