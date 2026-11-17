@@ -95,7 +95,7 @@ class CameraTakesAudioTest {
 
   private val camera = MediaCamera(
     captureProfile(CaptureKind.MOMENT).copy(minTakeMs = 0uL), CameraLens.BACK, backend,
-    CameraServices({ AutoCloseable {} }, { AutoCloseable {} }, { fixture.link }, { MediaInfo(2000UL, ImageSize(720u, 1280u)) }, {}, { raw, _ -> raw }, File(context.cacheDir, "takes-${System.nanoTime()}"), { _ -> com.noma4i.medialayer.AudioCoverage(com.noma4i.medialayer.CoverageVerdict.COVERED, 1UL, 0L, 1L, null, null) })
+    CameraServices({ AutoCloseable {} }, { AutoCloseable {} }, { fixture.link }, { MediaInfo(2000UL, ImageSize(720u, 1280u)) }, {}, { raw, _ -> raw }, File(context.cacheDir, "takes-${System.nanoTime()}"), { _ -> CoreCoverage.covered() })
   )
 
   @After fun close() {

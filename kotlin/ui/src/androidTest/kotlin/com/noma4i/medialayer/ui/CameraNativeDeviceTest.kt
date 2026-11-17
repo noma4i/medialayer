@@ -105,7 +105,7 @@ class CameraNativeDeviceTest {
     }
   }
 
-  private fun diagnosing(): CameraServices {
+  private fun diagnosing(damage: Damage? = null): CameraServices {
     val live = CameraServices.live(context)
     return CameraServices(live.admitSession, live.admitShot, live.audio, { file ->
       live.clipInfo(file).also { readings.add("clipInfo ${file.name} = $it") }
@@ -118,10 +118,46 @@ class CameraNativeDeviceTest {
         readings.add("uprightVideo ${file.name} threw $error, after: ${describe(file)}")
         throw error
       }
-    }, live.upright, live.directory, live.audioCoverage)
+    }, live.upright, live.directory, { file ->
+      val seen = if (damage == null) file else damaged(file, damage).also { files.add(it) }
+      live.audioCoverage(seen).also { readings.add("coverage ${file.name} $damage = ${it.verdict}") }
+    })
   }
 
-  private fun record(audio: Boolean) = runBlocking {
+  private enum class Damage { HEAD, MIDDLE, TAIL }
+
+  /** A real copy of the file with the audio packets of one part removed, so the scan reads it through the real extractor and decoder. */
+  private fun damaged(file: File, damage: Damage): File {
+    val output = File(context.cacheDir, "damaged-${System.nanoTime()}.mp4")
+    val extractor = MediaExtractor()
+    val muxer = android.media.MediaMuxer(output.absolutePath, android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+    try {
+      extractor.setDataSource(file.absolutePath)
+      val formats = (0 until extractor.trackCount).map { extractor.getTrackFormat(it) }
+      val video = formats.indexOfFirst { it.getString(MediaFormat.KEY_MIME)!!.startsWith("video/") }
+      val length = formats[video].getLong(MediaFormat.KEY_DURATION)
+      val cut = when (damage) { Damage.HEAD -> 0L..length * 3 / 10; Damage.MIDDLE -> length * 4 / 10..length * 6 / 10; Damage.TAIL -> length * 7 / 10..length }
+      val mapped = formats.indices.map { muxer.addTrack(formats[it]) }
+      formats.indices.forEach { extractor.selectTrack(it) }
+      muxer.start()
+      val buffer = java.nio.ByteBuffer.allocate(1 shl 20)
+      val info = android.media.MediaCodec.BufferInfo()
+      while (extractor.sampleTrackIndex >= 0) {
+        val track = extractor.sampleTrackIndex
+        val time = extractor.sampleTime
+        info.set(0, extractor.readSampleData(buffer, 0), time, extractor.sampleFlags)
+        if (track == video || time !in cut) muxer.writeSampleData(mapped[track], buffer, info)
+        extractor.advance()
+      }
+      muxer.stop()
+      return output
+    } finally {
+      extractor.release()
+      muxer.release()
+    }
+  }
+
+  private fun record(audio: Boolean, damage: Damage? = null) = runBlocking {
     val profile = captureProfile(CaptureKind.MOMENT).copy(audio = audio)
     val failures = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { Media.failures.collect { reported.add(it) } }
     val hearing = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { checkNotNull(layer).microphoneAvailability.collect { heard.value += it } }
@@ -131,7 +167,7 @@ class CameraNativeDeviceTest {
       activity.setContentView(ComposeView(activity).apply {
         setContent {
           MediaLayerProvider(checkNotNull(opened)) {
-            val made = remember { MediaCamera(profile, CameraLens.BACK, CameraXBackend(context), diagnosing()) }
+            val made = remember { MediaCamera(profile, CameraLens.BACK, CameraXBackend(context), diagnosing(damage)) }
             DisposableEffect(made) { onDispose { made.close() } }
             LaunchedEffect(made) { composed.complete(made) }
             MediaCameraPreview(made, Modifier.fillMaxSize())
@@ -150,6 +186,16 @@ class CameraNativeDeviceTest {
       } catch (error: kotlinx.coroutines.TimeoutCancellationException) {
         throw AssertionError("the microphone never became available; availability=${heard.value}; native failures=${reported.toList()}", error)
       }
+    }
+    if (damage != null) {
+      made.startRecording()
+      withTimeout(TIMEOUT_MS) { made.state.first { it.isRecording && it.recordedMs >= profile.minTakeMs } }
+      val refused = try { made.stopRecording(); null } catch (error: MediaException.Camera) { error }
+      failures.cancel()
+      hearing.cancel()
+      assertEquals("$damage audio is refused, readings=${readings.toList()}", com.noma4i.medialayer.CameraRefusal.MICROPHONE_SILENT, refused?.reason)
+      assertTrue("the refused file is deleted", CaptureFiles.directory(context).listFiles().orEmpty().isEmpty())
+      return@runBlocking
     }
     val clips = (1..2).map {
       try {
@@ -177,6 +223,15 @@ class CameraNativeDeviceTest {
 
   @Test
   fun two_takes_without_sound_are_two_mp4_files_with_video_packets_only() = record(audio = false)
+
+  @Test
+  fun audio_missing_at_the_head_is_refused_and_the_file_deleted() = record(audio = true, damage = Damage.HEAD)
+
+  @Test
+  fun audio_missing_in_the_middle_is_refused_and_the_file_deleted() = record(audio = true, damage = Damage.MIDDLE)
+
+  @Test
+  fun audio_missing_at_the_tail_is_refused_and_the_file_deleted() = record(audio = true, damage = Damage.TAIL)
 
   private companion object {
     const val TIMEOUT_MS = 30_000L

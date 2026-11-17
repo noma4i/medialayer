@@ -15,9 +15,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.test.core.app.ApplicationProvider
 import com.noma4i.medialayer.CameraLens
 import com.noma4i.medialayer.CameraPhase
-import com.noma4i.medialayer.AudioCoverage
 import com.noma4i.medialayer.CameraRefusal
-import com.noma4i.medialayer.CoverageVerdict
 import com.noma4i.medialayer.CaptureEvent
 import com.noma4i.medialayer.CaptureKind
 import com.noma4i.medialayer.CaptureProfile
@@ -184,7 +182,7 @@ private class Counters {
   @Volatile var denySessions = false
   @Volatile var denyShots = false
   @Volatile var info: MediaInfo? = MediaInfo(2000UL, ImageSize(720u, 1280u))
-  @Volatile var coverage = com.noma4i.medialayer.AudioCoverage(com.noma4i.medialayer.CoverageVerdict.COVERED, 1UL, 0L, 1L, null, null)
+  @Volatile var coverage = CoreCoverage.covered()
   val coverageSeen = CopyOnWriteArrayList<File>()
   @Volatile var videoGate: CompletableDeferred<Unit>? = null
   @Volatile var focusAnswer = com.noma4i.medialayer.FocusAnswer.GRANTED
@@ -426,14 +424,19 @@ class MediaCameraTest {
   fun inv_audio_70_a_recorded_file_whose_sound_the_core_refuses_is_deleted_with_the_silent_refusal_and_one_outcome() = runBlocking {
     val rig = rig(moment)
     ready(rig)
-    listOf(CoverageVerdict.MISSING, CoverageVerdict.EMPTY, CoverageVerdict.BROKEN, CoverageVerdict.MID_GAP, CoverageVerdict.TAIL_CUT, CoverageVerdict.HEAD_GAP).forEach { verdict ->
-      rig.counters.coverage = AudioCoverage(verdict, 0UL, null, null, null, null)
+    val outcomes = CopyOnWriteArrayList<Any>()
+    val watching = launch(Dispatchers.Default, start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { rig.camera.state.collect { state -> state.outcome?.let { outcomes.add(it) } } }
+    CoreCoverage.refused.forEach { (verdict, answer) ->
+      assertEquals(verdict, answer.verdict)
+      rig.counters.coverage = answer
       rig.camera.startRecording()
       val ended = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
       assertEquals(CameraRefusal.MICROPHONE_SILENT, ended.reason)
       assertTrue(rig.files().isEmpty())
       eventually("ready after $verdict") { rig.camera.state.value.phase == CameraPhase.READY }
     }
+    watching.cancel()
+    assertEquals(listOf<Any>(com.noma4i.medialayer.TakeOutcome.Refused(CameraRefusal.MICROPHONE_SILENT)), outcomes.distinct())
   }
 
   @Test
@@ -450,20 +453,19 @@ class MediaCameraTest {
   fun inv_audio_72_a_take_with_no_audio_in_its_profile_skips_the_sound_read() = runBlocking {
     val rig = rig(moment.copy(audio = false))
     ready(rig)
-    rig.counters.coverage = AudioCoverage(CoverageVerdict.MISSING, 0UL, null, null, null, null)
+    rig.counters.coverage = CoreCoverage.missing()
     rig.camera.startRecording()
     rig.camera.stopRecording()
     assertTrue(rig.counters.coverageSeen.isEmpty())
   }
 
   @Test
-  fun inv_audio_73_aac_frame_samples_come_from_the_audio_specific_config() {
-    fun asc(vararg bytes: Int) = java.nio.ByteBuffer.wrap(ByteArray(bytes.size) { bytes[it].toByte() })
-    assertEquals(1024, aacFrameSamples(asc(0x12, 0x08)))
-    assertEquals(960, aacFrameSamples(asc(0x12, 0x0C)))
-    assertEquals(2048, aacFrameSamples(asc(0x2B, 0x92, 0x08, 0x00)))
-    assertEquals(0, aacFrameSamples(asc(0x42, 0x08)))
-    assertEquals(0, aacFrameSamples(null))
+  fun inv_audio_73_aac_frame_samples_come_from_the_audio_specific_config_and_only_for_lc_at_the_output_rate() {
+    val lc = java.nio.ByteBuffer.wrap(androidx.media3.extractor.AacUtil.buildAacLcAudioSpecificConfig(44_100, 1))
+    assertEquals(1024, aacFrameSamples(lc, 44_100))
+    assertEquals(0, aacFrameSamples(lc, 48_000))
+    assertEquals(0, aacFrameSamples(java.nio.ByteBuffer.wrap(byteArrayOf(0x42, 0x08)), 44_100))
+    assertEquals(0, aacFrameSamples(null, 44_100))
   }
 
   @Test

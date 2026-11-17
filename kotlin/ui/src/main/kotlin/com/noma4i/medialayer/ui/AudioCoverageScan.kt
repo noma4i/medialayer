@@ -21,58 +21,41 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** The frame of one AAC access unit in PCM samples per channel, read from the AudioSpecificConfig (ISO/IEC 14496-3, 1.6.2.1 and 4.4.1 GASpecificConfig). 0 when the profile is not one this reads: the core then refuses the clip as broken. */
-internal fun aacFrameSamples(config: ByteBuffer?): Int {
+/** The frame of one AAC access unit in PCM samples per channel for the AAC-LC the writers of the camera produce: the AudioSpecificConfig is read by media3 `AacUtil` (the object type is its `mp4a.40.2` codec string, the frame is `AAC_LC_AUDIO_SAMPLE_COUNT`) and its rate must be the rate the decoder outputs, so a signalled SBR or PS that doubles the output is not taken for LC. Any other profile or a config that does not parse is 0: the core then refuses the clip as broken. */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+internal fun aacFrameSamples(config: ByteBuffer?, outputRate: Int): Int {
   if (config == null) return 0
   val bytes = ByteArray(config.remaining()).also { config.duplicate().get(it) }
-  var at = 0
-  fun bits(count: Int): Int {
-    var value = 0
-    repeat(count) {
-      if (at >= bytes.size * 8) return -1
-      value = value shl 1 or (bytes[at / 8].toInt() shr (7 - at % 8) and 1)
-      at++
-    }
-    return value
-  }
-  fun objectType(): Int = bits(5).let { if (it == 31) bits(6).let { more -> if (more < 0) -1 else 32 + more } else it }
-  fun rate() { if (bits(4) == 15) bits(24) }
-  var type = objectType()
-  rate()
-  bits(4)
-  var factor = 1
-  if (type == 5 || type == 29) {
-    rate()
-    type = objectType()
-    factor = 2
-  }
-  val flag = when (type) {
-    1, 2, 4, 17, 19 -> bits(1)
-    39 -> bits(1)
-    else -> -1
-  }
-  if (flag < 0) return 0
-  val frame = if (type == 39) (if (flag == 0) 512 else 480) else (if (flag == 0) 1024 else 960)
-  return frame * factor
+  val parsed = try { androidx.media3.extractor.AacUtil.parseAudioSpecificConfig(bytes) } catch (_: androidx.media3.common.ParserException) { return 0 }
+  return if (parsed.codecs == "mp4a.40.${androidx.media3.extractor.AacUtil.AUDIO_OBJECT_TYPE_AAC_LC}" && parsed.sampleRateHz == outputRate) androidx.media3.extractor.AacUtil.AAC_LC_AUDIO_SAMPLE_COUNT else 0
 }
 
-/** The first and the last end of the video samples of a clip: the end of the last one is its PTS plus the real step to it from the one before. */
+private fun broken(): AudioCoverage = coverageFinish(coverageBegin(CoverageConfig(true, true, 0u, 0u)), null)
+
+/** The bounds of the video track of a clip: its first PTS and the track duration of the container taken from that origin, checked against the real packets (the last PTS lies inside it). Null when the track, its duration or a timestamp is missing or contradicts the packets: the clip is then broken, the end is never guessed from a frame step. */
 private fun videoBounds(file: File): VideoBounds? {
   val extractor = MediaExtractor()
   try {
     extractor.setDataSource(file.absolutePath)
     val track = (0 until extractor.trackCount).firstOrNull { extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true } ?: return null
+    val format = extractor.getTrackFormat(track)
+    if (!format.containsKey(MediaFormat.KEY_DURATION)) return null
+    val duration = format.getLong(MediaFormat.KEY_DURATION)
     extractor.selectTrack(track)
     var first = -1L
     var last = -1L
-    var step = 0L
     while (extractor.sampleTrackIndex >= 0) {
       val time = extractor.sampleTime
-      if (first < 0) first = time else if (time > last) step = time - last
-      if (time > last) last = time
+      if (time < 0) return null
+      if (first < 0) first = time
+      last = maxOf(last, time)
       if (!extractor.advance()) break
     }
-    return if (first < 0) null else VideoBounds(first, last + step)
+    if (first < 0 || duration <= 0) return null
+    val end = Math.addExact(first, duration)
+    return if (last >= end) null else VideoBounds(first, end)
+  } catch (_: ArithmeticException) {
+    return null
   } finally {
     extractor.release()
   }
@@ -80,7 +63,7 @@ private fun videoBounds(file: File): VideoBounds? {
 
 /** Decodes the audio of a clip once and runs its PCM through the core rule: the state of the scan is one value, no PCM and no interval is kept. A decode error is a broken audio, a cancelled read releases the codec and the file. */
 internal suspend fun scanAudioCoverage(file: File): AudioCoverage = withContext(Dispatchers.IO) {
-  val video = videoBounds(file)
+  val video = try { videoBounds(file) } catch (failure: RuntimeException) { null } ?: return@withContext broken()
   val extractor = MediaExtractor()
   try {
     extractor.setDataSource(file.absolutePath)
@@ -88,16 +71,19 @@ internal suspend fun scanAudioCoverage(file: File): AudioCoverage = withContext(
     if (track == null) return@withContext coverageFinish(coverageBegin(CoverageConfig(true, false, 0u, 0u)), video)
     val format = extractor.getTrackFormat(track)
     extractor.selectTrack(track)
-    val frame = if (format.getString(MediaFormat.KEY_MIME) == MediaFormat.MIMETYPE_AUDIO_AAC) aacFrameSamples(format.getByteBuffer("csd-0")) else 0
-    decode(extractor, format, frame, video)
+    decode(extractor, format, video)
+  } catch (failure: kotlinx.coroutines.CancellationException) {
+    throw failure
+  } catch (failure: RuntimeException) {
+    broken()
   } catch (failure: java.io.IOException) {
-    coverageFinish(coverageBegin(CoverageConfig(true, true, 0u, 0u)), video)
+    broken()
   } finally {
     extractor.release()
   }
 }
 
-private suspend fun decode(extractor: MediaExtractor, format: MediaFormat, frame: Int, video: VideoBounds?): AudioCoverage {
+private suspend fun decode(extractor: MediaExtractor, format: MediaFormat, video: VideoBounds): AudioCoverage {
   val codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
   val thread = HandlerThread("coverage-scan").apply { start() }
   val done = CompletableDeferred<Unit>()
@@ -105,6 +91,7 @@ private suspend fun decode(extractor: MediaExtractor, format: MediaFormat, frame
   var rate = 0
   var bytesPerFrame = 0
   var broken = false
+  var frame = 0
   fun begin(output: MediaFormat) {
     val channels = output.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
     val sampleRate = output.getInteger(MediaFormat.KEY_SAMPLE_RATE)
@@ -113,6 +100,7 @@ private suspend fun decode(extractor: MediaExtractor, format: MediaFormat, frame
     val previous = scan
     if (previous != null) { broken = broken || sampleRate != rate || channels * width != bytesPerFrame; return }
     rate = sampleRate
+    frame = if (format.getString(MediaFormat.KEY_MIME) == MediaFormat.MIMETYPE_AUDIO_AAC) aacFrameSamples(format.getByteBuffer("csd-0"), sampleRate) else 0
     bytesPerFrame = channels * width
     broken = bytesPerFrame == 0
     scan = coverageBegin(CoverageConfig(true, true, sampleRate.toUInt(), frame.toUInt()))
@@ -133,7 +121,8 @@ private suspend fun decode(extractor: MediaExtractor, format: MediaFormat, frame
         if (!done.isCompleted && info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
           if (scan == null) begin(codec.outputFormat)
           val samples = info.size / bytesPerFrame
-          val end = info.presentationTimeUs + samples * 1_000_000L / rate
+          val end = Math.addExact(info.presentationTimeUs, Math.multiplyExact(samples.toLong(), 1_000_000L) / rate)
+          if (info.presentationTimeUs < 0) broken = true
           if (!broken) scan = coveragePush(scan!!, AudioInterval(info.presentationTimeUs, end, samples.toULong()))
         }
         codec.releaseOutputBuffer(index, false)
@@ -151,12 +140,12 @@ private suspend fun decode(extractor: MediaExtractor, format: MediaFormat, frame
     codec.configure(format, null, null, 0)
     codec.start()
     done.await()
-    val last = scan ?: coverageBegin(CoverageConfig(true, true, format.getInteger(MediaFormat.KEY_SAMPLE_RATE).toUInt(), frame.toUInt()))
+    val last = scan ?: coverageBegin(CoverageConfig(true, true, format.getInteger(MediaFormat.KEY_SAMPLE_RATE).toUInt(), 0u))
     return if (broken) coverageFinish(last.copy(defect = last.defect ?: CoverageVerdict.BROKEN), video) else coverageFinish(last, video)
   } catch (failure: kotlinx.coroutines.CancellationException) {
     throw failure
   } catch (failure: Exception) {
-    return coverageFinish(coverageBegin(CoverageConfig(true, true, 0u, 0u)), video)
+    return broken()
   } finally {
     try { codec.stop() } catch (_: Exception) {}
     codec.release()
