@@ -492,9 +492,9 @@ internal class CameraXBackend(private val context: Context, private val audioLin
     if (!audio) return Result.success(made)
     val supported = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filter { it.isEncoder && it.supportedTypes.contains(MediaFormat.MIMETYPE_AUDIO_AAC) }
       .flatMap { it.getCapabilitiesForType(MediaFormat.MIMETYPE_AUDIO_AAC).profileLevels.map { level -> level.profile } }.toSet()
-    val profile = resolveAacProfile(made.audioProfile, supported)
-      ?: return refused(PlanRefusal.NO_AUDIO_ENCODER, PlanFacts(counted.cameraId, counted.quality, counted.supported, counted.videoProfiles, counted.audioProfiles, made))
-    return Result.success(made.withAudioProfile(profile))
+    val chosen = resolveAacProfile(made.audioProfile, supported)?.let { made.withAudioProfile(it) } ?: made
+    if (resolveAacProfile(made.audioProfile, supported) == null || MediaCodecList(MediaCodecList.REGULAR_CODECS).findEncoderForFormat(checkNotNull(chosen.audioFormat())) == null) return refused(PlanRefusal.NO_AUDIO_ENCODER, PlanFacts(counted.cameraId, counted.quality, counted.supported, counted.videoProfiles, counted.audioProfiles, chosen))
+    return Result.success(chosen)
   }
 
   private fun aspect(size: PixelSize): AspectRatioStrategy {
