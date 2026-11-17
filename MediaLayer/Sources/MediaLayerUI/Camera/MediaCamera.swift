@@ -662,14 +662,12 @@ public final class MediaCamera: @unchecked Sendable {
     }
   }
 
-  /// The rule of the core for the audio of the clip, before and after the turn of the video: the PCM that the file really decodes against its video.
   private func audioRefusal(of url: URL) async throws -> CameraRefusal? {
     let coverage = try await services.audioCoverage(url, profile.audio)
     try Task.checkCancellation()
     return audioCoverageRefusal(verdict: coverage.verdict)
   }
 
-  /// A refusal reaches the core as the lost microphone of the take: the take is thrown away by the usual way, once, and the preview goes on.
   private func refuseClip(_ url: URL, _ refusal: CameraRefusal) {
     queue.async {
       guard self.recordingURL == url, self.reading != nil else { return }

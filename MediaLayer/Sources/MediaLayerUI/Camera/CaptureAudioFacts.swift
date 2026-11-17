@@ -42,8 +42,6 @@ func scanCaptureFacts(at url: URL) async throws -> CaptureMediaFacts {
   }
 }
 
-/// The audio of a recorded clip against its video, by the one rule of the core: the decoded PCM intervals go to the core one by one and only a counter set is kept, never the stream.
-/// Nothing is decoded when the profile does not need audio. A source that cannot be read is a broken audio, never a covered one.
 func scanAudioCoverage(at url: URL, required: Bool) async throws -> AudioCoverage {
   guard required else { return coverageFinish(scan: coverageBegin(config: CoverageConfig(audioRequired: false, audioTrack: false, sampleRate: 0, frameSamples: 0)), video: nil) }
   let task = Task.detached { try await readAudioCoverage(of: AVURLAsset(url: url)) }
@@ -65,17 +63,16 @@ private func readAudioCoverage(of asset: AVURLAsset) async throws -> AudioCovera
   } catch {
     return brokenCoverage()
   }
+  // A camera clip always has video: a video that is absent, empty or unreadable is not an audio-only clip.
+  guard case let .read(intervals) = video, let start = microseconds(intervals.firstPTS), let end = microseconds(intervals.lastPTS) else { return brokenCoverage() }
   guard let track = tracks.first else {
     return coverageFinish(scan: coverageBegin(config: CoverageConfig(audioRequired: true, audioTrack: false, sampleRate: 0, frameSamples: 0)), video: nil)
   }
-  var bounds: VideoBounds?
-  if case let .read(intervals) = video, let start = microseconds(intervals.firstPTS), let end = microseconds(intervals.lastPTS) {
-    bounds = VideoBounds(startUs: start, endUs: end)
-  }
   do {
-    guard let stored = try await track.load(.formatDescriptions).first, let format = CMAudioFormatDescriptionGetStreamBasicDescription(stored)?.pointee else { return brokenCoverage() }
-    guard let scan = try await decodeCoverage(asset: asset, track: track, format: format) else { return brokenCoverage() }
-    return coverageFinish(scan: scan, video: bounds)
+    guard let stored = try await track.load(.formatDescriptions).first, let format = CMAudioFormatDescriptionGetStreamBasicDescription(stored)?.pointee,
+          format.mSampleRate.isFinite, format.mSampleRate > 0, format.mSampleRate <= Double(UInt32.max), format.mChannelsPerFrame > 0,
+          let scan = try await decodeCoverage(asset: asset, track: track, format: format) else { return brokenCoverage() }
+    return coverageFinish(scan: scan, video: VideoBounds(startUs: start, endUs: end))
   } catch is CancellationError {
     throw CancellationError()
   } catch {
@@ -88,7 +85,7 @@ private func decodeCoverage(asset: AVURLAsset, track: AVAssetTrack, format store
   let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
     AVFormatIDKey: kAudioFormatLinearPCM,
     AVSampleRateKey: stored.mSampleRate,
-    AVNumberOfChannelsKey: Int(max(stored.mChannelsPerFrame, 1)),
+    AVNumberOfChannelsKey: Int(stored.mChannelsPerFrame),
     AVLinearPCMBitDepthKey: 32,
     AVLinearPCMIsFloatKey: true,
     AVLinearPCMIsBigEndianKey: false,
@@ -109,18 +106,17 @@ private func decodeCoverage(asset: AVURLAsset, track: AVAssetTrack, format store
     if let interval = decodedInterval(of: buffer) { scan = coveragePush(scan: current, interval: interval) }
   }
   guard reader.status == .completed else { return nil }
-  return scan ?? coverageBegin(config: CoverageConfig(audioRequired: true, audioTrack: true, sampleRate: UInt32(clamping: Int(stored.mSampleRate)), frameSamples: stored.mFramesPerPacket))
+  return scan ?? coverageBegin(config: CoverageConfig(audioRequired: true, audioTrack: true, sampleRate: UInt32(stored.mSampleRate.rounded()), frameSamples: stored.mFramesPerPacket))
 }
 
-/// The rate is the one the decoder produced, the frame is the native codec frame of the stored track.
+// The rate is the decoder output's, the frame is the stored track's native codec frame.
 private func decodedConfig(of buffer: CMSampleBuffer, stored: AudioStreamBasicDescription) -> CoverageConfig {
-  let decoded = CMSampleBufferGetFormatDescription(buffer).flatMap(CMAudioFormatDescriptionGetStreamBasicDescription)?.pointee
-  let rate = decoded?.mSampleRate ?? 0
-  let valid = rate.isFinite && rate > 0 && rate < Double(UInt32.max)
+  let rate = CMSampleBufferGetFormatDescription(buffer).flatMap(CMAudioFormatDescriptionGetStreamBasicDescription)?.pointee.mSampleRate ?? 0
+  let valid = rate.isFinite && rate > 0 && rate <= Double(UInt32.max)
   return CoverageConfig(audioRequired: true, audioTrack: true, sampleRate: valid ? UInt32(rate.rounded()) : 0, frameSamples: stored.mFramesPerPacket)
 }
 
-/// An interval of decoded PCM frames in the output clock, where the priming and the padding are already cut by the reader. An empty buffer is nothing; a buffer that cannot be told is an interval the core refuses.
+// A buffer the reader trimmed to nothing is no PCM; one that cannot be told is an interval the core refuses.
 private func decodedInterval(of buffer: CMSampleBuffer) -> AudioInterval? {
   let count = CMSampleBufferGetNumSamples(buffer)
   let refused = AudioInterval(startUs: 0, endUs: 1, samples: 0)
@@ -128,7 +124,9 @@ private func decodedInterval(of buffer: CMSampleBuffer) -> AudioInterval? {
   guard count > 0 else { return CMSampleBufferGetTotalSampleSize(buffer) == 0 ? nil : refused }
   let pts = CMSampleBufferGetOutputPresentationTimeStamp(buffer)
   let duration = CMSampleBufferGetOutputDuration(buffer)
-  guard duration.isNumeric, duration > .zero, let start = microseconds(pts), let end = microseconds(pts + duration) else { return refused }
+  guard duration.isNumeric, duration >= .zero else { return refused }
+  guard duration > .zero else { return nil }
+  guard let start = microseconds(pts), let end = microseconds(pts + duration) else { return refused }
   return AudioInterval(startUs: start, endUs: end, samples: UInt64(count))
 }
 
