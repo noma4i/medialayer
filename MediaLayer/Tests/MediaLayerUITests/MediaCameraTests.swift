@@ -439,6 +439,19 @@ struct MediaCameraTests {
   }
 
   @Test
+  func inv_capture_42_a_lens_switch_with_the_flash_on_reaches_ready_and_lights_the_torch_on_the_new_lens() async throws {
+    let rig = try makeRig(.moment)
+    await ready(rig)
+    rig.camera.setFlash(true)
+    await eventually("flash on") { rig.camera.state.flash }
+
+    rig.camera.setLens(.front)
+
+    await eventually("front ready") { rig.camera.state.lens == .front && rig.camera.state.phase == .ready }
+    #expect(rig.camera.state.flash == true && rig.backend.count("torch true") == 2)
+  }
+
+  @Test
   func inv_capture_17_the_preview_leaving_the_window_and_the_background_release_the_camera_and_the_return_binds_again() async throws {
     let rig = try makeRig()
     await ready(rig)

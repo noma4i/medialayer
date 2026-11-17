@@ -106,7 +106,8 @@ class MediaCamera internal constructor(
   private val observers = ConcurrentHashMap<String, Observer>()
   private var frameTapOn = false
   private var frameTapPending = false
-  private var commandGeneration = 0L
+  private var torchGeneration = 0L
+  private var zoomGeneration = 0L
   private val layerClose = services.audio()?.onClose {
     val done = java.util.concurrent.CountDownLatch(1)
     if (enqueue {
@@ -385,23 +386,8 @@ class MediaCamera internal constructor(
     val cancelReading = if (event == CaptureEvent.Cancel) reading else null
     val previous = run
     val step = captureStep(run, event, profile)
-    val command = step.actions.singleOrNull()
-    if (command is CaptureAction.SetTorch || command is CaptureAction.SetZoom) {
-      val generation = ++commandGeneration
-      val done: (Throwable?) -> Unit = { failure -> enqueue {
-        if (failure != null) Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, failure)
-        else if (generation == commandGeneration && !closed) {
-            val state = if (command is CaptureAction.SetTorch) run.state.copy(flash = step.run.state.flash) else run.state.copy(zoom = step.run.state.zoom)
-            run = run.copy(state = state)
-            published.value = state
-        }
-      } }
-      if (command is CaptureAction.SetTorch) backend.setTorch(command.on, done)
-      else backend.setZoom((command as CaptureAction.SetZoom).ratio, done)
-      return
-    }
     run = step.run
-    try { step.actions.forEach(::perform) } catch (failure: Exception) {
+    try { step.actions.forEach { perform(it, previous.state) } } catch (failure: Exception) {
       run = previous
       Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, failure)
     }
@@ -464,7 +450,7 @@ class MediaCamera internal constructor(
     }
   }
 
-  private fun perform(action: CaptureAction) {
+  private fun perform(action: CaptureAction, before: CameraState) {
     when (action) {
       is CaptureAction.Bind -> open(action.lens)
       is CaptureAction.Restart -> {
@@ -502,8 +488,26 @@ class MediaCamera internal constructor(
       CaptureAction.ReadClip -> readClip()
       CaptureAction.Deliver -> deliver()
       CaptureAction.Discard -> discard()
-      is CaptureAction.SetTorch -> backend.setTorch(action.on)
-      is CaptureAction.SetZoom -> backend.setZoom(action.ratio)
+      is CaptureAction.SetTorch -> {
+        val generation = ++torchGeneration
+        backend.setTorch(action.on) { failure -> refused(failure) { if (generation == torchGeneration) run = run.copy(state = run.state.copy(flash = before.flash)) } }
+      }
+      is CaptureAction.SetZoom -> {
+        val generation = ++zoomGeneration
+        backend.setZoom(action.ratio) { failure -> refused(failure) { if (generation == zoomGeneration) run = run.copy(state = run.state.copy(zoom = before.zoom)) } }
+      }
+    }
+  }
+
+  private fun refused(failure: Throwable?, rollback: () -> Unit) {
+    if (failure == null) return
+    enqueue {
+      if (!closed) {
+        rollback()
+        published.value = run.state
+        onTestChange?.invoke()
+      }
+      Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, failure)
     }
   }
 

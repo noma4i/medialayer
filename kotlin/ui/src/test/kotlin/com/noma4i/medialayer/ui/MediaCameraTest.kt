@@ -789,6 +789,19 @@ class MediaCameraTest {
   }
 
   @Test
+  fun inv_capture_42_a_lens_switch_with_the_flash_on_reaches_ready_and_lights_the_torch_on_the_new_lens() = runBlocking {
+    val rig = rig(moment)
+    ready(rig)
+    rig.camera.setFlash(true)
+    eventually("flash on") { rig.camera.state.value.flash }
+
+    rig.camera.setLens(CameraLens.FRONT)
+
+    eventually("front ready") { rig.camera.state.value.lens == CameraLens.FRONT && rig.camera.state.value.phase == CameraPhase.READY }
+    assertEquals(true to 2, rig.camera.state.value.flash to rig.backend.count("torch true"))
+  }
+
+  @Test
   fun inv_capture_41_a_frame_observer_that_arrives_during_a_take_gets_frames_after_it_without_a_rebind_of_the_recording() = runBlocking {
     val rig = rig(moment)
     ready(rig)
