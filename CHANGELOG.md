@@ -32,6 +32,8 @@
 - Voice take on iOS and Android: `MediaVoiceRecorder.start` returns when the first live PCM has arrived and its file is open; no file or `recording` state exists before that. A source without sound ends the take once with `microphoneSilent` and no file; the source may return by itself and is released at its first healthy sound, without resuming the take. A started source shows `NoSound` until it gives sound.
 - `MediaVoiceRecorder` does not request the microphone permission on iOS and Android; the app asks for it, and without it `start` throws `permissionDenied`.
 - Android `MediaVoiceRecorder` records through the audio input owner and a MediaCodec writer; the old `MediaRecorder` path is removed.
+- Android camera reads the encoder profile from the CameraX provider instead of the legacy `CamcorderProfile`.
+- Android camera `CONFIGURE_FAILED` of a video names the step that refused the plan (stream map, format, SDR profile, AAC encoder) with the camera facts.
 - `playUrl` returns a library `MediaPlayer` with its own playback state.
 - A play during a call or recording is refused and shows its refusal.
 - After the library forgets a wish, one Play plays again.
@@ -64,6 +66,8 @@
 
 ### Fixed
 
+- Android camera video on devices whose camera profile asks for an AAC profile no encoder declares (Samsung A16 front): the take uses AAC-LC like CameraX instead of failing with `CONFIGURE_FAILED`.
+- A lens change while the camera is failed starts a new attempt with that lens and clears the fault (iOS and Android).
 - Response bodies reach the core in pieces of up to 64 KiB instead of single network reads.
 - An Android camera switched with the flash on becomes ready and lights the torch on the new lens.
 - A place that starts playing while a camera preview or recording holds the session plays at once.
