@@ -5,7 +5,7 @@ import Foundation
 import MediaLayer
 
 /// The hardware camera: one `AVCaptureSession` with the photo output of the profile. A video take is written by `CameraTake` from the audio and video data outputs. Every call runs on its own serial queue, never on Main.
-final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
+final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unchecked Sendable {
   let session = AVCaptureSession()
   private let queue = DispatchQueue(label: "com.noma4i.medialayer.camera.session")
   private let frames = DispatchQueue(label: "com.noma4i.medialayer.camera.frames")
@@ -15,6 +15,9 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
   private var photoOutput: AVCapturePhotoOutput?
   private var videoMode = false
   private var audioOutput: AVCaptureAudioDataOutput?
+  private var microphoneInput: AVCaptureDeviceInput?
+  private var audioProfile = false
+  private var wanted: (generation: UInt64, listener: CameraMicrophoneListener)?
   private var audioFlowing = false
   private var audioInterrupted = false
   private var frameOutput: AVCaptureVideoDataOutput?
@@ -53,6 +56,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
             audioInterrupted = true
             audioFlowing = false
             emit(.microphoneFlow(false))
+            loseMicrophone(nil)
           }
           emit(.streaming(on: false))
         }
@@ -67,6 +71,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
       center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil) { [weak self] note in
         let error = note.userInfo?[AVCaptureSessionErrorKey] as? AVError
         self?.emit(.fault(kind: error?.code == .mediaServicesWereReset ? .reset : .other))
+        self?.queue.async { if self?.audioOutput != nil { self?.loseMicrophone(error ?? NSError(domain: AVFoundationErrorDomain, code: AVError.unknown.rawValue)) } }
       }
     ]
   }
@@ -77,6 +82,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
   }
 
   var photoSize: PixelSize? { lock.withLock { chosenPhotoSize } }
+  var audio: CaptureAudio { .native(self) }
 
   func setSink(_ sink: @escaping @Sendable (CaptureEvent) -> Void) {
     lock.withLock { self.sink = sink }
@@ -101,29 +107,14 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: lens == .front ? .front : .back) else {
       return emit(.refuse(reason: .noCamera))
     }
-    var inputs: [AVCaptureDeviceInput]
+    let inputs: [AVCaptureDeviceInput]
     do {
       inputs = [try AVCaptureDeviceInput(device: device)]
     } catch {
       Media.recordNativeFailure(error, source: .camera)
       return emit(.refuse(reason: .busy))
     }
-    if profile.audio {
-      guard let microphone = AVCaptureDevice.default(for: .audio) else { return emit(.refuse(reason: .microphoneBusy)) }
-      do { inputs.append(try AVCaptureDeviceInput(device: microphone)) }
-      catch {
-        Media.recordNativeFailure(error, source: .camera)
-        let error = error as NSError
-        if !authorized(.audio) || (error.domain == AVFoundationErrorDomain && error.code == AVError.applicationIsNotAuthorizedToUseDevice.rawValue) {
-          return emit(.refuse(reason: .permissionDenied))
-        }
-        let busy = [AVError.deviceInUseByAnotherApplication.rawValue, AVError.deviceAlreadyUsedByAnotherSession.rawValue, AVError.sessionHardwareCostOverage.rawValue]
-        return emit(.refuse(reason: error.domain == AVFoundationErrorDomain && busy.contains(error.code) ? .microphoneBusy : .configureFailed))
-      }
-    }
     let photo = profile.mode == .photo ? AVCapturePhotoOutput() : nil
-    let audio = profile.audio ? AVCaptureAudioDataOutput() : nil
-    audio?.setSampleBufferDelegate(self, queue: queue)
     relay.cancel()
     recordingOutput = false
     session.beginConfiguration()
@@ -132,9 +123,11 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     previewLinks = [:]
     videoPort = nil
     frameOutput = nil
+    audioOutput = nil
+    microphoneInput = nil
+    audioProfile = profile.audio
     var outputs: [AVCaptureOutput] = []
     if let photo { outputs.append(photo) }
-    if let audio { outputs.append(audio) }
     let added = inputs.allSatisfy { session.canAddInput($0) } && outputs.allSatisfy { session.canAddOutput($0) }
     guard added else {
       session.commitConfiguration()
@@ -142,6 +135,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     }
     inputs.forEach(session.addInput)
     outputs.forEach(session.addOutput)
+    let microphoneFailure = addMicrophone()
     let choice: FormatChoice?
     do { choice = try applyFormat(device, profile: profile) }
     catch {
@@ -158,15 +152,17 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
       session.inputs.forEach(session.removeInput)
       session.outputs.forEach(session.removeOutput)
       session.commitConfiguration()
+      audioOutput = nil
+      microphoneInput = nil
       return emit(.refuse(reason: .configureFailed))
     }
     camera = device
     photoOutput = photo
     videoMode = profile.mode == .video
-    audioOutput = audio
     audioFlowing = false
     audioInterrupted = false
-    if audio != nil { emit(.microphoneFlow(false)) }
+    if audioOutput != nil { emit(.microphoneFlow(false)) }
+    if let microphoneFailure { loseMicrophone(microphoneFailure) }
     rotation = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
     if let photo, let size = choice?.photoSize {
       photo.maxPhotoDimensions = CMVideoDimensions(width: Int32(size.width), height: Int32(size.height))
@@ -263,6 +259,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
       self.videoMode = false
       self.stabilization = nil
       self.audioOutput = nil
+      self.microphoneInput = nil
       self.audioFlowing = false
       self.audioInterrupted = false
       self.emit(.microphoneFlow(true))
@@ -344,6 +341,66 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     relay.recordedMs
   }
 
+  func start(generation: UInt64, listener: CameraMicrophoneListener) {
+    queue.async {
+      self.removeMicrophone()
+      self.wanted = (generation, listener)
+      guard self.camera != nil else { return }
+      self.session.beginConfiguration()
+      let failure = self.addMicrophone()
+      self.session.commitConfiguration()
+      if self.audioOutput != nil {
+        self.audioFlowing = false
+        self.emit(.microphoneFlow(false))
+      }
+      if let failure { self.loseMicrophone(failure) }
+    }
+  }
+
+  func stop(generation: UInt64) {
+    queue.async {
+      guard self.wanted?.generation == generation else { return }
+      self.wanted = nil
+      self.removeMicrophone()
+    }
+  }
+
+  private func addMicrophone() -> Error? {
+    guard audioProfile, wanted != nil, audioOutput == nil else { return nil }
+    do {
+      guard authorized(.audio) else { throw NSError(domain: AVFoundationErrorDomain, code: AVError.applicationIsNotAuthorizedToUseDevice.rawValue) }
+      guard let device = AVCaptureDevice.default(for: .audio) else { throw NSError(domain: AVFoundationErrorDomain, code: AVError.deviceNotConnected.rawValue) }
+      let input = try AVCaptureDeviceInput(device: device)
+      let output = AVCaptureAudioDataOutput()
+      guard session.canAddInput(input), session.canAddOutput(output) else { throw NSError(domain: AVFoundationErrorDomain, code: AVError.sessionConfigurationChanged.rawValue) }
+      output.setSampleBufferDelegate(self, queue: queue)
+      session.addInput(input)
+      session.addOutput(output)
+      microphoneInput = input
+      audioOutput = output
+      return nil
+    } catch {
+      return error
+    }
+  }
+
+  private func removeMicrophone() {
+    guard let input = microphoneInput, let output = audioOutput else { return }
+    session.beginConfiguration()
+    session.removeOutput(output)
+    session.removeInput(input)
+    session.commitConfiguration()
+    microphoneInput = nil
+    audioOutput = nil
+    audioFlowing = false
+    emit(.microphoneFlow(false))
+  }
+
+  private func loseMicrophone(_ error: Error?) {
+    guard let wanted else { return }
+    wanted.listener.microphoneLost(generation: wanted.generation, error: error)
+  }
+
   func setTorch(_ on: Bool) throws {
     try queue.sync {
       guard let camera = self.camera, camera.hasTorch else { throw NSError(domain: AVFoundationErrorDomain, code: -1) }
@@ -393,9 +450,10 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
 extension AVCaptureBackend: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
   func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
     if output is AVCaptureAudioDataOutput {
-      guard output === audioOutput else { return }
+      guard output === audioOutput, !audioInterrupted, isLivePCM(sampleBuffer) else { return }
       relay.appendAudio(sampleBuffer)
-      guard !audioInterrupted, !audioFlowing else { return }
+      if let wanted { wanted.listener.microphoneHeard(generation: wanted.generation) }
+      guard !audioFlowing else { return }
       audioFlowing = true
       MediaTrace.emit("camera", "first audio sample")
       emit(.microphoneFlow(true))

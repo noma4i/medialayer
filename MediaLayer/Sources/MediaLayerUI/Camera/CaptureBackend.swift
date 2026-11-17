@@ -38,6 +38,7 @@ public final class CameraFrameObservation: @unchecked Sendable {
 protocol CaptureBackend: AnyObject, Sendable {
   var session: AVCaptureSession { get }
   var photoSize: PixelSize? { get }
+  var audio: CaptureAudio { get }
   func setSink(_ sink: @escaping @Sendable (CaptureEvent) -> Void)
   func bind(lens: CameraLens, profile: CaptureProfile)
   func unbind()
@@ -55,6 +56,8 @@ protocol CaptureBackend: AnyObject, Sendable {
 }
 
 extension CaptureBackend {
+  var audio: CaptureAudio { .managed }
+
   func unbind(completion: @escaping @Sendable () -> Void) { unbind(); completion() }
 
   func beginRecording(to url: URL, profile: CaptureProfile, lens: CameraLens, ticket: RecordingTicket?, refused: @escaping @Sendable (RecordingRefusal) -> Void) {

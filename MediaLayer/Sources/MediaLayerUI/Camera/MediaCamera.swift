@@ -97,6 +97,8 @@ public final class MediaCamera: @unchecked Sendable {
   private var audioHold: RecordingTicket?
   private var revokedAudio: RecordingTicket?
   private var microphoneFlowing = false
+  private var audioInput: CameraAudioInput?
+  private var microphoneFault: CameraRefusal?
   private var binding: Task<Void, Never>?
   private var shooting: Task<Void, Never>?
   private var reading: Task<Void, Never>?
@@ -138,6 +140,7 @@ public final class MediaCamera: @unchecked Sendable {
     for task in [binding, shooting, reading, ticker] { task?.cancel() }
     sessionHold?()
     audioHold?.end()
+    audioInput?.close()
     if let url = recordingURL { removeFile(url) }
     if case let .success(clip)? = ended { removeFile(clip.url) }
   }
@@ -185,6 +188,7 @@ public final class MediaCamera: @unchecked Sendable {
         queue.async {
           guard self.startWaiter == nil else { return continuation.resume(throwing: Self.refusal(.notReady)) }
           if self.profile.audio && self.audioHold == nil { return continuation.resume(throwing: Self.refusal(.notReady)) }
+          if self.profile.audio, let fault = self.microphoneFault { return continuation.resume(throwing: Self.refusal(fault)) }
           let wasReady = self.run.state.phase == .ready && self.profile.mode == .video
           if wasReady {
             if case let .success(clip)? = self.ended { self.removeFile(clip.url) }
@@ -308,6 +312,7 @@ public final class MediaCamera: @unchecked Sendable {
   private func closeFromLayer() {
     queue.sync {
       apply(.layerClosed)
+      closeAudioInput()
       awake.set(playing: false)
       if case let .success(clip)? = ended { removeFile(clip.url) }
       ended = nil
@@ -424,6 +429,7 @@ public final class MediaCamera: @unchecked Sendable {
       shooting?.cancel()
       let ticket = audioHold
       audioHold = nil
+      closeAudioInput()
       teardownHardware { ticket?.end() }
       releaseHolds()
       failWaiters()
@@ -519,7 +525,20 @@ public final class MediaCamera: @unchecked Sendable {
     if let waiter = stopWaiter { stopWaiter = nil; waiter.resume(throwing: failure) }
   }
 
+  private func openAudioInput() {
+    guard profile.audio, audioInput == nil, case let .native(microphone) = backend.audio else { return }
+    guard let link = services.link() else { return post(.refuse(reason: .notReady)) }
+    audioInput = CameraAudioInput(link: link, microphone: microphone) { [weak self] fault in self?.queue.async { self?.microphoneFault = fault } }
+  }
+
+  private func closeAudioInput() {
+    audioInput?.close()
+    audioInput = nil
+    microphoneFault = nil
+  }
+
   private func open(_ lens: CameraLens) {
+    openAudioInput()
     epoch += 1
     let current = epoch
     let needsHold = sessionHold == nil
