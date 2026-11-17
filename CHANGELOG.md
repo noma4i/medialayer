@@ -29,8 +29,9 @@
 
 ### Changed
 
-- iOS voice take starts from live PCM; a silent source deletes the file.
-- iOS `MediaVoiceRecorder` leaves the microphone permission to the app.
+- Voice take on iOS and Android: `MediaVoiceRecorder.start` returns when the first live PCM has arrived and its file is open; no file or `recording` state exists before that. A source without sound ends the take once with `microphoneSilent` and no file; the source may return by itself and is released at its first healthy sound, without resuming the take. A started source shows `NoSound` until it gives sound.
+- `MediaVoiceRecorder` does not request the microphone permission on iOS and Android; the app asks for it, and without it `start` throws `permissionDenied`.
+- Android `MediaVoiceRecorder` records through the audio input owner and a MediaCodec writer; the old `MediaRecorder` path is removed.
 - `playUrl` returns a library `MediaPlayer` with its own playback state.
 - A play during a call or recording is refused and shows its refusal.
 - After the library forgets a wish, one Play plays again.

@@ -62,6 +62,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     case failed(Error)
   }
 
+  /// The end of the capture before the start committed is left here and belongs to the start.
   private enum StartPhase {
     case free
     case starting
@@ -215,6 +216,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     }
   }
 
+  /// Makes the take running and publishes it in one step. A failure of the capture before it is the result of the start, a limit before it ends the take at once after it.
   private func commit(_ current: Running, _ hold: RecordingTicket) throws -> Bool {
     try lock.withLock {
       var limited = false
@@ -359,6 +361,8 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
   }
 }
 
+/// The microphone of a voice take through the input owner of the audio core. `start` returns with the first live PCM and a started writer: until then no file exists.
+/// The owner outlives a take whose source was lost, for the restore of the core until the first healthy PCM; every other end of a take closes it.
 final class SystemVoiceCapture: VoiceCapture, @unchecked Sendable {
   private enum State {
     case idle
@@ -421,7 +425,7 @@ final class SystemVoiceCapture: VoiceCapture, @unchecked Sendable {
       self.healthy(box)
     }
     box.microphone = microphone
-    // Registered before the owner can act: its first word may come at once.
+    // The take and its input are registered before the owner can act: the owner opens the input and its first word may come at once.
     release(lock.withLock { () -> State in
       defer { state = .taking(take, box) }
       return state
@@ -473,6 +477,7 @@ final class SystemVoiceCapture: VoiceCapture, @unchecked Sendable {
     box.close()
   }
 
+  /// The one place a take that ended by itself is told. A lost source keeps its input for the restore, a failed writer closes it.
   private func ended(_ take: VoiceTake?, by broken: VoiceTake.Broken) -> Error {
     let box = lock.withLock { () -> InputBox? in
       guard let take, case let .taking(current, box) = state, current === take else { return nil }
@@ -517,6 +522,7 @@ final class SystemVoiceCapture: VoiceCapture, @unchecked Sendable {
   }
 }
 
+/// The one lifetime of the input of a take: it exists before its owner does and closes the owner whenever it comes.
 private final class InputBox: @unchecked Sendable {
   private let lock = NSLock()
   private var owner: CameraAudioInput?
@@ -551,6 +557,7 @@ private final class TakeHolder: @unchecked Sendable {
   }
 }
 
+/// The wait of a start for the first live PCM: one result, the continuation resumes exactly once whoever settles first.
 private final class FirstPCM: @unchecked Sendable {
   private let lock = NSLock()
   private var result: Result<Void, Error>?

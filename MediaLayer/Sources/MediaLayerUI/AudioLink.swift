@@ -523,6 +523,7 @@ final class RecordingTicket: @unchecked Sendable {
     sink.finish()
   }
 
+  /// Tells the revoke of this ticket, at once when it is already revoked. For a start that waits before the take observes `revoked`.
   func whenRevoked(_ action: @escaping @Sendable (RecordingRefusal) -> Void) {
     let reason = lock.withLock { () -> RecordingRefusal? in
       if let revokedReason { return revokedReason }
