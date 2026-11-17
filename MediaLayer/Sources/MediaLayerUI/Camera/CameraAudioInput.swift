@@ -1,4 +1,3 @@
-#if os(iOS)
 import AVFoundation
 import CoreMedia
 import Foundation
@@ -28,7 +27,10 @@ func microphoneRefusal(_ error: Error) -> CameraRefusal {
   guard native.domain == AVFoundationErrorDomain else { return .configureFailed }
   switch native.code {
   case AVError.applicationIsNotAuthorizedToUseDevice.rawValue: return .permissionDenied
-  case AVError.deviceNotConnected.rawValue, AVError.deviceInUseByAnotherApplication.rawValue, AVError.deviceAlreadyUsedByAnotherSession.rawValue, AVError.sessionHardwareCostOverage.rawValue: return .microphoneBusy
+  case AVError.deviceNotConnected.rawValue, AVError.deviceInUseByAnotherApplication.rawValue, AVError.deviceAlreadyUsedByAnotherSession.rawValue: return .microphoneBusy
+#if os(iOS)
+  case AVError.sessionHardwareCostOverage.rawValue: return .microphoneBusy
+#endif
   default: return .configureFailed
   }
 }
@@ -44,16 +46,19 @@ final class CameraAudioInput: AudioInputOwner, CameraMicrophoneListener, @unchec
   private let lock = NSLock()
   private let microphone: CameraMicrophone
   private let issue: @Sendable (CameraRefusal?) -> Void
+  private let failureSource: FailureSource?
   private var live: Live?
   private var input: AudioInputHandle?
   private var opened: AudioInputHandle?
   private var audioGeneration: UInt64 = 0
   private var closed = false
 
-  init(link: AudioLink, microphone: CameraMicrophone, issue: @escaping @Sendable (CameraRefusal?) -> Void) {
+  /// `kind` and `failureSource` default to the camera. A voice take opens the same owner as `.voice` with no failure source: its recorder owns the one event of a failure.
+  init(link: AudioLink, microphone: CameraMicrophone, kind: RecordingKind = .video, failureSource: FailureSource? = .camera, issue: @escaping @Sendable (CameraRefusal?) -> Void) {
     self.microphone = microphone
     self.issue = issue
-    opened = link.openInput(.video, owner: self)
+    self.failureSource = failureSource
+    opened = link.openInput(kind, owner: self)
   }
 
   func restore(_ input: AudioInputHandle, generation: UInt64) {
@@ -91,7 +96,7 @@ final class CameraAudioInput: AudioInputOwner, CameraMicrophoneListener, @unchec
       live = nil
       microphone.stop(generation: current.audio)
       guard let error else { return input.sound(generation: current.core, heard: false) }
-      Media.recordNativeFailure(error, source: .camera)
+      if let failureSource { Media.recordNativeFailure(error, source: failureSource) }
       issue(microphoneRefusal(error))
       input.restoreFailed(generation: current.core)
     }
@@ -110,4 +115,3 @@ final class CameraAudioInput: AudioInputOwner, CameraMicrophoneListener, @unchec
 
   deinit { close() }
 }
-#endif
