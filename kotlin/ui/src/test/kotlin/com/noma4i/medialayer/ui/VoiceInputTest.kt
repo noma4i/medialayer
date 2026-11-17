@@ -18,13 +18,6 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.flow.take
-import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -78,7 +71,7 @@ class VoiceInputTest {
     override fun onStarted() { events += "started"; TestSignal.fire() }
     override fun onLimit() { events += "limit" }
     override fun onFinished(file: File, durationUs: Long) { events += "finished"; TestSignal.fire() }
-    override fun onFailed(failure: NativeFailure) { events += "failed"; TestSignal.fire() }
+    override fun onFailed(failure: NativeFailure) { events += "failed:${failure.message}"; TestSignal.fire() }
     override fun onCancelled() { events += "cancelled"; TestSignal.fire() }
     override fun onLost() { events += "lost"; TestSignal.fire() }
   }
@@ -164,27 +157,23 @@ class VoiceInputTest {
   }
 
   @Test
-  fun a_codec_that_is_not_ready_is_one_failure_with_no_source_and_no_file() = runBlocking {
+  fun a_codec_that_is_not_ready_is_one_typed_failure_with_no_source_and_no_file() {
     val input = input()
-    val failures = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { Media.failures.take(1).toList() }
     input.start()
     writer.ready!!(Result.failure(IllegalStateException("no codec")))
-    assertEquals("no codec", withTimeout(5_000) { failures.await() }.single().message)
-    assertEquals(listOf("failed"), events.toList())
+    assertEquals(listOf("failed:no codec"), events.toList())
     assertTrue(microphone.calls.isEmpty())
     assertFalse(file.exists())
   }
 
   @Test
-  fun a_writer_error_after_ready_and_a_source_error_end_the_take_once() = runBlocking {
+  fun a_writer_error_after_ready_and_a_source_error_end_the_take_once() {
     val input = input()
     started(input)
-    val failures = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { Media.failures.take(1).toList() }
     writer.failed!!(IllegalStateException("codec died"))
-    assertEquals("codec died", withTimeout(5_000) { failures.await() }.single().message)
     microphoneListener.onFailed(1, NativeFailure(com.noma4i.medialayer.FailureSource.RECORDER, "android.media.AudioRecord", 7L, "dead"))
     await("the owner is closed") { microphone.calls.contains("close") }
-    assertEquals("one event, one owner", listOf("failed"), events.toList())
+    assertEquals("one event, one owner", listOf("failed:codec died"), events.toList())
     assertEquals(listOf("prepare", "cancel"), writer.calls.toList())
   }
 }

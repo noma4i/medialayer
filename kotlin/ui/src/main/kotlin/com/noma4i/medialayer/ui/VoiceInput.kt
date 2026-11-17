@@ -8,7 +8,7 @@ import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicInteger
 
 // One voice take over the input owner of the audio core: the codec is prepared without a file, the owner starts the microphone only after it is ready, and the take opens on the first live PCM of one generation.
-// A lost take is told once and the owner stays for the restore the core allows: the next healthy PCM of a later generation closes it and starts no take. Every other end closes the owner; the failure event is recorded here once.
+// A lost take is told once and the owner stays for the restore the core allows: the next healthy PCM of a later generation closes it and starts no take. Every other end closes the owner; the failure leaves once through `VoiceTakeListener.onFailed(NativeFailure)`: its owner records it.
 internal class VoiceInput(
   private val link: AudioLink,
   private val spec: PcmSpec,
@@ -31,7 +31,7 @@ internal class VoiceInput(
     override fun onStarted() = listener.onStarted()
     override fun onLimit() = listener.onLimit()
     override fun onFinished(file: File, durationUs: Long) = end(true) { listener.onFinished(file, durationUs) }
-    override fun onFailed(failure: NativeFailure) = end(true) { Media.recordNativeFailure(failure); listener.onFailed(failure) }
+    override fun onFailed(failure: NativeFailure) = end(true) { listener.onFailed(failure) }
     override fun onCancelled() = end(true) { listener.onCancelled() }
     override fun onLost() = end(false) { listener.onLost() }
   }
