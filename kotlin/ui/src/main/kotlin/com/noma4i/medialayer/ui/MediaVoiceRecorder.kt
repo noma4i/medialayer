@@ -1,11 +1,8 @@
 package com.noma4i.medialayer.ui
 
-import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
+import android.media.AudioFormat
 import android.media.MediaRecorder
-import android.media.AudioManager
-import android.media.AudioRecordingConfiguration
 import android.os.SystemClock
 import com.noma4i.medialayer.MediaException
 import com.noma4i.medialayer.VoiceRefusal
@@ -16,18 +13,19 @@ import com.noma4i.medialayer.NativeFailure
 import com.noma4i.medialayer.FailureSource
 import com.noma4i.medialayer.RecordingKind
 import com.noma4i.medialayer.RecordingRefusal
-import com.noma4i.medialayer.VoiceEncoderSettings
 import com.noma4i.medialayer.voiceEncoderSettings
 import com.noma4i.medialayer.voiceLevel
 import com.noma4i.medialayer.voiceLimitMs
 import com.noma4i.medialayer.voiceRefusalText
 import com.noma4i.medialayer.voiceTooShort
 import java.io.File
-import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -41,27 +39,35 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runBlocking
 
 /** A finished voice recording: an m4a file (AAC, mono) and its length. */
 data class VoiceRecording(val file: File, val durationMs: Long)
 
-internal class VoiceRefused(val reason: VoiceRefusal, val native: Throwable? = null) : Exception()
+internal class VoiceRefused(val reason: VoiceRefusal) : Exception()
 
-/** The microphone side of a recording. `start` throws [VoiceRefused], `peak` is the linear peak 0 to 1 since the last call. */
+internal class VoiceNativeFailure(val failure: NativeFailure) : Exception(failure.message)
+
+/** The microphone side of a recording. `start` waits for the first live PCM and throws [VoiceRefused] or [VoiceNativeFailure]; a later end of the take goes to `onFailure`. `peak` is the linear peak 0 to 1 since the last call. */
 internal interface VoiceCapture {
-  fun start(file: File, maxDurationMs: ULong, onLimit: () -> Unit)
+  suspend fun start(file: File, maxDurationMs: ULong, ticket: RecordingTicket, onLimit: () -> Unit, onFailure: (Exception) -> Unit)
 
   fun peak(): Float
 
   fun stop()
 
-  fun isSilenced(): Boolean = false
-
-  fun onSilenced(listener: () -> Unit) = Unit
-
-  fun onFailure(listener: (NativeFailure) -> Unit) = Unit
+  suspend fun finish() = stop()
 }
+
+internal fun RecordingRefusal.toVoice(): VoiceRefusal = when (this) {
+  RecordingRefusal.IN_CALL -> VoiceRefusal.IN_CALL
+  RecordingRefusal.INTERRUPTED -> VoiceRefusal.INTERRUPTED
+  RecordingRefusal.MICROPHONE_SILENT -> VoiceRefusal.MICROPHONE_SILENT
+  RecordingRefusal.PERMISSION_DENIED -> VoiceRefusal.PERMISSION_DENIED
+  RecordingRefusal.MICROPHONE_BUSY -> VoiceRefusal.MICROPHONE_BUSY
+}
+
+private fun voiceError(reason: VoiceRefusal) = MediaException.Voice(voiceRefusalText(reason), reason)
 
 /**
  * Records a voice message into an m4a file (AAC, mono). [levels] gives the wave level 0 to 1 while a recording runs and nothing in rest.
@@ -94,8 +100,16 @@ class MediaVoiceRecorder internal constructor(
   private var ended: Result<VoiceRecording>? = null
   private var heldAudio: RecordingTicket? = null
   private var revoked: java.io.Closeable? = null
-  private var starting = false
-  private class Running(val file: File, val startedAt: ULong, var poll: Job? = null)
+  private var finishing: Deferred<Result<VoiceRecording>>? = null
+  private var phase: StartPhase = StartPhase.Free
+  private class Running(val file: File, val startedAt: ULong, var poll: Job? = null, var finish: Deferred<Result<VoiceRecording>>? = null)
+
+  private sealed interface StartPhase {
+    object Free : StartPhase
+    object Starting : StartPhase
+    object Limited : StartPhase
+    class Failed(val error: Exception) : StartPhase
+  }
 
   val levels: Flow<Float> = flow {
     val initial = currentState.value
@@ -111,20 +125,17 @@ class MediaVoiceRecorder internal constructor(
 
   suspend fun start(file: File) {
     synchronized(lock) {
-      check(running == null && !starting) { "a recording is already running" }
-      starting = true
+      check(running == null && finishing == null && phase === StartPhase.Free) { "a recording is already running" }
+      phase = StartPhase.Starting
       ended = null
     }
     try {
-      withContext(Dispatchers.IO) { begin(file) }
-    } catch (cancelled: kotlinx.coroutines.CancellationException) {
-      synchronized(lock) { running }?.let { finish(it, voiceError(RecordingRefusal.INTERRUPTED)) }
-      throw cancelled
+      begin(file)
     } catch (refused: MediaException.Voice) {
       synchronized(lock) { publish(VoiceState(currentState.value.take, VoicePhase.IDLE, VoiceOutcome.Refused(refused.reason), 0uL)) }
       throw refused
     } finally {
-      synchronized(lock) { starting = false }
+      synchronized(lock) { phase = StartPhase.Free }
     }
   }
 
@@ -132,112 +143,128 @@ class MediaVoiceRecorder internal constructor(
     val session = link() ?: throw MediaException.Closed()
     val hold = when (val admission = session.admit(RecordingKind.VOICE)) {
       is Admission.Admitted -> admission.ticket
-      is Admission.Refused -> throw voiceError(admission.reason)
+      is Admission.Refused -> throw voiceError(admission.reason.toVoice())
     }
-    capture.onSilenced { session.send(com.noma4i.medialayer.AudioInput.Silenced(hold.id)) }
-    capture.onFailure { failure ->
-      Media.recordNativeFailure(failure)
-      synchronized(lock) { running }?.let { finish(it, nativeFailure = failure) }
-    }
-    try {
-      val refusal = hold.start {
-        capture.start(file, maxDurationMs, ::limitReached)
-        synchronized(lock) {
-          heldAudio = hold
-          val current = Running(file, clock()).also {
-            running = it
-            publish(VoiceState(currentState.value.take + 1uL, VoicePhase.RECORDING, null, 0uL))
-            it.poll = scope.launch { pollLevels() }
-          }
-          revoked = hold.onRevoked { reason, done ->
-            scope.launch(Dispatchers.IO) { try { finish(current, voiceError(reason)) } finally { done() } }
-          }
-        }
-      }
-      if (refusal != null) throw voiceError(refusal)
-    } catch (refused: VoiceRefused) {
-      refused.native?.let { Media.recordNativeFailure(FailureSource.RECORDER, it) }
+    val current = Running(file, clock())
+    val limited = try {
+      capture.start(file, maxDurationMs, hold, ::limitReached, ::captureFailed)
+      hold.start {}?.let { throw VoiceRefused(it.toVoice()) }
+      commit(current, hold)
+    } catch (error: Throwable) {
+      try { capture.stop() } catch (stopping: Exception) { Media.recordNativeFailure(FailureSource.RECORDER, stopping) }
       hold.close()
       deleteMediaFile(file)
-      throw MediaException.Voice(voiceRefusalText(refused.reason), refused.reason)
-    } catch (failure: Throwable) {
-      hold.close()
-      deleteMediaFile(file)
-      throw failure
-    }
-    synchronized(lock) {
-      if (capture.isSilenced()) {
-        val failure = voiceError(RecordingRefusal.MICROPHONE_SILENT)
-        running?.let { finish(it, failure) }
-        throw failure
+      throw when (error) {
+        is VoiceRefused -> voiceError(error.reason)
+        is VoiceNativeFailure -> failed(error.failure)
+        else -> error
       }
     }
+    if (limited) scope.launch(Dispatchers.IO) { finish(current) }
   }
 
-  private fun voiceError(reason: RecordingRefusal): MediaException.Voice {
-    val voiceReason = when (reason) {
-    RecordingRefusal.IN_CALL -> VoiceRefusal.IN_CALL
-    RecordingRefusal.INTERRUPTED -> VoiceRefusal.INTERRUPTED
-    RecordingRefusal.MICROPHONE_SILENT -> VoiceRefusal.MICROPHONE_SILENT
-    RecordingRefusal.PERMISSION_DENIED -> VoiceRefusal.PERMISSION_DENIED
-    RecordingRefusal.MICROPHONE_BUSY -> VoiceRefusal.MICROPHONE_BUSY
+  private fun failed(failure: NativeFailure): MediaException {
+    Media.recordNativeFailure(failure)
+    synchronized(lock) { publish(VoiceState(currentState.value.take, VoicePhase.IDLE, VoiceOutcome.Failed(failure), 0uL)) }
+    return MediaException.Unexpected(failure.message)
+  }
+
+  // One lock holds the end of the start phase, the running take and its RECORDING state: an early limit or loss is the result of start.
+  private fun commit(current: Running, hold: RecordingTicket): Boolean = synchronized(lock) {
+    (phase as? StartPhase.Failed)?.let { throw it.error }
+    val limited = phase === StartPhase.Limited
+    phase = StartPhase.Free
+    heldAudio = hold
+    running = current
+    publish(VoiceState(currentState.value.take + 1uL, VoicePhase.RECORDING, null, 0uL))
+    current.poll = scope.launch { pollLevels() }
+    revoked = hold.onRevoked { reason, done ->
+      scope.launch(Dispatchers.IO) { try { finish(current, voiceError(reason.toVoice())) } finally { done() } }
     }
-    return MediaException.Voice(voiceRefusalText(voiceReason), voiceReason)
+    limited
   }
 
   /** Ends the recording and gives the file. After the limit ended it, gives the outcome of that recording. */
   suspend fun stop(): VoiceRecording {
-    val current = synchronized(lock) { running }
-    if (current == null) return (synchronized(lock) { ended } ?: throw IllegalStateException("no recording was started")).getOrThrow()
-    return withContext(Dispatchers.IO) { finish(current).getOrThrow() }
+    val (current, task, done) = synchronized(lock) { Triple(running, finishing, ended) }
+    if (current != null) return finish(current).getOrThrow()
+    if (task != null) return task.await().getOrThrow()
+    return (done ?: throw IllegalStateException("no recording was started")).getOrThrow()
   }
 
   private fun limitReached() {
-    val current = synchronized(lock) { running } ?: return
+    val current = synchronized(lock) { running.also { if (it == null && phase === StartPhase.Starting) phase = StartPhase.Limited } } ?: return
     scope.launch(Dispatchers.IO) { finish(current) }
   }
 
-  private fun finish(current: Running, interrupted: MediaException? = null, nativeFailure: NativeFailure? = null): Result<VoiceRecording> = synchronized(lock) {
-    if (running !== current) return@synchronized checkNotNull(ended)
-    running = null
-    try { revoked?.close() } catch (error: Exception) { Media.recordNativeFailure(FailureSource.RECORDER, error) }
-    revoked = null
-    current.poll?.cancel()
-    val session = heldAudio
-    heldAudio = null
+  private fun captureFailed(error: Exception) {
+    val current = synchronized(lock) { running.also { if (it == null && phase === StartPhase.Starting) phase = StartPhase.Failed(error) } } ?: return
+    scope.launch(Dispatchers.IO) {
+      when (error) {
+        is VoiceRefused -> finish(current, voiceError(error.reason))
+        is VoiceNativeFailure -> finish(current, failure = error.failure)
+        else -> finish(current, failure = voiceFailure(error))
+      }
+    }
+  }
+
+  private suspend fun finish(current: Running, interrupted: MediaException? = null, failure: NativeFailure? = null): Result<VoiceRecording> {
+    val task = synchronized(lock) {
+      current.finish ?: run {
+        running = null
+        try { revoked?.close() } catch (error: Exception) { Media.recordNativeFailure(FailureSource.RECORDER, error) }
+        revoked = null
+        current.poll?.cancel()
+        val session = heldAudio
+        heldAudio = null
+        scope.async(Dispatchers.IO) { finishRecording(current, session, interrupted, failure) }.also { current.finish = it; finishing = it }
+      }
+    }
+    onTestChange?.invoke()
+    return task.await()
+  }
+
+  private suspend fun finishRecording(current: Running, session: RecordingTicket?, interrupted: MediaException?, failure: NativeFailure?): Result<VoiceRecording> {
     val length = clock() - current.startedAt
+    var native = failure
+    failure?.let { Media.recordNativeFailure(it) }
     val outcome = runCatching {
       try {
-        capture.stop()
-      } catch (refused: VoiceRefused) {
-        refused.native?.let { Media.recordNativeFailure(FailureSource.RECORDER, it) }
-        if (refused.reason == VoiceRefusal.EMPTY && interrupted == null && nativeFailure == null && voiceTooShort(length, minTakeMs)) {
-          throw MediaException.Voice(voiceRefusalText(VoiceRefusal.TOO_SHORT), VoiceRefusal.TOO_SHORT)
+        if (interrupted != null || failure != null) capture.stop() else capture.finish()
+      } catch (error: VoiceNativeFailure) {
+        if (interrupted == null && failure == null) {
+          native = error.failure
+          Media.recordNativeFailure(error.failure)
+          throw MediaException.Unexpected(error.failure.message)
         }
-        if (interrupted == null) throw MediaException.Voice(voiceRefusalText(refused.reason), refused.reason)
+      } catch (error: VoiceRefused) {
+        if (interrupted == null) throw voiceError(error.reason)
       } finally {
         session?.close()
       }
       if (interrupted != null) throw interrupted
-      if (nativeFailure != null) throw MediaException.Unexpected(nativeFailure.message)
-      if (voiceTooShort(length, minTakeMs)) throw MediaException.Voice(voiceRefusalText(VoiceRefusal.TOO_SHORT), VoiceRefusal.TOO_SHORT)
-      if (length == 0uL || !current.file.isFile || current.file.length() == 0L) throw MediaException.Voice(voiceRefusalText(VoiceRefusal.EMPTY), VoiceRefusal.EMPTY)
+      if (failure != null) throw MediaException.Unexpected(failure.message)
+      if (voiceTooShort(length, minTakeMs)) throw voiceError(VoiceRefusal.TOO_SHORT)
+      if (length == 0uL || !current.file.isFile || current.file.length() == 0L) throw voiceError(VoiceRefusal.EMPTY)
       VoiceRecording(current.file, length.toLong())
     }
     outcome.exceptionOrNull()?.let { error ->
-      if (nativeFailure == null && error !is MediaException.Voice && error !== interrupted) Media.recordNativeFailure(FailureSource.RECORDER, error)
+      if (native == null && error !is MediaException.Voice && error !== interrupted) Media.recordNativeFailure(FailureSource.RECORDER, error)
     }
     if (outcome.isFailure) deleteMediaFile(current.file)
-    ended = outcome
+    synchronized(lock) {
+      ended = outcome
+      finishing = null
+    }
     val published = when {
-      nativeFailure != null -> VoiceOutcome.Failed(nativeFailure)
+      native != null -> VoiceOutcome.Failed(native!!)
       outcome.isSuccess -> outcome.getOrThrow().let { VoiceOutcome.Recorded(it.file.absolutePath, it.durationMs.toULong()) }
       outcome.exceptionOrNull() is MediaException.Voice -> VoiceOutcome.Refused((outcome.exceptionOrNull() as MediaException.Voice).reason)
-      else -> VoiceOutcome.Failed(NativeFailure(FailureSource.RECORDER, "android.media.MediaRecorder", -1L, outcome.exceptionOrNull().toString()))
+      else -> VoiceOutcome.Failed(voiceFailure(outcome.exceptionOrNull()!!))
     }
-    publish(VoiceState(currentState.value.take, VoicePhase.IDLE, published, 0uL))
+    synchronized(lock) { publish(VoiceState(currentState.value.take, VoicePhase.IDLE, published, 0uL)) }
     onTestChange?.invoke()
-    outcome
+    return outcome
   }
 
   private suspend fun pollLevels() {
@@ -250,8 +277,7 @@ class MediaVoiceRecorder internal constructor(
         }
       } catch (error: Exception) {
         val failure = NativeFailure(FailureSource.RECORDER, error.javaClass.name, -1L, error.message ?: error.toString())
-        Media.recordNativeFailure(failure)
-        synchronized(lock) { running }?.let { finish(it, nativeFailure = failure) }
+        synchronized(lock) { running }?.let { finish(it, failure = failure) }
         return
       }
     }
@@ -262,81 +288,70 @@ class MediaVoiceRecorder internal constructor(
   }
 }
 
-internal class SystemVoiceCapture(private val context: Context) : VoiceCapture {
-  private var recorder: MediaRecorder? = null
-  private var silence: () -> Unit = {}
-  private var failure: (NativeFailure) -> Unit = {}
-  private val recordingCallback = object : AudioManager.AudioRecordingCallback() {
-    override fun onRecordingConfigChanged(configs: MutableList<AudioRecordingConfiguration>) {
-      val session = recorder?.activeRecordingConfiguration?.clientAudioSessionId
-      if (session != null && configs.any { it.clientAudioSessionId == session && it.isClientSilenced }) silence()
+/** The lease of the microphone from the budget of the core, as the camera takes it (`reserveCapture`). It runs on the hardware thread of [RecordingAudio], never on a caller's. */
+private fun reserveCaptureLease(bytes: Long): AutoCloseable {
+  val hold = runBlocking { (ProcessMediaEnvironment.current ?: throw MediaException.Closed()).media.reserveCapture(bytes.toULong()) }
+  return AutoCloseable { hold.release() }
+}
+
+internal class SystemVoiceCapture(
+  private val context: Context,
+  private val link: () -> AudioLink? = { Media.link },
+  private val writer: () -> VoiceFileWriter = { MediaCodecVoiceFileWriter() },
+  private val microphone: (RecordingAudioListener) -> CameraMicrophone = { RecordingAudio(it, ::reserveCaptureLease, context.mainExecutor).asMicrophone() }
+) : VoiceCapture {
+  // A lost take leaves its input lingering for the restore of the core: it closes itself on the first healthy PCM, or when the next take replaces it.
+  private class Active(val input: VoiceInput, val done: CompletableDeferred<Unit>) { @Volatile var lost = false }
+
+  private val lock = Any()
+  private var active: Active? = null
+
+  override suspend fun start(file: File, maxDurationMs: ULong, ticket: RecordingTicket, onLimit: () -> Unit, onFailure: (Exception) -> Unit) {
+    val audio = link() ?: throw MediaException.Closed()
+    val settings = voiceEncoderSettings()
+    val spec = PcmSpec(MediaRecorder.AudioSource.MIC, settings.sampleRateHz.toInt(), if (settings.channels.toInt() == 1) AudioFormat.CHANNEL_IN_MONO else AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
+    val first = CompletableDeferred<Unit>()
+    val done = CompletableDeferred<Unit>()
+    fun ended(error: Exception) {
+      if (!first.completeExceptionally(error)) onFailure(error)
+      done.completeExceptionally(error)
     }
-  }
-
-  override fun onSilenced(listener: () -> Unit) { silence = listener }
-  override fun onFailure(listener: (NativeFailure) -> Unit) { failure = listener }
-
-  override fun start(file: File, maxDurationMs: ULong, onLimit: () -> Unit) {
-    if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) throw VoiceRefused(VoiceRefusal.PERMISSION_DENIED)
-    val made = MediaRecorder(context)
-    try {
-      made.setAudioSource(MediaRecorder.AudioSource.MIC)
-      made.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-      made.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-      applyVoiceEncoder(object : EncoderTarget {
-        override fun setChannels(count: Int) = made.setAudioChannels(count)
-        override fun setSampleRate(hertz: Int) = made.setAudioSamplingRate(hertz)
-        override fun setBitRate(bitsPerSecond: Int) = made.setAudioEncodingBitRate(bitsPerSecond)
-      })
-      made.setMaxDuration(maxDurationMs.toInt())
-      made.setOutputFile(file.path)
-      made.registerAudioRecordingCallback(context.mainExecutor, recordingCallback)
-      made.setOnInfoListener { _, what, _ -> if (what == MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED) onLimit() }
-      made.setOnErrorListener { _, what, extra -> failure(NativeFailure(FailureSource.RECORDER, "android.media.MediaRecorder", what.toLong(), "MediaRecorder error $what ($extra)")) }
-      made.prepare()
-      made.start()
-    } catch (failure: IOException) {
-      made.release()
-      throw VoiceRefused(VoiceRefusal.MICROPHONE_BUSY, failure)
-    } catch (failure: RuntimeException) {
-      made.release()
-      throw VoiceRefused(VoiceRefusal.MICROPHONE_BUSY, failure)
+    lateinit var mine: Active
+    val listener = object : VoiceTakeListener {
+      override fun onStarted() { first.complete(Unit) }
+      override fun onLimit() = onLimit()
+      override fun onFinished(file: File, durationUs: Long) { done.complete(Unit) }
+      override fun onFailed(failure: NativeFailure) = ended(VoiceNativeFailure(failure))
+      override fun onCancelled() { first.completeExceptionally(kotlinx.coroutines.CancellationException("the take was cancelled")); done.complete(Unit) }
+      override fun onLost() { mine.lost = true; ended(VoiceRefused(VoiceRefusal.MICROPHONE_SILENT)) }
     }
-    recorder = made
-  }
-
-  override fun peak(): Float = (recorder?.maxAmplitude ?: 0) / MAX_AMPLITUDE
-
-  override fun isSilenced(): Boolean = recorder?.activeRecordingConfiguration?.isClientSilenced == true
-
-  override fun stop() {
-    val made = recorder ?: return
-    recorder = null
+    val input = VoiceInput(audio, spec, settings, maxDurationMs.toLong() * 1_000L, file, writer(), listener, microphone)
+    mine = Active(input, done)
+    // Registered before the owner can act: its first word may come at once.
+    val previous = synchronized(lock) { active.also { active = mine } }
+    previous?.input?.cancel()
+    val revoked = ticket.onRevoked { reason, ack -> first.completeExceptionally(VoiceRefused(reason.toVoice())); ack() }
     try {
-      made.stop()
-    } catch (failure: RuntimeException) {
-      throw VoiceRefused(VoiceRefusal.EMPTY)
+      input.start()
+      first.await()
+    } catch (error: Throwable) {
+      if (!mine.lost) { leave(); input.cancel() }
+      throw error
     } finally {
-      try { made.unregisterAudioRecordingCallback(recordingCallback) } finally { made.release() }
+      revoked.close()
     }
   }
 
-  private companion object {
-    const val MAX_AMPLITUDE = 32_767f
+  override fun peak(): Float = synchronized(lock) { active }?.input?.peak() ?: 0f
+
+  override fun stop() { leave()?.takeUnless { it.lost }?.input?.cancel() }
+
+  override suspend fun finish() {
+    val taking = leave() ?: return
+    if (taking.lost) throw VoiceRefused(VoiceRefusal.MICROPHONE_SILENT)
+    taking.input.finish()
+    taking.done.await()
   }
-}
 
-/** The encoder calls of a recorder, so the voice setup of the core can be read without a microphone. */
-internal interface EncoderTarget {
-  fun setChannels(count: Int)
-
-  fun setSampleRate(hertz: Int)
-
-  fun setBitRate(bitsPerSecond: Int)
-}
-
-internal fun applyVoiceEncoder(target: EncoderTarget, settings: VoiceEncoderSettings = voiceEncoderSettings()) {
-  target.setChannels(settings.channels.toInt())
-  target.setSampleRate(settings.sampleRateHz.toInt())
-  target.setBitRate(settings.bitRate.toInt())
+  private fun leave(): Active? = synchronized(lock) { active?.also { if (!it.lost) active = null } }
 }
