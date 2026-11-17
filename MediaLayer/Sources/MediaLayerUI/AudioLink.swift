@@ -500,6 +500,7 @@ final class RecordingTicket: @unchecked Sendable {
   private let lock = NSLock()
   private var ended = false
   private var revokedReason: RecordingRefusal?
+  private var revokeObservers: [@Sendable (RecordingRefusal) -> Void] = []
   private let stopped = DispatchGroup()
   var isActive: Bool { lock.withLock { !ended && revokedReason == nil } }
   var isEnded: Bool { lock.withLock { ended } }
@@ -512,9 +513,23 @@ final class RecordingTicket: @unchecked Sendable {
   }
 
   func revoke(_ reason: RecordingRefusal) {
-    lock.withLock { revokedReason = reason }
+    let observers = lock.withLock { () -> [@Sendable (RecordingRefusal) -> Void] in
+      revokedReason = reason
+      defer { revokeObservers = [] }
+      return revokeObservers
+    }
+    observers.forEach { $0(reason) }
     sink.yield(reason)
     sink.finish()
+  }
+
+  func whenRevoked(_ action: @escaping @Sendable (RecordingRefusal) -> Void) {
+    let reason = lock.withLock { () -> RecordingRefusal? in
+      if let revokedReason { return revokedReason }
+      revokeObservers.append(action)
+      return nil
+    }
+    if let reason { action(reason) }
   }
   func start<T>(_ operation: () throws -> T) throws -> T {
     try lock.withLock {

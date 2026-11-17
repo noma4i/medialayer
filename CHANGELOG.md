@@ -29,6 +29,8 @@
 
 ### Changed
 
+- iOS voice take starts from live PCM; a silent source deletes the file.
+- iOS `MediaVoiceRecorder` leaves the microphone permission to the app.
 - `playUrl` returns a library `MediaPlayer` with its own playback state.
 - A play during a call or recording is refused and shows its refusal.
 - After the library forgets a wish, one Play plays again.

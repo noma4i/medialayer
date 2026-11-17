@@ -18,9 +18,12 @@ protocol VoiceCapture: Sendable {
   func start(file: URL, maxDurationMs: UInt64, ticket: RecordingTicket, onLimit: @escaping @Sendable () -> Void, onFailure: @escaping @Sendable (Error) -> Void) async throws
   func peak() -> Float
   func stop() throws
+  func finish() async throws
 }
 
 extension VoiceCapture {
+  func finish() async throws { try stop() }
+
   func start(file: URL, maxDurationMs: UInt64, ticket: RecordingTicket, onLimit: @escaping @Sendable () -> Void, onFailure: @escaping @Sendable (Error) -> Void) async throws {
     try ticket.start {}
     try await start(file: file, maxDurationMs: maxDurationMs, onLimit: onLimit, onFailure: onFailure)
@@ -53,7 +56,18 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
   private var finishing: Task<Result<VoiceRecording, Error>, Never>?
   private var ended: Result<VoiceRecording, Error>?
   private var held: RecordingTicket?
-  private var starting = false
+  private var startPhase = StartPhase.free
+  private enum StartEnd {
+    case limit
+    case failed(Error)
+  }
+
+  private enum StartPhase {
+    case free
+    case starting
+    case ended(StartEnd)
+  }
+
   private let awake: ScreenAwakeHold
   private var sinks: [UUID: AsyncStream<Float>.Continuation] = [:]
   private var voiceState = VoiceState(take: 0, phase: .idle, outcome: nil, recordedMs: 0)
@@ -68,12 +82,14 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     }
   }
 
+  private func setLocked(_ value: VoiceState) {
+    voiceState = value
+    stateSinks.values.forEach { $0.yield(value) }
+    awake.set(playing: value.phase != .idle)
+  }
+
   private func publish(_ value: VoiceState) {
-    lock.withLock {
-      voiceState = value
-      stateSinks.values.forEach { $0.yield(value) }
-      awake.set(playing: value.phase != .idle)
-    }
+    lock.withLock { setLocked(value) }
     TestChange.fire()
   }
 
@@ -124,11 +140,11 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
 
   public func start(to file: URL) async throws {
     try lock.withLock {
-      guard running == nil && finishing == nil && !starting else { throw MediaError.Unexpected(detail: "a recording is already running") }
-      starting = true
+      guard running == nil, finishing == nil, case .free = startPhase else { throw MediaError.Unexpected(detail: "a recording is already running") }
+      startPhase = .starting
       ended = nil
     }
-    defer { lock.withLock { starting = false } }
+    defer { lock.withLock { startPhase = .free } }
     guard let link = link() else { throw MediaError.Closed }
     let hold: RecordingTicket
     switch await link.admit(.voice) {
@@ -141,6 +157,8 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
       }
       throw error
     }
+    let current = Running(file: file, startedAt: clock())
+    let early: Bool
     do {
       try Task.checkCancellation()
       try await capture.start(file: file, maxDurationMs: maxDurationMs, ticket: hold, onLimit: { [weak self] in self?.limitReached() }, onFailure: { [weak self] error in self?.captureFailed(error) })
@@ -149,6 +167,18 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
         try hold.start {}
       } catch {
         do { try capture.stop() } catch { Media.recordNativeFailure(error, source: .recorder) }
+        throw error
+      }
+      let waitForLevel = waitForLevel
+      current.poll = Task { [weak self] in
+        while !Task.isCancelled {
+          await waitForLevel()
+          if Task.isCancelled { return }
+          self?.publishLevel()
+        }
+      }
+      do { early = try commit(current, hold) } catch {
+        current.poll?.cancel()
         throw error
       }
     } catch let reason as RecordingRefusal {
@@ -175,25 +205,30 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
       removeFile(file)
       throw error
     }
-    let current = Running(file: file, startedAt: clock())
-    let waitForLevel = waitForLevel
-    current.poll = Task { [weak self] in
-      while !Task.isCancelled {
-        await waitForLevel()
-        if Task.isCancelled { return }
-        self?.publishLevel()
-      }
-    }
-    lock.withLock {
-      held = hold
-      running = current
-    }
-    publish(VoiceState(take: state.take &+ 1, phase: .recording, outcome: nil, recordedMs: 0))
+    TestChange.fire()
+    if early { Task { _ = await finish(current) } }
     Task { [weak self] in
       for await reason in hold.revoked {
         guard let self else { return }
         _ = await self.finish(current, interrupted: Self.refusal(reason))
       }
+    }
+  }
+
+  private func commit(_ current: Running, _ hold: RecordingTicket) throws -> Bool {
+    try lock.withLock {
+      var limited = false
+      if case let .ended(end) = startPhase {
+        switch end {
+        case let .failed(error): throw error
+        case .limit: limited = true
+        }
+      }
+      startPhase = .free
+      held = hold
+      running = current
+      setLocked(VoiceState(take: voiceState.take &+ 1, phase: .recording, outcome: nil, recordedMs: 0))
+      return limited
     }
   }
 
@@ -228,13 +263,22 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
   }
 
   private func limitReached() {
-    guard let current = lock.withLock({ running }) else { return }
+    let current = lock.withLock { () -> Running? in
+      if running == nil, case .starting = startPhase { startPhase = .ended(.limit) }
+      return running
+    }
+    guard let current else { return }
     Task { _ = await finish(current) }
   }
 
   private func captureFailed(_ error: Error) {
-    guard let current = lock.withLock({ running }) else { return }
-    Task { _ = await finish(current, failure: error) }
+    let current = lock.withLock { () -> Running? in
+      if running == nil, case .starting = startPhase { startPhase = .ended(.failed(error)) }
+      return running
+    }
+    guard let current else { return }
+    let refusal = (error as? RecordingRefusal).map(Self.refusal)
+    Task { _ = await finish(current, interrupted: refusal, failure: refusal == nil ? error : nil) }
   }
 
   private func finish(_ current: Running, interrupted: MediaError? = nil, failure: Error? = nil) async -> Result<VoiceRecording, Error> {
@@ -259,11 +303,11 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     if let failure { Media.recordNativeFailure(failure, source: .recorder) }
     do {
       do {
-        try capture.stop()
+        if interrupted != nil || failure != nil { try capture.stop() } else { try await capture.finish() }
       } catch let refused as VoiceRefused where refused.reason == .empty && voiceTooShort(durationMs: length, minTakeMs: minTakeMs) && interrupted == nil && failure == nil {
         throw VoiceRefused(reason: .tooShort)
       } catch {
-        Media.recordNativeFailure(error, source: .recorder)
+        if !(error is CancellationError) { Media.recordNativeFailure(error, source: .recorder) }
         if interrupted == nil { throw error }
       }
       if let interrupted { throw interrupted }
@@ -315,11 +359,26 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
   }
 }
 
-final class SystemVoiceCapture: NSObject, VoiceCapture, AVAudioRecorderDelegate, @unchecked Sendable {
+final class SystemVoiceCapture: VoiceCapture, @unchecked Sendable {
+  private enum State {
+    case idle
+    case taking(VoiceTake, InputBox)
+    case lingering(InputBox)
+  }
+
+  private let source: VoicePCMSource
+  private let link: @Sendable () -> AudioLink?
+  private let makeWriter: @Sendable (URL) -> VoiceFileWriter
   private let lock = NSLock()
-  private var recorder: AVAudioRecorder?
-  private var onLimit: (@Sendable () -> Void)?
-  private var onFailure: (@Sendable (Error) -> Void)?
+  private var state = State.idle
+
+  init(source: VoicePCMSource = AVCaptureVoiceSource(), link: @escaping @Sendable () -> AudioLink? = { Media.link }, writer: @escaping @Sendable (URL) -> VoiceFileWriter = { AssetVoiceWriter(url: $0) }) {
+    self.source = source
+    self.link = link
+    makeWriter = writer
+  }
+
+  deinit { release(state) }
 
   static var settings: [String: Any] {
     let encoder = voiceEncoderSettings()
@@ -332,63 +391,191 @@ final class SystemVoiceCapture: NSObject, VoiceCapture, AVAudioRecorderDelegate,
   }
 
   func start(file: URL, maxDurationMs: UInt64, onLimit: @escaping @Sendable () -> Void, onFailure: @escaping @Sendable (Error) -> Void) async throws {
-    try await start(file: file, maxDurationMs: maxDurationMs, ticket: nil, onLimit: onLimit, onFailure: onFailure)
+    try await run(file: file, maxDurationMs: maxDurationMs, ticket: nil, onLimit: onLimit, onFailure: onFailure)
   }
 
   func start(file: URL, maxDurationMs: UInt64, ticket: RecordingTicket, onLimit: @escaping @Sendable () -> Void, onFailure: @escaping @Sendable (Error) -> Void) async throws {
-    try await start(file: file, maxDurationMs: maxDurationMs, ticket: Optional(ticket), onLimit: onLimit, onFailure: onFailure)
+    try ticket.start {}
+    try await run(file: file, maxDurationMs: maxDurationMs, ticket: ticket, onLimit: onLimit, onFailure: onFailure)
   }
 
-  private func start(file: URL, maxDurationMs: UInt64, ticket: RecordingTicket?, onLimit: @escaping @Sendable () -> Void, onFailure: @escaping @Sendable (Error) -> Void) async throws {
-    guard await Self.permitted() else { throw VoiceRefused(reason: .permissionDenied) }
-    let made: AVAudioRecorder
-    made = try AVAudioRecorder(url: file, settings: Self.settings)
-    made.delegate = self
-    made.isMeteringEnabled = true
-    let start = {
-      guard made.record(forDuration: TimeInterval(maxDurationMs) / 1000) else { throw NSError(domain: "MediaLayer.VoiceCapture", code: 1) }
-      self.lock.withLock {
-        self.recorder = made
-        self.onLimit = onLimit
-        self.onFailure = onFailure
+  private func run(file: URL, maxDurationMs: UInt64, ticket: RecordingTicket?, onLimit: @escaping @Sendable () -> Void, onFailure: @escaping @Sendable (Error) -> Void) async throws {
+    guard let audio = link() else { throw MediaError.Closed }
+    let first = FirstPCM()
+    let box = InputBox()
+    let holder = TakeHolder()
+    let take = VoiceTake(
+      url: file, writer: makeWriter(file), settings: Self.settings, maxDurationMs: maxDurationMs,
+      onStarted: { first.settle(.success(())) },
+      onLimit: onLimit,
+      onBroken: { [weak self, holder] broken in
+        let error = self?.ended(holder.take, by: broken) ?? Self.loss(nil)
+        if !first.settle(.failure(error)) { onFailure(error) }
       }
+    )
+    holder.take = take
+    let microphone = VoiceMicrophone(source: source)
+    microphone.attach(take)
+    microphone.onIdleHeard { [weak self, weak box] in
+      guard let self, let box else { return }
+      self.healthy(box)
     }
-    if let ticket { try ticket.start(start) } else { try start() }
+    box.microphone = microphone
+    // Registered before the owner can act: its first word may come at once.
+    release(lock.withLock { () -> State in
+      defer { state = .taking(take, box) }
+      return state
+    })
+    box.set(CameraAudioInput(link: audio, microphone: microphone, kind: .voice, failureSource: nil) { _ in })
+    ticket?.whenRevoked { reason in _ = first.settle(.failure(reason)) }
+    do {
+      try await withTaskCancellationHandler { try await first.wait() } onCancel: { _ = first.settle(.failure(CancellationError())) }
+    } catch {
+      abort(take)
+      throw error
+    }
   }
 
   func peak() -> Float {
-    guard let recorder = lock.withLock({ recorder }) else { return 0 }
-    recorder.updateMeters()
-    return powf(10, recorder.peakPower(forChannel: 0) / 20)
+    guard case let .taking(take, _) = lock.withLock({ state }) else { return 0 }
+    return take.takePeak()
   }
 
   func stop() throws {
-    guard let made = lock.withLock({ () -> AVAudioRecorder? in
-      defer { recorder = nil }
-      return recorder
-    }) else { return }
-    made.stop()
+    guard let take = leaveTaking() else { return }
+    take.cancel()
   }
 
-  func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
-    let limit = lock.withLock { () -> (@Sendable () -> Void)? in
-      defer { onLimit = nil }
-      return self.recorder === recorder ? onLimit : nil
+  func finish() async throws {
+    guard let take = leaveTaking() else { return }
+    try await take.finish()
+  }
+
+  private func leaveTaking() -> VoiceTake? {
+    let taking = lock.withLock { () -> (VoiceTake, InputBox)? in
+      guard case let .taking(take, box) = state else { return nil }
+      state = .idle
+      return (take, box)
     }
-    if flag { limit?() }
-    else { lock.withLock { onFailure }?(NSError(domain: AVFoundationErrorDomain, code: -1)) }
+    guard let (take, box) = taking else { return nil }
+    box.close()
+    return take
   }
 
-  func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
-    guard lock.withLock({ self.recorder === recorder }) else { return }
-    lock.withLock { onFailure }?(error ?? NSError(domain: AVFoundationErrorDomain, code: -1))
+  private func abort(_ take: VoiceTake) {
+    let box = lock.withLock { () -> InputBox? in
+      guard case let .taking(current, box) = state, current === take else { return nil }
+      state = .idle
+      return box
+    }
+    guard let box else { return }
+    take.cancel()
+    box.close()
   }
 
-  private static func permitted() async -> Bool {
-    switch AVAudioApplication.shared.recordPermission {
-    case .granted: return true
-    case .undetermined: return await AVAudioApplication.requestRecordPermission()
-    default: return false
+  private func ended(_ take: VoiceTake?, by broken: VoiceTake.Broken) -> Error {
+    let box = lock.withLock { () -> InputBox? in
+      guard let take, case let .taking(current, box) = state, current === take else { return nil }
+      if case .lost = broken { state = .lingering(box) } else { state = .idle }
+      return box
+    }
+    box?.microphone?.attach(nil)
+    switch broken {
+    case let .lost(error): return Self.loss(error)
+    case let .failed(error):
+      box?.close()
+      return error
+    }
+  }
+
+  private func healthy(_ box: InputBox) {
+    let done = lock.withLock { () -> Bool in
+      guard case let .lingering(current) = state, current === box else { return false }
+      state = .idle
+      return true
+    }
+    if done { box.close() }
+  }
+
+  private func release(_ state: State) {
+    switch state {
+    case .idle: break
+    case let .taking(take, box):
+      take.cancel()
+      box.close()
+    case let .lingering(box): box.close()
+    }
+  }
+
+  private static func loss(_ error: Error?) -> Error {
+    guard let error else { return RecordingRefusal.microphoneSilent }
+    switch microphoneRefusal(error) {
+    case .permissionDenied: return RecordingRefusal.permissionDenied
+    case .microphoneBusy: return RecordingRefusal.microphoneBusy
+    default: return error
+    }
+  }
+}
+
+private final class InputBox: @unchecked Sendable {
+  private let lock = NSLock()
+  private var owner: CameraAudioInput?
+  private var closed = false
+  var microphone: VoiceMicrophone?
+
+  func set(_ owner: CameraAudioInput) {
+    let late = lock.withLock { () -> Bool in
+      if closed { return true }
+      self.owner = owner
+      return false
+    }
+    if late { owner.close() }
+  }
+
+  func close() {
+    let owner = lock.withLock { () -> CameraAudioInput? in
+      closed = true
+      defer { self.owner = nil }
+      return self.owner
+    }
+    owner?.close()
+  }
+}
+
+private final class TakeHolder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var value: VoiceTake?
+  var take: VoiceTake? {
+    get { lock.withLock { value } }
+    set { lock.withLock { value = newValue } }
+  }
+}
+
+private final class FirstPCM: @unchecked Sendable {
+  private let lock = NSLock()
+  private var result: Result<Void, Error>?
+  private var continuation: CheckedContinuation<Void, Error>?
+
+  @discardableResult
+  func settle(_ value: Result<Void, Error>) -> Bool {
+    let (first, pending) = lock.withLock { () -> (Bool, CheckedContinuation<Void, Error>?) in
+      guard result == nil else { return (false, nil) }
+      result = value
+      defer { continuation = nil }
+      return (true, continuation)
+    }
+    pending?.resume(with: value)
+    return first
+  }
+
+  func wait() async throws {
+    try await withCheckedThrowingContinuation { (waiting: CheckedContinuation<Void, Error>) in
+      let ready = lock.withLock { () -> Result<Void, Error>? in
+        if let result { return result }
+        continuation = waiting
+        return nil
+      }
+      if let ready { waiting.resume(with: ready) }
     }
   }
 }

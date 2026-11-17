@@ -249,6 +249,8 @@ val avatar = MediaImageLoad.loadBitmap(avatarUrl, cacheDirectory, side = 96, cir
 
 `MediaVoiceRecorder` records the microphone into an m4a file (AAC at 44.1 kHz, one channel, 128 kbit/s). The recorder takes the recording session from MediaLayer when `start` runs and gives it back when the take ends. `levels` gives the wave level from 0 to 1 while the recording runs, from one formula of the core, and nothing at rest. The recording ends by itself at the longest length (default 10 minutes, set between 1 second and 1 hour). A refused start throws `MediaError.Voice(detail, reason)` (Swift) or `MediaException.Voice` (Kotlin) with the same text and the same `VoiceRefusal` on both platforms.
 
+On iOS a take starts from live sound. `start` returns when the first live PCM of the take has arrived and its file is open, so no file exists and `phase` stays `idle` before that. A source that gives no sound ends the take once with `refused(microphoneSilent)` and no file, and a take cancelled while it waits leaves no file. After such a loss the source may come back by itself when the system allows it, and it is released at its first healthy sound: it never resumes the take, the app starts the next one. A call that starts while the take waits or records ends it with `refused(inCall)`. The app asks for the microphone permission itself: without it `start` throws `permissionDenied`, and the recorder never shows the system prompt. `microphoneAvailability` shows `noSound` while a started source has not given sound yet.
+
 `state` and `states` publish `recordedMs` while a take records, and 0 when idle. Set `minTakeMs` on the recorder to refuse a shorter take with `tooShort` and delete its file. The default is 0, with no minimum.
 
 `state` and `states` (Swift `AsyncStream<VoiceState>`, Kotlin `StateFlow<VoiceState>`) show every take, also one that ended without a `stop()` call. `VoiceState` has `take` (the number of the take, 0 before the first), `phase` (`idle`, `recording`) and `outcome` of the last take:
@@ -257,7 +259,7 @@ val avatar = MediaImageLoad.loadBitmap(avatarUrl, cacheDirectory, side = 96, cir
 | ------- | ---- | ---- |
 | `recorded(path, durationMs)` | `stop()`, or the longest length reached | Kept, it belongs to the app |
 | `refused(reason)` | A call, an interruption, a silent microphone, a revoked permission, closing MediaLayer, an empty take | Deleted |
-| `failed(NativeFailure)` | The system recorder reported an error | Deleted, the error also reaches `Media.failures` |
+| `failed(NativeFailure)` | The system recorder or the file writer reported an error | Deleted, the error also reaches `Media.failures` once |
 
 The terminal state comes first, then `levels` ends. After the take ended by itself, `stop()` gives the same outcome. A file that could not be deleted is a `file` event of `Media.failures`.
 
