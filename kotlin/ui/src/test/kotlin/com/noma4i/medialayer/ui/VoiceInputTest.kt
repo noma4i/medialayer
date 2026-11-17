@@ -139,6 +139,7 @@ class VoiceInputTest {
   fun a_loss_while_waiting_for_the_first_pcm_is_told_once_with_no_file_and_the_next_healthy_pcm_closes_the_owner() {
     val input = input()
     started(input)
+    microphoneListener.onLive(1)
     microphoneListener.onSilenced(1, true)
     await("lost, the restore is the core's") { events == listOf("lost") && microphone.calls == listOf("start 1", "stop 1", "start 2") }
     microphoneListener.onSilenced(1, true)
