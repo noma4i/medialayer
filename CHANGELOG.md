@@ -61,6 +61,7 @@
 ### Fixed
 
 - Response bodies reach the core in pieces of up to 64 KiB instead of single network reads.
+- An Android camera switched with the flash on becomes ready and lights the torch on the new lens.
 - A place that starts playing while a camera preview or recording holds the session plays at once.
 - The screen stays on while a place plays with sound, a voice take, a camera preview or a call runs.
 - `isPlaying` shows paused after the library pauses a place.
