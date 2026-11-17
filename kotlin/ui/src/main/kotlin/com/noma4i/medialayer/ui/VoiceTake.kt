@@ -41,17 +41,16 @@ internal class VoiceTake(
 
   fun pcm(chunk: PcmChunk) = transition {
     if (chunk.generation != generation || (state != State.WAITING && state != State.OPEN)) return@transition
+    val first = state == State.WAITING
     try {
       require(matches(chunk)) { "PCM does not match the voice encoder" }
-      if (state == State.WAITING) {
-        writer.open(file, settings)
-        state = State.OPEN
-        events += { it.onStarted() }
-      }
+      if (first) writer.open(file, settings)
+      state = State.OPEN
       writer.append(chunk)
     } catch (error: Throwable) {
       return@transition end { it.onFailed(failure(error)) }
     }
+    if (first) events += { it.onStarted() }
     frames += chunk.frames
     if (!limited && frames * 1_000_000L / settings.sampleRateHz.toLong() >= limitUs) { limited = true; events += { it.onLimit() } }
   }
