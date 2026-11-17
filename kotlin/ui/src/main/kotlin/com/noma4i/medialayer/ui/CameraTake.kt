@@ -1,0 +1,322 @@
+package com.noma4i.medialayer.ui
+
+import android.media.AudioFormat
+import android.media.MediaCodec
+import android.media.MediaFormat
+import android.os.Handler
+import android.os.HandlerThread
+import android.view.Surface
+import androidx.media3.common.util.MediaFormatUtil
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.muxer.BufferInfo
+import androidx.media3.muxer.FragmentedMp4Muxer
+import com.noma4i.medialayer.FailureSource
+import com.noma4i.medialayer.NativeFailure
+import java.io.File
+import java.io.FileOutputStream
+import java.nio.ByteBuffer
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+
+internal enum class VideoTimebase { BOOTTIME, UNKNOWN }
+
+internal class CameraTakeSettings(
+  val video: MediaFormat,
+  val audio: MediaFormat?,
+  val videoTimebase: VideoTimebase,
+  val audioGeneration: Long,
+  val heldLimitBytes: Long,
+  val maxDurationUs: Long,
+  val fragmentDurationMs: Long?
+)
+
+internal interface CameraTakeListener {
+  fun onBegan(generation: Long, inputSurface: Surface)
+
+  fun onStarted(generation: Long, baseUs: Long)
+
+  fun onFinished(generation: Long, file: File, durationUs: Long)
+
+  fun onFailed(generation: Long, failure: NativeFailure)
+
+  fun onCancelled(generation: Long)
+}
+
+@OptIn(UnstableApi::class)
+internal class CameraTake(
+  val generation: Long,
+  private val file: File,
+  private val settings: CameraTakeSettings,
+  private val admit: (Long) -> AutoCloseable,
+  private val listener: CameraTakeListener
+) {
+  private class Sample(val track: Int, val ptsUs: Long, val flags: Int, val bytes: ByteArray)
+  private class Pcm(val bytes: ByteArray, var offset: Int, var ptsUs: Long, val bytesPerFrame: Int)
+
+  private val thread = HandlerThread("CameraTake-$generation").apply { start() }
+  private val handler = Handler(thread.looper)
+  private val ended = AtomicBoolean(false)
+  private val held = AtomicLong()
+  private val failing = AtomicBoolean()
+  private var begun = false
+  private val hasAudio = settings.audio != null
+  private var reserve: AutoCloseable? = null
+  private var videoCodec: MediaCodec? = null
+  private var audioCodec: MediaCodec? = null
+  private var surface: Surface? = null
+  private var videoFormat: androidx.media3.common.Format? = null
+  private var audioFormat: androidx.media3.common.Format? = null
+  private var muxer: FragmentedMp4Muxer? = null
+  private var output: FileOutputStream? = null
+  private var tracks = IntArray(2)
+  private var baseUs = 0L
+  private var written = IntArray(2)
+  private var heldVideo = ArrayList<Sample>()
+  private var heldAudio = ArrayList<Sample>()
+  private var lastPts = LongArray(2) { -1L }
+  private var endUs = 0L
+  private var needKeyframe = true
+  private val pending = ArrayDeque<Pcm>()
+  private val freeInputs = ArrayDeque<Int>()
+  private var originUs: Long? = null
+  private var live = false
+  private var confirmed = false
+  private var finishing = false
+  private var audioEos = false
+  private var videoEos = false
+  private var audioDone = !hasAudio
+  private var videoDone = false
+  private var started = false
+
+  fun begin() = handler.post {
+    if (begun || ended.get()) return@post
+    begun = true
+    try {
+      if (settings.videoTimebase == VideoTimebase.UNKNOWN) return@post fail(0, "video timebase is unknown, not taken as REALTIME")
+      reserve = admit(settings.heldLimitBytes)
+      codec(settings.video, VIDEO).also {
+        surface = it.createInputSurface()
+        it.start()
+      }
+      settings.audio?.let { format -> codec(format, AUDIO).start() }
+      listener.onBegan(generation, surface!!)
+    } catch (error: Throwable) {
+      fail(0, error.message ?: error.javaClass.name)
+    }
+  }
+
+  fun audio(chunk: PcmChunk) {
+    if (!hasAudio || chunk.generation != settings.audioGeneration || ended.get() || failing.get()) return
+    val rate = settings.audio!!.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+    val channels = settings.audio.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+    val size = chunk.data.remaining()
+    val bytesPerFrame = Integer.bitCount(chunk.spec.channelMask) * 2
+    val mismatch = chunk.spec.encoding != AudioFormat.ENCODING_PCM_16BIT || chunk.spec.sampleRate != rate || bytesPerFrame != channels * 2
+    if (mismatch || chunk.frames <= 0 || size != chunk.frames * bytesPerFrame) return failLater("PCM does not match the audio encoder")
+    if (!acquire(size.toLong())) return failLater("PCM exceeds the memory reserve")
+    val copy = ByteArray(size).also { chunk.data.duplicate().get(it) }
+    handler.post {
+      if (ended.get()) return@post
+      live = true
+      pending.addLast(Pcm(copy, 0, chunk.ptsUs, bytesPerFrame))
+      drain()
+      tryStart()
+    }
+  }
+
+  private fun acquire(bytes: Long): Boolean {
+    if (held.addAndGet(bytes) <= settings.heldLimitBytes) return true
+    held.addAndGet(-bytes)
+    return false
+  }
+
+  fun audioTimebase(generation: Long, originNanos: Long) {
+    if (generation != settings.audioGeneration) return
+    handler.post { if (ended.get()) return@post; originUs = originNanos / 1000; drain() }
+  }
+
+  private fun failLater(message: String) { if (failing.compareAndSet(false, true)) handler.post { fail(0, message) } }
+
+  fun confirm() { handler.post { confirmed = true; tryStart() } }
+
+  fun finish() { handler.post { if (ended.get()) return@post; if (!started) return@post fail(0, "the take ended before it started"); beginFinish() } }
+
+  private fun beginFinish() {
+    if (finishing) return
+    finishing = true
+    videoCodec?.signalEndOfInputStream()
+    drain()
+  }
+
+  fun cancel() { handler.post { end(null, null) } }
+
+  private fun codec(format: MediaFormat, kind: Int): MediaCodec {
+    val made = MediaCodec.createEncoderByType(format.getString(MediaFormat.KEY_MIME)!!)
+    if (kind == VIDEO) videoCodec = made else audioCodec = made
+    made.setCallback(object : MediaCodec.Callback() {
+      override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
+        if (ended.get()) return
+        freeInputs.addLast(index)
+        drain()
+      }
+
+      override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) = output(codec, kind, index, info)
+
+      override fun onError(codec: MediaCodec, error: MediaCodec.CodecException) = if (ended.get()) Unit else fail(error.errorCode.toLong(), error.diagnosticInfo)
+
+      override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
+        if (ended.get()) return
+        val converted = MediaFormatUtil.createFormatFromMediaFormat(format)
+        if (kind == VIDEO) videoFormat = converted else audioFormat = converted
+        tryStart()
+      }
+    }, handler)
+    made.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+    return made
+  }
+
+  private fun drain() {
+    val codec = audioCodec ?: return
+    val origin = originUs ?: return
+    while (!ended.get() && originUs != null && freeInputs.isNotEmpty() && (pending.isNotEmpty() || (finishing && !audioEos))) {
+      val index = freeInputs.removeFirst()
+      val head = pending.firstOrNull()
+      if (head == null) {
+        codec.queueInputBuffer(index, 0, 0, lastAudioInputUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+        audioEos = true
+        return
+      }
+      val buffer = codec.getInputBuffer(index)!!
+      val size = minOf(buffer.remaining(), head.bytes.size - head.offset).let { it - it % head.bytesPerFrame }
+      if (size <= 0) return fail(0, "audio input buffer holds no whole frame")
+      buffer.put(head.bytes, head.offset, size)
+      lastAudioInputUs = origin + head.ptsUs
+      codec.queueInputBuffer(index, 0, size, lastAudioInputUs, 0)
+      head.offset += size
+      head.ptsUs += size / head.bytesPerFrame * 1_000_000L / settings.audio!!.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+      if (head.offset >= head.bytes.size) {
+        pending.removeFirst()
+        held.addAndGet(-head.bytes.size.toLong())
+      }
+    }
+  }
+
+  private var lastAudioInputUs = 0L
+
+  private fun output(codec: MediaCodec, kind: Int, index: Int, info: MediaCodec.BufferInfo) {
+    if (ended.get()) return
+    try {
+      val eos = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+      val config = info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0
+      if (info.size > 0 && !config && !ended.get()) {
+        val buffer = codec.getOutputBuffer(index)!!.apply { position(info.offset); limit(info.offset + info.size) }
+        sample(kind, info.presentationTimeUs, info.flags, buffer)
+      }
+      codec.releaseOutputBuffer(index, false)
+      if (eos) {
+        if (kind == VIDEO) videoDone = true else audioDone = true
+        if (audioDone && videoDone) complete()
+      }
+    } catch (error: Throwable) {
+      fail(0, error.message ?: error.javaClass.name)
+    }
+  }
+
+  private fun sample(kind: Int, ptsUs: Long, flags: Int, buffer: ByteBuffer) {
+    if (started) return write(kind, ptsUs - baseUs, flags, buffer)
+    val key = flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
+    if (kind == VIDEO && needKeyframe && !key) return
+    val size = buffer.remaining().toLong()
+    if (!acquire(size)) {
+      if (kind == AUDIO) return fail(0, "held audio exceeds the memory reserve")
+      heldVideo.forEach { held.addAndGet(-it.bytes.size.toLong()) }
+      heldVideo.clear()
+      needKeyframe = true
+      if (!key || !acquire(size)) return
+    }
+    val bytes = ByteArray(size.toInt()).also { buffer.get(it) }
+    if (kind == VIDEO) { needKeyframe = false; heldVideo.add(Sample(VIDEO, ptsUs, flags, bytes)) } else heldAudio.add(Sample(AUDIO, ptsUs, flags, bytes))
+    tryStart()
+  }
+
+  private fun tryStart() {
+    if (started || ended.get() || heldVideo.isEmpty() || videoFormat == null || !confirmed || (hasAudio && !live)) return
+    val base = heldVideo.first().ptsUs
+    val audible = heldAudio.filter { it.ptsUs >= base }
+    if (hasAudio && (audioFormat == null || audible.isEmpty())) return
+    try {
+      baseUs = base
+      val stream = FileOutputStream(file).also { output = it }
+      val builder = FragmentedMp4Muxer.Builder(stream)
+      settings.fragmentDurationMs?.let { builder.setFragmentDurationMs(it) }
+      val opened = builder.build().also { muxer = it }
+      tracks[VIDEO] = opened.addTrack(videoFormat!!)
+      if (hasAudio) tracks[AUDIO] = opened.addTrack(audioFormat!!)
+      started = true
+      audible.forEach { write(AUDIO, it.ptsUs - baseUs, it.flags, ByteBuffer.wrap(it.bytes)) }
+      heldVideo.forEach { write(VIDEO, it.ptsUs - baseUs, it.flags, ByteBuffer.wrap(it.bytes)) }
+      clearHeld()
+      listener.onStarted(generation, baseUs)
+    } catch (error: Throwable) {
+      fail(0, error.message ?: error.javaClass.name)
+    }
+  }
+
+  private fun clearHeld() {
+    (heldVideo + heldAudio).forEach { held.addAndGet(-it.bytes.size.toLong()) }
+    heldVideo = ArrayList()
+    heldAudio = ArrayList()
+  }
+
+  private fun write(kind: Int, ptsUs: Long, flags: Int, buffer: ByteBuffer) {
+    if (ptsUs < 0) return
+    if (ptsUs > settings.maxDurationUs) return beginFinish()
+    muxer!!.writeSampleData(tracks[kind], buffer, BufferInfo(ptsUs, buffer.remaining(), flags))
+    written[kind]++
+    val interval = if (lastPts[kind] >= 0) ptsUs - lastPts[kind] else 0L
+    lastPts[kind] = ptsUs
+    endUs = maxOf(endUs, ptsUs + interval)
+  }
+
+  private fun complete() {
+    if (!started || written[VIDEO] == 0 || (hasAudio && written[AUDIO] == 0)) return fail(0, "the take ended without both streams")
+    end(file, endUs)
+  }
+
+  private fun fail(code: Long, message: String) = end(null, null, NativeFailure(FailureSource.RECORDER, "android.media.MediaCodec", code, message))
+
+  private fun end(done: File?, durationUs: Long?, failure: NativeFailure? = null) {
+    if (!ended.compareAndSet(false, true)) return
+    var outcome = failure
+    fun guarded(step: () -> Unit) {
+      try { step() } catch (error: Throwable) { if (outcome == null && done != null) outcome = NativeFailure(FailureSource.RECORDER, "CameraTake.end", 0, error.message ?: error.javaClass.name) }
+    }
+    guarded { muxer?.close() }
+    guarded { output?.close() }
+    listOf(videoCodec, audioCodec).forEach { codec ->
+      guarded { codec?.stop() }
+      guarded { codec?.release() }
+    }
+    guarded { surface?.release() }
+    guarded { reserve?.close() }
+    pending.clear()
+    freeInputs.clear()
+    clearHeld()
+    val success = done != null && outcome == null
+    if (!success) file.delete()
+    try {
+      when {
+        success -> listener.onFinished(generation, file, durationUs!!)
+        outcome != null -> listener.onFailed(generation, outcome!!)
+        else -> listener.onCancelled(generation)
+      }
+    } finally {
+      thread.quitSafely()
+    }
+  }
+
+  private companion object {
+    const val VIDEO = 0
+    const val AUDIO = 1
+  }
+}
