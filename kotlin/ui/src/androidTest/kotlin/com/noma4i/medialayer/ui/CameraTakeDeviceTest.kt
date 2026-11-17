@@ -119,7 +119,7 @@ class CameraTakeDeviceTest {
   }
 
   private fun settings(audio: Boolean, heldLimitBytes: Long = 16L shl 20) =
-    CameraTakeSettings(videoFormat(), if (audio) audioFormat() else null, VideoTimebase.BOOTTIME, audioGeneration, heldLimitBytes, 60_000_000L, null)
+    CameraTakeSettings(videoFormat(), if (audio) audioFormat() else null, VideoTimebase.BOOTTIME, audioGeneration, heldLimitBytes, 60_000_000L)
 
   private fun take(target: File, settings: CameraTakeSettings, listener: Recorder, released: AtomicInteger = AtomicInteger(), admit: (Long) -> AutoCloseable = { AutoCloseable { released.incrementAndGet() } }) =
     CameraTake(1L, target, settings, admit, listener).also { opened.add(AutoCloseable { it.cancel() }) }
