@@ -9,7 +9,7 @@ import android.view.Surface
 import androidx.media3.common.util.MediaFormatUtil
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.muxer.BufferInfo
-import androidx.media3.muxer.FragmentedMp4Muxer
+import androidx.media3.muxer.Mp4Muxer
 import com.noma4i.medialayer.FailureSource
 import com.noma4i.medialayer.NativeFailure
 import java.io.File
@@ -26,8 +26,7 @@ internal class CameraTakeSettings(
   val videoTimebase: VideoTimebase,
   val audioGeneration: Long,
   val heldLimitBytes: Long,
-  val maxDurationUs: Long,
-  val fragmentDurationMs: Long?
+  val maxDurationUs: Long
 )
 
 internal interface CameraTakeListener {
@@ -51,7 +50,7 @@ internal class CameraTake(
   private val settings: CameraTakeSettings,
   private val admit: (Long) -> AutoCloseable,
   private val listener: CameraTakeListener
-) {
+) : CameraTaking {
   private class Sample(val track: Int, val ptsUs: Long, val flags: Int, val bytes: ByteArray)
   private class Pcm(val bytes: ByteArray, var offset: Int, var ptsUs: Long, val bytesPerFrame: Int)
 
@@ -68,7 +67,7 @@ internal class CameraTake(
   private var surface: Surface? = null
   private var videoFormat: androidx.media3.common.Format? = null
   private var audioFormat: androidx.media3.common.Format? = null
-  private var muxer: FragmentedMp4Muxer? = null
+  private var muxer: Mp4Muxer? = null
   private var output: FileOutputStream? = null
   private var tracks = IntArray(2)
   private var baseUs = 0L
@@ -90,7 +89,7 @@ internal class CameraTake(
   private var videoDone = false
   private var started = false
 
-  fun begin() = handler.post {
+  override fun begin(): Boolean = handler.post {
     if (begun || ended.get()) return@post
     begun = true
     try {
@@ -107,7 +106,7 @@ internal class CameraTake(
     }
   }
 
-  fun audio(chunk: PcmChunk) {
+  override fun audio(chunk: PcmChunk) {
     if (!hasAudio || chunk.generation != settings.audioGeneration || ended.get() || failing.get()) return
     val rate = settings.audio!!.getInteger(MediaFormat.KEY_SAMPLE_RATE)
     val channels = settings.audio.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
@@ -132,16 +131,16 @@ internal class CameraTake(
     return false
   }
 
-  fun audioTimebase(generation: Long, originNanos: Long) {
+  override fun audioTimebase(generation: Long, originNanos: Long) {
     if (generation != settings.audioGeneration) return
     handler.post { if (ended.get()) return@post; originUs = originNanos / 1000; drain() }
   }
 
   private fun failLater(message: String) { if (failing.compareAndSet(false, true)) handler.post { fail(0, message) } }
 
-  fun confirm() { handler.post { confirmed = true; tryStart() } }
+  override fun confirm() { handler.post { confirmed = true; tryStart() } }
 
-  fun finish() { handler.post { if (ended.get()) return@post; if (!started) return@post fail(0, "the take ended before it started"); beginFinish() } }
+  override fun finish() { handler.post { if (ended.get()) return@post; if (!started) return@post fail(0, "the take ended before it started"); beginFinish() } }
 
   private fun beginFinish() {
     if (finishing) return
@@ -150,7 +149,7 @@ internal class CameraTake(
     drain()
   }
 
-  fun cancel() { handler.post { end(null, null) } }
+  override fun cancel() { handler.post { end(null, null) } }
 
   private fun codec(format: MediaFormat, kind: Int): MediaCodec {
     val made = MediaCodec.createEncoderByType(format.getString(MediaFormat.KEY_MIME)!!)
@@ -250,9 +249,7 @@ internal class CameraTake(
     try {
       baseUs = base
       val stream = FileOutputStream(file).also { output = it }
-      val builder = FragmentedMp4Muxer.Builder(stream)
-      settings.fragmentDurationMs?.let { builder.setFragmentDurationMs(it) }
-      val opened = builder.build().also { muxer = it }
+      val opened = Mp4Muxer.Builder(stream).build().also { muxer = it }
       tracks[VIDEO] = opened.addTrack(videoFormat!!)
       if (hasAudio) tracks[AUDIO] = opened.addTrack(audioFormat!!)
       started = true

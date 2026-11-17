@@ -41,6 +41,8 @@ internal interface CaptureBackend {
 
   fun setHost(view: PreviewView?, owner: LifecycleOwner?)
 
+  fun useMemory(memory: CaptureMemory) = Unit
+
   fun bind(lens: CameraLens, profile: CaptureProfile)
 
   fun unbind()

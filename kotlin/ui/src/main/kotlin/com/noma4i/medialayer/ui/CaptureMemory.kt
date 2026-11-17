@@ -3,7 +3,7 @@ package com.noma4i.medialayer.ui
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** One admitted capture hold split into leases: the GL input, the microphone and the held take share [total]. `close(onDrained)` calls back once, outside the lock, after the last lease came back. */
-internal class CaptureMemory(private val total: Long) : AutoCloseable {
+internal class CaptureMemory(val total: Long) : AutoCloseable {
   private val lock = Any()
   private var leasedBytes = 0L
   private var closed = false

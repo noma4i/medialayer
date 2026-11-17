@@ -1,105 +1,176 @@
 package com.noma4i.medialayer.ui
 
-import android.content.Context
-import androidx.camera.video.AudioStats
-import androidx.camera.video.FileOutputOptions
-import androidx.camera.video.Recorder
-import androidx.camera.video.Recording
-import androidx.camera.video.VideoRecordEvent
+import android.view.Surface
 import com.noma4i.medialayer.CaptureEvent
 import com.noma4i.medialayer.FailureSource
 import com.noma4i.medialayer.NativeFailure
 import com.noma4i.medialayer.RecordEnd
 import java.io.File
 import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicBoolean
 
+internal interface CameraTaking {
+  fun begin(): Boolean
+
+  fun audio(chunk: PcmChunk)
+
+  fun audioTimebase(generation: Long, originNanos: Long)
+
+  fun confirm()
+
+  fun finish()
+
+  fun cancel()
+}
+
+internal interface CameraEncoderFeed {
+  fun attach(generation: Long, target: Surface)
+
+  fun detach(generation: Long)
+
+  fun encoded(generation: Long, ptsUs: Long)
+}
+
+/** A take records only after its own first PCM and the confirm of the gate; a take that ends before it started, or fails, gives one `RecordFinished(FAILED)`. Every callback of a take that is not the current one is dropped. */
 internal class CameraRecording(
-  private val context: Context,
   private val main: Executor,
   private val emit: (CaptureEvent) -> Unit,
-  private val audioIssue: (CaptureAudioIssue) -> Unit
-) {
-  private var recording: Recording? = null
-  private val stopCallbacks = mutableListOf<() -> Unit>()
-  @Volatile private var recordedNanos = 0L
+  private val make: (Long, File, CameraTakeSettings, CameraTakeListener) -> CameraTaking
+) : CameraAudioTap {
+  private class Take(val generation: Long, val audio: Long?, val feed: CameraEncoderFeed, val gate: (() -> Unit) -> Unit, val stale: () -> Boolean, val finalized: () -> Unit) {
+    var take: CameraTaking? = null
+    val firstPcm = AtomicBoolean()
+    @Volatile var baseUs = -1L
+    var gated = false
+    var started = false
+    var stopping = false
+  }
 
-  val active: Boolean get() = recording != null
+  @Volatile private var current: Take? = null
+  @Volatile private var origin: Pair<Long, Long>? = null
+  @Volatile private var recordedNanos = 0L
+  private val stopCallbacks = mutableListOf<() -> Unit>()
+
+  val active: Boolean get() = current != null
 
   fun recordedMs(): Long = recordedNanos / 1_000_000
 
-  fun start(output: Recorder, file: File, profile: com.noma4i.medialayer.CaptureProfile, stale: () -> Boolean, finalized: () -> Unit) {
+  fun start(file: File, settings: CameraTakeSettings, feed: CameraEncoderFeed, gate: (() -> Unit) -> Unit, stale: () -> Boolean, generation: Long, finalized: () -> Unit) {
+    recordedNanos = 0
+    val entry = Take(generation, settings.audio?.let { settings.audioGeneration }, feed, gate, stale, finalized)
     try {
-      recordedNanos = 0
-      var pending = output.prepareRecording(context, FileOutputOptions.Builder(file).setDurationLimitMillis(profile.maxDurationMs.toLong()).build())
-      if (profile.audio) pending = pending.withAudioEnabled()
-      MediaTrace.emit("camera") { "take audio=${profile.audio}" }
-      recording = pending.start(main) callback@{ event ->
-        if (stale()) {
-          if (event is VideoRecordEvent.Finalize) completeStops()
-          return@callback
-        }
-        if (profile.audio) {
-          when (event.recordingStats.audioStats.audioState) {
-            AudioStats.AUDIO_STATE_SOURCE_SILENCED -> audioIssue(CaptureAudioIssue.SILENCED)
-            AudioStats.AUDIO_STATE_ACTIVE -> audioIssue(CaptureAudioIssue.ACTIVE)
-            AudioStats.AUDIO_STATE_SOURCE_ERROR -> audioIssue(CaptureAudioIssue.SOURCE_ERROR)
-            AudioStats.AUDIO_STATE_ENCODER_ERROR -> audioIssue(CaptureAudioIssue.ENCODER_ERROR)
-          }
-        }
-        when (event) {
-          is VideoRecordEvent.Start -> emit(CaptureEvent.RecordStarted)
-          is VideoRecordEvent.Status -> recordedNanos = event.recordingStats.recordedDurationNanos
-          is VideoRecordEvent.Finalize -> {
-            recording = null
-            if (endOf(event.error) == RecordEnd.FAILED) {
-              Media.recordNativeFailure(NativeFailure(FailureSource.CAMERA, "androidx.camera.video.VideoRecordEvent.Finalize", event.error.toLong(), event.cause?.message ?: "Recording failed"))
-            }
-            emit(CaptureEvent.RecordFinished(endOf(event.error)))
-            completeStops()
-            finalized()
-          }
-          else -> Unit
-        }
-      }
-    } catch (error: SecurityException) {
-      Media.recordNativeFailure(FailureSource.CAMERA, error)
-      audioIssue(CaptureAudioIssue.PERMISSION_DENIED)
-      emit(CaptureEvent.RecordFinished(RecordEnd.FAILED))
+      val made = make(generation, file, settings, listener(entry)).also { entry.take = it }
+      current = entry
+      origin?.takeIf { it.first == entry.audio }?.let { made.audioTimebase(it.first, it.second) }
+      check(made.begin()) { "the take has no thread" }
     } catch (error: Exception) {
-      Media.recordNativeFailure(FailureSource.CAMERA, error)
+      current = null
+      entry.take?.cancel()
+      Media.recordNativeFailure(FailureSource.RECORDER, error)
       emit(CaptureEvent.RecordFinished(RecordEnd.FAILED))
     }
   }
 
-  fun stop() { recording?.stop() }
+  private fun listener(entry: Take) = object : CameraTakeListener {
+    override fun onBegan(generation: Long, inputSurface: Surface) = main.execute {
+      if (current !== entry) return@execute
+      entry.feed.attach(generation, inputSurface)
+      if (entry.audio == null) open(entry)
+    }
+
+    override fun onVideoEncoded(generation: Long, ptsUs: Long) = main.execute {
+      if (current !== entry || entry.stale()) return@execute
+      entry.feed.encoded(generation, ptsUs)
+      if (entry.baseUs >= 0) recordedNanos = maxOf(0L, ptsUs - entry.baseUs) * 1000
+    }
+
+    override fun onStarted(generation: Long, baseUs: Long) {
+      entry.baseUs = baseUs
+      main.execute {
+        if (current !== entry) return@execute
+        entry.started = true
+        if (!entry.stale()) emit(CaptureEvent.RecordStarted)
+      }
+    }
+
+    override fun onFinished(generation: Long, file: File, durationUs: Long) = main.execute { settle(entry, if (entry.stopping) RecordEnd.COMPLETED else RecordEnd.LIMIT_REACHED) }
+
+    override fun onFailed(generation: Long, failure: NativeFailure) = main.execute {
+      if (current === entry && !entry.stale()) Media.recordNativeFailure(failure)
+      settle(entry, RecordEnd.FAILED)
+    }
+
+    override fun onCancelled(generation: Long) = main.execute { settle(entry, RecordEnd.FAILED) }
+  }
+
+  private fun open(entry: Take) {
+    if (current !== entry || entry.gated || entry.stale()) return
+    entry.gated = true
+    entry.gate { if (current === entry) entry.take?.confirm() }
+  }
+
+  private fun settle(entry: Take, end: RecordEnd) {
+    if (current !== entry) return
+    current = null
+    entry.feed.detach(entry.generation)
+    if (entry.stale()) return completeStops()
+    emit(CaptureEvent.RecordFinished(end))
+    completeStops()
+    entry.finalized()
+  }
+
+  fun encoderFailed(generation: Long, failure: NativeFailure) = main.execute {
+    val entry = current?.takeIf { it.generation == generation } ?: return@execute
+    if (!entry.stale()) Media.recordNativeFailure(failure)
+    entry.take?.cancel()
+  }
+
+  override fun onTimebase(generation: Long, originNanos: Long) {
+    origin = generation to originNanos
+    current?.takeIf { it.audio == generation }?.take?.audioTimebase(generation, originNanos)
+  }
+
+  override fun onPcm(chunk: PcmChunk) {
+    val entry = current?.takeIf { it.audio == chunk.generation } ?: return
+    entry.take?.audio(chunk)
+    if (entry.firstPcm.compareAndSet(false, true)) main.execute {
+      if (current !== entry || entry.stale()) return@execute
+      emit(CaptureEvent.AudioFlow(true))
+      open(entry)
+    }
+  }
+
+  fun stop() { current?.let(::end) }
 
   fun stop(done: () -> Unit) {
-    val current = recording
-    if (current == null) done() else {
+    val entry = current
+    if (entry == null) done() else {
       stopCallbacks.add(done)
-      try { current.stop() } catch (error: Exception) {
-        Media.recordNativeFailure(FailureSource.CAMERA, error)
-        completeStops()
-      }
+      end(entry)
     }
   }
 
-  fun awaitStopped(done: () -> Unit) { if (recording == null) done() else stopCallbacks.add(done) }
+  fun awaitStopped(done: () -> Unit) { if (current == null) done() else stopCallbacks.add(done) }
 
   fun close() {
-    recording?.close()
-    recording = null
+    current?.let {
+      current = null
+      it.feed.detach(it.generation)
+      it.take?.cancel()
+    }
+    completeStops()
+  }
+
+  private fun end(entry: Take) {
+    if (entry.started) {
+      entry.stopping = true
+      entry.take?.finish()
+    } else entry.take?.cancel()
   }
 
   private fun completeStops() {
     val callbacks = stopCallbacks.toList()
     stopCallbacks.clear()
     callbacks.forEach { it() }
-  }
-
-  private fun endOf(error: Int) = when (error) {
-    VideoRecordEvent.Finalize.ERROR_NONE -> RecordEnd.COMPLETED
-    VideoRecordEvent.Finalize.ERROR_DURATION_LIMIT_REACHED -> RecordEnd.LIMIT_REACHED
-    else -> RecordEnd.FAILED
   }
 }

@@ -86,6 +86,7 @@ class MediaCamera internal constructor(
   private var closed = false
   private var epoch = 0
   private var sessionHold: AutoCloseable? = null
+  private var sessionMemory: CaptureMemory? = null
   private var audioHold: RecordingTicket? = null
   private var audioFailure: RecordingRefusal? = null
   private var retiringAudio: RecordingTicket? = null
@@ -521,8 +522,11 @@ class MediaCamera internal constructor(
   }
 
   private fun releaseHolds() {
-    sessionHold?.close()
+    val hold = sessionHold
+    val memory = sessionMemory
     sessionHold = null
+    sessionMemory = null
+    if (memory != null && hold != null) memory.close { hold.close() } else hold?.close()
     audioRevocation?.close()
     audioRevocation = null
     retiringAudio?.close()
@@ -582,7 +586,10 @@ class MediaCamera internal constructor(
             try { admittedHold?.close() } finally { admittedSession?.close() }
             return@enqueue
           }
-          admittedHold?.let { sessionHold = it }
+          admittedHold?.let {
+            sessionHold = it
+            sessionMemory = CaptureMemory(captureCost(profile).toLong()).also(backend::useMemory)
+          }
           admittedSession?.let { installAudio(it) }
           backend.bind(lens, profile)
           installTap()

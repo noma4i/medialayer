@@ -13,6 +13,7 @@ internal class CameraAudioHold(
   val generation: Long? get() = input?.audioGeneration
 
   fun keep(wanted: PcmSpec?) {
+    if (closed && wanted == null) return
     check(!closed) { "the audio hold is closed" }
     if (wanted == spec) return
     input?.close()
