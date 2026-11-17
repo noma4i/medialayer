@@ -20,7 +20,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** The real MediaCodec and MediaMuxer under a VoiceTake, fed with a sine PCM fixture instead of a microphone. */
 @RunWith(AndroidJUnit4::class)
 class VoiceFileWriterDeviceTest {
   private val settings = voiceEncoderSettings()
@@ -52,7 +51,7 @@ class VoiceFileWriterDeviceTest {
   fun finishGivesARealAacM4aAtTheCoreSettings() {
     val (file, take) = take("voice-device.m4a")
     assertFalse(file.exists())
-    repeat(50) { take.pcm(chunk(it)) }
+    repeat(50) { take.pcm(chunk(it)); Thread.sleep(5) }
     assertEquals("started", events.poll(10, TimeUnit.SECONDS))
     take.finish()
     assertEquals("finished", events.poll(10, TimeUnit.SECONDS))
@@ -72,7 +71,7 @@ class VoiceFileWriterDeviceTest {
   @Test
   fun cancelLeavesNoFile() {
     val (file, take) = take("voice-device-cancel.m4a")
-    repeat(5) { take.pcm(chunk(it)) }
+    repeat(5) { take.pcm(chunk(it)); Thread.sleep(5) }
     take.cancel()
     assertEquals(listOf("started", "cancelled"), listOf(events.take(), events.take()))
     assertFalse(file.exists())
@@ -81,7 +80,7 @@ class VoiceFileWriterDeviceTest {
   @Test
   fun cancelDuringFinishDoesNotLeaveTheFile() {
     val (file, take) = take("voice-device-cancel-finish.m4a")
-    repeat(50) { take.pcm(chunk(it)) }
+    repeat(50) { take.pcm(chunk(it)); Thread.sleep(5) }
     take.finish()
     take.cancel()
     events.take()
