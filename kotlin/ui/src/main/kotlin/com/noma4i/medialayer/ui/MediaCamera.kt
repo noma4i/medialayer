@@ -365,7 +365,7 @@ class MediaCamera internal constructor(
   private fun microphoneFailed(issue: CaptureAudioIssue) {
     if (closed) return
     when (issue) {
-      CaptureAudioIssue.SILENCED -> apply(CaptureEvent.AudioFlow(false))
+      CaptureAudioIssue.SILENCED -> { apply(CaptureEvent.AudioFlow(false)); backend.audioLost() }
       CaptureAudioIssue.ACTIVE -> apply(CaptureEvent.AudioFlow(true))
       CaptureAudioIssue.PERMISSION_DENIED -> if (run.starting || run.started) failMicrophone(microphoneRefusal(RecordingRefusal.PERMISSION_DENIED))
       CaptureAudioIssue.SOURCE_ERROR, CaptureAudioIssue.ENCODER_ERROR -> if (run.starting || run.started) failMicrophone(refusal(CameraRefusal.RECORD_FAILED))
@@ -375,6 +375,7 @@ class MediaCamera internal constructor(
   private fun failMicrophone(failure: MediaException.Camera) {
     startFailure = failure
     apply(CaptureEvent.Revoked(failure.reason))
+    backend.audioLost()
   }
 
   private fun reconcile() {

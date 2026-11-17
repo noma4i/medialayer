@@ -20,6 +20,9 @@ internal interface CameraTaking {
 
   fun finish()
 
+  /** The audio source is gone: a take that waits for its PCM ends with what it has. */
+  fun audioEnded() = Unit
+
   fun cancel()
 }
 
@@ -139,6 +142,8 @@ internal class CameraRecording(
       open(entry)
     }
   }
+
+  fun audioLost() { current?.take?.audioEnded() }
 
   fun stop() { current?.let(::end) }
 

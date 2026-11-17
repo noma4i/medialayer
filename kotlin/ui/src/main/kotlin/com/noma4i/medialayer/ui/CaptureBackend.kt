@@ -61,6 +61,9 @@ internal interface CaptureBackend {
 
   fun awaitRecordingStopped(done: () -> Unit) = done()
 
+  /** The audio source of the take is gone. */
+  fun audioLost() = Unit
+
   fun recordedMs(): Long
 
   fun setTorch(on: Boolean)
