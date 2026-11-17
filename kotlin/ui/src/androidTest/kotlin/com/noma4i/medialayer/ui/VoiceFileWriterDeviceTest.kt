@@ -64,7 +64,7 @@ class VoiceFileWriterDeviceTest {
   fun finishGivesARealAacM4aAtTheCoreSettings() {
     val ready = LinkedBlockingQueue<Result<Unit>>()
     val rig = rig("voice-device.m4a", 50) { it.finish() }
-    rig.writer.prepare(settings) { ready += it; assertFalse(rig.file.exists()) }
+    rig.writer.prepare(settings, { ready += it; assertFalse(rig.file.exists()) }, rig.take::fail)
     assertEquals("started", events.poll(10, TimeUnit.SECONDS))
     assertTrue(ready.poll(10, TimeUnit.SECONDS)!!.isSuccess)
     assertEquals("finished", events.poll(10, TimeUnit.SECONDS))
@@ -85,18 +85,18 @@ class VoiceFileWriterDeviceTest {
   fun cancelBeforeTheFirstPcmReleasesThePreparedCodecAndLeavesNoFile() {
     val rig = rig("voice-device-early.m4a", 0) {}
     val ready = LinkedBlockingQueue<Result<Unit>>()
-    rig.writer.prepare(settings) { ready += it }
+    rig.writer.prepare(settings, { ready += it }, rig.take::fail)
     assertTrue(ready.poll(10, TimeUnit.SECONDS)!!.isSuccess)
     rig.take.cancel()
     assertEquals("cancelled", events.poll(10, TimeUnit.SECONDS))
     assertFalse(rig.file.exists())
-    assertTrue(runCatching { rig.writer.prepare(settings) {} }.isFailure)
+    assertTrue(runCatching { rig.writer.prepare(settings, {}, {}) }.isFailure)
   }
 
   @Test
   fun cancelWhileRecordingLeavesNoFile() {
     val rig = rig("voice-device-cancel.m4a", 5) { it.cancel() }
-    rig.writer.prepare(settings) {}
+    rig.writer.prepare(settings, {}, rig.take::fail)
     assertEquals("started", events.poll(10, TimeUnit.SECONDS))
     assertEquals("cancelled", events.poll(10, TimeUnit.SECONDS))
     assertFalse(rig.file.exists())
@@ -105,7 +105,7 @@ class VoiceFileWriterDeviceTest {
   @Test
   fun cancelDuringFinishLeavesNoFile() {
     val rig = rig("voice-device-cancel-finish.m4a", 50) { it.finish(); it.cancel() }
-    rig.writer.prepare(settings) {}
+    rig.writer.prepare(settings, {}, rig.take::fail)
     assertEquals("started", events.poll(10, TimeUnit.SECONDS))
     assertEquals("cancelled", events.poll(10, TimeUnit.SECONDS))
     assertFalse(rig.file.exists())

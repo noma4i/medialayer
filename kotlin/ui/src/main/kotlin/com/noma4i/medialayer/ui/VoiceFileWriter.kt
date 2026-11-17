@@ -10,7 +10,7 @@ import com.noma4i.medialayer.VoiceEncoderSettings
 import java.io.File
 
 internal interface VoiceFileWriter {
-  fun prepare(settings: VoiceEncoderSettings, ready: (Result<Unit>) -> Unit)
+  fun prepare(settings: VoiceEncoderSettings, ready: (Result<Unit>) -> Unit, failed: (Throwable) -> Unit)
 
   fun open(file: File)
 
@@ -21,7 +21,7 @@ internal interface VoiceFileWriter {
   fun cancel()
 }
 
-// Nothing here waits: the codec is prepared without a file and `ready` is its first real input buffer, append copies the borrowed PCM into free inputs or throws, every native error ends in `conclude`, callbacks run outside `gate`.
+// Nothing here waits; the codec is prepared without a file, a native error ends in `conclude` and reaches the owner once: by `done`, else `ready`, else `failed`.
 internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {}) : VoiceFileWriter {
   private val gate = Any()
   private val thread = HandlerThread("VoiceFileWriter")
@@ -34,13 +34,14 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
   private var failure: Throwable? = null
   private var eosPending = false
   private var ready: ((Result<Unit>) -> Unit)? = null
+  private var failed: ((Throwable) -> Unit)? = null
   private var done: ((Result<Long>) -> Unit)? = null
   private var written = 0
   private var rate = 0
   private var baseUs = -1L
   private var endUs = 0L
 
-  override fun prepare(settings: VoiceEncoderSettings, ready: (Result<Unit>) -> Unit) = synchronized(gate) {
+  override fun prepare(settings: VoiceEncoderSettings, ready: (Result<Unit>) -> Unit, failed: (Throwable) -> Unit) = synchronized(gate) {
     check(!closed && codec == null) { "the writer is already used" }
     try {
       rate = settings.sampleRateHz.toInt()
@@ -49,6 +50,7 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
         setInteger(MediaFormat.KEY_BIT_RATE, settings.bitRate.toInt())
       }
       this.ready = ready
+      this.failed = failed
       thread.start()
       codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC).also {
         it.setCallback(callback, Handler(thread.looper))
@@ -104,6 +106,7 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
   override fun cancel() = synchronized(gate) {
     done = null
     ready = null
+    failed = null
     closeLocked()
   }
 
@@ -119,6 +122,7 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
   private fun conclude(error: Throwable?) {
     val finishing: ((Result<Long>) -> Unit)?
     val starting: ((Result<Unit>) -> Unit)?
+    val pushing: ((Throwable) -> Unit)?
     val result: Result<Long>
     synchronized(gate) {
       if (closed) return
@@ -126,12 +130,14 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
       failure = result.exceptionOrNull()
       finishing = done
       starting = ready
+      pushing = failed
       done = null
       ready = null
+      failed = null
       closeLocked()
     }
     finishing?.invoke(result)
-    result.exceptionOrNull()?.let { starting?.invoke(Result.failure(it)) }
+    result.exceptionOrNull()?.let { if (starting != null) starting.invoke(Result.failure(it)) else if (finishing == null) pushing?.invoke(it) }
   }
 
   private fun closeLocked() {

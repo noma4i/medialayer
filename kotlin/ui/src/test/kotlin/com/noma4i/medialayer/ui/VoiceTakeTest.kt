@@ -23,7 +23,7 @@ class VoiceTakeTest {
   private class Writer(val failOpen: Boolean = false, val failAppend: Boolean = false) : VoiceFileWriter {
     val calls = ArrayList<String>()
     var done: ((Result<Long>) -> Unit)? = null
-    override fun prepare(settings: VoiceEncoderSettings, ready: (Result<Unit>) -> Unit) = Unit
+    override fun prepare(settings: VoiceEncoderSettings, ready: (Result<Unit>) -> Unit, failed: (Throwable) -> Unit) = Unit
     override fun open(file: File) { calls += "open"; if (failOpen) error("writer is not ready"); file.writeText("m4a") }
     override fun append(chunk: PcmChunk) { calls += "append"; if (failAppend) error("no free input") }
     override fun finish(done: (Result<Long>) -> Unit) { calls += "finish"; this.done = done }
