@@ -293,6 +293,208 @@ extension GlobalMedia {
       await task.value
       #expect(voiceRefusal(returned.error) == nil && returned.error != nil, "a native error is not a refusal")
     }
+
+    @Test
+    func aLossOfSoundWhileRecordingIsOneMicrophoneSilentWithoutAFileAndTheOwnerOutlivesTheTakeUntilTheFirstHealthyPCM() async throws {
+      let voice = try Voice()
+      let file = temporaryFile("m4a")
+      let states = Collected(voice.recorder.states)
+      try await voice.running(file)
+      await eventually("recording") { states.last?.phase == .recording }
+
+      voice.source.lose()
+
+      await eventually("one outcome") { states.last?.outcome != nil }
+      #expect(states.last == VoiceState(take: 1, phase: .idle, outcome: .refused(reason: .microphoneSilent), recordedMs: 0))
+      #expect(!FileManager.default.fileExists(atPath: file.path))
+      await eventually("the core restores the source of the owner without a take") { voice.source.starts == [1, 2] }
+      #expect(voice.source.stops == [1], "the owner is not closed before a healthy PCM")
+      let count = states.values.count
+
+      try voice.source.emit(generation: 1)
+      #expect(voice.source.stops == [1], "a PCM of the old generation neither closes the owner nor reaches a take")
+
+      try voice.source.emit(3)
+
+      await eventually("the first healthy PCM released the owner") { voice.source.stops == [1, 2] }
+      #expect(states.values.count == count, "no take resumed")
+      #expect(!FileManager.default.fileExists(atPath: file.path))
+      await eventually("the public availability is available after the owner closed") { voice.rig.availability.last == .available }
+      await #expect(throws: MediaError.self) { _ = try await voice.recorder.stop() }
+    }
+
+    @Test
+    func aLossBetweenTheFirstPCMAndTheCommitOfTheStartIsTheResultOfTheStart() async throws {
+      let voice = try Voice(afterStart: { $0.lose() })
+      let file = temporaryFile("m4a")
+      let states = Collected(voice.recorder.states)
+      let (task, returned) = voice.begin(file)
+      await eventually("connected") { voice.source.starts == [1] }
+
+      try voice.source.emit()
+      await task.value
+
+      #expect(voiceRefusal(returned.error) == .microphoneSilent)
+      #expect(states.last == VoiceState(take: 0, phase: .idle, outcome: .refused(reason: .microphoneSilent), recordedMs: 0))
+      #expect(states.values.filter { $0.outcome != nil }.count == 1 && states.values.allSatisfy { $0.phase == .idle })
+      #expect(!FileManager.default.fileExists(atPath: file.path))
+      #expect(!voice.recorder.isRecording)
+    }
+
+    @Test
+    func aLimitReachedByTheFirstPCMEndsTheTakeAtOnceAfterTheCommitOfTheStart() async throws {
+      let voice = try Voice(maxMs: 50, clockStep: 1_000)
+      let file = temporaryFile("m4a")
+      let states = Collected(voice.recorder.states)
+      let (task, returned) = voice.begin(file)
+      await eventually("connected") { voice.source.starts == [1] }
+
+      try voice.source.emit()
+      await task.value
+
+      #expect(returned.error == nil)
+      await eventually("the take ended by its limit") { states.last?.phase == .idle && states.last?.outcome != nil }
+      guard case let .recorded(path: path, durationMs: _)? = states.last?.outcome else {
+        Issue.record("the outcome is \(String(describing: states.last?.outcome))")
+        return
+      }
+      #expect(path == file.path && FileManager.default.fileExists(atPath: file.path))
+      #expect(states.values.filter { $0.outcome != nil }.count == 1)
+      #expect(try await voice.recorder.stop().url == file)
+    }
+
+    @Test
+    func aNativeCallbackThatComesWhileTheOwnerOpensIsTheLossOfItsTake() async throws {
+      let voice = try Voice()
+      voice.source.whenStarted { sink, generation in
+        DispatchQueue.global().async { sink.lost(generation: generation, error: nil) }
+      }
+      let states = Collected(voice.recorder.states)
+      let (task, returned) = voice.begin(temporaryFile("m4a"))
+      await task.value
+      voice.source.whenStarted(nil)
+
+      #expect(voiceRefusal(returned.error) == .microphoneSilent)
+      #expect(states.last == VoiceState(take: 0, phase: .idle, outcome: .refused(reason: .microphoneSilent), recordedMs: 0))
+
+      let before = voice.source.starts.count
+      let file = temporaryFile("m4a")
+      let (next, again) = voice.begin(file)
+      await eventually("the next take opens its own input") { voice.source.starts.count == before + 1 }
+      try voice.source.emit()
+      await next.value
+      #expect(again.error == nil && voice.recorder.state.phase == .recording)
+      voice.clock.advance(1_000)
+      _ = try await voice.recorder.stop()
+    }
+
+    @Test
+    func aCancelWhileTheFileClosesRemovesItAfterTheNativeCompletionAndTheResultIsTheCancel() async throws {
+      let file = temporaryFile("m4a")
+      let writer = HeldWriter(url: file)
+      let take = VoiceTake(url: file, writer: writer, settings: [:], maxDurationMs: 60_000, onStarted: {}, onLimit: {}, onBroken: { _ in })
+      take.pcm(generation: 1, try pcmBuffer(firstFrame: 0))
+      #expect(FileManager.default.fileExists(atPath: file.path))
+      let closing = Task { try await take.finish() }
+      await eventually("the file is closing") { writer.isClosing }
+
+      take.cancel()
+      #expect(FileManager.default.fileExists(atPath: file.path), "the file is removed by the native completion, not before")
+      writer.complete()
+
+      await #expect(throws: CancellationError.self) { try await closing.value }
+      #expect(!FileManager.default.fileExists(atPath: file.path))
+    }
+
+    @Test
+    func aWriterThatIsNotReadyIsOneTypedFailureWithoutAFileAndTheOwnerIsClosed() async throws {
+      let voice = try Voice(writer: { BoundedWriter(url: $0, capacity: 3) })
+      let file = temporaryFile("m4a")
+      let failures = Collected(Media.failures)
+      let states = Collected(voice.recorder.states)
+      try await voice.running(file)
+      try voice.source.emit(2)
+      #expect(FileManager.default.fileExists(atPath: file.path), "the bounded writer has the file while it takes buffers")
+
+      try voice.source.emit()
+
+      await eventually("one typed failure") { if case .failed? = states.last?.outcome { true } else { false } }
+      #expect(!FileManager.default.fileExists(atPath: file.path))
+      #expect(states.values.filter { $0.outcome != nil }.count == 1)
+      #expect(failures.values.filter { $0.source == .recorder }.count == 1, "\(failures.values)")
+      await eventually("the owner is closed with the failed take") { voice.source.stops == [1] }
+      #expect(voice.source.starts == [1], "a failed writer does not wait for a restore")
+    }
+
+    @Test
+    func aLayerCloseOrAReleasedRecorderFreesTheOwnerThatWaitsForARestore() async throws {
+      for close in [true, false] {
+        let rig = try AudioRig()
+        let source = FakePCMSource()
+        var recorder: MediaVoiceRecorder? = MediaVoiceRecorder(capture: SystemVoiceCapture(source: source, link: { rig.link }), maxDurationMs: 60_000, link: { rig.link }, levelInterval: .milliseconds(5))
+        let started = Returned()
+        let task = Task { [recorder] in do { try await recorder!.start(to: temporaryFile("m4a")); started.finish() } catch { started.finish(error) } }
+        await eventually("connected") { source.starts == [1] }
+        try source.emit()
+        await task.value
+        source.lose()
+        await eventually("the owner waits for its restore") { source.starts == [1, 2] }
+
+        if close { rig.link.close() } else { recorder = nil }
+
+        await eventually("the owner is freed (layer close \(close))") { source.stops.contains(2) }
+        withExtendedLifetime(recorder) {}
+      }
+    }
+
+    @Test
+    func aCallWhileWaitingOrRecordingEndsTheTakeWithInCallAndWithoutAFile() async throws {
+      for running in [false, true] {
+        let voice = try Voice()
+        let file = temporaryFile("m4a")
+        let states = Collected(voice.recorder.states)
+        let returned: Returned
+        let task: Task<Void, Never>
+        if running {
+          try await voice.running(file)
+          (task, returned) = (Task {}, Returned())
+        } else {
+          (task, returned) = voice.begin(file)
+          await eventually("connected") { voice.source.starts == [1] }
+        }
+
+        let call = try await voice.rig.link.call(.unmanaged)
+        await task.value
+
+        if !running { #expect(voiceRefusal(returned.error) == .inCall, "waiting") }
+        await eventually("the take ended with inCall (running \(running))") { states.last?.outcome == .refused(reason: .inCall) }
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+        await eventually("the call stopped the source") { voice.source.stops.contains(1) }
+        call.end()
+      }
+    }
+
+    @Test
+    func aTakeAfterAStoppedTakeStartsItsOwnSourceAndFile() async throws {
+      let voice = try Voice()
+      let first = temporaryFile("m4a")
+      try await voice.running(first)
+      voice.clock.advance(1_000)
+      _ = try await voice.recorder.stop()
+      await eventually("the first source is stopped") { voice.source.stops == [1] }
+
+      let second = temporaryFile("m4a")
+      let (task, returned) = voice.begin(second)
+      await eventually("the second take connects its own source") { voice.source.starts.count == 2 }
+      #expect(!FileManager.default.fileExists(atPath: second.path), "no file before the PCM of the second take")
+      try voice.source.emit()
+      await task.value
+      #expect(returned.error == nil && FileManager.default.fileExists(atPath: second.path))
+      voice.clock.advance(1_000)
+      let recording = try await voice.recorder.stop()
+      #expect(recording.url == second && recording.durationMs == 1_000)
+      #expect(FileManager.default.fileExists(atPath: first.path))
+    }
   }
 }
 #endif
