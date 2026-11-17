@@ -295,9 +295,11 @@ final class CameraTake: @unchecked Sendable {
     return true
   }
 
+  static let entryCost = MemoryLayout<(buffer: CMSampleBuffer, bytes: Int)>.stride
+
   private static func bytes(_ buffer: CMSampleBuffer) -> Int {
-    if let image = CMSampleBufferGetImageBuffer(buffer) { return CVPixelBufferGetDataSize(image) }
-    return CMSampleBufferGetTotalSampleSize(buffer)
+    let payload = CMSampleBufferGetImageBuffer(buffer).map(CVPixelBufferGetDataSize) ?? CMSampleBufferGetTotalSampleSize(buffer)
+    return payload > 0 ? payload + entryCost : 0
   }
 
   private static func milliseconds(_ interval: CMTime) -> UInt64? {

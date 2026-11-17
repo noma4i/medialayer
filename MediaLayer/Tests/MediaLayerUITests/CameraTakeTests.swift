@@ -29,8 +29,8 @@ struct CameraTakeTests {
     let stale: [CMSampleBuffer]
 
     var settings: CameraTake.Settings {
-      let bytes = (audio + stale).reduce(0) { $0 + CMSampleBufferGetTotalSampleSize($1) }
-        + video.reduce(0) { $0 + CVPixelBufferGetDataSize(CMSampleBufferGetImageBuffer($1)!) }
+      let bytes = (audio + stale).reduce(0) { $0 + CMSampleBufferGetTotalSampleSize($1) + CameraTake.entryCost }
+        + video.reduce(0) { $0 + CVPixelBufferGetDataSize(CMSampleBufferGetImageBuffer($1)!) + CameraTake.entryCost }
       return CameraTake.Settings(
         video: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: Self.width, AVVideoHeightKey: Self.height],
         audio: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVNumberOfChannelsKey: 1, AVSampleRateKey: Self.sampleRate],
@@ -149,7 +149,7 @@ struct CameraTakeTests {
     let fixture = try Fixture.make()
     var settings = fixture.settings
     settings.maxPendingAudio = pending
-    settings.memoryBudgetBytes = CMSampleBufferGetTotalSampleSize(fixture.audio[0]) - bytesShort
+    settings.memoryBudgetBytes = CMSampleBufferGetTotalSampleSize(fixture.audio[0]) + CameraTake.entryCost - bytesShort
     var (take, events, url) = makeTake(fixture, settings: settings)
     defer { try? FileManager.default.removeItem(at: url) }
     take.appendAudio(fixture.audio[0], generation: Fixture.generation)

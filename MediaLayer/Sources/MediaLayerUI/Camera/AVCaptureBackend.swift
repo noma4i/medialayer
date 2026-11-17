@@ -316,7 +316,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     }
   }
 
-  /// The writer settings come from the recommended settings of the outputs for the chosen format. The turn and the mirror ride in the transform of the track, `uprightVideo` makes the file upright.
   private func takeSettings(profile: CaptureProfile, lens: CameraLens) -> CameraTake.Settings? {
     let fileType = AVFileType.mp4
     guard let video = frameOutput?.recommendedVideoSettingsForAssetWriter(writingTo: fileType), let clock = session.synchronizationClock else { return nil }
@@ -330,8 +329,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     let budget = Int(clamping: captureCost(profile: profile))
     return CameraTake.Settings(
       video: video, audio: audio, transform: transform, maxDurationMs: profile.maxDurationMs, fileType: fileType,
-      fragmentInterval: Self.fragmentInterval, armPTS: CMClockGetTime(clock), maxPendingAudio: budget, maxPendingVideo: budget,
-      maxHeldAudio: budget, memoryBudgetBytes: budget
+      fragmentInterval: Self.fragmentInterval, armPTS: CMClockGetTime(clock), maxPendingAudio: budget / CameraTake.entryCost, maxPendingVideo: budget / CameraTake.entryCost,
+      maxHeldAudio: budget / CameraTake.entryCost, memoryBudgetBytes: budget
     )
   }
 

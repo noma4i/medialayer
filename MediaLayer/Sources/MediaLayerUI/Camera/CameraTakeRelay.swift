@@ -3,8 +3,7 @@ import CoreMedia
 import Foundation
 import MediaLayer
 
-/// Owns the one live `CameraTake` of a camera backend and turns its callbacks into the events of the camera. Callbacks run on `queue`, the session queue of the backend.
-/// A callback of a take that is no longer the live one is dropped, so a begin, a start or an outcome reaches the camera for the live take only and at most once.
+/// Callbacks of a take that is no longer the live one are dropped, so each event reaches the camera once.
 final class CameraTakeRelay: @unchecked Sendable {
   private let queue: DispatchQueue
   private let emit: @Sendable (CaptureEvent) -> Void
@@ -13,7 +12,6 @@ final class CameraTakeRelay: @unchecked Sendable {
   private var take: CameraTake?
   private var lastGeneration: UInt64 = 0
 
-  /// `idle` runs on `queue` when a live take ends or is refused, never for `cancel`.
   init(queue: DispatchQueue, emit: @escaping @Sendable (CaptureEvent) -> Void, idle: @escaping @Sendable () -> Void) {
     self.queue = queue
     self.emit = emit
@@ -51,7 +49,6 @@ final class CameraTakeRelay: @unchecked Sendable {
     lock.withLock { take }?.stop()
   }
 
-  /// Ends the live take with no event and no file.
   func cancel() {
     lock.withLock { () -> CameraTake? in
       defer { take = nil }

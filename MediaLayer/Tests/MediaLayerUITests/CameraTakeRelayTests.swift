@@ -9,95 +9,130 @@ import Testing
 struct CameraTakeRelayTests {
   private typealias Fixture = CameraTakeTests.Fixture
 
+  enum Scenario: CaseIterable {
+    case audioAndVideo, videoOnly, limit, revokedTicket, cancelledMidTake
+  }
+
   private final class Rig: @unchecked Sendable {
+    let queue = DispatchQueue(label: "camera-relay-test")
     let relay: CameraTakeRelay
-    var events: AsyncStream<CaptureEvent>.Iterator
-    let refusals: AsyncStream<RecordingRefusal>
-    let refused: AsyncStream<RecordingRefusal>.Continuation
-    let url = FileManager.default.temporaryDirectory.appendingPathComponent("camera-relay-\(UUID().uuidString).mp4")
+    private let sink: AsyncStream<CaptureEvent>.Continuation
+    private var events: AsyncStream<CaptureEvent>.Iterator
+    private var refusals: AsyncStream<RecordingRefusal>.Iterator
+    private let refuse: AsyncStream<RecordingRefusal>.Continuation
+    private(set) var seen: [CaptureEvent] = []
 
     init() {
       let (stream, sink) = AsyncStream<CaptureEvent>.makeStream()
-      (refusals, refused) = AsyncStream<RecordingRefusal>.makeStream()
+      let (refusalStream, refuse) = AsyncStream<RecordingRefusal>.makeStream()
+      self.sink = sink
+      self.refuse = refuse
       events = stream.makeAsyncIterator()
-      relay = CameraTakeRelay(queue: DispatchQueue(label: "camera-relay-test"), emit: { sink.yield($0) }, idle: {})
+      refusals = refusalStream.makeAsyncIterator()
+      relay = CameraTakeRelay(queue: queue, emit: { sink.yield($0) }, idle: {})
     }
 
-    func begin(_ fixture: Fixture, ticket: RecordingTicket?, maxDurationMs: UInt64 = 0) {
+    func begin(_ fixture: Fixture, url: URL, ticket: RecordingTicket? = nil, audio: Bool = true, maxDurationMs: UInt64 = 0) {
       var settings = fixture.settings
       settings.maxDurationMs = maxDurationMs
-      let refused = refused
-      relay.begin(url: url, settings: settings, ticket: ticket) { refused.yield($0) }
+      if !audio { settings.audio = nil }
+      let refuse = refuse
+      relay.begin(url: url, settings: settings, ticket: ticket) { refuse.yield($0) }
     }
 
-    func feed(_ fixture: Fixture) {
+    func open(_ fixture: Fixture, audio: Bool = true) {
       relay.appendAudio(fixture.stale[0])
-      for buffer in fixture.audio { relay.appendAudio(buffer) }
-      for buffer in fixture.video { relay.appendVideo(buffer) }
+      if audio { relay.appendAudio(fixture.audio[0]) } else { relay.appendVideo(fixture.video[0]) }
+    }
+
+    func flow(_ fixture: Fixture, audio: Bool = true) {
+      let sound = audio ? fixture.audio.dropFirst().map { (buffer: $0, isAudio: true) } : []
+      let frames = fixture.video.dropFirst(audio ? 0 : 1).map { (buffer: $0, isAudio: false) }
+      let ordered = (sound + frames).enumerated().sorted {
+        let (left, right) = (CMSampleBufferGetPresentationTimeStamp($0.element.buffer), CMSampleBufferGetPresentationTimeStamp($1.element.buffer))
+        return left == right ? $0.offset < $1.offset : left < right
+      }
+      for (_, item) in ordered {
+        if item.isAudio { relay.appendAudio(item.buffer) } else { relay.appendVideo(item.buffer) }
+      }
+    }
+
+    func next() async -> CaptureEvent? {
+      guard let event = await events.next() else { return nil }
+      seen.append(event)
+      return event
+    }
+
+    func nextRefusal() async -> RecordingRefusal? { await refusals.next() }
+
+    func settle() async -> [CaptureEvent] {
+      queue.sync {}
+      sink.finish()
+      while await next() != nil {}
+      return seen
     }
   }
 
-  private func ticket() async throws -> (AudioRig, RecordingTicket) {
+  private func url() -> URL {
+    FileManager.default.temporaryDirectory.appendingPathComponent("camera-relay-\(UUID().uuidString).mp4")
+  }
+
+  private func record(_ rig: Rig, _ fixture: Fixture, url: URL, ticket: RecordingTicket? = nil, audio: Bool = true, maxDurationMs: UInt64 = 0, stop: Bool = true) async {
+    rig.begin(fixture, url: url, ticket: ticket, audio: audio, maxDurationMs: maxDurationMs)
+    #expect(!FileManager.default.fileExists(atPath: url.path))
+    rig.open(fixture, audio: audio)
+    guard case .recordStarted? = await rig.next() else { Issue.record("no started"); return }
+    rig.flow(fixture, audio: audio)
+    if stop { rig.relay.stop() }
+    _ = await rig.next()
+  }
+
+  @Test(arguments: Scenario.allCases)
+  func inv_capture_48_a_take_through_the_relay_gives_each_event_once_and_only_the_live_take_ends(_ scenario: Scenario) async throws {
+    let fixture = try Fixture.make()
     let audio = try AudioRig()
-    guard case let .success(ticket) = await audio.link.admit(.video) else { throw CancellationError() }
-    return (audio, ticket)
-  }
-
-  @Test
-  func inv_capture_48_a_take_through_the_relay_starts_once_and_finishes_once_with_a_file() async throws {
-    let fixture = try Fixture.make()
-    let (audio, ticket) = try await ticket()
-    defer { ticket.end(); _ = audio }
-    var rig = Rig()
-    defer { try? FileManager.default.removeItem(at: rig.url) }
-    rig.begin(fixture, ticket: ticket)
-    #expect(!FileManager.default.fileExists(atPath: rig.url.path))
-    rig.feed(fixture)
-    guard case .recordStarted? = await rig.events.next() else { Issue.record("no started"); return }
-    rig.relay.stop()
-    guard case .recordFinished(.completed)? = await rig.events.next() else { Issue.record("no completed"); return }
-    #expect(FileManager.default.fileExists(atPath: rig.url.path))
-    #expect(!rig.relay.isActive)
-  }
-
-  @Test
-  func inv_capture_49_a_revoked_ticket_refuses_at_the_begin_and_no_file_or_event_follows() async throws {
-    let fixture = try Fixture.make()
-    let (audio, ticket) = try await ticket()
-    defer { ticket.end(); _ = audio }
-    var rig = Rig()
-    defer { try? FileManager.default.removeItem(at: rig.url) }
-    rig.begin(fixture, ticket: ticket)
-    ticket.revoke(.inCall)
-    rig.feed(fixture)
-    var refusals = rig.refusals.makeAsyncIterator()
-    #expect(await refusals.next() == .inCall)
-    rig.feed(fixture)
-    #expect(!rig.relay.isActive)
-    #expect(!FileManager.default.fileExists(atPath: rig.url.path))
-  }
-
-  @Test
-  func inv_capture_50_a_cancel_ends_the_take_without_an_event_or_a_file() async throws {
-    let fixture = try Fixture.make()
+    guard case let .success(ticket) = await audio.link.admit(.video) else { Issue.record("no ticket"); return }
+    defer { ticket.end() }
     let rig = Rig()
-    defer { try? FileManager.default.removeItem(at: rig.url) }
-    rig.begin(fixture, ticket: nil)
-    rig.relay.cancel()
-    rig.feed(fixture)
+    let first = url()
+    let last = url()
+    defer { [first, last].forEach { try? FileManager.default.removeItem(at: $0) } }
+    var expected: [CaptureEvent] = [.recordStarted, .recordFinished(end: .completed)]
+    switch scenario {
+    case .audioAndVideo:
+      await record(rig, fixture, url: last, ticket: ticket)
+    case .videoOnly:
+      await record(rig, fixture, url: last, audio: false)
+    case .limit:
+      await record(rig, fixture, url: last, maxDurationMs: 100, stop: false)
+      expected = [.recordStarted, .recordFinished(end: .limitReached)]
+    case .revokedTicket:
+      rig.begin(fixture, url: first, ticket: ticket)
+      ticket.revoke(.inCall)
+      rig.open(fixture)
+      #expect(await rig.nextRefusal() == .inCall)
+      await record(rig, fixture, url: last)
+    case .cancelledMidTake:
+      rig.begin(fixture, url: first)
+      rig.open(fixture)
+      guard case .recordStarted? = await rig.next() else { Issue.record("no started"); return }
+      rig.relay.cancel()
+      await record(rig, fixture, url: last)
+      expected = [.recordStarted, .recordStarted, .recordFinished(end: .completed)]
+    }
+    let observed = await rig.settle()
+    #expect(observed == expected)
     #expect(!rig.relay.isActive)
-    #expect(!FileManager.default.fileExists(atPath: rig.url.path))
-  }
-
-  @Test
-  func inv_capture_51_the_limit_of_the_profile_ends_the_take_with_the_limit() async throws {
-    let fixture = try Fixture.make()
-    var rig = Rig()
-    defer { try? FileManager.default.removeItem(at: rig.url) }
-    rig.begin(fixture, ticket: nil, maxDurationMs: 100)
-    rig.feed(fixture)
-    guard case .recordStarted? = await rig.events.next() else { Issue.record("no started"); return }
-    guard case .recordFinished(.limitReached)? = await rig.events.next() else { Issue.record("no limit end"); return }
+    if scenario == .revokedTicket || scenario == .cancelledMidTake { #expect(!FileManager.default.fileExists(atPath: first.path)) }
+    let facts = try await scanCaptureFacts(at: last)
+    guard case let .read(video) = facts.video else { Issue.record("no video stream: \(facts)"); return }
+    #expect(video.samples > 0)
+    if scenario == .videoOnly { #expect(facts.audio == .absent) }
+    else if case let .read(sound) = facts.audio {
+      #expect(sound.samples > 0)
+      if scenario == .limit { #expect((90...110).contains(sound.durationMs)) }
+    }
+    else { Issue.record("no audio stream: \(facts)") }
   }
 }
 #endif
