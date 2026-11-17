@@ -108,7 +108,8 @@ class VoiceTakeTest {
   @Test
   fun anEndBeforeTheFirstPcmHasNoWriterCallAndNoFile() = (ends.map { it.second } + { it: VoiceTake -> it.finish() }).forEach { end ->
     events.clear()
-    val take = take()
+    val writer = Writer()
+    val take = take(writer)
     end(take)
     take.pcm(chunk())
     assertEquals(1, events.size)
