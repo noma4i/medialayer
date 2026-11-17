@@ -258,7 +258,7 @@ class AudioLinkTest {
 
 internal class WritingVoiceCapture : VoiceCapture {
   @Volatile var starts = 0
-  override fun start(file: File, maxDurationMs: ULong, onLimit: () -> Unit) {
+  override suspend fun start(file: File, maxDurationMs: ULong, ticket: RecordingTicket, onLimit: () -> Unit, onFailure: (Exception) -> Unit) {
     starts += 1
     file.writeBytes(byteArrayOf(1, 2, 3))
   }

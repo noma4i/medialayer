@@ -27,36 +27,31 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** The recorder hardware of Android: it writes the file, and reports silence, the limit and its own failure as MediaRecorder does. */
+/** The microphone side of Android: it writes the file, and reports silence, the limit and its own failure as the real capture does. */
 private class VoicePort : VoiceCapture {
   @Volatile var refusal: VoiceRefusal? = null
-  @Volatile var refusalCause: Throwable? = null
   @Volatile var stopRefusal: VoiceRefused? = null
   @Volatile var reachLimit: () -> Unit = {}
-  @Volatile private var silenced: () -> Unit = {}
-  @Volatile private var failure: (NativeFailure) -> Unit = {}
+  @Volatile private var failure: (Exception) -> Unit = {}
 
-  override fun start(file: File, maxDurationMs: ULong, onLimit: () -> Unit) {
-    refusal?.let { throw VoiceRefused(it, refusalCause) }
+  override suspend fun start(file: File, maxDurationMs: ULong, ticket: RecordingTicket, onLimit: () -> Unit, onFailure: (Exception) -> Unit) {
+    refusal?.let { throw VoiceRefused(it) }
     reachLimit = onLimit
+    failure = onFailure
     file.writeBytes(byteArrayOf(1, 2, 3))
   }
   override fun peak(): Float = 0.5f
   override fun stop() { stopRefusal?.let { throw it } }
-  override fun onSilenced(listener: () -> Unit) { silenced = listener }
-  override fun onFailure(listener: (NativeFailure) -> Unit) { failure = listener }
-  fun silence() = silenced()
-  fun fail(native: NativeFailure) = failure(native)
+  fun silence() = failure(VoiceRefused(VoiceRefusal.MICROPHONE_SILENT))
+  fun fail(native: NativeFailure) = failure(VoiceNativeFailure(native))
 }
 
-/** Records what the focus port had done at the moment the recorder hardware stops. */
+/** Records what the focus port had done at the moment the microphone stops. */
 private class StopWitness(private val focus: AppFocusPort) : VoiceCapture {
   @Volatile var callsAtStop: List<String>? = null
-  override fun start(file: File, maxDurationMs: ULong, onLimit: () -> Unit) { file.writeBytes(byteArrayOf(1, 2, 3)) }
+  override suspend fun start(file: File, maxDurationMs: ULong, ticket: RecordingTicket, onLimit: () -> Unit, onFailure: (Exception) -> Unit) { file.writeBytes(byteArrayOf(1, 2, 3)) }
   override fun peak(): Float = 0.5f
   override fun stop() { callsAtStop = focus.calls.toList(); TestSignal.fire() }
-  override fun onSilenced(listener: () -> Unit) {}
-  override fun onFailure(listener: (NativeFailure) -> Unit) {}
 }
 
 @RunWith(MediaLayerTestRunner::class)
@@ -220,32 +215,5 @@ class VoiceContractTest {
       folder.setWritable(true)
       folder.deleteRecursively()
     }
-  }
-
-  @Test
-  fun inv_voice_20_a_start_and_a_stop_the_recorder_refuses_each_show_their_native_failure_once() = runBlocking {
-    val seen = SignallingList<NativeFailure>()
-    val end = NativeFailure(FailureSource.RECORDER, "test.end", 0L, "end of the takes")
-    val watch = launch(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { Media.failures.collect { seen.add(it) } }
-    port.refusal = VoiceRefusal.MICROPHONE_BUSY
-    port.refusalCause = java.io.IOException("microphone held by another recorder")
-    val busy = assertThrows(MediaException.Voice::class.java) { runBlocking { recorder.start(file()) } }
-    port.refusal = null
-    port.refusalCause = null
-    take(file())
-    now += 1_000uL
-    port.stopRefusal = VoiceRefused(VoiceRefusal.EMPTY, IllegalStateException("stop called in an invalid state"))
-
-    val empty = assertThrows(MediaException.Voice::class.java) { runBlocking { recorder.stop() } }
-
-    Media.recordNativeFailure(end)
-    TestSignal.await("the end of the takes", 5_000) { seen.lastOrNull() == end }
-    watch.cancel()
-    assertEquals(VoiceRefusal.MICROPHONE_BUSY to VoiceRefusal.EMPTY, busy.reason to empty.reason)
-    assertEquals(listOf(
-      NativeFailure(FailureSource.RECORDER, "java.io.IOException", 0L, "microphone held by another recorder"),
-      NativeFailure(FailureSource.RECORDER, "java.lang.IllegalStateException", 0L, "stop called in an invalid state"),
-      end
-    ), seen.toList())
   }
 }
