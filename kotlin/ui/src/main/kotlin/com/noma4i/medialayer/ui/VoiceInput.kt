@@ -65,7 +65,7 @@ internal class VoiceInput(
   }
 
   private fun issue(issue: CaptureAudioIssue) {
-    if (issue == CaptureAudioIssue.SILENCED) route({ leave(Phase.LOST, Phase.PREPARING, Phase.WAITING).also { if (it) { writer.cancel(); listener.onLost() } } }, { it.lost() })
+    if (issue == CaptureAudioIssue.SILENCED) route({ leave(Phase.LOST, Phase.WAITING).also { if (it) { writer.cancel(); listener.onLost() } } }, { it.lost() })
   }
 
   private fun fail(failure: NativeFailure) {
