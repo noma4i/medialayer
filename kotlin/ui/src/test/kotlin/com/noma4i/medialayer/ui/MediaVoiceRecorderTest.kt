@@ -7,6 +7,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.noma4i.medialayer.AudioFocus
 import com.noma4i.medialayer.DeviceMemory
 import com.noma4i.medialayer.FailureSource
+import com.noma4i.medialayer.FocusChange
 import com.noma4i.medialayer.MediaException
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.MicrophoneAvailability
@@ -52,8 +53,13 @@ private class Microphone : CameraMicrophone {
   val calls = SignallingList<String>()
   @Volatile var listener: RecordingAudioListener? = null
   private var generation = 0L
-  override fun start(spec: PcmSpec): Long = (++generation).also { calls.add("start $it") }
-  override fun stop(generation: Long) { calls.add("stop $generation") }
+  @Volatile var lease: ((Long) -> AutoCloseable)? = null
+  private var held: AutoCloseable? = null
+  override fun start(spec: PcmSpec): Long {
+    held = lease?.invoke(pcmSizes(spec).lease)
+    return (++generation).also { calls.add("start $it") }
+  }
+  override fun stop(generation: Long) { held?.close(); held = null; calls.add("stop $generation") }
   override fun close() { calls.add("close") }
 }
 
@@ -89,6 +95,7 @@ class MediaVoiceRecorderTest {
   private val failures = SignallingList<NativeFailure>()
   private val watch = scope.launch(start = CoroutineStart.UNDISPATCHED) { Media.failures.collect { failures.add(it) } }
   private val microphone = Microphone()
+  private val holds = SignallingList<String>()
   private val ticks = Ticks()
   private val spec = PcmSpec(MediaRecorder.AudioSource.MIC, 44_100, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
 
@@ -101,8 +108,8 @@ class MediaVoiceRecorderTest {
 
   private fun file(): File = File.createTempFile("voice", ".m4a").apply { delete(); deleteOnExit() }
 
-  private fun recorder(writer: Writer = Writer(), maxMs: Long = 60_000, minTakeMs: ULong = 0uL, screen: ScreenSwitch = ScreenSwitch(), clock: () -> ULong = ticks::read) =
-    MediaVoiceRecorder(SystemVoiceCapture(context, { link }, { writer }, { made -> microphone.listener = made; microphone }), maxMs.toULong(), { link }, clock, 5, scope, minTakeMs, screen.awake())
+  private fun recorder(writer: Writer = Writer(), maxMs: Long = 60_000, minTakeMs: ULong = 0uL, screen: ScreenSwitch = ScreenSwitch(), clock: () -> ULong = ticks::read, reserve: suspend (Long) -> AutoCloseable = { AutoCloseable { holds.add("closed") } }) =
+    MediaVoiceRecorder(SystemVoiceCapture(context, { link }, { writer }, reserve, { made, lease -> microphone.listener = made; microphone.lease = lease; microphone }), maxMs.toULong(), { link }, clock, 5, scope, minTakeMs, screen.awake())
 
   private fun chunk(generation: Long, sample: Int = 0, frames: Int = 1): PcmChunk {
     val data = ByteBuffer.allocate(frames * 2).order(ByteOrder.LITTLE_ENDIAN)
@@ -161,6 +168,7 @@ class MediaVoiceRecorderTest {
     assertTrue(recording.file.isFile)
     assertFalse(recorder.isRecording)
     await("the owner closes with the take") { microphone.calls.toList() == listOf("start 1", "stop 1", "close") }
+    await("the hold goes back after the microphone") { holds.toList() == listOf("closed") }
     assertEquals(VoiceOutcome.Recorded(target.absolutePath, 2_500uL), recorder.state.value.outcome)
     assertTrue(failures.isEmpty())
   }
@@ -226,21 +234,105 @@ class MediaVoiceRecorderTest {
   }
 
   @Test
-  fun a_denied_permission_and_a_busy_microphone_are_typed_refusals_with_no_failure() {
+  fun inv_voice_07_a_refused_permission_is_a_media_exception_with_the_text_of_the_core() {
     val writer = Writer()
     val recorder = recorder(writer)
     permission.change(false)
+
     val denied = refusal { recorder.start(file()) }
-    permission.change(true)
+
+    assertEquals(voiceRefusalText(VoiceRefusal.PERMISSION_DENIED), denied.detail)
+    assertEquals(VoiceOutcome.Refused(VoiceRefusal.PERMISSION_DENIED), recorder.state.value.outcome)
+    assertTrue(failures.isEmpty())
+    assertTrue(microphone.calls.isEmpty() && writer.calls.isEmpty())
+    assertFalse(recorder.isRecording)
+  }
+
+  @Test
+  fun inv_voice_08_the_take_holds_the_focus_and_gives_it_back_and_a_refused_focus_is_a_busy_microphone_without_a_source() = runBlocking<Unit> {
+    val recorder = recorder()
+    record(recorder, file())
+    assertTrue(link.isRecording)
+    ticks.now += 1_000
+    recorder.stop()
+    assertFalse(link.isRecording)
+
+    microphone.calls.clear()
     focus.answer = com.noma4i.medialayer.FocusAnswer.FAILED
     val busy = refusal { recorder.start(file()) }
 
-    assertEquals(voiceRefusalText(VoiceRefusal.PERMISSION_DENIED), denied.detail)
     assertEquals(voiceRefusalText(VoiceRefusal.MICROPHONE_BUSY), busy.detail)
-    assertEquals(VoiceOutcome.Refused(VoiceRefusal.MICROPHONE_BUSY), recorder.state.value.outcome)
     assertTrue(failures.isEmpty())
-    assertTrue(microphone.calls.isEmpty() && writer.calls.isEmpty())
+    assertTrue(microphone.calls.isEmpty())
     assertFalse(link.isRecording)
+  }
+
+  @Test
+  fun inv_voice_05_the_levels_are_core_levels_in_zero_to_one_and_end_with_the_take() = runBlocking<Unit> {
+    val recorder = recorder()
+    val seen = SignallingList<Float>()
+    val collecting = scope.launch(start = CoroutineStart.UNDISPATCHED) { recorder.levels.collect { seen.add(it) } }
+    assertTrue("no level in rest", seen.isEmpty())
+    record(recorder, file(), sample = 16_384)
+    await("the level of the peak") { seen.contains(voiceLevel(0.5f)) }
+    ticks.now += 1_000
+    recorder.stop()
+    withTimeout(5_000) { collecting.join() }
+
+    assertTrue(seen.all { it in 0f..1f })
+  }
+
+  @Test
+  fun inv_voice_06_the_level_is_not_read_after_the_take_ends() = runBlocking<Unit> {
+    val recorder = recorder()
+    record(recorder, file(), sample = 16_384)
+    ticks.now += 1_000
+    recorder.stop()
+    val ended = recorder.state.value
+
+    microphone.listener!!.onPcm(chunk(1, 16_384))
+
+    assertEquals(VoicePhase.IDLE to 0uL, ended.phase to ended.recordedMs)
+    assertEquals(ended, recorder.state.value)
+  }
+
+  @Test
+  fun inv_voice_10_a_take_without_sound_is_a_media_exception_and_leaves_no_file() = runBlocking<Unit> {
+    val recorder = recorder()
+    val target = file()
+    record(recorder, target)
+
+    val error = refusal { recorder.stop() }
+
+    assertEquals(voiceRefusalText(VoiceRefusal.EMPTY), error.detail)
+    assertFalse(target.exists())
+  }
+
+  @Test
+  fun inv_voice_12_the_writer_is_prepared_with_the_encoder_settings_of_the_core() = runBlocking<Unit> {
+    val writer = Writer()
+    record(recorder(writer), file())
+
+    assertEquals(VoiceEncoderSettings(44_100u, 1u, 128_000u), writer.settings)
+  }
+
+  @Test
+  fun inv_voice_20_a_take_file_that_cannot_be_removed_is_one_file_failure_event() = runBlocking<Unit> {
+    val folder = Files.createTempDirectory("voice").toFile()
+    val recorder = recorder()
+    record(recorder, File(folder, "take.m4a"))
+    folder.setWritable(false)
+    try {
+      focus.send(FocusSignal.Change(FocusChange.LOSS_TRANSIENT))
+
+      val ended = withTimeout(5_000) { recorder.state.first { it.outcome != null } }
+      await("the file failure reaches the app") { failures.any { it.source == FailureSource.FILE } }
+      assertEquals(VoiceOutcome.Refused(VoiceRefusal.INTERRUPTED), ended.outcome)
+      assertEquals(1, failures.count { it.source == FailureSource.FILE })
+    } finally {
+      folder.setWritable(true)
+      folder.deleteRecursively()
+    }
   }
 
   @Test
@@ -271,6 +363,7 @@ class MediaVoiceRecorderTest {
     microphone.listener!!.onPcm(chunk(2, 16_384))
     await("the first healthy PCM closes the owner") { microphone.calls.toList() == listOf("start 1", "stop 1", "start 2", "stop 2", "close") }
 
+    await("the hold goes back once, after the restored source") { holds.toList() == listOf("closed") }
     assertEquals(VoiceOutcome.Refused(VoiceRefusal.MICROPHONE_SILENT), ended.outcome)
     assertFalse(target.exists())
     assertEquals("no resume", VoicePhase.IDLE, recorder.state.value.phase)
@@ -279,7 +372,7 @@ class MediaVoiceRecorderTest {
   }
 
   @Test
-  fun an_early_limit_is_the_result_of_start_and_the_take_ends_once() = runBlocking<Unit> {
+  fun inv_voice_09_an_early_limit_is_the_result_of_start_and_the_take_ends_once() = runBlocking<Unit> {
     val steps = java.util.concurrent.atomic.AtomicLong(1_000)
     val recorder = recorder(maxMs = 1, clock = { steps.getAndAdd(10).toULong() })
     val target = file()
@@ -307,6 +400,21 @@ class MediaVoiceRecorderTest {
     assertEquals(VoicePhase.IDLE, recorder.state.value.phase)
     assertTrue(failures.single().let { recorder.state.value.outcome == VoiceOutcome.Failed(it) })
     assertTrue(microphone.calls.isEmpty())
+    assertFalse(target.exists())
+    assertFalse(link.isRecording)
+  }
+
+  @Test
+  fun a_refused_budget_is_a_failure_of_start_with_no_file_no_source_and_no_hold() {
+    val writer = Writer()
+    val recorder = recorder(writer, reserve = { throw IllegalStateException("no budget") })
+    val target = file()
+
+    assertThrows(MediaException.Unexpected::class.java) { runBlocking { recorder.start(target) } }
+
+    await("the failure reaches the app") { failures.size == 1 }
+    assertEquals("no budget", failures.single().message)
+    assertTrue(microphone.calls.isEmpty() && writer.calls.isEmpty() && holds.isEmpty())
     assertFalse(target.exists())
     assertFalse(link.isRecording)
   }
