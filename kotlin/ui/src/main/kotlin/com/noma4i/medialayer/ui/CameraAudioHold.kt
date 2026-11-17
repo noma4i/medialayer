@@ -21,7 +21,7 @@ internal class CameraAudioHold(
     spec = null
     if (wanted == null) return
     val audio = checkNotNull(link()) { "no audio link for the camera microphone" }
-    input = CameraAudioInput(audio, wanted, tap, issue, microphone)
+    input = CameraAudioInput(audio, wanted, tap, issue, microphone = microphone)
     spec = wanted
   }
 
