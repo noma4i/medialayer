@@ -183,6 +183,29 @@ class MediaCallAudio internal constructor(private val id: ULong, internal val ki
   override fun close() { if (closed.compareAndSet(false, true)) { awake.set(false); send(AudioInput.CallEnded(id)) } }
 }
 
+internal interface AudioInputOwner {
+  fun restore(input: AudioInputHandle, generation: ULong)
+  fun stop(generation: ULong)
+}
+
+internal class AudioInputHandle(internal val id: ULong, private val link: AudioLink) : AutoCloseable {
+  fun sound(generation: ULong, heard: Boolean) = link.send(AudioInput.NoSound(id, generation, !heard))
+  fun restoreFailed(generation: ULong) = link.send(AudioInput.RestoreFailed(id, generation))
+  override fun close() = link.closeInput(id)
+}
+
+private class InputRegistration(owner: AudioInputOwner, handle: AudioInputHandle) {
+  val owner = java.lang.ref.WeakReference(owner)
+  val handle = java.lang.ref.WeakReference(handle)
+  var generation: ULong? = null
+
+  fun stopLive() {
+    val live = generation ?: return
+    generation = null
+    owner.get()?.stop(live)
+  }
+}
+
 internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, private val volume: VolumePort? = null) : Closeable {
   private val audioInputs = core.audioInputs()
   private val core = java.lang.ref.WeakReference(core)
@@ -197,6 +220,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
   private val postLock = Any()
   private val pending = HashMap<ULong, CompletableDeferred<Admission>>()
   private val tickets = HashMap<ULong, RecordingTicket>()
+  private val inputRegistry = HashMap<ULong, InputRegistration>()
   private val recordingCount = AtomicInteger()
   internal val isRecording: Boolean get() = recordingCount.get() != 0
   private val calls = LinkedHashMap<ULong, MediaCallAudio>()
@@ -236,6 +260,20 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
   private fun enqueue(work: () -> Unit): Boolean = synchronized(postLock) { !closed.get() && handler.post(work) }
   internal fun send(input: AudioInput) {
     if (Looper.myLooper() == thread.looper && !closed.get()) process(input) else enqueue { process(input) }
+  }
+  fun openInput(kind: RecordingKind, owner: AudioInputOwner): AudioInputHandle {
+    val handle = AudioInputHandle(id(), this)
+    enqueue {
+      inputRegistry[handle.id] = InputRegistration(owner, handle)
+      process(AudioInput.InputOpened(handle.id, kind))
+    }
+    return handle
+  }
+  fun closeInput(id: ULong) {
+    enqueue {
+      inputRegistry.remove(id)?.stopLive()
+      process(AudioInput.InputClosed(id))
+    }
   }
   private fun process(input: AudioInput) {
     val next = try { audioInputs.send(input) } catch (failure: MediaException) {
@@ -315,6 +353,14 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
         }))
         is AudioAction.Refuse -> pending.remove(action.id)?.complete(Admission.Refused(action.reason))
         is AudioAction.Revoke -> tickets[action.id]?.revoke(action.reason)
+        is AudioAction.RestoreInput -> inputRegistry[action.id]?.let { input ->
+          input.generation = action.generation
+          input.handle.get()?.let { handle -> input.owner.get()?.restore(handle, action.generation) }
+        }
+        is AudioAction.StopInput -> inputRegistry[action.id]?.let { input ->
+          input.generation = null
+          input.owner.get()?.stop(action.generation)
+        }
         is AudioAction.Availability -> synchronized(listeners) { availability.value = action.value; listeners.toList().forEach { it(action.value) } }
         is AudioAction.CallState -> {
           calls[action.id]?.update(action.state)
@@ -409,6 +455,8 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
       try {
         pending.values.forEach { it.completeExceptionally(MediaException.Closed()) }
         pending.clear()
+        inputRegistry.values.forEach { it.stopLive() }
+        inputRegistry.clear()
         tickets.values.toList().map { ticket ->
           async(start = CoroutineStart.UNDISPATCHED) { ticket.revoke(RecordingRefusal.INTERRUPTED) }
         }.awaitAll()

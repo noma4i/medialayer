@@ -846,3 +846,38 @@ fn inv_call_17_a_new_call_is_a_new_intent_that_leaves_a_permanently_lost_focus()
 
     assert!(started.iter().any(|action| generation_of(action).is_some()), "the new call asks for its session: {started:?}");
 }
+
+#[test]
+fn inv_audio_63_an_input_is_connected_after_its_recording_session_by_generation_and_stopped_when_a_call_comes() {
+    let restores = |actions: &[AudioAction]| actions.iter().filter_map(|action| if let A::RestoreInput { id, kind, generation } = action { Some((*id, *kind, *generation)) } else { None }).collect::<Vec<_>>();
+    let stops = |actions: &[AudioAction]| actions.iter().filter_map(|action| if let A::StopInput { id, generation } = action { Some((*id, *generation)) } else { None }).collect::<Vec<_>>();
+    let mut world = World::new();
+    let opened = world.raw(I::InputOpened { id: 1, kind: RecordingKind::Video });
+    assert_eq!((restores(&opened), availabilities(&opened)), (vec![], vec![MicrophoneAvailability::NoSound]), "a new input is no sound and waits for its session");
+    let generation = opened.iter().find_map(generation_of).expect("an input asks for a recording session");
+    assert_eq!(restores(&world.raw(I::Applied { generation, result: AppliedResult::Ok })), vec![(1, RecordingKind::Video, 1)], "the session is applied, then the input connects");
+    assert_eq!(restores(&world.send(I::InputOpened { id: 2, kind: RecordingKind::Voice })), vec![(2, RecordingKind::Voice, 1)], "a session that covers the kind connects at once");
+    assert_eq!(world.send(I::NoSound { id: 1, generation: 1, on: false }), vec![]);
+    assert_eq!(world.send(I::NoSound { id: 2, generation: 1, on: false }), vec![available(MicrophoneAvailability::Available)]);
+    assert_eq!(world.send(I::NoSound { id: 1, generation: 0, on: true }), vec![], "the late word of an old generation changes nothing");
+
+    assert_eq!(world.send(I::NoSound { id: 1, generation: 1, on: true }), vec![A::RestoreInput { id: 1, kind: RecordingKind::Video, generation: 2 }, available(MicrophoneAvailability::NoSound)]);
+    assert_eq!(world.send(I::RestoreFailed { id: 1, generation: 2 }), vec![], "a failed reconnect waits for a cause, it does not loop");
+    assert_eq!(world.send(I::Route { reason: RouteReason::NewDeviceAvailable, lost_private_output: false }), vec![A::RestoreInput { id: 1, kind: RecordingKind::Video, generation: 3 }]);
+    assert_eq!(world.send(I::NoSound { id: 1, generation: 2, on: false }), vec![], "the sound of the failed generation does not confirm the new one");
+
+    let started = world.settle(I::CallStarted { id: 7, kind: CallKind::Unmanaged, speaker: false });
+    assert_eq!((stops(&started), restores(&started), availabilities(&started)), (vec![(1, 3), (2, 1)], vec![], vec![MicrophoneAvailability::OwnCall]), "a call stops every connected input and wins over no sound");
+    world.send(I::InputClosed { id: 1 });
+
+    let ended = world.settle(I::CallEnded { id: 7 });
+    assert_eq!((restores(&ended), availabilities(&ended)), (vec![(2, RecordingKind::Voice, 2)], vec![MicrophoneAvailability::NoSound]), "the end of a call connects only the living input after its session and starts no take");
+    assert_eq!(world.send(I::NoSound { id: 2, generation: 2, on: false }), vec![available(MicrophoneAvailability::Available)]);
+
+    assert_eq!(world.send(I::InputOpened { id: 3, kind: RecordingKind::Voice }), vec![A::RestoreInput { id: 3, kind: RecordingKind::Voice, generation: 1 }, available(MicrophoneAvailability::NoSound)]);
+    assert_eq!(world.send(I::InputClosed { id: 3 }), vec![A::StopInput { id: 3, generation: 1 }, available(MicrophoneAvailability::Available)], "closing a connecting owner stops it first");
+    assert_eq!(world.send(I::NoSound { id: 3, generation: 1, on: false }), vec![], "the late sound of a closed owner is ignored");
+    let last = world.send(I::InputClosed { id: 2 });
+    assert_eq!((stops(&last), restores(&last)), (vec![(2, 2)], vec![]), "closing the last live owner stops its generation and starts nothing");
+    assert_eq!(stops(&world.send(I::InputClosed { id: 2 })), vec![], "a second close changes nothing");
+}

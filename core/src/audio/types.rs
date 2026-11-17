@@ -23,6 +23,7 @@ pub enum MicrophoneAvailability {
     ExternalCall,
     OtherApp,
     PermissionDenied,
+    NoSound,
 }
 #[derive(uniffi::Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordingRefusal {
@@ -169,6 +170,20 @@ pub enum AudioInput {
     Silenced {
         id: u64,
     },
+    InputOpened {
+        id: u64,
+        kind: RecordingKind,
+    },
+    InputClosed { id: u64 },
+    NoSound {
+        id: u64,
+        generation: u64,
+        on: bool,
+    },
+    RestoreFailed {
+        id: u64,
+        generation: u64,
+    },
     Foreground {
         on: bool,
     },
@@ -214,5 +229,14 @@ pub enum AudioAction {
     },
     Availability {
         value: MicrophoneAvailability,
+    },
+    RestoreInput {
+        id: u64,
+        kind: RecordingKind,
+        generation: u64,
+    },
+    StopInput {
+        id: u64,
+        generation: u64,
     },
 }

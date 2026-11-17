@@ -29,6 +29,23 @@ private final class Admission: @unchecked Sendable {
   var isCancelled: Bool { lock.withLock { cancelled } }
 }
 
+protocol AudioInputOwner: AnyObject, Sendable {
+  func restore(_ input: AudioInputHandle, generation: UInt64)
+  func stop(generation: UInt64)
+}
+
+final class AudioInputHandle: @unchecked Sendable {
+  let id: UInt64
+  private weak var link: AudioLink?
+
+  init(id: UInt64, link: AudioLink) { self.id = id; self.link = link }
+  deinit { close() }
+
+  func sound(generation: UInt64, heard: Bool) { link?.send(.noSound(id: id, generation: generation, on: !heard)) }
+  func restoreFailed(generation: UInt64) { link?.send(.restoreFailed(id: id, generation: generation)) }
+  func close() { link?.closeInput(id: id) }
+}
+
 final class AudioLink: @unchecked Sendable {
   private let inputs: AudioInputs
   private let ports: AudioPorts
@@ -38,12 +55,14 @@ final class AudioLink: @unchecked Sendable {
   private var queuedActions: [PendingAudioAction] = []
   private var processing = false
   private var sessionConfigured = false
+  private let idLock = NSLock()
   private var next: UInt64 = 0
   private var closed = false
   private var closeFinished = false
   private var closeWaiters: [@Sendable () -> Void] = []
   private var pending: [UInt64: CheckedContinuation<Result<RecordingTicket, Error>, Never>] = [:]
   private var tickets: [UInt64: WeakRecordingTicket] = [:]
+  private var inputRegistry: [UInt64: InputRegistration] = [:]
   private var pendingStops: [RecordingTicket] = []
   private var calls: [UInt64: CallSignals] = [:]
   private var unmanagedSpeakers: [UInt64: Bool] = [:]
@@ -116,6 +135,23 @@ final class AudioLink: @unchecked Sendable {
         self.process(.callStarted(id: id, kind: kind.core, speaker: false))
         continuation.resume(returning: call)
       }
+    }
+  }
+
+  func openInput(_ kind: RecordingKind, owner: AudioInputOwner) -> AudioInputHandle {
+    let handle = AudioInputHandle(id: allocate(), link: self)
+    inbox.async {
+      guard !self.closed else { return }
+      self.inputRegistry[handle.id] = InputRegistration(owner: owner, handle: handle)
+      self.process(.inputOpened(id: handle.id, kind: kind))
+    }
+    return handle
+  }
+
+  func closeInput(id: UInt64) {
+    inbox.async {
+      self.inputRegistry.removeValue(forKey: id)?.stopLive()
+      self.process(.inputClosed(id: id))
     }
   }
 
@@ -199,6 +235,8 @@ final class AudioLink: @unchecked Sendable {
       let stops = self.tickets.values.compactMap(\.value)
       stops.forEach { $0.revoke(.interrupted) }
       self.tickets.removeAll()
+      self.inputRegistry.values.forEach { $0.stopLive() }
+      self.inputRegistry.removeAll()
       self.closeActions.forEach { $0() }
       self.closeActions.removeAll()
       self.calls.values.forEach { $0.end() }
@@ -225,7 +263,7 @@ final class AudioLink: @unchecked Sendable {
     await withCheckedContinuation { continuation in close { continuation.resume() } }
   }
 
-  private func allocate() -> UInt64 { next += 1; return next }
+  private func allocate() -> UInt64 { idLock.withLock { next += 1; return next } }
 
   private func observedCalls(_ observed: Set<String>) {
     inbox.async {
@@ -327,6 +365,16 @@ final class AudioLink: @unchecked Sendable {
       case let .availability(value):
         currentAvailability = value
         availabilitySinks.values.forEach { $0.yield(value) }
+      case let .restoreInput(id, _, generation):
+        guard var input = inputRegistry[id], let owner = input.owner, let handle = input.handle else { continue }
+        input.generation = generation
+        inputRegistry[id] = input
+        owner.restore(handle, generation: generation)
+      case let .stopInput(id, generation):
+        guard var input = inputRegistry[id] else { continue }
+        input.generation = nil
+        inputRegistry[id] = input
+        input.owner?.stop(generation: generation)
       case let .volumeMultiplier(value): setVolumeMultiplier(value)
       case let .route(speaker): overrideSpeaker(speaker)
       case let .failure(failure): Media.publishFailure(failure)
@@ -362,6 +410,19 @@ final class AudioLink: @unchecked Sendable {
 
 private struct WeakRecordingTicket {
   weak var value: RecordingTicket?
+}
+
+private struct InputRegistration {
+  weak var owner: AudioInputOwner?
+  weak var handle: AudioInputHandle?
+  var generation: UInt64?
+
+  init(owner: AudioInputOwner, handle: AudioInputHandle) { self.owner = owner; self.handle = handle }
+
+  func stopLive() {
+    guard let generation else { return }
+    owner?.stop(generation: generation)
+  }
 }
 
 private final class CallSignals: @unchecked Sendable {

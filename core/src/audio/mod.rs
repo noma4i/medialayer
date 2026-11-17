@@ -1,4 +1,5 @@
 //! Focus transitions derive from AndroidX Media3 AudioFocusManager (Apache-2.0).
+mod input;
 mod session;
 mod system;
 mod types;
@@ -9,6 +10,15 @@ pub use types::*;
 
 #[cfg(test)]
 mod audio_tests;
+
+#[derive(Clone)]
+struct Input {
+    id: u64,
+    kind: RecordingKind,
+    generation: u64,
+    ready: bool,
+    life: StateMachine<input::Life>,
+}
 
 #[derive(Clone)]
 struct Call {
@@ -33,6 +43,8 @@ pub struct AudioOwner {
     comm_mode: bool,
     permission: bool,
     other_recording: bool,
+    inputs: Vec<Input>,
+    wake: bool,
     pending: BTreeSet<u64>,
     system: StateMachine<SystemMachine>,
     foreground: bool,
@@ -43,6 +55,11 @@ pub struct AudioOwner {
     resuming: bool,
     last_availability: MicrophoneAvailability,
     hold: bool,
+}
+
+fn feed_input(input: &mut Input, event: &input::InputEvent, actions: &mut Vec<AudioAction>, wake: &mut bool) {
+    let mut context = input::InputContext { id: input.id, kind: input.kind, generation: &mut input.generation, actions, woke: wake };
+    input.life.handle_with_context(event, &mut context);
 }
 
 impl AudioOwner {
@@ -58,6 +75,8 @@ impl AudioOwner {
             comm_mode: false,
             permission: true,
             other_recording: false,
+            inputs: Vec::new(),
+            wake: false,
             pending: BTreeSet::new(),
             system: SystemMachine.state_machine(),
             foreground: true,
@@ -100,11 +119,19 @@ impl AudioOwner {
             MicrophoneAvailability::OwnCall
         } else if self.external() {
             MicrophoneAvailability::ExternalCall
-        } else if self.other_recording || matches!(self.system(), System::Interrupted | System::FocusLost | System::Transient | System::WaitForeground) || session::blocked(&self.session) {
+        } else if self.other_recording || self.system_blocked() {
             MicrophoneAvailability::OtherApp
+        } else if self.inputs.iter().any(|input| !input::is_live(&input.life)) {
+            MicrophoneAvailability::NoSound
         } else {
             MicrophoneAvailability::Available
         }
+    }
+    fn system_blocked(&self) -> bool {
+        matches!(self.system(), System::Interrupted | System::FocusLost | System::Transient | System::WaitForeground) || session::blocked(&self.session)
+    }
+    fn feed(&mut self, id: u64, event: input::InputEvent, actions: &mut Vec<AudioAction>) {
+        if let Some(input) = self.inputs.iter_mut().find(|input| input.id == id) { feed_input(input, &event, actions, &mut self.wake); }
     }
     fn want(&self) -> Option<SessionWant> {
         if let Some(call) = self.calls.last() {
@@ -119,9 +146,9 @@ impl AudioOwner {
             return None;
         }
         if self.system() != System::Interrupted {
-            if !self.captures.is_empty() {
-                let kind = if self.captures.iter().any(|(_, kind)| *kind == RecordingKind::Video) { RecordingKind::Video } else { RecordingKind::Voice };
-                return Some(SessionWant::Recording { kind });
+            if !self.captures.is_empty() || !self.inputs.is_empty() {
+                let video = self.captures.iter().any(|(_, kind)| *kind == RecordingKind::Video) || self.inputs.iter().any(|input| input.kind == RecordingKind::Video);
+                return Some(SessionWant::Recording { kind: if video { RecordingKind::Video } else { RecordingKind::Voice } });
             }
         }
         if (!self.audible.is_empty() || (self.paused.is_some() && self.paused_audible) || self.resuming)
@@ -392,6 +419,7 @@ impl AudioOwner {
                 reason,
                 lost_private_output,
             } => {
+                self.wake |= matches!(reason, RouteReason::NewDeviceAvailable | RouteReason::OldDeviceUnavailable);
                 if reason == RouteReason::OldDeviceUnavailable
                     && lost_private_output
                 {
@@ -432,6 +460,18 @@ impl AudioOwner {
                     actions.push(if self.pending.remove(&id) { AudioAction::Refuse { id, reason } } else { AudioAction::Revoke { id, reason } });
                 }
             }
+            I::InputOpened { id, kind } => {
+                if !self.inputs.iter().any(|input| input.id == id) {
+                    self.inputs.push(Input { id, kind, generation: 0, ready: false, life: input::Life.state_machine() });
+                    fresh = true;
+                }
+            }
+            I::InputClosed { id } => {
+                self.feed(id, input::InputEvent::Block, &mut actions);
+                self.inputs.retain(|input| input.id != id);
+            }
+            I::NoSound { id, generation, on } => self.feed(id, input::InputEvent::Sound { generation, heard: !on }, &mut actions),
+            I::RestoreFailed { id, generation } => self.feed(id, input::InputEvent::Failed { generation }, &mut actions),
             I::Foreground { on } => {
                 self.foreground = on;
                 self.system_event(SystemEvent::Foreground(on), &mut actions);
@@ -476,6 +516,17 @@ impl AudioOwner {
             self.hold = hold;
             actions.push(AudioAction::CallHold { on: hold });
         }
+        let open = self.permission && self.foreground && !hold && !self.other_recording && !self.system_blocked();
+        let held = match session::held(&self.session) { Some(SessionWant::Recording { kind }) => Some(kind), _ => None };
+        let woken = self.wake;
+        for input in &mut self.inputs {
+            let ready = open && held.is_some_and(|held| held == RecordingKind::Video || held == input.kind);
+            let edge = ready && !input.ready;
+            input.ready = ready;
+            if !ready { feed_input(input, &input::InputEvent::Block, &mut actions, &mut self.wake); }
+            else if edge || woken { feed_input(input, &input::InputEvent::Wake, &mut actions, &mut self.wake); }
+        }
+        self.wake = false;
         let availability = self.availability();
         if availability != self.last_availability {
             self.last_availability = availability;
@@ -496,7 +547,8 @@ impl AudioOwner {
             AudioAction::ResumePaused => 8,
             AudioAction::VolumeMultiplier { .. } => 9,
             AudioAction::CallState { .. } => 10,
-            AudioAction::Availability { .. } => 11,
+            AudioAction::Availability { .. } | AudioAction::RestoreInput { .. } => 11,
+            AudioAction::StopInput { .. } => 2,
             AudioAction::Route { .. } | AudioAction::Failure { .. } => 12,
         });
         actions

@@ -4,6 +4,7 @@
 
 ### Added
 
+- Add `NoSound` to microphone availability.
 - `Media.retry(source)` reloads a failed source without remounting its places.
 - `VoiceState.recordedMs` publishes the elapsed recording time.
 - `MediaVoiceRecorder` accepts `minTakeMs` and refuses shorter takes.
