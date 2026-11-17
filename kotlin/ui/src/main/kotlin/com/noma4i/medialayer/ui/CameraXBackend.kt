@@ -113,6 +113,25 @@ internal fun encodersFrom(all: EncoderProfilesProxy?, audio: Boolean, timebase: 
   }
 }
 
+/** The step of the plan the camera stopped at: each one is its own text in the failure, so a device report tells which one it was. */
+internal enum class PlanRefusal(val step: String) {
+  NO_STREAM_MAP("the camera has no SCALER_STREAM_CONFIGURATION_MAP"),
+  NO_FORMAT("no format of the profile fits the sizes of the camera"),
+  NO_SDR_PROFILE("the camera has no 8-bit SDR video profile for the quality"),
+  NO_AUDIO_ENCODER("the device has no AAC encoder for the audio format")
+}
+
+/** What the camera offered when the plan was refused; null where the step was not reached. */
+internal class PlanFacts(val cameraId: String, val quality: String?, val supported: List<String>, val videoProfiles: Int?, val audioProfiles: Int?, val audio: Encoders?)
+
+internal class PlanRefused(val reason: PlanRefusal, facts: PlanFacts) : IllegalStateException(describe(reason, facts))
+
+private fun describe(reason: PlanRefusal, facts: PlanFacts): String {
+  val sound = facts.audio?.let { "audio ${it.audioMime} ${it.sampleRate}Hz ${it.channels}ch profile ${it.audioProfile} ${it.audioBitrate}bps" } ?: "audio none"
+  return "${reason.step}: camera ${facts.cameraId}, quality ${facts.quality ?: "none"}, supported ${facts.supported}, " +
+    "profiles video ${facts.videoProfiles ?: "none"} audio ${facts.audioProfiles ?: "none"}, $sound"
+}
+
 internal fun uprightVertex(rotationDegrees: Int, mirror: Boolean): FloatArray = FloatArray(16).also {
   android.opengl.Matrix.setIdentityM(it, 0)
   if (mirror) android.opengl.Matrix.scaleM(it, 0, -1f, 1f, 1f)
@@ -226,16 +245,17 @@ internal class CameraXBackend(private val context: Context, private val audioLin
     }
   }
 
-  private fun bindOn(provider: ProcessCameraProvider, lens: CameraLens, profile: CaptureProfile, host: PreviewView, lifecycle: LifecycleOwner, plan: Plan?, stabilization: VideoStabilization?, generation: Long) {
+  private fun bindOn(provider: ProcessCameraProvider, lens: CameraLens, profile: CaptureProfile, host: PreviewView, lifecycle: LifecycleOwner, plan: Result<Plan>, stabilization: VideoStabilization?, generation: Long) {
     cameras = provider
     release(provider)
     val selector = if (lens == CameraLens.FRONT) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
     if (!provider.hasCamera(selector)) return sink(CaptureEvent.Refuse(CameraRefusal.NO_CAMERA))
-    photoSize = plan?.photoSize
-    val recorded = if (profile.mode == CaptureMode.VIDEO) plan?.encoders ?: return configureFailed(IllegalStateException("the camera has no native encoder profile for the video"), generation) else null
-    val builder = Preview.Builder().setResolutionSelector(previewSelector(plan, profile, recorded))
+    val ready = if (profile.mode == CaptureMode.VIDEO) plan.getOrElse { return configureFailed(it, generation) } else plan.getOrNull()
+    photoSize = ready?.photoSize
+    val recorded = ready?.encoders.takeIf { profile.mode == CaptureMode.VIDEO }
+    val builder = Preview.Builder().setResolutionSelector(previewSelector(ready, profile, recorded))
     if (recorded != null) {
-      plan?.let { builder.setTargetFrameRate(android.util.Range(it.frameRate.low.toInt(), it.frameRate.high.toInt())) }
+      ready?.let { builder.setTargetFrameRate(android.util.Range(it.frameRate.low.toInt(), it.frameRate.high.toInt())) }
       stabilization?.let { builder.setPreviewStabilizationEnabled(it != VideoStabilization.OFF) }
     }
     val made = builder.build().apply { surfaceProvider = host.surfaceProvider }
@@ -243,7 +263,7 @@ internal class CameraXBackend(private val context: Context, private val audioLin
     preview = made
     if (profile.mode == CaptureMode.PHOTO) {
       val capture = ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).setJpegQuality(profile.photoQuality.toInt())
-        .setResolutionSelector(photoSelector(plan)).build()
+        .setResolutionSelector(photoSelector(ready)).build()
       photo = capture
       cases += capture
     }
@@ -430,27 +450,34 @@ internal class CameraXBackend(private val context: Context, private val audioLin
     lastBind?.let { (lens, profile) -> bind(lens, profile) }
   }
 
-  private fun plan(info: CameraInfo, profile: CaptureProfile): Plan? {
+  private fun plan(info: CameraInfo, profile: CaptureProfile): Result<Plan> {
     val camera2 = Camera2CameraInfo.from(info)
-    val map = camera2.getCameraCharacteristic(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return null
+    val id = camera2.cameraId
+    val map = camera2.getCameraCharacteristic(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return refused(PlanRefusal.NO_STREAM_MAP, PlanFacts(id, null, emptyList(), null, null, null))
     val jpeg = map.getOutputSizes(ImageFormat.JPEG).orEmpty().map { PixelSize(it.width.toUInt(), it.height.toUInt()) }
     val rates = camera2.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES).orEmpty().map { FpsRange(it.lower.toUInt(), it.upper.toUInt()) }
     val supported = Recorder.getVideoCapabilities(info).getSupportedQualities(DynamicRange.SDR)
     val formats = QUALITIES.filter { it in supported }.mapNotNull { quality ->
       QualitySelector.getResolution(info, quality)?.let { quality to PixelSize(it.width.toUInt(), it.height.toUInt()) }
     }
-    val choice = pickFormat(formatCandidates(formats.map { it.second }, jpeg, rates), profile) ?: return null
+    val offered = supported.map { it.toString() }
+    val choice = pickFormat(formatCandidates(formats.map { it.second }, jpeg, rates), profile) ?: return refused(PlanRefusal.NO_FORMAT, PlanFacts(id, null, offered, null, null, null))
     val quality = formats[choice.index.toInt()].first
     val timebase = videoTimebaseOf(camera2.getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE))
-    return Plan(quality, choice.photoSize, choice.frameRate, if (profile.mode == CaptureMode.VIDEO) encodersOf(info, quality, profile.audio, timebase) else null)
+    val encoders = if (profile.mode == CaptureMode.VIDEO) encodersOf(info, PlanFacts(id, quality.toString(), offered, null, null, null), quality, profile.audio, timebase).getOrElse { return Result.failure(it) } else null
+    return Result.success(Plan(quality, choice.photoSize, choice.frameRate, encoders))
   }
+
+  private fun <T> refused(reason: PlanRefusal, facts: PlanFacts): Result<T> = Result.failure(PlanRefused(reason, facts))
 
   /** The encoder profile comes from the provider of the CameraX camera, the one the CameraX recorder reads: it holds the profile of a camera the legacy `CamcorderProfile` has none for. */
   @android.annotation.SuppressLint("RestrictedApi")
-  private fun encodersOf(info: CameraInfo, quality: Quality, audio: Boolean, timebase: VideoTimebase): Encoders? {
-    val made = encodersFrom((info as CameraInfoInternal).encoderProfilesProvider.getAll(CAMCORDER_QUALITIES.getValue(quality)), audio, timebase) ?: return null
-    if (audio && MediaCodecList(MediaCodecList.REGULAR_CODECS).findEncoderForFormat(checkNotNull(made.audioFormat())) == null) return null
-    return made
+  private fun encodersOf(info: CameraInfo, facts: PlanFacts, quality: Quality, audio: Boolean, timebase: VideoTimebase): Result<Encoders> {
+    val all = (info as CameraInfoInternal).encoderProfilesProvider.getAll(CAMCORDER_QUALITIES.getValue(quality))
+    val counted = PlanFacts(facts.cameraId, facts.quality, facts.supported, all?.videoProfiles?.size ?: 0, all?.audioProfiles?.size ?: 0, null)
+    val made = encodersFrom(all, audio, timebase) ?: return refused(PlanRefusal.NO_SDR_PROFILE, counted)
+    if (audio && MediaCodecList(MediaCodecList.REGULAR_CODECS).findEncoderForFormat(checkNotNull(made.audioFormat())) == null) return refused(PlanRefusal.NO_AUDIO_ENCODER, PlanFacts(counted.cameraId, counted.quality, counted.supported, counted.videoProfiles, counted.audioProfiles, made))
+    return Result.success(made)
   }
 
   private fun aspect(size: PixelSize): AspectRatioStrategy {

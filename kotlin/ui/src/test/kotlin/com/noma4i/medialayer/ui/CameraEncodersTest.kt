@@ -6,6 +6,7 @@ import androidx.camera.core.impl.EncoderProfilesProxy.VideoProfileProxy
 import androidx.camera.video.internal.VideoValidatedEncoderProfilesProxy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CameraEncodersTest {
@@ -29,6 +30,19 @@ class CameraEncodersTest {
   fun a_provider_without_an_sdr_video_or_without_a_profile_is_an_honest_absence() {
     assertNull(encodersFrom(set(listOf(hdr), listOf(aac)), true, VideoTimebase.BOOTTIME))
     assertNull(encodersFrom(null, false, VideoTimebase.BOOTTIME))
+  }
+
+  @Test
+  fun each_refusal_of_the_plan_names_its_own_step_and_the_facts_it_stopped_at() {
+    val audio = encodersFrom(set(listOf(sdr), listOf(aac)), true, VideoTimebase.BOOTTIME)!!
+    val facts = PlanFacts("1", "HD", listOf("SD", "HD"), 2, 1, audio)
+    val texts = PlanRefusal.values().map { PlanRefused(it, facts).message!! }
+    assertEquals(PlanRefusal.values().size, texts.toSet().size)
+    texts.forEachIndexed { index, text -> assertTrue(text, text.startsWith(PlanRefusal.values()[index].step)) }
+    val text = texts.first()
+    listOf("camera 1", "quality HD", "supported [SD, HD]", "video 2 audio 1", "audio audio/mp4a-latm 48000Hz 2ch profile 2 128000bps").forEach { assertTrue(text, text.contains(it)) }
+    val early = PlanRefused(PlanRefusal.NO_STREAM_MAP, PlanFacts("0", null, emptyList(), null, null, null)).message!!
+    assertTrue(early, early.contains("quality none") && early.contains("video none audio none") && early.contains("audio none"))
   }
 
   @Test
