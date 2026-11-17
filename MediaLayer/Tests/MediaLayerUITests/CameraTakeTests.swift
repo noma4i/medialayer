@@ -14,7 +14,7 @@ struct CameraTakeTests {
     case outcome(CameraTake.Outcome)
   }
 
-  private struct Fixture {
+  struct Fixture {
     static let generation: UInt64 = 7
     static let sampleRate = 48_000.0
     static let framesPerAudio = 480

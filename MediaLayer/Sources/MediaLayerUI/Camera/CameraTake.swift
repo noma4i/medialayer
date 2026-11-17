@@ -61,6 +61,10 @@ final class CameraTake: @unchecked Sendable {
   private var end = CMTime.invalid
   private var audioCount = 0
   private var videoCount = 0
+  private var writtenMs: UInt64 = 0
+
+  /// The length of the clock stream written so far, for the ticker of the camera.
+  var recordedMs: UInt64 { lock.withLock { writtenMs } }
 
   init(
     url: URL, generation: UInt64, settings: Settings,
@@ -77,7 +81,7 @@ final class CameraTake: @unchecked Sendable {
   }
 
   func appendAudio(_ buffer: CMSampleBuffer, generation: UInt64) {
-    guard generation == self.generation, settings.audio != nil else { return }
+    guard generation == self.generation, settings.audio != nil, isFresh(buffer, mediaType: kCMMediaType_Audio, subType: kAudioFormatLinearPCM) else { return }
     let bytes = Self.bytes(buffer)
     switch admit(audio: true, bytes: bytes) {
     case .taken:
@@ -94,7 +98,7 @@ final class CameraTake: @unchecked Sendable {
   }
 
   func appendVideo(_ buffer: CMSampleBuffer, generation: UInt64) {
-    guard generation == self.generation else { return }
+    guard generation == self.generation, isFresh(buffer, mediaType: kCMMediaType_Video, subType: nil) else { return }
     let bytes = Self.bytes(buffer)
     guard case .taken = admit(audio: false, bytes: bytes) else { return }
     queue.async { [self] in
@@ -121,7 +125,6 @@ final class CameraTake: @unchecked Sendable {
   }
 
   private func handleAudio(_ buffer: CMSampleBuffer, bytes: Int) -> Bool {
-    guard isFresh(buffer, mediaType: kCMMediaType_Audio, subType: kAudioFormatLinearPCM) else { return false }
     switch phase {
     case .waiting:
       held = [(buffer, bytes)]
@@ -144,7 +147,6 @@ final class CameraTake: @unchecked Sendable {
   }
 
   private func handleVideo(_ buffer: CMSampleBuffer) {
-    guard isFresh(buffer, mediaType: kCMMediaType_Video, subType: nil) else { return }
     if phase == .waiting, settings.audio == nil { return open(first: buffer) }
     guard phase == .writing, CMSampleBufferGetPresentationTimeStamp(buffer) >= start else { return }
     appendWritten(buffer, to: videoInput, isAudio: false)
@@ -205,6 +207,7 @@ final class CameraTake: @unchecked Sendable {
     if carriesClock {
       let tail = pts + CMSampleBufferGetDuration(buffer)
       end = end.isValid ? max(end, tail) : tail
+      if let elapsed = Self.milliseconds(end - start) { lock.withLock { writtenMs = elapsed } }
     }
   }
 
