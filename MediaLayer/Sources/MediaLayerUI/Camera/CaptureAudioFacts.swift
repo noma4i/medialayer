@@ -98,12 +98,13 @@ private struct IntervalScan {
 
   mutating func add(_ buffer: CMSampleBuffer) -> String? {
     let count = CMSampleBufferGetNumSamples(buffer)
-    let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
-    let duration = CMSampleBufferGetDuration(buffer)
+    let pts = CMSampleBufferGetOutputPresentationTimeStamp(buffer)
+    let duration = CMSampleBufferGetOutputDuration(buffer)
     guard CMSampleBufferIsValid(buffer), CMSampleBufferDataIsReady(buffer) else { return "sample buffer is not valid or its data is not ready" }
     guard count > 0 else { return CMSampleBufferGetTotalSampleSize(buffer) == 0 ? nil : "sample buffer with data and without samples" }
-    guard pts.isNumeric else { return "sample buffer without a numeric presentation time" }
-    guard duration.isNumeric, duration > .zero else { return "sample buffer without a positive duration" }
+    guard pts.isNumeric else { return "sample buffer without a numeric output presentation time" }
+    guard duration.isNumeric, duration >= .zero else { return "sample buffer without a valid output duration" }
+    guard duration > .zero else { return nil }
     let decode = CMSampleBufferGetDecodeTimeStamp(buffer)
     let start = gapClock == .decode && decode.isNumeric ? decode : pts
     samples += count

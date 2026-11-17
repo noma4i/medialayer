@@ -1,4 +1,5 @@
 #if os(iOS)
+import AVFoundation
 import CoreMedia
 import Foundation
 import Testing
@@ -73,6 +74,25 @@ struct CameraTakeRelayTests {
     }
   }
 
+  private func decodedRange(of url: URL) async throws -> (start: CMTime, end: CMTime)? {
+    let asset = AVURLAsset(url: url)
+    guard let track = try await asset.loadTracks(withMediaType: .audio).first else { return nil }
+    let reader = try AVAssetReader(asset: asset)
+    let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+      AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false,
+      AVNumberOfChannelsKey: 1, AVSampleRateKey: Fixture.sampleRate
+    ])
+    reader.add(output)
+    guard reader.startReading() else { return nil }
+    var start = CMTime.invalid
+    var frames = 0
+    while let buffer = output.copyNextSampleBuffer() {
+      if !start.isValid { start = CMSampleBufferGetPresentationTimeStamp(buffer) }
+      frames += CMSampleBufferGetNumSamples(buffer)
+    }
+    return (start, start + CMTime(value: CMTimeValue(frames), timescale: CMTimeScale(Fixture.sampleRate)))
+  }
+
   private func url() -> URL {
     FileManager.default.temporaryDirectory.appendingPathComponent("camera-relay-\(UUID().uuidString).mp4")
   }
@@ -130,6 +150,10 @@ struct CameraTakeRelayTests {
     if scenario == .videoOnly { #expect(facts.audio == .absent) }
     else if case let .read(sound) = facts.audio {
       #expect(sound.samples > 0)
+      let bufferStep = CMTime(value: CMTimeValue(Fixture.framesPerAudio), timescale: CMTimeScale(Fixture.sampleRate))
+      guard let decoded = try await decodedRange(of: last) else { Issue.record("no decoded audio"); return }
+      #expect(abs((sound.firstPTS - decoded.start).seconds) <= bufferStep.seconds)
+      #expect(abs((sound.lastPTS - decoded.end).seconds) <= bufferStep.seconds)
       if scenario == .limit { #expect((90...110).contains(sound.durationMs)) }
     }
     else { Issue.record("no audio stream: \(facts)") }
