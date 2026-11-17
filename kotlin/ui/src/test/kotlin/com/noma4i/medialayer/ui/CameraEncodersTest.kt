@@ -52,4 +52,15 @@ class CameraEncodersTest {
     assertEquals(44_100, made.sampleRate)
     assertEquals(1, made.channels)
   }
+
+  @Test
+  fun the_aac_profile_is_the_one_of_the_camera_when_an_encoder_declares_it_else_lc_else_none() {
+    val lc = android.media.MediaCodecInfo.CodecProfileLevel.AACObjectLC
+    val main = android.media.MediaCodecInfo.CodecProfileLevel.AACObjectMain
+    assertEquals(lc, resolveAacProfile(main, setOf(lc)))
+    assertEquals(lc, resolveAacProfile(lc, setOf(lc)))
+    assertEquals(main, resolveAacProfile(main, setOf(lc, main)))
+    assertNull(resolveAacProfile(main, emptySet()))
+    assertNull(resolveAacProfile(lc, setOf(main)))
+  }
 }

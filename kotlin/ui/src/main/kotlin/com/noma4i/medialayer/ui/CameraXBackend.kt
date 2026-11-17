@@ -79,6 +79,8 @@ internal class Encoders(
     }
   }
 
+  fun withAudioProfile(profile: Int) = Encoders(videoMime, width, height, videoBitrate, frameRate, audioMime, profile, audioBitrate, sampleRate, channels, timebase)
+
   fun settings(audio: Boolean, upright: Size, audioGeneration: Long, heldLimitBytes: Long, maxDurationMs: Long): CameraTakeSettings {
     val video = MediaFormat.createVideoFormat(videoMime, upright.width, upright.height).apply {
       setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
@@ -111,6 +113,17 @@ internal fun encodersFrom(all: EncoderProfilesProxy?, audio: Boolean, timebase: 
     val bitrate = (AUDIO_BITRATE_BASE * (AUDIO_CHANNEL_COUNT_DEFAULT.toDouble() / AUDIO_CHANNEL_COUNT_BASE) * (AUDIO_SAMPLE_RATE_DEFAULT.toDouble() / AUDIO_SAMPLE_RATE_BASE)).toInt()
     Encoders(video.mediaType, video.width, video.height, video.bitrate, video.frameRate, MediaFormat.MIMETYPE_AUDIO_AAC, MediaCodecInfo.CodecProfileLevel.AACObjectLC, bitrate, AUDIO_SAMPLE_RATE_DEFAULT, AUDIO_CHANNEL_COUNT_DEFAULT, timebase)
   }
+}
+
+/**
+ * The AAC profile of the audio encoder: the one of the camera profile when an AAC encoder of the device declares it, else AAC-LC when one declares that, else null.
+ * Follows the CameraX recorder, which always encodes AAC as AAC-LC (AudioConfigUtil.audioMimeToAudioProfile, AAC_DEFAULT_PROFILE = AACObjectLC, in
+ * androidx/camera/camera-video/src/main/java/androidx/camera/video/internal/config/AudioConfigUtil.kt) and takes only the rate, channels and bitrate from the camera profile.
+ */
+internal fun resolveAacProfile(declared: Int, supported: Set<Int>): Int? = when {
+  declared in supported -> declared
+  MediaCodecInfo.CodecProfileLevel.AACObjectLC in supported -> MediaCodecInfo.CodecProfileLevel.AACObjectLC
+  else -> null
 }
 
 /** The step of the plan the camera stopped at: each one is its own text in the failure, so a device report tells which one it was. */
@@ -476,8 +489,12 @@ internal class CameraXBackend(private val context: Context, private val audioLin
     val all = (info as CameraInfoInternal).encoderProfilesProvider.getAll(CAMCORDER_QUALITIES.getValue(quality))
     val counted = PlanFacts(facts.cameraId, facts.quality, facts.supported, all?.videoProfiles?.size ?: 0, all?.audioProfiles?.size ?: 0, null)
     val made = encodersFrom(all, audio, timebase) ?: return refused(PlanRefusal.NO_SDR_PROFILE, counted)
-    if (audio && MediaCodecList(MediaCodecList.REGULAR_CODECS).findEncoderForFormat(checkNotNull(made.audioFormat())) == null) return refused(PlanRefusal.NO_AUDIO_ENCODER, PlanFacts(counted.cameraId, counted.quality, counted.supported, counted.videoProfiles, counted.audioProfiles, made))
-    return Result.success(made)
+    if (!audio) return Result.success(made)
+    val supported = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filter { it.isEncoder && it.supportedTypes.contains(MediaFormat.MIMETYPE_AUDIO_AAC) }
+      .flatMap { it.getCapabilitiesForType(MediaFormat.MIMETYPE_AUDIO_AAC).profileLevels.map { level -> level.profile } }.toSet()
+    val profile = resolveAacProfile(made.audioProfile, supported)
+      ?: return refused(PlanRefusal.NO_AUDIO_ENCODER, PlanFacts(counted.cameraId, counted.quality, counted.supported, counted.videoProfiles, counted.audioProfiles, made))
+    return Result.success(made.withAudioProfile(profile))
   }
 
   private fun aspect(size: PixelSize): AspectRatioStrategy {
