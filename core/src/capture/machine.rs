@@ -128,7 +128,8 @@ impl Capture {
         match event {
             CaptureRunEvent::Input(CaptureEvent::DemandOn) => { context.demand_on(); Transition(State::opening()) }
             CaptureRunEvent::Input(CaptureEvent::Fault { .. } | CaptureEvent::CameraClosed | CaptureEvent::Streaming { .. }) => Handled,
-            CaptureRunEvent::Input(CaptureEvent::SetLens { lens }) if !context.run.state.shooting => { context.run.state.lens = *lens; Handled }
+            CaptureRunEvent::Input(CaptureEvent::SetLens { lens }) if *lens != context.run.state.lens => { context.run.state.lens = *lens; context.demand_on(); Transition(State::opening()) }
+            CaptureRunEvent::Input(CaptureEvent::SetLens { .. }) => Handled,
             _ => Super,
         }
     }

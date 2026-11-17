@@ -534,3 +534,50 @@ fn inv_capture_37_closing_the_layer_ends_a_running_take_closes_the_camera_and_ig
     let (idle, actions) = drive(profile, capture_run(CameraLens::Back), &[CaptureEvent::LayerClosed]);
     assert_eq!((actions, phase(&idle)), (vec![], CameraPhase::Closed), "an idle camera closes without unbinding");
 }
+
+#[test]
+fn inv_capture_38_a_failed_camera_is_settled_and_a_lens_change_starts_a_new_attempt() {
+    let profile = moment();
+    let failed = drive(profile, ready(profile), &[CaptureEvent::Fault { kind: FaultKind::Other }]).0;
+    assert_eq!((phase(&failed), failed.state.fault), (CameraPhase::Failed, Some(CameraRefusal::ConfigureFailed)));
+    let (same, actions) = drive(profile, failed, &[CaptureEvent::SetLens { lens: CameraLens::Back }]);
+    assert_eq!((phase(&same), same.state.fault, actions.len()), (CameraPhase::Failed, Some(CameraRefusal::ConfigureFailed), 0), "the same lens changes nothing");
+    let (again, actions) = drive(profile, failed, &[CaptureEvent::SetLens { lens: CameraLens::Front }]);
+    assert_eq!((phase(&again), again.state.lens, again.state.fault, again.recovery_spent, actions), (CameraPhase::Opening, CameraLens::Front, None, false, vec![CaptureAction::Bind { lens: CameraLens::Front }]));
+}
+
+#[test]
+fn inv_capture_38_random_lens_and_fault_sequences_bind_once_per_lens_change_out_of_failed() {
+    let mut dice = crate::seeded::Dice::new("inv_capture_38_random_lens_and_fault_sequences_bind_once_per_lens_change_out_of_failed");
+    let profile = moment();
+    for _ in 0..2_000 {
+        let mut run = capture_run(CameraLens::Back);
+        for _ in 0..40 {
+            let event = match dice.below(7) {
+                0 => CaptureEvent::DemandOn,
+                1 => CaptureEvent::SetLens { lens: CameraLens::Front },
+                2 => CaptureEvent::SetLens { lens: CameraLens::Back },
+                3 => CaptureEvent::Fault { kind: FaultKind::Other },
+                4 => CaptureEvent::Fault { kind: FaultKind::Reset },
+                5 => CaptureEvent::Opened { has_flash: true, zoom_min: 1.0, zoom_max: 30.0 },
+                _ => CaptureEvent::Streaming { on: true },
+            };
+            let before = run;
+            let step = capture_step(before, event, profile);
+            let binds = step.actions.iter().filter(|action| matches!(action, CaptureAction::Bind { .. })).count();
+            if phase(&before) == CameraPhase::Failed {
+                if let CaptureEvent::SetLens { lens } = event {
+                    if lens != before.state.lens {
+                        assert_eq!((phase(&step.run), binds, step.run.state.lens, step.run.state.fault), (CameraPhase::Opening, 1, lens, None), "{before:?} {event:?}");
+                    } else {
+                        assert_eq!((phase(&step.run), binds, step.run.state.fault), (CameraPhase::Failed, 0, before.state.fault), "{before:?} {event:?}");
+                    }
+                } else if !matches!(event, CaptureEvent::DemandOn) {
+                    assert_eq!((phase(&step.run), step.run.state.fault), (CameraPhase::Failed, before.state.fault), "fault changes only with a new attempt: {event:?}");
+                }
+            }
+            if phase(&step.run) == CameraPhase::Failed { assert!(step.run.state.fault.is_some()); }
+            run = step.run;
+        }
+    }
+}
