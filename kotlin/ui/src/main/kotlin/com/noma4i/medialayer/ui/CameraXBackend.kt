@@ -23,14 +23,10 @@ import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FallbackStrategy
-import androidx.camera.video.AudioStats
-import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
 import androidx.camera.video.Recorder
-import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
-import androidx.camera.video.VideoRecordEvent
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
@@ -79,12 +75,10 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
   private var photo: ImageCapture? = null
   private var movie: VideoCapture<Recorder>? = null
   private var analysis: ImageAnalysis? = null
-  private var recording: Recording? = null
-  private val stopCallbacks = mutableListOf<() -> Unit>()
+  private val recording = CameraRecording(context, main, { sink(it) }, { audioIssue(it) })
   private var analyzer: ImageAnalysis.Analyzer? = null
   private var lastBind: Pair<CameraLens, CaptureProfile>? = null
   private var watchingStream = false
-  @Volatile private var recordedNanos = 0L
   @Volatile override var photoSize: PixelSize? = null
     private set
 
@@ -223,8 +217,7 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
     take.incrementAndGet()
     lastBind = null
     main.execute {
-      recording?.close()
-      recording = null
+      recording.close()
       cameras?.let(::release)
       if (watchingStream) {
         view?.previewStreamState?.removeObserver(streamObserver)
@@ -259,80 +252,25 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
     main.execute {
       if (generation != session.get() || recordingGeneration != take.get()) return@execute
       start startRecording@{
-      val output = movie?.output ?: return@startRecording sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
-      try {
-        recordedNanos = 0
-        var pending = output.prepareRecording(context, FileOutputOptions.Builder(file).setDurationLimitMillis(profile.maxDurationMs.toLong()).build())
-        if (profile.audio) pending = pending.withAudioEnabled()
-        MediaTrace.emit("camera") { "take audio=${profile.audio}" }
-        recording = pending.start(main) callback@{ event ->
-          if (generation != session.get() || recordingGeneration != take.get()) {
-            if (event is VideoRecordEvent.Finalize) completeStops()
-            return@callback
-          }
-          if (profile.audio) {
-            when (event.recordingStats.audioStats.audioState) {
-              AudioStats.AUDIO_STATE_SOURCE_SILENCED -> audioIssue(CaptureAudioIssue.SILENCED)
-              AudioStats.AUDIO_STATE_ACTIVE -> audioIssue(CaptureAudioIssue.ACTIVE)
-              AudioStats.AUDIO_STATE_SOURCE_ERROR -> audioIssue(CaptureAudioIssue.SOURCE_ERROR)
-              AudioStats.AUDIO_STATE_ENCODER_ERROR -> audioIssue(CaptureAudioIssue.ENCODER_ERROR)
-            }
-          }
-          when (event) {
-            is VideoRecordEvent.Start -> sink(CaptureEvent.RecordStarted)
-            is VideoRecordEvent.Status -> recordedNanos = event.recordingStats.recordedDurationNanos
-            is VideoRecordEvent.Finalize -> {
-              recording = null
-              if (endOf(event.error) == RecordEnd.FAILED) {
-                Media.recordNativeFailure(com.noma4i.medialayer.NativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, "androidx.camera.video.VideoRecordEvent.Finalize", event.error.toLong(), event.cause?.message ?: "Recording failed"))
-              }
-              sink(CaptureEvent.RecordFinished(endOf(event.error)))
-              completeStops()
-              reconcileAnalysis()
-            }
-            else -> Unit
-          }
-        }
-      } catch (error: SecurityException) {
-        Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, error)
-        audioIssue(CaptureAudioIssue.PERMISSION_DENIED)
-        sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
-      } catch (error: Exception) {
-        Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, error)
-        sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
-      }
+        val output = movie?.output ?: return@startRecording sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
+        recording.start(output, file, profile, { generation != session.get() || recordingGeneration != take.get() }) { reconcileAnalysis() }
       }
     }
   }
 
   override fun endRecording() {
-    main.execute { recording?.stop() }
+    main.execute { recording.stop() }
   }
 
   override fun endRecording(done: () -> Unit) {
-    main.execute {
-      val current = recording
-      if (current == null) done() else {
-        stopCallbacks.add(done)
-        try { current.stop() } catch (error: Exception) {
-          Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, error)
-          completeStops()
-        }
-      }
-    }
+    main.execute { recording.stop(done) }
   }
 
   override fun awaitRecordingStopped(done: () -> Unit) {
-    main.execute { if (recording == null) done() else stopCallbacks.add(done) }
+    main.execute { recording.awaitStopped(done) }
   }
 
-  private fun completeStops() {
-    val callbacks = stopCallbacks.toList()
-    stopCallbacks.clear()
-    callbacks.forEach { it() }
-  }
-
-  override fun recordedMs(): Long = recordedNanos / 1_000_000
+  override fun recordedMs(): Long = recording.recordedMs()
 
   override fun setTorch(on: Boolean) {
     main.execute { camera?.cameraControl?.enableTorch(on) }
@@ -366,7 +304,7 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
   }
 
   private fun reconcileAnalysis() {
-    if (recording != null || camera == null || (analysis != null) == (analyzer != null)) return
+    if (recording.active || camera == null || (analysis != null) == (analyzer != null)) return
     lastBind?.let { (lens, profile) -> bind(lens, profile) }
   }
 
@@ -404,12 +342,6 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
       exact + (supported - exact.toSet())
     }
     return builder.build()
-  }
-
-  private fun endOf(error: Int) = when (error) {
-    VideoRecordEvent.Finalize.ERROR_NONE -> RecordEnd.COMPLETED
-    VideoRecordEvent.Finalize.ERROR_DURATION_LIMIT_REACHED -> RecordEnd.LIMIT_REACHED
-    else -> RecordEnd.FAILED
   }
 
   private fun isRecoverable(code: Int) = code == CameraState.ERROR_CAMERA_IN_USE || code == CameraState.ERROR_MAX_CAMERAS_IN_USE || code == CameraState.ERROR_OTHER_RECOVERABLE_ERROR
