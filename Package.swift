@@ -16,8 +16,8 @@ let package = Package(
   targets: [
     .binaryTarget(
       name: "medialayerFFI",
-      url: "https://github.com/noma4i/medialayer/releases/download/3.41.0/MediaLayerFFI.xcframework.zip",
-      checksum: "f0eeab8da99d26860846525c8fe7563c00fcdbf2b6a94da9c23fa87b934279a2"
+      url: "https://github.com/noma4i/medialayer/releases/download/3.41.1/MediaLayerFFI.xcframework.zip",
+      checksum: "63a6a2f2ec7f177b30e2ec824e3238bca8ad7e3c824a834c08ddd88d9194bef7"
     ),
     .target(
       name: "MediaLayer",
@@ -33,7 +33,7 @@ let package = Package(
     ),
     .target(
       name: "MediaLayerTesting",
-      dependencies: ["MediaLayer"],
+      dependencies: ["MediaLayer", "MediaLayerUI"],
       path: "MediaLayer/Sources/MediaLayerTesting",
       swiftSettings: [.swiftLanguageMode(.v5)]
     )
