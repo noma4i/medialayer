@@ -13,8 +13,8 @@ impl Book {
 
     pub(super) fn open_window(&mut self, owner: u64, kind: WindowKind, reserve: Reserve) {
         let window = match kind {
-            WindowKind::Video => Window::Video(VideoWindowState { sources: Arc::new(Vec::new()), active: 0, is_active: true, intent: 0, replaced: 0, ready: PageReadiness::new(), _opened: reserve, held: Reserve::none() }),
-            WindowKind::Image(name) => Window::Image(ImageWindowState { scoped: format!("{name}\u{1f}{owner}"), pages: Arc::new(Vec::new()), active: 0, is_active: true, ready: PageReadiness::new(), _opened: reserve, held: Reserve::none() }),
+            WindowKind::Video => Window::Video(VideoWindowState { sources: Arc::new(Vec::new()), active: 0, is_active: true, intent: 0, replaced: 0, fresh_wholes: Vec::new(), ready: PageReadiness::new(), _opened: reserve, held: Reserve::none() }),
+            WindowKind::Image(name) => Window::Image(ImageWindowState { scoped: format!("{name}\u{1f}{owner}"), pages: Arc::new(Vec::new()), fresh_wholes: Vec::new(), active: 0, is_active: true, ready: PageReadiness::new(), _opened: reserve, held: Reserve::none() }),
         };
         self.windows.insert(owner, window);
     }
@@ -39,7 +39,7 @@ impl Book {
         }
     }
 
-    pub(super) fn video_window(&mut self, owner: u64, active: u32, sources: Option<Arc<Vec<Option<MediaItem>>>>, reserve: Reserve) {
+    pub(super) fn video_window(&mut self, owner: u64, active: u32, sources: Option<Arc<Vec<Option<MediaItem>>>>, wholes: Vec<MediaItem>, reserve: Reserve) {
         let intent = self.next_seq();
         let replaced = self.next_seq();
         let Some(Window::Video(window)) = self.windows.get_mut(&owner) else { return };
@@ -48,6 +48,7 @@ impl Book {
             drop(std::mem::replace(&mut window.sources, sources));
             window.held = reserve;
             window.replaced = replaced;
+            window.fresh_wholes.extend(wholes);
         }
         self.video_order.remove(&window.intent);
         window.intent = intent;
@@ -85,14 +86,14 @@ impl Book {
     pub(super) fn resolve_video(&mut self) {
         let winner = self.video_order.iter().next_back().map(|(_, owner)| *owner);
         let stage = &self.assembled.stage;
-        match winner.and_then(|owner| match self.windows.get(&owner) {
+        match winner.and_then(|owner| match self.windows.get_mut(&owner) {
             Some(Window::Video(window)) => Some((owner, window)),
             _ => None,
         }) {
             Some((owner, window)) => {
                 let applied = (owner, window.replaced);
                 if self.video_applied != Some(applied) {
-                    stage.replace_window(window.active as usize, window.sources.clone());
+                    stage.replace_window_declared(window.active as usize, window.sources.clone(), std::mem::take(&mut window.fresh_wholes));
                     self.video_applied = Some(applied);
                 } else {
                     stage.move_window(window.active as usize);
@@ -106,13 +107,14 @@ impl Book {
         }
     }
 
-    pub(super) fn image_window(&mut self, owner: u64, active: u32, pages: Option<Arc<Vec<Vec<MediaItem>>>>, reserve: Reserve) {
+    pub(super) fn image_window(&mut self, owner: u64, active: u32, pages: Option<Arc<Vec<Vec<MediaItem>>>>, wholes: Vec<MediaItem>, reserve: Reserve) {
         let Some(Window::Image(window)) = self.windows.get_mut(&owner) else { return };
         window.active = active;
         let replaced = pages.is_some();
         if let Some(pages) = pages {
             drop(std::mem::replace(&mut window.pages, pages));
             window.held = reserve;
+            window.fresh_wholes.extend(wholes);
         }
         self.follow_ready(owner);
         if replaced { self.apply_image(owner) } else { self.move_image(owner, active) }
@@ -125,10 +127,14 @@ impl Book {
         }
     }
 
-    pub(super) fn apply_image(&self, owner: u64) {
-        let Some(Window::Image(window)) = self.windows.get(&owner) else { return };
-        let pages = if window.is_active { window.pages.clone() } else { Arc::default() };
-        self.assembled.stage.replace_image_window(&window.scoped, window.active as usize, pages);
+    pub(super) fn apply_image(&mut self, owner: u64) {
+        let Some(Window::Image(window)) = self.windows.get_mut(&owner) else { return };
+        if !window.is_active {
+            self.assembled.stage.replace_image_window_declared(&window.scoped, window.active as usize, Arc::default(), Vec::new());
+            return;
+        }
+        let wholes = std::mem::take(&mut window.fresh_wholes);
+        self.assembled.stage.replace_image_window_declared(&window.scoped, window.active as usize, window.pages.clone(), wholes);
     }
 
     pub(super) fn release_window(&mut self, owner: u64) {

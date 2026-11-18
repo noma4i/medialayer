@@ -29,6 +29,7 @@ pub(super) struct VideoWindowState {
     pub(super) is_active: bool,
     pub(super) intent: u64,
     pub(super) replaced: u64,
+    pub(super) fresh_wholes: Vec<MediaItem>,
     pub(super) ready: PageReadiness,
     pub(super) _opened: Reserve,
     pub(super) held: Reserve,
@@ -43,6 +44,7 @@ impl VideoWindowState {
 pub(super) struct ImageWindowState {
     pub(super) scoped: String,
     pub(super) pages: Arc<Vec<Vec<MediaItem>>>,
+    pub(super) fresh_wholes: Vec<MediaItem>,
     pub(super) active: u32,
     pub(super) is_active: bool,
     pub(super) ready: PageReadiness,
@@ -83,6 +85,7 @@ pub(crate) struct Book {
     pub(super) places: HashMap<u64, Place>,
     pub(super) keys: HashMap<String, KeyOwners>,
     pub(super) windows: HashMap<u64, Window>,
+    pub(super) known: crate::api::Known,
     pub(super) video_order: BTreeMap<u64, u64>,
     pub(super) video_applied: Option<(u64, u64)>,
     pub(super) subscriptions: HashMap<u64, Observed>,

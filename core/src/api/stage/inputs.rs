@@ -69,6 +69,12 @@ impl Stage {
     pub fn replace_window(&self, active: usize, sources: impl Into<Arc<Vec<Option<MediaItem>>>>) {
         let sources = sources.into();
         self.declare_whole(sources.iter().flatten());
+        self.replace_window_declared(active, sources, Vec::new());
+    }
+
+    /// `replace_window` for a caller that already handed over the whole-strategy items: the list is not walked.
+    pub fn replace_window_declared(&self, active: usize, sources: Arc<Vec<Option<MediaItem>>>, wholes: Vec<MediaItem>) {
+        self.declare_whole(wholes.iter());
         let mut state = self.state();
         state.window = sources;
         self.move_window_from(state, active);
@@ -123,6 +129,11 @@ impl Stage {
     pub fn replace_image_window(&self, name: &str, active: usize, pages: impl Into<Arc<Vec<Vec<MediaItem>>>>) {
         let pages = pages.into();
         self.declare_whole(pages.iter().flatten());
+        self.replace_image_window_declared(name, active, pages, Vec::new());
+    }
+
+    pub fn replace_image_window_declared(&self, name: &str, active: usize, pages: Arc<Vec<Vec<MediaItem>>>, wholes: Vec<MediaItem>) {
+        self.declare_whole(wholes.iter());
         self.state().image_windows.insert(name.to_string(), pages);
         self.move_image_window(name, active);
     }

@@ -30,7 +30,7 @@ pub use routes::Routes;
 pub use signals::{SignalPorts, Signals};
 pub use slots::{CreatedPlayer, PlayerSlot, PlayerSlotFactory, SlotCall, SlotRunner, SlotSample};
 pub use source::{is_local_url, normalize_item, MediaItem, PlaybackRoute};
-pub(crate) use source::{clean_item, clean_url};
+pub(crate) use source::{clean_item, clean_item_known, clean_url, Known};
 pub use stage::{Stage, StageParts};
 pub use stats_feed::follow_stats;
 pub use tones::{CacheTones, Keying, TonePixels, TonePreparation, ToneStore, Tones, MEMO_ENTRIES};

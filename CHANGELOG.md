@@ -79,6 +79,7 @@
 - iOS animated frames and still images now share one `imageMemoryBytes` budget.
 - iOS image playback rate ignores infinite, NaN and non-positive values.
 - Window lists from the FFI are shared with the stage instead of copied on each replace.
+- Replacing an FFI window no longer re-parses or re-declares items it already took.
 - The external image loader timeout now covers the cache write and flush.
 - A slow `FailureListener` no longer blocks the producer or other listeners.
 - Camera: leaving the screen mid-take now gives the take an `interrupted` outcome.

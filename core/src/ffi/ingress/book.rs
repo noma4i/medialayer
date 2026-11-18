@@ -15,7 +15,7 @@ use super::AudioOp;
 impl Book {
     pub fn new(assembled: Arc<Assembled>, queue: Arc<InputQueue>, handle: Handle) -> Book {
         assembled.stage.observe_playback();
-        Book { assembled, queue, handle, seq: 0, places: HashMap::new(), keys: HashMap::new(), windows: HashMap::new(), video_order: BTreeMap::new(), video_applied: None, subscriptions: HashMap::new(), suspensions: HashMap::new(), suspension_groups: HashMap::new(), allowed_groups: HashMap::new(), in_call: false, paused: false, pause_reason: None, declarations: HashMap::new(), deliveries: tokio::task::JoinSet::new() }
+        Book { assembled, queue, handle, seq: 0, places: HashMap::new(), keys: HashMap::new(), windows: HashMap::new(), known: HashMap::new(), video_order: BTreeMap::new(), video_applied: None, subscriptions: HashMap::new(), suspensions: HashMap::new(), suspension_groups: HashMap::new(), allowed_groups: HashMap::new(), in_call: false, paused: false, pause_reason: None, declarations: HashMap::new(), deliveries: tokio::task::JoinSet::new() }
     }
 
     pub(super) fn next_seq(&mut self) -> u64 {
@@ -24,7 +24,8 @@ impl Book {
     }
 
     pub fn apply(&mut self, command: Declared, reserve: Reserve, slot: EntryPlace) {
-        match super::clean::declared(command) {
+        let (command, wholes) = super::clean::declared(command, &mut self.known);
+        match command {
             Declared::PlaceOpen { owner, item } => self.open_place(owner, item, reserve),
             Declared::PlaceUpdate { owner, input } => self.update_place(owner, input, reserve),
             Declared::PlaceSeek { owner, fraction } => {
@@ -44,8 +45,8 @@ impl Book {
             Declared::WindowOpen { owner, kind } => self.open_window(owner, kind, reserve),
             Declared::WindowActive { owner, is_active } => self.set_window_active(owner, is_active),
             Declared::WindowReady { owner, listener } => self.window_ready(owner, listener),
-            Declared::VideoWindow { owner, active, sources } => self.video_window(owner, active, sources, reserve),
-            Declared::ImageWindow { owner, active, pages } => self.image_window(owner, active, pages, reserve),
+            Declared::VideoWindow { owner, active, sources } => self.video_window(owner, active, sources, wholes, reserve),
+            Declared::ImageWindow { owner, active, pages } => self.image_window(owner, active, pages, wholes, reserve),
             Declared::Suspend { owner, groups } => {
                 self.assembled.stage.suspend(owner, &groups);
                 let groups: Vec<String> = groups.into_iter().map(|group| group.trim().to_string()).collect();

@@ -48,6 +48,46 @@ pub(crate) fn clean_item(item: MediaItem) -> MediaItem {
     MediaItem { url: clean_url(&item.url), cover, blur_hash, ..item }
 }
 
+/// The urls an intake has already cleaned, each with whether its whole-strategy declaration was already handed over: an item seen again costs no parse and no allocation.
+pub(crate) type Known = std::collections::HashMap<String, bool>;
+
+/// The cleaning rule of `clean_item` applied in place. A url seen before is not parsed again; a whole-strategy remote item seen for the first time is pushed to `fresh_wholes`.
+pub(crate) fn clean_item_known(item: &mut MediaItem, known: &mut Known, fresh_wholes: &mut Vec<MediaItem>) {
+    trim_in_place(&mut item.cover);
+    trim_in_place(&mut item.blur_hash);
+    if item.url.trim().len() != item.url.len() {
+        item.url = item.url.trim().to_string();
+    }
+    if !known.contains_key(&item.url) {
+        item.url = clean_url(&item.url);
+        if !item.url.is_empty() {
+            known.insert(item.url.clone(), false);
+        }
+    }
+    if item.strategy == CacheStrategy::Whole && item.is_remote() {
+        if let Some(declared) = known.get_mut(&item.url) {
+            if !*declared {
+                *declared = true;
+                fresh_wholes.push(item.clone());
+            }
+        }
+    }
+}
+
+fn trim_in_place(text: &mut Option<String>) {
+    let blank = match text.as_deref() {
+        Some(held) if held.trim().is_empty() => true,
+        Some(held) if held.trim().len() != held.len() => {
+            *text = Some(held.trim().to_string());
+            false
+        }
+        _ => false,
+    };
+    if blank {
+        *text = None;
+    }
+}
+
 pub(crate) fn clean_url(text: &str) -> String {
     let text = text.trim();
     if text.starts_with('/') || text.starts_with("file://") {
