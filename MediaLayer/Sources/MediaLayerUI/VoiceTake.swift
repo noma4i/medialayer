@@ -31,6 +31,7 @@ final class VoiceTake: VoicePCMSink, @unchecked Sendable {
   private var phase = Phase.waiting
   private var bound: UInt64?
   private var start = CMTime.invalid
+  private var end = CMTime.invalid
   private var limited = false
   private var peak: Float = 0
 
@@ -86,8 +87,9 @@ final class VoiceTake: VoicePCMSink, @unchecked Sendable {
     if report { onBroken(.lost(error)) }
   }
 
-  /// Closes the file of a take that is writing. A cancel that comes while the file closes removes it after the native completion and the result is the cancel.
-  func finish() async throws {
+  /// Closes the file of a take that is writing and returns the length of the written audio in microseconds: from the first written PCM to the end of the last sample. A take that never wrote returns 0. A cancel that comes while the file closes removes the file after the native completion and the result is the cancel.
+  @discardableResult
+  func finish() async throws -> UInt64 {
     let writing = lock.withLock { () -> Bool in
       guard phase == .writing else {
         if phase == .waiting { phase = .settled }
@@ -96,7 +98,7 @@ final class VoiceTake: VoicePCMSink, @unchecked Sendable {
       phase = .finishing
       return true
     }
-    guard writing else { return }
+    guard writing else { return 0 }
     var failure: Error?
     do { try await writer.finish() } catch { failure = error }
     let cancelled = lock.withLock { () -> Bool in
@@ -106,6 +108,12 @@ final class VoiceTake: VoicePCMSink, @unchecked Sendable {
     if cancelled || failure != nil { NativeFailures.removeFile(url) }
     if cancelled { throw CancellationError() }
     if let failure { throw failure }
+    return lock.withLock { Self.microseconds(from: start, to: end) }
+  }
+
+  private static func microseconds(from start: CMTime, to end: CMTime) -> UInt64 {
+    let seconds = (end - start).seconds
+    return seconds.isFinite && seconds > 0 ? UInt64((seconds * 1_000_000).rounded()) : 0
   }
 
   func cancel() {
@@ -118,6 +126,7 @@ final class VoiceTake: VoicePCMSink, @unchecked Sendable {
     let tail = CMSampleBufferGetPresentationTimeStamp(buffer) + CMSampleBufferGetDuration(buffer)
     let elapsed = (tail - start).seconds
     guard (tail - start).isNumeric, elapsed.isFinite, elapsed >= 0 else { throw Failure.invalidInterval }
+    end = tail
     if elapsed * 1000 >= Double(maxDurationMs) { limited = true }
   }
 

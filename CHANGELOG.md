@@ -91,6 +91,9 @@
 - A second voice start is refused as `MicrophoneBusy` and a stop without a take as `Empty` on both platforms.
 - iOS no longer reports voice refusals as native failures in `Media.failures`.
 - The microphone is released at once after `microphoneSilent`; the next start opens a new one.
+- Android voice recording no longer fails when the encoder has no free input.
+- Android voice recording releases the encoder when it fails to configure or start.
+- Android voice recording continues when the encoder announces the same output format again.
 - iOS camera sound no longer runs past the last video frame.
 - Android voice records again when the AAC encoder announces its format before the file opens.
 - Android camera video uses AAC-LC when no encoder declares the camera AAC profile.

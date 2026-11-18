@@ -403,6 +403,36 @@ extension GlobalMedia {
     }
 
     @Test
+    func inv_voice_33_finish_gives_the_length_of_the_written_audio_in_microseconds() async throws {
+      let file = temporaryFile("m4a")
+      let writer = HeldWriter(url: file)
+      let take = VoiceTake(url: file, writer: writer, settings: [:], maxDurationMs: 60_000, onStarted: {}, onLimit: {}, onBroken: { _ in })
+      for index in 0..<3 { take.pcm(generation: 1, try pcmBuffer(firstFrame: Int64(index) * pcmFrames)) }
+      let closing = Task { try await take.finish() }
+      await eventually("the file is closing") { writer.isClosing }
+      writer.complete()
+      #expect(try await closing.value == 300_000)
+      #expect(try await VoiceTake(url: file, writer: writer, settings: [:], maxDurationMs: 60_000, onStarted: {}, onLimit: {}, onBroken: { _ in }).finish() == 0, "a take that never wrote has no length")
+    }
+
+    /// O-21: whether the real realtime writer input ever reports not-ready for audio that arrives far faster than real time.
+    @Test
+    func inv_voice_31_the_real_writer_stays_ready_for_a_burst_of_pcm() async throws {
+      let file = temporaryFile("m4a")
+      defer { try? FileManager.default.removeItem(at: file) }
+      let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: pcmRate, AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 64_000]
+      let writer = AssetVoiceWriter(url: file)
+      try writer.open(first: try pcmBuffer(firstFrame: 0), settings: settings)
+      var notReady = 0
+      for index in 0..<3_000 {
+        if !writer.isReady { notReady += 1; continue }
+        try writer.append(try pcmBuffer(firstFrame: Int64(index) * pcmFrames))
+      }
+      #expect(notReady == 0, "the real writer reported not-ready \(notReady) times in a burst of 3000 buffers")
+      try await writer.finish()
+    }
+
+    @Test
     func aWriterThatIsNotReadyIsOneTypedFailureWithoutAFileAndTheOwnerIsClosed() async throws {
       let voice = try Voice(writer: { BoundedWriter(url: $0, capacity: 3) })
       let file = temporaryFile("m4a")

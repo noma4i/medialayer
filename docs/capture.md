@@ -82,3 +82,7 @@ to the app. The frame output exists only while somebody listens. An observer tha
 
 The session asks the Ledger for `capture_cost` before the camera binds, a shot asks for `shot_cost` and gives it back after the photo. A refusal is `MediaError.Camera(.memory)` and the camera is `failed`.
 The core, the file work and the clip reading run off the main thread. The binding of CameraX is the only Main work, CameraX requires it.
+
+## Voice file length on Android
+
+`MediaVoiceRecorder` files on Android are AAC in `.m4a`. `MediaMuxer` writes no priming edit list, so the encoder delay (two AAC frames, about 46 ms at 44.1 kHz) stays in the file as leading silence, and the container duration is longer than `durationMs` by that delay. No audio is cut or added. iOS writes the priming information, so its files carry no extra silence.
