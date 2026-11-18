@@ -5,6 +5,7 @@
 ### Fixed
 
 - A shown whole-strategy place is never failed by the full whole queue.
+- Android camera recording is not dropped by a GL error left by an earlier call.
 
 ## 3.41.2 - 2026-11-18
 

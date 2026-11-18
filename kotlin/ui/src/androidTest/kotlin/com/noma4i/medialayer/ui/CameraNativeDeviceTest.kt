@@ -152,6 +152,8 @@ class CameraNativeDeviceTest {
 
   private enum class Damage { HEAD, MIDDLE, TAIL }
 
+  private enum class Disturbance { LENS, PREVIEW }
+
   /** A real copy of the file with the audio packets of one part removed, so the scan reads it through the real extractor and decoder. */
   private fun damaged(file: File, damage: Damage): File {
     val output = File(context.cacheDir, "damaged-${System.nanoTime()}.mp4")
@@ -183,7 +185,7 @@ class CameraNativeDeviceTest {
     }
   }
 
-  private fun record(audio: Boolean, damage: Damage? = null, lens: CameraLens = CameraLens.BACK, kind: CaptureKind = CaptureKind.MOMENT, mirrored: Boolean = false) = runBlocking {
+  private fun record(audio: Boolean, damage: Damage? = null, lens: CameraLens = CameraLens.BACK, kind: CaptureKind = CaptureKind.MOMENT, mirrored: Boolean = false, disturb: Disturbance? = null) = runBlocking {
     val profile = captureProfile(kind).copy(audio = audio).let { if (mirrored) it.copy(mirrorFrontVideo = true) else it }
     val failures = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { Media.failures.collect { reported.add(it) } }
     val hearing = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { checkNotNull(layer).microphoneAvailability.collect { heard.value += it } }
@@ -223,6 +225,20 @@ class CameraNativeDeviceTest {
       assertTrue("the refused file is deleted", CaptureFiles.directory(context).listFiles().orEmpty().isEmpty())
       return@runBlocking
     }
+    if (disturb != null) {
+      made.startRecording()
+      withTimeout(TIMEOUT_MS) { made.state.first { it.isRecording && it.recordedMs >= profile.minTakeMs } }
+      when (disturb) {
+        Disturbance.LENS -> made.setLens(CameraLens.FRONT)
+        Disturbance.PREVIEW -> launched.onActivity { it.setContentView(android.view.View(it)) }
+      }
+      kotlinx.coroutines.delay(DISTURB_SETTLE_MS)
+      failures.cancel()
+      hearing.cancel()
+      assertTrue("no GL error is blamed on the draw, native failures=${reported.toList()}", reported.none { it.message.contains("GL ") })
+      try { made.stopRecording().also { files.add(it.file) } } catch (_: MediaException.Camera) {}
+      return@runBlocking
+    }
     val clips = (1..2).map {
       try {
         made.startRecording()
@@ -245,6 +261,12 @@ class CameraNativeDeviceTest {
   }
 
   @Test
+  fun inv_capture_78_a_lens_change_during_a_take_gives_no_gl_failure() = record(audio = false, disturb = Disturbance.LENS)
+
+  @Test
+  fun inv_capture_78_the_preview_leaving_during_a_take_gives_no_gl_failure() = record(audio = false, disturb = Disturbance.PREVIEW)
+
+  @Test
   fun two_takes_with_sound_are_two_mp4_files_with_video_and_aac_packets() = record(audio = true)
 
   @Test
@@ -264,5 +286,6 @@ class CameraNativeDeviceTest {
 
   private companion object {
     const val TIMEOUT_MS = 30_000L
+    const val DISTURB_SETTLE_MS = 2_000L
   }
 }

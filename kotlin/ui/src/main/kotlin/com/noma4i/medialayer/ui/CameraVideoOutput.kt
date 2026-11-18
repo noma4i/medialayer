@@ -232,16 +232,22 @@ internal class CameraVideoOutput(
   private fun draw(frame: Input) {
     if (frame.released || finished) return
     try {
+      clearGl()
       frame.st.updateTexImage()
+      clearGl()
       val timestamp = frame.st.timestamp
       if (frame !== current || shutting || timestamp == frame.lastTimestamp) return
       frame.lastTimestamp = timestamp
       frame.st.getTransformMatrix(texMatrix)
       previews.toList().forEach { preview ->
-        if (preview.surface == EGL14.EGL_NO_SURFACE) preview.surface = windowSurface(preview.target)
-        preview.output.updateTransformMatrix(outMatrix, texMatrix)
-        render(preview.surface, preview.output.size, identity, outMatrix, frame.texture)
-        check(EGL14.eglSwapBuffers(display, preview.surface)) { "preview swap failed ${EGL14.eglGetError()}" }
+        try {
+          if (preview.surface == EGL14.EGL_NO_SURFACE) preview.surface = windowSurface(preview.target)
+          preview.output.updateTransformMatrix(outMatrix, texMatrix)
+          render(preview.surface, preview.output.size, identity, outMatrix, frame.texture)
+          check(EGL14.eglSwapBuffers(display, preview.surface)) { "preview swap failed ${EGL14.eglGetError()}" }
+        } catch (_: Throwable) {
+          closePreview(preview)
+        }
       }
       encoder?.let { drawEncoder(it, frame, timestamp) }
     } catch (error: Throwable) {
@@ -265,21 +271,39 @@ internal class CameraVideoOutput(
 
   private fun render(surface: EGLSurface, size: Size, vertex: FloatArray, texture: FloatArray, sampler: Int) {
     makeCurrent(surface)
+    clearGl()
     GLES20.glViewport(0, 0, size.width, size.height)
     GLES20.glUseProgram(program)
     GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
     GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, sampler)
-    GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uVertex"), 1, false, vertex, 0)
-    GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uTex"), 1, false, texture, 0)
-    val position = GLES20.glGetAttribLocation(program, "aPos")
-    val coordinate = GLES20.glGetAttribLocation(program, "aTex")
+    checkGl("state")
+    GLES20.glUniformMatrix4fv(location("uVertex"), 1, false, vertex, 0)
+    GLES20.glUniformMatrix4fv(location("uTex"), 1, false, texture, 0)
+    val position = attribute("aPos")
+    val coordinate = attribute("aTex")
+    checkGl("uniforms")
     GLES20.glEnableVertexAttribArray(position)
     GLES20.glVertexAttribPointer(position, 2, GLES20.GL_FLOAT, false, 0, positions)
     GLES20.glEnableVertexAttribArray(coordinate)
     GLES20.glVertexAttribPointer(coordinate, 2, GLES20.GL_FLOAT, false, 0, coordinates)
     GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-    check(GLES20.glGetError() == GLES20.GL_NO_ERROR) { "GL draw failed" }
+    checkGl("draw")
   }
+
+  // glGetError returns the first error stored since the last read: drain what other calls left, then read after each group.
+  private fun clearGl() {
+    var guard = 0
+    while (GLES20.glGetError() != GLES20.GL_NO_ERROR && ++guard < MAX_GL_DRAIN) {}
+  }
+
+  private fun checkGl(call: String) {
+    val code = GLES20.glGetError()
+    check(code == GLES20.GL_NO_ERROR) { "GL $call failed 0x${code.toString(16)}" }
+  }
+
+  private fun location(name: String): Int = GLES20.glGetUniformLocation(program, name).also { check(it >= 0) { "GL uniform $name is missing" } }
+
+  private fun attribute(name: String): Int = GLES20.glGetAttribLocation(program, name).also { check(it >= 0) { "GL attribute $name is missing" } }
 
   private fun makeCurrent(surface: EGLSurface) = check(EGL14.eglMakeCurrent(display, surface, surface, context)) { "eglMakeCurrent failed ${EGL14.eglGetError()}" }
 
@@ -325,6 +349,7 @@ internal class CameraVideoOutput(
     const val EGL_RECORDABLE_ANDROID = 0x3142
     const val BYTES_PER_PIXEL = 4L
     const val PBUFFER_BYTES = BYTES_PER_PIXEL
+    const val MAX_GL_DRAIN = 16
 
     fun floats(vararg values: Float): FloatBuffer =
       ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply { put(values); position(0) }
