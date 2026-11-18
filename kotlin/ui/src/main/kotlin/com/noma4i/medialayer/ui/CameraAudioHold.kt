@@ -4,6 +4,7 @@ internal class CameraAudioHold(
   private val link: () -> AudioLink?,
   private val tap: CameraAudioTap,
   private val issue: (CaptureAudioIssue) -> Unit,
+  private val timer: RetryTimer = RetryTimer.system,
   private val microphone: (RecordingAudioListener) -> CameraMicrophone
 ) : AutoCloseable {
   private var input: CameraAudioInput? = null
@@ -25,7 +26,7 @@ internal class CameraAudioHold(
     spec = null
     if (wanted == null) return
     val audio = checkNotNull(link()) { "no audio link for the camera microphone" }
-    input = CameraAudioInput(audio, wanted, tap, issue) { heard -> microphone(heard).also { synchronized(made) { made.add(it) } } }
+    input = CameraAudioInput(audio, wanted, tap, issue, timer = timer) { heard -> microphone(heard).also { synchronized(made) { made.add(it) } } }
     spec = wanted
   }
 

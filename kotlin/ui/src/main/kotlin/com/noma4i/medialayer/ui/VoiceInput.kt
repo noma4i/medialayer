@@ -16,6 +16,7 @@ internal class VoiceInput(
   private val file: File,
   private val writer: VoiceFileWriter,
   private val listener: VoiceTakeListener,
+  private val timer: RetryTimer = RetryTimer.system,
   private val microphone: (RecordingAudioListener) -> CameraMicrophone
 ) : CameraAudioTap, AutoCloseable {
   private enum class Phase { PREPARING, WAITING, TAKING, CLOSED }
@@ -59,7 +60,7 @@ internal class VoiceInput(
     result.exceptionOrNull()?.let { return fail(voiceFailure(it)) }
     synchronized(lock) {
       if (phase != Phase.PREPARING) return
-      owner = CameraAudioInput(link, spec, this, ::issue, RecordingKind.VOICE, ::fail, microphone)
+      owner = CameraAudioInput(link, spec, this, ::issue, RecordingKind.VOICE, ::fail, timer, microphone)
       phase = Phase.WAITING
     }
   }

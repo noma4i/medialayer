@@ -304,7 +304,8 @@ internal class SystemVoiceCapture(
   private val link: () -> AudioLink? = { Media.link },
   private val writer: () -> VoiceFileWriter = { MediaCodecVoiceFileWriter() },
   private val reserve: suspend (Long) -> AutoCloseable = ::reserveCaptureBytes,
-  private val microphone: (RecordingAudioListener, (Long) -> AutoCloseable) -> CameraMicrophone = { listener, lease -> RecordingAudio(listener, lease, context.mainExecutor).asMicrophone() }
+  private val microphone: (RecordingAudioListener, (Long) -> AutoCloseable) -> CameraMicrophone = { listener, lease -> RecordingAudio(listener, lease, context.mainExecutor).asMicrophone() },
+  private val timer: RetryTimer = RetryTimer.system
 ) : VoiceCapture {
   // A lost take has closed its input at once; the marker stays so that the end of that take is still told as the loss.
   private class Active(val input: VoiceInput, val done: CompletableDeferred<Long?>, val release: () -> Unit) { @Volatile var lost = false }
@@ -338,7 +339,7 @@ internal class SystemVoiceCapture(
       override fun onCancelled() { first.completeExceptionally(kotlinx.coroutines.CancellationException("the take was cancelled")); done.complete(null) }
       override fun onLost() { mine.lost = true; ended(VoiceRefused(VoiceRefusal.MICROPHONE_SILENT)) }
     }
-    val input = VoiceInput(audio, spec, settings, maxDurationMs.toLong() * 1_000L, file, writer(), listener) { heard ->
+    val input = VoiceInput(audio, spec, settings, maxDurationMs.toLong() * 1_000L, file, writer(), listener, timer) { heard ->
       val made = microphone(heard, memory::lease)
       ticket.gate { made.idle() }
       // The hold goes back after the last lease of the microphone: the owner closes it at the end of the take or of its restore.

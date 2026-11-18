@@ -39,18 +39,32 @@ internal class CameraAudioInput(
   private val issue: (CaptureAudioIssue) -> Unit,
   kind: RecordingKind = RecordingKind.VIDEO,
   private val failed: (NativeFailure) -> Unit = { Media.recordNativeFailure(it) },
+  private val timer: RetryTimer = RetryTimer.system,
   microphone: (RecordingAudioListener) -> CameraMicrophone
 ) : AudioInputOwner, RecordingAudioListener, AutoCloseable {
-  private class Live(val core: ULong, val audio: Long)
+  /**
+   * The attempts of one core generation (owner 2026-11-19, [MicrophoneRetry]). The take and the core see one source: its PCM and its end carry the generation
+   * of the first source that started (`tap`), a retry is told to nobody.
+   */
+  private class Run(val core: ULong) {
+    var tap: Long? = null
+    var attempt = 0
+  }
+
+  /** The source of the current attempt of a run; `heard` once its first sound came, no retry after it. */
+  private class Live(val run: Run, val audio: Long) { var heard = false }
 
   private val lock = Any()
   private val microphone = microphone(this)
   private var live: Live? = null
+  /** The run waiting the pause before its next attempt. */
+  private var pause: Run? = null
+  private var clock: AutoCloseable? = null
   private var closed = false
   private var input: AudioInputHandle? = null
   private val opened = link.openInput(kind, this)
 
-  val audioGeneration: Long? get() = synchronized(lock) { live?.audio }
+  val audioGeneration: Long? get() = synchronized(lock) { (live?.run ?: pause)?.tap }
 
   override suspend fun idle() = microphone.idle()
 
@@ -59,55 +73,122 @@ internal class CameraAudioInput(
       if (closed) return
       this.input = input
       release()
-      live = try { Live(generation, microphone.start(spec)) } catch (error: Exception) {
-        failed(NativeFailure(FailureSource.RECORDER, error.javaClass.name, 0L, error.message ?: error.toString()))
-        issue(CaptureAudioIssue.SOURCE_ERROR)
-        input.restoreFailed(generation)
-        null
-      }
+      attempt(Run(generation))
     }
   }
 
   override fun stop(generation: ULong) {
     synchronized(lock) {
-      if (live?.core != generation) return
+      if ((live?.run ?: pause)?.core != generation) return
       release()
     }
   }
 
-  override fun onLive(generation: Long) = whileLive(generation) { handle, core -> issue(CaptureAudioIssue.ACTIVE); handle.sound(core, true) }
-
-  override fun onSilenced(generation: Long, silenced: Boolean) = whileLive(generation) { handle, core ->
-    issue(if (silenced) CaptureAudioIssue.SILENCED else CaptureAudioIssue.ACTIVE)
-    handle.sound(core, !silenced)
+  override fun onLive(generation: Long) = whileLive(generation) { handle, current ->
+    heard(current)
+    issue(CaptureAudioIssue.ACTIVE)
+    handle.sound(current.run.core, true)
   }
 
-  override fun onFailed(generation: Long, failure: NativeFailure) = whileLive(generation) { handle, core ->
+  override fun onSilenced(generation: Long, silenced: Boolean) = whileLive(generation) { handle, current ->
+    if (silenced && retry(current, stopMicrophone = true)) return@whileLive
+    if (!silenced) heard(current)
+    issue(if (silenced) CaptureAudioIssue.SILENCED else CaptureAudioIssue.ACTIVE)
+    handle.sound(current.run.core, !silenced)
+  }
+
+  override fun onFailed(generation: Long, failure: NativeFailure) = whileLive(generation) { handle, current ->
+    if (retry(current, stopMicrophone = false)) return@whileLive
     release(stopMicrophone = false)
     failed(failure)
     issue(CaptureAudioIssue.SOURCE_ERROR)
-    handle.restoreFailed(core)
+    handle.restoreFailed(current.run.core)
   }
 
   override fun onEnded(generation: Long) = whileLive(generation) { _, _ -> release(stopMicrophone = false) }
 
-  override fun onTimebase(generation: Long, originNanos: Long) = whileLive(generation) { _, _ -> tap.onTimebase(generation, originNanos) }
+  override fun onTimebase(generation: Long, originNanos: Long) = whileLive(generation) { _, current -> tap.onTimebase(current.run.tap!!, originNanos) }
 
-  override fun onPcm(chunk: PcmChunk) = whileLive(chunk.generation) { _, _ -> tap.onPcm(chunk) }
-
-  /** The one place a generation of the source ends: the take hears it once, whoever ended it. Runs under the lock. */
-  private fun release(stopMicrophone: Boolean = true) {
-    val current = live ?: return
-    live = null
-    if (stopMicrophone) microphone.stop(current.audio)
-    tap.onSourceEnd(current.audio)
+  override fun onPcm(chunk: PcmChunk) = whileLive(chunk.generation) { _, current ->
+    val tapped = current.run.tap!!
+    tap.onPcm(if (chunk.generation == tapped) chunk else PcmChunk(tapped, chunk.spec, chunk.data, chunk.frames, chunk.firstFrame, chunk.ptsUs))
   }
 
+  /** Starts the next attempt of [run] and its wait for the first sound. Runs under the lock. */
+  private fun attempt(run: Run) {
+    val handle = input ?: return
+    run.attempt += 1
+    val audio = try { microphone.start(spec) } catch (error: Exception) {
+      if (run.attempt < MicrophoneRetry.ATTEMPTS) return wait(run)
+      end(run)
+      failed(NativeFailure(FailureSource.RECORDER, error.javaClass.name, 0L, error.message ?: error.toString()))
+      issue(CaptureAudioIssue.SOURCE_ERROR)
+      handle.restoreFailed(run.core)
+      return
+    }
+    if (run.tap == null) run.tap = audio
+    val current = Live(run, audio)
+    live = current
+    clock = timer.schedule(MicrophoneRetry.SOUND_WAIT_MS) {
+      synchronized(lock) {
+        if (live !== current || current.heard) return@synchronized
+        clock = null
+        if (retry(current, stopMicrophone = true)) return@synchronized
+        // The last attempt gave no sound in time: the same word as a source the system silenced.
+        issue(CaptureAudioIssue.SILENCED)
+        input?.sound(run.core, false)
+      }
+    }
+  }
+
+  /** The source of [current] failed before its first sound: true when another attempt follows after the pause. Runs under the lock. */
+  private fun retry(current: Live, stopMicrophone: Boolean): Boolean {
+    if (current.heard || current.run.attempt >= MicrophoneRetry.ATTEMPTS) return false
+    clock?.close()
+    clock = null
+    live = null
+    if (stopMicrophone) microphone.stop(current.audio)
+    wait(current.run)
+    return true
+  }
+
+  private fun wait(run: Run) {
+    pause = run
+    clock = timer.schedule(MicrophoneRetry.PAUSE_MS) {
+      synchronized(lock) {
+        if (closed || pause !== run) return@synchronized
+        pause = null
+        clock = null
+        attempt(run)
+      }
+    }
+  }
+
+  private fun heard(current: Live) {
+    current.heard = true
+    clock?.close()
+    clock = null
+  }
+
+  /** The one place a run of the source ends: the take hears it once, whoever ended it. Runs under the lock. */
+  private fun release(stopMicrophone: Boolean = true) {
+    clock?.close()
+    clock = null
+    val waiting = pause
+    pause = null
+    val current = live
+    live = null
+    if (current != null && stopMicrophone) microphone.stop(current.audio)
+    (current?.run ?: waiting)?.let(::end)
+  }
+
+  private fun end(run: Run) { run.tap?.let(tap::onSourceEnd) }
+
   // Every word of the microphone runs under the lock that stop and close take: nothing reaches the core or the take after its generation ended.
-  private fun whileLive(generation: Long, deliver: (AudioInputHandle, ULong) -> Unit) {
+  private fun whileLive(generation: Long, deliver: (AudioInputHandle, Live) -> Unit) {
     synchronized(lock) {
       val current = live?.takeIf { it.audio == generation } ?: return
-      deliver(input ?: return, current.core)
+      deliver(input ?: return, current)
     }
   }
 

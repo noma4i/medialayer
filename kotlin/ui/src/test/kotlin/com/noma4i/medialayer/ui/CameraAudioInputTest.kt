@@ -25,6 +25,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -69,7 +70,9 @@ class CameraAudioInputTest {
     core.close()
   }
 
-  private fun open() = CameraAudioInput(link, spec, tap, { issues.add(it) }) { made -> listener = made; microphone }
+  private val timer = ManualTimer()
+
+  private fun open() = CameraAudioInput(link, spec, tap, { issues.add(it) }, timer = timer) { made -> listener = made; microphone }
 
   private fun await(what: String, condition: () -> Boolean) = TestSignal.await(what, 5_000, condition)
 
@@ -139,18 +142,45 @@ class CameraAudioInputTest {
   }
 
   @Test
-  fun a_failed_microphone_reports_its_typed_failure_once_and_waits_for_a_cause_instead_of_looping() = runBlocking {
+  fun a_failed_microphone_retries_twice_then_reports_its_typed_failure_once_and_waits_for_a_cause_instead_of_looping() = runBlocking {
     val input = open()
     await("restore") { microphone.calls == listOf("start 1") }
     val dead = NativeFailure(FailureSource.RECORDER, "android.media.AudioRecord", 7L, "dead")
     val failures = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { Media.failures.take(1).toList() }
-    listener.onFailed(1, dead)
+    for (attempt in 1L..2L) {
+      listener.onFailed(attempt, dead)
+      await("pause after attempt $attempt") { timer.armed(MicrophoneRetry.PAUSE_MS) }
+      assertEquals("a retried failure is told to nobody", 1L, input.audioGeneration)
+      timer.fire(MicrophoneRetry.PAUSE_MS)
+      await("attempt ${attempt + 1}") { microphone.calls.last() == "start ${attempt + 1}" }
+    }
+    assertTrue(issues.isEmpty())
+    listener.onFailed(3, dead)
     assertEquals(listOf(dead), withTimeout(5_000) { failures.await() })
     assertEquals(listOf(CaptureAudioIssue.SOURCE_ERROR), issues.toList())
     assertEquals(null, input.audioGeneration)
-    listener.onFailed(1, NativeFailure(FailureSource.RECORDER, "android.media.AudioRecord", 7L, "again"))
+    listener.onFailed(3, NativeFailure(FailureSource.RECORDER, "android.media.AudioRecord", 7L, "again"))
     assertEquals("one failure, one outcome", listOf(CaptureAudioIssue.SOURCE_ERROR), issues.toList())
-    assertEquals(listOf("start 1"), microphone.calls.toList())
+    assertEquals(listOf("start 1", "start 2", "start 3"), microphone.calls.toList())
+    input.close()
+  }
+
+  @Test
+  fun inv_audio_114_the_pcm_of_a_retried_attempt_reaches_the_take_under_the_generation_of_the_first_and_a_stop_cancels_the_pause() {
+    val input = open()
+    await("restore") { microphone.calls == listOf("start 1") }
+    listener.onSilenced(1, true)
+    await("pause") { timer.armed(MicrophoneRetry.PAUSE_MS) }
+    assertEquals(1L, input.audioGeneration)
+    timer.fire(MicrophoneRetry.PAUSE_MS)
+    await("attempt 2") { microphone.calls == listOf("start 1", "stop 1", "start 2") }
+    listener.onLive(2)
+    listener.onPcm(chunk(2))
+    assertEquals(listOf("pcm 1"), tap.seen.toList())
+    assertEquals(listOf(CaptureAudioIssue.ACTIVE), issues.toList())
+    assertFalse(MicrophoneAvailability.NO_SOUND in availability)
+    listener.onSilenced(2, true)
+    await("a heard source is not retried") { issues.toList() == listOf(CaptureAudioIssue.ACTIVE, CaptureAudioIssue.SILENCED) }
     input.close()
   }
 

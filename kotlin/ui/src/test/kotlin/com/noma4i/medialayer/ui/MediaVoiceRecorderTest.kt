@@ -106,6 +106,7 @@ class MediaVoiceRecorderTest {
   private val microphone = Microphone()
   private val holds = SignallingList<String>()
   private val ticks = Ticks()
+  private val timer = ManualTimer()
   private val spec = PcmSpec(MediaRecorder.AudioSource.MIC, 44_100, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
 
   @After fun close() {
@@ -119,7 +120,7 @@ class MediaVoiceRecorderTest {
 
   private fun recorder(writer: Writer = Writer(), maxMs: Long = 60_000, minTakeMs: ULong = 0uL, screen: ScreenSwitch = ScreenSwitch(), clock: () -> ULong = ticks::read, reserve: suspend (Long) -> AutoCloseable = { AutoCloseable { holds.add("closed") } }): MediaVoiceRecorder {
     writer.clock = { clock().toLong() }
-    return MediaVoiceRecorder(SystemVoiceCapture(context, { link }, { writer }, reserve, { made, lease -> microphone.listener = made; microphone.lease = lease; microphone }), maxMs.toULong(), { link }, clock, 5, scope, minTakeMs, screen.awake())
+    return MediaVoiceRecorder(SystemVoiceCapture(context, { link }, { writer }, reserve, { made, lease -> microphone.listener = made; microphone.lease = lease; microphone }, timer), maxMs.toULong(), { link }, clock, 5, scope, minTakeMs, screen.awake())
   }
 
   private fun chunk(generation: Long, sample: Int = 0, frames: Int = 1): PcmChunk {
@@ -613,5 +614,81 @@ class MediaVoiceRecorderTest {
       if (state.outcome != null) { assertEquals("an outcome carries its own take, seed $seed", take, state.take); over = true }
     }
     assertEquals((rounds * blocks).toULong(), take)
+  }
+
+  private fun startsOf(): List<String> = microphone.calls.filter { it.startsWith("start") }
+
+  /** The source of attempt [attempt] is silenced before its first PCM: it stops and the next attempt starts after the pause. */
+  private fun silence(attempt: Long) {
+    await("attempt $attempt started") { microphone.calls.contains("start $attempt") }
+    microphone.listener!!.onSilenced(attempt, true)
+    await("attempt $attempt stopped and the pause armed") { microphone.calls.contains("stop $attempt") && timer.armed(MicrophoneRetry.PAUSE_MS) }
+    timer.fire(MicrophoneRetry.PAUSE_MS)
+  }
+
+  @Test
+  fun inv_audio_110_a_voice_start_silenced_twice_records_on_the_third_attempt_with_no_word_of_the_retries() = runBlocking<Unit> {
+    val recorder = recorder()
+    val target = file()
+    val start = scope.async { recorder.start(target) }
+    silence(1)
+    silence(2)
+    await("attempt 3 started") { microphone.calls.contains("start 3") }
+    microphone.listener!!.onLive(3)
+    microphone.listener!!.onPcm(chunk(3))
+    withTimeout(5_000) { start.await() }
+
+    assertEquals(listOf("start 1", "stop 1", "start 2", "stop 2", "start 3"), microphone.calls.toList())
+    assertEquals(VoicePhase.RECORDING, recorder.state.value.phase)
+    assertEquals("one take", 1, recorder.state.value.take.toInt())
+    assertFalse("the retries publish no NoSound", MicrophoneAvailability.NO_SOUND in availability)
+    ticks.now += 1_000
+    val recording = recorder.stop()
+    assertEquals(target, recording.file)
+  }
+
+  @Test
+  fun inv_audio_111_a_voice_start_silenced_on_all_three_attempts_is_microphone_silent_after_exactly_three_sources() = runBlocking<Unit> {
+    val recorder = recorder()
+    val target = file()
+    val start = scope.async { runCatching { recorder.start(target) } }
+    silence(1)
+    silence(2)
+    await("attempt 3 started") { microphone.calls.contains("start 3") }
+    microphone.listener!!.onSilenced(3, true)
+    val error = withTimeout(5_000) { start.await() }.exceptionOrNull() as MediaException.Voice
+
+    assertEquals(VoiceRefusal.MICROPHONE_SILENT, error.reason)
+    assertEquals(listOf("start 1", "start 2", "start 3"), startsOf())
+    assertFalse(target.exists())
+    assertFalse(timer.armed(MicrophoneRetry.PAUSE_MS))
+  }
+
+  @Test
+  fun inv_audio_112_a_voice_start_with_no_sound_in_time_retries_and_ends_microphone_silent_after_the_third_wait() = runBlocking<Unit> {
+    val recorder = recorder()
+    val start = scope.async { runCatching { recorder.start(file()) } }
+    for (attempt in 1L..3L) {
+      await("attempt $attempt waits for sound") { microphone.calls.contains("start $attempt") && timer.armed(MicrophoneRetry.SOUND_WAIT_MS) }
+      timer.fire(MicrophoneRetry.SOUND_WAIT_MS)
+      if (attempt < 3) {
+        await("pause after attempt $attempt") { timer.armed(MicrophoneRetry.PAUSE_MS) }
+        timer.fire(MicrophoneRetry.PAUSE_MS)
+      }
+    }
+    val error = withTimeout(5_000) { start.await() }.exceptionOrNull() as MediaException.Voice
+    assertEquals(VoiceRefusal.MICROPHONE_SILENT, error.reason)
+    assertEquals(listOf("start 1", "start 2", "start 3"), startsOf())
+  }
+
+  @Test
+  fun inv_audio_113_a_voice_start_in_a_call_is_refused_at_once_with_no_source_and_no_retry() = runBlocking<Unit> {
+    val call = link.call(MediaCallKind.Unmanaged)
+    val recorder = recorder()
+    val error = assertThrows(MediaException.Voice::class.java) { runBlocking { recorder.start(file()) } }
+    call.close()
+    assertEquals(VoiceRefusal.IN_CALL, error.reason)
+    assertTrue("no source started", startsOf().isEmpty())
+    assertFalse(timer.armed(MicrophoneRetry.PAUSE_MS) || timer.armed(MicrophoneRetry.SOUND_WAIT_MS))
   }
 }

@@ -221,3 +221,24 @@ internal class RecordingLayer(private val events: PlayerEvents = RecordingEvents
 
 
 internal fun kotlinx.coroutines.Deferred<MediaLayer>.blocking(): MediaLayer = kotlinx.coroutines.runBlocking { await() }.also { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle() }
+
+/** The clock of the microphone attempts in a test: nothing fires until the test fires it. */
+internal class ManualTimer : RetryTimer {
+  private class Pending(val delayMs: Long, val run: () -> Unit) { @Volatile var done = false }
+  private val pending = java.util.concurrent.CopyOnWriteArrayList<Pending>()
+
+  override fun schedule(delayMs: Long, run: () -> Unit): AutoCloseable {
+    val entry = Pending(delayMs, run)
+    pending.add(entry)
+    TestSignal.fire()
+    return AutoCloseable { entry.done = true }
+  }
+
+  fun armed(delayMs: Long): Boolean = pending.any { !it.done && it.delayMs == delayMs }
+
+  fun fire(delayMs: Long) {
+    val entry = pending.first { !it.done && it.delayMs == delayMs }
+    entry.done = true
+    entry.run()
+  }
+}
