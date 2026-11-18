@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A shown whole-strategy place is never failed by the full whole queue.
+
 ## 3.41.2 - 2026-11-18
 
 ### Fixed

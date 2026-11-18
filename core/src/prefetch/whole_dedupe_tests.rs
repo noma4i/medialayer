@@ -154,3 +154,69 @@ async fn inv_strategy_28_forgetting_a_loaded_source_allows_exactly_one_new_load_
     assert_eq!(rig.prefetcher.live_tasks(), 0);
     assert_eq!(fetches(&rig), 2);
 }
+
+fn item(index: usize) -> Source {
+    Source { url: format!("https://o.test/w{index}.jpg"), headers: HashMap::new(), kind: SourceKind::Image, strategy: CacheStrategy::Whole }
+}
+
+#[tokio::test]
+async fn inv_strategy_32_a_shown_place_is_never_refused_by_the_whole_entry_limit() {
+    let rig = rig_with(|limits| limits.dedupe_max_entries = 2);
+    for index in (0..6).chain(std::iter::once(9)) {
+        rig.loader.hang(&item(index).url);
+    }
+    let mut events = rig.prefetcher.settled();
+    for index in 0..6 {
+        rig.prefetcher.keep_shown_whole(item(index));
+    }
+    assert_eq!(rig.prefetcher.counters().failed, 0);
+    assert!(events.try_recv().is_err(), "a shown place got a settled outcome while its load is pending");
+    rig.prefetcher.hold_whole(1, item(9));
+    assert_eq!(rig.prefetcher.counters().failed, 1, "a preload hold past the limit is still one refusal");
+    assert!(matches!(next(&mut events).await.outcome, Outcome::Failed(_)));
+    for index in 0..6 {
+        rig.loader.release(&item(index).url);
+    }
+    for _ in 0..6 {
+        assert_eq!(next(&mut events).await.outcome, Outcome::Loaded);
+    }
+}
+
+#[tokio::test]
+async fn inv_strategy_32_random_holds_refuse_only_preload_past_the_limit() {
+    let mut dice = crate::seeded::Dice::new("inv_strategy_32_random_holds_refuse_only_preload_past_the_limit");
+    for _ in 0..20 {
+        let limit = dice.between(1, 4) as usize;
+        let rig = rig_with(|limits| limits.dedupe_max_entries = limit as u32);
+        rig.loader.hang_all();
+        let mut held: HashMap<usize, std::collections::HashSet<u64>> = HashMap::new();
+        let mut refused = 0u64;
+        for _ in 0..60 {
+            let index = dice.index(8);
+            match dice.below(3) {
+                0 => {
+                    rig.prefetcher.keep_shown_whole(item(index));
+                    held.entry(index).or_default().insert(0);
+                }
+                1 => {
+                    let owner = dice.between(1, 3);
+                    rig.prefetcher.hold_whole(owner, item(index));
+                    if !held.contains_key(&index) && held.len() >= limit {
+                        refused += 1;
+                    } else {
+                        held.entry(index).or_default().insert(owner);
+                    }
+                }
+                _ => {
+                    let owner = dice.between(1, 3);
+                    rig.prefetcher.release_owner(owner);
+                    held.retain(|_, owners| {
+                        owners.remove(&owner);
+                        !owners.is_empty()
+                    });
+                }
+            }
+        }
+        assert_eq!(rig.prefetcher.counters().failed, refused, "limit {limit}");
+    }
+}

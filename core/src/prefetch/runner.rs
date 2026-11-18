@@ -235,14 +235,23 @@ impl Prefetcher {
         }
     }
 
+    /// A place the user sees holds its source past the entry limit: the limit caps preload, a shown place never fails on it.
+    pub fn keep_shown_whole(&self, source: Source) {
+        self.admit_whole(WINDOW_OWNER, source, true);
+    }
+
     pub fn hold_whole(&self, owner: u64, source: Source) {
+        self.admit_whole(owner, source, false);
+    }
+
+    fn admit_whole(&self, owner: u64, source: Source, shown: bool) {
         if source.strategy != CacheStrategy::Whole {
             return;
         }
         let now = Duration::from_millis(self.shared.clock.now_ms());
         let key = self.shared.loader.cache_key(&source.url, &source.headers);
         let mut state = self.shared.state();
-        if !state.wholes.contains_key(&key) && state.wholes.len() >= self.shared.tuning().max_entries {
+        if !shown && !state.wholes.contains_key(&key) && state.wholes.len() >= self.shared.tuning().max_entries {
             state.ledger.counters.requested += 1;
             state.ledger.counters.failed += 1;
             drop(state);

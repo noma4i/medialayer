@@ -27,6 +27,12 @@ impl Stage {
         }
     }
 
+    fn declare_shown_whole(&self, source: &MediaItem) {
+        if source.strategy == CacheStrategy::Whole && source.is_remote() {
+            self.inner.prefetcher.keep_shown_whole(source.for_prefetch());
+        }
+    }
+
     pub fn hold_wholes<'a>(&self, owner: u64, sources: impl Iterator<Item = &'a MediaItem>) {
         for source in sources.filter(|source| source.is_remote()) {
             self.inner.prefetcher.hold_whole(owner, Source { strategy: CacheStrategy::Whole, ..source.for_prefetch() });
@@ -345,7 +351,7 @@ impl Stage {
             return;
         }
         let now = self.now();
-        self.declare_whole(std::iter::once(&source));
+        self.declare_shown_whole(&source);
         let declaration = std::sync::Arc::new(());
         let (state, commands) = {
             let mut state = self.state();
