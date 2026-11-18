@@ -41,7 +41,8 @@ class CameraTakesAudioTest {
     override fun confirm() { TestSignal.fire() }
     @Volatile var finishing = false
     override fun finish() { finishing = true; TestSignal.fire() }
-    override fun cancel() = Unit
+    @Volatile var cancelled = false
+    override fun cancel() { cancelled = true; TestSignal.fire() }
   }
 
   private class Microphone : CameraMicrophone {
@@ -182,7 +183,7 @@ class CameraTakesAudioTest {
     silence(2)
     TestSignal.await("attempt 3", 5_000) { source.starts.get() == 3L }
     microphone.onSilenced(3, true)
-    TestSignal.await("the silent take is asked to end", 5_000) { current.finishing }
+    TestSignal.await("the silent take that never started is thrown away", 5_000) { current.cancelled }
     current.listener.onCancelled(current.generation)
     val error = kotlinx.coroutines.withTimeout(5_000) { started.await() }.exceptionOrNull() as com.noma4i.medialayer.MediaException.Camera
     assertEquals(com.noma4i.medialayer.CameraRefusal.MICROPHONE_SILENT, error.reason)
