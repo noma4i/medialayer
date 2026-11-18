@@ -743,7 +743,7 @@ class MediaCameraTest {
     eventually("the camera closed and gave the microphone back") { microphones.live.isEmpty() && !rig.audio.isRecording }
 
     val seen = CopyOnWriteArrayList<com.noma4i.medialayer.MicrophoneAvailability>()
-    val watch = rig.audio.onAvailability { seen.add(it) }
+    val watch = rig.audio.onAvailability { seen.add(it); TestSignal.fire() }
     val voice = MediaVoiceRecorder(AppVoiceCapture({ rig.audio }, microphones), 60_000u, { rig.audio })
     val started = withTimeout(5_000) { runCatching { voice.start(File.createTempFile("voice", ".m4a")) } }
     assertNull("the voice right after the camera closed: ${started.exceptionOrNull()}", started.exceptionOrNull())
@@ -764,7 +764,7 @@ class MediaCameraTest {
     val microphones = AppMicrophones()
     val rig = rig(moment)
     val seen = CopyOnWriteArrayList<com.noma4i.medialayer.MicrophoneAvailability>()
-    val watch = rig.audio.onAvailability { seen.add(it) }
+    val watch = rig.audio.onAvailability { seen.add(it); TestSignal.fire() }
     rig.fixture.port.send(FocusSignal.OtherRecording(true))
     eventually("another app records") { seen.lastOrNull() == com.noma4i.medialayer.MicrophoneAvailability.OTHER_APP }
     val voice = MediaVoiceRecorder(AppVoiceCapture({ rig.audio }, microphones), 60_000u, { rig.audio })
