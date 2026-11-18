@@ -33,7 +33,7 @@ The library gives app tests a fake fetcher and a player snapshot. Add both only 
 
 ## MediaAudioDriver
 
-`MediaAudioDriver(media)` feeds a system audio event into the opened layer through the same inputs the system signals use. `VoiceState`, `CameraState` and `microphoneAvailability` run their real code: no real call, no muted microphone, no revoked permission needed on the device. The entry is closed to the app code: Swift marks it `package` (only `MediaLayerTesting` sees it), Kotlin marks it with an opt-in that is an error without `@OptIn(MediaLayerTestingApi::class)` and only `:testing` uses it. Use the driver in tests, not in app code.
+`MediaAudioDriver(media)` feeds a system audio event into the opened MediaLayer through the same inputs the system signals use. `VoiceState`, `CameraState` and `microphoneAvailability` run their real code: no real call, no muted microphone, no revoked permission needed on the device. The entry is closed to the app code: Swift marks it `package` (only `MediaLayerTesting` sees it), Kotlin marks it with an opt-in that is an error without `@OptIn(MediaLayerTestingApi::class)` and only `:testing` uses it. Use the driver in tests, not in app code.
 
 | Event | Swift | Kotlin | A live take ends with | `microphoneAvailability` |
 | ----- | ----- | ------ | ---------------- | ---------- |
@@ -44,7 +44,7 @@ The library gives app tests a fake fetcher and a player snapshot. Add both only 
 
 `revokePermission` and `grantPermission` change only the state of the library, not the system permission: the next real read of the system permission (foreground, the app asks again) puts the real value back. `endInterruption(shouldResume:)` carries the iOS resume hint; Android has no hint and the audio focus simply returns.
 
-Recipe: open the layer as the app does, start the take (`MediaVoiceRecorder.start`, `MediaCamera.startRecording`), call the driver, then read the state. A camera or voice take reports its refusal in `VoiceState.outcome` / `CameraState.outcome`, a start refused during the event throws the same refusal.
+Recipe: open MediaLayer as the app does, start the take (`MediaVoiceRecorder.start`, `MediaCamera.startRecording`), call the driver, then read the state. A camera or voice take reports its refusal in `VoiceState.outcome` / `CameraState.outcome`, a start refused during the event throws the same refusal.
 
 ```swift
 let driver = MediaAudioDriver(media)

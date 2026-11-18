@@ -2,20 +2,22 @@
 
 What an app changes when it moves to a new MediaLayer version. Each section names the removed API, its replacement, and what the app shows.
 
-## Unreleased
+## 3.41.0
 
-| Removed | Replacement |
-| ------- | ----------- |
-| `.id(playerRound)` or `key(generation)` to remount a failed place | `Media.retry(source)` |
-
-## 3.39.0: a signal for each change
-
-Every change that MediaLayer makes by itself reaches the app as a stream or a state on both platforms. The app keeps no playing flag, no take timer and no call state of its own, and polls nothing.
+An app that moves from 3.33.1 or earlier makes every change below at once. MediaLayer owns the audio session (iOS) and the audio focus (Android) for playback, recording and calls, and every change it makes by itself reaches the app as a stream or a state on both platforms. The app keeps no audio session, focus, call, microphone or playing state of its own, no take timer, and polls nothing.
 
 ### Remove
 
 | Removed | Replacement |
 | ------- | ----------- |
+| `.id(playerRound)` or `key(generation)` to remount a failed place | `Media.retry(source)` |
+| `MediaLayer.callHold()`, `MediaCallHold` | Nothing for a phone call or a call of another app: MediaLayer sees it. Your own call: `callAudio` |
+| `callAudio(managedBySystem:callUUID:)`, `liveChanges`, Kotlin `callAudio(managedBySystem)`, `live` | `callAudio(kind)` and its `states` |
+| `MediaAudioSession.activateRecording()`, `deactivateRecording()`, `holdRecording()`, `MediaRecordingHold` | Nothing: `MediaVoiceRecorder` and `MediaCamera` hold the microphone themselves |
+| Your own `AVAudioSession` category or `setActive` calls, your own `requestAudioFocus` | Nothing |
+| Your own mute on a lost headphone | Nothing: MediaLayer pauses the players and keeps `Media.muted` as the user set it |
+| Swift `SystemSignalNames(memoryWarning:background:foreground:outputLost:)` | `SystemSignalNames(memoryWarning:background:foreground:)`: MediaLayer watches the audio route itself |
+| Kotlin `MediaAudioSession`, `Media.audio`, the `audio` argument and property of `ExoPlayerSlotFactory` | `media.readVolume()` and `media.volumeRaises()` on the open MediaLayer. Swift keeps `Media.audio?.readVolume()` and `volumeRaises()` |
 | `playUrl(source)` that returned a `PlaybackRoute` | `playUrl(source)` returns a player of MediaLayer with `play()`, `pause()`, `seek(fraction)`, `release()`, `state` and `states`. An app with its own player reads the route with `readRoute(item)` |
 | `MediaError.InCall` thrown by `playUrl` during a call | `playUrl` gives the player, its `play()` sets `state.refused` to `inCall` |
 | Kotlin `MediaCallKind.Telecom` object | `MediaCallKind.Telecom(CallEndpointPort.of(callControlScope))` with the `CallControlScope` of `addCall` |
@@ -24,40 +26,16 @@ Every change that MediaLayer makes by itself reaches the app as a stream or a st
 | Your own "video plays" flag | `MediaVideo(onPlaybackChange:)` (Swift), `MediaVideo(onPlaybackChange = ...)` (Kotlin) with `PlaybackState` |
 | A wait on `stop()` or `stopRecording()` to learn how a take ended | `MediaVoiceRecorder.states` with `VoiceState.outcome`, `MediaCamera.states` (Kotlin `state`) with `CameraState.take` and `outcome`, the clip from `clip(take:)` |
 | `Media.failure` as the feed of an error tracker | `Media.failures`, one `NativeFailure` per error (see [Failures](failures.md)) |
-| Kotlin `microphoneAvailability` after close threw `IllegalStateException` | It gives a flow that ends at once, like Swift |
+| Kotlin `microphoneAvailability` after close threw an exception | It gives a flow that ends at once, like Swift |
 | Swift test doubles of `MediaPlaces` and `PlaceHandle` | `MediaPlaces` adds `readRoute(item:)` and its `playUrl(source:)` returns a player. `PlaceHandle` adds `subscribePlayback(listener:)` |
 
-### What the app shows
+### Microphone permission and the start of a voice take
 
-| Signal | What the app shows |
-| ------ | ------------------ |
-| `audio.isPlaying` false, `PlaybackState.reason` set | The Play button. One press plays again |
-| `PlaybackState.refused` is `inCall` or `recording` | The Play button stays, a hint that a call or a recording runs |
-| `VoiceState.outcome` is `refused(reason)` | "Recording stopped" with the reason, no file |
-| `VoiceState.outcome` is `recorded(path, durationMs)` without a `stop()` | The finished voice message at the longest length |
-| `CameraState.outcome` is `captured(take)` | The clip from `clip(take:)` |
-| `CameraState.outcome` is `refused(reason)` or `lost(reason)` | "Recording stopped" with the reason |
-| `CameraState.phase` is `closed` | The camera screen closes |
-| `MediaCallAudio.states` is `interrupted` | Call audio stopped until `live` |
-| `MediaCallAudio.route` is `speaker`, `receiver` or `failed` | The speaker button in the state the system applied |
-| `microphoneAvailability` not `available` | Record buttons disabled with the busy banner |
-| A `Media.failures` event | Nothing on screen, the event goes to the error tracker |
+MediaLayer never shows the system prompt for the microphone. Your app asks for the permission before it calls `MediaVoiceRecorder.start`, on iOS and on Android. Without the permission `start` throws `permissionDenied` and nothing is recorded.
 
-## 3.38.0: one audio owner
+`start` returns when the first live PCM of the take has arrived and its file is open. Before that no file exists and `phase` stays `idle`. Show the recording screen from the moment `start` returned, not from the call of `start`: a start that waits for sound can end with `refused(microphoneSilent)`, `refused(inCall)` or a cancel, and then it leaves no file. Kotlin `start` is a `suspend` function. A take that ends by `microphoneSilent` releases its microphone at once, and the next `start` opens a new one.
 
-MediaLayer owns the audio session (iOS) and the audio focus (Android) for playback, recording and calls. The app keeps no audio session, focus, call or microphone state of its own.
-
-### Remove
-
-| Removed | Replacement |
-| ------- | ----------- |
-| `MediaLayer.callHold()`, `MediaCallHold` | Nothing for a phone call or a call of another app: MediaLayer sees it. Your own call: `callAudio` |
-| `callAudio(managedBySystem:callUUID:)`, `liveChanges`, Kotlin `callAudio(managedBySystem)`, `live` | `callAudio(kind)` and its `states` |
-| `MediaAudioSession.holdRecording()`, `MediaRecordingHold` | Nothing: `MediaVoiceRecorder` and `MediaCamera` hold the microphone themselves |
-| Your own `AVAudioSession` category or `setActive` calls, your own `requestAudioFocus` | Nothing |
-| Your own mute on a lost headphone | Nothing: MediaLayer pauses the players and keeps `Media.muted` as the user set it |
-| Swift `SystemSignalNames(memoryWarning:background:foreground:outputLost:)` | `SystemSignalNames(memoryWarning:background:foreground:)`: MediaLayer watches the audio route itself |
-| Kotlin `MediaAudioSession`, `Media.audio`, the `audio` argument and property of `ExoPlayerSlotFactory` | `media.readVolume()` and `media.volumeRaises()` on the open MediaLayer. Swift keeps `Media.audio?.readVolume()` and `volumeRaises()` |
+`MediaCamera` with a sound profile follows the same rule: its take shows `recording` only after the microphone sound flows.
 
 ### Calls
 
@@ -92,11 +70,14 @@ Loss of a private output pauses playback at any time. Loss means the previous ro
 | Value | What the app shows |
 | ----- | ------------------ |
 | `available` | Record buttons enabled |
+| `noSound` | A started microphone has not given sound yet or went silent: a hint, the take refuses by itself with `microphoneSilent` |
 | `ownCall` | Record buttons disabled, your call screen is visible |
 | `externalCall` | A banner: the microphone is busy with a call |
 | `otherApp` | A banner: another app uses the microphone, or the system interrupted the audio, took the focus or refused the session |
-| `permissionNotAsked` | Your own explanation, then the system permission request (iOS only, see below) |
-| `permissionDenied` | A prompt that opens the settings |
+| `permissionNotAsked` | Your own explanation, then the system permission request. Only iOS gives it, Android cannot tell it from a refusal |
+| `permissionDenied` | The permission was asked and refused: a prompt that opens the settings. Android gives it also for a permission that was never asked |
+
+An app that read one value for "no permission" now handles `permissionNotAsked` apart: it asks, `permissionDenied` sends to the settings. A `when` over `MicrophoneAvailability` in Kotlin and a `switch` in Swift need the two new cases `noSound` and `permissionNotAsked`.
 
 ```swift
 for await value in media.microphoneAvailability { recordEnabled = value == .available }
@@ -112,11 +93,39 @@ media.microphoneAvailability.collect { recordEnabled = it == MicrophoneAvailabil
 
 | Refusal | When | What the app shows |
 | ------- | ---- | ------------------ |
-| `interrupted` | The system interrupted the audio (an alarm, Siri, a call screen) during the recording, or before it started | "Recording stopped", the user records again |
-| `microphoneSilent` | The microphone gave no sound when a video take started, or its sound stopped during the take | "No sound from the microphone", the user records again |
+| `interrupted` | The system interrupted the audio (an alarm, Siri, a call screen) during the recording, or before it started, or MediaLayer closed or the screen left mid-take | "Recording stopped", the user records again |
+| `microphoneSilent` | The microphone gave no sound when a take started, or its sound stopped during the take | "No sound from the microphone", the user records again |
 | `inCall` | A call runs | The call banner |
-| `microphoneBusy` | The system refused the recording session, or another app records | The busy banner |
+| `microphoneBusy` | The system refused the recording session, another app records, or a second `start` came during a take | The busy banner |
+
+A second `start` during a take is refused as `MicrophoneBusy` and a `stop` without a take as `Empty`, the running take is untouched. A refusal at the end of a take is an outcome in `VoiceState.outcome`, not a `Media.failures` event.
+
+### Camera clips
+
+`CameraState.outcome` `captured(take)` keeps its clip until the app takes it with `clip(take:)` (Swift) or `clip(take)` (Kotlin) or the camera closes. The next take, a lens change and leaving the screen do not delete it. The clip carries the lens of its take, not the lens of the camera now. Kotlin `clip(take)` can be called from a frame analyzer.
+
+A stop that waits when the camera unbinds or MediaLayer closes ends with `refused(interrupted)`, and a clip delivered before the close is still given. Cancelling `startRecording` cancels its own take on both platforms.
 
 ### Playback
 
 Recording pauses every player, and the end of a recording plays nothing back. An interruption that the system allows to resume plays the same places again. A lost headphone or Bluetooth output pauses the players. In all other cases a place plays after its owner declares play again.
+
+### What the app shows
+
+| Signal | What the app shows |
+| ------ | ------------------ |
+| `audio.isPlaying` false, `PlaybackState.reason` set | The Play button. One press plays again |
+| `PlaybackState.refused` is `inCall` or `recording` | The Play button stays, a hint that a call or a recording runs |
+| `VoiceState.outcome` is `refused(reason)` | "Recording stopped" with the reason, no file |
+| `VoiceState.outcome` is `recorded(path, durationMs)` without a `stop()` | The finished voice message at the longest length |
+| `CameraState.outcome` is `captured(take)` | The clip from `clip(take:)` |
+| `CameraState.outcome` is `refused(reason)` or `lost(reason)` | "Recording stopped" with the reason |
+| `CameraState.phase` is `closed` | The camera screen closes |
+| `MediaCallAudio.states` is `interrupted` | Call audio stopped until `live` |
+| `MediaCallAudio.route` is `speaker`, `receiver` or `failed` | The speaker button in the state the system applied |
+| `microphoneAvailability` not `available` | Record buttons disabled with the busy banner |
+| A `Media.failures` event | Nothing on screen, the event goes to the error tracker |
+
+### Tests
+
+`MediaAudioDriver` of the testing modules (Swift `MediaLayerTesting`, Kotlin `:testing`) drives a call, a silent microphone, an interruption and a revoked permission through the real audio link, so a test needs no real call on a device. See [Testing your app](testing-your-app.md#mediaaudiodriver).

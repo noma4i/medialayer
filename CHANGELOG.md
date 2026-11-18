@@ -4,7 +4,7 @@
 
 ### Added
 
-- `MediaAudioDriver` in the testing modules drives call, silence, interruption and revoke through the real audio link.
+- `MediaAudioDriver` in the testing modules drives call, silence, interruption and revoke on the real link.
 - Add `NoSound` to microphone availability.
 - Add `permissionNotAsked` to microphone availability; `permissionDenied` now means asked and refused.
 - `Media.retry(source)` reloads a failed source without remounting its places.
@@ -18,15 +18,13 @@
 - `CameraState` gains `take` and `outcome`, and `CameraPhase` gains `closed`.
 - `MediaCallAudio.route` shows the applied call output or its failure.
 - `Media.failures` streams every native failure with its source, domain and code.
-- The screen stays on while a `MediaVideo` or `MediaAudio` place plays (`PlaybackState.playing`) and is released when the last playing place of the window pauses, ends or leaves.
+- The screen stays on while sound plays, a camera previews or a call runs.
 - One core rule owns the audio session, audio focus, recording and calls on both platforms.
 - `callAudio(kind)` takes a CallKit, Telecom or unmanaged call with call states.
 - `microphoneAvailability` names who holds the microphone, including calls of other apps.
 - `VoiceRefusal` and `CameraRefusal` gain `interrupted` and `microphoneSilent`.
 - A video take with sound starts only while the microphone sound flows.
-- `MediaLayer.callAudio` holds a call and its audio session, with speaker and CallKit control.
 - `CameraRefusal.microphoneBusy` names a camera refusal caused by a busy microphone.
-- `MediaAudioSession.holdRecording()` gives a recording hold that its owner releases.
 - The trace writes audio session steps, recording holders and camera audio tracks.
 
 ### Changed
@@ -63,48 +61,49 @@
 - Audio session, focus and speaker errors reach `Media.failure` with their system domain and code.
 - The audio session follows the recording and playback demand after any system event.
 - Internal test hooks do no work in release builds.
-- The outcome of a recording is given once; a second stop is refused until the next start.
-- A recording is turned upright while the camera is stopping, and a cancel then stops the conversion.
+- A recording outcome is given once, a second stop is refused until the next start.
+- A recording is turned upright while stopping, and a cancel stops the conversion.
 - A recorded video comes out upright in its pixels, with no rotation tag.
 
 ### Fixed
 
 - Android camera: a cancelled `takePhoto` no longer leaves its photo file behind.
 - Android camera: closing the layer now stops the camera thread too.
-- Android camera: `clip(take)` no longer waits on the camera queue, so a frame analyzer can call it.
-- Android camera: a clip stays for `clip(take)` until the layer closes, and keeps its take's lens.
+- Android camera: `clip(take)` no longer waits on the camera queue.
+- Android camera: a clip stays until `clip(take)` or close.
 - Android recording admission reads the microphone permission of that moment.
 - iOS availability follows the first grant of the system prompt.
 - Android camera and voice together no longer read as another app recording.
 - `microphoneAvailability` read after close ends at once on both platforms.
 - iOS animated frames and still images now share one `imageMemoryBytes` budget.
 - iOS image playback rate ignores infinite, NaN and non-positive values.
-- Window lists from the FFI are shared with the stage instead of copied on each replace.
+- FFI window lists are shared with the stage instead of copied per replace.
 - Replacing an FFI window no longer re-parses or re-declares items it already took.
 - The external image loader timeout now covers the cache write and flush.
 - A slow `FailureListener` no longer blocks the producer or other listeners.
 - Camera: leaving the screen mid-take now gives the take an `interrupted` outcome.
 - iOS camera: the session memory goes back only after the hardware stopped.
 - iOS camera: a cancelled `startRecording` cancels its own take.
-- iOS camera: a rejected torch or zoom drops only its own field, not the whole step.
+- iOS camera: a rejected torch or zoom drops only its own field.
 - iOS camera: a new `states` subscription of a closed camera ends at once.
 - iOS camera: the microphone input opens only after the recording is admitted.
 - iOS camera: a cancelled `uprightVideo` no longer waits for a platform callback.
-- iOS camera: a clip stays until `clip(take)` or close; a waiting stop gets the real end.
-- Camera: a clip keeps the lens of its take, not the lens of the next session.
+- iOS camera: a clip stays until `clip(take)` or close.
+- Camera: a clip keeps the lens of its take.
+- Camera: a stop waiting at close or unbind ends as `interrupted`.
 - Camera: `stopRecording` during a starting take now ends it instead of being lost.
 - Camera: torch and zoom commands reach the platform only after the camera opened.
 - The Android camera take ends at its last video frame and cuts the sound there.
 - A codec that throws inside an Android camera take callback now fails the take cleanly.
 - A stopped microphone ends the sound of an Android camera take instead of hanging it.
 - A corrupt WebP with chunk size minus eight no longer loops forever.
-- A voice outcome is published with the number of its own take, not of the next one.
+- A voice outcome carries the number of its own take, not the next.
 - The voice length and `tooShort` count from the first microphone sample, not the hardware start.
-- A second voice start is refused as `MicrophoneBusy` and a stop without a take as `Empty` on both platforms.
+- A second voice start is `MicrophoneBusy` and a stop without a take is `Empty`.
 - iOS no longer reports voice refusals as native failures in `Media.failures`.
 - The microphone is released at once after `microphoneSilent`; the next start opens a new one.
 - Android voice recording no longer fails when the encoder has no free input.
-- iOS voice recording waits for a busy writer instead of failing, and fails when the capture drops a buffer.
+- iOS voice recording waits for a busy writer and fails on a dropped buffer.
 - iOS voice length comes from the written audio, like on Android.
 - Android voice recording releases the encoder when it fails to configure or start.
 - Android voice recording continues when the encoder announces the same output format again.
@@ -113,10 +112,9 @@
 - Android camera video uses AAC-LC when no encoder declares the camera AAC profile.
 - A lens change on a failed camera starts a new attempt with that lens.
 - Android camera no longer reports a closed capture memory after the session ends.
-- Response bodies reach the core in pieces of up to 64 KiB instead of single network reads.
-- An Android camera switched with the flash on becomes ready and lights the torch on the new lens.
-- A place that starts playing while a camera preview or recording holds the session plays at once.
-- The screen stays on while a place plays with sound, a voice take, a camera preview or a call runs.
+- Response bodies reach the core in pieces of up to 64 KiB.
+- An Android camera switched with the flash on becomes ready and lights the torch.
+- A place starting while a camera holds the audio session plays at once.
 - `isPlaying` shows paused after the library pauses a place.
 - A muted or buffering place pauses on a call, recording or interruption.
 - A take finished by the duration limit reaches the app without a stop.
@@ -130,7 +128,7 @@
 - Sound returns after a recording, a call or an interruption without an end.
 - The first video note after a cold start records its sound or fails.
 - An own Android call is not counted as an external call.
-- A refused or delayed audio request recovers on a new sound, recording, call or volume reader.
+- A refused or delayed audio request recovers on any new demand.
 - A change of audio demand during a pending system request is not lost.
 - A switch from Bluetooth A2DP to HFP does not count as a lost output.
 - The camera releases its microphone and memory holds when its start is cancelled.
@@ -138,9 +136,8 @@
 - Only a lost headphone, Bluetooth or other private output turns the global mute on.
 - Sound comes back after a recording, an interruption or a media services reset.
 - An Android audio focus taken by the system is requested again.
-- A second voice recording start during the first is refused.
 - The iOS camera preview keeps its frames when a recording starts or stops.
-- A lens change asked while the camera stops or takes a photo is applied when that ends.
+- A lens change asked while the camera stops or shoots is applied after.
 - A camera and a voice recorder can hold the recording audio together.
 - An iOS voice recording stopped right after its limit gives its file and ends once.
 - An Android layer released twice reports no receiver error.
@@ -150,20 +147,19 @@
 - A cancelled or cut block download keeps its bytes and resumes from where it stopped.
 - A pending playback retry survives a stall or a pause of the same video.
 - A source evicted from the cache is prefetched again when it re-enters the window.
-- An Android video never shows its old cover after its cover changes under the same url.
+- An Android video never shows an old cover after the cover changes.
 - A one-shot video place ends once even when a window loaded the clip first.
 - A fixed crop frame turned right and then left returns to the frame it had.
 - Playback after a voice recording starts in the playback audio session on iOS.
-- An Android image is drawn only in the frame where its content gets the ready state.
+- An Android image is drawn only in the frame it becomes ready.
 - An Android video starts no cover request while it is off screen.
 
 ### Removed
 
 - `callHold()`, replaced by external call detection and `callAudio(kind)`.
 - `callAudio(managedBySystem:)`, `liveChanges` and `live`, replaced by `callAudio(kind)` and `states`.
-- `MediaAudioSession.holdRecording()`, recorders hold the microphone themselves.
+- `MediaAudioSession.activateRecording()`, `deactivateRecording()` and `holdRecording()`, recorders hold the microphone themselves.
 - `SystemSignalNames.outputLost`.
-- `MediaAudioSession.activateRecording()` and `deactivateRecording()`, replaced by `holdRecording()`.
 
 ## 3.33.1 - 2026-11-14
 
