@@ -211,7 +211,7 @@ fn inv_audio_21_every_loss_of_the_microphone_revokes_the_running_recording_with_
         (I::PhoneCall { active: true }, vec![revoke(RecordingRefusal::InCall), A::ForgetPaused, A::CallHold { on: true }, DEACTIVATE, available(MicrophoneAvailability::ExternalCall)]),
         (I::ObservedCalls { uuids: vec!["cellular".into()] }, vec![revoke(RecordingRefusal::InCall), A::ForgetPaused, A::CallHold { on: true }, DEACTIVATE, available(MicrophoneAvailability::ExternalCall)]),
         (I::CallStarted { id: 7, kind: CallKind::Unmanaged, speaker: false }, vec![revoke(RecordingRefusal::InCall), A::ForgetPaused, A::CallHold { on: true }, apply(SessionWant::Call { kind: CallKind::Unmanaged, speaker: false }), A::CallState { id: 7, state: CallState::Connecting }, available(MicrophoneAvailability::OwnCall)]),
-        (I::Permission { granted: false }, vec![revoke(RecordingRefusal::PermissionDenied), A::ForgetPaused, DEACTIVATE, available(MicrophoneAvailability::PermissionDenied)]),
+        (I::Permission { state: MicrophonePermission::Denied }, vec![revoke(RecordingRefusal::PermissionDenied), A::ForgetPaused, DEACTIVATE, available(MicrophoneAvailability::PermissionDenied)]),
         (I::MediaReset, vec![revoke(RecordingRefusal::Interrupted), A::PauseAll { reason: PauseReason::MediaReset }, A::ForgetPaused]),
     ];
     for (input, expected) in cases {
@@ -307,9 +307,13 @@ fn inv_audio_27_a_media_reset_drops_every_player_and_waits_for_a_new_intent() {
 #[test]
 fn inv_audio_28_availability_is_one_value_derived_from_every_input() {
     let mut world = World::new();
-    assert_eq!(world.send(I::Permission { granted: false }), vec![available(MicrophoneAvailability::PermissionDenied)]);
+    assert_eq!(world.send(I::Permission { state: MicrophonePermission::Denied }), vec![available(MicrophoneAvailability::PermissionDenied)]);
     assert_eq!(world.send(I::Capture { id: 1, kind: RecordingKind::Voice }), vec![A::Refuse { id: 1, reason: RecordingRefusal::PermissionDenied }]);
-    assert_eq!(world.send(I::Permission { granted: true }), vec![available(MicrophoneAvailability::Available)]);
+    assert_eq!(world.send(I::Permission { state: MicrophonePermission::Granted }), vec![available(MicrophoneAvailability::Available)]);
+    assert_eq!(world.send(I::Permission { state: MicrophonePermission::NotAsked }), vec![available(MicrophoneAvailability::PermissionNotAsked)], "never asked is its own value");
+    assert_eq!(world.send(I::Capture { id: 2, kind: RecordingKind::Voice }), vec![A::Refuse { id: 2, reason: RecordingRefusal::PermissionDenied }]);
+    assert_eq!(world.send(I::Permission { state: MicrophonePermission::Denied }), vec![available(MicrophoneAvailability::PermissionDenied)], "asked and refused differs from never asked");
+    assert_eq!(world.send(I::Permission { state: MicrophonePermission::Granted }), vec![available(MicrophoneAvailability::Available)]);
     assert_eq!(world.send(I::OtherRecording { active: true }), vec![available(MicrophoneAvailability::OtherApp)]);
     assert_eq!(world.send(I::Capture { id: 2, kind: RecordingKind::Voice }), vec![A::Refuse { id: 2, reason: RecordingRefusal::MicrophoneBusy }]);
     assert_eq!(world.send(I::OtherRecording { active: false }), vec![available(MicrophoneAvailability::Available)]);
@@ -317,7 +321,7 @@ fn inv_audio_28_availability_is_one_value_derived_from_every_input() {
     assert_eq!(world.settle(I::CallStarted { id: 7, kind: CallKind::Unmanaged, speaker: false }), vec![A::CallHold { on: true }, apply(call), A::CallState { id: 7, state: CallState::Connecting }, available(MicrophoneAvailability::OwnCall), A::CallState { id: 7, state: CallState::Live }]);
     assert_eq!(world.send(I::PhoneCall { active: true }), vec![A::CallState { id: 7, state: CallState::Interrupted }], "an external call interrupts the own call, which stays OwnCall");
     assert_eq!(world.settle(I::CallEnded { id: 7 }), vec![DEACTIVATE, A::CallState { id: 7, state: CallState::Ended }, available(MicrophoneAvailability::ExternalCall)]);
-    assert_eq!(world.send(I::Permission { granted: true }), vec![], "an unchanged value is not sent again");
+    assert_eq!(world.send(I::Permission { state: MicrophonePermission::Granted }), vec![], "an unchanged value is not sent again");
 }
 
 #[test]
@@ -367,7 +371,7 @@ fn random_input(dice: &mut crate::seeded::Dice, next_id: &mut u64, started: &[u6
         18 => I::ObservedCalls { uuids: if dice.percent(50) { vec![] } else { vec![format!("own{}", dice.between(1, (*next_id).max(1))), "cellular".into()][..1 + dice.index(2)].to_vec() } },
         19 => I::PhoneCall { active: dice.percent(40) },
         20 => I::CommunicationMode { active: dice.percent(40) },
-        21 => I::Permission { granted: dice.percent(80) },
+        21 => I::Permission { state: if dice.percent(80) { MicrophonePermission::Granted } else if dice.percent(50) { MicrophonePermission::NotAsked } else { MicrophonePermission::Denied } },
         22 => I::OtherRecording { active: dice.percent(30) },
         23 => I::Silenced { id: dice.between(1, (*next_id).max(1)) },
         24 => I::Noisy,
@@ -499,7 +503,7 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
             let running: std::collections::BTreeSet<_> = admitted.iter().map(|id| format!("{:?}", kinds[id])).collect();
             assert_eq!(running.len(), admitted.len(), "two recordings of one kind run: {admitted:?} {actions:?}");
         }
-        let mut ending = vec![I::PhoneCall { active: false }, I::CommunicationMode { active: false }, I::ObservedCalls { uuids: vec![] }, I::OtherRecording { active: false }, I::Permission { granted: true }];
+        let mut ending = vec![I::PhoneCall { active: false }, I::CommunicationMode { active: false }, I::ObservedCalls { uuids: vec![] }, I::OtherRecording { active: false }, I::Permission { state: MicrophonePermission::Granted }];
         ending.extend(started.iter().map(|id| I::CallEnded { id: *id }));
         ending.extend((1..=next_id).map(|id| I::CaptureEnded { id }));
         ending.extend((0..3).map(|slot| I::Audible { slot, on: false }));

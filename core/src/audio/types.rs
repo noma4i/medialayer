@@ -22,8 +22,15 @@ pub enum MicrophoneAvailability {
     OwnCall,
     ExternalCall,
     OtherApp,
+    PermissionNotAsked,
     PermissionDenied,
     NoSound,
+}
+#[derive(uniffi::Enum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MicrophonePermission {
+    Granted,
+    NotAsked,
+    Denied,
 }
 #[derive(uniffi::Enum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordingRefusal {
@@ -162,7 +169,7 @@ pub enum AudioInput {
         active: bool,
     },
     Permission {
-        granted: bool,
+        state: MicrophonePermission,
     },
     OtherRecording {
         active: bool,

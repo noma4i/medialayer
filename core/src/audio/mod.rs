@@ -41,7 +41,7 @@ pub struct AudioOwner {
     observed: BTreeSet<String>,
     phone: bool,
     comm_mode: bool,
-    permission: bool,
+    permission: MicrophonePermission,
     other_recording: bool,
     inputs: Vec<Input>,
     wake: bool,
@@ -73,7 +73,7 @@ impl AudioOwner {
             observed: BTreeSet::new(),
             phone: false,
             comm_mode: false,
-            permission: true,
+            permission: MicrophonePermission::Granted,
             other_recording: false,
             inputs: Vec::new(),
             wake: false,
@@ -113,7 +113,9 @@ impl AudioOwner {
             })
     }
     fn availability(&self) -> MicrophoneAvailability {
-        if !self.permission {
+        if self.permission == MicrophonePermission::NotAsked {
+            MicrophoneAvailability::PermissionNotAsked
+        } else if self.permission == MicrophonePermission::Denied {
             MicrophoneAvailability::PermissionDenied
         } else if !self.calls.is_empty() {
             MicrophoneAvailability::OwnCall
@@ -264,7 +266,7 @@ impl AudioOwner {
                 self.system_event(SystemEvent::Audible(on), &mut actions);
             }
             I::Capture { id, kind } => {
-                let refusal = if !self.permission {
+                let refusal = if self.permission != MicrophonePermission::Granted {
                     Some(RecordingRefusal::PermissionDenied)
                 } else if !self.calls.is_empty() || self.external() {
                     Some(RecordingRefusal::InCall)
@@ -446,9 +448,9 @@ impl AudioOwner {
                     self.revoke(RecordingRefusal::InCall, &mut actions);
                 }
             }
-            I::Permission { granted } => {
-                self.permission = granted;
-                if !granted {
+            I::Permission { state } => {
+                self.permission = state;
+                if state != MicrophonePermission::Granted {
                     self.revoke(RecordingRefusal::PermissionDenied, &mut actions);
                 }
             }
@@ -516,7 +518,7 @@ impl AudioOwner {
             self.hold = hold;
             actions.push(AudioAction::CallHold { on: hold });
         }
-        let open = self.permission && self.foreground && !hold && !self.other_recording && !self.system_blocked();
+        let open = self.permission == MicrophonePermission::Granted && self.foreground && !hold && !self.other_recording && !self.system_blocked();
         let held = match session::held(&self.session) { Some(SessionWant::Recording { kind }) => Some(kind), _ => None };
         let woken = self.wake;
         for input in &mut self.inputs {
