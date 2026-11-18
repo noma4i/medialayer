@@ -58,7 +58,7 @@ fun MomentCamera() {
 ## What a command gives
 
 - `takePhoto` gives an upright JPEG file (the EXIF turn is applied, the mirror is not), its size after the turn and the side it was taken from. Mirror a front photo with `prepareImage(mirror:)`.
-- `startRecording` returns after the hardware started. `stopRecording` gives the clip (file, length, frame as the screen shows it). A recording that is too short, failed or thrown away is a `MediaError.Camera` with the reason. A recording that is too short also carries its length in `recordedMs` (milliseconds, `nil` for every other reason), and `CameraState.refusedMs` holds it until the next recording starts.
+- `startRecording` returns when the take is recording: for a profile with sound only after the first live sound of the microphone, at the same moment `CameraState` turns `recording` (Swift and Kotlin). Show the recording UI from either; without sound the call ends with the refusal, never a silent take. `stopRecording` gives the clip (file, length, frame as the screen shows it). A recording that is too short, failed or thrown away is a `MediaError.Camera` with the reason. A recording that is too short also carries its length in `recordedMs` (milliseconds, `nil` for every other reason), and `CameraState.refusedMs` holds it until the next recording starts.
   The recording ends by itself at the limit, and `stopRecording` then gives that clip.
 - A lens change during a recording throws the recording away and binds the other side. Leaving the screen during a recording throws it away and deletes its file.
 - Each recording is a take with a number, `CameraState.take`. `CameraState.outcome` tells how the last take ended, also when nobody called `stopRecording`:
