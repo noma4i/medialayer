@@ -11,18 +11,22 @@ public struct SystemSignalNames {
   public var memoryWarning: Notification.Name
   public var background: Notification.Name
   public var foreground: Notification.Name
+  /// The app became active again, also after a system prompt that never left the foreground.
+  public var active: Notification.Name?
 
-  public init(memoryWarning: Notification.Name, background: Notification.Name, foreground: Notification.Name) {
+  public init(memoryWarning: Notification.Name, background: Notification.Name, foreground: Notification.Name, active: Notification.Name? = nil) {
     self.memoryWarning = memoryWarning
     self.background = background
     self.foreground = foreground
+    self.active = active
   }
 
   #if canImport(UIKit)
   public static let system = SystemSignalNames(
     memoryWarning: UIApplication.didReceiveMemoryWarningNotification,
     background: UIApplication.didEnterBackgroundNotification,
-    foreground: UIApplication.willEnterForegroundNotification
+    foreground: UIApplication.willEnterForegroundNotification,
+    active: UIApplication.didBecomeActiveNotification
   )
   #else
   public static let system = SystemSignalNames(
@@ -43,11 +47,14 @@ final class SystemSignals {
     self.center = center
     self.audio = audio
     self.onRelease = onRelease
+    let refresh = names.active.map { name in
+      center.addObserver(forName: name, object: nil, queue: nil) { _ in audio?.refreshPermission() }
+    }
     tokens = [
       center.addObserver(forName: names.memoryWarning, object: nil, queue: nil) { _ in events.memoryWarning(level: .critical) },
       center.addObserver(forName: names.background, object: nil, queue: nil) { _ in events.background(); audio?.foreground(false) },
       center.addObserver(forName: names.foreground, object: nil, queue: nil) { _ in events.foreground(); audio?.foreground(true) }
-    ]
+    ] + (refresh.map { [$0] } ?? [])
   }
 
   deinit {

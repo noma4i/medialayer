@@ -91,7 +91,7 @@ final class FakeCallObserver: CallObserverPort, @unchecked Sendable {
 }
 
 struct GrantedMicrophone: MicrophonePermissionPort {
-  func granted() -> Bool { true }
+  func state() -> MicrophonePermission { .granted }
 }
 
 final class AudioRig: @unchecked Sendable {
@@ -103,7 +103,7 @@ final class AudioRig: @unchecked Sendable {
   private var seen: [MicrophoneAvailability] = []
   private var follower: Task<Void, Never>?
 
-  init(session: FakeSessionPort = FakeSessionPort()) throws {
+  init(session: FakeSessionPort = FakeSessionPort(), microphone: any MicrophonePermissionPort = GrantedMicrophone()) throws {
     self.session = session
     core = try MediaLayer.open(config: OpenConfig(
       dir: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path,
@@ -111,7 +111,7 @@ final class AudioRig: @unchecked Sendable {
       device: DeviceMemory(totalMb: 4096, heapClassMb: nil, lowRam: false),
       defaults: defaultLimits(), pool: defaultPoolSettings(), audioFocus: .exclusive
     ))
-    link = AudioLink(core: core, ports: AudioPorts(session: session, calls: calls, permission: GrantedMicrophone()))
+    link = AudioLink(core: core, ports: AudioPorts(session: session, calls: calls, permission: microphone))
     let stream = link.availability
     follower = Task { [weak self] in
       for await value in stream {
@@ -136,6 +136,41 @@ private func plan(_ category: AVAudioSession.Category, _ mode: AVAudioSession.Mo
 
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct AudioLinkTests {
+  @Test
+  func inv_audio_75_the_first_grant_of_the_system_prompt_reaches_the_availability_when_the_app_becomes_active() async throws {
+    let microphone = SwitchMicrophone(state: .notAsked)
+    let rig = try AudioRig(microphone: microphone)
+    await eventually("never asked at open") { rig.availability.last == .permissionNotAsked }
+    let center = NotificationCenter()
+    let active = Notification.Name("test.active")
+    let signals = SystemSignals(
+      events: rig.core.playerEvents(), center: center,
+      names: SystemSignalNames(memoryWarning: Notification.Name("test.memory"), background: Notification.Name("test.background"), foreground: Notification.Name("test.foreground"), active: active),
+      audio: rig.link
+    )
+    microphone.setSilently(.denied)
+    center.post(name: active, object: nil)
+    await eventually("refused by the prompt") { rig.availability.last == .permissionDenied }
+    microphone.setSilently(.granted)
+    center.post(name: active, object: nil)
+    await eventually("granted by the prompt") { rig.availability.last == .available }
+    #expect(rig.availability == [.permissionNotAsked, .permissionDenied, .available])
+    signals.stop()
+  }
+
+  @Test
+  func inv_audio_78_a_permission_never_asked_is_not_a_denied_one() async throws {
+    let microphone = SwitchMicrophone(state: .notAsked)
+    let rig = try AudioRig(microphone: microphone)
+    await eventually("never asked") { rig.availability.last == .permissionNotAsked }
+    guard case .failure = await rig.link.admit(.voice) else { Issue.record("a never asked permission admitted a recording"); return }
+    microphone.set(.denied)
+    await eventually("denied") { rig.availability.last == .permissionDenied }
+    microphone.set(.granted)
+    await eventually("granted") { rig.availability.last == .available }
+    #expect(rig.availability == [.permissionNotAsked, .permissionDenied, .available])
+  }
+
   @Test
   func inv_audio_34_every_wish_of_the_core_has_one_session_plan() {
     let table: [(SessionWant, SessionPlan)] = [

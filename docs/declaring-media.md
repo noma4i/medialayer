@@ -656,13 +656,14 @@ Swift exposes an `AsyncStream<MicrophoneAvailability>` and Kotlin a `Flow<Microp
 
 | Value | When |
 | ----- | ---- |
-| `permissionDenied` | The microphone permission is not granted. Android sees a change at once, iOS reads the permission on open and on each return to the foreground |
+| `permissionNotAsked` | The system has not asked for the microphone yet. iOS only (`undetermined`): show your own explanation, then request the permission. Android cannot tell this state from a refusal and gives `permissionDenied` |
+| `permissionDenied` | The microphone permission was asked and refused. Android sees a change at once, iOS reads the permission on open, on each return to the foreground and when the app becomes active again after the system prompt |
 | `ownCall` | Your `callAudio` call runs |
 | `externalCall` | A phone call or a call of another app runs |
 | `otherApp` | Another app records (Android), the system interrupted the audio, the audio focus is lost (also for a while), the system refused or delayed the session, or the session waits for the app to come back to the foreground |
 | `available` | None of the above |
 
-The value goes back to `available` by itself when its cause ends: the end of the interruption, a focus gain, a new demand, the return to the foreground. Closing MediaLayer ends the stream. After close Swift gives a stream that ends at once and Kotlin throws `MediaException.Closed`.
+The value goes back to `available` by itself when its cause ends: the end of the interruption, a focus gain, a new demand, the return to the foreground. Closing MediaLayer ends the stream. After close both platforms give a stream that ends at once: Swift an empty `AsyncStream`, Kotlin `emptyFlow()`.
 
 Unexpected session, focus and speaker errors reach `Media.failures` with their system domain and code (see [Failures](failures.md)). iOS `cannotInterruptOthers`, `insufficientPriority` and `cannotStartPlaying` and Android focus `FAILED` and `DELAYED` are states, not failures. A system event or a new demand leaves a refused or delayed state. New demand includes a newly sounding place, recording, call or volume reader.
 

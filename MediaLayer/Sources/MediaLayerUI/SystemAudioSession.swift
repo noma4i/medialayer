@@ -116,7 +116,13 @@ private final class VolumeObservation: @unchecked Sendable {
 }
 
 struct SystemRecordingPermission: MicrophonePermissionPort {
-  func granted() -> Bool { AVAudioApplication.shared.recordPermission == .granted }
+  func state() -> MicrophonePermission {
+    switch AVAudioApplication.shared.recordPermission {
+    case .granted: return .granted
+    case .undetermined: return .notAsked
+    default: return .denied
+    }
+  }
 }
 
 final class SystemCallObserver: NSObject, CallObserverPort, CXCallObserverDelegate, @unchecked Sendable {

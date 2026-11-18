@@ -24,7 +24,7 @@ Every change that MediaLayer makes by itself reaches the app as a stream or a st
 | Your own "video plays" flag | `MediaVideo(onPlaybackChange:)` (Swift), `MediaVideo(onPlaybackChange = ...)` (Kotlin) with `PlaybackState` |
 | A wait on `stop()` or `stopRecording()` to learn how a take ended | `MediaVoiceRecorder.states` with `VoiceState.outcome`, `MediaCamera.states` (Kotlin `state`) with `CameraState.take` and `outcome`, the clip from `clip(take:)` |
 | `Media.failure` as the feed of an error tracker | `Media.failures`, one `NativeFailure` per error (see [Failures](failures.md)) |
-| Kotlin `microphoneAvailability` after close threw `IllegalStateException` | It throws `MediaException.Closed` |
+| Kotlin `microphoneAvailability` after close threw `IllegalStateException` | It gives a flow that ends at once, like Swift |
 | Swift test doubles of `MediaPlaces` and `PlaceHandle` | `MediaPlaces` adds `readRoute(item:)` and its `playUrl(source:)` returns a player. `PlaceHandle` adds `subscribePlayback(listener:)` |
 
 ### What the app shows
@@ -95,6 +95,7 @@ Loss of a private output pauses playback at any time. Loss means the previous ro
 | `ownCall` | Record buttons disabled, your call screen is visible |
 | `externalCall` | A banner: the microphone is busy with a call |
 | `otherApp` | A banner: another app uses the microphone, or the system interrupted the audio, took the focus or refused the session |
+| `permissionNotAsked` | Your own explanation, then the system permission request (iOS only, see below) |
 | `permissionDenied` | A prompt that opens the settings |
 
 ```swift

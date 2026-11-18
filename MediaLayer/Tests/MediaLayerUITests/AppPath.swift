@@ -7,25 +7,31 @@ import Testing
 
 final class SwitchMicrophone: MicrophonePermissionPort, @unchecked Sendable {
   private let lock = NSLock()
-  private var value: Bool
-  private var sink: (@Sendable (Bool) -> Void)?
+  private var value: MicrophonePermission
+  private var sink: (@Sendable (MicrophonePermission) -> Void)?
 
-  init(granted: Bool = true) { value = granted }
+  init(granted: Bool = true) { value = granted ? .granted : .denied }
+  init(state: MicrophonePermission) { value = state }
 
-  func granted() -> Bool { lock.withLock { value } }
+  func state() -> MicrophonePermission { lock.withLock { value } }
 
-  func changes(_ sink: @escaping @Sendable (Bool) -> Void) -> @Sendable () -> Void {
+  func changes(_ sink: @escaping @Sendable (MicrophonePermission) -> Void) -> @Sendable () -> Void {
     lock.withLock { self.sink = sink }
     return { [weak self] in self?.lock.withLock { self?.sink = nil } }
   }
 
-  func set(_ granted: Bool) {
-    let sink = lock.withLock { () -> (@Sendable (Bool) -> Void)? in
-      value = granted
+  func set(_ granted: Bool) { set(granted ? .granted : .denied) }
+
+  func set(_ state: MicrophonePermission) {
+    let sink = lock.withLock { () -> (@Sendable (MicrophonePermission) -> Void)? in
+      value = state
       return self.sink
     }
-    sink?(granted)
+    sink?(state)
   }
+
+  /// A change with no push: the system answered a prompt and said nothing.
+  func setSilently(_ state: MicrophonePermission) { lock.withLock { value = state } }
 }
 
 /// A layer opened the way the app opens it. Only the system ports are fakes.

@@ -81,9 +81,9 @@ final class AudioLink: @unchecked Sendable {
     stopEvents = [
       ports.session.systemEvents { [weak self] event in self?.systemEvent(event) },
       ports.calls.calls { [weak self] calls in self?.observedCalls(calls) },
-      ports.permission.changes { [weak self] granted in self?.send(.permission(granted: granted)) }
+      ports.permission.changes { [weak self] state in self?.send(.permission(state: state)) }
     ]
-    send(.permission(granted: ports.permission.granted()))
+    send(.permission(state: ports.permission.state()))
   }
 
   var availability: AsyncStream<MicrophoneAvailability> {
@@ -107,7 +107,7 @@ final class AudioLink: @unchecked Sendable {
           guard !self.closed else { continuation.resume(returning: .failure(MediaError.Closed)); return }
           let id = self.allocate()
           admission.id = id
-          self.process(.permission(granted: self.ports.permission.granted()))
+          self.process(.permission(state: self.ports.permission.state()))
           self.pending[id] = continuation
           self.process(.capture(id: id, kind: kind))
         }
@@ -183,9 +183,11 @@ final class AudioLink: @unchecked Sendable {
     }
   }
   func foreground(_ on: Bool) {
-    if on { send(.permission(granted: ports.permission.granted())) }
+    if on { refreshPermission() }
     send(.foreground(on: on))
   }
+  /// The system permission prompt resigns the app and returns it active in the same foreground: the one source of a first grant.
+  func refreshPermission() { send(.permission(state: ports.permission.state())) }
 
   func send(_ input: AudioInput) { inbox.async { self.process(input) } }
 
