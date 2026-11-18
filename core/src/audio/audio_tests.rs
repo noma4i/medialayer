@@ -305,14 +305,20 @@ fn inv_audio_27_a_media_reset_drops_every_player_and_waits_for_a_new_intent() {
 }
 
 #[test]
+fn inv_audio_78_a_permission_never_asked_is_not_a_denied_one() {
+    let mut world = World::new();
+    assert_eq!(world.send(I::Permission { state: MicrophonePermission::Granted }), vec![]);
+    assert_eq!(world.send(I::Permission { state: MicrophonePermission::NotAsked }), vec![available(MicrophoneAvailability::PermissionNotAsked)], "never asked is its own value");
+    assert_eq!(world.send(I::Capture { id: 2, kind: RecordingKind::Voice }), vec![A::Refuse { id: 2, reason: RecordingRefusal::PermissionDenied }]);
+    assert_eq!(world.send(I::Permission { state: MicrophonePermission::Denied }), vec![available(MicrophoneAvailability::PermissionDenied)], "asked and refused differs from never asked");
+    assert_eq!(world.send(I::Permission { state: MicrophonePermission::Granted }), vec![available(MicrophoneAvailability::Available)]);
+}
+
+#[test]
 fn inv_audio_28_availability_is_one_value_derived_from_every_input() {
     let mut world = World::new();
     assert_eq!(world.send(I::Permission { state: MicrophonePermission::Denied }), vec![available(MicrophoneAvailability::PermissionDenied)]);
     assert_eq!(world.send(I::Capture { id: 1, kind: RecordingKind::Voice }), vec![A::Refuse { id: 1, reason: RecordingRefusal::PermissionDenied }]);
-    assert_eq!(world.send(I::Permission { state: MicrophonePermission::Granted }), vec![available(MicrophoneAvailability::Available)]);
-    assert_eq!(world.send(I::Permission { state: MicrophonePermission::NotAsked }), vec![available(MicrophoneAvailability::PermissionNotAsked)], "never asked is its own value");
-    assert_eq!(world.send(I::Capture { id: 2, kind: RecordingKind::Voice }), vec![A::Refuse { id: 2, reason: RecordingRefusal::PermissionDenied }]);
-    assert_eq!(world.send(I::Permission { state: MicrophonePermission::Denied }), vec![available(MicrophoneAvailability::PermissionDenied)], "asked and refused differs from never asked");
     assert_eq!(world.send(I::Permission { state: MicrophonePermission::Granted }), vec![available(MicrophoneAvailability::Available)]);
     assert_eq!(world.send(I::OtherRecording { active: true }), vec![available(MicrophoneAvailability::OtherApp)]);
     assert_eq!(world.send(I::Capture { id: 2, kind: RecordingKind::Voice }), vec![A::Refuse { id: 2, reason: RecordingRefusal::MicrophoneBusy }]);
