@@ -30,6 +30,7 @@ import com.noma4i.medialayer.TakeOutcome
 import com.noma4i.medialayer.NativeFailure
 import com.noma4i.medialayer.FailureSource
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.take
@@ -51,6 +52,8 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -68,6 +71,7 @@ private class FakeBackend : CaptureBackend {
   @Volatile var tap: ImageAnalysis.Analyzer? = null
   @Volatile var recordingFile: File? = null
   @Volatile var photoFails = false
+  @Volatile var photoGate: java.util.concurrent.CountDownLatch? = null
   @Volatile var hasFlash = true
   @Volatile var recordedProfile: CaptureProfile? = null
   @Volatile var torchFailure: Exception? = null
@@ -112,6 +116,7 @@ private class FakeBackend : CaptureBackend {
 
   override suspend fun takePhoto(file: File, flash: Boolean, profile: CaptureProfile) {
     note("photo flash=$flash")
+    photoGate?.await()
     if (photoFails) throw IllegalStateException("fake")
     file.writeBytes(byteArrayOf(1, 2, 3))
   }
@@ -915,5 +920,100 @@ class MediaCameraTest {
     eventually("the layer closed") { shadowOf(Looper.getMainLooper()).idle(); closed.isCompleted }
     runBlocking { closed.await() }
     assertEquals(listOf("take stopped", "abandon"), app.focus.calls.toList().takeLast(2))
+  }
+
+  private fun cameraThreads(): Set<Thread> = Thread.getAllStackTraces().keys.filter { it.name == "medialayer-camera" && it.isAlive }.toSet()
+
+  @Test
+  fun inv_capture_72_a_cancelled_take_photo_leaves_no_file_nobody_receives() = runBlocking {
+    val rig = rig()
+    ready(rig)
+    val gate = java.util.concurrent.CountDownLatch(1)
+    rig.backend.photoGate = gate
+    val asked = CoroutineScope(Dispatchers.Default).launch { rig.camera.takePhoto() }
+    eventually("the photo is shooting") { rig.camera.state.value.shooting }
+
+    asked.cancelAndJoin()
+    gate.countDown()
+
+    eventually("the shot ended") { !rig.camera.state.value.shooting }
+    rig.camera.awaitQueue()
+    assertEquals(emptyList<String>(), rig.files())
+  }
+
+  @Test
+  fun inv_capture_73_closing_the_layer_stops_the_camera_thread() {
+    val before = cameraThreads()
+    val app = AppPath()
+    val rig = rig(moment, app = app)
+    ready(rig)
+    val mine = cameraThreads() - before
+    assertTrue(mine.isNotEmpty())
+
+    app.close()
+
+    eventually("the camera thread ended") { mine.none { it.isAlive } }
+  }
+
+  @Test
+  fun inv_capture_74_a_frame_analyzer_may_fetch_a_clip_without_waiting_on_the_camera_queue() = runBlocking {
+    val rig = rig(moment)
+    ready(rig)
+    val take = recordingTake(rig)
+    rig.backend.emit(CaptureEvent.RecordFinished(RecordEnd.LIMIT_REACHED))
+    settled(rig, CameraPhase.READY)
+    val fetched = java.util.concurrent.atomic.AtomicReference<CapturedClip?>()
+    val ran = java.util.concurrent.CountDownLatch(1)
+    val listening = rig.camera.observeFrames(1000.0, ImageAnalysis.Analyzer { image ->
+      fetched.set(rig.camera.clip(take))
+      image.close()
+      ran.countDown()
+    })
+    eventually("the frame output stands") { rig.backend.tap != null }
+    val image = java.lang.reflect.Proxy.newProxyInstance(javaClass.classLoader, arrayOf(androidx.camera.core.ImageProxy::class.java)) { _, _, _ -> null } as androidx.camera.core.ImageProxy
+
+    rig.backend.tap!!.analyze(image)
+
+    assertTrue("the analyzer waited for the queue it runs on", ran.await(5, java.util.concurrent.TimeUnit.SECONDS))
+    assertNotNull(fetched.get())
+    listening.close()
+  }
+
+  @Test
+  fun inv_capture_75_a_clip_stays_for_its_take_after_the_next_take_starts_and_goes_with_the_camera() = runBlocking {
+    val rig = rig(moment)
+    ready(rig)
+    val first = recordingTake(rig)
+    rig.backend.emit(CaptureEvent.RecordFinished(RecordEnd.LIMIT_REACHED))
+    settled(rig, CameraPhase.READY)
+    rig.camera.setLens(CameraLens.FRONT)
+    eventually("the other side") { rig.camera.state.value.phase == CameraPhase.READY && rig.camera.state.value.lens == CameraLens.FRONT }
+    val second = recordingTake(rig)
+    assertNotEquals(first, second)
+
+    val clip = checkNotNull(rig.camera.clip(first))
+
+    assertEquals(CameraLens.BACK, clip.lens)
+    assertTrue(clip.file.isFile)
+    assertNull(rig.camera.clip(first))
+    rig.backend.emit(CaptureEvent.RecordFinished(RecordEnd.LIMIT_REACHED))
+    settled(rig, CameraPhase.READY)
+    rig.camera.close()
+    eventually("the clip of the last take went with the camera") { rig.files().isEmpty() || rig.files() == listOf(clip.file.name) }
+    assertNull(rig.camera.clip(second))
+  }
+
+  @Test
+  fun inv_capture_76_a_stop_waiting_when_the_layer_closes_gets_an_end() = runBlocking {
+    val app = AppPath()
+    val rig = rig(moment, app = app)
+    ready(rig)
+    recordingTake(rig)
+    val stopping = CoroutineScope(Dispatchers.Default).async { runCatching { rig.camera.stopRecording() } }
+
+    app.close()
+
+    val outcome = withTimeout(5_000) { stopping.await() }
+    if (outcome.isFailure) assertTrue(outcome.exceptionOrNull() is MediaException.Camera)
   }
 }

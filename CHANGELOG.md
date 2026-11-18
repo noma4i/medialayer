@@ -67,6 +67,10 @@
 
 ### Fixed
 
+- Android camera: a cancelled `takePhoto` no longer leaves its photo file behind.
+- Android camera: closing the layer now stops the camera thread too.
+- Android camera: `clip(take)` no longer waits on the camera queue, so a frame analyzer can call it.
+- Android camera: a clip stays for `clip(take)` until the layer closes, and keeps its take's lens.
 - Camera: leaving the screen mid-take now gives the take an `interrupted` outcome.
 - iOS camera: the session memory goes back only after the hardware stopped.
 - iOS camera: a cancelled `startRecording` cancels its own take.

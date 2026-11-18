@@ -105,6 +105,8 @@ class MediaCamera internal constructor(
   private var startWaiter: CompletableDeferred<Unit>? = null
   private var startFailure: MediaException.Camera? = null
   private var stopWaiter: CompletableDeferred<CapturedClip>? = null
+  // The delivered clips by take: kept until the app fetches one with `clip(take)` or the camera ends. Read from any thread, so `clip` never waits for the queue.
+  private val clips = ConcurrentHashMap<ULong, CapturedClip>()
   private val observers = ConcurrentHashMap<String, Observer>()
   private var frameTapOn = false
   private var frameTapPending = false
@@ -115,12 +117,7 @@ class MediaCamera internal constructor(
     if (enqueue {
       if (!closed) {
         apply(CaptureEvent.LayerClosed)
-        ended?.getOrNull()?.file?.let(::deleteMediaFile)
-        ended = null
-        closed = true
-        awake.set(false)
-        backend.close()
-        scope.cancel()
+        terminate()
       }
       done.countDown()
     }) done.await()
@@ -160,7 +157,7 @@ class MediaCamera internal constructor(
       if (run.state.shooting) photoWaiter = waiter else waiter.completeExceptionally(refusal(CameraRefusal.NOT_READY))
     }
     if (!queued) throw refusal(CameraRefusal.NOT_READY)
-    return waiter.await()
+    return waiter.awaitOwned()
   }
 
   /** Returns after the hardware started the recording. `NOT_READY` when the camera is not ready or the profile holds no video. */
@@ -175,7 +172,6 @@ class MediaCamera internal constructor(
         waiter.completeExceptionally(refusal(CameraRefusal.NOT_READY))
         return@enqueue
       }
-      ended?.getOrNull()?.file?.let(::deleteMediaFile)
       ended = null
       startFailure = null
       if (profile.audio && audioHold == null) {
@@ -207,7 +203,7 @@ class MediaCamera internal constructor(
       val outcome = ended
       if (outcome != null) {
         ended = null
-        outcome.fold(waiter::complete, waiter::completeExceptionally)
+        handOver(outcome, waiter)
         return@enqueue
       }
       if (stopWaiter != null || !(run.started || run.starting)) {
@@ -218,22 +214,11 @@ class MediaCamera internal constructor(
       apply(CaptureEvent.Stop)
     }
     if (!queued) throw refusal(CameraRefusal.NOT_READY)
-    return waiter.await()
+    return waiter.awaitOwned()
   }
 
-  fun clip(take: ULong): CapturedClip? {
-    val done = java.util.concurrent.CountDownLatch(1)
-    var result: CapturedClip? = null
-    if (!enqueue {
-      if (run.state.take == take) {
-        result = ended?.getOrNull()
-        if (result != null) ended = null
-      }
-      done.countDown()
-    }) return null
-    done.await()
-    return result
-  }
+  /** The clip of a take once: it stays until this call or the end of the camera, and a later take does not drop it. Never waits for the camera queue. */
+  fun clip(take: ULong): CapturedClip? = clips.remove(take)
 
   /** Throws the recording away and deletes its file. */
   fun cancelRecording() = post(CaptureEvent.Cancel)
@@ -263,15 +248,36 @@ class MediaCamera internal constructor(
       if (closed) return@enqueue
       hosts.clear()
       reconcile()
-      ended?.getOrNull()?.file?.let(::deleteMediaFile)
-      ended = null
-      closed = true
-      awake.set(false)
       layerClose?.close()
-      backend.close()
-      scope.cancel()
+      terminate()
     }
+  }
+
+  /** The one end of the camera, for the layer close and for [close]: the clips and waiters go, the hardware, the scope and the queue thread stop. Runs on the queue. */
+  private fun terminate() {
+    closed = true
+    ended = null
+    clips.values.forEach { deleteMediaFile(it.file) }
+    clips.clear()
+    failWaiters()
+    startWaiter?.let { startWaiter = null; it.completeExceptionally(refusal(CameraRefusal.NOT_READY)) }
+    awake.set(false)
+    backend.close()
+    scope.cancel()
     queue.shutdown()
+  }
+
+  /** A caller that gives up cancels the waiter, so the result that comes later is refused by `complete` and its owner removes it. */
+  private suspend fun <T> CompletableDeferred<T>.awaitOwned(): T = try { await() } catch (failure: kotlinx.coroutines.CancellationException) {
+    cancel()
+    throw failure
+  }
+
+  private fun handOver(outcome: Result<CapturedClip>, waiter: CompletableDeferred<CapturedClip>) {
+    outcome.fold({ clip ->
+      if (!clips.values.remove(clip)) waiter.completeExceptionally(refusal(CameraRefusal.NOT_READY))
+      else if (!waiter.complete(clip)) run.state.take?.let { clips[it] = clip }
+    }, waiter::completeExceptionally)
   }
 
   internal fun attachPreview(host: Any, view: PreviewView?, owner: LifecycleOwner?) {
@@ -425,14 +431,15 @@ class MediaCamera internal constructor(
         photoWaiter = null
         val outcome = photoOutcome ?: Result.failure(refusal(run.state.fault ?: CameraRefusal.NOT_READY))
         photoOutcome = null
-        outcome.fold(waiter::complete, waiter::completeExceptionally)
+        // A caller that gave up owns no result: its photo file goes with it.
+        outcome.fold({ if (!waiter.complete(it)) deleteMediaFile(it.file) }, waiter::completeExceptionally)
       }
     }
     stopWaiter?.let { waiter ->
       ended?.let {
         stopWaiter = null
         ended = null
-        it.fold(waiter::complete, waiter::completeExceptionally)
+        handOver(it, waiter)
       }
     }
   }
@@ -690,10 +697,13 @@ class MediaCamera internal constructor(
     val file = recordingFile
     val info = clipInfo
     val length = info?.durationMs
-    if (file == null || info == null || length == null) return discard()
+    val take = run.state.take
+    if (file == null || info == null || length == null || take == null || closed) return discard()
     recordingFile = null
     clipInfo = null
-    ended = Result.success(CapturedClip(file, length.toLong(), info.frame, run.state.lens))
+    val clip = CapturedClip(file, length.toLong(), info.frame, run.takeLens)
+    clips[take] = clip
+    ended = Result.success(clip)
   }
 
   private fun discard() {
