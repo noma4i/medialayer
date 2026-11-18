@@ -725,7 +725,7 @@ class MediaCameraTest {
     val started = withTimeout(5_000) { runCatching { voice.start(File.createTempFile("voice", ".m4a")) } }
     assertNull("the voice right after the circle stop: ${started.exceptionOrNull()}", started.exceptionOrNull())
     assertEquals("only the voice holds the AudioRecord", setOf("voice"), microphones.live.keys)
-    voice.stop()
+    runCatching { voice.stop() } // the fake take holds no audio: EMPTY is its outcome, the microphone goes back either way
     eventually("the preview took its microphone back") { microphones.live.keys == setOf("camera") }
   }
 
