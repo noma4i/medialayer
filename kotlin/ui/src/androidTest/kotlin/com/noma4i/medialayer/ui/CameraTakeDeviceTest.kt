@@ -296,7 +296,7 @@ class CameraTakeDeviceTest {
   }
 
   @Test
-  fun inv_capture_60_the_sound_is_cut_at_the_last_video_frame_and_the_duration_comes_from_it() {
+  fun inv_capture_51_the_sound_is_cut_at_the_last_video_frame_and_the_duration_comes_from_it() {
     val target = file()
     val recorder = Recorder()
     val take = take(target, settings(true), recorder)
