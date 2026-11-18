@@ -37,6 +37,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
   private final class Running: @unchecked Sendable {
     let file: URL
     let startedAt: UInt64
+    var take: UInt64 = 0
     var poll: Task<Void, Never>?
     var finish: Task<Result<VoiceRecording, Error>, Never>?
     init(file: URL, startedAt: UInt64) {
@@ -141,7 +142,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
 
   public func start(to file: URL) async throws {
     try lock.withLock {
-      guard running == nil, finishing == nil, case .free = startPhase else { throw MediaError.Unexpected(detail: "a recording is already running") }
+      guard running == nil, finishing == nil, case .free = startPhase else { throw MediaError.Voice(detail: voiceRefusalText(reason: .microphoneBusy), reason: .microphoneBusy) }
       startPhase = .starting
       ended = nil
     }
@@ -158,12 +159,14 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
       }
       throw error
     }
-    let current = Running(file: file, startedAt: clock())
+    let current: Running
     let early: Bool
     do {
       try Task.checkCancellation()
       try await capture.start(file: file, maxDurationMs: maxDurationMs, ticket: hold, onLimit: { [weak self] in self?.limitReached() }, onFailure: { [weak self] error in self?.captureFailed(error) })
       try Task.checkCancellation()
+      // The clock of the take starts with its first PCM: `start` returns after it, not before the hardware opened.
+      current = Running(file: file, startedAt: clock())
       do {
         try hold.start {}
       } catch {
@@ -229,7 +232,8 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
       startPhase = .free
       held = hold
       running = current
-      setLocked(VoiceState(take: voiceState.take &+ 1, phase: .recording, outcome: nil, recordedMs: 0))
+      current.take = voiceState.take &+ 1
+      setLocked(VoiceState(take: current.take, phase: .recording, outcome: nil, recordedMs: 0))
       return limited
     }
   }
@@ -260,7 +264,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     let state = lock.withLock { (running, finishing, ended) }
     if let current = state.0 { return try await finish(current).get() }
     if let task = state.1 { return try await task.value.get() }
-    guard let outcome = state.2 else { throw MediaError.Unexpected(detail: "no recording was started") }
+    guard let outcome = state.2 else { throw MediaError.Voice(detail: voiceRefusalText(reason: .empty), reason: .empty) }
     return try outcome.get()
   }
 
@@ -309,7 +313,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
       } catch let refused as VoiceRefused where refused.reason == .empty && voiceTooShort(durationMs: length, minTakeMs: minTakeMs) && interrupted == nil && failure == nil {
         throw VoiceRefused(reason: .tooShort)
       } catch {
-        if !(error is CancellationError) { Media.recordNativeFailure(error, source: .recorder) }
+        if !(error is CancellationError), !(error is VoiceRefused), !(error is RecordingRefusal) { Media.recordNativeFailure(error, source: .recorder) }
         if interrupted == nil { throw error }
       }
       if let interrupted { throw interrupted }
@@ -327,12 +331,6 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
     let fileFailure: NativeFailure?
     if case .failure = outcome { fileFailure = NativeFailures.deleteFile(current.file) }
     else { fileFailure = nil }
-    let finished = lock.withLock { () -> [AsyncStream<Float>.Continuation] in
-      ended = outcome
-      finishing = nil
-      defer { sinks.removeAll() }
-      return Array(sinks.values)
-    }
     let result: VoiceOutcome
     switch outcome {
     case let .success(recording): result = .recorded(path: recording.url.path, durationMs: recording.durationMs)
@@ -343,7 +341,15 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
         result = .failed(failure: NativeFailure(source: .recorder, domain: native.domain, code: Int64(native.code), message: native.localizedDescription))
       }
     }
-    publish(VoiceState(take: state.take, phase: .idle, outcome: result, recordedMs: 0))
+    // The end of the take, its outcome and the room for the next start are one step: a start cannot commit between them.
+    let finished = lock.withLock { () -> [AsyncStream<Float>.Continuation] in
+      ended = outcome
+      finishing = nil
+      setLocked(VoiceState(take: current.take, phase: .idle, outcome: result, recordedMs: 0))
+      defer { sinks.removeAll() }
+      return Array(sinks.values)
+    }
+    TestChange.fire()
     for sink in finished { sink.finish() }
     if let fileFailure { NativeFailures.publish(fileFailure) }
     return outcome
@@ -362,12 +368,11 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
 }
 
 /// The microphone of a voice take through the input owner of the audio core. `start` returns with the first live PCM and a started writer: until then no file exists.
-/// The owner outlives a take whose source was lost, for the restore of the core until the first healthy PCM; every other end of a take closes it.
+/// A take whose source was lost closes its owner at once, like every other end of a take; the next start opens a new one.
 final class SystemVoiceCapture: VoiceCapture, @unchecked Sendable {
   private enum State {
     case idle
     case taking(VoiceTake, InputBox)
-    case lingering(InputBox)
   }
 
   private let source: VoicePCMSource
@@ -420,10 +425,6 @@ final class SystemVoiceCapture: VoiceCapture, @unchecked Sendable {
     holder.take = take
     let microphone = VoiceMicrophone(source: source)
     microphone.attach(take)
-    microphone.onIdleHeard { [weak self, weak box] in
-      guard let self, let box else { return }
-      self.healthy(box)
-    }
     box.microphone = microphone
     // The take and its input are registered before the owner can act: the owner opens the input and its first word may come at once.
     release(lock.withLock { () -> State in
@@ -477,29 +478,22 @@ final class SystemVoiceCapture: VoiceCapture, @unchecked Sendable {
     box.close()
   }
 
-  /// The one place a take that ended by itself is told. A lost source keeps its input for the restore, a failed writer closes it.
+  /// The one place a take that ended by itself is told. A lost source and a failed writer both close the input.
   private func ended(_ take: VoiceTake?, by broken: VoiceTake.Broken) -> Error {
     let box = lock.withLock { () -> InputBox? in
       guard let take, case let .taking(current, box) = state, current === take else { return nil }
-      if case .lost = broken { state = .lingering(box) } else { state = .idle }
+      state = .idle
       return box
     }
     box?.microphone?.attach(nil)
     switch broken {
-    case let .lost(error): return Self.loss(error)
+    case let .lost(error):
+      box?.close()
+      return Self.loss(error)
     case let .failed(error):
       box?.close()
       return error
     }
-  }
-
-  private func healthy(_ box: InputBox) {
-    let done = lock.withLock { () -> Bool in
-      guard case let .lingering(current) = state, current === box else { return false }
-      state = .idle
-      return true
-    }
-    if done { box.close() }
   }
 
   private func release(_ state: State) {
@@ -508,7 +502,6 @@ final class SystemVoiceCapture: VoiceCapture, @unchecked Sendable {
     case let .taking(take, box):
       take.cancel()
       box.close()
-    case let .lingering(box): box.close()
     }
   }
 

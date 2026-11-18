@@ -7,7 +7,7 @@ import java.io.File
 import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicInteger
 
-// One phase owner: PREPARING -> WAITING (owner open, no take) -> TAKING -> LOST (told once, owner lingers until the next healthy PCM) -> CLOSED; every transition and the owner's registration happen under one lock, every call out of it.
+// One phase owner: PREPARING -> WAITING (owner open, no take) -> TAKING -> CLOSED (a lost take is told once and closes its owner at once); every transition and the owner's registration happen under one lock, every call out of it.
 internal class VoiceInput(
   private val link: AudioLink,
   private val spec: PcmSpec,
@@ -18,7 +18,7 @@ internal class VoiceInput(
   private val listener: VoiceTakeListener,
   private val microphone: (RecordingAudioListener) -> CameraMicrophone
 ) : CameraAudioTap, AutoCloseable {
-  private enum class Phase { PREPARING, WAITING, TAKING, LOST, CLOSED }
+  private enum class Phase { PREPARING, WAITING, TAKING, CLOSED }
 
   private val lock = Any()
   private val peakBits = AtomicInteger()
@@ -33,7 +33,7 @@ internal class VoiceInput(
     override fun onFinished(file: File, durationUs: Long) { if (leave(Phase.CLOSED, Phase.TAKING)) { release(); listener.onFinished(file, durationUs) } }
     override fun onFailed(failure: NativeFailure) { if (leave(Phase.CLOSED, Phase.TAKING)) { release(); listener.onFailed(failure) } }
     override fun onCancelled() { if (leave(Phase.CLOSED, Phase.TAKING)) { release(); listener.onCancelled() } }
-    override fun onLost() { if (leave(Phase.LOST, Phase.TAKING)) listener.onLost() }
+    override fun onLost() { if (leave(Phase.CLOSED, Phase.TAKING)) { release(); listener.onLost() } }
   }
 
   /** The linear peak 0 to 1 of the take's PCM since the last call. */
@@ -49,7 +49,7 @@ internal class VoiceInput(
   }
 
   fun cancel() {
-    route({ endWaiting { it.onCancelled() } }, { it.cancel() }, { leave(Phase.CLOSED, Phase.LOST) })
+    route({ endWaiting { it.onCancelled() } }, { it.cancel() })
     release()
   }
 
@@ -65,26 +65,23 @@ internal class VoiceInput(
   }
 
   private fun issue(issue: CaptureAudioIssue) {
-    if (issue == CaptureAudioIssue.SILENCED) route({ leave(Phase.LOST, Phase.WAITING).also { if (it) { writer.cancel(); listener.onLost() } } }, { it.lost() })
+    if (issue == CaptureAudioIssue.SILENCED) route({ leave(Phase.CLOSED, Phase.WAITING).also { if (it) { writer.cancel(); release(); listener.onLost() } } }, { it.lost() })
   }
 
   private fun fail(failure: NativeFailure) {
-    route({ endWaiting { it.onFailed(failure) } }, { it.fail(failure) }, { if (leave(Phase.CLOSED, Phase.LOST)) release() })
+    route({ endWaiting { it.onFailed(failure) } }, { it.fail(failure) })
   }
 
   override fun onTimebase(generation: Long, originNanos: Long) = Unit
 
   override fun onPcm(chunk: PcmChunk) {
-    var healthyAfterLoss = false
     val current = synchronized(lock) {
       when (phase) {
         Phase.WAITING -> VoiceTake(chunk.generation, file, settings, limitUs, writer, out).also { take = it; generation = chunk.generation; phase = Phase.TAKING }
         Phase.TAKING -> take.takeIf { chunk.generation == generation }
-        Phase.LOST -> null.also { healthyAfterLoss = true; phase = Phase.CLOSED }
         else -> null
       }
     }
-    if (healthyAfterLoss) release()
     current?.let { record(chunk); it.pcm(chunk) }
   }
 
@@ -95,13 +92,12 @@ internal class VoiceInput(
     peakBits.accumulateAndGet(peak, ::maxOf)
   }
 
-  private fun route(waiting: () -> Boolean, taking: (VoiceTake) -> Unit, lost: () -> Unit = {}) {
+  private fun route(waiting: () -> Boolean, taking: (VoiceTake) -> Unit) {
     while (true) {
       val (now, current) = synchronized(lock) { phase to take }
       when (now) {
         Phase.PREPARING, Phase.WAITING -> if (waiting()) return
         Phase.TAKING -> return taking(current!!)
-        Phase.LOST -> return lost()
         Phase.CLOSED -> return
       }
     }

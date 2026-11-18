@@ -16,6 +16,7 @@ import com.noma4i.medialayer.OpenConfig
 import com.noma4i.medialayer.VoiceEncoderSettings
 import com.noma4i.medialayer.VoiceOutcome
 import com.noma4i.medialayer.VoicePhase
+import com.noma4i.medialayer.VoiceState
 import com.noma4i.medialayer.VoiceRefusal
 import com.noma4i.medialayer.defaultLimits
 import com.noma4i.medialayer.defaultPoolSettings
@@ -67,14 +68,16 @@ private class Microphone : CameraMicrophone {
 private class Writer(private val notReady: Throwable? = null) : VoiceFileWriter {
   val calls = SignallingList<String>()
   @Volatile var settings: VoiceEncoderSettings? = null
+  @Volatile var clock: () -> Long = { 0L }
+  @Volatile private var openedAt = 0L
   override fun prepare(settings: VoiceEncoderSettings, ready: (Result<Unit>) -> Unit, failed: (Throwable) -> Unit) {
     calls.add("prepare")
     this.settings = settings
     ready(notReady?.let { Result.failure(it) } ?: Result.success(Unit))
   }
-  override fun open(file: File) { calls.add("open"); file.writeBytes(byteArrayOf(1, 2, 3)) }
+  override fun open(file: File) { calls.add("open"); openedAt = clock(); file.writeBytes(byteArrayOf(1, 2, 3)) }
   override fun append(chunk: PcmChunk) { calls.add("append ${chunk.generation}") }
-  override fun finish(done: (Result<Long>) -> Unit) { calls.add("finish"); done(Result.success(1L)) }
+  override fun finish(done: (Result<Long>) -> Unit) { calls.add("finish"); done(Result.success((clock() - openedAt) * 1_000L)) }
   override fun cancel() { calls.add("cancel") }
 }
 
@@ -108,8 +111,10 @@ class MediaVoiceRecorderTest {
 
   private fun file(): File = File.createTempFile("voice", ".m4a").apply { delete(); deleteOnExit() }
 
-  private fun recorder(writer: Writer = Writer(), maxMs: Long = 60_000, minTakeMs: ULong = 0uL, screen: ScreenSwitch = ScreenSwitch(), clock: () -> ULong = ticks::read, reserve: suspend (Long) -> AutoCloseable = { AutoCloseable { holds.add("closed") } }) =
-    MediaVoiceRecorder(SystemVoiceCapture(context, { link }, { writer }, reserve, { made, lease -> microphone.listener = made; microphone.lease = lease; microphone }), maxMs.toULong(), { link }, clock, 5, scope, minTakeMs, screen.awake())
+  private fun recorder(writer: Writer = Writer(), maxMs: Long = 60_000, minTakeMs: ULong = 0uL, screen: ScreenSwitch = ScreenSwitch(), clock: () -> ULong = ticks::read, reserve: suspend (Long) -> AutoCloseable = { AutoCloseable { holds.add("closed") } }): MediaVoiceRecorder {
+    writer.clock = { ticks.now }
+    return MediaVoiceRecorder(SystemVoiceCapture(context, { link }, { writer }, reserve, { made, lease -> microphone.listener = made; microphone.lease = lease; microphone }), maxMs.toULong(), { link }, clock, 5, scope, minTakeMs, screen.awake())
+  }
 
   private fun chunk(generation: Long, sample: Int = 0, frames: Int = 1): PcmChunk {
     val data = ByteBuffer.allocate(frames * 2).order(ByteOrder.LITTLE_ENDIAN)
@@ -447,5 +452,76 @@ class MediaVoiceRecorderTest {
     val error = withTimeout(5_000) { waiting.await() }.exceptionOrNull()
     assertTrue(error is MediaException)
     await("the owner is closed") { microphone.calls.last() == "close" }
+  }
+
+  @Test
+  fun inv_voice_23_the_length_counts_from_the_first_pcm_not_from_the_start_of_the_hardware() = runBlocking<Unit> {
+    val recorder = recorder(minTakeMs = 500uL)
+    val target = file()
+    val start = scope.async { recorder.start(target) }
+    await("the owner starts the microphone") { microphone.calls.contains("start 1") }
+    ticks.now += 2_000
+    microphone.listener!!.onLive(1)
+    microphone.listener!!.onPcm(chunk(1))
+    withTimeout(5_000) { start.await() }
+    ticks.now += 100
+
+    val error = refusal { recorder.stop() }
+
+    assertEquals(VoiceRefusal.TOO_SHORT, error.reason)
+    assertFalse(target.exists())
+  }
+
+  @Test
+  fun inv_voice_24_a_second_start_and_a_stop_without_a_take_are_typed_refusals_and_leave_the_take_alone() = runBlocking<Unit> {
+    val recorder = recorder()
+    assertEquals(VoiceRefusal.EMPTY, refusal { recorder.stop() }.reason)
+    val target = file()
+    record(recorder, target)
+    val state = recorder.state.value
+
+    assertEquals(VoiceRefusal.MICROPHONE_BUSY, refusal { recorder.start(file()) }.reason)
+
+    assertEquals("the refused start does not touch the take", state, recorder.state.value)
+    ticks.now += 1_000
+    assertEquals(target, recorder.stop().file)
+  }
+
+  @Test
+  fun inv_voice_22_every_outcome_is_published_with_the_number_of_its_own_take() = runBlocking<Unit> {
+    val seed = System.getenv("ML_SEED")?.toLongOrNull() ?: System.nanoTime()
+    println("repeat: ML_SEED=$seed")
+    val random = java.util.Random(seed)
+    val recorder = recorder()
+    val seen = SignallingList<VoiceState>()
+    val watching = scope.launch(start = CoroutineStart.UNDISPATCHED) { recorder.states.collect { seen.add(it) } }
+    var generation = 0L
+    suspend fun begin() {
+      while (true) {
+        try { recorder.start(file()); return } catch (busy: MediaException.Voice) { assertEquals(VoiceRefusal.MICROPHONE_BUSY, busy.reason); Thread.yield() }
+      }
+    }
+    var next: kotlinx.coroutines.Deferred<Unit>? = scope.async { begin() }
+    repeat(40) { round ->
+      await("the owner starts the microphone") { microphone.calls.contains("start ${generation + 1}") }
+      generation += 1
+      microphone.listener!!.onLive(generation)
+      microphone.listener!!.onPcm(chunk(generation))
+      withTimeout(5_000) { next!!.await() }
+      ticks.now += 1_000
+      val stop = scope.async { recorder.stop() }
+      // The next start races the end of this take: it either is refused as busy or comes after the outcome.
+      if (random.nextBoolean()) repeat(random.nextInt(50)) { Thread.yield() }
+      next = if (round < 39) scope.async { begin() } else null
+      stop.await()
+    }
+    watching.cancel()
+    val states = seen.toList()
+    var take = 0uL
+    states.forEach { state ->
+      if (state.phase == VoicePhase.RECORDING) { assertEquals("seed $seed", take + 1uL, state.take); take = state.take }
+      if (state.outcome != null) assertEquals("an outcome carries its own take, seed $seed", take, state.take)
+    }
+    assertEquals(40uL, take)
   }
 }

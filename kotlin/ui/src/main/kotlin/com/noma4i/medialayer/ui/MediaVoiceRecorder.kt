@@ -55,7 +55,8 @@ internal interface VoiceCapture {
 
   fun stop()
 
-  suspend fun finish() = stop()
+  /** Ends the take and gives the length in ms of the audio written to the file, or null when the capture does not measure it. */
+  suspend fun finish(): ULong? { stop(); return null }
 }
 
 internal fun RecordingRefusal.toVoice(): VoiceRefusal = when (this) {
@@ -101,7 +102,7 @@ class MediaVoiceRecorder internal constructor(
   private var revoked: java.io.Closeable? = null
   private var finishing: Deferred<Result<VoiceRecording>>? = null
   private var phase: StartPhase = StartPhase.Free
-  private class Running(val file: File, val startedAt: ULong, var poll: Job? = null, var finish: Deferred<Result<VoiceRecording>>? = null)
+  private class Running(val file: File, val startedAt: ULong, var take: ULong = 0uL, var poll: Job? = null, var finish: Deferred<Result<VoiceRecording>>? = null)
 
   private sealed interface StartPhase {
     object Free : StartPhase
@@ -124,7 +125,7 @@ class MediaVoiceRecorder internal constructor(
 
   suspend fun start(file: File) {
     synchronized(lock) {
-      check(running == null && finishing == null && phase === StartPhase.Free) { "a recording is already running" }
+      if (running != null || finishing != null || phase !== StartPhase.Free) throw voiceError(VoiceRefusal.MICROPHONE_BUSY)
       phase = StartPhase.Starting
       ended = null
     }
@@ -144,9 +145,11 @@ class MediaVoiceRecorder internal constructor(
       is Admission.Admitted -> admission.ticket
       is Admission.Refused -> throw voiceError(admission.reason.toVoice())
     }
-    val current = Running(file, clock())
+    lateinit var current: Running
     val limited = try {
       capture.start(file, maxDurationMs, hold, ::limitReached, ::captureFailed)
+      // The clock of the take starts with its first PCM: `start` returns after it, not before the hardware opened.
+      current = Running(file, clock())
       hold.start {}?.let { throw VoiceRefused(it.toVoice()) }
       commit(current, hold)
     } catch (error: Throwable) {
@@ -175,7 +178,8 @@ class MediaVoiceRecorder internal constructor(
     phase = StartPhase.Free
     heldAudio = hold
     running = current
-    publish(VoiceState(currentState.value.take + 1uL, VoicePhase.RECORDING, null, 0uL))
+    current.take = currentState.value.take + 1uL
+    publish(VoiceState(current.take, VoicePhase.RECORDING, null, 0uL))
     current.poll = scope.launch { pollLevels() }
     revoked = hold.onRevoked { reason, done ->
       scope.launch(Dispatchers.IO) { try { finish(current, voiceError(reason.toVoice())) } finally { done() } }
@@ -188,7 +192,7 @@ class MediaVoiceRecorder internal constructor(
     val (current, task, done) = synchronized(lock) { Triple(running, finishing, ended) }
     if (current != null) return finish(current).getOrThrow()
     if (task != null) return task.await().getOrThrow()
-    return (done ?: throw IllegalStateException("no recording was started")).getOrThrow()
+    return (done ?: throw voiceError(VoiceRefusal.EMPTY)).getOrThrow()
   }
 
   private fun limitReached() {
@@ -224,12 +228,13 @@ class MediaVoiceRecorder internal constructor(
   }
 
   private suspend fun finishRecording(current: Running, session: RecordingTicket?, interrupted: MediaException?, failure: NativeFailure?): Result<VoiceRecording> {
-    val length = clock() - current.startedAt
+    val elapsed = clock() - current.startedAt
+    var length = elapsed
     var native = failure
     failure?.let { Media.recordNativeFailure(it) }
     val outcome = runCatching {
       try {
-        if (interrupted != null || failure != null) capture.stop() else capture.finish()
+        if (interrupted != null || failure != null) capture.stop() else capture.finish()?.let { length = it }
       } catch (error: VoiceNativeFailure) {
         if (interrupted == null && failure == null) {
           native = error.failure
@@ -251,17 +256,18 @@ class MediaVoiceRecorder internal constructor(
       if (native == null && error !is MediaException.Voice && error !== interrupted) Media.recordNativeFailure(FailureSource.RECORDER, error)
     }
     if (outcome.isFailure) deleteMediaFile(current.file)
-    synchronized(lock) {
-      ended = outcome
-      finishing = null
-    }
     val published = when {
       native != null -> VoiceOutcome.Failed(native!!)
       outcome.isSuccess -> outcome.getOrThrow().let { VoiceOutcome.Recorded(it.file.absolutePath, it.durationMs.toULong()) }
       outcome.exceptionOrNull() is MediaException.Voice -> VoiceOutcome.Refused((outcome.exceptionOrNull() as MediaException.Voice).reason)
       else -> VoiceOutcome.Failed(voiceFailure(outcome.exceptionOrNull()!!))
     }
-    synchronized(lock) { publish(VoiceState(currentState.value.take, VoicePhase.IDLE, published, 0uL)) }
+    // The end of the take, its outcome and the room for the next start are one step: a start cannot commit between them.
+    synchronized(lock) {
+      ended = outcome
+      finishing = null
+      publish(VoiceState(current.take, VoicePhase.IDLE, published, 0uL))
+    }
     onTestChange?.invoke()
     return outcome
   }
@@ -300,8 +306,8 @@ internal class SystemVoiceCapture(
   private val reserve: suspend (Long) -> AutoCloseable = ::reserveCaptureBytes,
   private val microphone: (RecordingAudioListener, (Long) -> AutoCloseable) -> CameraMicrophone = { listener, lease -> RecordingAudio(listener, lease, context.mainExecutor).asMicrophone() }
 ) : VoiceCapture {
-  // A lost take leaves its input lingering for the restore of the core: it closes itself on the first healthy PCM, or when the next take replaces it.
-  private class Active(val input: VoiceInput, val done: CompletableDeferred<Unit>, val release: () -> Unit) { @Volatile var lost = false }
+  // A lost take has closed its input at once; the marker stays so that the end of that take is still told as the loss.
+  private class Active(val input: VoiceInput, val done: CompletableDeferred<Long?>, val release: () -> Unit) { @Volatile var lost = false }
 
   private val lock = Any()
   private var active: Active? = null
@@ -318,7 +324,7 @@ internal class SystemVoiceCapture(
     val memory = CaptureMemory(cost)
     val release = { memory.close { hold.close() } }
     val first = CompletableDeferred<Unit>()
-    val done = CompletableDeferred<Unit>()
+    val done = CompletableDeferred<Long?>()
     fun ended(error: Exception) {
       if (!first.completeExceptionally(error)) onFailure(error)
       done.completeExceptionally(error)
@@ -327,9 +333,9 @@ internal class SystemVoiceCapture(
     val listener = object : VoiceTakeListener {
       override fun onStarted() { first.complete(Unit) }
       override fun onLimit() = onLimit()
-      override fun onFinished(file: File, durationUs: Long) { done.complete(Unit) }
+      override fun onFinished(file: File, durationUs: Long) { done.complete(durationUs / 1_000L) }
       override fun onFailed(failure: NativeFailure) = ended(VoiceNativeFailure(failure))
-      override fun onCancelled() { first.completeExceptionally(kotlinx.coroutines.CancellationException("the take was cancelled")); done.complete(Unit) }
+      override fun onCancelled() { first.completeExceptionally(kotlinx.coroutines.CancellationException("the take was cancelled")); done.complete(null) }
       override fun onLost() { mine.lost = true; ended(VoiceRefused(VoiceRefusal.MICROPHONE_SILENT)) }
     }
     val input = VoiceInput(audio, spec, settings, maxDurationMs.toLong() * 1_000L, file, writer(), listener) { heard ->
@@ -357,12 +363,12 @@ internal class SystemVoiceCapture(
 
   override fun stop() { leave()?.takeUnless { it.lost }?.let { it.input.cancel(); it.release() } }
 
-  override suspend fun finish() {
-    val taking = leave() ?: return
+  override suspend fun finish(): ULong? {
+    val taking = leave() ?: return null
     if (taking.lost) throw VoiceRefused(VoiceRefusal.MICROPHONE_SILENT)
     try {
       taking.input.finish()
-      taking.done.await()
+      return taking.done.await()?.toULong()
     } finally {
       taking.release()
     }
