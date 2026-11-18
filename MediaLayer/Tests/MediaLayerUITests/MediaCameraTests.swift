@@ -409,6 +409,29 @@ struct MediaCameraTests {
     }
   }
 
+  @Test(arguments: [AudioDriveSignal.startCall, .silenceMicrophone, .beginInterruption])
+  func inv_audio_80_a_driven_system_event_throws_a_camera_take_away_with_its_refusal(_ signal: AudioDriveSignal) async throws {
+    let rig = try makeRig(.moment)
+    await ready(rig)
+    try await rig.camera.startRecording()
+
+    rig.audio.link.drive(signal)
+
+    await eventually("recording revoked") { rig.camera.state.phase == .ready }
+    let expected: CameraRefusal = switch signal {
+    case .startCall: .inCall
+    case .silenceMicrophone: .microphoneSilent
+    default: .interrupted
+    }
+    do {
+      _ = try await rig.camera.stopRecording()
+      Issue.record("a recording survived \(signal)")
+    } catch let MediaError.Camera(reason, _, _) {
+      #expect(reason == expected)
+    }
+    #expect(files(rig).isEmpty)
+  }
+
   @Test
   func inv_audio_43_a_take_without_microphone_sound_is_refused_and_a_lost_sound_throws_the_take_away() async throws {
     let rig = try makeRig(.moment)

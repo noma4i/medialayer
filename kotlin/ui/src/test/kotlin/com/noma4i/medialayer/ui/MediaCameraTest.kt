@@ -215,7 +215,7 @@ private fun eventually(condition: String, holds: () -> Boolean) {
 }
 
 @RunWith(MediaLayerTestRunner::class)
-@OptIn(ExperimentalCoroutinesApi::class)
+@OptIn(ExperimentalCoroutinesApi::class, MediaLayerTestingApi::class)
 class MediaCameraTest {
   private val context = ApplicationProvider.getApplicationContext<Application>()
   private val fixtures = mutableListOf<AudioFixture>()
@@ -408,6 +408,26 @@ class MediaCameraTest {
       assertEquals(CameraRefusal.IN_CALL, refused.reason)
     } finally {
       rig.fixture.port.send(FocusSignal.PhoneCall(false))
+    }
+  }
+
+  @Test
+  fun inv_audio_80_aDrivenSystemEventThrowsACameraTakeAwayWithItsRefusal() = runBlocking {
+    for ((signal, expected) in listOf(
+      AudioDriveSignal.StartCall to CameraRefusal.IN_CALL,
+      AudioDriveSignal.SilenceMicrophone to CameraRefusal.MICROPHONE_SILENT,
+      AudioDriveSignal.BeginInterruption to CameraRefusal.INTERRUPTED
+    )) {
+      val rig = rig(moment)
+      ready(rig)
+      rig.camera.startRecording()
+
+      rig.audio.drive(signal)
+
+      eventually("the take ended by $signal") { rig.camera.state.value.phase != CameraPhase.RECORDING }
+      val ended = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
+      assertEquals(signal.toString(), expected, ended.reason)
+      assertTrue(rig.files().isEmpty())
     }
   }
 
