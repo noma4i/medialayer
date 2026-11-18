@@ -86,3 +86,36 @@ final class ScreenSwitch: @unchecked Sendable {
   func set(_ on: Bool) { lock.withLock { value = on } }
   func awake() -> ScreenAwake { ScreenAwake(apply: { [self] in set($0) }) }
 }
+
+/// The clock of the microphone attempts in a test: nothing fires until the test fires it.
+final class ManualTimer: @unchecked Sendable {
+  private final class Pending: @unchecked Sendable {
+    let delayMs: UInt64
+    let work: @Sendable () -> Void
+    var done = false
+    init(_ delayMs: UInt64, _ work: @escaping @Sendable () -> Void) { self.delayMs = delayMs; self.work = work }
+  }
+
+  private let lock = NSLock()
+  private var pending: [Pending] = []
+
+  var timer: RetryTimer {
+    RetryTimer { [self] delayMs, work in
+      let entry = Pending(delayMs, work)
+      lock.withLock { pending.append(entry) }
+      TestSignal.shared.fire()
+      return { [self] in lock.withLock { entry.done = true } }
+    }
+  }
+
+  func armed(_ delayMs: UInt64) -> Bool { lock.withLock { pending.contains { !$0.done && $0.delayMs == delayMs } } }
+
+  func fire(_ delayMs: UInt64) {
+    let entry = lock.withLock { () -> Pending? in
+      guard let entry = pending.first(where: { !$0.done && $0.delayMs == delayMs }) else { return nil }
+      entry.done = true
+      return entry
+    }
+    entry?.work()
+  }
+}

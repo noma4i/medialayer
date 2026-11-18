@@ -380,13 +380,15 @@ final class SystemVoiceCapture: VoiceCapture, @unchecked Sendable {
   private let source: VoicePCMSource
   private let link: @Sendable () -> AudioLink?
   private let makeWriter: @Sendable (URL) -> VoiceFileWriter
+  private let timer: RetryTimer
   private let lock = NSLock()
   private var state = State.idle
 
-  init(source: VoicePCMSource = AVCaptureVoiceSource(), link: @escaping @Sendable () -> AudioLink? = { Media.link }, writer: @escaping @Sendable (URL) -> VoiceFileWriter = { AssetVoiceWriter(url: $0) }) {
+  init(source: VoicePCMSource = AVCaptureVoiceSource(), link: @escaping @Sendable () -> AudioLink? = { Media.link }, writer: @escaping @Sendable (URL) -> VoiceFileWriter = { AssetVoiceWriter(url: $0) }, timer: RetryTimer = .system) {
     self.source = source
     self.link = link
     makeWriter = writer
+    self.timer = timer
   }
 
   deinit { release(state) }
@@ -433,7 +435,7 @@ final class SystemVoiceCapture: VoiceCapture, @unchecked Sendable {
       defer { state = .taking(take, box) }
       return state
     })
-    box.set(CameraAudioInput(link: audio, microphone: microphone, kind: .voice, failureSource: nil) { _ in })
+    box.set(CameraAudioInput(link: audio, microphone: microphone, kind: .voice, failureSource: nil, timer: timer) { _ in })
     ticket?.whenRevoked { reason in _ = first.settle(.failure(reason)) }
     do {
       try await withTaskCancellationHandler { try await first.wait() } onCancel: { _ = first.settle(.failure(CancellationError())) }

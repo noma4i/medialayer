@@ -175,6 +175,7 @@ private final class Clock: @unchecked Sendable {
 private struct Voice {
   let rig: AudioRig
   let source = FakePCMSource()
+  let retry = ManualTimer()
   let clock: Clock
   let recorder: MediaVoiceRecorder
 
@@ -184,7 +185,7 @@ private struct Voice {
     let clock = Clock(step: clockStep)
     self.clock = clock
     self.rig = rig
-    let system = SystemVoiceCapture(source: source, link: { rig.link }, writer: writer)
+    let system = SystemVoiceCapture(source: source, link: { rig.link }, writer: writer, timer: retry.timer)
     recorder = MediaVoiceRecorder(
       capture: afterStart.map { gate in GatedCapture(system, afterStart: { gate(source) }) } ?? system, maxDurationMs: maxMs,
       link: { rig.link }, clock: { clock.read() }, levelInterval: .milliseconds(5)
@@ -195,6 +196,17 @@ private struct Voice {
     let returned = Returned()
     let recorder = recorder
     return (Task { do { try await recorder.start(to: file); returned.finish() } catch { returned.finish(error) } }, returned)
+  }
+
+  /// Every attempt of the start loses its source before the first PCM: the pause after the first two is fired, the third is the outcome.
+  func loseEveryAttempt(_ error: Error? = nil) async {
+    for attempt in UInt64(1)...UInt64(MicrophoneRetry.attempts) {
+      await eventually("attempt \(attempt) started") { source.starts.count == Int(attempt) }
+      source.lose(error)
+      guard attempt < UInt64(MicrophoneRetry.attempts) else { return }
+      await eventually("the pause after attempt \(attempt)") { retry.armed(MicrophoneRetry.pauseMs) }
+      retry.fire(MicrophoneRetry.pauseMs)
+    }
   }
 
   func running(_ file: URL) async throws {
@@ -276,14 +288,66 @@ extension GlobalMedia {
       let voice = try Voice()
       let file = temporaryFile("m4a")
       let (task, returned) = voice.begin(file)
-      await eventually("connected") { voice.source.starts == [1] }
-
-      voice.source.lose()
+      await voice.loseEveryAttempt()
       await task.value
 
       #expect(voiceRefusal(returned.error) == .microphoneSilent)
+      #expect(voice.source.starts == [1, 2, 3], "exactly three sources")
       #expect(!FileManager.default.fileExists(atPath: file.path))
       #expect(voice.recorder.state == VoiceState(take: 0, phase: .idle, outcome: .refused(reason: .microphoneSilent), recordedMs: 0))
+    }
+
+    @Test
+    func inv_audio_110_aVoiceStartSilencedTwiceRecordsOnTheThirdAttemptWithNoWordOfTheRetries() async throws {
+      let voice = try Voice()
+      let file = temporaryFile("m4a")
+      let (task, returned) = voice.begin(file)
+      for attempt in 1...2 {
+        await eventually("attempt \(attempt)") { voice.source.starts.count == attempt }
+        voice.source.lose()
+        await eventually("pause \(attempt)") { voice.retry.armed(MicrophoneRetry.pauseMs) }
+        #expect(!returned.done, "a retry is not the outcome of the start")
+        voice.retry.fire(MicrophoneRetry.pauseMs)
+      }
+      await eventually("attempt 3") { voice.source.starts == [1, 2, 3] }
+      try voice.source.emit()
+      await task.value
+
+      #expect(returned.error == nil)
+      #expect(voice.recorder.state.phase == .recording && voice.recorder.state.take == 1, "one take")
+      #expect(voice.source.stops.prefix(2) == [1, 2])
+      #expect(!voice.rig.availability.contains(.noSound), "the retries publish no NoSound")
+      voice.clock.advance(1_000)
+      #expect(try await voice.recorder.stop().url == file)
+    }
+
+    @Test
+    func inv_audio_112_aVoiceStartWithNoSoundInTimeRetriesAndEndsMicrophoneSilentAfterTheThirdWait() async throws {
+      let voice = try Voice()
+      let (task, returned) = voice.begin(temporaryFile("m4a"))
+      for attempt in 1...MicrophoneRetry.attempts {
+        await eventually("attempt \(attempt) waits") { voice.source.starts.count == attempt && voice.retry.armed(MicrophoneRetry.soundWaitMs) }
+        voice.retry.fire(MicrophoneRetry.soundWaitMs)
+        if attempt < MicrophoneRetry.attempts {
+          await eventually("pause \(attempt)") { voice.retry.armed(MicrophoneRetry.pauseMs) }
+          voice.retry.fire(MicrophoneRetry.pauseMs)
+        }
+      }
+      await task.value
+      #expect(voiceRefusal(returned.error) == .microphoneSilent)
+      #expect(voice.source.starts == [1, 2, 3])
+    }
+
+    @Test
+    func inv_audio_113_aVoiceStartInACallIsRefusedAtOnceWithNoSourceAndNoRetry() async throws {
+      let voice = try Voice()
+      let call = voice.rig.link.call(.unmanaged)
+      let (task, returned) = voice.begin(temporaryFile("m4a"))
+      await task.value
+      call.close()
+      #expect(voiceRefusal(returned.error) == .inCall)
+      #expect(voice.source.starts.isEmpty, "no source started")
+      #expect(!voice.retry.armed(MicrophoneRetry.pauseMs) && !voice.retry.armed(MicrophoneRetry.soundWaitMs))
     }
 
     @Test
@@ -294,15 +358,19 @@ extension GlobalMedia {
       ] {
         let voice = try Voice()
         let (task, returned) = voice.begin(temporaryFile("m4a"))
-        await eventually("connected") { voice.source.starts == [1] }
-        voice.source.lose(error)
+        if expected == .permissionDenied {
+          await eventually("connected") { voice.source.starts == [1] }
+          voice.source.lose(error)
+        } else {
+          await voice.loseEveryAttempt(error)
+        }
         await task.value
         #expect(voiceRefusal(returned.error) == expected)
+        #expect(voice.source.starts.count == (expected == .permissionDenied ? 1 : 3), "a revoked permission is not retried")
       }
       let voice = try Voice()
       let (task, returned) = voice.begin(temporaryFile("m4a"))
-      await eventually("connected") { voice.source.starts == [1] }
-      voice.source.lose(NSError(domain: "native", code: 7))
+      await voice.loseEveryAttempt(NSError(domain: "native", code: 7))
       await task.value
       #expect(voiceRefusal(returned.error) == nil && returned.error != nil, "a native error is not a refusal")
     }
@@ -380,6 +448,10 @@ extension GlobalMedia {
       }
       let states = Collected(voice.recorder.states)
       let (task, returned) = voice.begin(temporaryFile("m4a"))
+      for _ in 1..<MicrophoneRetry.attempts {
+        await eventually("the pause after a lost attempt") { voice.retry.armed(MicrophoneRetry.pauseMs) }
+        voice.retry.fire(MicrophoneRetry.pauseMs)
+      }
       await task.value
       voice.source.whenStarted(nil)
 

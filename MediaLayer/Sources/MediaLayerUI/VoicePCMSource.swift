@@ -22,6 +22,8 @@ final class VoiceMicrophone: CameraMicrophone, VoicePCMSink, @unchecked Sendable
   private let lock = NSLock()
   private weak var listener: CameraMicrophoneListener?
   private var active: UInt64?
+  /// The generation that gave PCM: only its loss reaches the take at once, a loss before the first PCM waits for the owner's `gaveUp`.
+  private var heard: UInt64?
   private var take: VoicePCMSink?
 
   init(source: VoicePCMSource) { self.source = source }
@@ -44,7 +46,9 @@ final class VoiceMicrophone: CameraMicrophone, VoicePCMSink, @unchecked Sendable
   func pcm(generation: UInt64, _ buffer: CMSampleBuffer) {
     guard isLivePCM(buffer) else { return }
     guard let (take, listener) = lock.withLock({ () -> (VoicePCMSink?, CameraMicrophoneListener?)? in
-      active == generation ? (take, self.listener) : nil
+      guard active == generation else { return nil }
+      heard = generation
+      return (take, self.listener)
     }) else { return }
     take?.pcm(generation: generation, buffer)
     listener?.microphoneHeard(generation: generation)
@@ -57,10 +61,15 @@ final class VoiceMicrophone: CameraMicrophone, VoicePCMSink, @unchecked Sendable
 
   func lost(generation: UInt64, error: Error?) {
     guard let (take, listener) = lock.withLock({ () -> (VoicePCMSink?, CameraMicrophoneListener?)? in
-      active == generation ? (take, self.listener) : nil
+      guard active == generation else { return nil }
+      return (heard == generation ? take : nil, self.listener)
     }) else { return }
     take?.lost(generation: generation, error: error)
     listener?.microphoneLost(generation: generation, error: error)
+  }
+
+  func gaveUp(generation: UInt64, error: Error?) {
+    lock.withLock { take }?.lost(generation: generation, error: error)
   }
 }
 

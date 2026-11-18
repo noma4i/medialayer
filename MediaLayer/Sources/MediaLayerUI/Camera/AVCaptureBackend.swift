@@ -349,10 +349,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
       self.session.beginConfiguration()
       let failure = self.addMicrophone()
       self.session.commitConfiguration()
-      if self.audioOutput != nil {
-        self.audioFlowing = false
-        self.emit(.microphoneFlow(false))
-      }
+      // A source not heard yet is not silent: the owner tells the silence of its last attempt (owner 2026-11-19, MicrophoneRetry).
+      if self.audioOutput != nil { self.audioFlowing = false }
       if let failure { self.loseMicrophone(failure) }
     }
   }
@@ -393,7 +391,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     microphoneInput = nil
     audioOutput = nil
     audioFlowing = false
-    emit(.microphoneFlow(false))
   }
 
   private func loseMicrophone(_ error: Error?) {

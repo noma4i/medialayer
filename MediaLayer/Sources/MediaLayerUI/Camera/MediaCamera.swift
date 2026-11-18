@@ -551,7 +551,13 @@ public final class MediaCamera: @unchecked Sendable {
   private func openAudioInput() {
     guard profile.audio, audioInput == nil, case let .native(microphone) = backend.audio else { return }
     guard let link = services.link() else { return post(.refuse(reason: .notReady)) }
-    audioInput = CameraAudioInput(link: link, microphone: microphone) { [weak self] fault in self?.queue.async { self?.microphoneFault = fault } }
+    audioInput = CameraAudioInput(link: link, microphone: microphone) { [weak self] fault in
+      self?.queue.async {
+        self?.microphoneFault = fault
+        // The last attempt of the microphone gave no sound: a take that waits for its first sound ends silent, the way Android tells it.
+        if fault == .microphoneSilent { self?.apply(.audioFlow(flowing: false)) }
+      }
+    }
   }
 
   private func closeAudioInput() {
