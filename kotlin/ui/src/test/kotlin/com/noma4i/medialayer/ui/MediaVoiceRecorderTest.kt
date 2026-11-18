@@ -11,6 +11,7 @@ import com.noma4i.medialayer.FocusChange
 import com.noma4i.medialayer.MediaException
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.MicrophoneAvailability
+import com.noma4i.medialayer.MicrophonePermission
 import com.noma4i.medialayer.NativeFailure
 import com.noma4i.medialayer.OpenConfig
 import com.noma4i.medialayer.VoiceEncoderSettings
@@ -82,6 +83,7 @@ private class Writer(private val notReady: Throwable? = null) : VoiceFileWriter 
 }
 
 @RunWith(MediaLayerTestRunner::class)
+@OptIn(MediaLayerTestingApi::class)
 class MediaVoiceRecorderTest {
   private val context = ApplicationProvider.getApplicationContext<Application>()
   private val scope = CoroutineScope(Dispatchers.Default)
@@ -353,6 +355,56 @@ class MediaVoiceRecorderTest {
     assertEquals(VoiceOutcome.Refused(VoiceRefusal.IN_CALL), recorder.state.value.outcome)
     assertFalse(link.isRecording)
     await("the owner is closed") { microphone.calls.last() == "close" }
+  }
+
+  @Test
+  fun inv_audio_80_the_driver_call_ends_a_voice_take_with_in_call_and_names_it_in_availability() = runBlocking<Unit> {
+    val recorder = recorder()
+    record(recorder, file())
+
+    link.drive(AudioDriveSignal.StartCall)
+
+    val ended = withTimeout(5_000) { recorder.state.first { it.outcome != null } }
+    assertEquals(VoiceOutcome.Refused(VoiceRefusal.IN_CALL), ended.outcome)
+    await("external call") { availability.last() == MicrophoneAvailability.EXTERNAL_CALL }
+    link.drive(AudioDriveSignal.EndCall)
+    await("available again") { availability.last() == MicrophoneAvailability.AVAILABLE }
+  }
+
+  @Test
+  fun inv_audio_81_the_driver_silence_ends_a_voice_take_with_microphone_silent() = runBlocking<Unit> {
+    val recorder = recorder()
+    record(recorder, file())
+
+    link.drive(AudioDriveSignal.SilenceMicrophone)
+
+    val ended = withTimeout(5_000) { recorder.state.first { it.outcome != null } }
+    assertEquals(VoiceOutcome.Refused(VoiceRefusal.MICROPHONE_SILENT), ended.outcome)
+  }
+
+  @Test
+  fun inv_audio_82_the_driver_interruption_and_revoke_end_a_voice_take_and_show_in_availability() = runBlocking<Unit> {
+    val interrupted = recorder()
+    record(interrupted, file())
+    link.drive(AudioDriveSignal.BeginInterruption)
+    val first = withTimeout(5_000) { interrupted.state.first { it.outcome != null } }
+    assertEquals(VoiceOutcome.Refused(VoiceRefusal.INTERRUPTED), first.outcome)
+    link.drive(AudioDriveSignal.EndInterruption)
+
+    val revoked = recorder()
+    await("focus is back") { availability.last() == MicrophoneAvailability.AVAILABLE }
+    val start = scope.async { revoked.start(file()) }
+    await("the owner starts the microphone") { microphone.calls.contains("start 2") }
+    microphone.listener!!.onLive(2)
+    microphone.listener!!.onPcm(chunk(2))
+    withTimeout(5_000) { start.await() }
+    link.drive(AudioDriveSignal.Permission(MicrophonePermission.DENIED))
+
+    val second = withTimeout(5_000) { revoked.state.first { it.outcome != null } }
+    assertEquals(VoiceOutcome.Refused(VoiceRefusal.PERMISSION_DENIED), second.outcome)
+    await("denied") { availability.last() == MicrophoneAvailability.PERMISSION_DENIED }
+    link.drive(AudioDriveSignal.Permission(MicrophonePermission.GRANTED))
+    await("granted") { availability.last() == MicrophoneAvailability.AVAILABLE }
   }
 
   @Test

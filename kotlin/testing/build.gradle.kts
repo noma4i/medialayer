@@ -51,6 +51,7 @@ if (providers.gradleProperty("releaseVersion").isPresent && providers.gradleProp
 
 dependencies {
   api(project(":"))
+  implementation(project(":ui"))
   implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
   implementation("net.java.dev.jna:jna:5.19.1@aar")
 

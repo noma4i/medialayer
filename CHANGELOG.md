@@ -4,6 +4,7 @@
 
 ### Added
 
+- `MediaAudioDriver` in the testing modules drives call, silence, interruption and revoke through the real audio link.
 - Add `NoSound` to microphone availability.
 - Add `permissionNotAsked` to microphone availability; `permissionDenied` now means asked and refused.
 - `Media.retry(source)` reloads a failed source without remounting its places.

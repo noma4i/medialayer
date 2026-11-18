@@ -259,6 +259,24 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
   }
   private fun id() = nextId.incrementAndGet().toULong()
   private fun enqueue(work: () -> Unit): Boolean = synchronized(postLock) { !closed.get() && handler.post(work) }
+  /** Feeds a test signal through the same inputs the system ports send. */
+  @OptIn(MediaLayerTestingApi::class)
+  internal fun drive(signal: AudioDriveSignal) {
+    when (signal) {
+      AudioDriveSignal.SilenceMicrophone -> enqueue {
+        tickets.keys.toList().forEach { process(AudioInput.Silenced(it)) }
+        inputRegistry.forEach { (id, input) -> input.generation?.let { process(AudioInput.NoSound(id, it, true)) } }
+      }
+      AudioDriveSignal.RestoreMicrophone -> enqueue {
+        inputRegistry.forEach { (id, input) -> input.generation?.let { process(AudioInput.NoSound(id, it, false)) } }
+      }
+      AudioDriveSignal.StartCall -> send(AudioInput.PhoneCall(true))
+      AudioDriveSignal.EndCall -> send(AudioInput.PhoneCall(false))
+      AudioDriveSignal.BeginInterruption -> send(AudioInput.Focus(FocusChange.LOSS_TRANSIENT))
+      AudioDriveSignal.EndInterruption -> send(AudioInput.Focus(FocusChange.GAIN))
+      is AudioDriveSignal.Permission -> send(AudioInput.Permission(signal.state))
+    }
+  }
   internal fun send(input: AudioInput) {
     if (Looper.myLooper() == thread.looper && !closed.get()) process(input) else enqueue { process(input) }
   }
