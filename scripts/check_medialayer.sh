@@ -15,6 +15,7 @@ source "$root/scripts/check_steps.sh"
 steps=(
   "cheap|zoo|120|*|bash scripts/check_zoo.sh"
   "cheap|docs|120|*|bash scripts/check_docs.sh"
+  "cheap|invariants|120|*|bash scripts/check_invariants.sh"
   "cheap|build-modes|120|*|bash scripts/check_build_modes.sh"
   "cheap|release-evidence|120|*|bash scripts/check_release_evidence.sh"
   "cargo|cargo-test|900|core/ gen/ Cargo.|$slot cargo-step cargo test --workspace"
