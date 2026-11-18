@@ -269,7 +269,7 @@ struct AudioLinkTests {
   }
 
   @Test
-  func inv_audio_40_an_external_call_seen_by_the_observer_refuses_a_recording_until_it_ends() async throws {
+  func inv_call_10_an_external_call_seen_by_the_observer_refuses_a_recording_until_it_ends() async throws {
     let rig = try AudioRig()
     rig.calls.send(["cellular"])
     await eventually("external") { rig.availability.last == .externalCall }

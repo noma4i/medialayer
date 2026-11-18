@@ -525,7 +525,7 @@ extension GlobalMedia {
 
     // V2: the end by the layer close is in inv_ios_04
     @Test(arguments: [("interruption", VoiceRefusal.interrupted), ("call", .inCall), ("permission", .permissionDenied)])
-    func inv_voice_14_a_revoked_take_ends_refused_without_stop_and_leaves_no_file(cause: String, reason: VoiceRefusal) async throws {
+    func inv_audio_41_a_revoked_take_ends_refused_without_stop_and_leaves_no_file(cause: String, reason: VoiceRefusal) async throws {
       let app = try await AppLayer.open()
       let recorder = appRecorder(FakeCapture(), ticks: Ticks())
       let states = Collected(recorder.states)
@@ -549,7 +549,7 @@ extension GlobalMedia {
 
     // V3
     @Test
-    func inv_voice_15_the_duration_limit_ends_the_take_recorded_without_stop() async throws {
+    func inv_voice_14_the_duration_limit_ends_the_take_recorded_without_stop() async throws {
       let app = try await AppLayer.open()
       let ticks = Ticks()
       let capture = FakeCapture()
@@ -574,7 +574,7 @@ extension GlobalMedia {
 
     // V4
     @Test
-    func inv_voice_16_a_recorder_failure_ends_the_take_failed_and_the_next_take_starts() async throws {
+    func inv_voice_15_a_recorder_failure_ends_the_take_failed_and_the_next_take_starts() async throws {
       let app = try await AppLayer.open()
       let capture = FakeCapture()
       let recorder = appRecorder(capture, ticks: Ticks())
@@ -601,7 +601,7 @@ extension GlobalMedia {
 
     // V5
     @Test(arguments: ["capture permission", "capture busy", "port permission", "call", "empty"])
-    func inv_voice_17_every_refusal_carries_its_reason_in_the_error(cause: String) async throws {
+    func inv_voice_16_every_refusal_carries_its_reason_in_the_error(cause: String) async throws {
       let app = try await AppLayer.open(microphone: SwitchMicrophone(granted: cause != "port permission"))
       let ticks = Ticks()
       let capture: FakeCapture
@@ -631,7 +631,7 @@ extension GlobalMedia {
 
     // V6
     @Test(arguments: ["stop", "limit", "interruption"])
-    func inv_voice_18_the_levels_end_with_every_take(end: String) async throws {
+    func inv_voice_17_the_levels_end_with_every_take(end: String) async throws {
       let app = try await AppLayer.open()
       let ticks = Ticks()
       let capture = FakeCapture()
@@ -653,7 +653,7 @@ extension GlobalMedia {
 
     // D09
     @Test
-    func inv_voice_19_a_call_applies_its_session_only_after_the_recorder_hardware_stopped() async throws {
+    func inv_voice_18_a_call_applies_its_session_only_after_the_recorder_hardware_stopped() async throws {
       let app = try await AppLayer.open()
       let capture = StopWitness(session: app.session)
       let recorder = appRecorder(capture, ticks: Ticks())
@@ -672,7 +672,7 @@ extension GlobalMedia {
 
     // D25
     @Test
-    func inv_voice_20_a_take_file_that_cannot_be_removed_is_one_file_failure_event() async throws {
+    func inv_voice_19_a_take_file_that_cannot_be_removed_is_one_file_failure_event() async throws {
       let app = try await AppLayer.open()
       let failures = Collected(Media.failures)
       let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

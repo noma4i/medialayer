@@ -783,7 +783,7 @@ class MediaCameraTest {
   }
 
   @Test
-  fun inv_capture_35_a_take_ended_by_the_limit_shows_its_captured_outcome_without_a_stop() = runBlocking {
+  fun inv_capture_77_a_take_ended_by_the_limit_shows_its_captured_outcome_without_a_stop() = runBlocking {
     val rig = rig(moment)
     ready(rig)
     val take = recordingTake(rig)

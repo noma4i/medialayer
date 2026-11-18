@@ -114,7 +114,7 @@ class AudioContractTest {
   }
 
   @Test
-  fun inv_call_16_every_loss_of_the_call_sound_shows_interrupted_before_a_new_live() = runBlocking {
+  fun inv_call_15_every_loss_of_the_call_sound_shows_interrupted_before_a_new_live() = runBlocking {
     val rows = listOf<Pair<String, (MediaCallAudio) -> Unit>>(
       "transient focus loss" to { _ -> app.focus.send(FocusSignal.Change(FocusChange.LOSS_TRANSIENT)) },
       "permanent focus loss" to { _ -> app.focus.send(FocusSignal.Change(FocusChange.LOSS)) },
@@ -140,7 +140,7 @@ class AudioContractTest {
   }
 
   @Test
-  fun inv_call_17_the_speaker_choice_of_every_call_kind_shows_its_applied_route() = runBlocking {
+  fun inv_call_16_the_speaker_choice_of_every_call_kind_shows_its_applied_route() = runBlocking {
     val unmanaged = app.layer.callAudio(MediaCallKind.Unmanaged)
     assertEquals("a new call starts on the receiver", CallRoute.RECEIVER, unmanaged.route.next { true })
     unmanaged.states.next { it == CallState.LIVE }
@@ -231,7 +231,7 @@ class AudioContractTest {
   }
 
   @Test
-  fun inv_audio_62_closing_the_layer_ends_the_availability_stream_and_a_later_stream_ends_at_once() = runBlocking {
+  fun inv_audio_77_closing_the_layer_ends_the_availability_stream_and_a_later_stream_ends_at_once() = runBlocking {
     val stream = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { app.layer.microphoneAvailability.toList() }
 
     app.close()
@@ -259,7 +259,7 @@ class AudioContractTest {
   }
 
   @Test
-  fun inv_audio_63_a_high_low_high_burst_behind_a_slow_collector_is_one_rise() {
+  fun inv_audio_64_a_high_low_high_burst_behind_a_slow_collector_is_one_rise() {
     val worker = Executors.newSingleThreadExecutor()
     val busy = CountDownLatch(1)
     val afterBurst = AtomicBoolean()
@@ -291,7 +291,7 @@ class AudioContractTest {
   }
 
   @Test
-  fun inv_audio_64_the_global_mute_reaches_a_layer_opened_after_it() = runBlocking {
+  fun inv_audio_65_the_global_mute_reaches_a_layer_opened_after_it() = runBlocking {
     val url = "file:///muted.mp3"
     Media.muted = true
     try {
@@ -312,7 +312,7 @@ class AudioContractTest {
   }
 
   @Test
-  fun inv_audio_65_closing_the_layer_ends_the_volume_streams_and_releases_the_system_observer() = runBlocking {
+  fun inv_audio_63_closing_the_layer_ends_the_volume_streams_and_releases_the_system_observer() = runBlocking {
     val raises = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { app.layer.volumeRaises().toList() }
     TestSignal.await("observing", 5_000) { volume.observers == 1 }
 

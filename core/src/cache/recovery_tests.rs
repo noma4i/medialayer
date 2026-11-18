@@ -39,7 +39,7 @@ async fn inv_cache_07_part_files_are_removed_on_open() {
 }
 
 #[tokio::test]
-async fn inv_cache_07_orphan_files_without_an_index_entry_are_removed() {
+async fn inv_cache_07_inv_cache_16_orphan_files_without_an_index_entry_are_removed() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join(format!("{}.bin", crate::identity::key_file_name("ab"))), b"orphan").unwrap();
     let cache = Cache::open(dir.path(), roomy());

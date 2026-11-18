@@ -201,7 +201,7 @@ fn inv_audio_20_one_recording_of_each_kind_pauses_playback_and_camera_and_voice_
 }
 
 #[test]
-fn inv_audio_21_every_loss_of_the_microphone_revokes_the_running_recording_with_its_reason() {
+fn inv_audio_21_inv_call_09_every_loss_of_the_microphone_revokes_the_running_recording_with_its_reason() {
     let revoke = |reason| A::Revoke { id: 1, reason };
     let cases: Vec<(AudioInput, Vec<AudioAction>)> = vec![
         (I::InterruptionBegan, vec![revoke(RecordingRefusal::Interrupted), A::PauseAll { reason: PauseReason::Interrupted }, A::ForgetPaused, available(MicrophoneAvailability::OtherApp)]),
@@ -236,7 +236,7 @@ fn inv_audio_22_an_own_call_takes_one_core_hold_and_its_own_mode_is_never_an_ext
 }
 
 #[test]
-fn inv_audio_23_an_external_call_holds_the_core_until_its_platform_signal_ends() {
+fn inv_audio_23_inv_call_10_an_external_call_holds_the_core_until_its_platform_signal_ends() {
     for (begin, end) in [
         (I::ObservedCalls { uuids: vec!["cellular".into()] }, I::ObservedCalls { uuids: vec![] }),
         (I::PhoneCall { active: true }, I::PhoneCall { active: false }),
@@ -804,7 +804,7 @@ fn inv_audio_60_every_blocked_session_reports_the_microphone_as_taken_until_its_
 }
 
 #[test]
-fn inv_audio_61_a_capture_of_a_kind_the_held_plan_does_not_cover_is_admitted_after_its_own_plan() {
+fn inv_audio_83_a_capture_of_a_kind_the_held_plan_does_not_cover_is_admitted_after_its_own_plan() {
     let video = SessionWant::Recording { kind: RecordingKind::Video };
     let mut world = World::new();
     world.settle(I::Capture { id: 1, kind: RecordingKind::Voice });
@@ -838,7 +838,7 @@ fn inv_audio_62_every_native_failure_reaches_the_app_once_in_order() {
 }
 
 #[test]
-fn inv_voice_13_a_voice_error_carries_its_typed_reason_and_the_shared_text() {
+fn inv_voice_03_a_voice_error_carries_its_typed_reason_and_the_shared_text() {
     use crate::api::MediaError;
     use crate::send_prep::{voice_error, voice_refusal_text, VoiceRefusal};
     for reason in [VoiceRefusal::PermissionDenied, VoiceRefusal::MicrophoneBusy, VoiceRefusal::Empty, VoiceRefusal::InCall, VoiceRefusal::Interrupted, VoiceRefusal::MicrophoneSilent] {
@@ -847,7 +847,7 @@ fn inv_voice_13_a_voice_error_carries_its_typed_reason_and_the_shared_text() {
 }
 
 #[test]
-fn inv_call_17_a_new_call_is_a_new_intent_that_leaves_a_permanently_lost_focus() {
+fn inv_call_21_a_new_call_is_a_new_intent_that_leaves_a_permanently_lost_focus() {
     let mut world = World::playing();
     world.send(I::Focus { change: FocusChange::Loss });
     world.send(I::Audible { slot: 0, on: false });
@@ -858,7 +858,7 @@ fn inv_call_17_a_new_call_is_a_new_intent_that_leaves_a_permanently_lost_focus()
 }
 
 #[test]
-fn inv_audio_63_an_input_is_connected_after_its_recording_session_by_generation_and_stopped_when_a_call_comes() {
+fn inv_audio_84_an_input_is_connected_after_its_recording_session_by_generation_and_stopped_when_a_call_comes() {
     let restores = |actions: &[AudioAction]| actions.iter().filter_map(|action| if let A::RestoreInput { id, kind, generation } = action { Some((*id, *kind, *generation)) } else { None }).collect::<Vec<_>>();
     let stops = |actions: &[AudioAction]| actions.iter().filter_map(|action| if let A::StopInput { id, generation } = action { Some((*id, *generation)) } else { None }).collect::<Vec<_>>();
     let mut world = World::new();

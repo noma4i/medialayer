@@ -138,7 +138,7 @@ class MediaVoiceRecorderTest {
   private fun refusal(work: suspend () -> Unit) = assertThrows(MediaException.Voice::class.java) { runBlocking { work() } }
 
   @Test
-  fun inv_voice_01_no_file_and_no_recording_before_the_first_live_pcm_and_both_after_it() = runBlocking<Unit> {
+  fun inv_voice_34_no_file_and_no_recording_before_the_first_live_pcm_and_both_after_it() = runBlocking<Unit> {
     val writer = Writer()
     val recorder = recorder(writer)
     val target = file()
@@ -324,7 +324,7 @@ class MediaVoiceRecorderTest {
   }
 
   @Test
-  fun inv_voice_20_a_take_file_that_cannot_be_removed_is_one_file_failure_event() = runBlocking<Unit> {
+  fun inv_voice_19_a_take_file_that_cannot_be_removed_is_one_file_failure_event() = runBlocking<Unit> {
     val folder = Files.createTempDirectory("voice").toFile()
     val recorder = recorder()
     record(recorder, File(folder, "take.m4a"))

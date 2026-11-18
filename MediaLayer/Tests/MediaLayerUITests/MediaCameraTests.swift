@@ -708,7 +708,7 @@ struct MediaCameraTests {
   }
 
   @Test
-  func inv_capture_39_a_frame_observer_that_arrives_during_a_take_gets_frames_after_it_without_touching_the_recording() async throws {
+  func inv_capture_41_a_frame_observer_that_arrives_during_a_take_gets_frames_after_it_without_touching_the_recording() async throws {
     let rig = try makeRig(.moment)
     await ready(rig)
     try await rig.camera.startRecording()
@@ -856,7 +856,7 @@ struct MediaCameraTests {
 
   // C1
   @Test
-  func inv_capture_34_a_take_ended_by_the_limit_shows_its_captured_outcome_without_stop() async throws {
+  func inv_capture_77_a_take_ended_by_the_limit_shows_its_captured_outcome_without_stop() async throws {
     let rig = try makeRig(.moment)
     await ready(rig)
     let states = Collected(rig.camera.states)
@@ -873,7 +873,7 @@ struct MediaCameraTests {
 
   // C2
   @Test(arguments: [("interruption", CameraRefusal.interrupted), ("silence", .microphoneSilent), ("too short", .tooShort), ("failure", .recordFailed)])
-  func inv_capture_35_a_thrown_away_take_shows_its_refusal_and_fault_without_stop(cause: String, reason: CameraRefusal) async throws {
+  func inv_capture_36_a_thrown_away_take_shows_its_refusal_and_fault_without_stop(cause: String, reason: CameraRefusal) async throws {
     let rig = try makeRig(.moment)
     await ready(rig)
     let states = Collected(rig.camera.states)
@@ -900,7 +900,7 @@ struct MediaCameraTests {
 
   // C3
   @Test
-  func inv_capture_36_a_reset_during_a_take_shows_the_lost_take_and_the_camera_opens_again() async throws {
+  func inv_capture_37_a_reset_during_a_take_shows_the_lost_take_and_the_camera_opens_again() async throws {
     let rig = try makeRig(.moment)
     await ready(rig)
     let states = Collected(rig.camera.states)
@@ -1006,7 +1006,7 @@ struct MediaCameraTests {
 
   // C6
   @Test(arguments: ["flash", "zoom"])
-  func inv_capture_38_a_command_the_system_rejects_is_a_failure_event_and_the_state_stays_true(command: String) async throws {
+  func inv_capture_40_a_command_the_system_rejects_is_a_failure_event_and_the_state_stays_true(command: String) async throws {
     let rig = try makeRig(.moment)
     await ready(rig)
     let failures = Collected(Media.failures)

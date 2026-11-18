@@ -506,7 +506,7 @@ fn inv_capture_35_every_take_ends_with_one_outcome_that_names_it() {
 }
 
 #[test]
-fn inv_capture_36_a_take_records_only_after_positive_microphone_sound() {
+fn inv_capture_38_a_take_records_only_after_positive_microphone_sound() {
     let profile = moment();
     let (pending, actions) = drive(profile, opened(profile), &[CaptureEvent::Start, CaptureEvent::RecordStarted]);
     assert_eq!((actions, phase(&pending)), (vec![CaptureAction::BeginRecording], CameraPhase::Ready), "a microphone not heard yet keeps the take out of Recording (CameraX reports sound only during a take)");
@@ -520,7 +520,7 @@ fn inv_capture_36_a_take_records_only_after_positive_microphone_sound() {
 }
 
 #[test]
-fn inv_capture_37_closing_the_layer_ends_a_running_take_closes_the_camera_and_ignores_later_events() {
+fn inv_capture_39_closing_the_layer_ends_a_running_take_closes_the_camera_and_ignores_later_events() {
     let profile = moment();
     let running = drive(profile, ready(profile), &[CaptureEvent::Start, CaptureEvent::RecordStarted]).0;
     let take = running.state.take;

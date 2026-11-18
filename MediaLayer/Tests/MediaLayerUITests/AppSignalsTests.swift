@@ -38,7 +38,7 @@ extension GlobalMedia {
   struct AppSignalsTests {
     // K1
     @Test
-    func inv_call_14_the_system_activation_and_deactivation_of_a_callkit_call_reach_its_states() async throws {
+    func inv_call_22_the_system_activation_and_deactivation_of_a_callkit_call_reach_its_states() async throws {
       let app = try await AppLayer.open()
       let call = try await app.media.callAudio(.callKit(UUID()))
       let states = Collected(call.states)
@@ -137,7 +137,7 @@ extension GlobalMedia {
 
     // M1
     @Test
-    func inv_audio_60_a_permission_change_in_the_foreground_reaches_the_availability() async throws {
+    func inv_audio_59_a_permission_change_in_the_foreground_reaches_the_availability() async throws {
       let microphone = SwitchMicrophone(granted: false)
       let app = try await AppLayer.open(microphone: microphone)
       let availability = Collected(app.media.microphoneAvailability)
@@ -164,7 +164,7 @@ extension GlobalMedia {
 
     // M2
     @Test
-    func inv_audio_61_a_microphone_held_by_another_app_shows_other_app() async throws {
+    func inv_audio_60_a_microphone_held_by_another_app_shows_other_app() async throws {
       let app = try await AppLayer.open()
       let availability = Collected(app.media.microphoneAvailability)
       app.session.failApply(.playAndRecord, refusedApply(AVAudioSession.ErrorCode.insufficientPriority.rawValue))
@@ -179,7 +179,7 @@ extension GlobalMedia {
 
     // M3
     @Test(arguments: ["interruption", "refused session"])
-    func inv_audio_62_a_lost_or_refused_session_is_not_available_and_comes_back(cause: String) async throws {
+    func inv_audio_61_a_lost_or_refused_session_is_not_available_and_comes_back(cause: String) async throws {
       let app = try await AppLayer.open()
       let availability = Collected(app.media.microphoneAvailability)
       await eventually("available") { availability.last == .available }
@@ -206,7 +206,7 @@ extension GlobalMedia {
 
     // F1
     @Test
-    func inv_audio_63_two_native_errors_are_two_ordered_failure_events() async throws {
+    func inv_audio_62_two_native_errors_are_two_ordered_failure_events() async throws {
       let app = try await AppLayer.open()
       let failures = Collected(Media.failures)
       let call = try await app.media.callAudio(.unmanaged)
