@@ -456,7 +456,7 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
             let release_in_flight = world.owner.inflight().is_some_and(|generation| releases.contains(&generation));
             let busy_answer = answers_flight && release_in_flight && matches!(input, I::Applied { result: AppliedResult::Busy, .. });
             let pending_release = world.owner.release_pending() && !matches!(input, I::Applied { .. });
-            if !matches!(input, I::Applied { .. }) && release_in_flight {
+            if !matches!(input, I::Applied { .. } | I::FocusRequest { .. }) && release_in_flight {
                 heard_in_flight = true;
             }
             if let I::CallStarted { id, .. } = &input {
