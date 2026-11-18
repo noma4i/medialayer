@@ -106,6 +106,8 @@ extension GlobalMedia {
   @MainActor
   @Suite(.serialized, .timeLimit(.minutes(2)))
   struct ConnectWithoutAppMachineTests {
+    init() { ProcessMediaContext.shared.reset() }
+
     private func gatedOpening(_ result: @escaping @Sendable () throws -> MediaLayer) -> (Task<MediaLayer, Error>, AsyncStream<Void>.Continuation) {
       let (gate, release) = AsyncStream<Void>.makeStream()
       let task = Task<MediaLayer, Error> {
@@ -171,7 +173,7 @@ extension GlobalMedia {
     }
 
     @Test
-    func inv_native_29_viewOutsideTheProviderTakesTheProcessContextAndTheEnvironmentWinsAndRemovalClearsIt() async throws {
+    func inv_native_29_viewOutsideTheProviderTakesTheProcessContextAndTheEnvironmentWinsAndTheLayerOutlivesItsScreen() async throws {
       let first = RecordingPlaces(), second = RecordingPlaces()
       let outside = ConnectSeen(), insideFirst = ConnectSeen()
       let firstWindow = connectHost(ConnectProbe(seen: insideFirst).mediaLayer(first))
@@ -193,7 +195,8 @@ extension GlobalMedia {
       #expect(outside.seenPlaces === second)
 
       connectRemove(secondWindow)
-      #expect(await untilConnect { outside.seenPlaces == nil })
+      await connectDrainMain()
+      #expect(ProcessMediaContext.shared.current?.places === second)
     }
 
     @Test

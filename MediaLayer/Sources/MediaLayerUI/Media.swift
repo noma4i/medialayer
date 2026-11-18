@@ -126,6 +126,11 @@ final class ProcessMediaContext: @unchecked Sendable {
     current = context
   }
 
+  /// Test seam: a test process starts without a layer, as an app process does before it opens one.
+  func reset() {
+    current = nil
+  }
+
 }
 
 @propertyWrapper
