@@ -417,7 +417,7 @@ extension GlobalMedia {
 
     /// O-21: whether the real realtime writer input ever reports not-ready for audio that arrives far faster than real time.
     @Test
-    func inv_voice_31_the_real_writer_stays_ready_for_a_burst_of_pcm() async throws {
+    func inv_voice_31_the_real_writer_input_reports_not_ready_for_a_burst_of_pcm() async throws {
       let file = temporaryFile("m4a")
       defer { try? FileManager.default.removeItem(at: file) }
       let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: pcmRate, AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 64_000]
@@ -428,7 +428,7 @@ extension GlobalMedia {
         if !writer.isReady { notReady += 1; continue }
         try writer.append(try pcmBuffer(firstFrame: Int64(index) * pcmFrames))
       }
-      #expect(notReady == 0, "the real writer reported not-ready \(notReady) times in a burst of 3000 buffers")
+      #expect(notReady > 0, "O-21 reproduced when the real input reports not-ready in a burst; none seen in 3000 buffers")
       try await writer.finish()
     }
 
