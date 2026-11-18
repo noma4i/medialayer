@@ -3,7 +3,7 @@ import MediaLayer
 import Nuke
 import ObjectiveC
 
-nonisolated(unsafe) private var lifetimeKey: UInt8 = 0
+nonisolated(unsafe) var lifetimeKey: UInt8 = 0
 
 extension MediaLayer {
   public static func open(

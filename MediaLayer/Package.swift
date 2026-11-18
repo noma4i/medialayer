@@ -33,7 +33,7 @@ let package = Package(
     ),
     .target(
       name: "MediaLayerTesting",
-      dependencies: ["MediaLayer"],
+      dependencies: ["MediaLayer", "MediaLayerUI"],
       swiftSettings: [.swiftLanguageMode(.v5)]
     ),
     .testTarget(

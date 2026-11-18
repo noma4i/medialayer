@@ -49,7 +49,7 @@ final class AudioInputHandle: @unchecked Sendable {
 final class AudioLink: @unchecked Sendable {
   private let inputs: AudioInputs
   private let ports: AudioPorts
-  private let inbox = DispatchQueue(label: "MediaLayer.audio.inbox")
+  let inbox = DispatchQueue(label: "MediaLayer.audio.inbox")
   private let inboxKey = DispatchSpecificKey<Bool>()
   private let sessionQueue = DispatchQueue(label: "MediaLayer.audio.session")
   private var queuedActions: [PendingAudioAction] = []
@@ -61,8 +61,8 @@ final class AudioLink: @unchecked Sendable {
   private var closeFinished = false
   private var closeWaiters: [@Sendable () -> Void] = []
   private var pending: [UInt64: CheckedContinuation<Result<RecordingTicket, Error>, Never>] = [:]
-  private var tickets: [UInt64: WeakRecordingTicket] = [:]
-  private var inputRegistry: [UInt64: InputRegistration] = [:]
+  var tickets: [UInt64: WeakRecordingTicket] = [:]
+  var inputRegistry: [UInt64: InputRegistration] = [:]
   private var pendingStops: [RecordingTicket] = []
   private var calls: [UInt64: CallSignals] = [:]
   private var unmanagedSpeakers: [UInt64: Bool] = [:]
@@ -267,7 +267,7 @@ final class AudioLink: @unchecked Sendable {
 
   private func allocate() -> UInt64 { idLock.withLock { next += 1; return next } }
 
-  private func observedCalls(_ observed: Set<String>) {
+  func observedCalls(_ observed: Set<String>) {
     inbox.async {
       self.process(.observedCalls(uuids: observed.sorted()))
       let external = !observed.subtracting(self.callKitIDs.values).isEmpty
@@ -280,7 +280,7 @@ final class AudioLink: @unchecked Sendable {
     send(.failure(failure: NativeFailure(source: source, domain: native.domain, code: Int64(native.code), message: native.localizedDescription)))
   }
 
-  private func process(_ input: AudioInput) {
+  func process(_ input: AudioInput) {
     guard !closed else { return }
     let actions: [AudioAction]
     do {
@@ -386,7 +386,7 @@ final class AudioLink: @unchecked Sendable {
     processing = false
   }
 
-  private func systemEvent(_ event: SystemAudioEvent) {
+  func systemEvent(_ event: SystemAudioEvent) {
     switch event {
     case .interruptionBegan: send(.interruptionBegan)
     case let .interruptionEnded(shouldResume): send(.interruptionEnded(shouldResume: shouldResume))
@@ -410,11 +410,11 @@ final class AudioLink: @unchecked Sendable {
   }
 }
 
-private struct WeakRecordingTicket {
+struct WeakRecordingTicket {
   weak var value: RecordingTicket?
 }
 
-private struct InputRegistration {
+struct InputRegistration {
   weak var owner: AudioInputOwner?
   weak var handle: AudioInputHandle?
   var generation: UInt64?

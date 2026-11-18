@@ -7,7 +7,7 @@ import UIKit
 @testable import MediaLayerUI
 
 private struct DeniedMicrophone: MicrophonePermissionPort {
-  func granted() -> Bool { false }
+  func state() -> MicrophonePermission { .denied }
 }
 
 private final class FakeBackend: CaptureBackend, CameraMicrophone, @unchecked Sendable {
