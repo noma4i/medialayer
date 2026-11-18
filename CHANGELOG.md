@@ -7,6 +7,9 @@
 - A shown whole-strategy place is never failed by the full whole queue.
 - Android camera recording is not dropped by a GL error left by an earlier call.
 - A screen recreate no longer makes the process media environment Closed on Android and iOS.
+- A voice start right after a camera take records instead of hanging while the preview lives.
+- A voice start during a camera take is refused as microphone busy at once.
+- An Android microphone source silenced before its first sound now ends the waiting voice start.
 
 ## 3.41.2 - 2026-11-18
 
