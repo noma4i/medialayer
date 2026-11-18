@@ -209,11 +209,9 @@ class CameraNativeDeviceTest {
     val ready = withTimeout(TIMEOUT_MS) { made.state.first { it.isReady || it.phase == CameraPhase.FAILED } }
     assertEquals("the camera is ready, fault ${ready.fault}, native failures=${reported.toList()}", CameraPhase.READY, ready.phase)
     if (audio) {
-      try {
-        withTimeout(TIMEOUT_MS) { heard.first { history -> MicrophoneAvailability.AVAILABLE in history.dropWhile { it != MicrophoneAvailability.NO_SOUND } } }
-      } catch (error: kotlinx.coroutines.TimeoutCancellationException) {
-        throw AssertionError("the microphone never became available; availability=${heard.value}; native failures=${reported.toList()}", error)
-      }
+      // The preview microphone starts silently: noSound comes only from a silence the platform reports (INV-AUDIO-86), the take below starts on its first live sound.
+      kotlinx.coroutines.delay(500)
+      assertTrue("the microphone start blinked no sound; availability=${heard.value}; native failures=${reported.toList()}", MicrophoneAvailability.NO_SOUND !in heard.value)
     }
     if (damage != null) {
       made.startRecording()
