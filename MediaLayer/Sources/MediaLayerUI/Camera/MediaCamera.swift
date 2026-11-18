@@ -48,6 +48,12 @@ private final class CameraBindHolds: @unchecked Sendable {
   }
 }
 
+/// One `startRecording` call: its cancel finds the take it started and the waiter it left, on the camera queue only.
+private final class StartGate: @unchecked Sendable {
+  var cancelled = false
+  var take: UInt64?
+}
+
 /// A photo from the camera: an upright JPEG file (the EXIF turn is applied, the mirror is not), its size after the turn and the side it was taken from.
 public struct CapturedPhoto: Sendable, Equatable {
   public let url: URL
@@ -106,7 +112,9 @@ public final class MediaCamera: @unchecked Sendable {
   private var clipInfo: MediaInfo?
   private var ended: Result<CapturedClip, Error>?
   private var photoWaiter: CheckedContinuation<CapturedPhoto, Error>?
-  private var startWaiter: CheckedContinuation<Void, Error>?
+  private var startWaiter: (gate: StartGate, continuation: CheckedContinuation<Void, Error>)?
+  private var kept: [UInt64: CapturedClip] = [:]
+  private var closed = false
   private var stopWaiter: CheckedContinuation<CapturedClip, Error>?
   private var signalTokens: [NSObjectProtocol] = []
   private var observers: [UUID: (rate: Double, last: UInt64?, handler: @Sendable (CameraFrame) -> Void)] = [:]
@@ -135,13 +143,13 @@ public final class MediaCamera: @unchecked Sendable {
     let backend = backend
     backend.setSink { _ in }
     backend.setFrameTap(nil)
-    backend.unbind()
+    let hold = sessionHold
+    let ticket = audioHold
+    backend.unbind { hold?(); ticket?.end() }
     for task in [binding, shooting, reading, ticker] { task?.cancel() }
-    sessionHold?()
-    audioHold?.end()
     audioInput?.close()
     if let url = recordingURL { removeFile(url) }
-    if case let .success(clip)? = ended { removeFile(clip.url) }
+    kept.values.forEach { removeFile($0.url) }
   }
 
   public static func isAvailable(_ lens: CameraLens) -> Bool {
@@ -162,8 +170,8 @@ public final class MediaCamera: @unchecked Sendable {
     let id = UUID()
     return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
       lock.withLock {
-        sinks[id] = continuation
         continuation.yield(published)
+        if closed { continuation.finish() } else { sinks[id] = continuation }
       }
       continuation.onTermination = { [weak self] _ in self?.lock.withLock { self?.sinks[id] = nil } }
     }
@@ -180,21 +188,32 @@ public final class MediaCamera: @unchecked Sendable {
   }
 
   /// Returns after the hardware started the recording. `NotReady` when the camera is not ready or the profile holds no video.
+  /// A cancelled call throws `CancellationError` and throws its own take away.
   public func startRecording() async throws {
     if profile.audio { try await ensureAudioTicket() }
+    let gate = StartGate()
     do {
-      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-        queue.async {
-          guard self.startWaiter == nil else { return continuation.resume(throwing: Self.refusal(.notReady)) }
-          if self.profile.audio && self.audioHold == nil { return continuation.resume(throwing: Self.refusal(.notReady)) }
-          if self.profile.audio, let fault = self.microphoneFault { return continuation.resume(throwing: Self.refusal(fault)) }
-          let wasReady = self.run.state.phase == .ready && self.profile.mode == .video
-          if wasReady {
-            if case let .success(clip)? = self.ended { self.removeFile(clip.url) }
-            self.ended = nil
+      try await withTaskCancellationHandler {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+          queue.async {
+            if gate.cancelled { return continuation.resume(throwing: CancellationError()) }
+            guard self.startWaiter == nil else { return continuation.resume(throwing: Self.refusal(.notReady)) }
+            if self.profile.audio && self.audioHold == nil { return continuation.resume(throwing: Self.refusal(.notReady)) }
+            if self.profile.audio, let fault = self.microphoneFault { return continuation.resume(throwing: Self.refusal(fault)) }
+            let wasReady = self.run.state.phase == .ready && self.profile.mode == .video
+            if wasReady { self.ended = nil }
+            self.apply(.start)
+            gate.take = self.run.state.take
+            if self.run.starting { self.startWaiter = (gate, continuation) } else { continuation.resume(throwing: Self.refusal(wasReady ? self.run.state.fault ?? .notReady : .notReady)) }
           }
-          self.apply(.start)
-          if self.run.starting { self.startWaiter = continuation } else { continuation.resume(throwing: Self.refusal(wasReady ? self.run.state.fault ?? .notReady : .notReady)) }
+        }
+      } onCancel: {
+        queue.async {
+          gate.cancelled = true
+          guard let waiter = self.startWaiter, waiter.gate === gate else { return }
+          self.startWaiter = nil
+          waiter.continuation.resume(throwing: CancellationError())
+          if let take = gate.take, self.run.state.take == take, self.run.starting || self.run.started { self.apply(.cancel) }
         }
       }
     } catch {
@@ -218,6 +237,7 @@ public final class MediaCamera: @unchecked Sendable {
       queue.async {
         if let outcome = self.ended {
           self.ended = nil
+          if case let .success(clip) = outcome { self.kept = self.kept.filter { $0.value.url != clip.url } }
           return continuation.resume(with: outcome)
         }
         guard self.stopWaiter == nil, self.run.started || self.run.starting else { return continuation.resume(throwing: Self.refusal(.notReady)) }
@@ -229,8 +249,8 @@ public final class MediaCamera: @unchecked Sendable {
 
   public func clip(take: UInt64) -> CapturedClip? {
     queue.sync {
-      guard run.state.take == take, case let .success(clip)? = ended else { return nil }
-      ended = nil
+      guard let clip = kept.removeValue(forKey: take) else { return nil }
+      if case let .success(current)? = ended, current.url == clip.url { ended = nil }
       return clip
     }
   }
@@ -313,10 +333,11 @@ public final class MediaCamera: @unchecked Sendable {
       apply(.layerClosed)
       closeAudioInput()
       awake.set(playing: false)
-      if case let .success(clip)? = ended { removeFile(clip.url) }
+      kept.values.forEach { removeFile($0.url) }
+      kept = [:]
       ended = nil
-      let closed = lock.withLock { let closed = Array(sinks.values); sinks.removeAll(); return closed }
-      closed.forEach { $0.finish() }
+      let sinks = lock.withLock { closed = true; let all = Array(sinks.values); sinks.removeAll(); return all }
+      sinks.forEach { $0.finish() }
     }
   }
 
@@ -340,21 +361,10 @@ public final class MediaCamera: @unchecked Sendable {
       revokedAudio = nil
     }
     let taking = run.starting || run.started
+    let before = run.state
     let step = captureStep(run: run, event: event, profile: profile)
-    do {
-      for action in step.actions {
-        switch action {
-        case let .setTorch(on): try backend.setTorch(on)
-        case let .setZoom(ratio): try backend.setZoom(ratio)
-        default: break
-        }
-      }
-    } catch {
-      Media.recordNativeFailure(error, source: .camera)
-      return
-    }
     run = step.run
-    for action in step.actions { perform(action) }
+    for action in step.actions { perform(action, before: before) }
     if taking && !run.starting && !run.started && run.state.phase == .ready { installTap() }
     if run.discard, run.end != nil, reading != nil {
       reading?.cancel()
@@ -379,7 +389,7 @@ public final class MediaCamera: @unchecked Sendable {
   private func settleWaiters() {
     if let waiter = startWaiter, run.state.phase == .recording || (!run.starting && !run.started) {
       startWaiter = nil
-      if run.state.phase == .recording { waiter.resume() } else { waiter.resume(throwing: Self.refusal(run.state.fault ?? .notReady)) }
+      if run.state.phase == .recording { waiter.continuation.resume() } else { waiter.continuation.resume(throwing: Self.refusal(run.state.fault ?? .notReady)) }
     }
     if let waiter = photoWaiter, !run.state.shooting {
       photoWaiter = nil
@@ -389,6 +399,7 @@ public final class MediaCamera: @unchecked Sendable {
     if let waiter = stopWaiter, let outcome = ended {
       stopWaiter = nil
       ended = nil
+      if case let .success(clip) = outcome { kept = kept.filter { $0.value.url != clip.url } }
       waiter.resume(with: outcome)
     }
   }
@@ -412,7 +423,7 @@ public final class MediaCamera: @unchecked Sendable {
     }
   }
 
-  private func perform(_ action: CaptureAction) {
+  private func perform(_ action: CaptureAction, before: CameraState) {
     switch action {
     case let .bind(lens):
       open(lens)
@@ -426,9 +437,11 @@ public final class MediaCamera: @unchecked Sendable {
       shooting?.cancel()
       let ticket = audioHold
       audioHold = nil
+      let hold = sessionHold
+      sessionHold = nil
       closeAudioInput()
-      teardownHardware { ticket?.end() }
-      releaseHolds()
+      // The memory and the microphone go back only after the hardware stopped, so no new camera is admitted beside a session that still runs.
+      teardownHardware { hold?(); ticket?.end() }
       failWaiters()
     case .takePhoto:
       shoot()
@@ -448,7 +461,16 @@ public final class MediaCamera: @unchecked Sendable {
       deliver()
     case .discard:
       discard()
-    case .setTorch, .setZoom: break
+    case let .setTorch(on):
+      do { try backend.setTorch(on) } catch {
+        Media.recordNativeFailure(error, source: .camera)
+        run.state.flash = before.flash
+      }
+    case let .setZoom(ratio):
+      do { try backend.setZoom(ratio) } catch {
+        Media.recordNativeFailure(error, source: .camera)
+        run.state.zoom = before.zoom
+      }
     }
   }
 
@@ -461,15 +483,6 @@ public final class MediaCamera: @unchecked Sendable {
     if let url = recordingURL { removeFile(url) }
     recordingURL = nil
     clipInfo = nil
-  }
-
-  private func releaseHolds() {
-    sessionHold?()
-    sessionHold = nil
-    if let audio = audioHold {
-      audioHold = nil
-      audio.end()
-    }
   }
 
   private func audioRevoked(_ reason: RecordingRefusal, ticket: RecordingTicket) {
@@ -519,7 +532,10 @@ public final class MediaCamera: @unchecked Sendable {
   private func failWaiters() {
     let failure = Self.refusal(.notReady)
     if let waiter = photoWaiter { photoWaiter = nil; waiter.resume(throwing: failure) }
-    if let waiter = stopWaiter { stopWaiter = nil; waiter.resume(throwing: failure) }
+    if let waiter = stopWaiter {
+      stopWaiter = nil
+      waiter.resume(throwing: Self.refusal(.interrupted))
+    }
   }
 
   private func openAudioInput() {
@@ -535,7 +551,6 @@ public final class MediaCamera: @unchecked Sendable {
   }
 
   private func open(_ lens: CameraLens) {
-    openAudioInput()
     epoch += 1
     let current = epoch
     let needsHold = sessionHold == nil
@@ -579,6 +594,7 @@ public final class MediaCamera: @unchecked Sendable {
         guard self.epoch == current, let (release, session) = holds.take() else { return }
         if let release { self.sessionHold = release }
         if let session { self.audioHold = session; self.watch(session) }
+        self.openAudioInput()
         self.backend.bind(lens: lens, profile: self.profile)
         self.installTap()
       }
@@ -682,7 +698,9 @@ public final class MediaCamera: @unchecked Sendable {
     }
     recordingURL = nil
     clipInfo = nil
-    ended = .success(CapturedClip(url: url, durationMs: length, frame: info.frame, lens: run.state.lens))
+    let clip = CapturedClip(url: url, durationMs: length, frame: info.frame, lens: run.takeLens)
+    if let take = run.state.take { kept[take] = clip }
+    ended = .success(clip)
   }
 
   private func discard() {

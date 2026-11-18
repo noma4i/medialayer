@@ -6,7 +6,11 @@ import Testing
 import UIKit
 @testable import MediaLayerUI
 
-private final class FakeBackend: CaptureBackend, @unchecked Sendable {
+private struct DeniedMicrophone: MicrophonePermissionPort {
+  func granted() -> Bool { false }
+}
+
+private final class FakeBackend: CaptureBackend, CameraMicrophone, @unchecked Sendable {
   enum Answer { case opens, refuses(CameraRefusal), silent }
 
   let session = AVCaptureSession()
@@ -57,6 +61,27 @@ private final class FakeBackend: CaptureBackend, @unchecked Sendable {
   }
 
   func unbind() { note("unbind") }
+
+  /// The hardware stop of a real session ends later on its own queue: a test holds it and ends it itself.
+  var deferUnbind = false
+  private var heldUnbinds: [@Sendable () -> Void] = []
+  func unbind(completion: @escaping @Sendable () -> Void) {
+    unbind()
+    if lock.withLock({ deferUnbind }) { lock.withLock { heldUnbinds.append(completion) } } else { completion() }
+  }
+  func finishUnbind() {
+    let held = lock.withLock { let all = heldUnbinds; heldUnbinds = []; return all }
+    held.forEach { $0() }
+  }
+
+  /// A native microphone: the camera opens its audio input only after the recording is admitted.
+  var nativeMicrophone = false
+  var audio: CaptureAudio { nativeMicrophone ? .native(self) : .managed }
+  func start(generation: UInt64, listener: CameraMicrophoneListener) { note("mic start") }
+  func stop(generation: UInt64) { note("mic stop") }
+
+  /// The hardware does not report the start of a take until the test does.
+  var holdRecordStart = false
   func attachPreviewLayer(_ layer: AVCaptureVideoPreviewLayer) {
     note("attachPreview")
     layer.setSessionWithNoConnection(session)
@@ -73,6 +98,7 @@ private final class FakeBackend: CaptureBackend, @unchecked Sendable {
     note("record \(lens)")
     lock.withLock { recordingURL = url; recordedProfile = profile }
     if let clipFile { try? FileManager.default.copyItem(at: clipFile, to: url) } else { try? Data([1, 2, 3]).write(to: url) }
+    if holdRecordStart { return }
     if profile.audio && soundOnTake { emit(.microphoneFlow(true)) }
     emit(.recordStarted)
   }
@@ -139,6 +165,11 @@ private final class Counters: @unchecked Sendable {
   var straightened: [URL] { lock.withLock { straightenedURLs } }
   var straightenCancelled: Bool { lock.withLock { cancelledStraighten } }
 
+  func releaseVideo() {
+    let continuation = lock.withLock { () -> CheckedContinuation<Void, Error>? in defer { parked = nil }; return parked }
+    continuation?.resume()
+  }
+
   func straighten(_ url: URL) async throws {
     let hold = lock.withLock { straightenedURLs.append(url); return holdVideo }
     TestSignal.shared.fire()
@@ -197,13 +228,13 @@ private func jpeg() -> Data {
   }
 }
 
-private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .back, screen: ScreenSwitch = ScreenSwitch(), configure: (FakeBackend, Counters) -> Void = { _, _ in }) throws -> Rig {
+private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .back, screen: ScreenSwitch = ScreenSwitch(), permission: MicrophonePermissionPort = GrantedMicrophone(), configure: (FakeBackend, Counters) -> Void = { _, _ in }) throws -> Rig {
   let backend = FakeBackend()
   let counters = Counters()
   configure(backend, counters)
   let center = NotificationCenter()
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent("camera-\(UUID().uuidString)")
-  let audio = try TestAudioRig()
+  let audio = try TestAudioRig(permission: permission)
   let image = jpeg()
   let services = CameraServices(
     admitSession: { _ in
@@ -863,6 +894,93 @@ struct MediaCameraTests {
 
   // C5 is in inv_ios_04. C4 is an Android row.
 
+
+  // CAPTURE-65: the hold of the session goes back after the hardware stopped.
+  @Test
+  func inv_capture_65_the_memory_of_the_session_goes_back_only_after_the_hardware_stopped() async throws {
+    let rig = try makeRig { backend, _ in backend.deferUnbind = true }
+    await ready(rig)
+    rig.camera.detachPreview()
+    await eventually("the hardware stop started") { rig.backend.count("unbind") == 1 }
+    #expect(rig.counters.released == 0, "the stop of the hardware is not over")
+    rig.backend.finishUnbind()
+    await eventually("the memory is back") { rig.counters.released == 1 }
+  }
+
+  // CAPTURE-66: a cancelled start throws away its own take.
+  @Test
+  func inv_capture_66_a_cancelled_start_recording_cancels_its_take_and_leaves_the_camera_ready() async throws {
+    let rig = try makeRig(.moment) { backend, _ in backend.holdRecordStart = true }
+    await ready(rig)
+    let start = Task { try await rig.camera.startRecording() }
+    await eventually("the hardware was asked") { rig.backend.count("record back") == 1 }
+    start.cancel()
+    await #expect(throws: CancellationError.self) { try await start.value }
+    await eventually("the take is gone") { rig.backend.count("endRecording") == 1 && rig.camera.state.phase == .ready }
+    #expect(files(rig).isEmpty)
+    rig.backend.holdRecordStart = false
+    try await rig.camera.startRecording()
+    #expect(rig.camera.state.phase == .recording)
+  }
+
+  // CAPTURE-67: a torch or zoom the system rejects drops only its own field.
+  @Test
+  func inv_capture_67_a_torch_the_system_rejects_after_open_keeps_the_open_step_and_drops_only_the_flash() async throws {
+    let rig = try makeRig(.moment) { backend, _ in
+      backend.commandFailure = NSError(domain: AVFoundationErrorDomain, code: -11852, userInfo: [NSLocalizedDescriptionKey: "lock failed"])
+    }
+    rig.camera.setFlash(true)
+    await ready(rig)
+    #expect(rig.camera.state.flash == false)
+    try await rig.camera.startRecording()
+    #expect(rig.camera.state.phase == .recording)
+  }
+
+  // CAPTURE-69: a refused microphone opens no audio demand.
+  @Test
+  func inv_capture_69_a_refused_microphone_opens_no_audio_input_and_changes_no_audio_session() async throws {
+    let rig = try makeRig(.moment, permission: DeniedMicrophone()) { backend, _ in backend.nativeMicrophone = true }
+    rig.camera.attachPreview()
+    await eventually("the camera is refused") { rig.camera.state.fault == .permissionDenied }
+    #expect(rig.backend.count("mic start") == 0)
+    #expect(!rig.audio.port.log.contains { $0.hasPrefix("apply") })
+  }
+
+  // CAPTURE-70: the clip of a take stays until its owner takes it, and it keeps the lens of its take.
+  @Test
+  func inv_capture_70_a_delivered_clip_survives_the_next_take_and_keeps_the_lens_of_its_take() async throws {
+    let rig = try makeRig(.moment) { _, counters in counters.holdVideo = true }
+    await ready(rig)
+    try await rig.camera.startRecording()
+    rig.backend.emit(.recordFinished(end: .limitReached))
+    await eventually("straightening") { rig.camera.state.phase == .stopping }
+    rig.camera.setLens(.front)
+    rig.counters.holdVideo = false
+    rig.counters.releaseVideo()
+    await eventually("the take is captured") { rig.camera.state.outcome != nil }
+    let take = try #require(rig.camera.state.take)
+    await eventually("ready on the other lens") { rig.camera.state.phase == .ready && rig.camera.state.lens == .front }
+    try await rig.camera.startRecording()
+    let clip = try #require(rig.camera.clip(take: take))
+    #expect(FileManager.default.fileExists(atPath: clip.url.path))
+    #expect(clip.lens == .back)
+    #expect(rig.camera.clip(take: take) == nil)
+  }
+
+  // CAPTURE-71: a stop waiting while the preview leaves gets the real end.
+  @Test
+  func inv_capture_71_a_stop_waiting_while_the_preview_leaves_ends_with_the_interrupted_refusal() async throws {
+    let rig = try makeRig(.moment) { _, counters in counters.holdVideo = true }
+    await ready(rig)
+    try await rig.camera.startRecording()
+    let stop = Task { try await rig.camera.stopRecording() }
+    await eventually("straightening") { rig.camera.state.phase == .stopping }
+    rig.camera.detachPreview()
+    do { _ = try await stop.value; Issue.record("the stop must fail") } catch let MediaError.Camera(reason, _, _) {
+      #expect(reason == .interrupted)
+    }
+  }
+
   // C6
   @Test(arguments: ["flash", "zoom"])
   func inv_capture_38_a_command_the_system_rejects_is_a_failure_event_and_the_state_stays_true(command: String) async throws {
@@ -908,6 +1026,9 @@ extension GlobalMedia {
 
       await eventually("camera closed") { cameraStates.last?.phase == .closed }
       #expect(backend.count("unbind") == 1)
+      let later = Collected(camera.states)
+      await eventually("a new subscription of a closed camera ends") { later.finished }
+      #expect(later.last?.phase == .closed)
       await eventually("the take ended") { voice.last?.outcome != nil }
       #expect(voice.last == VoiceState(take: 1, phase: .idle, outcome: .refused(reason: .interrupted), recordedMs: 0))
       #expect(!FileManager.default.fileExists(atPath: target.path))

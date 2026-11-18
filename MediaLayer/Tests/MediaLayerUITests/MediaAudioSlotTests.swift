@@ -30,7 +30,7 @@ final class TestAudioRig: @unchecked Sendable {
   let checked: TestSessionPort
   var isRecording: Bool { port.log.last?.hasPrefix("apply AVAudioSessionCategoryPlayAndRecord") == true }
 
-  init(focus: AudioFocus = .mix, port: FakeSessionPort = FakeSessionPort()) throws {
+  init(focus: AudioFocus = .mix, port: FakeSessionPort = FakeSessionPort(), permission: MicrophonePermissionPort = GrantedMicrophone()) throws {
     self.port = port
     let checked = TestSessionPort(port)
     self.checked = checked
@@ -41,7 +41,7 @@ final class TestAudioRig: @unchecked Sendable {
       defaults: defaultLimits(), pool: defaultPoolSettings(), audioFocus: focus
     ))
     self.core = core
-    let link = AudioLink(core: core, ports: AudioPorts(session: checked, calls: FakeCallObserver(), permission: GrantedMicrophone()))
+    let link = AudioLink(core: core, ports: AudioPorts(session: checked, calls: FakeCallObserver(), permission: permission))
     self.link = link
     let audio = MediaAudioSession()
     self.audio = audio
