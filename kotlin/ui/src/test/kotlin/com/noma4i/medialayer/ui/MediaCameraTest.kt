@@ -1151,7 +1151,9 @@ class MediaCameraTest {
     rig.backend.emit(CaptureEvent.RecordFinished(RecordEnd.LIMIT_REACHED))
     settled(rig, CameraPhase.READY)
     rig.camera.close()
-    eventually("the clip of the last take went with the camera") { rig.files().isEmpty() || rig.files() == listOf(clip.file.name) }
+    // The close runs on the camera queue: a call behind it ends only after the clips went (or the queue is shut, which is after them).
+    assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
+    assertTrue(rig.files().isEmpty() || rig.files() == listOf(clip.file.name))
     assertNull(rig.camera.clip(second))
   }
 
