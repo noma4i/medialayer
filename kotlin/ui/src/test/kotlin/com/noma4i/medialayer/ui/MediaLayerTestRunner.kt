@@ -39,6 +39,7 @@ class MediaLayerTestRunner(testClass: Class<*>) : RobolectricTestRunner(testClas
 class MediaLayerTestLifecycle : DefaultTestLifecycle() {
   override fun afterTest(method: java.lang.reflect.Method) {
     super.afterTest(method)
+    ProcessMediaEnvironment.reset()
     org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
   }
 }

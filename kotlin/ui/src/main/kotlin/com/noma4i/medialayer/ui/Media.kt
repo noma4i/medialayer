@@ -167,6 +167,11 @@ internal object ProcessMediaEnvironment {
   fun install(environment: MediaEnvironment) {
     installed = environment
   }
+
+  /** Test seam: a test process starts without a layer, as an app process does before it opens one. */
+  internal fun reset() {
+    installed = null
+  }
 }
 
 internal object LocalMediaEnvironment {

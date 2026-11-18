@@ -110,7 +110,7 @@ class ConnectWithoutAppMachineTest {
   }
 
   @Test
-  fun inv_android_16_a_view_outside_the_provider_takes_the_process_context_and_the_environment_wins_and_removal_clears_it() {
+  fun inv_android_16_a_view_outside_the_provider_takes_the_process_context_and_the_environment_wins_and_closing_the_layer_clears_it() {
     val first = RecordingLayer()
     val second = RecordingLayer()
     var showFirst by mutableStateOf(true)
@@ -133,6 +133,10 @@ class ConnectWithoutAppMachineTest {
     assertSame(second, outside.layer)
 
     showSecond = false
+    rule.waitForIdle()
+    assertSame("the process layer outlives the screen", second, outside.layer)
+
+    second.destroy()
     rule.waitForIdle()
     assertNull(outside.layer)
   }
