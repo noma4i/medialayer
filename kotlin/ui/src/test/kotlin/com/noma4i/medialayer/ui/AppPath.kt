@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
 import org.robolectric.Shadows.shadowOf
 
 /** The system focus, communication and speaker of Android. A test answers each request and fails chosen operations. */
@@ -163,13 +164,16 @@ internal class AppPath(
     shadowOf(Looper.getMainLooper()).idle()
   }
 
+  private val link = layer.binding!!.link
+
   override fun close() { if (closed.compareAndSet(false, true)) layer.close() }
 
-  /** Closes the layer and returns after its shutdown, running the main thread while it waits. */
+  /** Waits for the layer shutdown, running the main thread meanwhile, then disposes the handle: a closed handle cannot be awaited, its audio link is. */
   fun closeAndAwait(timeoutMs: Long = 5_000) {
-    close()
-    val done = CoroutineScope(Dispatchers.Default).async { layer.awaitClosed() }
+    val done = CoroutineScope(Dispatchers.Default).async { if (closed.get()) link.awaitClosed() else layer.awaitClosed() }
     done.invokeOnCompletion { TestSignal.fire() }
     TestSignal.await("the layer closed", timeoutMs) { shadowOf(Looper.getMainLooper()).idle(); done.isCompleted }
+    runBlocking { done.await() }
+    close()
   }
 }
