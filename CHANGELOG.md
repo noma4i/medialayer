@@ -68,6 +68,13 @@
 ### Fixed
 
 - Camera: leaving the screen mid-take now gives the take an `interrupted` outcome.
+- iOS camera: the session memory goes back only after the hardware stopped.
+- iOS camera: a cancelled `startRecording` cancels its own take.
+- iOS camera: a rejected torch or zoom drops only its own field, not the whole step.
+- iOS camera: a new `states` subscription of a closed camera ends at once.
+- iOS camera: the microphone input opens only after the recording is admitted.
+- iOS camera: a cancelled `uprightVideo` no longer waits for a platform callback.
+- iOS camera: a clip stays until `clip(take)` or close; a waiting stop gets the real end.
 - Camera: a clip keeps the lens of its take, not the lens of the next session.
 - Camera: `stopRecording` during a starting take now ends it instead of being lost.
 - Camera: torch and zoom commands reach the platform only after the camera opened.
