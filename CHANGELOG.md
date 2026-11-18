@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- A voice or camera start retries the microphone three times, 1 s each, 200 ms apart.
+
 ### Fixed
 
 - A shown whole-strategy place is never failed by the full whole queue.
