@@ -149,7 +149,7 @@ private final class GatedCapture: VoiceCapture, @unchecked Sendable {
 
   func peak() -> Float { inner.peak() }
   func stop() throws { try inner.stop() }
-  func finish() async throws { try await inner.finish() }
+  func finish() async throws -> UInt64? { try await inner.finish() }
 }
 
 private final class Returned: @unchecked Sendable {
@@ -444,6 +444,17 @@ extension GlobalMedia {
     }
 
     @Test
+    func inv_voice_23_the_length_of_the_result_is_the_written_audio_not_the_clock() async throws {
+      let voice = try Voice()
+      let file = temporaryFile("m4a")
+      try await voice.running(file)
+      try voice.source.emit(4)
+      voice.clock.advance(3_000)
+      let recording = try await voice.recorder.stop()
+      #expect(recording.durationMs == 500, "five buffers of 100 ms are written, whatever the clock says")
+    }
+
+    @Test
     func inv_voice_31_a_buffer_dropped_by_the_capture_is_one_typed_failure_without_a_file_and_the_owner_is_closed() async throws {
       let voice = try Voice(writer: { BoundedWriter(url: $0, capacity: 3) })
       let file = temporaryFile("m4a")
@@ -527,7 +538,7 @@ extension GlobalMedia {
       #expect(returned.error == nil && FileManager.default.fileExists(atPath: second.path))
       voice.clock.advance(1_000)
       let recording = try await voice.recorder.stop()
-      #expect(recording.url == second && recording.durationMs == 1_000)
+      #expect(recording.url == second && recording.durationMs == 100)
       #expect(FileManager.default.fileExists(atPath: first.path))
     }
   }

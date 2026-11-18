@@ -92,6 +92,8 @@
 - iOS no longer reports voice refusals as native failures in `Media.failures`.
 - The microphone is released at once after `microphoneSilent`; the next start opens a new one.
 - Android voice recording no longer fails when the encoder has no free input.
+- iOS voice recording waits for a busy writer instead of failing, and fails when the capture drops a buffer.
+- iOS voice length comes from the written audio, like on Android.
 - Android voice recording releases the encoder when it fails to configure or start.
 - Android voice recording continues when the encoder announces the same output format again.
 - iOS camera sound no longer runs past the last video frame.

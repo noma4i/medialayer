@@ -18,11 +18,13 @@ protocol VoiceCapture: Sendable {
   func start(file: URL, maxDurationMs: UInt64, ticket: RecordingTicket, onLimit: @escaping @Sendable () -> Void, onFailure: @escaping @Sendable (Error) -> Void) async throws
   func peak() -> Float
   func stop() throws
-  func finish() async throws
+  /// Closes the take and returns the length of the written audio in milliseconds, nil when the capture does not know it.
+  @discardableResult
+  func finish() async throws -> UInt64?
 }
 
 extension VoiceCapture {
-  func finish() async throws { try stop() }
+  func finish() async throws -> UInt64? { try stop(); return nil }
 
   func start(file: URL, maxDurationMs: UInt64, ticket: RecordingTicket, onLimit: @escaping @Sendable () -> Void, onFailure: @escaping @Sendable (Error) -> Void) async throws {
     try ticket.start {}
@@ -304,12 +306,12 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
   }
 
   private func finishRecording(_ current: Running, session: RecordingTicket?, interrupted: MediaError?, failure: Error?) async -> Result<VoiceRecording, Error> {
-    let length = clock() &- current.startedAt
+    var length = clock() &- current.startedAt
     var outcome: Result<VoiceRecording, Error>
     if let failure { Media.recordNativeFailure(failure, source: .recorder) }
     do {
       do {
-        if interrupted != nil || failure != nil { try capture.stop() } else { try await capture.finish() }
+        if interrupted != nil || failure != nil { try capture.stop() } else if let written = try await capture.finish() { length = written }
       } catch let refused as VoiceRefused where refused.reason == .empty && voiceTooShort(durationMs: length, minTakeMs: minTakeMs) && interrupted == nil && failure == nil {
         throw VoiceRefused(reason: .tooShort)
       } catch {
@@ -451,9 +453,9 @@ final class SystemVoiceCapture: VoiceCapture, @unchecked Sendable {
     take.cancel()
   }
 
-  func finish() async throws {
-    guard let take = leaveTaking() else { return }
-    try await take.finish()
+  func finish() async throws -> UInt64? {
+    guard let take = leaveTaking() else { return nil }
+    return try await take.finish() / 1_000
   }
 
   private func leaveTaking() -> VoiceTake? {

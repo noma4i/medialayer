@@ -23,13 +23,10 @@ final class VoiceMicrophone: CameraMicrophone, VoicePCMSink, @unchecked Sendable
   private weak var listener: CameraMicrophoneListener?
   private var active: UInt64?
   private var take: VoicePCMSink?
-  private var idleHeard: (@Sendable () -> Void)?
 
   init(source: VoicePCMSource) { self.source = source }
 
   func attach(_ take: VoicePCMSink?) { lock.withLock { self.take = take } }
-
-  func onIdleHeard(_ action: (@Sendable () -> Void)?) { lock.withLock { idleHeard = action } }
 
   func start(generation: UInt64, listener: CameraMicrophoneListener) {
     lock.withLock {
@@ -46,12 +43,11 @@ final class VoiceMicrophone: CameraMicrophone, VoicePCMSink, @unchecked Sendable
 
   func pcm(generation: UInt64, _ buffer: CMSampleBuffer) {
     guard isLivePCM(buffer) else { return }
-    guard let (take, listener, idle) = lock.withLock({ () -> (VoicePCMSink?, CameraMicrophoneListener?, (@Sendable () -> Void)?)? in
-      active == generation ? (take, self.listener, idleHeard) : nil
+    guard let (take, listener) = lock.withLock({ () -> (VoicePCMSink?, CameraMicrophoneListener?)? in
+      active == generation ? (take, self.listener) : nil
     }) else { return }
     take?.pcm(generation: generation, buffer)
     listener?.microphoneHeard(generation: generation)
-    if take == nil { idle?() }
   }
 
   func dropped(generation: UInt64) {
