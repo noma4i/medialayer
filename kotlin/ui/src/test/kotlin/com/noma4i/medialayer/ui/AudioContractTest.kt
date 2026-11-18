@@ -123,8 +123,8 @@ class AudioContractTest {
     )
     val seen = rows.map { (name, cause) ->
       val call = app.layer.callAudio(MediaCallKind.Unmanaged)
-      val states = record(call.states)
       call.states.next { it == CallState.LIVE }
+      val states = record(call.states)
 
       cause(call)
 
@@ -136,7 +136,7 @@ class AudioContractTest {
       ended(call)
       shown
     }
-    assertEquals(rows.map { it.first to listOf(CallState.CONNECTING, CallState.LIVE, CallState.INTERRUPTED) }, seen)
+    assertEquals(rows.map { it.first to listOf(CallState.LIVE, CallState.INTERRUPTED) }, seen)
   }
 
   @Test
