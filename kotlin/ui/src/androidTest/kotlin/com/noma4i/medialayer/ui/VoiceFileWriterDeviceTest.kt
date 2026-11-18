@@ -86,6 +86,33 @@ class VoiceFileWriterDeviceTest {
     }
   }
 
+  // c2.android.aac.encoder announces its output format right after start, before the take opens the file on the first PCM.
+  @Test
+  fun aFormatAnnouncedBeforeTheFileOpensStillGivesAnM4a() {
+    val file = File(dir, "voice-device-format-first.m4a").also { it.delete() }
+    val writer = MediaCodecVoiceFileWriter()
+    val ready = LinkedBlockingQueue<Result<Unit>>()
+    val failures = LinkedBlockingQueue<Throwable>()
+    writer.prepare(settings, { ready += it }, { failures += it })
+    assertTrue(ready.poll(10, TimeUnit.SECONDS)!!.isSuccess)
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+    while (!writer.formatKnown && System.nanoTime() < deadline) Thread.sleep(10)
+    assertTrue("the encoder announced no format before open", writer.formatKnown)
+    writer.open(file)
+    writer.append(chunk(0))
+    val done = LinkedBlockingQueue<Result<Long>>()
+    writer.finish { done += it }
+    val result = done.poll(10, TimeUnit.SECONDS)!!
+    assertTrue("finish failed: ${result.exceptionOrNull()}", result.isSuccess)
+    assertTrue(failures.isEmpty())
+    val extractor = MediaExtractor().apply { setDataSource(file.path) }
+    try {
+      assertEquals(MediaFormat.MIMETYPE_AUDIO_AAC, extractor.getTrackFormat(0).getString(MediaFormat.KEY_MIME))
+    } finally {
+      extractor.release()
+    }
+  }
+
   @Test
   fun cancelBeforeTheFirstPcmReleasesThePreparedCodecAndLeavesNoFile() {
     val rig = rig("voice-device-early.m4a", 0) {}

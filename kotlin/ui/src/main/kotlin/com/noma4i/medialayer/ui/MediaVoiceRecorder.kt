@@ -165,7 +165,7 @@ class MediaVoiceRecorder internal constructor(
   private fun failed(failure: NativeFailure): MediaException {
     Media.recordNativeFailure(failure)
     synchronized(lock) { publish(VoiceState(currentState.value.take, VoicePhase.IDLE, VoiceOutcome.Failed(failure), 0uL)) }
-    return MediaException.Unexpected(failure.message)
+    return MediaException.Unexpected("${failure.domain}: ${failure.message}")
   }
 
   // One lock holds the end of the start phase, the running take and its RECORDING state: an early limit or loss is the result of start.

@@ -22,12 +22,14 @@ internal interface VoiceFileWriter {
 }
 
 // Nothing here waits; the codec is prepared without a file, a native error ends in `conclude` and reaches the owner once: by `done`, else `ready`, else `failed`.
+// The codec may announce its output format before `open` (c2.android.aac.encoder does it right after start): the format is kept and `startMuxerLocked` adds the track once both the format and the muxer exist.
 internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {}) : VoiceFileWriter {
   private val gate = Any()
   private val thread = HandlerThread("VoiceFileWriter")
   private val free = ArrayDeque<Int>()
   private var codec: MediaCodec? = null
   private var muxer: MediaMuxer? = null
+  private var format: MediaFormat? = null
   private var track = -1
   private var muxing = false
   private var closed = false
@@ -67,6 +69,7 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
     check(!closed && codec != null && muxer == null) { failure?.message ?: "the writer is not prepared" }
     try {
       muxer = MediaMuxer(file.path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+      startMuxerLocked()
     } catch (error: Throwable) {
       closeLocked()
       throw error
@@ -75,7 +78,7 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
 
   override fun append(chunk: PcmChunk) = synchronized(gate) {
     check(!closed) { failure?.message ?: "the writer is closed" }
-    val encoder = codec!!
+    val encoder = checkNotNull(codec) { "the writer is not prepared" }
     val source = chunk.data.duplicate()
     val bytesPerFrame = chunk.data.remaining() / chunk.frames
     if (baseUs < 0) baseUs = chunk.ptsUs
@@ -83,7 +86,7 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
     while (source.hasRemaining()) {
       check(free.isNotEmpty()) { "the encoder has no free input" }
       val index = free.removeFirst()
-      val input = encoder.getInputBuffer(index)!!
+      val input = checkNotNull(encoder.getInputBuffer(index)) { "the encoder gave no input buffer $index" }
       val size = minOf(input.remaining(), source.remaining()).let { it - it % bytesPerFrame }
       check(size > 0) { "audio input buffer holds no whole frame" }
       input.put(source.duplicate().apply { limit(position() + size) })
@@ -114,7 +117,7 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
     val error = synchronized(gate) {
       if (closed || !eosPending || free.isEmpty()) return
       eosPending = false
-      try { codec!!.queueInputBuffer(free.removeFirst(), 0, 0, endUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM); null } catch (thrown: Throwable) { thrown }
+      try { checkNotNull(codec) { "the writer is not prepared" }.queueInputBuffer(free.removeFirst(), 0, 0, endUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM); null } catch (thrown: Throwable) { thrown }
     }
     if (error != null) conclude(error)
   }
@@ -126,7 +129,7 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
     val result: Result<Long>
     synchronized(gate) {
       if (closed) return
-      result = if (error != null) Result.failure(error) else runCatching { check(written > 0) { "the take holds no audio" }; muxer!!.stop(); muxing = false; endUs }
+      result = if (error != null) Result.failure(error) else runCatching { check(written > 0) { "the take holds no audio" }; muxingMuxerLocked().stop(); muxing = false; endUs }
       failure = result.exceptionOrNull()
       finishing = done
       starting = ready
@@ -138,6 +141,22 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
     }
     finishing?.invoke(result)
     result.exceptionOrNull()?.let { if (starting != null) starting.invoke(Result.failure(it)) else if (finishing == null) pushing?.invoke(it) }
+  }
+
+  // The one place the track is added: called when the format arrives and when the file opens, it starts the muxer once both exist.
+  private fun startMuxerLocked() {
+    val container = muxer ?: return
+    val known = format ?: return
+    if (muxing) return
+    track = container.addTrack(known)
+    container.start()
+    muxing = true
+  }
+
+  private fun muxingMuxerLocked(): MediaMuxer {
+    val container = checkNotNull(muxer) { "encoder output arrived before the file was opened" }
+    check(muxing) { "encoder output arrived before the encoder output format" }
+    return container
   }
 
   private fun closeLocked() {
@@ -158,6 +177,8 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
       thread.quitSafely()
     }
   }
+
+  internal val formatKnown: Boolean get() = synchronized(gate) { format != null }
 
   private val callback = object : MediaCodec.Callback() {
     override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
@@ -180,8 +201,9 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
         if (closed) return
         try {
           if (info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
-            val output = codec.getOutputBuffer(index)!!.apply { position(info.offset); limit(info.offset + info.size) }
-            muxer!!.writeSampleData(track, output, info)
+            val container = muxingMuxerLocked()
+            val output = checkNotNull(codec.getOutputBuffer(index)) { "the encoder gave no output buffer $index" }.apply { position(info.offset); limit(info.offset + info.size) }
+            container.writeSampleData(track, output, info)
             written++
           }
           codec.releaseOutputBuffer(index, false)
@@ -196,7 +218,14 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
     override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
       val error = synchronized(gate) {
         if (closed) return
-        try { track = muxer!!.addTrack(format); muxer!!.start(); muxing = true; null } catch (thrown: Throwable) { thrown }
+        try {
+          check(!muxing) { "the encoder changed its output format after the muxer started" }
+          this@MediaCodecVoiceFileWriter.format = format
+          startMuxerLocked()
+          null
+        } catch (thrown: Throwable) {
+          thrown
+        }
       }
       if (error != null) conclude(error)
     }

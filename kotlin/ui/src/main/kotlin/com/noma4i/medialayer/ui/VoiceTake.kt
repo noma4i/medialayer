@@ -104,4 +104,5 @@ internal class VoiceTake(
   }
 }
 
-internal fun voiceFailure(error: Throwable) = NativeFailure(FailureSource.RECORDER, "android.media.MediaCodec", 0, error.message ?: error.javaClass.name)
+// An error without a message still names its class and the frame that threw it.
+internal fun voiceFailure(error: Throwable) = NativeFailure(FailureSource.RECORDER, "android.media.MediaCodec", 0, error.message ?: "${error.javaClass.name} at ${error.stackTrace.firstOrNull() ?: "unknown frame"}")

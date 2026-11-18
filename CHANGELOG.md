@@ -68,6 +68,7 @@
 ### Fixed
 
 - iOS camera sound no longer runs past the last video frame.
+- Android voice records again when the AAC encoder announces its format before the file opens.
 - Android camera video uses AAC-LC when no encoder declares the camera AAC profile.
 - A lens change on a failed camera starts a new attempt with that lens.
 - Android camera no longer reports a closed capture memory after the session ends.
