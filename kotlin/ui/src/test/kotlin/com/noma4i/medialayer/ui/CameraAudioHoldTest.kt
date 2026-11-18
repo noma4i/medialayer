@@ -41,6 +41,8 @@ class CameraAudioHoldTest {
   private object Tap : CameraAudioTap {
     override fun onTimebase(generation: Long, originNanos: Long) = Unit
     override fun onPcm(chunk: PcmChunk) = Unit
+    // The end of a source is the event the test waits for: availability no longer changes when an input opens or closes (INV-AUDIO-86).
+    override fun onSourceEnd(generation: Long) = TestSignal.fire()
   }
 
   private val context = ApplicationProvider.getApplicationContext<Context>()
