@@ -312,7 +312,7 @@ final class CameraTake: @unchecked Sendable {
   }
 
   /// The end of a written video frame: its pts and duration, or the gap since the previous frame when the camera gives no duration.
-  /// The tracks of the take end here, so the sound never runs past the last picture (INV-CAPTURE-44).
+  /// The tracks of the take end here, so the sound never runs past the last picture (INV-CAPTURE-51).
   static func frameEnd(pts: CMTime, duration: CMTime, previous: CMTime) -> CMTime {
     if duration.isNumeric, duration > .zero { return pts + duration }
     if previous.isNumeric, pts > previous { return pts + (pts - previous) }
