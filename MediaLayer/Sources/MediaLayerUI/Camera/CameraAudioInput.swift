@@ -108,20 +108,23 @@ final class CameraAudioInput: AudioInputOwner, CameraMicrophoneListener, @unchec
   }
 
   func microphoneLost(generation: UInt64, error: Error?) {
-    lock.withLock {
-      guard let current = live, current.audio == generation, let input else { return }
+    let gaveUp = lock.withLock { () -> Bool in
+      guard let current = live, current.audio == generation, let input else { return false }
       let refusal = error.map(microphoneRefusal)
-      if refusal != .permissionDenied, retry(current) { return }
+      if refusal != .permissionDenied, retry(current) { return false }
       release()
-      if !current.heard { microphone.gaveUp(generation: current.audio, error: error) }
       guard let error else {
         if !current.heard { issue(.microphoneSilent) }
-        return input.sound(generation: current.run.core, heard: false)
+        input.sound(generation: current.run.core, heard: false)
+        return !current.heard
       }
       if let failureSource { Media.recordNativeFailure(error, source: failureSource) }
       issue(refusal)
       input.restoreFailed(generation: current.run.core)
+      return !current.heard
     }
+    // Out of the lock: the take that hears it closes this owner.
+    if gaveUp { microphone.gaveUp(generation: generation, error: error) }
   }
 
   /// Starts the next attempt of `run` and its wait for the first sound. Runs under the lock.
@@ -135,15 +138,17 @@ final class CameraAudioInput: AudioInputOwner, CameraMicrophoneListener, @unchec
   }
 
   private func soundWaitEnded(_ audio: UInt64) {
-    lock.withLock {
-      guard let current = live, current.audio == audio, !current.heard, let input else { return }
+    let gaveUp = lock.withLock { () -> Bool in
+      guard let current = live, current.audio == audio, !current.heard, let input else { return false }
       cancelClock = nil
-      if retry(current) { return }
+      if retry(current) { return false }
       // The last attempt gave no sound in time: the same word as a source the system silenced.
-      microphone.gaveUp(generation: audio, error: nil)
       issue(.microphoneSilent)
       input.sound(generation: current.run.core, heard: false)
+      return true
     }
+    // Out of the lock: the take that hears it closes this owner.
+    if gaveUp { microphone.gaveUp(generation: audio, error: nil) }
   }
 
   /// The source of `current` gave no sound: true when another attempt follows after the pause. Runs under the lock.
