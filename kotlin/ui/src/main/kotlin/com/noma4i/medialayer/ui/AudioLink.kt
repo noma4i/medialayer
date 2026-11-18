@@ -95,8 +95,8 @@ internal interface AudioFocusPort {
   fun leaveCommunication()
 }
 internal interface MicrophonePermissionPort {
-  fun granted(): Boolean
-  fun listen(sink: (Boolean) -> Unit) = Unit
+  fun state(): MicrophonePermission
+  fun listen(sink: (MicrophonePermission) -> Unit) = Unit
 }
 internal data class AudioPorts(val focus: AudioFocusPort, val permission: MicrophonePermissionPort)
 internal sealed interface Admission {
@@ -254,7 +254,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
       })
     }
     ports.permission.listen { send(AudioInput.Permission(it)) }
-    send(AudioInput.Permission(ports.permission.granted()))
+    send(AudioInput.Permission(ports.permission.state()))
   }
   private fun id() = nextId.incrementAndGet().toULong()
   private fun enqueue(work: () -> Unit): Boolean = synchronized(postLock) { !closed.get() && handler.post(work) }
@@ -349,7 +349,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
         is AudioAction.Admit -> pending.remove(action.id)?.complete(Admission.Admitted(RecordingTicket(action.id, ::endTicket).also {
           tickets[action.id] = it
           recordingCount.incrementAndGet()
-          (ports.focus as? AudioSystem)?.ownRecording(true)
+          (ports.focus as? AudioSystem)?.ownRecordings(recordingCount.get())
         }))
         is AudioAction.Refuse -> pending.remove(action.id)?.complete(Admission.Refused(action.reason))
         is AudioAction.Revoke -> tickets[action.id]?.revoke(action.reason)
@@ -381,7 +381,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
   suspend fun admit(kind: RecordingKind): Admission {
     val id = id()
     val result = CompletableDeferred<Admission>()
-    if (!enqueue { pending[id] = result; process(AudioInput.Capture(id, kind)) }) throw MediaException.Closed()
+    if (!enqueue { pending[id] = result; process(AudioInput.Permission(ports.permission.state())); process(AudioInput.Capture(id, kind)) }) throw MediaException.Closed()
     try { return result.await() } catch (failure: Throwable) {
       enqueue {
         pending.remove(id)
@@ -394,7 +394,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
   private fun endTicket(id: ULong) { recordingCount.decrementAndGet(); enqueue {
     tickets.remove(id)
     process(AudioInput.CaptureEnded(id))
-    if (recordingCount.get() == 0) (ports.focus as? AudioSystem)?.ownRecording(false)
+    (ports.focus as? AudioSystem)?.ownRecordings(recordingCount.get())
   } }
   fun call(kind: MediaCallKind): MediaCallAudio {
     val id = id()
@@ -417,7 +417,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
     return Closeable { synchronized(closeListeners) { closeListeners.remove(listener) } }
   }
   suspend fun awaitClosed() { closeDone.await() }
-  fun foreground(on: Boolean) { if (on) { (ports.focus as? AudioSystem)?.refreshPhone(); send(AudioInput.Permission(ports.permission.granted())) }; send(AudioInput.Foreground(on)) }
+  fun foreground(on: Boolean) { if (on) { (ports.focus as? AudioSystem)?.refreshPhone(); send(AudioInput.Permission(ports.permission.state())) }; send(AudioInput.Foreground(on)) }
   suspend fun readVolume(): MediaVolumeReading? {
     val port = volume ?: return null
     val initial = CompletableDeferred<Float?>()

@@ -19,6 +19,7 @@ import com.noma4i.medialayer.AudioFocus
 import com.noma4i.medialayer.Fetcher
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.MemoryReleaser
+import com.noma4i.medialayer.MicrophonePermission
 import com.noma4i.medialayer.NativeCallbacks
 import com.noma4i.medialayer.OpenConfig
 import com.noma4i.medialayer.PlayerEventsInterface
@@ -54,9 +55,10 @@ internal class Binding(val factory: ExoPlayerSlotFactory, val signals: SystemSig
 private class SystemMicrophonePermission(private val context: Context) : MicrophonePermissionPort, AutoCloseable {
   private val appOps = context.getSystemService(android.app.AppOpsManager::class.java)
   private var listener: android.app.AppOpsManager.OnOpChangedListener? = null
-  override fun granted() = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-  override fun listen(sink: (Boolean) -> Unit) {
-    val callback = android.app.AppOpsManager.OnOpChangedListener { _, _ -> sink(granted()) }
+  /** Android cannot tell a permission never asked from a refused one without an activity: not granted is always `DENIED`. */
+  override fun state() = if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) MicrophonePermission.GRANTED else MicrophonePermission.DENIED
+  override fun listen(sink: (MicrophonePermission) -> Unit) {
+    val callback = android.app.AppOpsManager.OnOpChangedListener { _, _ -> sink(state()) }
     listener = callback
     appOps.startWatchingMode(android.app.AppOpsManager.OPSTR_RECORD_AUDIO, context.packageName, callback)
   }

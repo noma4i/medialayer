@@ -51,10 +51,14 @@ internal class AppFocusPort : AudioFocusPort {
 
 /** The microphone permission of the system: the app grants or revokes it while the app stays in the foreground. */
 internal class TogglePermission(@Volatile var value: Boolean = true) : MicrophonePermissionPort {
-  @Volatile private var sink: (Boolean) -> Unit = {}
-  override fun granted() = value
-  override fun listen(sink: (Boolean) -> Unit) { this.sink = sink }
-  fun change(to: Boolean) { value = to; sink(to) }
+  @Volatile private var sink: (com.noma4i.medialayer.MicrophonePermission) -> Unit = {}
+  @Volatile private var override: com.noma4i.medialayer.MicrophonePermission? = null
+  override fun state() = override ?: if (value) com.noma4i.medialayer.MicrophonePermission.GRANTED else com.noma4i.medialayer.MicrophonePermission.DENIED
+  override fun listen(sink: (com.noma4i.medialayer.MicrophonePermission) -> Unit) { this.sink = sink }
+  fun change(to: Boolean) { override = null; value = to; sink(state()) }
+  fun change(to: com.noma4i.medialayer.MicrophonePermission) { override = to; value = to == com.noma4i.medialayer.MicrophonePermission.GRANTED; sink(to) }
+  /** The system changed the permission and the AppOps callback has not come yet. */
+  fun changeSilently(to: Boolean) { override = null; value = to }
 }
 
 /** The music stream volume of the system. */

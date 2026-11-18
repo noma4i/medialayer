@@ -59,7 +59,7 @@ internal class RecordingFocusPort : AudioFocusPort {
 }
 
 internal object GrantedPermission : MicrophonePermissionPort {
-  override fun granted() = true
+  override fun state() = com.noma4i.medialayer.MicrophonePermission.GRANTED
 }
 
 @RunWith(MediaLayerTestRunner::class)
@@ -73,7 +73,8 @@ class AudioLinkTest {
     device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings(),
     audioFocus = AudioFocus.EXCLUSIVE
   ))
-  private val link = AudioLink(core, AudioPorts(focus, GrantedPermission))
+  private val permission = TogglePermission()
+  private val link = AudioLink(core, AudioPorts(focus, permission))
   private val seen = CopyOnWriteArrayList<MicrophoneAvailability>()
   private val follow = link.onAvailability { seen.add(it); TestSignal.fire() }
 
@@ -84,6 +85,53 @@ class AudioLinkTest {
   }
 
   private fun await(what: String, condition: () -> Boolean) = TestSignal.await(what, 5_000, condition)
+
+  @Test
+  fun inv_audio_74_an_admission_reads_the_permission_of_that_moment_before_the_capture() = runBlocking {
+    permission.changeSilently(false)
+    val refused = link.admit(RecordingKind.VOICE)
+    assertEquals(Admission.Refused(RecordingRefusal.PERMISSION_DENIED), refused)
+    permission.changeSilently(true)
+    val admitted = link.admit(RecordingKind.VOICE)
+    assertTrue("a grant the callback has not delivered yet admits: $admitted", admitted is Admission.Admitted)
+    (admitted as Admission.Admitted).ticket.close()
+    permission.change(com.noma4i.medialayer.MicrophonePermission.NOT_ASKED)
+    assertEquals(Admission.Refused(RecordingRefusal.PERMISSION_DENIED), link.admit(RecordingKind.VOICE))
+    await("never asked is shown") { seen.lastOrNull() == MicrophoneAvailability.PERMISSION_NOT_ASKED }
+  }
+
+  private fun ownSystemLink(): Triple<MediaLayer, AudioLink, AudioSystem> {
+    val system = AudioSystem(context)
+    val layer = MediaLayer.open(OpenConfig(
+      dir = Files.createTempDirectory("audio-own").toString(), fetcher = TestFetcher(),
+      settings = SharedPreferencesSettings(context, "audio-own"), slots = null,
+      device = DeviceMemory(4096u, null, false), defaults = defaultLimits(), pool = defaultPoolSettings(), audioFocus = AudioFocus.EXCLUSIVE
+    ))
+    return Triple(layer, AudioLink(layer, AudioPorts(system, permission)), system)
+  }
+
+  @Test
+  fun inv_audio_11_a_camera_and_a_voice_recorder_hold_the_microphone_together() = runBlocking {
+    val (layer, own, system) = ownSystemLink()
+    val states = CopyOnWriteArrayList<MicrophoneAvailability>()
+    val watch = own.onAvailability { states.add(it); TestSignal.fire() }
+    val voice = own.admit(RecordingKind.VOICE) as Admission.Admitted
+    val video = own.admit(RecordingKind.VIDEO) as Admission.Admitted
+    val revoked = CopyOnWriteArrayList<RecordingRefusal>()
+    val hearVoice = voice.ticket.onRevoked { reason, done -> revoked.add(reason); done(); TestSignal.fire() }
+    val hearVideo = video.ticket.onRevoked { reason, done -> revoked.add(reason); done(); TestSignal.fire() }
+
+    system.onRecordingConfigs(2)
+
+    system.onRecordingConfigs(3)
+    TestSignal.await("a third record is another app", 5_000) { states.lastOrNull() == MicrophoneAvailability.OTHER_APP }
+
+    system.onRecordingConfigs(2)
+    TestSignal.await("back to ours", 5_000) { states.lastOrNull() == MicrophoneAvailability.AVAILABLE && states.size == 3 }
+    assertEquals("two own records never read as another app", listOf(MicrophoneAvailability.AVAILABLE, MicrophoneAvailability.OTHER_APP, MicrophoneAvailability.AVAILABLE), states.toList())
+    assertTrue("no recording is revoked as another app: $revoked", revoked.isEmpty())
+    hearVoice.close(); hearVideo.close(); voice.ticket.close(); video.ticket.close(); watch.close(); own.close(); layer.close()
+  }
 
   @Test
   fun inv_audio_34_every_wish_of_the_core_has_one_focus_plan() {

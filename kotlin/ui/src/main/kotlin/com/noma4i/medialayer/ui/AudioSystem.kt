@@ -24,14 +24,14 @@ internal class AudioSystem(private val context: Context) : AudioFocusPort, AutoC
   private val phone = context.getSystemService(TelephonyManager::class.java)
   private var sink: (FocusSignal) -> Unit = {}
   private var phoneRegistered = false
-  private var ownRecording = false
+  @Volatile private var ownRecordings = 0
   private val executor = java.util.concurrent.Executor { handler.post(it) }
   private val mode = AudioManager.OnModeChangedListener { value ->
     sink(FocusSignal.CommunicationMode(value == AudioManager.MODE_IN_COMMUNICATION || value == AudioManager.MODE_IN_CALL))
   }
   private val recording = object : AudioManager.AudioRecordingCallback() {
     override fun onRecordingConfigChanged(configs: MutableList<AudioRecordingConfiguration>) {
-      sink(FocusSignal.OtherRecording(configs.size > if (ownRecording) 1 else 0))
+      onRecordingConfigs(configs.size)
     }
   }
   private val phoneListener = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
@@ -47,11 +47,14 @@ internal class AudioSystem(private val context: Context) : AudioFocusPort, AutoC
     ContextCompat.registerReceiver(context, noisy, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), ContextCompat.RECEIVER_NOT_EXPORTED)
     refreshPhone()
     mode.onModeChanged(audio.mode)
-    sink(FocusSignal.OtherRecording(audio.activeRecordingConfigurations.isNotEmpty()))
+    onRecordingConfigs(audio.activeRecordingConfigurations.size)
   }
-  fun ownRecording(on: Boolean) {
-    ownRecording = on
-    if (!on) sink(FocusSignal.OtherRecording(audio.activeRecordingConfigurations.isNotEmpty()))
+  /** Every own input is one system recording: the recordings beyond their number belong to other apps. */
+  internal fun onRecordingConfigs(count: Int) { sink(FocusSignal.OtherRecording(count > ownRecordings)) }
+  fun ownRecordings(count: Int) {
+    val fewer = count < ownRecordings
+    ownRecordings = count
+    if (fewer) onRecordingConfigs(audio.activeRecordingConfigurations.size)
   }
   fun refreshPhone() {
     val allowed = context.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
