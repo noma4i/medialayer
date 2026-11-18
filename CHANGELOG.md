@@ -67,6 +67,7 @@
 
 ### Fixed
 
+<<<<<<< HEAD
 - Camera: leaving the screen mid-take now gives the take an `interrupted` outcome.
 - Camera: a clip keeps the lens of its take, not the lens of the next session.
 - Camera: `stopRecording` during a starting take now ends it instead of being lost.
@@ -75,6 +76,14 @@
 - A codec that throws inside an Android camera take callback now fails the take cleanly.
 - A stopped microphone ends the sound of an Android camera take instead of hanging it.
 - A corrupt WebP with chunk size minus eight no longer loops forever.
+||||||| parent of 8b672453 (Note the voice recorder fixes in the changelog)
+=======
+- A voice outcome is published with the number of its own take, not of the next one.
+- The voice length and `tooShort` count from the first microphone sample, not the hardware start.
+- A second voice start is refused as `MicrophoneBusy` and a stop without a take as `Empty` on both platforms.
+- iOS no longer reports voice refusals as native failures in `Media.failures`.
+- The microphone is released at once after `microphoneSilent`; the next start opens a new one.
+>>>>>>> 8b672453 (Note the voice recorder fixes in the changelog)
 - iOS camera sound no longer runs past the last video frame.
 - Android voice records again when the AAC encoder announces its format before the file opens.
 - Android camera video uses AAC-LC when no encoder declares the camera AAC profile.

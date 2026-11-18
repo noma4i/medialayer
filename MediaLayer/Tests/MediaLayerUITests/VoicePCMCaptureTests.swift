@@ -423,22 +423,20 @@ extension GlobalMedia {
     }
 
     @Test
-    func aLayerCloseOrAReleasedRecorderFreesTheOwnerThatWaitsForARestore() async throws {
+    func inv_voice_26_aSourceThatWasLostIsFreedAtOnceWhetherOrNotTheLayerOrTheRecorderGoes() async throws {
       for close in [true, false] {
         let rig = try AudioRig()
         let source = FakePCMSource()
         var recorder: MediaVoiceRecorder? = MediaVoiceRecorder(capture: SystemVoiceCapture(source: source, link: { rig.link }), maxDurationMs: 60_000, link: { rig.link }, levelInterval: .milliseconds(5))
-        let started = Returned()
-        let task = Task { [recorder] in do { try await recorder!.start(to: temporaryFile("m4a")); started.finish() } catch { started.finish(error) } }
+        let task = Task { [recorder] in try? await recorder!.start(to: temporaryFile("m4a")) }
         await eventually("connected") { source.starts == [1] }
         try source.emit()
         await task.value
         source.lose()
-        await eventually("the owner waits for its restore") { source.starts == [1, 2] }
 
+        await eventually("the owner is freed at once (layer close \(close))") { source.stops == [1] }
+        #expect(source.starts == [1], "no restore of a source without a take")
         if close { rig.link.close() } else { recorder = nil }
-
-        await eventually("the owner is freed (layer close \(close))") { source.stops.contains(2) }
         withExtendedLifetime(recorder) {}
       }
     }
