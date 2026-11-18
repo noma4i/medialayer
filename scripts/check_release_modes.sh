@@ -33,6 +33,9 @@ def run_case(publish):
         root = Path(directory)
         (root / "scripts").mkdir()
         shutil.copy2(script, root / "scripts/release.sh")
+        shutil.copy2(source / "scripts/release_manifest.py", root / "scripts/release_manifest.py")
+        (root / "MediaLayer").mkdir(exist_ok=True)
+        shutil.copy2(source / "MediaLayer/Package.swift", root / "MediaLayer/Package.swift")
         (root / "scripts/release_evidence.py").write_text('import pathlib, sys\nif sys.argv[1] == "tree": print("tree")\nif sys.argv[1] == "stage": (pathlib.Path(sys.argv[2]) / "source-evidence.json").write_text("{}")\n')
         (root / "scripts/release.sh").chmod(0o755)
         for name in ("check_docs.sh", "check_zoo.sh"):
@@ -243,6 +246,26 @@ except AssertionError as error:
     failed.append(str(error))
 try:
     check_android_build_arguments()
+except AssertionError as error:
+    failed.append(str(error))
+def check_release_manifest():
+    check = source / "scripts/release_manifest.py"
+    generated = subprocess.run(["python3", "-B", str(check), "render", "9.9.9", "0" * 64], capture_output=True, text=True, check=True).stdout
+    real = subprocess.run(["python3", "-B", str(check), "check"], capture_output=True, text=True)
+    assert real.returncode == 0, f"release manifest check failed on the repository: {real.stdout}{real.stderr}"
+    with tempfile.TemporaryDirectory() as directory:
+        for label, text, expect_ok in (
+            ("generated release manifest", generated, True),
+            ("manifest without the MediaLayerUI dependency of MediaLayerTesting", generated.replace('dependencies: ["MediaLayer", "MediaLayerUI"],\n      path: "MediaLayer/Sources/MediaLayerTesting"', 'dependencies: ["MediaLayer"],\n      path: "MediaLayer/Sources/MediaLayerTesting"'), False),
+        ):
+            manifest = Path(directory) / "Package.swift"
+            manifest.write_text(text)
+            result = subprocess.run(["python3", "-B", str(check), "check", str(manifest)], capture_output=True, text=True)
+            assert (result.returncode == 0) == expect_ok, f"release manifest check wrong for {label}: {result.stdout}{result.stderr}"
+    print("ok release manifest takes its dependencies from the dev manifest and the check rejects a missing one")
+
+try:
+    check_release_manifest()
 except AssertionError as error:
     failed.append(str(error))
 for publish in (False, True):

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- iOS MediaLayerTesting package now depends on MediaLayerUI.
+
 ## 3.41.0 - 2026-11-18
 
 ### Added

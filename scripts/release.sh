@@ -138,52 +138,7 @@ check_archs "$stage/medialayer-gen-macos-universal" 'arm64 x86_64'
 for file in "${attachments[@]}"; do [ -s "$stage/$file" ] || fail "missing release attachment: $file"; done
 checksum="$(swift package compute-checksum "$stage/MediaLayerFFI.xcframework.zip")"
 
-write_package() {
-  cat <<EOF
-// swift-tools-version: 6.0
-
-import PackageDescription
-
-let package = Package(
-  name: "MediaLayer",
-  platforms: [.iOS(.v17), .macOS(.v14)],
-  products: [
-    .library(name: "MediaLayer", targets: ["MediaLayer"]),
-    .library(name: "MediaLayerUI", targets: ["MediaLayerUI"]),
-    .library(name: "MediaLayerTesting", targets: ["MediaLayerTesting"])
-  ],
-  dependencies: [
-    .package(url: "https://github.com/kean/Nuke", from: "13.2.0")
-  ],
-  targets: [
-    .binaryTarget(
-      name: "medialayerFFI",
-      url: "https://github.com/noma4i/medialayer/releases/download/$version/MediaLayerFFI.xcframework.zip",
-      checksum: "$checksum"
-    ),
-    .target(
-      name: "MediaLayer",
-      dependencies: ["medialayerFFI"],
-      path: "MediaLayer/Sources/MediaLayer",
-      swiftSettings: [.swiftLanguageMode(.v5)]
-    ),
-    .target(
-      name: "MediaLayerUI",
-      dependencies: ["MediaLayer", .product(name: "Nuke", package: "Nuke")],
-      path: "MediaLayer/Sources/MediaLayerUI",
-      swiftSettings: [.swiftLanguageMode(.v5)]
-    ),
-    .target(
-      name: "MediaLayerTesting",
-      dependencies: ["MediaLayer"],
-      path: "MediaLayer/Sources/MediaLayerTesting",
-      swiftSettings: [.swiftLanguageMode(.v5)]
-    )
-  ]
-)
-EOF
-}
-write_package > "$tmp/Package.swift"
+python3 -B "$root/scripts/release_manifest.py" render "$version" "$checksum" > "$tmp/Package.swift"
 mkdir -p "$tmp/package/MediaLayer/Sources/MediaLayer" "$tmp/package/MediaLayer/Sources/MediaLayerUI" "$tmp/package/MediaLayer/Sources/MediaLayerTesting"
 cp "$tmp/Package.swift" "$tmp/package/Package.swift"
 cp MediaLayer/Sources/MediaLayer/*.swift "$tmp/package/MediaLayer/Sources/MediaLayer/"
