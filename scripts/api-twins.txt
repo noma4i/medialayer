@@ -99,3 +99,8 @@ kotlin:com/noma4i/medialayer/MediaSourceValue$Companion.raw | swift:MediaSourceV
 kotlin:com/noma4i/medialayer/MediaSourceValue$Companion.file | swift:MediaSourceValue.file | Local file source, Kotlin also takes a File
 kotlin:com/noma4i/medialayer/ui/MediaImageLoad.DEFAULT_TIMEOUT_MS | swift:MediaImageLoad.defaultTimeout | Milliseconds in Kotlin, Duration in Swift
 kotlin:com/noma4i/medialayer/ui/MediaVoiceRecorder.LEVEL_INTERVAL_MS | platform idiom | Kotlin constant of the default constructor argument, Swift has a default argument
+kotlin:com/noma4i/medialayer/ui/MediaLayerTestingApi | platform idiom | Kotlin opt-in marks the test driver entry; Swift closes it with package access
+swift:MediaAudioDriver.endInterruption(shouldResume:) | platform idiom | iOS carries the system resume hint; Android focus has none
+kotlin:com/noma4i/medialayer/ui/AudioDriveSignal | platform idiom | Opt-in entry of the test driver; Swift keeps it package access
+kotlin:com/noma4i/medialayer/ui/AudioDriveKt.driveAudio | platform idiom | Opt-in entry of the test driver; Swift keeps it package access
+kotlin:com/noma4i/medialayer/testing/MediaAudioDriver.endInterruption | platform idiom | Android focus has no resume hint; Swift takes shouldResume
