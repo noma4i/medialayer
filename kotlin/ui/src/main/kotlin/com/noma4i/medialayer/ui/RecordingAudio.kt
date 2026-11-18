@@ -7,6 +7,8 @@ import android.media.AudioRecordingConfiguration
 import android.media.AudioTimestamp
 import com.noma4i.medialayer.FailureSource
 import com.noma4i.medialayer.NativeFailure
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import java.nio.ByteBuffer
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
@@ -81,11 +83,13 @@ internal class RecordingAudio(
   private val lock = Any()
   private var current: Source? = null
   private var closed = false
+  private val sources = kotlinx.coroutines.flow.MutableStateFlow(0)
   private val hardware = Executors.newSingleThreadExecutor { Thread(it, "RecordingAudio-hardware").apply { isDaemon = true } }
   private val signals = Executors.newSingleThreadExecutor { Thread(it, "RecordingAudio-signal").apply { isDaemon = true } }
 
   fun start(spec: PcmSpec): Long {
     val source = Source(generations.incrementAndGet(), spec)
+    sources.update { it + 1 }
     val previous = synchronized(lock) {
       check(!closed) { "RecordingAudio is closed" }
       current.also { current = source }.also { hardware.execute(source::run) }
@@ -104,6 +108,9 @@ internal class RecordingAudio(
     hardware.execute { signals.shutdown() }
     hardware.shutdown()
   }
+
+  /** Returns once every started source has released its AudioRecord. */
+  suspend fun idle() { sources.first { it == 0 } }
 
   fun stop(generation: Long) {
     synchronized(lock) { current?.takeIf { it.generation == generation } }?.stop()
@@ -223,6 +230,7 @@ internal class RecordingAudio(
       }
       try { reserve?.close() } finally {
         synchronized(lock) { if (current === this) current = null }
+        sources.update { it - 1 }
       }
     }
   }

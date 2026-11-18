@@ -106,6 +106,11 @@ internal sealed interface Admission {
 
 internal class RecordingTicket(val id: ULong, private val end: (ULong) -> Unit) : Closeable {
   private val closed = AtomicBoolean()
+  private val gates = ArrayList<suspend () -> Unit>()
+  private val ended = CompletableDeferred<Unit>()
+  private val gateScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+  /** The ticket ends only after [idle] returns: a microphone of this recording still holds the system's AudioRecord until then, and the system would count it as another app's recording. */
+  fun gate(idle: suspend () -> Unit) { synchronized(gates) { gates.add(idle) } }
   private val listeners = LinkedHashSet<(RecordingRefusal, () -> Unit) -> Unit>()
   private var reason: RecordingRefusal? = null
   private val stopped = CompletableDeferred<Unit>()
@@ -134,7 +139,15 @@ internal class RecordingTicket(val id: ULong, private val end: (ULong) -> Unit) 
     work()
     null
   }
-  override fun close() { if (closed.compareAndSet(false, true)) end(id) }
+  override fun close() {
+    if (!closed.compareAndSet(false, true)) return
+    val waits = synchronized(gates) { gates.toList() }
+    if (waits.isEmpty()) { end(id); ended.complete(Unit); return }
+    gateScope.launch { try { waits.forEach { it() } } finally { end(id); ended.complete(Unit) } }
+  }
+
+  /** Closes the ticket and returns when it has ended, after the microphones of the recording are released. */
+  suspend fun closeAndWait() { close(); ended.await() }
 }
 
 class MediaCallAudio internal constructor(private val id: ULong, internal val kind: MediaCallKind, private val send: (AudioInput) -> Unit) : Closeable {

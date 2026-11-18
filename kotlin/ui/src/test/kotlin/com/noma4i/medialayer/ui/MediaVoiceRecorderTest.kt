@@ -41,6 +41,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -63,6 +64,9 @@ private class Microphone : CameraMicrophone {
   }
   override fun stop(generation: Long) { held?.close(); held = null; calls.add("stop $generation") }
   override fun close() { calls.add("close") }
+  /** The system gives the AudioRecord back only when the test says so. */
+  @Volatile var released: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+  override suspend fun idle() { released?.await() }
 }
 
 /** The second fake boundary: the file writer, it keeps the file of a take on `open` and ends a take at once. */
@@ -159,6 +163,27 @@ class MediaVoiceRecorderTest {
     assertEquals(voiceEncoderSettings(), writer.settings)
     ticks.now += 1_000
     recorder.stop()
+  }
+
+  @Test
+  fun inv_voice_35_stop_returns_after_the_microphone_is_released_so_the_next_start_is_admitted() = runBlocking<Unit> {
+    val recorder = recorder()
+    record(recorder, file())
+    val released = kotlinx.coroutines.CompletableDeferred<Unit>()
+    microphone.released = released
+    ticks.now += 1_000
+
+    val stop = scope.async { recorder.stop() }
+    await("the owner closed the microphone") { microphone.calls.contains("close") }
+    assertNull("stop returned while the system still holds the AudioRecord", kotlinx.coroutines.withTimeoutOrNull(300) { stop.await() })
+    assertTrue("the recording ticket ended before the microphone was released", link.isRecording)
+
+    released.complete(Unit)
+    withTimeout(5_000) { stop.await() }
+    assertFalse(link.isRecording)
+    val next = link.admit(com.noma4i.medialayer.RecordingKind.VOICE)
+    assertTrue("the next admission right after stop: $next", next is Admission.Admitted)
+    (next as Admission.Admitted).ticket.close()
   }
 
   @Test

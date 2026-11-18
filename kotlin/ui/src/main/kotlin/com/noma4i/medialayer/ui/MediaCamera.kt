@@ -343,6 +343,7 @@ class MediaCamera internal constructor(
   }
 
   private fun installAudio(ticket: RecordingTicket) {
+    ticket.gate { backend.audioIdle() }
     audioHold?.close()
     audioRevocation?.close()
     audioHold = ticket

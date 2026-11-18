@@ -8,6 +8,9 @@ internal interface CameraMicrophone : AutoCloseable {
   fun start(spec: PcmSpec): Long
 
   fun stop(generation: Long)
+
+  /** Returns once no AudioRecord of this microphone is live: the system has it back. */
+  suspend fun idle() = Unit
 }
 
 internal interface CameraAudioTap {
@@ -25,6 +28,8 @@ internal fun RecordingAudio.asMicrophone(): CameraMicrophone = object : CameraMi
   override fun stop(generation: Long) = this@asMicrophone.stop(generation)
 
   override fun close() = this@asMicrophone.close()
+
+  override suspend fun idle() = this@asMicrophone.idle()
 }
 
 internal class CameraAudioInput(

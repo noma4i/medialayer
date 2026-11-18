@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Android voice and camera recordings end only after their microphone is released, so the next start is not refused.
+
 ## 3.41.1 - 2026-11-18
 
 ### Fixed

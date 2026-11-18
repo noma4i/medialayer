@@ -9,6 +9,10 @@ internal class CameraAudioHold(
   private var input: CameraAudioInput? = null
   private var spec: PcmSpec? = null
   private var closed = false
+  private val made = ArrayList<CameraMicrophone>()
+
+  /** Returns once every microphone this hold opened has no live AudioRecord. */
+  suspend fun idle() { synchronized(made) { made.toList() }.forEach { it.idle() } }
 
   val generation: Long? get() = input?.audioGeneration
 
@@ -21,7 +25,7 @@ internal class CameraAudioHold(
     spec = null
     if (wanted == null) return
     val audio = checkNotNull(link()) { "no audio link for the camera microphone" }
-    input = CameraAudioInput(audio, wanted, tap, issue, microphone = microphone)
+    input = CameraAudioInput(audio, wanted, tap, issue) { heard -> microphone(heard).also { synchronized(made) { made.add(it) } } }
     spec = wanted
   }
 

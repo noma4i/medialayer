@@ -154,7 +154,7 @@ class MediaVoiceRecorder internal constructor(
       commit(current, hold)
     } catch (error: Throwable) {
       try { capture.stop() } catch (stopping: Exception) { Media.recordNativeFailure(FailureSource.RECORDER, stopping) }
-      hold.close()
+      hold.closeAndWait()
       deleteMediaFile(file)
       throw when (error) {
         is VoiceRefused -> voiceError(error.reason)
@@ -244,7 +244,7 @@ class MediaVoiceRecorder internal constructor(
       } catch (error: VoiceRefused) {
         if (interrupted == null) throw voiceError(error.reason)
       } finally {
-        session?.close()
+        session?.closeAndWait()
       }
       if (interrupted != null) throw interrupted
       if (failure != null) throw MediaException.Unexpected(failure.message)
@@ -340,6 +340,7 @@ internal class SystemVoiceCapture(
     }
     val input = VoiceInput(audio, spec, settings, maxDurationMs.toLong() * 1_000L, file, writer(), listener) { heard ->
       val made = microphone(heard, memory::lease)
+      ticket.gate { made.idle() }
       // The hold goes back after the last lease of the microphone: the owner closes it at the end of the take or of its restore.
       object : CameraMicrophone by made { override fun close() { try { made.close() } finally { release() } } }
     }

@@ -64,6 +64,9 @@ internal interface CaptureBackend {
 
   fun awaitRecordingStopped(done: () -> Unit) = done()
 
+  /** Returns once the camera's microphones hold no AudioRecord: the recording ticket ends after it. */
+  suspend fun audioIdle() = Unit
+
   /** The audio source of the take is gone. */
   fun audioLost() = Unit
 

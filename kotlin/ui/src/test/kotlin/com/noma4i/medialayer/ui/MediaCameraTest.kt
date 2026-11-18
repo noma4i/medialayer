@@ -145,6 +145,11 @@ private class FakeBackend : CaptureBackend {
     note("endRecording held")
   }
 
+  /** While set, the fake microphone of the camera still holds the system's AudioRecord. */
+  @Volatile var audioIdleGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
+  override suspend fun audioIdle() { audioIdleGate?.await() }
+
   override fun awaitRecordingStopped(done: () -> Unit) {
     if (!holdStops) return done()
     heldStops.add(done)
@@ -655,6 +660,20 @@ class MediaCameraTest {
     assertTrue(stopping.await().isFailure)
     assertEquals(CameraPhase.IDLE to 0UL, rig.camera.state.value.phase to rig.camera.state.value.recordedMs)
     eventually("microphone given back") { !rig.audio.isRecording }
+  }
+
+  @Test
+  fun inv_voice_36_theCameraRecordingEndsOnlyAfterItsMicrophoneIsReleasedSoTheNextVoiceStartIsAdmitted() = runBlocking {
+    val rig = rig(moment)
+    ready(rig)
+    val released = kotlinx.coroutines.CompletableDeferred<Unit>()
+    rig.backend.audioIdleGate = released
+    rig.detach()
+    eventually("the camera let the microphone go") { rig.backend.count("unbind") == 1 }
+    assertNull("the recording ended while the AudioRecord was still held", kotlinx.coroutines.withTimeoutOrNull(300) { while (!rig.audio.isRecording.not()) kotlinx.coroutines.delay(10) })
+    assertTrue(rig.audio.isRecording)
+    released.complete(Unit)
+    eventually("the recording ended after the release") { !rig.audio.isRecording }
   }
 
   @Test
