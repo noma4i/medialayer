@@ -123,7 +123,7 @@ internal class RecordingAudio(
     private val deliverLock = Any()
     private val resourceLock = Any()
     private var record: AudioRecord? = null
-    private val gate = SourceGate(spec.sampleRate.toLong())
+    private val gate = SourceGate()
     private var timebased = false
     private val recordingCallback = object : AudioManager.AudioRecordingCallback() {
       override fun onRecordingConfigChanged(configs: MutableList<AudioRecordingConfiguration>) {
@@ -177,7 +177,7 @@ internal class RecordingAudio(
         buffer.limit(read)
         val first = frames
         frames += count
-        if (!evaluate(made.activeRecordingConfiguration, true, count.toLong())) continue
+        if (!evaluate(made.activeRecordingConfiguration, true)) continue
         checkTimebase(made)
         deliver { listener.onPcm(PcmChunk(generation, spec, buffer, count, first, first * 1_000_000L / spec.sampleRate)) }
       }
@@ -192,10 +192,10 @@ internal class RecordingAudio(
       deliver { listener.onTimebase(generation, origin) }
     }
 
-    private fun evaluate(config: AudioRecordingConfiguration?, fromRead: Boolean, frames: Long = 0): Boolean = synchronized(deliverLock) {
+    private fun evaluate(config: AudioRecordingConfiguration?, fromRead: Boolean): Boolean = synchronized(deliverLock) {
       if (!open.get()) return false
       val state = when { config == null -> SourceGate.Config.ABSENT; config.isClientSilenced -> SourceGate.Config.SILENCED; else -> SourceGate.Config.ACTIVE }
-      val (pcm, signal) = gate.observe(state, fromRead, frames)
+      val (pcm, signal) = gate.observe(state, fromRead)
       when (signal) {
         SourceGate.Signal.LIVE -> listener.onLive(generation)
         SourceGate.Signal.SILENCED -> listener.onSilenced(generation, true)
@@ -231,29 +231,26 @@ internal class RecordingAudio(
 }
 
 /**
- * Every state of a source is an event, from its first read: a source the system silences before its first PCM (a second AudioRecord of the app) is told silenced at once,
- * one with no recording configuration after a second of reads too. A take that waits for its first PCM ends on that event, never hangs.
+ * Every state of a source is told by an event of the platform, from its first read: a source the system silences before its first PCM (a second AudioRecord of the app)
+ * is told silenced at once on the read or on AudioRecordingCallback.onRecordingConfigChanged. A source with no configuration yet waits for that callback.
  */
-internal class SourceGate(private val absentFrames: Long) {
+internal class SourceGate {
   enum class Config { ACTIVE, SILENCED, ABSENT }
   enum class Signal { LIVE, SILENCED, HEARD }
 
   private var live = false
   private var silenced = false
-  private var absent = 0L
 
   /** Returns whether the read PCM goes to the take, and the event to tell. */
-  fun observe(config: Config, fromRead: Boolean, frames: Long): Pair<Boolean, Signal?> {
+  fun observe(config: Config, fromRead: Boolean): Pair<Boolean, Signal?> {
     if (config == Config.ACTIVE) {
-      absent = 0
       if (!fromRead) return false to null
       if (!live) { live = true; silenced = false; return true to Signal.LIVE }
       if (silenced) { silenced = false; return true to Signal.HEARD }
       return true to null
     }
     if (silenced) return false to null
-    if (fromRead && config == Config.ABSENT) absent += frames
-    if (live || config == Config.SILENCED || absent >= absentFrames) { silenced = true; return false to Signal.SILENCED }
+    if (live || config == Config.SILENCED) { silenced = true; return false to Signal.SILENCED }
     return false to null
   }
 }
