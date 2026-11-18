@@ -164,3 +164,70 @@ fn inv_coverage_05_only_a_lost_sound_gives_a_refusal() {
         assert_eq!(audio_coverage_refusal(v), want, "{v:?}");
     }
 }
+
+/// AAC frames of `rate` whose boundaries are rounded to a whole microsecond the way a container reports them, `lost` samples missing after packet `at`.
+fn rounded_frames(rate: u32, count: usize, jitter: &mut dyn FnMut() -> i64, hole: Option<(usize, i64)>) -> Vec<AudioInterval> {
+    let at_us = |sample: i64| (sample * 1_000_000 + rate as i64 / 2) / rate as i64;
+    let mut sample = 0i64;
+    let mut out = Vec::new();
+    for index in 0..count {
+        if let Some((at, lost)) = hole {
+            if index == at { sample += lost; }
+        }
+        let start = at_us(sample) + jitter();
+        let end = at_us(sample + 1024) + jitter();
+        out.push(AudioInterval { start_us: start, end_us: end, samples: 1024 });
+        sample += 1024;
+    }
+    out
+}
+
+#[test]
+fn inv_coverage_06_a_joint_is_judged_in_samples_of_the_track_rate() {
+    for rate in [44_100u32, 48_000] {
+        let config = CoverageConfig { sample_rate: rate, ..config() };
+        let sample_us = 1_000_000 / rate as i64;
+        let at = |us: i64| -> Vec<AudioInterval> {
+            let first = AudioInterval { start_us: 0, end_us: 1_000_000, samples: rate as u64 };
+            vec![first, AudioInterval { start_us: 1_000_000 + us, end_us: 2_000_000 + us, samples: rate as u64 }]
+        };
+        let one_sample = (1_000_000 + rate as i64 / 2) / rate as i64 + 1;
+        assert_eq!(read(config, &at(0), None).verdict, CoverageVerdict::Covered, "{rate}: a joint");
+        assert_eq!(read(config, &at(one_sample), None).verdict, CoverageVerdict::Covered, "{rate}: one sample and a microsecond of rounding");
+        assert_eq!(read(config, &at(one_sample + sample_us), None).verdict, CoverageVerdict::MidGap, "{rate}: two samples are a hole");
+        assert_eq!(read(config, &at(-one_sample), None).verdict, CoverageVerdict::Covered, "{rate}: one sample of overlap");
+        assert_eq!(read(config, &at(-(one_sample + sample_us)), None).verdict, CoverageVerdict::Broken, "{rate}: two samples of overlap");
+    }
+    // The 24 microsecond joint a real clip showed on the emulator at 44100 Hz.
+    let real = [AudioInterval { start_us: 0, end_us: 513_309, samples: 22_637 }, AudioInterval { start_us: 513_333, end_us: 534_100, samples: 916 }];
+    assert_eq!(read(config(), &real, None).verdict, CoverageVerdict::Covered);
+}
+
+#[test]
+fn inv_coverage_07_random_clips_with_rounded_boundaries_are_covered_and_a_hole_of_two_samples_is_not() {
+    let name = "inv_coverage_07_random_clips_with_rounded_boundaries_are_covered_and_a_hole_of_two_samples_is_not";
+    let mut dice = crate::seeded::Dice::new(name);
+    for round in 0..2_000 {
+        let rate = [8_000u32, 16_000, 22_050, 44_100, 48_000][dice.index(5)];
+        let config = CoverageConfig { sample_rate: rate, ..config() };
+        let count = dice.between(3, 40) as usize;
+        let rounding = |dice: &mut crate::seeded::Dice| dice.between(0, 2) as i64 - 1;
+        let whole = {
+            let mut jitter = || rounding(&mut dice);
+            rounded_frames(rate, count, &mut jitter, None)
+        };
+        assert_eq!(read(config, &whole, None).verdict, CoverageVerdict::Covered, "round {rate} Hz, {count} packets: {whole:?}\nreproduce: ML_SEED={}", crate::seeded::seed());
+        let at = dice.between(1, count as u64 - 1) as usize;
+        let one = {
+            let mut jitter = || rounding(&mut dice);
+            rounded_frames(rate, count, &mut jitter, Some((at, 1)))
+        };
+        assert_eq!(read(config, &one, None).verdict, CoverageVerdict::Covered, "round {round}: {rate} Hz, one sample lost after packet {at}: {one:?}\nreproduce: ML_SEED={}", crate::seeded::seed());
+        let lost = dice.between(2, 40) as i64;
+        let holed = {
+            let mut jitter = || rounding(&mut dice);
+            rounded_frames(rate, count, &mut jitter, Some((at, lost)))
+        };
+        assert_eq!(read(config, &holed, None).verdict, CoverageVerdict::MidGap, "round {round}: {rate} Hz, {lost} samples lost after packet {at}: {holed:?}\nreproduce: ML_SEED={}", crate::seeded::seed());
+    }
+}

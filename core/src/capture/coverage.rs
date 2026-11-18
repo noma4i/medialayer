@@ -63,6 +63,11 @@ fn sound(scan: &CoverageScan) -> bool {
     config.sample_rate > 0 && config.frame_samples > 0 && counted
 }
 
+/// The samples a span of microseconds holds, rounded to the nearest: a boundary rounded to a microsecond is off by less than half a sample at any audio rate.
+fn samples_in(us: i128, rate: u32) -> i128 {
+    (us * rate as i128 + MICROS / 2).div_euclid(MICROS)
+}
+
 fn ceil_us(samples: i128, rate: u32) -> i128 {
     (samples * MICROS + rate as i128 - 1) / rate as i128
 }
@@ -81,7 +86,7 @@ pub fn coverage_begin(config: CoverageConfig) -> CoverageScan {
     CoverageScan { config, first_us: None, reached_us: 0, samples: 0, packets: 0, defect, gap_at_us: None, gap_us: None }
 }
 
-/// One rule for the audio of a recorded clip on both platforms: inside the stream one PCM sample of rounding is allowed (a longer hole is `MidGap`, an overlap, a repeat or a count that does not fit its length is `Broken`), the ends may differ from the video by one native codec frame. The first defect stays, a scan changed from outside is `Broken`.
+/// One rule for the audio of a recorded clip on both platforms: inside the stream one PCM sample of rounding is allowed, counted in samples of the track rate (a longer hole is `MidGap`, an overlap, a repeat or a count that does not fit its length is `Broken`), the ends may differ from the video by one native codec frame. The first defect stays, a scan changed from outside is `Broken`.
 #[uniffi::export]
 pub fn coverage_push(scan: CoverageScan, interval: AudioInterval) -> CoverageScan {
     let mut next = scan;
@@ -98,18 +103,18 @@ pub fn coverage_push(scan: CoverageScan, interval: AudioInterval) -> CoverageSca
         return next;
     }
     let heard = interval.samples as i128 * MICROS / scan.config.sample_rate as i128;
-    let step = interval.start_us as i128 - scan.reached_us as i128;
+    let step = samples_in(interval.start_us as i128 - scan.reached_us as i128, scan.config.sample_rate);
     let total = scan.samples.checked_add(interval.samples).zip(scan.packets.checked_add(1));
-    let broken = length <= 0 || interval.samples == 0 || (length - heard).abs() > sample_us || (scan.packets > 0 && step < -sample_us) || total.is_none();
+    let broken = length <= 0 || interval.samples == 0 || (length - heard).abs() > sample_us || (scan.packets > 0 && step < -1) || total.is_none();
 
     if broken {
         next.defect = scan.defect.or(Some(CoverageVerdict::Broken));
         return next;
     }
-    if scan.packets > 0 && step > sample_us && next.defect.is_none() {
+    if scan.packets > 0 && step > 1 && next.defect.is_none() {
         next.defect = Some(CoverageVerdict::MidGap);
         next.gap_at_us = Some(scan.reached_us);
-        next.gap_us = i64::try_from(step).ok();
+        next.gap_us = Some(interval.start_us.saturating_sub(scan.reached_us));
     }
     next.first_us = scan.first_us.or(Some(interval.start_us));
     next.reached_us = interval.end_us;
