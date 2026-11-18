@@ -162,11 +162,16 @@ private final class Counters: @unchecked Sendable {
   private var straightenedURLs: [URL] = []
   private var cancelledStraighten = false
   var holdVideo = false
+  /// The straightening of a real file reaches its wait later than it reports its start: a test sets how much later.
+  var parkLag: Duration?
   var straightened: [URL] { lock.withLock { straightenedURLs } }
   var straightenCancelled: Bool { lock.withLock { cancelledStraighten } }
 
+  /// The release stays: a straightening that reaches its wait after the release passes through, so the order of the two is not the test's luck.
+  private var videoReleased = false
+
   func releaseVideo() {
-    let continuation = lock.withLock { () -> CheckedContinuation<Void, Error>? in defer { parked = nil }; return parked }
+    let continuation = lock.withLock { () -> CheckedContinuation<Void, Error>? in videoReleased = true; defer { parked = nil }; return parked }
     continuation?.resume()
   }
 
@@ -174,14 +179,16 @@ private final class Counters: @unchecked Sendable {
     let hold = lock.withLock { straightenedURLs.append(url); return holdVideo }
     TestSignal.shared.fire()
     guard hold else { return }
+    if let lag = lock.withLock({ parkLag }) { try await Task.sleep(for: lag) }
     try await withTaskCancellationHandler {
       try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-        let cancelled = lock.withLock { () -> Bool in
-          if cancelledStraighten { return true }
+        let outcome = lock.withLock { () -> Result<Void, Error>? in
+          if cancelledStraighten { return .failure(CancellationError()) }
+          if videoReleased { return .success(()) }
           parked = continuation
-          return false
+          return nil
         }
-        if cancelled { continuation.resume(throwing: CancellationError()) }
+        if let outcome { continuation.resume(with: outcome) }
       }
     } onCancel: {
       let continuation = lock.withLock { () -> CheckedContinuation<Void, Error>? in
@@ -972,11 +979,11 @@ struct MediaCameraTests {
   // CAPTURE-70: the clip of a take stays until its owner takes it, and it keeps the lens of its take.
   @Test
   func inv_capture_70_a_delivered_clip_survives_the_next_take_and_keeps_the_lens_of_its_take() async throws {
-    let rig = try makeRig(.moment) { _, counters in counters.holdVideo = true }
+    let rig = try makeRig(.moment) { _, counters in counters.holdVideo = true; counters.parkLag = .milliseconds(200) }
     await ready(rig)
     try await rig.camera.startRecording()
     rig.backend.emit(.recordFinished(end: .limitReached))
-    await eventually("straightening") { rig.camera.state.phase == .stopping }
+    await eventually("straightening") { rig.camera.state.phase == .stopping && !rig.counters.straightened.isEmpty }
     rig.camera.setLens(.front)
     rig.counters.holdVideo = false
     rig.counters.releaseVideo()
