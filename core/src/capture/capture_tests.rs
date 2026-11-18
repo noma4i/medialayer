@@ -448,10 +448,14 @@ fn inv_capture_30_a_lens_change_in_a_passing_phase_is_applied_when_that_phase_se
 fn inv_capture_32_a_take_starts_only_while_its_microphone_sound_flows_and_losing_it_throws_the_take_away() {
     let profile = moment();
     let silent = drive(profile, ready(profile), &[CaptureEvent::AudioFlow { flowing: false }]).0;
-    let (refused, actions) = drive(profile, silent, &[CaptureEvent::Start]);
-    assert_eq!((actions, refused.state.fault, phase(&refused)), (Vec::new(), Some(CameraRefusal::MicrophoneSilent), CameraPhase::Ready));
+    let (waiting, actions) = drive(profile, silent, &[CaptureEvent::Start, CaptureEvent::RecordStarted]);
+    assert_eq!((actions, waiting.state.fault, phase(&waiting)), (vec![CaptureAction::BeginRecording], None, CameraPhase::Ready), "a silent microphone is retried by the start: the take waits for its sound");
+    let (heard, _) = drive(profile, waiting, &[CaptureEvent::AudioFlow { flowing: true }]);
+    assert_eq!(phase(&heard), CameraPhase::Recording, "the sound of a retry starts the take");
+    let (cut, actions) = drive(profile, drive(profile, silent, &[CaptureEvent::Start, CaptureEvent::RecordStarted]).0, &[CaptureEvent::AudioFlow { flowing: false }, CaptureEvent::RecordFinished { end: RecordEnd::Completed }]);
+    assert_eq!((actions, cut.state.outcome), (vec![CaptureAction::EndRecording { discard: true }, CaptureAction::Discard], Some(TakeOutcome::Refused { reason: CameraRefusal::MicrophoneSilent })), "the silence of the last attempt ends the start microphone silent");
 
-    let flowing = drive(profile, refused, &[CaptureEvent::AudioFlow { flowing: true }]).0;
+    let flowing = drive(profile, cut, &[CaptureEvent::AudioFlow { flowing: true }]).0;
     let (started, actions) = drive(profile, flowing, &[CaptureEvent::Start, CaptureEvent::RecordStarted]);
     assert_eq!((actions, phase(&started)), (vec![CaptureAction::BeginRecording], CameraPhase::Recording));
 
@@ -474,7 +478,7 @@ fn inv_capture_33_the_silence_of_a_take_ends_with_it_and_the_next_start_follows_
     assert_eq!(actions, vec![CaptureAction::BeginRecording], "a sensor that reports only during a take (CameraX AudioStats) does not lock the camera after a silent take");
 
     let (still, actions) = drive(profile, silent_take(), &[CaptureEvent::AudioFlow { flowing: false }, CaptureEvent::Start]);
-    assert_eq!((actions, still.state.fault), (Vec::new(), Some(CameraRefusal::MicrophoneSilent)), "a sensor that still hears silence after the take refuses the next start");
+    assert_eq!((actions, still.state.fault), (vec![CaptureAction::BeginRecording], None), "a sensor that still hears silence after the take is retried by the next start, not refused");
 }
 
 #[test]

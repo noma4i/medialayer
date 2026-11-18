@@ -273,7 +273,7 @@ impl CaptureRunInput {
 
     fn start(&mut self) {
         if !self.profile.is_video() || self.recording_in_progress() || self.run.state.shooting { return; }
-        if self.profile.audio && self.run.audio_flowing == Some(false) { self.run.state.fault = Some(CameraRefusal::MicrophoneSilent); return; }
+        // A silent microphone does not refuse the start: the start retries it (owner 2026-11-19) and the take waits for its sound like an unknown flow; the silence of the last attempt cancels it.
         self.run.starting = true;
         self.run.take_lens = self.run.state.lens;
         self.run.state.take = Some(self.run.state.take.unwrap_or(0).saturating_add(1));
