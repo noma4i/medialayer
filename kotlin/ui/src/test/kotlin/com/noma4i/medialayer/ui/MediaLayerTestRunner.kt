@@ -40,6 +40,8 @@ class MediaLayerTestLifecycle : DefaultTestLifecycle() {
   override fun afterTest(method: java.lang.reflect.Method) {
     super.afterTest(method)
     ProcessMediaEnvironment.reset()
+    ScreenAwake.shared.reset()
+    ScreenWindows.reset()
     org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
   }
 }

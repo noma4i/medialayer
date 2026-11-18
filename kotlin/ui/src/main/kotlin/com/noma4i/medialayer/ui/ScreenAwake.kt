@@ -31,6 +31,9 @@ internal class ScreenAwake(muted: Boolean = false, private val apply: (Boolean) 
 
   fun setMuted(value: Boolean) = change { muted = value }
 
+  /** Test seam: a test process starts with no holder of an earlier test, as a fresh app process does. */
+  internal fun reset() = change { holders.clear(); muted = Media.muted }
+
   companion object {
     val shared = ScreenAwake(Media.muted, ScreenWindows::apply)
   }
@@ -72,6 +75,12 @@ internal object ScreenWindows {
       if (current is Activity) { val activity = current; main.post { add(activity) }; return }
       current = current.baseContext
     }
+  }
+
+  /** Test seam: a test process starts with no window and no registration of an earlier application. */
+  internal fun reset() {
+    synchronized(lock) { registered = false }
+    main.post { on = false; activities.clear() }
   }
 
   fun apply(value: Boolean) {
