@@ -13,17 +13,19 @@ private final class FakeMicrophone: CameraMicrophone, @unchecked Sendable {
   private var stopped: [UInt64] = []
   private var listener: CameraMicrophoneListener?
   private var failure: Error?
+  private var failures = 0
 
   var starts: [UInt64] { lock.withLock { started } }
   var stops: [UInt64] { lock.withLock { stopped } }
 
-  func failNextStart(_ error: Error) { lock.withLock { failure = error } }
+  func failNextStart(_ error: Error, times: Int = 1) { lock.withLock { failure = error; failures = times } }
 
   func start(generation: UInt64, listener: CameraMicrophoneListener) {
     let failed = lock.withLock { () -> Error? in
       started.append(generation)
       self.listener = listener
-      defer { failure = nil }
+      guard failures > 0 else { return nil }
+      failures -= 1
       return failure
     }
     if let failed { DispatchQueue.global().async { listener.microphoneLost(generation: generation, error: failed) } }
@@ -51,10 +53,11 @@ extension GlobalMedia {
   struct CameraAudioInputTests {
     private let microphone = FakeMicrophone()
     private let issues = Issues()
+    private let retry = ManualTimer()
 
     private func open(_ rig: AudioRig) -> CameraAudioInput {
       let issues = issues
-      return CameraAudioInput(link: rig.link, microphone: microphone) { issues.add($0) }
+      return CameraAudioInput(link: rig.link, microphone: microphone, timer: retry.timer) { issues.add($0) }
     }
 
     private func connected(_ rig: AudioRig, generation: UInt64 = 1) async {
@@ -106,6 +109,7 @@ extension GlobalMedia {
       let input = open(rig)
       defer { input.close() }
       await connected(rig)
+      microphone.hear(1)
 
       microphone.lose(1)
 
@@ -122,22 +126,27 @@ extension GlobalMedia {
       let rig = try AudioRig()
       let failures = Collected(Media.failures)
       let busy = NSError(domain: AVFoundationErrorDomain, code: AVError.deviceInUseByAnotherApplication.rawValue)
-      microphone.failNextStart(busy)
+      microphone.failNextStart(busy, times: MicrophoneRetry.attempts)
       let input = open(rig)
       defer { input.close() }
+      for attempt in 1..<MicrophoneRetry.attempts {
+        await eventually("the pause after attempt \(attempt)") { microphone.starts.count == attempt && retry.armed(MicrophoneRetry.pauseMs) }
+        #expect(issues.values.isEmpty, "a retried failure is told to nobody")
+        retry.fire(MicrophoneRetry.pauseMs)
+      }
 
       await eventually("the failure reached the app") { failures.values.contains { $0.source == .camera } }
       let failure = try #require(failures.values.first { $0.source == .camera })
       #expect((failure.domain, failure.code) == (AVFoundationErrorDomain, Int64(AVError.deviceInUseByAnotherApplication.rawValue)))
       #expect(issues.values == [.microphoneBusy])
       _ = await rig.link.readVolume()
-      #expect(microphone.starts == [1])
+      #expect(microphone.starts == [1, 2, 3])
       #expect(rig.availability.last == .noSound)
 
       rig.session.send(.routeChanged(.newDeviceAvailable, hadPrivateOutput: false))
 
-      await eventually("the route restores it") { microphone.starts == [1, 2] }
-      microphone.hear(2)
+      await eventually("the route restores it") { microphone.starts == [1, 2, 3, 4] }
+      microphone.hear(4)
       await eventually("available") { rig.availability.last == .available }
       #expect(issues.values == [.microphoneBusy, nil])
     }

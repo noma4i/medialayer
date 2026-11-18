@@ -77,7 +77,14 @@ private final class FakeBackend: CaptureBackend, CameraMicrophone, @unchecked Se
   /// A native microphone: the camera opens its audio input only after the recording is admitted.
   var nativeMicrophone = false
   var audio: CaptureAudio { nativeMicrophone ? .native(self) : .managed }
-  func start(generation: UInt64, listener: CameraMicrophoneListener) { note("mic start") }
+  private var microphoneListener: (UInt64, CameraMicrophoneListener)?
+  func start(generation: UInt64, listener: CameraMicrophoneListener) {
+    lock.withLock { microphoneListener = (generation, listener) }
+    note("mic start")
+  }
+  /// The native microphone of the current generation hears sound or loses it.
+  func micHeard() { if let (generation, listener) = lock.withLock({ microphoneListener }) { listener.microphoneHeard(generation: generation) } }
+  func micLost() { if let (generation, listener) = lock.withLock({ microphoneListener }) { listener.microphoneLost(generation: generation, error: nil) } }
   func stop(generation: UInt64) { note("mic stop") }
 
   /// The hardware does not report the start of a take until the test does.
@@ -262,7 +269,7 @@ private func jpeg() -> Data {
   }
 }
 
-private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .back, screen: ScreenSwitch = ScreenSwitch(), permission: MicrophonePermissionPort = GrantedMicrophone(), configure: (FakeBackend, Counters) -> Void = { _, _ in }) throws -> Rig {
+private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .back, screen: ScreenSwitch = ScreenSwitch(), permission: MicrophonePermissionPort = GrantedMicrophone(), retry: RetryTimer = .system, configure: (FakeBackend, Counters) -> Void = { _, _ in }) throws -> Rig {
   let backend = FakeBackend()
   let counters = Counters()
   configure(backend, counters)
@@ -302,7 +309,7 @@ private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .bac
     signals: names,
     clock: { 0 }
   )
-  let camera = try MediaCamera(profile: profile, lens: lens, backend: backend, services: services, screen: screen.awake())
+  let camera = try MediaCamera(profile: profile, lens: lens, backend: backend, services: services, screen: screen.awake(), retry: retry)
   let observation = StateObservation(camera.states)
   return Rig(camera: camera, backend: backend, counters: counters, center: center, directory: directory, audio: audio, signals: names, observation: observation)
 }
@@ -341,6 +348,62 @@ struct MediaCameraTests {
     #expect(capture.log == ["voice start"])
     _ = try? await voice.stop()
     await eventually("the preview took its microphone back") { rig.backend.count("mic start") == 2 }
+  }
+
+  /// A camera whose native microphone is silent until the test says so, on the manual clock of the attempts.
+  private func silentMicrophoneRig(_ retry: ManualTimer) async throws -> Rig {
+    let rig = try makeRig(.moment, retry: retry.timer) { backend, _ in
+      backend.nativeMicrophone = true
+      backend.soundOnBind = false
+      backend.soundOnTake = false
+    }
+    await ready(rig)
+    await eventually("the preview holds the microphone") { rig.backend.count("mic start") == 1 }
+    return rig
+  }
+
+  private func loseAttempt(_ rig: Rig, _ retry: ManualTimer, _ attempt: Int) async {
+    await eventually("attempt \(attempt)") { rig.backend.count("mic start") == attempt }
+    rig.backend.micLost()
+    await eventually("the pause after attempt \(attempt)") { retry.armed(MicrophoneRetry.pauseMs) }
+    retry.fire(MicrophoneRetry.pauseMs)
+  }
+
+  @Test
+  func inv_audio_115_a_camera_take_whose_microphone_is_lost_twice_starts_on_the_third_attempt_as_one_take() async throws {
+    let retry = ManualTimer()
+    let rig = try await silentMicrophoneRig(retry)
+    let start = Task { try await rig.camera.startRecording() }
+    await eventually("the take began") { rig.backend.count("record back") == 1 }
+    await loseAttempt(rig, retry, 1)
+    await loseAttempt(rig, retry, 2)
+    await eventually("attempt 3") { rig.backend.count("mic start") == 3 }
+    rig.backend.micHeard()
+    rig.backend.emit(.microphoneFlow(true))
+    try await start.value
+    #expect(rig.camera.state.phase == .recording)
+    #expect(rig.backend.count("record back") == 1, "one take")
+    _ = try await rig.camera.stopRecording()
+  }
+
+  @Test
+  func inv_audio_116_a_camera_take_whose_microphone_is_lost_on_all_three_attempts_is_microphone_silent() async throws {
+    let retry = ManualTimer()
+    let rig = try await silentMicrophoneRig(retry)
+    let start = Task { try await rig.camera.startRecording() }
+    await eventually("the take began") { rig.backend.count("record back") == 1 }
+    await loseAttempt(rig, retry, 1)
+    await loseAttempt(rig, retry, 2)
+    await eventually("attempt 3") { rig.backend.count("mic start") == 3 }
+    rig.backend.micLost()
+    do {
+      try await start.value
+      Issue.record("a take without sound started")
+    } catch let MediaError.Camera(reason, _, _) {
+      #expect(reason == .microphoneSilent)
+    }
+    #expect(rig.backend.count("mic start") == 3, "exactly three sources")
+    #expect(!retry.armed(MicrophoneRetry.pauseMs))
   }
 
   @Test

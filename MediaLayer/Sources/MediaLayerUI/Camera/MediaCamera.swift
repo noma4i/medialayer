@@ -105,6 +105,7 @@ public final class MediaCamera: @unchecked Sendable {
   private var revokedAudio: RecordingTicket?
   private var audioInput: CameraAudioInput?
   private var microphoneFault: CameraRefusal?
+  private let retry: RetryTimer
   private var binding: Task<Void, Never>?
   private var shooting: Task<Void, Never>?
   private var reading: Task<Void, Never>?
@@ -124,7 +125,8 @@ public final class MediaCamera: @unchecked Sendable {
     try self.init(profile: profile, lens: lens, backend: AVCaptureBackend(), services: .live, screen: .shared)
   }
 
-  init(profile: CaptureProfile, lens: CameraLens, backend: CaptureBackend, services: CameraServices, screen: ScreenAwake = .shared) throws {
+  init(profile: CaptureProfile, lens: CameraLens, backend: CaptureBackend, services: CameraServices, screen: ScreenAwake = .shared, retry: RetryTimer = .system) throws {
+    self.retry = retry
     awake = ScreenAwakeHold(kind: .always, awake: screen)
     self.profile = try checkCaptureProfile(profile: profile)
     self.services = services
@@ -551,7 +553,7 @@ public final class MediaCamera: @unchecked Sendable {
   private func openAudioInput() {
     guard profile.audio, audioInput == nil, case let .native(microphone) = backend.audio else { return }
     guard let link = services.link() else { return post(.refuse(reason: .notReady)) }
-    audioInput = CameraAudioInput(link: link, microphone: microphone) { [weak self] fault in
+    audioInput = CameraAudioInput(link: link, microphone: microphone, timer: retry) { [weak self] fault in
       self?.queue.async {
         self?.microphoneFault = fault
         // The last attempt of the microphone gave no sound: a take that waits for its first sound ends silent, the way Android tells it.

@@ -341,10 +341,10 @@ extension GlobalMedia {
     @Test
     func inv_audio_113_aVoiceStartInACallIsRefusedAtOnceWithNoSourceAndNoRetry() async throws {
       let voice = try Voice()
-      let call = voice.rig.link.call(.unmanaged)
+      let call = try await voice.rig.link.call(.unmanaged)
       let (task, returned) = voice.begin(temporaryFile("m4a"))
       await task.value
-      call.close()
+      call.end()
       #expect(voiceRefusal(returned.error) == .inCall)
       #expect(voice.source.starts.isEmpty, "no source started")
       #expect(!voice.retry.armed(MicrophoneRetry.pauseMs) && !voice.retry.armed(MicrophoneRetry.soundWaitMs))
