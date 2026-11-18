@@ -45,7 +45,8 @@ class CameraTakesAudioTest {
   }
 
   private class Microphone : CameraMicrophone {
-    override fun start(spec: PcmSpec): Long = 1L
+    val starts = java.util.concurrent.atomic.AtomicLong()
+    override fun start(spec: PcmSpec): Long = starts.incrementAndGet().also { TestSignal.fire() }
     override fun stop(generation: Long) = Unit
     override fun close() = Unit
   }
@@ -57,12 +58,14 @@ class CameraTakesAudioTest {
   private val surface = Surface(SurfaceTexture(0))
   private val spec = PcmSpec(MediaRecorder.AudioSource.CAMCORDER, 44_100, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
   private lateinit var microphone: RecordingAudioListener
+  private val source = Microphone()
+  private val timer = ManualTimer()
 
   private val backend = object : CaptureBackend {
     @Volatile var events: (CaptureEvent) -> Unit = {}
     @Volatile var issues: (CaptureAudioIssue) -> Unit = {}
     val recording = CameraRecording(Executor { it.run() }, { seen.add(it); events(it) }) { generation, _, _, listener -> FakeTake(generation, listener).also { takes.add(it); TestSignal.fire() } }
-    val audio = CameraAudioHold({ fixture.link }, recording, { issues(it) }) { made -> microphone = made; Microphone() }
+    val audio = CameraAudioHold({ fixture.link }, recording, { issues(it) }, timer) { made -> microphone = made; source }
     private var generation = 0L
     override val photoSize: PixelSize? = null
     override fun setSink(sink: (CaptureEvent) -> Unit) { events = sink }
@@ -135,5 +138,53 @@ class CameraTakesAudioTest {
     camera.state.value
     assertEquals("a pcm with no take opens nothing", 2, takes.size)
     assertEquals("a pcm with no take gives no flow", 2, seen.count { it == CaptureEvent.AudioFlow(true) })
+  }
+
+  private fun silence(attempt: Long) {
+    TestSignal.await("attempt $attempt", 5_000) { source.starts.get() == attempt }
+    microphone.onSilenced(attempt, true)
+    TestSignal.await("pause after attempt $attempt", 5_000) { timer.armed(MicrophoneRetry.PAUSE_MS) }
+    timer.fire(MicrophoneRetry.PAUSE_MS)
+  }
+
+  @Test
+  fun inv_audio_115_a_camera_take_whose_microphone_is_silenced_twice_starts_on_the_third_attempt_as_one_take() = runBlocking {
+    camera.attachPreview(this@CameraTakesAudioTest, null, null)
+    TestSignal.await("ready", 5_000) { camera.state.value.phase == CameraPhase.READY }
+    val started = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { camera.startRecording() }
+    TestSignal.await("take made", 5_000) { takes.size == 1 }
+    val current = takes.last()
+    current.listener.onBegan(current.generation, surface)
+    silence(1)
+    silence(2)
+    TestSignal.await("attempt 3", 5_000) { source.starts.get() == 3L }
+    microphone.onLive(3)
+    microphone.onPcm(chunk(3))
+    TestSignal.await("the first pcm of attempt 3 confirmed the take", 5_000) { CaptureEvent.AudioFlow(true) in seen }
+    current.listener.onStarted(current.generation, 0)
+    started.await()
+    assertEquals(CameraPhase.RECORDING, camera.state.value.phase)
+    assertEquals("one take", 1, takes.size)
+    assertEquals(1, seen.count { it == CaptureEvent.RecordStarted })
+    assertEquals("the retries tell no silence", false, CaptureEvent.AudioFlow(false) in seen)
+    assertEquals(3L, source.starts.get())
+  }
+
+  @Test
+  fun inv_audio_116_a_camera_take_whose_microphone_is_silenced_on_all_three_attempts_is_microphone_silent() = runBlocking {
+    camera.attachPreview(this@CameraTakesAudioTest, null, null)
+    TestSignal.await("ready", 5_000) { camera.state.value.phase == CameraPhase.READY }
+    val started = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { runCatching { camera.startRecording() } }
+    TestSignal.await("take made", 5_000) { takes.size == 1 }
+    val current = takes.last()
+    current.listener.onBegan(current.generation, surface)
+    silence(1)
+    silence(2)
+    TestSignal.await("attempt 3", 5_000) { source.starts.get() == 3L }
+    microphone.onSilenced(3, true)
+    val error = started.await().exceptionOrNull() as com.noma4i.medialayer.MediaException.Camera
+    assertEquals(com.noma4i.medialayer.CameraRefusal.MICROPHONE_SILENT, error.reason)
+    assertEquals("exactly three sources", 3L, source.starts.get())
+    assertEquals(false, timer.armed(MicrophoneRetry.PAUSE_MS))
   }
 }
