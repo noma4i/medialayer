@@ -54,15 +54,18 @@ func uprightVideo(at url: URL) async throws {
     }
     guard reader.startReading(), writer.startWriting() else { throw reader.error ?? writer.error ?? UprightVideoError.invalidVideo }
     writer.startSession(atSourceTime: .zero)
+    let gates = pairs.map { _ in UprightGate() }
     await withTaskCancellationHandler {
       await withTaskGroup(of: Void.self) { group in
-        for (input, output) in pairs {
-          group.addTask { await writeSamples(input: input, output: output) }
+        for (index, (input, output)) in pairs.enumerated() {
+          let gate = gates[index]
+          group.addTask { await writeSamples(input: input, output: output, gate: gate) }
         }
       }
     } onCancel: {
       reader.cancelReading()
       writer.cancelWriting()
+      gates.forEach { $0.finish() }
     }
     try Task.checkCancellation()
     guard reader.status == .completed, writer.status == .writing else {
@@ -85,16 +88,44 @@ private enum UprightVideoError: Error {
   case invalidVideo
 }
 
-private func writeSamples(input: AVAssetWriterInput, output: AVAssetReaderOutput) async {
+/// One pump waits on its gate: the end of its samples or the cancel of the whole job opens it, so a cancel never waits for a callback of the platform.
+private final class UprightGate: @unchecked Sendable {
+  private let lock = NSLock()
+  private var continuation: CheckedContinuation<Void, Never>?
+  private var finished = false
+
+  var isFinished: Bool { lock.withLock { finished } }
+
+  func wait(_ continuation: CheckedContinuation<Void, Never>) {
+    let ready = lock.withLock {
+      if !finished { self.continuation = continuation }
+      return finished
+    }
+    if ready { continuation.resume() }
+  }
+
+  func finish() {
+    let waiting = lock.withLock {
+      finished = true
+      defer { continuation = nil }
+      return continuation
+    }
+    waiting?.resume()
+  }
+}
+
+private func writeSamples(input: AVAssetWriterInput, output: AVAssetReaderOutput, gate: UprightGate) async {
   nonisolated(unsafe) let input = input
   nonisolated(unsafe) let output = output
-  await withCheckedContinuation { continuation in
+  await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+    gate.wait(continuation)
     let queue = DispatchQueue(label: "MediaLayer.uprightVideo.samples.\(UUID().uuidString)")
     input.requestMediaDataWhenReady(on: queue) {
       while input.isReadyForMoreMediaData {
+        if gate.isFinished { return }
         guard let sample = output.copyNextSampleBuffer(), input.append(sample) else {
           input.markAsFinished()
-          continuation.resume()
+          gate.finish()
           return
         }
       }

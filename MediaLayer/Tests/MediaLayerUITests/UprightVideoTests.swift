@@ -55,6 +55,18 @@ struct UprightVideoTests {
     #expect(zip(stored, shown).allSatisfy { pair in zip(pair.0, pair.1).allSatisfy { abs($0 - $1) < 48 } }, "stored \(stored) shown \(shown)")
   }
 
+  // CAPTURE-68: a cancel ends the job at once, whatever the platform pumps do.
+  @Test
+  func inv_capture_68_a_cancelled_upright_job_ends_with_the_cancellation_and_leaves_the_file_to_its_owner() async throws {
+    let url = try copy("rotated-recording")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let job = Task { try await uprightVideo(at: url) }
+    job.cancel()
+    do { try await job.value } catch is CancellationError {}
+    let leftovers = try FileManager.default.contentsOfDirectory(atPath: url.deletingLastPathComponent().path).filter { $0.hasPrefix(".upright-") }
+    #expect(leftovers.isEmpty)
+  }
+
   @Test
   func inv_capture_29_an_upright_recording_is_left_as_it_is() async throws {
     let url = try copy("silent")
