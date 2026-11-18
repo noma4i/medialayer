@@ -687,144 +687,6 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
 
 
 
-public protocol AudioInputsProtocol: AnyObject, Sendable {
-    
-    func paused(barrier: UInt64) async 
-    
-    func send(input: AudioInput) throws  -> [AudioAction]
-    
-}
-open class AudioInputs: AudioInputsProtocol, @unchecked Sendable {
-    fileprivate let handle: UInt64
-
-    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public struct NoHandle {
-        public init() {}
-    }
-
-    // TODO: We'd like this to be `private` but for Swifty reasons,
-    // we can't implement `FfiConverter` without making this `required` and we can't
-    // make it `required` without making it `public`.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    required public init(unsafeFromHandle handle: UInt64) {
-        self.handle = handle
-    }
-
-    // This constructor can be used to instantiate a fake object.
-    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
-    //
-    // - Warning:
-    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public init(noHandle: NoHandle) {
-        self.handle = 0
-    }
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_medialayer_fn_clone_audioinputs(self.handle, $0) }
-    }
-    // No primary constructor declared for this class.
-
-    deinit {
-        if handle == 0 {
-            // Mock objects have handle=0 don't try to free them
-            return
-        }
-
-        try! rustCall { uniffi_medialayer_fn_free_audioinputs(handle, $0) }
-    }
-
-    
-
-    
-open func paused(barrier: UInt64)async   {
-    return
-        try!  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_medialayer_fn_method_audioinputs_paused(
-                        self.uniffiCloneHandle(),FfiConverterUInt64.lower(barrier)
-                )
-            },
-            pollFunc: ffi_medialayer_rust_future_poll_void,
-            completeFunc: ffi_medialayer_rust_future_complete_void,
-            freeFunc: ffi_medialayer_rust_future_free_void,
-            cancelFunc: ffi_medialayer_rust_future_cancel_void,
-            liftFunc: { $0 },
-            errorHandler: nil
-            
-        )
-}
-    
-open func send(input: AudioInput)throws  -> [AudioAction]  {
-    return try  FfiConverterSequenceTypeAudioAction.lift(try rustCallWithError(FfiConverterTypeMediaError_lift) {
-        uniffiCallStatus in
-    uniffi_medialayer_fn_method_audioinputs_send(
-            self.uniffiCloneHandle(),
-        FfiConverterTypeAudioInput_lower(input),uniffiCallStatus
-    )
-})
-}
-    
-
-    
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeAudioInputs: FfiConverter {
-    typealias FfiType = UInt64
-    typealias SwiftType = AudioInputs
-
-    public static func lift(_ handle: UInt64) throws -> AudioInputs {
-        return AudioInputs(unsafeFromHandle: handle)
-    }
-
-    public static func lower(_ value: AudioInputs) -> UInt64 {
-        return value.uniffiCloneHandle()
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AudioInputs {
-        let handle: UInt64 = try readInt(&buf)
-        return try lift(handle)
-    }
-
-    public static func write(_ value: AudioInputs, into buf: inout [UInt8]) {
-        writeInt(&buf, lower(value))
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAudioInputs_lift(_ handle: UInt64) throws -> AudioInputs {
-    return try FfiConverterTypeAudioInputs.lift(handle)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAudioInputs_lower(_ value: AudioInputs) -> UInt64 {
-    return FfiConverterTypeAudioInputs.lower(value)
-}
-
-
-
-
-
-
 public protocol BodyReader: AnyObject, Sendable {
     
     func nextChunk() async throws  -> Data?
@@ -1080,6 +942,128 @@ public func FfiConverterTypeBodyReader_lower(_ value: BodyReader) -> UInt64 {
 
 
 
+/**
+ * While at least one hold lives, a call runs: nothing plays, `play_url` is refused, and releasing restores nothing.
+ */
+public protocol CallHoldProtocol: AnyObject, Sendable {
+    
+    func release() 
+    
+}
+/**
+ * While at least one hold lives, a call runs: nothing plays, `play_url` is refused, and releasing restores nothing.
+ */
+open class CallHold: CallHoldProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_medialayer_fn_clone_callhold(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_medialayer_fn_free_callhold(handle, $0) }
+    }
+
+    
+
+    
+open func release()  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_method_callhold_release(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+}
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCallHold: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = CallHold
+
+    public static func lift(_ handle: UInt64) throws -> CallHold {
+        return CallHold(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: CallHold) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CallHold {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: CallHold, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCallHold_lift(_ handle: UInt64) throws -> CallHold {
+    return try FfiConverterTypeCallHold.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCallHold_lower(_ value: CallHold) -> UInt64 {
+    return FfiConverterTypeCallHold.lower(value)
+}
+
+
+
+
+
+
 public protocol DecodeHoldProtocol: AnyObject, Sendable {
     
     func bytes()  -> UInt64
@@ -1211,8 +1195,6 @@ public protocol FailureListener: AnyObject, Sendable {
     
     func failed(failure: MediaFailure) 
     
-    func closed() 
-    
 }
 open class FailureListenerImpl: FailureListener, @unchecked Sendable {
     fileprivate let handle: UInt64
@@ -1276,14 +1258,6 @@ open func failed(failure: MediaFailure)  {try! rustCall() {
 }
 }
     
-open func closed()  {try! rustCall() {
-        uniffiCallStatus in
-    uniffi_medialayer_fn_method_failurelistener_closed(
-            self.uniffiCloneHandle(),uniffiCallStatus
-    )
-}
-}
-    
 
     
 }
@@ -1325,28 +1299,6 @@ fileprivate struct UniffiCallbackInterfaceFailureListener {
                 }
                 return uniffiObj.failed(
                      failure: try FfiConverterTypeMediaFailure_lift(failure)
-                )
-            }
-
-            
-            let writeReturn = { () }
-            uniffiTraitInterfaceCall(
-                callStatus: uniffiCallStatus,
-                makeCall: makeCall,
-                writeReturn: writeReturn
-            )
-        },
-        closed: { (
-            uniffiHandle: UInt64,
-            uniffiOutReturn: UnsafeMutableRawPointer,
-            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
-        ) in
-            let makeCall = {
-                () throws -> () in
-                guard let uniffiObj = try? FfiConverterTypeFailureListener.handleMap.get(handle: uniffiHandle) else {
-                    throw UniffiInternalError.unexpectedStaleHandle
-                }
-                return uniffiObj.closed(
                 )
             }
 
@@ -1811,8 +1763,6 @@ public func FfiConverterTypeImageCounters_lower(_ value: ImageCounters) -> UInt6
 
 public protocol MediaLayerProtocol: AnyObject, Sendable {
     
-    func audioInputs()  -> AudioInputs
-    
     func awaitClosed() async 
     
     func cacheKey(url: String, headers: [String: String])  -> String
@@ -1822,6 +1772,8 @@ public protocol MediaLayerProtocol: AnyObject, Sendable {
     func evictNow() async throws 
     
     func fetchImage(url: String, headers: [String: String]) async throws  -> ImageFetchResult
+    
+    func holdCall() throws  -> CallHold
     
     func imageSize(url: String, headers: [String: String]) async throws  -> ImageSize?
     
@@ -1841,13 +1793,11 @@ public protocol MediaLayerProtocol: AnyObject, Sendable {
     
     func placeholder(source: MediaItem, ready: Bool) async  -> Placeholder
     
-    func playUrl(source: MediaItem) async throws  -> MediaPlayer
+    func playUrl(source: MediaItem) async throws  -> PlaybackRoute
     
     func playerEvents()  -> PlayerEvents
     
     func purge(url: String) async throws 
-    
-    func readRoute(item: MediaItem) async throws  -> PlaybackRoute
     
     func refreshRoute(source: MediaItem, route: PlaybackRoute) async throws  -> PlaybackRoute
     
@@ -1860,8 +1810,6 @@ public protocol MediaLayerProtocol: AnyObject, Sendable {
     func resetLimits() async throws 
     
     func resetUserData() async throws 
-    
-    func retry(item: MediaItem) async throws 
     
     func seek(key: String, fraction: Double) throws 
     
@@ -1952,15 +1900,6 @@ public static func `open`(config: OpenConfig)throws  -> MediaLayer  {
     
 
     
-open func audioInputs() -> AudioInputs  {
-    return try!  FfiConverterTypeAudioInputs_lift(try! rustCall() {
-        uniffiCallStatus in
-    uniffi_medialayer_fn_method_medialayer_audio_inputs(
-            self.uniffiCloneHandle(),uniffiCallStatus
-    )
-})
-}
-    
 open func awaitClosed()async   {
     return
         try!  await uniffiRustCallAsync(
@@ -2039,6 +1978,15 @@ open func fetchImage(url: String, headers: [String: String])async throws  -> Ima
             liftFunc: FfiConverterTypeImageFetchResult_lift,
             errorHandler: FfiConverterTypeMediaError_lift
         )
+}
+    
+open func holdCall()throws  -> CallHold  {
+    return try  FfiConverterTypeCallHold_lift(try rustCallWithError(FfiConverterTypeMediaError_lift) {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_method_medialayer_hold_call(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
 }
     
 open func imageSize(url: String, headers: [String: String])async throws  -> ImageSize?  {
@@ -2160,7 +2108,7 @@ open func placeholder(source: MediaItem, ready: Bool)async  -> Placeholder  {
         )
 }
     
-open func playUrl(source: MediaItem)async throws  -> MediaPlayer  {
+open func playUrl(source: MediaItem)async throws  -> PlaybackRoute  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
@@ -2168,11 +2116,11 @@ open func playUrl(source: MediaItem)async throws  -> MediaPlayer  {
                         self.uniffiCloneHandle(),FfiConverterTypeMediaItem_lower(source)
                 )
             },
-            pollFunc: ffi_medialayer_rust_future_poll_u64,
-            completeFunc: ffi_medialayer_rust_future_complete_u64,
-            freeFunc: ffi_medialayer_rust_future_free_u64,
-            cancelFunc: ffi_medialayer_rust_future_cancel_u64,
-            liftFunc: FfiConverterTypeMediaPlayer_lift,
+            pollFunc: ffi_medialayer_rust_future_poll_rust_buffer,
+            completeFunc: ffi_medialayer_rust_future_complete_rust_buffer,
+            freeFunc: ffi_medialayer_rust_future_free_rust_buffer,
+            cancelFunc: ffi_medialayer_rust_future_cancel_rust_buffer,
+            liftFunc: FfiConverterTypePlaybackRoute_lift,
             errorHandler: FfiConverterTypeMediaError_lift
         )
 }
@@ -2199,23 +2147,6 @@ open func purge(url: String)async throws   {
             freeFunc: ffi_medialayer_rust_future_free_void,
             cancelFunc: ffi_medialayer_rust_future_cancel_void,
             liftFunc: { $0 },
-            errorHandler: FfiConverterTypeMediaError_lift
-        )
-}
-    
-open func readRoute(item: MediaItem)async throws  -> PlaybackRoute  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_medialayer_fn_method_medialayer_read_route(
-                        self.uniffiCloneHandle(),FfiConverterTypeMediaItem_lower(item)
-                )
-            },
-            pollFunc: ffi_medialayer_rust_future_poll_rust_buffer,
-            completeFunc: ffi_medialayer_rust_future_complete_rust_buffer,
-            freeFunc: ffi_medialayer_rust_future_free_rust_buffer,
-            cancelFunc: ffi_medialayer_rust_future_cancel_rust_buffer,
-            liftFunc: FfiConverterTypePlaybackRoute_lift,
             errorHandler: FfiConverterTypeMediaError_lift
         )
 }
@@ -2302,23 +2233,6 @@ open func resetUserData()async throws   {
             rustFutureFunc: {
                 uniffi_medialayer_fn_method_medialayer_reset_user_data(
                         self.uniffiCloneHandle()
-                )
-            },
-            pollFunc: ffi_medialayer_rust_future_poll_void,
-            completeFunc: ffi_medialayer_rust_future_complete_void,
-            freeFunc: ffi_medialayer_rust_future_free_void,
-            cancelFunc: ffi_medialayer_rust_future_cancel_void,
-            liftFunc: { $0 },
-            errorHandler: FfiConverterTypeMediaError_lift
-        )
-}
-    
-open func retry(item: MediaItem)async throws   {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_medialayer_fn_method_medialayer_retry(
-                        self.uniffiCloneHandle(),FfiConverterTypeMediaItem_lower(item)
                 )
             },
             pollFunc: ffi_medialayer_rust_future_poll_void,
@@ -2549,8 +2463,6 @@ public protocol MediaPlaceProtocol: AnyObject, Sendable {
     
     func seek(fraction: Double) throws 
     
-    func subscribePlayback(listener: PlaybackListener) throws  -> Subscription
-    
     func update(input: PlaceInput) throws 
     
 }
@@ -2636,16 +2548,6 @@ open func seek(fraction: Double)throws   {try rustCallWithError(FfiConverterType
 }
 }
     
-open func subscribePlayback(listener: PlaybackListener)throws  -> Subscription  {
-    return try  FfiConverterTypeSubscription_lift(try rustCallWithError(FfiConverterTypeMediaError_lift) {
-        uniffiCallStatus in
-    uniffi_medialayer_fn_method_mediaplace_subscribe_playback(
-            self.uniffiCloneHandle(),
-        FfiConverterTypePlaybackListener_lower(listener),uniffiCallStatus
-    )
-})
-}
-    
 open func update(input: PlaceInput)throws   {try rustCallWithError(FfiConverterTypeMediaError_lift) {
         uniffiCallStatus in
     uniffi_medialayer_fn_method_mediaplace_update(
@@ -2698,165 +2600,6 @@ public func FfiConverterTypeMediaPlace_lift(_ handle: UInt64) throws -> MediaPla
 #endif
 public func FfiConverterTypeMediaPlace_lower(_ value: MediaPlace) -> UInt64 {
     return FfiConverterTypeMediaPlace.lower(value)
-}
-
-
-
-
-
-
-public protocol MediaPlayerProtocol: AnyObject, Sendable {
-    
-    func pause() throws 
-    
-    func play() throws 
-    
-    func release() 
-    
-    func seek(fraction: Double) throws 
-    
-    func subscribePlayback(listener: PlaybackListener) throws  -> Subscription
-    
-}
-open class MediaPlayer: MediaPlayerProtocol, @unchecked Sendable {
-    fileprivate let handle: UInt64
-
-    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public struct NoHandle {
-        public init() {}
-    }
-
-    // TODO: We'd like this to be `private` but for Swifty reasons,
-    // we can't implement `FfiConverter` without making this `required` and we can't
-    // make it `required` without making it `public`.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    required public init(unsafeFromHandle handle: UInt64) {
-        self.handle = handle
-    }
-
-    // This constructor can be used to instantiate a fake object.
-    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
-    //
-    // - Warning:
-    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public init(noHandle: NoHandle) {
-        self.handle = 0
-    }
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_medialayer_fn_clone_mediaplayer(self.handle, $0) }
-    }
-    // No primary constructor declared for this class.
-
-    deinit {
-        if handle == 0 {
-            // Mock objects have handle=0 don't try to free them
-            return
-        }
-
-        try! rustCall { uniffi_medialayer_fn_free_mediaplayer(handle, $0) }
-    }
-
-    
-
-    
-open func pause()throws   {try rustCallWithError(FfiConverterTypeMediaError_lift) {
-        uniffiCallStatus in
-    uniffi_medialayer_fn_method_mediaplayer_pause(
-            self.uniffiCloneHandle(),uniffiCallStatus
-    )
-}
-}
-    
-open func play()throws   {try rustCallWithError(FfiConverterTypeMediaError_lift) {
-        uniffiCallStatus in
-    uniffi_medialayer_fn_method_mediaplayer_play(
-            self.uniffiCloneHandle(),uniffiCallStatus
-    )
-}
-}
-    
-open func release()  {try! rustCall() {
-        uniffiCallStatus in
-    uniffi_medialayer_fn_method_mediaplayer_release(
-            self.uniffiCloneHandle(),uniffiCallStatus
-    )
-}
-}
-    
-open func seek(fraction: Double)throws   {try rustCallWithError(FfiConverterTypeMediaError_lift) {
-        uniffiCallStatus in
-    uniffi_medialayer_fn_method_mediaplayer_seek(
-            self.uniffiCloneHandle(),
-        FfiConverterDouble.lower(fraction),uniffiCallStatus
-    )
-}
-}
-    
-open func subscribePlayback(listener: PlaybackListener)throws  -> Subscription  {
-    return try  FfiConverterTypeSubscription_lift(try rustCallWithError(FfiConverterTypeMediaError_lift) {
-        uniffiCallStatus in
-    uniffi_medialayer_fn_method_mediaplayer_subscribe_playback(
-            self.uniffiCloneHandle(),
-        FfiConverterTypePlaybackListener_lower(listener),uniffiCallStatus
-    )
-})
-}
-    
-
-    
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeMediaPlayer: FfiConverter {
-    typealias FfiType = UInt64
-    typealias SwiftType = MediaPlayer
-
-    public static func lift(_ handle: UInt64) throws -> MediaPlayer {
-        return MediaPlayer(unsafeFromHandle: handle)
-    }
-
-    public static func lower(_ value: MediaPlayer) -> UInt64 {
-        return value.uniffiCloneHandle()
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MediaPlayer {
-        let handle: UInt64 = try readInt(&buf)
-        return try lift(handle)
-    }
-
-    public static func write(_ value: MediaPlayer, into buf: inout [UInt8]) {
-        writeInt(&buf, lower(value))
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeMediaPlayer_lift(_ handle: UInt64) throws -> MediaPlayer {
-    return try FfiConverterTypeMediaPlayer.lift(handle)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeMediaPlayer_lower(_ value: MediaPlayer) -> UInt64 {
-    return FfiConverterTypeMediaPlayer.lower(value)
 }
 
 
@@ -3476,239 +3219,6 @@ public func FfiConverterTypeMemoryReleaser_lift(_ handle: UInt64) throws -> Memo
 #endif
 public func FfiConverterTypeMemoryReleaser_lower(_ value: MemoryReleaser) -> UInt64 {
     return FfiConverterTypeMemoryReleaser.lower(value)
-}
-
-
-
-
-
-
-public protocol PlaybackListener: AnyObject, Sendable {
-    
-    func changed(state: PlaybackState) 
-    
-    func failed(error: MediaError) 
-    
-}
-open class PlaybackListenerImpl: PlaybackListener, @unchecked Sendable {
-    fileprivate let handle: UInt64
-
-    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public struct NoHandle {
-        public init() {}
-    }
-
-    // TODO: We'd like this to be `private` but for Swifty reasons,
-    // we can't implement `FfiConverter` without making this `required` and we can't
-    // make it `required` without making it `public`.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    required public init(unsafeFromHandle handle: UInt64) {
-        self.handle = handle
-    }
-
-    // This constructor can be used to instantiate a fake object.
-    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
-    //
-    // - Warning:
-    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public init(noHandle: NoHandle) {
-        self.handle = 0
-    }
-
-#if swift(>=5.8)
-    @_documentation(visibility: private)
-#endif
-    public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_medialayer_fn_clone_playbacklistener(self.handle, $0) }
-    }
-    // No primary constructor declared for this class.
-
-    deinit {
-        if handle == 0 {
-            // Mock objects have handle=0 don't try to free them
-            return
-        }
-
-        try! rustCall { uniffi_medialayer_fn_free_playbacklistener(handle, $0) }
-    }
-
-    
-
-    
-open func changed(state: PlaybackState)  {try! rustCall() {
-        uniffiCallStatus in
-    uniffi_medialayer_fn_method_playbacklistener_changed(
-            self.uniffiCloneHandle(),
-        FfiConverterTypePlaybackState_lower(state),uniffiCallStatus
-    )
-}
-}
-    
-open func failed(error: MediaError)  {try! rustCall() {
-        uniffiCallStatus in
-    uniffi_medialayer_fn_method_playbacklistener_failed(
-            self.uniffiCloneHandle(),
-        FfiConverterTypeMediaError_lower(error),uniffiCallStatus
-    )
-}
-}
-    
-
-    
-}
-
-
-
-// Put the implementation in a struct so we don't pollute the top-level namespace
-fileprivate struct UniffiCallbackInterfacePlaybackListener {
-
-    // Create the VTable using a series of closures.
-    // Swift automatically converts these into C callback functions.
-    //
-    // Store the vtable directly.
-    static let vtable: UniffiVTableCallbackInterfacePlaybackListener = UniffiVTableCallbackInterfacePlaybackListener(
-        uniffiFree: { (uniffiHandle: UInt64) -> () in
-            do {
-                try FfiConverterTypePlaybackListener.handleMap.remove(handle: uniffiHandle)
-            } catch {
-                print("Uniffi callback interface PlaybackListener: handle missing in uniffiFree")
-            }
-        },
-        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
-            do {
-                return try FfiConverterTypePlaybackListener.handleMap.clone(handle: uniffiHandle)
-            } catch {
-                fatalError("Uniffi callback interface PlaybackListener: handle missing in uniffiClone")
-            }
-        },
-        changed: { (
-            uniffiHandle: UInt64,
-            state: RustBuffer,
-            uniffiOutReturn: UnsafeMutableRawPointer,
-            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
-        ) in
-            let makeCall = {
-                () throws -> () in
-                guard let uniffiObj = try? FfiConverterTypePlaybackListener.handleMap.get(handle: uniffiHandle) else {
-                    throw UniffiInternalError.unexpectedStaleHandle
-                }
-                return uniffiObj.changed(
-                     state: try FfiConverterTypePlaybackState_lift(state)
-                )
-            }
-
-            
-            let writeReturn = { () }
-            uniffiTraitInterfaceCall(
-                callStatus: uniffiCallStatus,
-                makeCall: makeCall,
-                writeReturn: writeReturn
-            )
-        },
-        failed: { (
-            uniffiHandle: UInt64,
-            error: RustBuffer,
-            uniffiOutReturn: UnsafeMutableRawPointer,
-            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
-        ) in
-            let makeCall = {
-                () throws -> () in
-                guard let uniffiObj = try? FfiConverterTypePlaybackListener.handleMap.get(handle: uniffiHandle) else {
-                    throw UniffiInternalError.unexpectedStaleHandle
-                }
-                return uniffiObj.failed(
-                     error: try FfiConverterTypeMediaError_lift(error)
-                )
-            }
-
-            
-            let writeReturn = { () }
-            uniffiTraitInterfaceCall(
-                callStatus: uniffiCallStatus,
-                makeCall: makeCall,
-                writeReturn: writeReturn
-            )
-        }
-    )
-
-    // Rust stores this pointer for future callback invocations, so it must live
-    // for the process lifetime (not just for the init function call).
-    //
-    // `nonisolated(unsafe)` is needed under Swift 6 strict concurrency.
-    // This is safe because the pointee is initialized once during static init
-    // and never mutated by either side of the FFI.  Its fields are C function pointers.
-    nonisolated(unsafe) static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfacePlaybackListener> = {
-        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfacePlaybackListener>.allocate(capacity: 1)
-        ptr.initialize(to: vtable)
-        return UnsafePointer(ptr)
-    }()
-}
-
-private func uniffiCallbackInitPlaybackListener() {
-    uniffi_medialayer_fn_init_callback_vtable_playbacklistener(UniffiCallbackInterfacePlaybackListener.vtablePtr)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypePlaybackListener: FfiConverter {
-    fileprivate static let handleMap = UniffiHandleMap<PlaybackListener>()
-
-    typealias FfiType = UInt64
-    typealias SwiftType = PlaybackListener
-
-    public static func lift(_ handle: UInt64) throws -> PlaybackListener {
-        if ((handle & 1) == 0) {
-            // Rust-generated handle, construct a new class that uses the handle to implement the
-            // interface
-            return PlaybackListenerImpl(unsafeFromHandle: handle)
-        } else {
-            // Swift-generated handle, get the object from the handle map
-            return try handleMap.remove(handle: handle)
-        }
-    }
-
-    public static func lower(_ value: PlaybackListener) -> UInt64 {
-         if let rustImpl = value as? PlaybackListenerImpl {
-             // Rust-implemented object.  Clone the handle and return it
-            return rustImpl.uniffiCloneHandle()
-         } else {
-            // Swift object, generate a new vtable handle and return that.
-            return handleMap.insert(obj: value)
-         }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PlaybackListener {
-        let handle: UInt64 = try readInt(&buf)
-        return try lift(handle)
-    }
-
-    public static func write(_ value: PlaybackListener, into buf: inout [UInt8]) {
-        writeInt(&buf, lower(value))
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypePlaybackListener_lift(_ handle: UInt64) throws -> PlaybackListener {
-    return try FfiConverterTypePlaybackListener.lift(handle)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypePlaybackListener_lower(_ value: PlaybackListener) -> UInt64 {
-    return FfiConverterTypePlaybackListener.lower(value)
 }
 
 
@@ -6279,134 +5789,6 @@ public func FfiConverterTypeWindowReadyListener_lower(_ value: WindowReadyListen
 
 
 
-public struct AudioCoverage: Equatable, Hashable {
-    public var verdict: CoverageVerdict
-    public var samples: UInt64
-    public var firstUs: Int64?
-    public var lastUs: Int64?
-    public var gapAtUs: Int64?
-    public var gapUs: Int64?
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(verdict: CoverageVerdict, samples: UInt64, firstUs: Int64?, lastUs: Int64?, gapAtUs: Int64?, gapUs: Int64?) {
-        self.verdict = verdict
-        self.samples = samples
-        self.firstUs = firstUs
-        self.lastUs = lastUs
-        self.gapAtUs = gapAtUs
-        self.gapUs = gapUs
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension AudioCoverage: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeAudioCoverage: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AudioCoverage {
-        return
-            try AudioCoverage(
-                verdict: FfiConverterTypeCoverageVerdict.read(from: &buf), 
-                samples: FfiConverterUInt64.read(from: &buf), 
-                firstUs: FfiConverterOptionInt64.read(from: &buf), 
-                lastUs: FfiConverterOptionInt64.read(from: &buf), 
-                gapAtUs: FfiConverterOptionInt64.read(from: &buf), 
-                gapUs: FfiConverterOptionInt64.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: AudioCoverage, into buf: inout [UInt8]) {
-        FfiConverterTypeCoverageVerdict.write(value.verdict, into: &buf)
-        FfiConverterUInt64.write(value.samples, into: &buf)
-        FfiConverterOptionInt64.write(value.firstUs, into: &buf)
-        FfiConverterOptionInt64.write(value.lastUs, into: &buf)
-        FfiConverterOptionInt64.write(value.gapAtUs, into: &buf)
-        FfiConverterOptionInt64.write(value.gapUs, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAudioCoverage_lift(_ buf: RustBuffer) throws -> AudioCoverage {
-    return try FfiConverterTypeAudioCoverage.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAudioCoverage_lower(_ value: AudioCoverage) -> RustBuffer {
-    return FfiConverterTypeAudioCoverage.lower(value)
-}
-
-
-public struct AudioInterval: Equatable, Hashable {
-    public var startUs: Int64
-    public var endUs: Int64
-    public var samples: UInt64
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(startUs: Int64, endUs: Int64, samples: UInt64) {
-        self.startUs = startUs
-        self.endUs = endUs
-        self.samples = samples
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension AudioInterval: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeAudioInterval: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AudioInterval {
-        return
-            try AudioInterval(
-                startUs: FfiConverterInt64.read(from: &buf), 
-                endUs: FfiConverterInt64.read(from: &buf), 
-                samples: FfiConverterUInt64.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: AudioInterval, into buf: inout [UInt8]) {
-        FfiConverterInt64.write(value.startUs, into: &buf)
-        FfiConverterInt64.write(value.endUs, into: &buf)
-        FfiConverterUInt64.write(value.samples, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAudioInterval_lift(_ buf: RustBuffer) throws -> AudioInterval {
-    return try FfiConverterTypeAudioInterval.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAudioInterval_lower(_ value: AudioInterval) -> RustBuffer {
-    return FfiConverterTypeAudioInterval.lower(value)
-}
-
-
 /**
  * The bitrate band for target videos whose long side is at least `from_long_side`.
  */
@@ -6483,12 +5865,10 @@ public struct CameraState: Equatable, Hashable {
     public var shooting: Bool
     public var fault: CameraRefusal?
     public var refusedMs: UInt64?
-    public var take: UInt64?
-    public var outcome: TakeOutcome?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(phase: CameraPhase, lens: CameraLens, flash: Bool, hasFlash: Bool, zoom: Float, zoomMin: Float, zoomMax: Float, recordedMs: UInt64, shooting: Bool, fault: CameraRefusal?, refusedMs: UInt64?, take: UInt64?, outcome: TakeOutcome?) {
+    public init(phase: CameraPhase, lens: CameraLens, flash: Bool, hasFlash: Bool, zoom: Float, zoomMin: Float, zoomMax: Float, recordedMs: UInt64, shooting: Bool, fault: CameraRefusal?, refusedMs: UInt64?) {
         self.phase = phase
         self.lens = lens
         self.flash = flash
@@ -6500,8 +5880,6 @@ public struct CameraState: Equatable, Hashable {
         self.shooting = shooting
         self.fault = fault
         self.refusedMs = refusedMs
-        self.take = take
-        self.outcome = outcome
     }
 
     
@@ -6530,9 +5908,7 @@ public struct FfiConverterTypeCameraState: FfiConverterRustBuffer {
                 recordedMs: FfiConverterUInt64.read(from: &buf), 
                 shooting: FfiConverterBool.read(from: &buf), 
                 fault: FfiConverterOptionTypeCameraRefusal.read(from: &buf), 
-                refusedMs: FfiConverterOptionUInt64.read(from: &buf), 
-                take: FfiConverterOptionUInt64.read(from: &buf), 
-                outcome: FfiConverterOptionTypeTakeOutcome.read(from: &buf)
+                refusedMs: FfiConverterOptionUInt64.read(from: &buf)
         )
     }
 
@@ -6548,8 +5924,6 @@ public struct FfiConverterTypeCameraState: FfiConverterRustBuffer {
         FfiConverterBool.write(value.shooting, into: &buf)
         FfiConverterOptionTypeCameraRefusal.write(value.fault, into: &buf)
         FfiConverterOptionUInt64.write(value.refusedMs, into: &buf)
-        FfiConverterOptionUInt64.write(value.take, into: &buf)
-        FfiConverterOptionTypeTakeOutcome.write(value.outcome, into: &buf)
     }
 }
 
@@ -6669,35 +6043,25 @@ public struct CaptureRun: Equatable, Hashable {
     public var state: CameraState
     public var `open`: Bool
     public var streaming: Bool
-    public var audioFlowing: Bool?
     public var starting: Bool
     public var started: Bool
     public var discard: Bool
     public var end: RecordEnd?
     public var recoverySpent: Bool
     public var pendingLens: CameraLens?
-    /**
-     * The lens the running or last take was started on. A delivered clip carries this lens, not `state.lens`, which a lens change may already have moved on.
-     */
-    public var takeLens: CameraLens
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(state: CameraState, `open`: Bool, streaming: Bool, audioFlowing: Bool?, starting: Bool, started: Bool, discard: Bool, end: RecordEnd?, recoverySpent: Bool, pendingLens: CameraLens?, 
-        /**
-         * The lens the running or last take was started on. A delivered clip carries this lens, not `state.lens`, which a lens change may already have moved on.
-         */takeLens: CameraLens) {
+    public init(state: CameraState, `open`: Bool, streaming: Bool, starting: Bool, started: Bool, discard: Bool, end: RecordEnd?, recoverySpent: Bool, pendingLens: CameraLens?) {
         self.state = state
         self.`open` = `open`
         self.streaming = streaming
-        self.audioFlowing = audioFlowing
         self.starting = starting
         self.started = started
         self.discard = discard
         self.end = end
         self.recoverySpent = recoverySpent
         self.pendingLens = pendingLens
-        self.takeLens = takeLens
     }
 
     
@@ -6719,14 +6083,12 @@ public struct FfiConverterTypeCaptureRun: FfiConverterRustBuffer {
                 state: FfiConverterTypeCameraState.read(from: &buf), 
                 open: FfiConverterBool.read(from: &buf), 
                 streaming: FfiConverterBool.read(from: &buf), 
-                audioFlowing: FfiConverterOptionBool.read(from: &buf), 
                 starting: FfiConverterBool.read(from: &buf), 
                 started: FfiConverterBool.read(from: &buf), 
                 discard: FfiConverterBool.read(from: &buf), 
                 end: FfiConverterOptionTypeRecordEnd.read(from: &buf), 
                 recoverySpent: FfiConverterBool.read(from: &buf), 
-                pendingLens: FfiConverterOptionTypeCameraLens.read(from: &buf), 
-                takeLens: FfiConverterTypeCameraLens.read(from: &buf)
+                pendingLens: FfiConverterOptionTypeCameraLens.read(from: &buf)
         )
     }
 
@@ -6734,14 +6096,12 @@ public struct FfiConverterTypeCaptureRun: FfiConverterRustBuffer {
         FfiConverterTypeCameraState.write(value.state, into: &buf)
         FfiConverterBool.write(value.`open`, into: &buf)
         FfiConverterBool.write(value.streaming, into: &buf)
-        FfiConverterOptionBool.write(value.audioFlowing, into: &buf)
         FfiConverterBool.write(value.starting, into: &buf)
         FfiConverterBool.write(value.started, into: &buf)
         FfiConverterBool.write(value.discard, into: &buf)
         FfiConverterOptionTypeRecordEnd.write(value.end, into: &buf)
         FfiConverterBool.write(value.recoverySpent, into: &buf)
         FfiConverterOptionTypeCameraLens.write(value.pendingLens, into: &buf)
-        FfiConverterTypeCameraLens.write(value.takeLens, into: &buf)
     }
 }
 
@@ -6812,146 +6172,6 @@ public func FfiConverterTypeCaptureStep_lift(_ buf: RustBuffer) throws -> Captur
 #endif
 public func FfiConverterTypeCaptureStep_lower(_ value: CaptureStep) -> RustBuffer {
     return FfiConverterTypeCaptureStep.lower(value)
-}
-
-
-public struct CoverageConfig: Equatable, Hashable {
-    public var audioRequired: Bool
-    public var audioTrack: Bool
-    public var sampleRate: UInt32
-    public var frameSamples: UInt32
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(audioRequired: Bool, audioTrack: Bool, sampleRate: UInt32, frameSamples: UInt32) {
-        self.audioRequired = audioRequired
-        self.audioTrack = audioTrack
-        self.sampleRate = sampleRate
-        self.frameSamples = frameSamples
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension CoverageConfig: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeCoverageConfig: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoverageConfig {
-        return
-            try CoverageConfig(
-                audioRequired: FfiConverterBool.read(from: &buf), 
-                audioTrack: FfiConverterBool.read(from: &buf), 
-                sampleRate: FfiConverterUInt32.read(from: &buf), 
-                frameSamples: FfiConverterUInt32.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: CoverageConfig, into buf: inout [UInt8]) {
-        FfiConverterBool.write(value.audioRequired, into: &buf)
-        FfiConverterBool.write(value.audioTrack, into: &buf)
-        FfiConverterUInt32.write(value.sampleRate, into: &buf)
-        FfiConverterUInt32.write(value.frameSamples, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeCoverageConfig_lift(_ buf: RustBuffer) throws -> CoverageConfig {
-    return try FfiConverterTypeCoverageConfig.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeCoverageConfig_lower(_ value: CoverageConfig) -> RustBuffer {
-    return FfiConverterTypeCoverageConfig.lower(value)
-}
-
-
-public struct CoverageScan: Equatable, Hashable {
-    public var config: CoverageConfig
-    public var firstUs: Int64?
-    public var reachedUs: Int64
-    public var samples: UInt64
-    public var packets: UInt64
-    public var defect: CoverageVerdict?
-    public var gapAtUs: Int64?
-    public var gapUs: Int64?
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(config: CoverageConfig, firstUs: Int64?, reachedUs: Int64, samples: UInt64, packets: UInt64, defect: CoverageVerdict?, gapAtUs: Int64?, gapUs: Int64?) {
-        self.config = config
-        self.firstUs = firstUs
-        self.reachedUs = reachedUs
-        self.samples = samples
-        self.packets = packets
-        self.defect = defect
-        self.gapAtUs = gapAtUs
-        self.gapUs = gapUs
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension CoverageScan: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeCoverageScan: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoverageScan {
-        return
-            try CoverageScan(
-                config: FfiConverterTypeCoverageConfig.read(from: &buf), 
-                firstUs: FfiConverterOptionInt64.read(from: &buf), 
-                reachedUs: FfiConverterInt64.read(from: &buf), 
-                samples: FfiConverterUInt64.read(from: &buf), 
-                packets: FfiConverterUInt64.read(from: &buf), 
-                defect: FfiConverterOptionTypeCoverageVerdict.read(from: &buf), 
-                gapAtUs: FfiConverterOptionInt64.read(from: &buf), 
-                gapUs: FfiConverterOptionInt64.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: CoverageScan, into buf: inout [UInt8]) {
-        FfiConverterTypeCoverageConfig.write(value.config, into: &buf)
-        FfiConverterOptionInt64.write(value.firstUs, into: &buf)
-        FfiConverterInt64.write(value.reachedUs, into: &buf)
-        FfiConverterUInt64.write(value.samples, into: &buf)
-        FfiConverterUInt64.write(value.packets, into: &buf)
-        FfiConverterOptionTypeCoverageVerdict.write(value.defect, into: &buf)
-        FfiConverterOptionInt64.write(value.gapAtUs, into: &buf)
-        FfiConverterOptionInt64.write(value.gapUs, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeCoverageScan_lift(_ buf: RustBuffer) throws -> CoverageScan {
-    return try FfiConverterTypeCoverageScan.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeCoverageScan_lower(_ value: CoverageScan) -> RustBuffer {
-    return FfiConverterTypeCoverageScan.lower(value)
 }
 
 
@@ -9244,68 +8464,6 @@ public func FfiConverterTypeMediaTone_lower(_ value: MediaTone) -> RustBuffer {
 }
 
 
-public struct NativeFailure: Equatable, Hashable {
-    public var source: FailureSource
-    public var domain: String
-    public var code: Int64
-    public var message: String
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(source: FailureSource, domain: String, code: Int64, message: String) {
-        self.source = source
-        self.domain = domain
-        self.code = code
-        self.message = message
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension NativeFailure: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeNativeFailure: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NativeFailure {
-        return
-            try NativeFailure(
-                source: FfiConverterTypeFailureSource.read(from: &buf), 
-                domain: FfiConverterString.read(from: &buf), 
-                code: FfiConverterInt64.read(from: &buf), 
-                message: FfiConverterString.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: NativeFailure, into buf: inout [UInt8]) {
-        FfiConverterTypeFailureSource.write(value.source, into: &buf)
-        FfiConverterString.write(value.domain, into: &buf)
-        FfiConverterInt64.write(value.code, into: &buf)
-        FfiConverterString.write(value.message, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeNativeFailure_lift(_ buf: RustBuffer) throws -> NativeFailure {
-    return try FfiConverterTypeNativeFailure.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeNativeFailure_lower(_ value: NativeFailure) -> RustBuffer {
-    return FfiConverterTypeNativeFailure.lower(value)
-}
-
-
 public struct OpenConfig {
     public var dir: String
     public var fetcher: Fetcher
@@ -9323,11 +8481,10 @@ public struct OpenConfig {
     public var memoryReleaser: MemoryReleaser?
     public var silent: Bool
     public var ingress: IngressLimits?
-    public var audioFocus: AudioFocus
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(dir: String, fetcher: Fetcher, settings: SettingsStore, slots: PlayerSlotFactory?, device: DeviceMemory, defaults: Limits, pool: PoolSettings, namespaceHeaders: [String] = [], imageWindows: [ImageWindow] = [], forwardHeaders: [String]? = nil, evictVideo: Evict? = nil, evictImage: Evict? = nil, evictAudio: Evict? = nil, memoryReleaser: MemoryReleaser? = nil, silent: Bool = false, ingress: IngressLimits? = nil, audioFocus: AudioFocus) {
+    public init(dir: String, fetcher: Fetcher, settings: SettingsStore, slots: PlayerSlotFactory?, device: DeviceMemory, defaults: Limits, pool: PoolSettings, namespaceHeaders: [String] = [], imageWindows: [ImageWindow] = [], forwardHeaders: [String]? = nil, evictVideo: Evict? = nil, evictImage: Evict? = nil, evictAudio: Evict? = nil, memoryReleaser: MemoryReleaser? = nil, silent: Bool = false, ingress: IngressLimits? = nil) {
         self.dir = dir
         self.fetcher = fetcher
         self.settings = settings
@@ -9344,7 +8501,6 @@ public struct OpenConfig {
         self.memoryReleaser = memoryReleaser
         self.silent = silent
         self.ingress = ingress
-        self.audioFocus = audioFocus
     }
 
     
@@ -9378,8 +8534,7 @@ public struct FfiConverterTypeOpenConfig: FfiConverterRustBuffer {
                 evictAudio: FfiConverterOptionTypeEvict.read(from: &buf), 
                 memoryReleaser: FfiConverterOptionTypeMemoryReleaser.read(from: &buf), 
                 silent: FfiConverterBool.read(from: &buf), 
-                ingress: FfiConverterOptionTypeIngressLimits.read(from: &buf), 
-                audioFocus: FfiConverterTypeAudioFocus.read(from: &buf)
+                ingress: FfiConverterOptionTypeIngressLimits.read(from: &buf)
         )
     }
 
@@ -9400,7 +8555,6 @@ public struct FfiConverterTypeOpenConfig: FfiConverterRustBuffer {
         FfiConverterOptionTypeMemoryReleaser.write(value.memoryReleaser, into: &buf)
         FfiConverterBool.write(value.silent, into: &buf)
         FfiConverterOptionTypeIngressLimits.write(value.ingress, into: &buf)
-        FfiConverterTypeAudioFocus.write(value.audioFocus, into: &buf)
     }
 }
 
@@ -9767,7 +8921,6 @@ public func FfiConverterTypePixelSize_lower(_ value: PixelSize) -> RustBuffer {
 public struct PlaceInput: Equatable, Hashable {
     public var visible: Bool
     public var playing: Bool
-    public var playGeneration: UInt64
     public var group: String?
     public var peeking: Bool
     public var muted: Bool?
@@ -9777,10 +8930,9 @@ public struct PlaceInput: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(visible: Bool, playing: Bool, playGeneration: UInt64 = UInt64(0), group: String?, peeking: Bool, muted: Bool?, rate: Float?, pinned: Bool, viewToken: UInt64?) {
+    public init(visible: Bool, playing: Bool, group: String?, peeking: Bool, muted: Bool?, rate: Float?, pinned: Bool, viewToken: UInt64?) {
         self.visible = visible
         self.playing = playing
-        self.playGeneration = playGeneration
         self.group = group
         self.peeking = peeking
         self.muted = muted
@@ -9807,7 +8959,6 @@ public struct FfiConverterTypePlaceInput: FfiConverterRustBuffer {
             try PlaceInput(
                 visible: FfiConverterBool.read(from: &buf), 
                 playing: FfiConverterBool.read(from: &buf), 
-                playGeneration: FfiConverterUInt64.read(from: &buf), 
                 group: FfiConverterOptionString.read(from: &buf), 
                 peeking: FfiConverterBool.read(from: &buf), 
                 muted: FfiConverterOptionBool.read(from: &buf), 
@@ -9820,7 +8971,6 @@ public struct FfiConverterTypePlaceInput: FfiConverterRustBuffer {
     public static func write(_ value: PlaceInput, into buf: inout [UInt8]) {
         FfiConverterBool.write(value.visible, into: &buf)
         FfiConverterBool.write(value.playing, into: &buf)
-        FfiConverterUInt64.write(value.playGeneration, into: &buf)
         FfiConverterOptionString.write(value.group, into: &buf)
         FfiConverterBool.write(value.peeking, into: &buf)
         FfiConverterOptionBool.write(value.muted, into: &buf)
@@ -9909,72 +9059,6 @@ public func FfiConverterTypePlaybackRoute_lift(_ buf: RustBuffer) throws -> Play
 #endif
 public func FfiConverterTypePlaybackRoute_lower(_ value: PlaybackRoute) -> RustBuffer {
     return FfiConverterTypePlaybackRoute.lower(value)
-}
-
-
-public struct PlaybackState: Equatable, Hashable {
-    public var playing: Bool
-    public var wish: Bool
-    public var reason: PauseReason?
-    public var refused: PlayRefusal?
-    public var attempt: UInt64
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(playing: Bool, wish: Bool, reason: PauseReason?, refused: PlayRefusal?, attempt: UInt64) {
-        self.playing = playing
-        self.wish = wish
-        self.reason = reason
-        self.refused = refused
-        self.attempt = attempt
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension PlaybackState: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypePlaybackState: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PlaybackState {
-        return
-            try PlaybackState(
-                playing: FfiConverterBool.read(from: &buf), 
-                wish: FfiConverterBool.read(from: &buf), 
-                reason: FfiConverterOptionTypePauseReason.read(from: &buf), 
-                refused: FfiConverterOptionTypePlayRefusal.read(from: &buf), 
-                attempt: FfiConverterUInt64.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: PlaybackState, into buf: inout [UInt8]) {
-        FfiConverterBool.write(value.playing, into: &buf)
-        FfiConverterBool.write(value.wish, into: &buf)
-        FfiConverterOptionTypePauseReason.write(value.reason, into: &buf)
-        FfiConverterOptionTypePlayRefusal.write(value.refused, into: &buf)
-        FfiConverterUInt64.write(value.attempt, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypePlaybackState_lift(_ buf: RustBuffer) throws -> PlaybackState {
-    return try FfiConverterTypePlaybackState.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypePlaybackState_lower(_ value: PlaybackState) -> RustBuffer {
-    return FfiConverterTypePlaybackState.lower(value)
 }
 
 
@@ -10630,60 +9714,6 @@ public func FfiConverterTypeTonePixels_lower(_ value: TonePixels) -> RustBuffer 
 }
 
 
-public struct VideoBounds: Equatable, Hashable {
-    public var startUs: Int64
-    public var endUs: Int64
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(startUs: Int64, endUs: Int64) {
-        self.startUs = startUs
-        self.endUs = endUs
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension VideoBounds: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeVideoBounds: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VideoBounds {
-        return
-            try VideoBounds(
-                startUs: FfiConverterInt64.read(from: &buf), 
-                endUs: FfiConverterInt64.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: VideoBounds, into buf: inout [UInt8]) {
-        FfiConverterInt64.write(value.startUs, into: &buf)
-        FfiConverterInt64.write(value.endUs, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeVideoBounds_lift(_ buf: RustBuffer) throws -> VideoBounds {
-    return try FfiConverterTypeVideoBounds.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeVideoBounds_lower(_ value: VideoBounds) -> RustBuffer {
-    return FfiConverterTypeVideoBounds.lower(value)
-}
-
-
 /**
  * What the app allows a video to be before it is sent. The app owns these tables, `default_video_limits` holds the V3 values.
  */
@@ -10972,809 +10002,6 @@ public func FfiConverterTypeVoiceEncoderSettings_lower(_ value: VoiceEncoderSett
 }
 
 
-/**
- * What the app sees of a voice recorder: the take number (0 before the first), its phase and how the last take ended.
- */
-public struct VoiceState: Equatable, Hashable {
-    public var take: UInt64
-    public var phase: VoicePhase
-    public var outcome: VoiceOutcome?
-    public var recordedMs: UInt64
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(take: UInt64, phase: VoicePhase, outcome: VoiceOutcome?, recordedMs: UInt64) {
-        self.take = take
-        self.phase = phase
-        self.outcome = outcome
-        self.recordedMs = recordedMs
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension VoiceState: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeVoiceState: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VoiceState {
-        return
-            try VoiceState(
-                take: FfiConverterUInt64.read(from: &buf), 
-                phase: FfiConverterTypeVoicePhase.read(from: &buf), 
-                outcome: FfiConverterOptionTypeVoiceOutcome.read(from: &buf), 
-                recordedMs: FfiConverterUInt64.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: VoiceState, into buf: inout [UInt8]) {
-        FfiConverterUInt64.write(value.take, into: &buf)
-        FfiConverterTypeVoicePhase.write(value.phase, into: &buf)
-        FfiConverterOptionTypeVoiceOutcome.write(value.outcome, into: &buf)
-        FfiConverterUInt64.write(value.recordedMs, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeVoiceState_lift(_ buf: RustBuffer) throws -> VoiceState {
-    return try FfiConverterTypeVoiceState.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeVoiceState_lower(_ value: VoiceState) -> RustBuffer {
-    return FfiConverterTypeVoiceState.lower(value)
-}
-
-
-
-public enum AppliedResult: Equatable, Hashable {
-    
-    case ok
-    case busy
-    case failed(code: Int64
-    )
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension AppliedResult: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeAppliedResult: FfiConverterRustBuffer {
-    typealias SwiftType = AppliedResult
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AppliedResult {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .ok
-        
-        case 2: return .busy
-        
-        case 3: return .failed(code: try FfiConverterInt64.read(from: &buf)
-        )
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: AppliedResult, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case .ok:
-            writeInt(&buf, Int32(1))
-        
-        
-        case .busy:
-            writeInt(&buf, Int32(2))
-        
-        
-        case let .failed(code):
-            writeInt(&buf, Int32(3))
-            FfiConverterInt64.write(code, into: &buf)
-            
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAppliedResult_lift(_ buf: RustBuffer) throws -> AppliedResult {
-    return try FfiConverterTypeAppliedResult.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAppliedResult_lower(_ value: AppliedResult) -> RustBuffer {
-    return FfiConverterTypeAppliedResult.lower(value)
-}
-
-
-
-
-public enum AudioAction: Equatable, Hashable {
-    
-    case awaitPaused(barrier: UInt64
-    )
-    case failure(failure: NativeFailure
-    )
-    case route(speaker: Bool
-    )
-    case revoke(id: UInt64, reason: RecordingRefusal
-    )
-    case refuse(id: UInt64, reason: RecordingRefusal
-    )
-    case pauseAll(reason: PauseReason
-    )
-    case forgetPaused
-    case callHold(on: Bool
-    )
-    case deactivate(generation: UInt64
-    )
-    case apply(generation: UInt64, want: SessionWant, activate: Bool
-    )
-    case admit(id: UInt64
-    )
-    case resumePaused
-    case volumeMultiplier(value: Float
-    )
-    case callState(id: UInt64, state: CallState
-    )
-    case availability(value: MicrophoneAvailability
-    )
-    case restoreInput(id: UInt64, kind: RecordingKind, generation: UInt64
-    )
-    case stopInput(id: UInt64, generation: UInt64
-    )
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension AudioAction: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeAudioAction: FfiConverterRustBuffer {
-    typealias SwiftType = AudioAction
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AudioAction {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .awaitPaused(barrier: try FfiConverterUInt64.read(from: &buf)
-        )
-        
-        case 2: return .failure(failure: try FfiConverterTypeNativeFailure.read(from: &buf)
-        )
-        
-        case 3: return .route(speaker: try FfiConverterBool.read(from: &buf)
-        )
-        
-        case 4: return .revoke(id: try FfiConverterUInt64.read(from: &buf), reason: try FfiConverterTypeRecordingRefusal.read(from: &buf)
-        )
-        
-        case 5: return .refuse(id: try FfiConverterUInt64.read(from: &buf), reason: try FfiConverterTypeRecordingRefusal.read(from: &buf)
-        )
-        
-        case 6: return .pauseAll(reason: try FfiConverterTypePauseReason.read(from: &buf)
-        )
-        
-        case 7: return .forgetPaused
-        
-        case 8: return .callHold(on: try FfiConverterBool.read(from: &buf)
-        )
-        
-        case 9: return .deactivate(generation: try FfiConverterUInt64.read(from: &buf)
-        )
-        
-        case 10: return .apply(generation: try FfiConverterUInt64.read(from: &buf), want: try FfiConverterTypeSessionWant.read(from: &buf), activate: try FfiConverterBool.read(from: &buf)
-        )
-        
-        case 11: return .admit(id: try FfiConverterUInt64.read(from: &buf)
-        )
-        
-        case 12: return .resumePaused
-        
-        case 13: return .volumeMultiplier(value: try FfiConverterFloat.read(from: &buf)
-        )
-        
-        case 14: return .callState(id: try FfiConverterUInt64.read(from: &buf), state: try FfiConverterTypeCallState.read(from: &buf)
-        )
-        
-        case 15: return .availability(value: try FfiConverterTypeMicrophoneAvailability.read(from: &buf)
-        )
-        
-        case 16: return .restoreInput(id: try FfiConverterUInt64.read(from: &buf), kind: try FfiConverterTypeRecordingKind.read(from: &buf), generation: try FfiConverterUInt64.read(from: &buf)
-        )
-        
-        case 17: return .stopInput(id: try FfiConverterUInt64.read(from: &buf), generation: try FfiConverterUInt64.read(from: &buf)
-        )
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: AudioAction, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case let .awaitPaused(barrier):
-            writeInt(&buf, Int32(1))
-            FfiConverterUInt64.write(barrier, into: &buf)
-            
-        
-        case let .failure(failure):
-            writeInt(&buf, Int32(2))
-            FfiConverterTypeNativeFailure.write(failure, into: &buf)
-            
-        
-        case let .route(speaker):
-            writeInt(&buf, Int32(3))
-            FfiConverterBool.write(speaker, into: &buf)
-            
-        
-        case let .revoke(id,reason):
-            writeInt(&buf, Int32(4))
-            FfiConverterUInt64.write(id, into: &buf)
-            FfiConverterTypeRecordingRefusal.write(reason, into: &buf)
-            
-        
-        case let .refuse(id,reason):
-            writeInt(&buf, Int32(5))
-            FfiConverterUInt64.write(id, into: &buf)
-            FfiConverterTypeRecordingRefusal.write(reason, into: &buf)
-            
-        
-        case let .pauseAll(reason):
-            writeInt(&buf, Int32(6))
-            FfiConverterTypePauseReason.write(reason, into: &buf)
-            
-        
-        case .forgetPaused:
-            writeInt(&buf, Int32(7))
-        
-        
-        case let .callHold(on):
-            writeInt(&buf, Int32(8))
-            FfiConverterBool.write(on, into: &buf)
-            
-        
-        case let .deactivate(generation):
-            writeInt(&buf, Int32(9))
-            FfiConverterUInt64.write(generation, into: &buf)
-            
-        
-        case let .apply(generation,want,activate):
-            writeInt(&buf, Int32(10))
-            FfiConverterUInt64.write(generation, into: &buf)
-            FfiConverterTypeSessionWant.write(want, into: &buf)
-            FfiConverterBool.write(activate, into: &buf)
-            
-        
-        case let .admit(id):
-            writeInt(&buf, Int32(11))
-            FfiConverterUInt64.write(id, into: &buf)
-            
-        
-        case .resumePaused:
-            writeInt(&buf, Int32(12))
-        
-        
-        case let .volumeMultiplier(value):
-            writeInt(&buf, Int32(13))
-            FfiConverterFloat.write(value, into: &buf)
-            
-        
-        case let .callState(id,state):
-            writeInt(&buf, Int32(14))
-            FfiConverterUInt64.write(id, into: &buf)
-            FfiConverterTypeCallState.write(state, into: &buf)
-            
-        
-        case let .availability(value):
-            writeInt(&buf, Int32(15))
-            FfiConverterTypeMicrophoneAvailability.write(value, into: &buf)
-            
-        
-        case let .restoreInput(id,kind,generation):
-            writeInt(&buf, Int32(16))
-            FfiConverterUInt64.write(id, into: &buf)
-            FfiConverterTypeRecordingKind.write(kind, into: &buf)
-            FfiConverterUInt64.write(generation, into: &buf)
-            
-        
-        case let .stopInput(id,generation):
-            writeInt(&buf, Int32(17))
-            FfiConverterUInt64.write(id, into: &buf)
-            FfiConverterUInt64.write(generation, into: &buf)
-            
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAudioAction_lift(_ buf: RustBuffer) throws -> AudioAction {
-    return try FfiConverterTypeAudioAction.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAudioAction_lower(_ value: AudioAction) -> RustBuffer {
-    return FfiConverterTypeAudioAction.lower(value)
-}
-
-
-
-
-public enum AudioFocus: Equatable, Hashable {
-    
-    case exclusive
-    case duck
-    case mix
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension AudioFocus: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeAudioFocus: FfiConverterRustBuffer {
-    typealias SwiftType = AudioFocus
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AudioFocus {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .exclusive
-        
-        case 2: return .duck
-        
-        case 3: return .mix
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: AudioFocus, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case .exclusive:
-            writeInt(&buf, Int32(1))
-        
-        
-        case .duck:
-            writeInt(&buf, Int32(2))
-        
-        
-        case .mix:
-            writeInt(&buf, Int32(3))
-        
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAudioFocus_lift(_ buf: RustBuffer) throws -> AudioFocus {
-    return try FfiConverterTypeAudioFocus.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAudioFocus_lower(_ value: AudioFocus) -> RustBuffer {
-    return FfiConverterTypeAudioFocus.lower(value)
-}
-
-
-
-
-public enum AudioInput: Equatable, Hashable {
-    
-    case failure(failure: NativeFailure
-    )
-    case volumeReadStarted(id: UInt64
-    )
-    case volumeReadEnded(id: UInt64
-    )
-    case audible(slot: UInt64, on: Bool
-    )
-    case capture(id: UInt64, kind: RecordingKind
-    )
-    case captureEnded(id: UInt64
-    )
-    case callStarted(id: UInt64, kind: CallKind, speaker: Bool
-    )
-    case callSpeaker(id: UInt64, speaker: Bool
-    )
-    case callEnded(id: UInt64
-    )
-    case callSystemActivated(id: UInt64
-    )
-    case callSystemDeactivated(id: UInt64
-    )
-    case applied(generation: UInt64, result: AppliedResult
-    )
-    case interruptionBegan
-    case interruptionEnded(shouldResume: Bool
-    )
-    case resumptionRecommendation(shouldResume: Bool
-    )
-    case focus(change: FocusChange
-    )
-    case focusRequest(generation: UInt64, answer: FocusAnswer
-    )
-    case mediaReset
-    case route(reason: RouteReason, lostPrivateOutput: Bool
-    )
-    case noisy
-    case observedCalls(uuids: [String]
-    )
-    case phoneCall(active: Bool
-    )
-    case communicationMode(active: Bool
-    )
-    case permission(granted: Bool
-    )
-    case otherRecording(active: Bool
-    )
-    case silenced(id: UInt64
-    )
-    case inputOpened(id: UInt64, kind: RecordingKind
-    )
-    case inputClosed(id: UInt64
-    )
-    case noSound(id: UInt64, generation: UInt64, on: Bool
-    )
-    case restoreFailed(id: UInt64, generation: UInt64
-    )
-    case foreground(on: Bool
-    )
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension AudioInput: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeAudioInput: FfiConverterRustBuffer {
-    typealias SwiftType = AudioInput
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AudioInput {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .failure(failure: try FfiConverterTypeNativeFailure.read(from: &buf)
-        )
-        
-        case 2: return .volumeReadStarted(id: try FfiConverterUInt64.read(from: &buf)
-        )
-        
-        case 3: return .volumeReadEnded(id: try FfiConverterUInt64.read(from: &buf)
-        )
-        
-        case 4: return .audible(slot: try FfiConverterUInt64.read(from: &buf), on: try FfiConverterBool.read(from: &buf)
-        )
-        
-        case 5: return .capture(id: try FfiConverterUInt64.read(from: &buf), kind: try FfiConverterTypeRecordingKind.read(from: &buf)
-        )
-        
-        case 6: return .captureEnded(id: try FfiConverterUInt64.read(from: &buf)
-        )
-        
-        case 7: return .callStarted(id: try FfiConverterUInt64.read(from: &buf), kind: try FfiConverterTypeCallKind.read(from: &buf), speaker: try FfiConverterBool.read(from: &buf)
-        )
-        
-        case 8: return .callSpeaker(id: try FfiConverterUInt64.read(from: &buf), speaker: try FfiConverterBool.read(from: &buf)
-        )
-        
-        case 9: return .callEnded(id: try FfiConverterUInt64.read(from: &buf)
-        )
-        
-        case 10: return .callSystemActivated(id: try FfiConverterUInt64.read(from: &buf)
-        )
-        
-        case 11: return .callSystemDeactivated(id: try FfiConverterUInt64.read(from: &buf)
-        )
-        
-        case 12: return .applied(generation: try FfiConverterUInt64.read(from: &buf), result: try FfiConverterTypeAppliedResult.read(from: &buf)
-        )
-        
-        case 13: return .interruptionBegan
-        
-        case 14: return .interruptionEnded(shouldResume: try FfiConverterBool.read(from: &buf)
-        )
-        
-        case 15: return .resumptionRecommendation(shouldResume: try FfiConverterBool.read(from: &buf)
-        )
-        
-        case 16: return .focus(change: try FfiConverterTypeFocusChange.read(from: &buf)
-        )
-        
-        case 17: return .focusRequest(generation: try FfiConverterUInt64.read(from: &buf), answer: try FfiConverterTypeFocusAnswer.read(from: &buf)
-        )
-        
-        case 18: return .mediaReset
-        
-        case 19: return .route(reason: try FfiConverterTypeRouteReason.read(from: &buf), lostPrivateOutput: try FfiConverterBool.read(from: &buf)
-        )
-        
-        case 20: return .noisy
-        
-        case 21: return .observedCalls(uuids: try FfiConverterSequenceString.read(from: &buf)
-        )
-        
-        case 22: return .phoneCall(active: try FfiConverterBool.read(from: &buf)
-        )
-        
-        case 23: return .communicationMode(active: try FfiConverterBool.read(from: &buf)
-        )
-        
-        case 24: return .permission(granted: try FfiConverterBool.read(from: &buf)
-        )
-        
-        case 25: return .otherRecording(active: try FfiConverterBool.read(from: &buf)
-        )
-        
-        case 26: return .silenced(id: try FfiConverterUInt64.read(from: &buf)
-        )
-        
-        case 27: return .inputOpened(id: try FfiConverterUInt64.read(from: &buf), kind: try FfiConverterTypeRecordingKind.read(from: &buf)
-        )
-        
-        case 28: return .inputClosed(id: try FfiConverterUInt64.read(from: &buf)
-        )
-        
-        case 29: return .noSound(id: try FfiConverterUInt64.read(from: &buf), generation: try FfiConverterUInt64.read(from: &buf), on: try FfiConverterBool.read(from: &buf)
-        )
-        
-        case 30: return .restoreFailed(id: try FfiConverterUInt64.read(from: &buf), generation: try FfiConverterUInt64.read(from: &buf)
-        )
-        
-        case 31: return .foreground(on: try FfiConverterBool.read(from: &buf)
-        )
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: AudioInput, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case let .failure(failure):
-            writeInt(&buf, Int32(1))
-            FfiConverterTypeNativeFailure.write(failure, into: &buf)
-            
-        
-        case let .volumeReadStarted(id):
-            writeInt(&buf, Int32(2))
-            FfiConverterUInt64.write(id, into: &buf)
-            
-        
-        case let .volumeReadEnded(id):
-            writeInt(&buf, Int32(3))
-            FfiConverterUInt64.write(id, into: &buf)
-            
-        
-        case let .audible(slot,on):
-            writeInt(&buf, Int32(4))
-            FfiConverterUInt64.write(slot, into: &buf)
-            FfiConverterBool.write(on, into: &buf)
-            
-        
-        case let .capture(id,kind):
-            writeInt(&buf, Int32(5))
-            FfiConverterUInt64.write(id, into: &buf)
-            FfiConverterTypeRecordingKind.write(kind, into: &buf)
-            
-        
-        case let .captureEnded(id):
-            writeInt(&buf, Int32(6))
-            FfiConverterUInt64.write(id, into: &buf)
-            
-        
-        case let .callStarted(id,kind,speaker):
-            writeInt(&buf, Int32(7))
-            FfiConverterUInt64.write(id, into: &buf)
-            FfiConverterTypeCallKind.write(kind, into: &buf)
-            FfiConverterBool.write(speaker, into: &buf)
-            
-        
-        case let .callSpeaker(id,speaker):
-            writeInt(&buf, Int32(8))
-            FfiConverterUInt64.write(id, into: &buf)
-            FfiConverterBool.write(speaker, into: &buf)
-            
-        
-        case let .callEnded(id):
-            writeInt(&buf, Int32(9))
-            FfiConverterUInt64.write(id, into: &buf)
-            
-        
-        case let .callSystemActivated(id):
-            writeInt(&buf, Int32(10))
-            FfiConverterUInt64.write(id, into: &buf)
-            
-        
-        case let .callSystemDeactivated(id):
-            writeInt(&buf, Int32(11))
-            FfiConverterUInt64.write(id, into: &buf)
-            
-        
-        case let .applied(generation,result):
-            writeInt(&buf, Int32(12))
-            FfiConverterUInt64.write(generation, into: &buf)
-            FfiConverterTypeAppliedResult.write(result, into: &buf)
-            
-        
-        case .interruptionBegan:
-            writeInt(&buf, Int32(13))
-        
-        
-        case let .interruptionEnded(shouldResume):
-            writeInt(&buf, Int32(14))
-            FfiConverterBool.write(shouldResume, into: &buf)
-            
-        
-        case let .resumptionRecommendation(shouldResume):
-            writeInt(&buf, Int32(15))
-            FfiConverterBool.write(shouldResume, into: &buf)
-            
-        
-        case let .focus(change):
-            writeInt(&buf, Int32(16))
-            FfiConverterTypeFocusChange.write(change, into: &buf)
-            
-        
-        case let .focusRequest(generation,answer):
-            writeInt(&buf, Int32(17))
-            FfiConverterUInt64.write(generation, into: &buf)
-            FfiConverterTypeFocusAnswer.write(answer, into: &buf)
-            
-        
-        case .mediaReset:
-            writeInt(&buf, Int32(18))
-        
-        
-        case let .route(reason,lostPrivateOutput):
-            writeInt(&buf, Int32(19))
-            FfiConverterTypeRouteReason.write(reason, into: &buf)
-            FfiConverterBool.write(lostPrivateOutput, into: &buf)
-            
-        
-        case .noisy:
-            writeInt(&buf, Int32(20))
-        
-        
-        case let .observedCalls(uuids):
-            writeInt(&buf, Int32(21))
-            FfiConverterSequenceString.write(uuids, into: &buf)
-            
-        
-        case let .phoneCall(active):
-            writeInt(&buf, Int32(22))
-            FfiConverterBool.write(active, into: &buf)
-            
-        
-        case let .communicationMode(active):
-            writeInt(&buf, Int32(23))
-            FfiConverterBool.write(active, into: &buf)
-            
-        
-        case let .permission(granted):
-            writeInt(&buf, Int32(24))
-            FfiConverterBool.write(granted, into: &buf)
-            
-        
-        case let .otherRecording(active):
-            writeInt(&buf, Int32(25))
-            FfiConverterBool.write(active, into: &buf)
-            
-        
-        case let .silenced(id):
-            writeInt(&buf, Int32(26))
-            FfiConverterUInt64.write(id, into: &buf)
-            
-        
-        case let .inputOpened(id,kind):
-            writeInt(&buf, Int32(27))
-            FfiConverterUInt64.write(id, into: &buf)
-            FfiConverterTypeRecordingKind.write(kind, into: &buf)
-            
-        
-        case let .inputClosed(id):
-            writeInt(&buf, Int32(28))
-            FfiConverterUInt64.write(id, into: &buf)
-            
-        
-        case let .noSound(id,generation,on):
-            writeInt(&buf, Int32(29))
-            FfiConverterUInt64.write(id, into: &buf)
-            FfiConverterUInt64.write(generation, into: &buf)
-            FfiConverterBool.write(on, into: &buf)
-            
-        
-        case let .restoreFailed(id,generation):
-            writeInt(&buf, Int32(30))
-            FfiConverterUInt64.write(id, into: &buf)
-            FfiConverterUInt64.write(generation, into: &buf)
-            
-        
-        case let .foreground(on):
-            writeInt(&buf, Int32(31))
-            FfiConverterBool.write(on, into: &buf)
-            
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAudioInput_lift(_ buf: RustBuffer) throws -> AudioInput {
-    return try FfiConverterTypeAudioInput.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAudioInput_lower(_ value: AudioInput) -> RustBuffer {
-    return FfiConverterTypeAudioInput.lower(value)
-}
-
-
-
 
 public enum CacheStrategy: Equatable, Hashable {
     
@@ -11844,245 +10071,6 @@ public func FfiConverterTypeCacheStrategy_lift(_ buf: RustBuffer) throws -> Cach
 #endif
 public func FfiConverterTypeCacheStrategy_lower(_ value: CacheStrategy) -> RustBuffer {
     return FfiConverterTypeCacheStrategy.lower(value)
-}
-
-
-
-
-public enum CallKind: Equatable, Hashable {
-    
-    case callKit(uuid: String
-    )
-    case telecom
-    case unmanaged
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension CallKind: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeCallKind: FfiConverterRustBuffer {
-    typealias SwiftType = CallKind
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CallKind {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .callKit(uuid: try FfiConverterString.read(from: &buf)
-        )
-        
-        case 2: return .telecom
-        
-        case 3: return .unmanaged
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: CallKind, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case let .callKit(uuid):
-            writeInt(&buf, Int32(1))
-            FfiConverterString.write(uuid, into: &buf)
-            
-        
-        case .telecom:
-            writeInt(&buf, Int32(2))
-        
-        
-        case .unmanaged:
-            writeInt(&buf, Int32(3))
-        
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeCallKind_lift(_ buf: RustBuffer) throws -> CallKind {
-    return try FfiConverterTypeCallKind.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeCallKind_lower(_ value: CallKind) -> RustBuffer {
-    return FfiConverterTypeCallKind.lower(value)
-}
-
-
-
-/**
- * The output a call's audio goes to, as the platform applied it.
- */
-
-public enum CallRoute: Equatable, Hashable {
-    
-    case speaker
-    case receiver
-    case other
-    case failed
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension CallRoute: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeCallRoute: FfiConverterRustBuffer {
-    typealias SwiftType = CallRoute
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CallRoute {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .speaker
-        
-        case 2: return .receiver
-        
-        case 3: return .other
-        
-        case 4: return .failed
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: CallRoute, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case .speaker:
-            writeInt(&buf, Int32(1))
-        
-        
-        case .receiver:
-            writeInt(&buf, Int32(2))
-        
-        
-        case .other:
-            writeInt(&buf, Int32(3))
-        
-        
-        case .failed:
-            writeInt(&buf, Int32(4))
-        
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeCallRoute_lift(_ buf: RustBuffer) throws -> CallRoute {
-    return try FfiConverterTypeCallRoute.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeCallRoute_lower(_ value: CallRoute) -> RustBuffer {
-    return FfiConverterTypeCallRoute.lower(value)
-}
-
-
-
-
-public enum CallState: Equatable, Hashable {
-    
-    case connecting
-    case live
-    case interrupted
-    case ended
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension CallState: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeCallState: FfiConverterRustBuffer {
-    typealias SwiftType = CallState
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CallState {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .connecting
-        
-        case 2: return .live
-        
-        case 3: return .interrupted
-        
-        case 4: return .ended
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: CallState, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case .connecting:
-            writeInt(&buf, Int32(1))
-        
-        
-        case .live:
-            writeInt(&buf, Int32(2))
-        
-        
-        case .interrupted:
-            writeInt(&buf, Int32(3))
-        
-        
-        case .ended:
-            writeInt(&buf, Int32(4))
-        
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeCallState_lift(_ buf: RustBuffer) throws -> CallState {
-    return try FfiConverterTypeCallState.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeCallState_lower(_ value: CallState) -> RustBuffer {
-    return FfiConverterTypeCallState.lower(value)
 }
 
 
@@ -12162,7 +10150,6 @@ public enum CameraPhase: Equatable, Hashable {
     case recording
     case stopping
     case failed
-    case closed
 
 
 
@@ -12196,8 +10183,6 @@ public struct FfiConverterTypeCameraPhase: FfiConverterRustBuffer {
         
         case 6: return .failed
         
-        case 7: return .closed
-        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -12229,10 +10214,6 @@ public struct FfiConverterTypeCameraPhase: FfiConverterRustBuffer {
         case .failed:
             writeInt(&buf, Int32(6))
         
-        
-        case .closed:
-            writeInt(&buf, Int32(7))
-        
         }
     }
 }
@@ -12260,7 +10241,6 @@ public enum CameraRefusal: Equatable, Hashable {
     case permissionDenied
     case noCamera
     case busy
-    case microphoneBusy
     case configureFailed
     case notReady
     case tooShort
@@ -12268,8 +10248,6 @@ public enum CameraRefusal: Equatable, Hashable {
     case photoFailed
     case memory
     case inCall
-    case interrupted
-    case microphoneSilent
 
 
 
@@ -12297,25 +10275,19 @@ public struct FfiConverterTypeCameraRefusal: FfiConverterRustBuffer {
         
         case 3: return .busy
         
-        case 4: return .microphoneBusy
+        case 4: return .configureFailed
         
-        case 5: return .configureFailed
+        case 5: return .notReady
         
-        case 6: return .notReady
+        case 6: return .tooShort
         
-        case 7: return .tooShort
+        case 7: return .recordFailed
         
-        case 8: return .recordFailed
+        case 8: return .photoFailed
         
-        case 9: return .photoFailed
+        case 9: return .memory
         
-        case 10: return .memory
-        
-        case 11: return .inCall
-        
-        case 12: return .interrupted
-        
-        case 13: return .microphoneSilent
+        case 10: return .inCall
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -12337,44 +10309,32 @@ public struct FfiConverterTypeCameraRefusal: FfiConverterRustBuffer {
             writeInt(&buf, Int32(3))
         
         
-        case .microphoneBusy:
+        case .configureFailed:
             writeInt(&buf, Int32(4))
         
         
-        case .configureFailed:
+        case .notReady:
             writeInt(&buf, Int32(5))
         
         
-        case .notReady:
+        case .tooShort:
             writeInt(&buf, Int32(6))
         
         
-        case .tooShort:
+        case .recordFailed:
             writeInt(&buf, Int32(7))
         
         
-        case .recordFailed:
+        case .photoFailed:
             writeInt(&buf, Int32(8))
         
         
-        case .photoFailed:
+        case .memory:
             writeInt(&buf, Int32(9))
         
         
-        case .memory:
-            writeInt(&buf, Int32(10))
-        
-        
         case .inCall:
-            writeInt(&buf, Int32(11))
-        
-        
-        case .interrupted:
-            writeInt(&buf, Int32(12))
-        
-        
-        case .microphoneSilent:
-            writeInt(&buf, Int32(13))
+            writeInt(&buf, Int32(10))
         
         }
     }
@@ -12398,8 +10358,6 @@ public func FfiConverterTypeCameraRefusal_lower(_ value: CameraRefusal) -> RustB
 
 
 /**
- * A delivered clip belongs to its take: the platform keeps the clip of every `Captured { take }` until the app fetches it with `clip(take)` or the layer closes (`LayerClosed`).
- * Starting the next take, `DemandOff`, a lens change and `Unbind` never drop it. Only a running or unsettled take is thrown away by `Unbind` and `Restart`.
  * What the platform does after a step. `Unbind` and `Restart` also stop a running recording and delete its file.
  */
 
@@ -12551,7 +10509,6 @@ public enum CaptureEvent: Equatable, Hashable {
     
     case demandOn
     case demandOff
-    case layerClosed
     case opened(hasFlash: Bool, zoomMin: Float, zoomMax: Float
     )
     case cameraClosed
@@ -12570,10 +10527,10 @@ public enum CaptureEvent: Equatable, Hashable {
     )
     case stop
     case cancel
-    case revoked(reason: CameraRefusal
-    )
-    case audioFlow(flowing: Bool
-    )
+    /**
+     * A call began: a recording that runs is thrown away and ends with `InCall`.
+     */
+    case callStarted
     case recordFinished(end: RecordEnd
     )
     case recordSettled(durationMs: UInt64?
@@ -12609,57 +10566,51 @@ public struct FfiConverterTypeCaptureEvent: FfiConverterRustBuffer {
         
         case 2: return .demandOff
         
-        case 3: return .layerClosed
-        
-        case 4: return .opened(hasFlash: try FfiConverterBool.read(from: &buf), zoomMin: try FfiConverterFloat.read(from: &buf), zoomMax: try FfiConverterFloat.read(from: &buf)
+        case 3: return .opened(hasFlash: try FfiConverterBool.read(from: &buf), zoomMin: try FfiConverterFloat.read(from: &buf), zoomMax: try FfiConverterFloat.read(from: &buf)
         )
         
-        case 5: return .cameraClosed
+        case 4: return .cameraClosed
         
-        case 6: return .streaming(on: try FfiConverterBool.read(from: &buf)
+        case 5: return .streaming(on: try FfiConverterBool.read(from: &buf)
         )
         
-        case 7: return .fault(kind: try FfiConverterTypeFaultKind.read(from: &buf)
+        case 6: return .fault(kind: try FfiConverterTypeFaultKind.read(from: &buf)
         )
         
-        case 8: return .refuse(reason: try FfiConverterTypeCameraRefusal.read(from: &buf)
+        case 7: return .refuse(reason: try FfiConverterTypeCameraRefusal.read(from: &buf)
         )
         
-        case 9: return .photo
+        case 8: return .photo
         
-        case 10: return .photoDone(ok: try FfiConverterBool.read(from: &buf)
+        case 9: return .photoDone(ok: try FfiConverterBool.read(from: &buf)
         )
         
-        case 11: return .start
+        case 10: return .start
         
-        case 12: return .recordStarted
+        case 11: return .recordStarted
         
-        case 13: return .tick(recordedMs: try FfiConverterUInt64.read(from: &buf)
+        case 12: return .tick(recordedMs: try FfiConverterUInt64.read(from: &buf)
         )
         
-        case 14: return .stop
+        case 13: return .stop
         
-        case 15: return .cancel
+        case 14: return .cancel
         
-        case 16: return .revoked(reason: try FfiConverterTypeCameraRefusal.read(from: &buf)
+        case 15: return .callStarted
+        
+        case 16: return .recordFinished(end: try FfiConverterTypeRecordEnd.read(from: &buf)
         )
         
-        case 17: return .audioFlow(flowing: try FfiConverterBool.read(from: &buf)
+        case 17: return .recordSettled(durationMs: try FfiConverterOptionUInt64.read(from: &buf)
         )
         
-        case 18: return .recordFinished(end: try FfiConverterTypeRecordEnd.read(from: &buf)
+        case 18: return .setLens(lens: try FfiConverterTypeCameraLens.read(from: &buf)
         )
         
-        case 19: return .recordSettled(durationMs: try FfiConverterOptionUInt64.read(from: &buf)
+        case 19: return .setFlash(on: try FfiConverterBool.read(from: &buf)
         )
         
-        case 20: return .setLens(lens: try FfiConverterTypeCameraLens.read(from: &buf)
-        )
-        
-        case 21: return .setFlash(on: try FfiConverterBool.read(from: &buf)
-        )
-        
-        case 22: return .zoomBy(factor: try FfiConverterFloat.read(from: &buf)
+        case 20: return .zoomBy(factor: try FfiConverterFloat.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -12678,98 +10629,88 @@ public struct FfiConverterTypeCaptureEvent: FfiConverterRustBuffer {
             writeInt(&buf, Int32(2))
         
         
-        case .layerClosed:
-            writeInt(&buf, Int32(3))
-        
-        
         case let .opened(hasFlash,zoomMin,zoomMax):
-            writeInt(&buf, Int32(4))
+            writeInt(&buf, Int32(3))
             FfiConverterBool.write(hasFlash, into: &buf)
             FfiConverterFloat.write(zoomMin, into: &buf)
             FfiConverterFloat.write(zoomMax, into: &buf)
             
         
         case .cameraClosed:
-            writeInt(&buf, Int32(5))
+            writeInt(&buf, Int32(4))
         
         
         case let .streaming(on):
-            writeInt(&buf, Int32(6))
+            writeInt(&buf, Int32(5))
             FfiConverterBool.write(on, into: &buf)
             
         
         case let .fault(kind):
-            writeInt(&buf, Int32(7))
+            writeInt(&buf, Int32(6))
             FfiConverterTypeFaultKind.write(kind, into: &buf)
             
         
         case let .refuse(reason):
-            writeInt(&buf, Int32(8))
+            writeInt(&buf, Int32(7))
             FfiConverterTypeCameraRefusal.write(reason, into: &buf)
             
         
         case .photo:
-            writeInt(&buf, Int32(9))
+            writeInt(&buf, Int32(8))
         
         
         case let .photoDone(ok):
-            writeInt(&buf, Int32(10))
+            writeInt(&buf, Int32(9))
             FfiConverterBool.write(ok, into: &buf)
             
         
         case .start:
-            writeInt(&buf, Int32(11))
+            writeInt(&buf, Int32(10))
         
         
         case .recordStarted:
-            writeInt(&buf, Int32(12))
+            writeInt(&buf, Int32(11))
         
         
         case let .tick(recordedMs):
-            writeInt(&buf, Int32(13))
+            writeInt(&buf, Int32(12))
             FfiConverterUInt64.write(recordedMs, into: &buf)
             
         
         case .stop:
-            writeInt(&buf, Int32(14))
+            writeInt(&buf, Int32(13))
         
         
         case .cancel:
+            writeInt(&buf, Int32(14))
+        
+        
+        case .callStarted:
             writeInt(&buf, Int32(15))
         
         
-        case let .revoked(reason):
-            writeInt(&buf, Int32(16))
-            FfiConverterTypeCameraRefusal.write(reason, into: &buf)
-            
-        
-        case let .audioFlow(flowing):
-            writeInt(&buf, Int32(17))
-            FfiConverterBool.write(flowing, into: &buf)
-            
-        
         case let .recordFinished(end):
-            writeInt(&buf, Int32(18))
+            writeInt(&buf, Int32(16))
             FfiConverterTypeRecordEnd.write(end, into: &buf)
             
         
         case let .recordSettled(durationMs):
-            writeInt(&buf, Int32(19))
+            writeInt(&buf, Int32(17))
             FfiConverterOptionUInt64.write(durationMs, into: &buf)
             
         
         case let .setLens(lens):
-            writeInt(&buf, Int32(20))
+            writeInt(&buf, Int32(18))
             FfiConverterTypeCameraLens.write(lens, into: &buf)
             
         
         case let .setFlash(on):
-            writeInt(&buf, Int32(21))
+            writeInt(&buf, Int32(19))
             FfiConverterBool.write(on, into: &buf)
             
         
         case let .zoomBy(factor):
-            writeInt(&buf, Int32(22))
+            writeInt(&buf, Int32(20))
             FfiConverterFloat.write(factor, into: &buf)
             
         }
@@ -12994,114 +10935,6 @@ public func FfiConverterTypeCaptureMode_lift(_ buf: RustBuffer) throws -> Captur
 #endif
 public func FfiConverterTypeCaptureMode_lower(_ value: CaptureMode) -> RustBuffer {
     return FfiConverterTypeCaptureMode.lower(value)
-}
-
-
-
-
-public enum CoverageVerdict: Equatable, Hashable {
-    
-    case skipped
-    case covered
-    case missing
-    case empty
-    case broken
-    case headGap
-    case midGap
-    case tailCut
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension CoverageVerdict: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeCoverageVerdict: FfiConverterRustBuffer {
-    typealias SwiftType = CoverageVerdict
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CoverageVerdict {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .skipped
-        
-        case 2: return .covered
-        
-        case 3: return .missing
-        
-        case 4: return .empty
-        
-        case 5: return .broken
-        
-        case 6: return .headGap
-        
-        case 7: return .midGap
-        
-        case 8: return .tailCut
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: CoverageVerdict, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case .skipped:
-            writeInt(&buf, Int32(1))
-        
-        
-        case .covered:
-            writeInt(&buf, Int32(2))
-        
-        
-        case .missing:
-            writeInt(&buf, Int32(3))
-        
-        
-        case .empty:
-            writeInt(&buf, Int32(4))
-        
-        
-        case .broken:
-            writeInt(&buf, Int32(5))
-        
-        
-        case .headGap:
-            writeInt(&buf, Int32(6))
-        
-        
-        case .midGap:
-            writeInt(&buf, Int32(7))
-        
-        
-        case .tailCut:
-            writeInt(&buf, Int32(8))
-        
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeCoverageVerdict_lift(_ buf: RustBuffer) throws -> CoverageVerdict {
-    return try FfiConverterTypeCoverageVerdict.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeCoverageVerdict_lower(_ value: CoverageVerdict) -> RustBuffer {
-    return FfiConverterTypeCoverageVerdict.lower(value)
 }
 
 
@@ -13374,107 +11207,6 @@ public func FfiConverterTypeEvict_lower(_ value: Evict) -> RustBuffer {
 
 
 
-public enum FailureSource: Equatable, Hashable {
-    
-    case session
-    case focus
-    case speaker
-    case device
-    case recorder
-    case camera
-    case file
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension FailureSource: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeFailureSource: FfiConverterRustBuffer {
-    typealias SwiftType = FailureSource
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FailureSource {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .session
-        
-        case 2: return .focus
-        
-        case 3: return .speaker
-        
-        case 4: return .device
-        
-        case 5: return .recorder
-        
-        case 6: return .camera
-        
-        case 7: return .file
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: FailureSource, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case .session:
-            writeInt(&buf, Int32(1))
-        
-        
-        case .focus:
-            writeInt(&buf, Int32(2))
-        
-        
-        case .speaker:
-            writeInt(&buf, Int32(3))
-        
-        
-        case .device:
-            writeInt(&buf, Int32(4))
-        
-        
-        case .recorder:
-            writeInt(&buf, Int32(5))
-        
-        
-        case .camera:
-            writeInt(&buf, Int32(6))
-        
-        
-        case .file:
-            writeInt(&buf, Int32(7))
-        
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFailureSource_lift(_ buf: RustBuffer) throws -> FailureSource {
-    return try FfiConverterTypeFailureSource.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFailureSource_lower(_ value: FailureSource) -> RustBuffer {
-    return FfiConverterTypeFailureSource.lower(value)
-}
-
-
-
-
 public enum FailureStage: Equatable, Hashable {
     
     case load
@@ -13602,159 +11334,6 @@ public func FfiConverterTypeFaultKind_lift(_ buf: RustBuffer) throws -> FaultKin
 #endif
 public func FfiConverterTypeFaultKind_lower(_ value: FaultKind) -> RustBuffer {
     return FfiConverterTypeFaultKind.lower(value)
-}
-
-
-
-
-public enum FocusAnswer: Equatable, Hashable {
-    
-    case granted
-    case delayed
-    case failed
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension FocusAnswer: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeFocusAnswer: FfiConverterRustBuffer {
-    typealias SwiftType = FocusAnswer
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FocusAnswer {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .granted
-        
-        case 2: return .delayed
-        
-        case 3: return .failed
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: FocusAnswer, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case .granted:
-            writeInt(&buf, Int32(1))
-        
-        
-        case .delayed:
-            writeInt(&buf, Int32(2))
-        
-        
-        case .failed:
-            writeInt(&buf, Int32(3))
-        
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFocusAnswer_lift(_ buf: RustBuffer) throws -> FocusAnswer {
-    return try FfiConverterTypeFocusAnswer.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFocusAnswer_lower(_ value: FocusAnswer) -> RustBuffer {
-    return FfiConverterTypeFocusAnswer.lower(value)
-}
-
-
-
-
-public enum FocusChange: Equatable, Hashable {
-    
-    case gain
-    case lossTransient
-    case lossTransientDuck
-    case loss
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension FocusChange: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeFocusChange: FfiConverterRustBuffer {
-    typealias SwiftType = FocusChange
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FocusChange {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .gain
-        
-        case 2: return .lossTransient
-        
-        case 3: return .lossTransientDuck
-        
-        case 4: return .loss
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: FocusChange, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case .gain:
-            writeInt(&buf, Int32(1))
-        
-        
-        case .lossTransient:
-            writeInt(&buf, Int32(2))
-        
-        
-        case .lossTransientDuck:
-            writeInt(&buf, Int32(3))
-        
-        
-        case .loss:
-            writeInt(&buf, Int32(4))
-        
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFocusChange_lift(_ buf: RustBuffer) throws -> FocusChange {
-    return try FfiConverterTypeFocusChange.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFocusChange_lower(_ value: FocusChange) -> RustBuffer {
-    return FfiConverterTypeFocusChange.lower(value)
 }
 
 
@@ -14105,12 +11684,13 @@ enum MediaError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
     )
     case InvalidSuspension(detail: String
     )
-    case Voice(detail: String, reason: VoiceRefusal
+    case Voice(detail: String
     )
     case Camera(reason: CameraRefusal, detail: String, recordedMs: UInt64?
     )
     case Overloaded(detail: String
     )
+    case InCall
     case Closed
     case Unexpected(detail: String
     )
@@ -14165,8 +11745,7 @@ public struct FfiConverterTypeMediaError: FfiConverterRustBuffer {
             detail: try FfiConverterString.read(from: &buf)
             )
         case 8: return .Voice(
-            detail: try FfiConverterString.read(from: &buf), 
-            reason: try FfiConverterTypeVoiceRefusal.read(from: &buf)
+            detail: try FfiConverterString.read(from: &buf)
             )
         case 9: return .Camera(
             reason: try FfiConverterTypeCameraRefusal.read(from: &buf), 
@@ -14176,8 +11755,9 @@ public struct FfiConverterTypeMediaError: FfiConverterRustBuffer {
         case 10: return .Overloaded(
             detail: try FfiConverterString.read(from: &buf)
             )
-        case 11: return .Closed
-        case 12: return .Unexpected(
+        case 11: return .InCall
+        case 12: return .Closed
+        case 13: return .Unexpected(
             detail: try FfiConverterString.read(from: &buf)
             )
 
@@ -14227,10 +11807,9 @@ public struct FfiConverterTypeMediaError: FfiConverterRustBuffer {
             FfiConverterString.write(detail, into: &buf)
             
         
-        case let .Voice(detail,reason):
+        case let .Voice(detail):
             writeInt(&buf, Int32(8))
             FfiConverterString.write(detail, into: &buf)
-            FfiConverterTypeVoiceRefusal.write(reason, into: &buf)
             
         
         case let .Camera(reason,detail,recordedMs):
@@ -14245,12 +11824,16 @@ public struct FfiConverterTypeMediaError: FfiConverterRustBuffer {
             FfiConverterString.write(detail, into: &buf)
             
         
-        case .Closed:
+        case .InCall:
             writeInt(&buf, Int32(11))
         
         
-        case let .Unexpected(detail):
+        case .Closed:
             writeInt(&buf, Int32(12))
+        
+        
+        case let .Unexpected(detail):
+            writeInt(&buf, Int32(13))
             FfiConverterString.write(detail, into: &buf)
             
         }
@@ -14371,201 +11954,6 @@ public func FfiConverterTypeMediaState_lower(_ value: MediaState) -> RustBuffer 
 
 
 
-public enum MicrophoneAvailability: Equatable, Hashable {
-    
-    case available
-    case ownCall
-    case externalCall
-    case otherApp
-    case permissionDenied
-    case noSound
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension MicrophoneAvailability: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeMicrophoneAvailability: FfiConverterRustBuffer {
-    typealias SwiftType = MicrophoneAvailability
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MicrophoneAvailability {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .available
-        
-        case 2: return .ownCall
-        
-        case 3: return .externalCall
-        
-        case 4: return .otherApp
-        
-        case 5: return .permissionDenied
-        
-        case 6: return .noSound
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: MicrophoneAvailability, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case .available:
-            writeInt(&buf, Int32(1))
-        
-        
-        case .ownCall:
-            writeInt(&buf, Int32(2))
-        
-        
-        case .externalCall:
-            writeInt(&buf, Int32(3))
-        
-        
-        case .otherApp:
-            writeInt(&buf, Int32(4))
-        
-        
-        case .permissionDenied:
-            writeInt(&buf, Int32(5))
-        
-        
-        case .noSound:
-            writeInt(&buf, Int32(6))
-        
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeMicrophoneAvailability_lift(_ buf: RustBuffer) throws -> MicrophoneAvailability {
-    return try FfiConverterTypeMicrophoneAvailability.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeMicrophoneAvailability_lower(_ value: MicrophoneAvailability) -> RustBuffer {
-    return FfiConverterTypeMicrophoneAvailability.lower(value)
-}
-
-
-
-
-public enum PauseReason: Equatable, Hashable {
-    
-    case capture
-    case interrupted
-    case focusLost
-    case outputLost
-    case mediaReset
-    case inCall
-    case suspended
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension PauseReason: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypePauseReason: FfiConverterRustBuffer {
-    typealias SwiftType = PauseReason
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PauseReason {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .capture
-        
-        case 2: return .interrupted
-        
-        case 3: return .focusLost
-        
-        case 4: return .outputLost
-        
-        case 5: return .mediaReset
-        
-        case 6: return .inCall
-        
-        case 7: return .suspended
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: PauseReason, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case .capture:
-            writeInt(&buf, Int32(1))
-        
-        
-        case .interrupted:
-            writeInt(&buf, Int32(2))
-        
-        
-        case .focusLost:
-            writeInt(&buf, Int32(3))
-        
-        
-        case .outputLost:
-            writeInt(&buf, Int32(4))
-        
-        
-        case .mediaReset:
-            writeInt(&buf, Int32(5))
-        
-        
-        case .inCall:
-            writeInt(&buf, Int32(6))
-        
-        
-        case .suspended:
-            writeInt(&buf, Int32(7))
-        
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypePauseReason_lift(_ buf: RustBuffer) throws -> PauseReason {
-    return try FfiConverterTypePauseReason.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypePauseReason_lower(_ value: PauseReason) -> RustBuffer {
-    return FfiConverterTypePauseReason.lower(value)
-}
-
-
-
-
 public enum Placeholder: Equatable, Hashable {
     
     case blurHash(hash: String
@@ -14647,72 +12035,6 @@ public func FfiConverterTypePlaceholder_lift(_ buf: RustBuffer) throws -> Placeh
 #endif
 public func FfiConverterTypePlaceholder_lower(_ value: Placeholder) -> RustBuffer {
     return FfiConverterTypePlaceholder.lower(value)
-}
-
-
-
-
-public enum PlayRefusal: Equatable, Hashable {
-    
-    case inCall
-    case recording
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension PlayRefusal: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypePlayRefusal: FfiConverterRustBuffer {
-    typealias SwiftType = PlayRefusal
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PlayRefusal {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .inCall
-        
-        case 2: return .recording
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: PlayRefusal, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case .inCall:
-            writeInt(&buf, Int32(1))
-        
-        
-        case .recording:
-            writeInt(&buf, Int32(2))
-        
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypePlayRefusal_lift(_ buf: RustBuffer) throws -> PlayRefusal {
-    return try FfiConverterTypePlayRefusal.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypePlayRefusal_lower(_ value: PlayRefusal) -> RustBuffer {
-    return FfiConverterTypePlayRefusal.lower(value)
 }
 
 
@@ -14947,159 +12269,6 @@ public func FfiConverterTypeRecordVerdict_lower(_ value: RecordVerdict) -> RustB
 
 
 
-public enum RecordingKind: Equatable, Hashable {
-    
-    case voice
-    case video
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension RecordingKind: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeRecordingKind: FfiConverterRustBuffer {
-    typealias SwiftType = RecordingKind
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RecordingKind {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .voice
-        
-        case 2: return .video
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: RecordingKind, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case .voice:
-            writeInt(&buf, Int32(1))
-        
-        
-        case .video:
-            writeInt(&buf, Int32(2))
-        
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeRecordingKind_lift(_ buf: RustBuffer) throws -> RecordingKind {
-    return try FfiConverterTypeRecordingKind.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeRecordingKind_lower(_ value: RecordingKind) -> RustBuffer {
-    return FfiConverterTypeRecordingKind.lower(value)
-}
-
-
-
-
-public enum RecordingRefusal: Equatable, Hashable {
-    
-    case inCall
-    case interrupted
-    case microphoneSilent
-    case permissionDenied
-    case microphoneBusy
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension RecordingRefusal: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeRecordingRefusal: FfiConverterRustBuffer {
-    typealias SwiftType = RecordingRefusal
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RecordingRefusal {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .inCall
-        
-        case 2: return .interrupted
-        
-        case 3: return .microphoneSilent
-        
-        case 4: return .permissionDenied
-        
-        case 5: return .microphoneBusy
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: RecordingRefusal, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case .inCall:
-            writeInt(&buf, Int32(1))
-        
-        
-        case .interrupted:
-            writeInt(&buf, Int32(2))
-        
-        
-        case .microphoneSilent:
-            writeInt(&buf, Int32(3))
-        
-        
-        case .permissionDenied:
-            writeInt(&buf, Int32(4))
-        
-        
-        case .microphoneBusy:
-            writeInt(&buf, Int32(5))
-        
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeRecordingRefusal_lift(_ buf: RustBuffer) throws -> RecordingRefusal {
-    return try FfiConverterTypeRecordingRefusal.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeRecordingRefusal_lower(_ value: RecordingRefusal) -> RustBuffer {
-    return FfiConverterTypeRecordingRefusal.lower(value)
-}
-
-
-
-
 public enum RecoveryAction: Equatable, Hashable {
     
     case restart
@@ -15166,176 +12335,6 @@ public func FfiConverterTypeRecoveryAction_lower(_ value: RecoveryAction) -> Rus
 
 
 
-public enum RouteReason: Equatable, Hashable {
-    
-    case oldDeviceUnavailable
-    case newDeviceAvailable
-    case categoryChange
-    case override
-    case other
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension RouteReason: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeRouteReason: FfiConverterRustBuffer {
-    typealias SwiftType = RouteReason
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RouteReason {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .oldDeviceUnavailable
-        
-        case 2: return .newDeviceAvailable
-        
-        case 3: return .categoryChange
-        
-        case 4: return .override
-        
-        case 5: return .other
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: RouteReason, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case .oldDeviceUnavailable:
-            writeInt(&buf, Int32(1))
-        
-        
-        case .newDeviceAvailable:
-            writeInt(&buf, Int32(2))
-        
-        
-        case .categoryChange:
-            writeInt(&buf, Int32(3))
-        
-        
-        case .override:
-            writeInt(&buf, Int32(4))
-        
-        
-        case .other:
-            writeInt(&buf, Int32(5))
-        
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeRouteReason_lift(_ buf: RustBuffer) throws -> RouteReason {
-    return try FfiConverterTypeRouteReason.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeRouteReason_lower(_ value: RouteReason) -> RustBuffer {
-    return FfiConverterTypeRouteReason.lower(value)
-}
-
-
-
-
-public enum SessionWant: Equatable, Hashable {
-    
-    case playback(focus: AudioFocus
-    )
-    case recording(kind: RecordingKind
-    )
-    case call(kind: CallKind, speaker: Bool
-    )
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension SessionWant: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeSessionWant: FfiConverterRustBuffer {
-    typealias SwiftType = SessionWant
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SessionWant {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .playback(focus: try FfiConverterTypeAudioFocus.read(from: &buf)
-        )
-        
-        case 2: return .recording(kind: try FfiConverterTypeRecordingKind.read(from: &buf)
-        )
-        
-        case 3: return .call(kind: try FfiConverterTypeCallKind.read(from: &buf), speaker: try FfiConverterBool.read(from: &buf)
-        )
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: SessionWant, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case let .playback(focus):
-            writeInt(&buf, Int32(1))
-            FfiConverterTypeAudioFocus.write(focus, into: &buf)
-            
-        
-        case let .recording(kind):
-            writeInt(&buf, Int32(2))
-            FfiConverterTypeRecordingKind.write(kind, into: &buf)
-            
-        
-        case let .call(kind,speaker):
-            writeInt(&buf, Int32(3))
-            FfiConverterTypeCallKind.write(kind, into: &buf)
-            FfiConverterBool.write(speaker, into: &buf)
-            
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeSessionWant_lift(_ buf: RustBuffer) throws -> SessionWant {
-    return try FfiConverterTypeSessionWant.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeSessionWant_lower(_ value: SessionWant) -> RustBuffer {
-    return FfiConverterTypeSessionWant.lower(value)
-}
-
-
-
-
 public enum SlotCall: Equatable, Hashable {
     
     case load(key: String, route: PlaybackRoute, generation: UInt64
@@ -15352,8 +12351,6 @@ public enum SlotCall: Equatable, Hashable {
     case seek(positionMs: UInt64
     )
     case rate(rate: Float
-    )
-    case looping(looping: Bool
     )
     case readahead(ms: UInt64
     )
@@ -15404,10 +12401,7 @@ public struct FfiConverterTypeSlotCall: FfiConverterRustBuffer {
         case 11: return .rate(rate: try FfiConverterFloat.read(from: &buf)
         )
         
-        case 12: return .looping(looping: try FfiConverterBool.read(from: &buf)
-        )
-        
-        case 13: return .readahead(ms: try FfiConverterUInt64.read(from: &buf)
+        case 12: return .readahead(ms: try FfiConverterUInt64.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -15468,13 +12462,8 @@ public struct FfiConverterTypeSlotCall: FfiConverterRustBuffer {
             FfiConverterFloat.write(rate, into: &buf)
             
         
-        case let .looping(looping):
-            writeInt(&buf, Int32(12))
-            FfiConverterBool.write(looping, into: &buf)
-            
-        
         case let .readahead(ms):
-            writeInt(&buf, Int32(13))
+            writeInt(&buf, Int32(12))
             FfiConverterUInt64.write(ms, into: &buf)
             
         }
@@ -15494,88 +12483,6 @@ public func FfiConverterTypeSlotCall_lift(_ buf: RustBuffer) throws -> SlotCall 
 #endif
 public func FfiConverterTypeSlotCall_lower(_ value: SlotCall) -> RustBuffer {
     return FfiConverterTypeSlotCall.lower(value)
-}
-
-
-
-
-public enum TakeOutcome: Equatable, Hashable {
-    
-    case captured(take: UInt64
-    )
-    case refused(reason: CameraRefusal
-    )
-    case lost(reason: CameraRefusal
-    )
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension TakeOutcome: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeTakeOutcome: FfiConverterRustBuffer {
-    typealias SwiftType = TakeOutcome
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TakeOutcome {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .captured(take: try FfiConverterUInt64.read(from: &buf)
-        )
-        
-        case 2: return .refused(reason: try FfiConverterTypeCameraRefusal.read(from: &buf)
-        )
-        
-        case 3: return .lost(reason: try FfiConverterTypeCameraRefusal.read(from: &buf)
-        )
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: TakeOutcome, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case let .captured(take):
-            writeInt(&buf, Int32(1))
-            FfiConverterUInt64.write(take, into: &buf)
-            
-        
-        case let .refused(reason):
-            writeInt(&buf, Int32(2))
-            FfiConverterTypeCameraRefusal.write(reason, into: &buf)
-            
-        
-        case let .lost(reason):
-            writeInt(&buf, Int32(3))
-            FfiConverterTypeCameraRefusal.write(reason, into: &buf)
-            
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeTakeOutcome_lift(_ buf: RustBuffer) throws -> TakeOutcome {
-    return try FfiConverterTypeTakeOutcome.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeTakeOutcome_lower(_ value: TakeOutcome) -> RustBuffer {
-    return FfiConverterTypeTakeOutcome.lower(value)
 }
 
 
@@ -15723,168 +12630,6 @@ public func FfiConverterTypeVideoStabilization_lower(_ value: VideoStabilization
 
 
 /**
- * How a voice take ended.
- */
-
-public enum VoiceOutcome: Equatable, Hashable {
-    
-    case recorded(path: String, durationMs: UInt64
-    )
-    case refused(reason: VoiceRefusal
-    )
-    case failed(failure: NativeFailure
-    )
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension VoiceOutcome: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeVoiceOutcome: FfiConverterRustBuffer {
-    typealias SwiftType = VoiceOutcome
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VoiceOutcome {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .recorded(path: try FfiConverterString.read(from: &buf), durationMs: try FfiConverterUInt64.read(from: &buf)
-        )
-        
-        case 2: return .refused(reason: try FfiConverterTypeVoiceRefusal.read(from: &buf)
-        )
-        
-        case 3: return .failed(failure: try FfiConverterTypeNativeFailure.read(from: &buf)
-        )
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: VoiceOutcome, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case let .recorded(path,durationMs):
-            writeInt(&buf, Int32(1))
-            FfiConverterString.write(path, into: &buf)
-            FfiConverterUInt64.write(durationMs, into: &buf)
-            
-        
-        case let .refused(reason):
-            writeInt(&buf, Int32(2))
-            FfiConverterTypeVoiceRefusal.write(reason, into: &buf)
-            
-        
-        case let .failed(failure):
-            writeInt(&buf, Int32(3))
-            FfiConverterTypeNativeFailure.write(failure, into: &buf)
-            
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeVoiceOutcome_lift(_ buf: RustBuffer) throws -> VoiceOutcome {
-    return try FfiConverterTypeVoiceOutcome.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeVoiceOutcome_lower(_ value: VoiceOutcome) -> RustBuffer {
-    return FfiConverterTypeVoiceOutcome.lower(value)
-}
-
-
-
-/**
- * Where a voice recorder is: no take, a take records, or a take ends.
- */
-
-public enum VoicePhase: Equatable, Hashable {
-    
-    case idle
-    case recording
-    case stopping
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension VoicePhase: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeVoicePhase: FfiConverterRustBuffer {
-    typealias SwiftType = VoicePhase
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VoicePhase {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .idle
-        
-        case 2: return .recording
-        
-        case 3: return .stopping
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: VoicePhase, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case .idle:
-            writeInt(&buf, Int32(1))
-        
-        
-        case .recording:
-            writeInt(&buf, Int32(2))
-        
-        
-        case .stopping:
-            writeInt(&buf, Int32(3))
-        
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeVoicePhase_lift(_ buf: RustBuffer) throws -> VoicePhase {
-    return try FfiConverterTypeVoicePhase.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeVoicePhase_lower(_ value: VoicePhase) -> RustBuffer {
-    return FfiConverterTypeVoicePhase.lower(value)
-}
-
-
-
-/**
  * Why a voice recording did not start or gave nothing.
  */
 
@@ -15894,9 +12639,6 @@ public enum VoiceRefusal: Equatable, Hashable {
     case microphoneBusy
     case empty
     case inCall
-    case interrupted
-    case microphoneSilent
-    case tooShort
 
 
 
@@ -15926,12 +12668,6 @@ public struct FfiConverterTypeVoiceRefusal: FfiConverterRustBuffer {
         
         case 4: return .inCall
         
-        case 5: return .interrupted
-        
-        case 6: return .microphoneSilent
-        
-        case 7: return .tooShort
-        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -15954,18 +12690,6 @@ public struct FfiConverterTypeVoiceRefusal: FfiConverterRustBuffer {
         
         case .inCall:
             writeInt(&buf, Int32(4))
-        
-        
-        case .interrupted:
-            writeInt(&buf, Int32(5))
-        
-        
-        case .microphoneSilent:
-            writeInt(&buf, Int32(6))
-        
-        
-        case .tooShort:
-            writeInt(&buf, Int32(7))
         
         }
     }
@@ -16030,30 +12754,6 @@ fileprivate struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterUInt64.read(from: &buf)
-        default: throw UniffiInternalError.unexpectedOptionalTag
-        }
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-fileprivate struct FfiConverterOptionInt64: FfiConverterRustBuffer {
-    typealias SwiftType = Int64?
-
-    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
-        guard let value = value else {
-            writeInt(&buf, Int8(0))
-            return
-        }
-        writeInt(&buf, Int8(1))
-        FfiConverterInt64.write(value, into: &buf)
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
-        switch try readInt(&buf) as Int8 {
-        case 0: return nil
-        case 1: return try FfiConverterInt64.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -16566,30 +13266,6 @@ fileprivate struct FfiConverterOptionTypeTonePixels: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterOptionTypeVideoBounds: FfiConverterRustBuffer {
-    typealias SwiftType = VideoBounds?
-
-    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
-        guard let value = value else {
-            writeInt(&buf, Int8(0))
-            return
-        }
-        writeInt(&buf, Int8(1))
-        FfiConverterTypeVideoBounds.write(value, into: &buf)
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
-        switch try readInt(&buf) as Int8 {
-        case 0: return nil
-        case 1: return try FfiConverterTypeVideoBounds.read(from: &buf)
-        default: throw UniffiInternalError.unexpectedOptionalTag
-        }
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterOptionTypeCameraLens: FfiConverterRustBuffer {
     typealias SwiftType = CameraLens?
 
@@ -16630,30 +13306,6 @@ fileprivate struct FfiConverterOptionTypeCameraRefusal: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeCameraRefusal.read(from: &buf)
-        default: throw UniffiInternalError.unexpectedOptionalTag
-        }
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-fileprivate struct FfiConverterOptionTypeCoverageVerdict: FfiConverterRustBuffer {
-    typealias SwiftType = CoverageVerdict?
-
-    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
-        guard let value = value else {
-            writeInt(&buf, Int8(0))
-            return
-        }
-        writeInt(&buf, Int8(1))
-        FfiConverterTypeCoverageVerdict.write(value, into: &buf)
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
-        switch try readInt(&buf) as Int8 {
-        case 0: return nil
-        case 1: return try FfiConverterTypeCoverageVerdict.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -16734,54 +13386,6 @@ fileprivate struct FfiConverterOptionTypeKind: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterOptionTypePauseReason: FfiConverterRustBuffer {
-    typealias SwiftType = PauseReason?
-
-    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
-        guard let value = value else {
-            writeInt(&buf, Int8(0))
-            return
-        }
-        writeInt(&buf, Int8(1))
-        FfiConverterTypePauseReason.write(value, into: &buf)
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
-        switch try readInt(&buf) as Int8 {
-        case 0: return nil
-        case 1: return try FfiConverterTypePauseReason.read(from: &buf)
-        default: throw UniffiInternalError.unexpectedOptionalTag
-        }
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-fileprivate struct FfiConverterOptionTypePlayRefusal: FfiConverterRustBuffer {
-    typealias SwiftType = PlayRefusal?
-
-    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
-        guard let value = value else {
-            writeInt(&buf, Int8(0))
-            return
-        }
-        writeInt(&buf, Int8(1))
-        FfiConverterTypePlayRefusal.write(value, into: &buf)
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
-        switch try readInt(&buf) as Int8 {
-        case 0: return nil
-        case 1: return try FfiConverterTypePlayRefusal.read(from: &buf)
-        default: throw UniffiInternalError.unexpectedOptionalTag
-        }
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterOptionTypeRecordEnd: FfiConverterRustBuffer {
     typealias SwiftType = RecordEnd?
 
@@ -16806,30 +13410,6 @@ fileprivate struct FfiConverterOptionTypeRecordEnd: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterOptionTypeTakeOutcome: FfiConverterRustBuffer {
-    typealias SwiftType = TakeOutcome?
-
-    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
-        guard let value = value else {
-            writeInt(&buf, Int8(0))
-            return
-        }
-        writeInt(&buf, Int8(1))
-        FfiConverterTypeTakeOutcome.write(value, into: &buf)
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
-        switch try readInt(&buf) as Int8 {
-        case 0: return nil
-        case 1: return try FfiConverterTypeTakeOutcome.read(from: &buf)
-        default: throw UniffiInternalError.unexpectedOptionalTag
-        }
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterOptionTypeVideoStabilization: FfiConverterRustBuffer {
     typealias SwiftType = VideoStabilization?
 
@@ -16846,30 +13426,6 @@ fileprivate struct FfiConverterOptionTypeVideoStabilization: FfiConverterRustBuf
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeVideoStabilization.read(from: &buf)
-        default: throw UniffiInternalError.unexpectedOptionalTag
-        }
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-fileprivate struct FfiConverterOptionTypeVoiceOutcome: FfiConverterRustBuffer {
-    typealias SwiftType = VoiceOutcome?
-
-    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
-        guard let value = value else {
-            writeInt(&buf, Int8(0))
-            return
-        }
-        writeInt(&buf, Int8(1))
-        FfiConverterTypeVoiceOutcome.write(value, into: &buf)
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
-        switch try readInt(&buf) as Int8 {
-        case 0: return nil
-        case 1: return try FfiConverterTypeVoiceOutcome.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -17202,31 +13758,6 @@ fileprivate struct FfiConverterSequenceTypeRgb: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterSequenceTypeAudioAction: FfiConverterRustBuffer {
-    typealias SwiftType = [AudioAction]
-
-    public static func write(_ value: [AudioAction], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterTypeAudioAction.write(item, into: &buf)
-        }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [AudioAction] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [AudioAction]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeAudioAction.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterSequenceTypeCaptureAction: FfiConverterRustBuffer {
     typealias SwiftType = [CaptureAction]
 
@@ -17542,43 +14073,6 @@ public func normalizeItem(item: MediaItem) -> MediaItem  {
     )
 })
 }
-public func audioCoverageRefusal(verdict: CoverageVerdict) -> CameraRefusal?  {
-    return try!  FfiConverterOptionTypeCameraRefusal.lift(try! rustCall() {
-        uniffiCallStatus in
-    uniffi_medialayer_fn_func_audio_coverage_refusal(
-        FfiConverterTypeCoverageVerdict_lower(verdict),uniffiCallStatus
-    )
-})
-}
-public func coverageBegin(config: CoverageConfig) -> CoverageScan  {
-    return try!  FfiConverterTypeCoverageScan_lift(try! rustCall() {
-        uniffiCallStatus in
-    uniffi_medialayer_fn_func_coverage_begin(
-        FfiConverterTypeCoverageConfig_lower(config),uniffiCallStatus
-    )
-})
-}
-public func coverageFinish(scan: CoverageScan, video: VideoBounds?) -> AudioCoverage  {
-    return try!  FfiConverterTypeAudioCoverage_lift(try! rustCall() {
-        uniffiCallStatus in
-    uniffi_medialayer_fn_func_coverage_finish(
-        FfiConverterTypeCoverageScan_lower(scan),
-        FfiConverterOptionTypeVideoBounds.lower(video),uniffiCallStatus
-    )
-})
-}
-/**
- * One rule for the audio of a recorded clip on both platforms: inside the stream one PCM sample of rounding is allowed (a longer hole is `MidGap`, an overlap, a repeat or a count that does not fit its length is `Broken`), the ends may differ from the video by one native codec frame. The first defect stays, a scan changed from outside is `Broken`.
- */
-public func coveragePush(scan: CoverageScan, interval: AudioInterval) -> CoverageScan  {
-    return try!  FfiConverterTypeCoverageScan_lift(try! rustCall() {
-        uniffiCallStatus in
-    uniffi_medialayer_fn_func_coverage_push(
-        FfiConverterTypeCoverageScan_lower(scan),
-        FfiConverterTypeAudioInterval_lower(interval),uniffiCallStatus
-    )
-})
-}
 /**
  * The formats of a camera that has one list of video sizes, one list of JPEG sizes and one list of frame rates (Android): each JPEG size of the aspect of a video size
  * goes with it, the photo is "high" from 1080x1920 pixels and "highest" when it is the largest JPEG of the camera.
@@ -17857,6 +14351,7 @@ public func cropPan(rect: CropFractions, dx: Double, dy: Double) -> CropFraction
 }
 /**
  * The rectangle after the photo turns a quarter clockwise or counter clockwise. `setup.photo` is the size before the turn.
+ * A crop with proportions is fitted again around the middle of the turned rectangle.
  */
 public func cropTurn(rect: CropFractions, setup: CropSetup, clockwise: Bool) -> CropFractions  {
     return try!  FfiConverterTypeCropFractions_lift(try! rustCall() {
@@ -18292,15 +14787,6 @@ public func voiceRefusalText(reason: VoiceRefusal) -> String  {
     )
 })
 }
-public func voiceTooShort(durationMs: UInt64, minTakeMs: UInt64) -> Bool  {
-    return try!  FfiConverterBool.lift(try! rustCall() {
-        uniffiCallStatus in
-    uniffi_medialayer_fn_func_voice_too_short(
-        FfiConverterUInt64.lower(durationMs),
-        FfiConverterUInt64.lower(minTakeMs),uniffiCallStatus
-    )
-})
-}
 /**
  * Routes every trace line to the sink and turns the trace on, or removes the sink.
  */
@@ -18346,18 +14832,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_normalize_item() != 30633) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_medialayer_checksum_func_audio_coverage_refusal() != 29963) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_medialayer_checksum_func_coverage_begin() != 16504) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_medialayer_checksum_func_coverage_finish() != 56229) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_medialayer_checksum_func_coverage_push() != 62985) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_format_candidates() != 39713) {
@@ -18426,7 +14900,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_medialayer_checksum_func_crop_pan() != 41864) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_medialayer_checksum_func_crop_turn() != 24769) {
+    if (uniffi_medialayer_checksum_func_crop_turn() != 28802) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_crop_zoom() != 47788) {
@@ -18537,9 +15011,6 @@ private let initializationResult: InitializationResult = {
     if (uniffi_medialayer_checksum_func_voice_refusal_text() != 24500) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_medialayer_checksum_func_voice_too_short() != 20970) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_medialayer_checksum_func_set_trace_sink() != 12310) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -18571,15 +15042,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_method_failurelistener_failed() != 25217) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_medialayer_checksum_method_failurelistener_closed() != 40051) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_medialayer_checksum_method_audioinputs_paused() != 3545) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_medialayer_checksum_method_audioinputs_send() != 53179) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_method_playerevents_background() != 39331) {
@@ -18630,9 +15092,6 @@ private let initializationResult: InitializationResult = {
     if (uniffi_medialayer_checksum_method_decodehold_release() != 23927) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_medialayer_checksum_method_medialayer_audio_inputs() != 63869) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_medialayer_checksum_method_medialayer_await_closed() != 53852) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -18646,6 +15105,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_method_medialayer_fetch_image() != 31267) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_medialayer_checksum_method_medialayer_hold_call() != 17283) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_method_medialayer_image_size() != 34246) {
@@ -18675,16 +15137,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_medialayer_checksum_method_medialayer_placeholder() != 13586) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_medialayer_checksum_method_medialayer_play_url() != 11292) {
+    if (uniffi_medialayer_checksum_method_medialayer_play_url() != 33635) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_method_medialayer_player_events() != 31486) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_method_medialayer_purge() != 62276) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_medialayer_checksum_method_medialayer_read_route() != 11813) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_method_medialayer_refresh_route() != 8576) {
@@ -18703,9 +15162,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_method_medialayer_reset_user_data() != 9388) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_medialayer_checksum_method_medialayer_retry() != 25430) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_method_medialayer_seek() != 14320) {
@@ -18753,12 +15209,6 @@ private let initializationResult: InitializationResult = {
     if (uniffi_medialayer_checksum_method_memoryreleaser_shutdown() != 64468) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_medialayer_checksum_method_playbacklistener_changed() != 37467) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_medialayer_checksum_method_playbacklistener_failed() != 6599) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_medialayer_checksum_method_statelistener_changed() != 19983) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -18780,6 +15230,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_medialayer_checksum_method_windowreadylistener_changed() != 13370) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_medialayer_checksum_method_callhold_release() != 12699) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_medialayer_checksum_method_mediaplace_item_state() != 46247) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -18789,25 +15242,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_medialayer_checksum_method_mediaplace_seek() != 60174) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_medialayer_checksum_method_mediaplace_subscribe_playback() != 53140) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_medialayer_checksum_method_mediaplace_update() != 14005) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_medialayer_checksum_method_mediaplayer_pause() != 62691) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_medialayer_checksum_method_mediaplayer_play() != 60525) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_medialayer_checksum_method_mediaplayer_release() != 6487) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_medialayer_checksum_method_mediaplayer_seek() != 4604) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_medialayer_checksum_method_mediaplayer_subscribe_playback() != 16953) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_method_mediawholedeclaration_add() != 49937) {
@@ -18860,7 +15295,6 @@ private let initializationResult: InitializationResult = {
     uniffiCallbackInitFailureListener()
     uniffiCallbackInitFetcher()
     uniffiCallbackInitMemoryReleaser()
-    uniffiCallbackInitPlaybackListener()
     uniffiCallbackInitPlayerSlot()
     uniffiCallbackInitPlayerSlotFactory()
     uniffiCallbackInitSettingsStore()
