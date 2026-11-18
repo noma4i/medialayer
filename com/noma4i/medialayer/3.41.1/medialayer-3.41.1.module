@@ -1,0 +1,103 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.noma4i",
+    "module": "medialayer",
+    "version": "3.41.1",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.8.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "releaseVariantReleaseApiPublication",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.libraryelements": "aar",
+        "org.gradle.usage": "java-api"
+      },
+      "dependencies": [
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.21"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "medialayer-3.41.1.aar",
+          "url": "medialayer-3.41.1.aar",
+          "size": 10252445,
+          "sha512": "8099ce245a9eace08c56d151caeba866f83c2b15820607bbb7d8471d0871f1e2c62c0a4b5047fb169acf1ca68c1d9cd46ce11303d3ac8c370099a0cf34420213",
+          "sha256": "e870ce35b4a9413f67e047d8d51f8260e71d70246aa1e8c0ae736149500ceff3",
+          "sha1": "c4de6cd5b041e1e9cec32a067fd3a0acfe9cc970",
+          "md5": "1495273db6daa15dd8b7ba3395d872b4"
+        }
+      ]
+    },
+    {
+      "name": "releaseVariantReleaseRuntimePublication",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.libraryelements": "aar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "net.java.dev.jna",
+          "module": "jna",
+          "version": {
+            "requires": "5.19.1"
+          },
+          "excludes": [
+            {
+              "group": "*",
+              "module": "*"
+            }
+          ],
+          "thirdPartyCompatibility": {
+            "artifactSelector": {
+              "name": "jna",
+              "type": "aar",
+              "extension": "aar"
+            }
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlinx",
+          "module": "kotlinx-coroutines-core",
+          "version": {
+            "requires": "1.10.2"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.21"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "medialayer-3.41.1.aar",
+          "url": "medialayer-3.41.1.aar",
+          "size": 10252445,
+          "sha512": "8099ce245a9eace08c56d151caeba866f83c2b15820607bbb7d8471d0871f1e2c62c0a4b5047fb169acf1ca68c1d9cd46ce11303d3ac8c370099a0cf34420213",
+          "sha256": "e870ce35b4a9413f67e047d8d51f8260e71d70246aa1e8c0ae736149500ceff3",
+          "sha1": "c4de6cd5b041e1e9cec32a067fd3a0acfe9cc970",
+          "md5": "1495273db6daa15dd8b7ba3395d872b4"
+        }
+      ]
+    }
+  ]
+}
