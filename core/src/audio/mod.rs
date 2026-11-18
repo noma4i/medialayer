@@ -284,7 +284,8 @@ impl AudioOwner {
                     Some(RecordingRefusal::InCall)
                 } else if self.system() == System::Interrupted {
                     Some(RecordingRefusal::Interrupted)
-                } else if self.captures.iter().any(|(_, existing)| *existing == kind) || self.other_recording || (kind == RecordingKind::Voice && self.video_taking()) {
+                } else if self.captures.iter().any(|(_, existing)| *existing == kind) || (kind == RecordingKind::Voice && self.video_taking()) {
+                    // A recording of another app never blocks a start: the one who opens a recording takes the microphone from the system (owner rule 2026-11-19).
                     Some(RecordingRefusal::MicrophoneBusy)
                 } else {
                     None
@@ -553,7 +554,7 @@ impl AudioOwner {
             self.hold = hold;
             actions.push(AudioAction::CallHold { on: hold });
         }
-        let open = self.permission == MicrophonePermission::Granted && self.foreground && !hold && !self.other_recording && !self.system_blocked();
+        let open = self.permission == MicrophonePermission::Granted && self.foreground && !hold && !self.system_blocked();
         let held = match session::held(&self.session) { Some(SessionWant::Recording { kind }) => Some(kind), _ => None };
         let woken = self.wake;
         let voice = self.yields(RecordingKind::Video);

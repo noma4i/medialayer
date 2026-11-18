@@ -321,7 +321,9 @@ fn inv_audio_28_availability_is_one_value_derived_from_every_input() {
     assert_eq!(world.send(I::Capture { id: 1, kind: RecordingKind::Voice }), vec![A::Refuse { id: 1, reason: RecordingRefusal::PermissionDenied }]);
     assert_eq!(world.send(I::Permission { state: MicrophonePermission::Granted }), vec![available(MicrophoneAvailability::Available)]);
     assert_eq!(world.send(I::OtherRecording { active: true }), vec![available(MicrophoneAvailability::OtherApp)]);
-    assert_eq!(world.send(I::Capture { id: 2, kind: RecordingKind::Voice }), vec![A::Refuse { id: 2, reason: RecordingRefusal::MicrophoneBusy }]);
+    let started = world.settle(I::Capture { id: 2, kind: RecordingKind::Voice });
+    assert!(started.contains(&A::Admit { id: 2 }), "a recording of another app is a signal, it never blocks a start: {started:?}");
+    world.settle(I::CaptureEnded { id: 2 });
     assert_eq!(world.send(I::OtherRecording { active: false }), vec![available(MicrophoneAvailability::Available)]);
     let call = SessionWant::Call { kind: CallKind::Unmanaged, speaker: false };
     assert_eq!(world.settle(I::CallStarted { id: 7, kind: CallKind::Unmanaged, speaker: false }), vec![A::CallHold { on: true }, apply(call), A::CallState { id: 7, state: CallState::Connecting }, available(MicrophoneAvailability::OwnCall), A::CallState { id: 7, state: CallState::Live }]);
@@ -995,4 +997,19 @@ fn inv_audio_85_any_sequence_keeps_one_microphone_owner_between_the_camera_and_t
         let held = captures.values().any(|kind| *kind == RecordingKind::Video) || inputs.values().any(|kind| *kind == RecordingKind::Video);
         assert!(!held || waiting == 0, "the preview did not get its microphone back after the voice ended: inputs {inputs:?} live {live:?}");
     }
+}
+
+#[test]
+fn inv_audio_87_a_recording_of_another_app_admits_our_capture_and_connects_its_input() {
+    let mut world = World::new();
+    assert_eq!(world.send(I::OtherRecording { active: true }), vec![available(MicrophoneAvailability::OtherApp)]);
+    let started = world.settle(I::Capture { id: 1, kind: RecordingKind::Voice });
+    assert!(started.contains(&A::Admit { id: 1 }), "admitted next to another app: {started:?}");
+    let opened = world.settle(I::InputOpened { id: 10, kind: RecordingKind::Voice });
+    assert!(opened.contains(&A::RestoreInput { id: 10, kind: RecordingKind::Voice, generation: 1 }), "the input opens and takes the microphone from the system: {opened:?}");
+    assert_eq!(world.send(I::NoSound { id: 10, generation: 1, on: false }), vec![], "OtherApp stays the signal while we record");
+    let silenced = world.send(I::NoSound { id: 10, generation: 1, on: true });
+    assert!(silenced.contains(&A::RestoreInput { id: 10, kind: RecordingKind::Voice, generation: 2 }), "a silence the system gives us is the platform's word, the input reconnects: {silenced:?}");
+    let busy = world.settle(I::Capture { id: 2, kind: RecordingKind::Voice });
+    assert!(busy.contains(&A::Refuse { id: 2, reason: RecordingRefusal::MicrophoneBusy }), "a second start of our own recorder stays busy: {busy:?}");
 }
