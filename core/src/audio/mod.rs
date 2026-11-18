@@ -504,7 +504,11 @@ impl AudioOwner {
                 if let Some(input) = self.inputs.iter_mut().find(|input| input.id == id && input.generation == generation) { input.silent = on; }
                 self.feed(id, input::InputEvent::Sound { generation, heard: !on }, &mut actions)
             }
-            I::RestoreFailed { id, generation } => self.feed(id, input::InputEvent::Failed { generation }, &mut actions),
+            I::RestoreFailed { id, generation } => {
+                // A start the platform refused is its word that this input gives no sound.
+                if let Some(input) = self.inputs.iter_mut().find(|input| input.id == id && input.generation == generation) { input.silent = true; }
+                self.feed(id, input::InputEvent::Failed { generation }, &mut actions)
+            }
             I::Foreground { on } => {
                 self.foreground = on;
                 self.system_event(SystemEvent::Foreground(on), &mut actions);

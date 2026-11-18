@@ -69,12 +69,14 @@ extension GlobalMedia {
       let input = open(rig)
       defer { input.close() }
 
-      await eventually("no sound until the first buffer") { rig.availability.last == .noSound && microphone.starts == [1] }
+      await eventually("connected") { microphone.starts == [1] }
+      _ = await rig.link.readVolume()
+      #expect(!rig.availability.contains(.noSound), "an input not heard yet does not blink no sound")
       microphone.hear(1)
       microphone.hear(1)
 
-      await eventually("available") { rig.availability.last == .available }
-      #expect(rig.availability == [.available, .noSound, .available])
+      _ = await rig.link.readVolume()
+      #expect(rig.availability == [.available])
       #expect(issues.values == [nil])
     }
 
@@ -92,7 +94,7 @@ extension GlobalMedia {
       #expect(microphone.starts == [1], "no reconnect before the call ends")
 
       if let call { call.end() } else { rig.calls.send([]) }
-      await eventually("restored") { microphone.starts == [1, 2] && rig.availability.last == .noSound }
+      await eventually("restored") { microphone.starts == [1, 2] && rig.availability.last == .available }
       microphone.hear(1)
       microphone.hear(2)
       await eventually("sound of the new generation") { rig.availability.last == .available }
@@ -112,7 +114,7 @@ extension GlobalMedia {
       microphone.hear(1)
       microphone.hear(2)
       await eventually("back") { rig.availability.last == .available }
-      #expect(rig.availability == [.available, .noSound, .available, .noSound, .available])
+      #expect(rig.availability == [.available, .noSound, .available], "only the loss the platform told is no sound")
     }
 
     @Test

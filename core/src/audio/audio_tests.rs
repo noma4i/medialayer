@@ -965,7 +965,7 @@ fn inv_audio_85_any_sequence_keeps_one_microphone_owner_between_the_camera_and_t
                 _ => match live.iter().nth(dice.index(live.len().max(1))) { Some((id, generation)) => I::NoSound { id: *id, generation: *generation, on: dice.percent(20) }, None => I::Foreground { on: true } },
             };
             let label = format!("{input:?}");
-            let silence = matches!(input, I::NoSound { on: true, .. });
+            let silence = matches!(input, I::NoSound { on: true, .. } | I::RestoreFailed { .. });
             let take = if let I::CaptureTake { id, taking: on } = &input { Some((*id, *on)) } else { None };
             let actions = world.settle(input);
             connections(&actions, &mut live);

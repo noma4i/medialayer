@@ -224,7 +224,8 @@ extension GlobalMedia {
       #expect(!FileManager.default.fileExists(atPath: file.path), "no file before the first live PCM")
       #expect(!returned.done, "start waits for the first live PCM")
       #expect(voice.recorder.state.phase == .idle)
-      await eventually("the public availability says no sound before the PCM") { voice.rig.availability.last == .noSound }
+      _ = await voice.rig.link.readVolume()
+      #expect(!voice.rig.availability.contains(.noSound), "the start does not blink no sound before the PCM")
 
       try voice.source.emit()
       await task.value

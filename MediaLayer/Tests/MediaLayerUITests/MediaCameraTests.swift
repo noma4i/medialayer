@@ -344,6 +344,23 @@ struct MediaCameraTests {
   }
 
   @Test
+  func inv_audio_86_a_voice_right_after_the_camera_closed_starts_without_a_blink_of_no_sound() async throws {
+    let rig = try makeRig(.moment) { backend, _ in backend.nativeMicrophone = true }
+    await ready(rig)
+    await eventually("the preview holds the microphone") { rig.backend.count("mic start") == 1 }
+    rig.camera.detachPreview()
+    await eventually("the camera closed") { rig.backend.count("mic stop") == 1 && !rig.audio.isRecording }
+
+    let seen = Collected(rig.audio.link.availability)
+    let capture = InputVoiceCapture(link: { rig.audio.link })
+    let voice = MediaVoiceRecorder(capture: capture, maxDurationMs: 60_000, link: { rig.audio.link })
+    try await voice.start(to: FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).m4a"))
+    _ = await rig.audio.link.readVolume()
+    #expect(!seen.values.contains(.noSound), "the start blinked no sound: \(seen.values)")
+    _ = try? await voice.stop()
+  }
+
+  @Test
   func inv_capture_13_the_session_takes_its_memory_before_the_bind_and_gives_it_back_when_the_preview_leaves() async throws {
     let rig = try makeRig()
     await ready(rig)
