@@ -42,6 +42,10 @@ extension AudioLink {
 
 extension MediaLayer {
   package func driveAudio(_ signal: AudioDriveSignal) {
-    (objc_getAssociatedObject(self, &lifetimeKey) as? SystemSignals)?.audio?.drive(signal)
+    audioLink?.drive(signal)
   }
+}
+
+extension MediaLayer {
+  var audioLink: AudioLink? { (objc_getAssociatedObject(self, &lifetimeKey) as? SystemSignals)?.audio }
 }

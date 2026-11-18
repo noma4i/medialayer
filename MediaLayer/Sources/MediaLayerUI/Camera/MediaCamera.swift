@@ -477,12 +477,13 @@ public final class MediaCamera: @unchecked Sendable {
   private func teardownHardware(completion: @escaping @Sendable () -> Void = {}) {
     let revoked = revokedAudio
     revokedAudio = nil
-    backend.unbind { revoked?.end(); completion() }
     reading?.cancel()
     reading = nil
     if let url = recordingURL { removeFile(url) }
     recordingURL = nil
     clipInfo = nil
+    // The clip of a thrown-away take is gone before any hold goes back: a released hold never sees its file.
+    backend.unbind { revoked?.end(); completion() }
   }
 
   private func audioRevoked(_ reason: RecordingRefusal, ticket: RecordingTicket) {
