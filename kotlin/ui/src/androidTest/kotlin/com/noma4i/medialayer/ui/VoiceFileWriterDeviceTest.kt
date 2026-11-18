@@ -60,7 +60,7 @@ class VoiceFileWriterDeviceTest {
   }
 
   @Test
-  fun finishGivesARealAacM4aAtTheCoreSettings() {
+  fun inv_voice_29_finishGivesARealAacM4aWithTheEncoderDelayAndNoLostAudio() {
     val ready = LinkedBlockingQueue<Result<Unit>>()
     val rig = rig("voice-device.m4a", CHUNKS) { it.finish() }
     rig.writer.prepare(settings, { ready += it; assertFalse(rig.file.exists()) }, rig.take::fail)
@@ -76,11 +76,17 @@ class VoiceFileWriterDeviceTest {
       assertEquals(1, extractor.trackCount)
       extractor.selectTrack(0)
       var lastUs = 0L
-      while (extractor.sampleTime >= 0) { lastUs = extractor.sampleTime; extractor.advance() }
+      var packets = 0
+      while (extractor.sampleTime >= 0) { lastUs = extractor.sampleTime; packets++; extractor.advance() }
       val frameUs = AAC_FRAME_SAMPLES * 1_000_000L / rate
-      val expectedUs = CHUNKS * CHUNK_FRAMES * 1_000_000L / rate
-      assertTrue("file duration ${format.getLong(MediaFormat.KEY_DURATION)} vs $expectedUs", Math.abs(format.getLong(MediaFormat.KEY_DURATION) - expectedUs) <= frameUs)
-      assertTrue("last packet $lastUs vs $expectedUs", Math.abs(lastUs + frameUs - expectedUs) <= frameUs)
+      val pcmFrames = CHUNKS * CHUNK_FRAMES
+      val expectedUs = pcmFrames * 1_000_000L / rate
+      // MediaMuxer writes no edit list: the encoder delay (two AAC frames, flushed at the end) stays in the file as packets. Nothing is cut or added; the file is longer by that delay.
+      val delayUs = AAC_ENCODER_DELAY_FRAMES * frameUs
+      val durationUs = format.getLong(MediaFormat.KEY_DURATION)
+      assertEquals("packets of the PCM and of the encoder delay", (pcmFrames + AAC_FRAME_SAMPLES - 1) / AAC_FRAME_SAMPLES + AAC_ENCODER_DELAY_FRAMES, packets)
+      assertTrue("file duration $durationUs vs $expectedUs", durationUs in (expectedUs - frameUs)..(expectedUs + delayUs + frameUs))
+      assertTrue("last packet $lastUs vs $expectedUs", lastUs + frameUs in (expectedUs - frameUs)..(expectedUs + delayUs + frameUs))
     } finally {
       extractor.release()
     }
@@ -111,6 +117,39 @@ class VoiceFileWriterDeviceTest {
     } finally {
       extractor.release()
     }
+  }
+
+  // A codec that announces the same output format again after the muxer started (O-08) is no failure; a different one is.
+  @Test
+  fun inv_voice_32_aReannouncedSameFormatKeepsTheTakeAndADifferentOneFailsIt() {
+    val file = File(dir, "voice-device-reannounce.m4a").also { it.delete() }
+    val writer = MediaCodecVoiceFileWriter()
+    val failures = LinkedBlockingQueue<Throwable>()
+    val ready = LinkedBlockingQueue<Result<Unit>>()
+    writer.prepare(settings, { ready += it }, { failures += it })
+    assertTrue(ready.poll(10, TimeUnit.SECONDS)!!.isSuccess)
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+    while (!writer.formatKnown && System.nanoTime() < deadline) Thread.sleep(10)
+    writer.open(file)
+    val announced = writer.announcedFormat!!
+    writer.outputFormat(announced)
+    writer.append(chunk(0))
+    val done = LinkedBlockingQueue<Result<Long>>()
+    writer.finish { done += it }
+    assertTrue("same format failed: ${done.poll(10, TimeUnit.SECONDS)?.exceptionOrNull()}", done.isEmpty() || failures.isEmpty())
+    assertTrue(failures.isEmpty())
+    assertTrue(file.exists())
+    val other = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, rate / 2, settings.channels.toInt())
+    val second = MediaCodecVoiceFileWriter()
+    val secondFailures = LinkedBlockingQueue<Throwable>()
+    val secondReady = LinkedBlockingQueue<Result<Unit>>()
+    second.prepare(settings, { secondReady += it }, { secondFailures += it })
+    assertTrue(secondReady.poll(10, TimeUnit.SECONDS)!!.isSuccess)
+    val limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+    while (!second.formatKnown && System.nanoTime() < limit) Thread.sleep(10)
+    second.open(File(dir, "voice-device-reannounce-other.m4a").also { it.delete() })
+    second.outputFormat(other)
+    assertTrue("a different format must fail the take", secondFailures.poll(10, TimeUnit.SECONDS) != null)
   }
 
   @Test
@@ -147,5 +186,6 @@ class VoiceFileWriterDeviceTest {
     const val CHUNKS = 50
     const val CHUNK_FRAMES = 1024
     const val AAC_FRAME_SAMPLES = 1024
+    const val AAC_ENCODER_DELAY_FRAMES = 2
   }
 }

@@ -1,13 +1,57 @@
 package com.noma4i.medialayer.ui
 
+import android.media.AudioFormat
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import android.media.MediaRecorder
 import android.os.Handler
 import android.os.HandlerThread
 import com.noma4i.medialayer.VoiceEncoderSettings
 import java.io.File
+
+/** PCM waiting for a free codec input, bounded by the memory of the take: `add` refuses what would pass it, `take` hands out the head in whole frames that fit one input. */
+internal class VoicePcmQueue(private val limitBytes: Long, private val rate: Int) {
+  class Part(val bytes: ByteArray, val offset: Int, val size: Int, val ptsUs: Long)
+
+  private class Pcm(val bytes: ByteArray, var offset: Int, var ptsUs: Long, val bytesPerFrame: Int)
+
+  private val items = ArrayDeque<Pcm>()
+  private var held = 0L
+
+  val isEmpty: Boolean get() = items.isEmpty()
+  val heldBytes: Long get() = held
+
+  fun add(bytes: ByteArray, ptsUs: Long, bytesPerFrame: Int): Boolean {
+    if (held + bytes.size > limitBytes) return false
+    held += bytes.size
+    items.addLast(Pcm(bytes, 0, ptsUs, bytesPerFrame))
+    return true
+  }
+
+  /** The next whole frames up to [capacity] bytes, or null when not even one frame fits. */
+  fun take(capacity: Int): Part? {
+    val head = items.first()
+    val size = minOf(capacity, head.bytes.size - head.offset).let { it - it % head.bytesPerFrame }
+    if (size <= 0) return null
+    val part = Part(head.bytes, head.offset, size, head.ptsUs)
+    head.offset += size
+    head.ptsUs += size / head.bytesPerFrame * 1_000_000L / rate
+    held -= size
+    if (head.offset >= head.bytes.size) items.removeFirst()
+    return part
+  }
+
+  fun clear() { items.clear(); held = 0 }
+}
+
+// A re-announced output format is harmless when the track would be the same: mime, rate, channels and the codec config.
+internal fun sameTrack(a: MediaFormat, b: MediaFormat): Boolean =
+  a.getString(MediaFormat.KEY_MIME) == b.getString(MediaFormat.KEY_MIME) &&
+    a.getInteger(MediaFormat.KEY_SAMPLE_RATE) == b.getInteger(MediaFormat.KEY_SAMPLE_RATE) &&
+    a.getInteger(MediaFormat.KEY_CHANNEL_COUNT) == b.getInteger(MediaFormat.KEY_CHANNEL_COUNT) &&
+    a.getByteBuffer("csd-0")?.duplicate() == b.getByteBuffer("csd-0")?.duplicate()
 
 internal interface VoiceFileWriter {
   fun prepare(settings: VoiceEncoderSettings, ready: (Result<Unit>) -> Unit, failed: (Throwable) -> Unit)
@@ -42,11 +86,14 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
   private var rate = 0
   private var baseUs = -1L
   private var endUs = 0L
+  private var pending = VoicePcmQueue(0, 1)
 
   override fun prepare(settings: VoiceEncoderSettings, ready: (Result<Unit>) -> Unit, failed: (Throwable) -> Unit) = synchronized(gate) {
     check(!closed && codec == null) { "the writer is already used" }
     try {
       rate = settings.sampleRateHz.toInt()
+      val limitBytes = pcmSizes(PcmSpec(MediaRecorder.AudioSource.MIC, rate, if (settings.channels.toInt() == 1) AudioFormat.CHANNEL_IN_MONO else AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)).lease
+      pending = VoicePcmQueue(limitBytes, rate)
       val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, rate, settings.channels.toInt()).apply {
         setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
         setInteger(MediaFormat.KEY_BIT_RATE, settings.bitRate.toInt())
@@ -54,11 +101,11 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
       this.ready = ready
       this.failed = failed
       thread.start()
-      codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC).also {
-        it.setCallback(callback, Handler(thread.looper))
-        it.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        it.start()
-      }
+      val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+      codec = encoder
+      encoder.setCallback(callback, Handler(thread.looper))
+      encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+      encoder.start()
     } catch (error: Throwable) {
       closeLocked()
       throw error
@@ -76,25 +123,27 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
     }
   }
 
+  // The one way PCM reaches the codec, as in CameraTake: copied into a queue that a free codec input drains. Only the queue passing the memory of the take fails it.
   override fun append(chunk: PcmChunk) = synchronized(gate) {
     check(!closed) { failure?.message ?: "the writer is closed" }
-    val encoder = checkNotNull(codec) { "the writer is not prepared" }
-    val source = chunk.data.duplicate()
+    checkNotNull(codec) { "the writer is not prepared" }
     val bytesPerFrame = chunk.data.remaining() / chunk.frames
     if (baseUs < 0) baseUs = chunk.ptsUs
-    var consumed = 0
-    while (source.hasRemaining()) {
-      check(free.isNotEmpty()) { "the encoder has no free input" }
+    val size = chunk.data.remaining()
+    val copy = ByteArray(size).also { chunk.data.duplicate().get(it) }
+    check(pending.add(copy, chunk.ptsUs - baseUs, bytesPerFrame)) { "PCM exceeds the memory reserve" }
+    endUs = chunk.ptsUs - baseUs + chunk.frames * 1_000_000L / rate
+    drainLocked()
+  }
+
+  private fun drainLocked() {
+    val encoder = codec ?: return
+    while (free.isNotEmpty() && !pending.isEmpty) {
       val index = free.removeFirst()
       val input = checkNotNull(encoder.getInputBuffer(index)) { "the encoder gave no input buffer $index" }
-      val size = minOf(input.remaining(), source.remaining()).let { it - it % bytesPerFrame }
-      check(size > 0) { "audio input buffer holds no whole frame" }
-      input.put(source.duplicate().apply { limit(position() + size) })
-      source.position(source.position() + size)
-      val ptsUs = chunk.ptsUs - baseUs + consumed * 1_000_000L / rate
-      consumed += size / bytesPerFrame
-      endUs = ptsUs + size / bytesPerFrame * 1_000_000L / rate
-      encoder.queueInputBuffer(index, 0, size, ptsUs, 0)
+      val part = checkNotNull(pending.take(input.remaining())) { "audio input buffer holds no whole frame" }
+      input.put(part.bytes, part.offset, part.size)
+      encoder.queueInputBuffer(index, 0, part.size, part.ptsUs, 0)
     }
   }
 
@@ -115,7 +164,7 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
 
   private fun queueEnd() {
     val error = synchronized(gate) {
-      if (closed || !eosPending || free.isEmpty()) return
+      if (closed || !eosPending || !pending.isEmpty || free.isEmpty()) return
       eosPending = false
       try { checkNotNull(codec) { "the writer is not prepared" }.queueInputBuffer(free.removeFirst(), 0, 0, endUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM); null } catch (thrown: Throwable) { thrown }
     }
@@ -162,6 +211,7 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
   private fun closeLocked() {
     closed = true
     free.clear()
+    pending.clear()
     val encoder = codec
     val container = muxer
     val wasMuxing = muxing
@@ -180,15 +230,39 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
 
   internal val formatKnown: Boolean get() = synchronized(gate) { format != null }
 
+  internal val announcedFormat: MediaFormat? get() = synchronized(gate) { format }
+
+  internal fun outputFormat(format: MediaFormat) {
+    val error = synchronized(gate) {
+      if (closed) return
+      try {
+        val known = this.format
+        if (muxing) check(known != null && sameTrack(known, format)) { "the encoder changed its output format after the muxer started" }
+        else {
+          this.format = format
+          startMuxerLocked()
+        }
+        null
+      } catch (thrown: Throwable) {
+        thrown
+      }
+    }
+    if (error != null) conclude(error)
+  }
+
+
   private val callback = object : MediaCodec.Callback() {
     override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
       val announce: ((Result<Unit>) -> Unit)?
+      var error: Throwable? = null
       synchronized(gate) {
         if (closed) return
         free.addLast(index)
         announce = ready
         ready = null
+        try { drainLocked() } catch (thrown: Throwable) { error = thrown }
       }
+      if (error != null) return conclude(error)
       announce?.invoke(Result.success(Unit))
       queueEnd()
       inputFree()
@@ -215,20 +289,7 @@ internal class MediaCodecVoiceFileWriter(private val inputFree: () -> Unit = {})
       if (end || error != null) conclude(error)
     }
 
-    override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
-      val error = synchronized(gate) {
-        if (closed) return
-        try {
-          check(!muxing) { "the encoder changed its output format after the muxer started" }
-          this@MediaCodecVoiceFileWriter.format = format
-          startMuxerLocked()
-          null
-        } catch (thrown: Throwable) {
-          thrown
-        }
-      }
-      if (error != null) conclude(error)
-    }
+    override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) = outputFormat(format)
 
     override fun onError(codec: MediaCodec, error: MediaCodec.CodecException) = conclude(error)
   }
