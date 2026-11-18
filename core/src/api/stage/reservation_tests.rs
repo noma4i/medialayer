@@ -152,7 +152,7 @@ async fn inv_pool_19_a_reload_keeps_its_admission_and_a_new_source_gets_its_own(
     assert_eq!(reserved(ledger, 4), SLOT_BYTES);
 
     let gate = rig.factory.unload_gate.hold();
-    stage.replace_window(4, (0..5).map(|index| Some(video(&format!("https://o.test/w{index}.mp4")))).collect());
+    stage.replace_window(4, (0..5).map(|index| Some(video(&format!("https://o.test/w{index}.mp4")))).collect::<Vec<_>>());
     eventually(|| rig.factory.unload_gate.entered() == 3).await;
     assert_eq!(reserved(ledger, 4), 2 * SLOT_BYTES, "the new source did not get its own admission next to the unloading one");
     drop(gate);

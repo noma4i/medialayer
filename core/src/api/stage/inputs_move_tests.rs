@@ -43,7 +43,7 @@ async fn inv_api_22_moving_an_image_window_prefetches_the_pages_around_the_new_p
     for index in 0..30 {
         rig.fetcher.route(&remote(index), Script::ok(vec![index as u8; 32]));
     }
-    stage.replace_image_window("grid", 0, (0..30).map(|index| vec![MediaItem::bare(&remote(index), Kind::Image)]).collect());
+    stage.replace_image_window("grid", 0, (0..30).map(|index| vec![MediaItem::bare(&remote(index), Kind::Image)]).collect::<Vec<_>>());
     eventually_async(|| async { rig.parts.cache.contains(&cache_key(&remote(0))).await }).await;
     assert_eq!(rig.fetcher.calls_for(&remote(25)), 0);
 

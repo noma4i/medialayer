@@ -40,10 +40,16 @@ fn query_of(query: Query) -> Query {
     }
 }
 
-fn video_sources(sources: Arc<Vec<Option<MediaItem>>>) -> Arc<Vec<Option<MediaItem>>> {
-    Arc::new(sources.iter().cloned().map(|source| source.map(clean_item)).collect())
+fn video_sources(mut sources: Arc<Vec<Option<MediaItem>>>) -> Arc<Vec<Option<MediaItem>>> {
+    for source in Arc::make_mut(&mut sources).iter_mut() {
+        *source = source.take().map(clean_item);
+    }
+    sources
 }
 
-fn image_pages(pages: Arc<Vec<Vec<MediaItem>>>) -> Arc<Vec<Vec<MediaItem>>> {
-    Arc::new(pages.iter().map(|page| page.iter().cloned().map(clean_item).collect()).collect())
+fn image_pages(mut pages: Arc<Vec<Vec<MediaItem>>>) -> Arc<Vec<Vec<MediaItem>>> {
+    for page in Arc::make_mut(&mut pages).iter_mut() {
+        *page = std::mem::take(page).into_iter().map(clean_item).collect();
+    }
+    pages
 }

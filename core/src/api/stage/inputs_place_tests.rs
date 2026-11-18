@@ -142,6 +142,17 @@ async fn inv_api_20_declaring_a_window_costs_the_same_for_a_short_and_a_long_lis
 }
 
 #[tokio::test]
+async fn inv_api_68_a_window_handed_over_shared_is_held_without_copying_the_list() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    let shared = std::sync::Arc::new(videos(2000));
+    let allocations = crate::alloc_probe::allocations_of(|| stage.replace_window(1000, shared.clone()));
+    assert_eq!(std::sync::Arc::strong_count(&shared), 2, "the stage holds the same list, not a copy");
+    let again = crate::alloc_probe::allocations_of(|| stage.replace_window(1000, shared.clone()));
+    assert!(again <= allocations.max(1) * 2, "{again} vs {allocations}");
+}
+
+#[tokio::test]
 async fn inv_api_21_the_mute_and_rate_of_a_place_that_left_are_forgotten() {
     let rig = rig().await;
     let stage = &rig.parts.stage;

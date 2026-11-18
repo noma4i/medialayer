@@ -66,7 +66,8 @@ impl Stage {
         self.inner.places.retired(key);
     }
 
-    pub fn replace_window(&self, active: usize, sources: Vec<Option<MediaItem>>) {
+    pub fn replace_window(&self, active: usize, sources: impl Into<Arc<Vec<Option<MediaItem>>>>) {
+        let sources = sources.into();
         self.declare_whole(sources.iter().flatten());
         let mut state = self.state();
         state.window = sources;
@@ -98,7 +99,7 @@ impl Stage {
         let wanted = self.inner.prefetcher.window_range(active, count);
         let now = self.now();
         let (state, commands, sources) = {
-            let sources = Sliced::slice(&state.window, reach.start.min(wanted.start)..reach.end.max(wanted.end));
+            let sources = Sliced::slice(state.window.as_slice(), reach.start.min(wanted.start)..reach.end.max(wanted.end));
             let keys = sources.map(|source| (source.kind != Kind::Image).then(|| source.url.clone()));
             for source in sources.present() {
                 if !state.shown.contains_key(&source.url) {
@@ -119,7 +120,8 @@ impl Stage {
         self.inner.prefetcher.set_window(active, remote);
     }
 
-    pub fn replace_image_window(&self, name: &str, active: usize, pages: Vec<Vec<MediaItem>>) {
+    pub fn replace_image_window(&self, name: &str, active: usize, pages: impl Into<Arc<Vec<Vec<MediaItem>>>>) {
+        let pages = pages.into();
         self.declare_whole(pages.iter().flatten());
         self.state().image_windows.insert(name.to_string(), pages);
         self.move_image_window(name, active);
@@ -131,9 +133,9 @@ impl Stage {
     }
 
     pub fn move_image_window(&self, name: &str, active: usize) {
-        let count = self.state().image_windows.get(name).map_or(0, Vec::len);
+        let count = self.state().image_windows.get(name).map_or(0, |pages| pages.len());
         let range = self.inner.prefetcher.image_window_range(name, active, count);
-        let pages = Sliced::<Vec<MediaItem>>::slice_pages(self.state().image_windows.get(name).map(Vec::as_slice).unwrap_or_default(), range);
+        let pages = Sliced::<Vec<MediaItem>>::slice_pages(self.state().image_windows.get(name).map(|pages| pages.as_slice()).unwrap_or_default(), range);
         let remote = pages.map(|page| Some(page.iter().filter(|source| !source.is_local() && source.strategy == CacheStrategy::Window).map(MediaItem::for_prefetch).collect()));
         self.inner.prefetcher.set_image_window(name, active, remote);
     }
@@ -389,7 +391,7 @@ impl Stage {
             state.rates.clear();
             state.positions.clear();
             state.releases += 1;
-            state.window.clear();
+            state.window = Arc::default();
             state.image_windows.clear();
             let commands = state.ring.release_all();
             self.inner.places.retire_all();

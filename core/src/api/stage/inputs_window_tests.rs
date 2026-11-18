@@ -355,7 +355,7 @@ async fn inv_api_17_an_image_window_prefetches_remote_images_into_the_cache_and_
         rig.fetcher.route(&remote(index), Script::ok(vec![index as u8; 32]));
     }
 
-    stage.replace_image_window("grid", 0, (0..4).map(page).collect());
+    stage.replace_image_window("grid", 0, (0..4).map(page).collect::<Vec<_>>());
 
     for index in 0..4 {
         eventually_async(|| async { rig.parts.cache.contains(&cache_key(&remote(index))).await }).await;

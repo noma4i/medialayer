@@ -96,7 +96,7 @@ impl Stage {
             declarations: HashMap::new(),
             rates: HashMap::new(),
             positions: ResumePositions::default(),
-            window: Vec::new(),
+            window: Arc::default(),
             image_windows: HashMap::new(),
             is_restore_requested: false,
             is_room_wanted: false,

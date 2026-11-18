@@ -92,7 +92,7 @@ impl Book {
             Some((owner, window)) => {
                 let applied = (owner, window.replaced);
                 if self.video_applied != Some(applied) {
-                    stage.replace_window(window.active as usize, window.sources.as_ref().clone());
+                    stage.replace_window(window.active as usize, window.sources.clone());
                     self.video_applied = Some(applied);
                 } else {
                     stage.move_window(window.active as usize);
@@ -127,7 +127,7 @@ impl Book {
 
     pub(super) fn apply_image(&self, owner: u64) {
         let Some(Window::Image(window)) = self.windows.get(&owner) else { return };
-        let pages = if window.is_active { window.pages.as_ref().clone() } else { Vec::new() };
+        let pages = if window.is_active { window.pages.clone() } else { Arc::default() };
         self.assembled.stage.replace_image_window(&window.scoped, window.active as usize, pages);
     }
 
