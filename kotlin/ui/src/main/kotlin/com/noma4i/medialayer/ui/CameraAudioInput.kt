@@ -60,6 +60,8 @@ internal class CameraAudioInput(
   /** The run waiting the pause before its next attempt. */
   private var pause: Run? = null
   private var clock: AutoCloseable? = null
+  /** The last run told SILENCED: a start of a take runs the attempts again ([retry]). */
+  private var silent = false
   private var closed = false
   private var input: AudioInputHandle? = null
   private val opened = link.openInput(kind, this)
@@ -77,6 +79,16 @@ internal class CameraAudioInput(
     }
   }
 
+  /** A start of a take retries a microphone whose last run ended silent (owner 2026-11-19): a fresh run of attempts on the same core generation, told to nobody. */
+  fun retry() {
+    synchronized(lock) {
+      if (closed || !silent) return
+      val core = live?.run?.core ?: return
+      release()
+      attempt(Run(core))
+    }
+  }
+
   override fun stop(generation: ULong) {
     synchronized(lock) {
       if ((live?.run ?: pause)?.core != generation) return
@@ -86,6 +98,7 @@ internal class CameraAudioInput(
 
   override fun onLive(generation: Long) = whileLive(generation) { handle, current ->
     heard(current)
+    silent = false
     issue(CaptureAudioIssue.ACTIVE)
     handle.sound(current.run.core, true)
   }
@@ -93,6 +106,7 @@ internal class CameraAudioInput(
   override fun onSilenced(generation: Long, silenced: Boolean) = whileLive(generation) { handle, current ->
     if (silenced && retry(current, stopMicrophone = true)) return@whileLive
     if (!silenced) heard(current)
+    silent = silenced
     issue(if (silenced) CaptureAudioIssue.SILENCED else CaptureAudioIssue.ACTIVE)
     handle.sound(current.run.core, !silenced)
   }
@@ -135,6 +149,7 @@ internal class CameraAudioInput(
         clock = null
         if (retry(current, stopMicrophone = true)) return@synchronized
         // The last attempt gave no sound in time: the same word as a source the system silenced.
+        silent = true
         issue(CaptureAudioIssue.SILENCED)
         input?.sound(run.core, false)
       }
@@ -172,6 +187,7 @@ internal class CameraAudioInput(
 
   /** The one place a run of the source ends: the take hears it once, whoever ended it. Runs under the lock. */
   private fun release(stopMicrophone: Boolean = true) {
+    silent = false
     clock?.close()
     clock = null
     val waiting = pause

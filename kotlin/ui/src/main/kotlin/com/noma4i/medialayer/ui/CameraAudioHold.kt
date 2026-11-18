@@ -30,6 +30,9 @@ internal class CameraAudioHold(
     spec = wanted
   }
 
+  /** Runs the microphone attempts again when the last run ended silent. */
+  fun retry() { input?.retry() }
+
   override fun close() {
     if (closed) return
     closed = true

@@ -78,6 +78,7 @@ class CameraTakesAudioTest {
       events(CaptureEvent.Streaming(true))
     }
     override fun unbind() { recording.close(); audio.keep(null) }
+    override fun retryMicrophone() = audio.retry()
     override suspend fun takePhoto(file: File, flash: Boolean, profile: CaptureProfile) = Unit
     override fun beginRecording(file: File, profile: CaptureProfile, lens: CameraLens) = Unit
     override fun beginRecording(file: File, profile: CaptureProfile, lens: CameraLens, start: (() -> Unit) -> Unit) {
@@ -189,5 +190,26 @@ class CameraTakesAudioTest {
     assertEquals(com.noma4i.medialayer.CameraRefusal.MICROPHONE_SILENT, error.reason)
     assertEquals("exactly three sources", 3L, source.starts.get())
     assertEquals(false, timer.armed(MicrophoneRetry.PAUSE_MS))
+  }
+
+  @Test
+  fun inv_audio_117_a_camera_start_after_a_silent_microphone_retries_it_and_starts_on_its_sound() = runBlocking {
+    camera.attachPreview(this@CameraTakesAudioTest, null, null)
+    TestSignal.await("ready", 5_000) { camera.state.value.phase == CameraPhase.READY }
+    microphone.onLive(1)
+    microphone.onSilenced(1, true)
+    TestSignal.await("the preview microphone told silence", 5_000) { CaptureEvent.AudioFlow(false) in seen }
+    val started = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { camera.startRecording() }
+    TestSignal.await("the start waits for a fresh run of the microphone", 5_000) { source.starts.get() >= 2L && takes.size == 1 }
+    val current = takes.last()
+    current.listener.onBegan(current.generation, surface)
+    val fresh = source.starts.get()
+    microphone.onLive(fresh)
+    microphone.onPcm(chunk(fresh))
+    TestSignal.await("the sound of the retry confirmed the take", 5_000) { CaptureEvent.AudioFlow(true) in seen }
+    current.listener.onStarted(current.generation, 0)
+    kotlinx.coroutines.withTimeout(5_000) { started.await() }
+    assertEquals(CameraPhase.RECORDING, camera.state.value.phase)
+    assertEquals("one take", 1, takes.size)
   }
 }

@@ -70,6 +70,9 @@ internal interface CaptureBackend {
   /** The audio source of the take is gone. */
   fun audioLost() = Unit
 
+  /** A start of a take with sound runs the microphone attempts again when its last run ended silent (owner 2026-11-19, [MicrophoneRetry]). */
+  fun retryMicrophone() = Unit
+
   fun recordedMs(): Long
 
   fun setTorch(on: Boolean)

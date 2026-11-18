@@ -426,6 +426,10 @@ internal class CameraXBackend(private val context: Context, private val audioLin
     main.execute { recording.audioLost() }
   }
 
+  override fun retryMicrophone() {
+    main.execute { audio.retry() }
+  }
+
   override suspend fun audioIdle() = audio.idle()
 
   override fun awaitRecordingStopped(done: () -> Unit) {
