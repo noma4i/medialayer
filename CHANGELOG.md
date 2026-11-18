@@ -67,6 +67,7 @@
 
 ### Fixed
 
+- iOS fetch tests: the local test server binds to 127.0.0.1, so another process on the same port cannot answer.
 - Android camera: a cancelled `takePhoto` no longer leaves its photo file behind.
 - Android camera: closing the layer now stops the camera thread too.
 - Android camera: `clip(take)` no longer waits on the camera queue.

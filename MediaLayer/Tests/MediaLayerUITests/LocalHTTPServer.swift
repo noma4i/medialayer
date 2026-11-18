@@ -24,7 +24,9 @@ final class LocalHTTPServer: @unchecked Sendable {
   init() throws {
     (closed, closedContinuation) = AsyncStream.makeStream()
     (requests, requestsContinuation) = AsyncStream.makeStream()
-    listener = try NWListener(using: .tcp, on: .any)
+    let parameters = NWParameters.tcp
+    parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+    listener = try NWListener(using: parameters)
   }
 
   func start() async throws {

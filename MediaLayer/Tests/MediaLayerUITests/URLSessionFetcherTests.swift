@@ -84,6 +84,17 @@ struct URLSessionFetcherTests {
   }
 
   @Test
+  func theTestServerListensOnIPv4LoopbackOnly() async throws {
+    let server = try await serve()
+    defer { server.stop() }
+
+    await #expect(throws: MediaError.self) {
+      try await URLSessionFetcher(timeout: 2).fetch(request: request("http://[::1]:\(server.port)/bytes"))
+    }
+    #expect(server.requestCount(of: "/bytes") == 0)
+  }
+
+  @Test
   func droppingTheBodyMidStreamStopsTheDownload() async throws {
     let server = try await serve()
     defer { server.stop() }
