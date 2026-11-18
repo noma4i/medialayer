@@ -16,7 +16,10 @@ private final class FakeCapture: VoiceCapture, @unchecked Sendable {
   private(set) var limit: (@Sendable () -> Void)?
   private(set) var failure: (@Sendable (Error) -> Void)?
 
-  init(refusal: VoiceRefusal? = nil, peaks: [Float] = [0.5], writes: Bool = true) {
+  private let onStart: (@Sendable () -> Void)?
+
+  init(refusal: VoiceRefusal? = nil, peaks: [Float] = [0.5], writes: Bool = true, onStart: (@Sendable () -> Void)? = nil) {
+    self.onStart = onStart
     self.refusal = refusal
     self.peaks = peaks
     self.writes = writes
@@ -26,6 +29,7 @@ private final class FakeCapture: VoiceCapture, @unchecked Sendable {
 
   func start(file: URL, maxDurationMs: UInt64, onLimit: @escaping @Sendable () -> Void, onFailure: @escaping @Sendable (Error) -> Void) async throws {
     if let refusal { throw VoiceRefused(reason: refusal) }
+    onStart?()
     lock.withLock {
       self.file = file
       limitMs = maxDurationMs
@@ -256,6 +260,86 @@ struct MediaVoiceRecorderTests {
     #expect(FileManager.default.fileExists(atPath: target.path))
     #expect(recording.durationMs == 2500)
     #expect(!recorder.isRecording)
+  }
+
+  @Test
+  func inv_voice_23_the_length_counts_from_the_first_pcm_not_from_the_start_of_the_hardware() async throws {
+    let ticks = Ticks()
+    let recorder = makeRecorder(FakeCapture(onStart: { ticks.advance(2000) }), ticks: ticks, minTakeMs: 500)
+
+    try await recorder.start(to: file())
+    ticks.advance(100)
+
+    await #expect(throws: MediaError.self) { _ = try await recorder.stop() }
+    #expect(recorder.state.outcome == .refused(reason: .tooShort))
+  }
+
+  @Test
+  func inv_voice_24_a_second_start_and_a_stop_without_a_take_are_typed_refusals_and_leave_the_take_alone() async throws {
+    let ticks = Ticks()
+    let recorder = makeRecorder(FakeCapture(), ticks: ticks)
+    do { _ = try await recorder.stop(); Issue.record("stop without a take returned") } catch let error as MediaError {
+      guard case let .Voice(_, reason) = error else { Issue.record("\(error)"); return }
+      #expect(reason == .empty)
+    }
+    try await recorder.start(to: file())
+    let before = recorder.state
+    do { try await recorder.start(to: file()); Issue.record("a second start returned") } catch let error as MediaError {
+      guard case let .Voice(_, reason) = error else { Issue.record("\(error)"); return }
+      #expect(reason == .microphoneBusy)
+    }
+    #expect(recorder.state == before)
+    ticks.advance(1000)
+    _ = try await recorder.stop()
+  }
+
+  @Test
+  func inv_voice_25_a_refusal_of_the_end_of_a_take_is_an_outcome_and_not_a_native_failure() async throws {
+    let ticks = Ticks()
+    let recorder = makeRecorder(FailingCapture(stop: VoiceRefused(reason: .empty)), ticks: ticks)
+    let failures = Collected(Media.failures)
+    try await recorder.start(to: file())
+    ticks.advance(1000)
+
+    await #expect(throws: MediaError.self) { _ = try await recorder.stop() }
+
+    let barrier = NativeFailure(source: .file, domain: "barrier", code: 0, message: "voice25")
+    NativeFailures.publish(barrier)
+    await eventually("the barrier arrived") { failures.values.contains(barrier) }
+    #expect(failures.values.filter { $0.source == .recorder }.isEmpty, "\(failures.values)")
+    #expect(recorder.state.outcome == .refused(reason: .empty))
+  }
+
+  @Test
+  func inv_voice_22_every_outcome_is_published_with_the_number_of_its_own_take() async throws {
+    let seed = UInt64(ProcessInfo.processInfo.environment["ML_SEED"] ?? "") ?? UInt64.random(in: 1...UInt64.max)
+    print("repeat: ML_SEED=\(seed)")
+    var generator = SplitMix(seed: seed)
+    let ticks = Ticks()
+    let recorder = makeRecorder(FakeCapture(), ticks: ticks)
+    let states = Collected(recorder.states)
+    func begin() async {
+      while true {
+        do { try await recorder.start(to: file()); return } catch let error as MediaError {
+          guard case let .Voice(_, reason) = error, reason == .microphoneBusy else { Issue.record("\(error)"); return }
+          await Task.yield()
+        } catch { Issue.record("\(error)"); return }
+      }
+    }
+    try await recorder.start(to: file())
+    for round in 0..<40 {
+      ticks.advance(1000)
+      async let stopped = recorder.stop()
+      for _ in 0..<Int(generator.next() % 50) { await Task.yield() }
+      if round < 39 { await begin() }
+      _ = try await stopped
+    }
+    var take: UInt64 = 0
+    for state in states.values {
+      if state.phase == .recording { #expect(state.take == take + 1, "seed \(seed)"); take = state.take }
+      if state.outcome != nil { #expect(state.take == take, "an outcome carries its own take, seed \(seed)") }
+    }
+    #expect(take == 40)
   }
 
   @Test
@@ -666,5 +750,17 @@ extension GlobalMedia {
       #expect(recorder.state.outcome == .failed(failure: expected), "\(step)")
       await app.close()
     }
+  }
+}
+
+private struct SplitMix {
+  var state: UInt64
+  init(seed: UInt64) { state = seed }
+  mutating func next() -> UInt64 {
+    state &+= 0x9E37_79B9_7F4A_7C15
+    var z = state
+    z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+    z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+    return z ^ (z >> 31)
   }
 }

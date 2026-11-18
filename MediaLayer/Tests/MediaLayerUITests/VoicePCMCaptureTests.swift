@@ -295,7 +295,7 @@ extension GlobalMedia {
     }
 
     @Test
-    func aLossOfSoundWhileRecordingIsOneMicrophoneSilentWithoutAFileAndTheOwnerOutlivesTheTakeUntilTheFirstHealthyPCM() async throws {
+    func inv_voice_26_aLossOfSoundWhileRecordingIsOneMicrophoneSilentWithoutAFileAndTheOwnerClosesAtOnce() async throws {
       let voice = try Voice()
       let file = temporaryFile("m4a")
       let states = Collected(voice.recorder.states)
@@ -307,16 +307,12 @@ extension GlobalMedia {
       await eventually("one outcome") { states.last?.outcome != nil }
       #expect(states.last == VoiceState(take: 1, phase: .idle, outcome: .refused(reason: .microphoneSilent), recordedMs: 0))
       #expect(!FileManager.default.fileExists(atPath: file.path))
-      await eventually("the core restores the source of the owner without a take") { voice.source.starts == [1, 2] }
-      #expect(voice.source.stops == [1], "the owner is not closed before a healthy PCM")
+      await eventually("the owner is closed without a restore") { voice.source.stops == [1] }
       let count = states.values.count
-
-      try voice.source.emit(generation: 1)
-      #expect(voice.source.stops == [1], "a PCM of the old generation neither closes the owner nor reaches a take")
 
       try voice.source.emit(3)
 
-      await eventually("the first healthy PCM released the owner") { voice.source.stops == [1, 2] }
+      #expect(voice.source.starts == [1], "no restore of a source without a take")
       #expect(states.values.count == count, "no take resumed")
       #expect(!FileManager.default.fileExists(atPath: file.path))
       await eventually("the public availability is available after the owner closed") { voice.rig.availability.last == .available }
