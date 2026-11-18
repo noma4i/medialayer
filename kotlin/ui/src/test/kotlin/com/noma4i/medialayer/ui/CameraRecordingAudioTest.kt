@@ -33,6 +33,7 @@ class CameraRecordingAudioTest {
     override fun audioTimebase(generation: Long, originNanos: Long) { calls.add("timebase $generation $originNanos") }
     override fun confirm() { calls.add("confirm") }
     override fun finish() { calls.add("finish") }
+    override fun audioEnded() { calls.add("audioEnded") }
     override fun cancel() { calls.add("cancel") }
   }
 
@@ -118,7 +119,19 @@ class CameraRecordingAudioTest {
     focus.send(FocusSignal.PhoneCall(false))
     await("the end of the call restores the source at a new generation") { microphone.calls == listOf("start 1", "stop 1", "start 2") }
     listener.onPcm(chunk(2))
-    assertEquals("neither the late pcm nor the new generation reaches the take", listOf("begin"), takes[0].calls.toList())
+    assertEquals("the stop of the source ends the sound of the take once; neither the late pcm nor the new generation reaches it", listOf("begin", "audioEnded"), takes[0].calls.toList())
     assertEquals(emptyList<String>(), gates.toList())
+  }
+
+  @Test
+  fun inv_capture_62_closing_the_source_ends_the_sound_of_the_take_without_a_silenced_word_and_only_once() {
+    hold.keep(spec)
+    await("the microphone started") { microphone.calls == listOf("start 1") }
+    listener.onLive(1)
+    start(1, hold.generation!!)
+    takes[0].listener.onBegan(1, surface)
+    hold.close()
+    hold.close()
+    assertEquals(listOf("begin", "audioEnded"), takes[0].calls.toList())
   }
 }

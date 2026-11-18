@@ -14,6 +14,9 @@ internal interface CameraAudioTap {
   fun onTimebase(generation: Long, originNanos: Long)
 
   fun onPcm(chunk: PcmChunk)
+
+  /** The source of this generation ended without a SILENCED word (stop, close, read failure, a restore): no PCM of it comes any more. */
+  fun onSourceEnd(generation: Long) = Unit
 }
 
 internal fun RecordingAudio.asMicrophone(): CameraMicrophone = object : CameraMicrophone {
@@ -48,8 +51,7 @@ internal class CameraAudioInput(
     synchronized(lock) {
       if (closed) return
       this.input = input
-      live?.let { microphone.stop(it.audio) }
-      live = null
+      release()
       live = try { Live(generation, microphone.start(spec)) } catch (error: Exception) {
         failed(NativeFailure(FailureSource.RECORDER, error.javaClass.name, 0L, error.message ?: error.toString()))
         issue(CaptureAudioIssue.SOURCE_ERROR)
@@ -61,9 +63,8 @@ internal class CameraAudioInput(
 
   override fun stop(generation: ULong) {
     synchronized(lock) {
-      val current = live?.takeIf { it.core == generation } ?: return
-      live = null
-      microphone.stop(current.audio)
+      if (live?.core != generation) return
+      release()
     }
   }
 
@@ -75,17 +76,25 @@ internal class CameraAudioInput(
   }
 
   override fun onFailed(generation: Long, failure: NativeFailure) = whileLive(generation) { handle, core ->
-    live = null
+    release(stopMicrophone = false)
     failed(failure)
     issue(CaptureAudioIssue.SOURCE_ERROR)
     handle.restoreFailed(core)
   }
 
-  override fun onEnded(generation: Long) = whileLive(generation) { _, _ -> live = null }
+  override fun onEnded(generation: Long) = whileLive(generation) { _, _ -> release(stopMicrophone = false) }
 
   override fun onTimebase(generation: Long, originNanos: Long) = whileLive(generation) { _, _ -> tap.onTimebase(generation, originNanos) }
 
   override fun onPcm(chunk: PcmChunk) = whileLive(chunk.generation) { _, _ -> tap.onPcm(chunk) }
+
+  /** The one place a generation of the source ends: the take hears it once, whoever ended it. Runs under the lock. */
+  private fun release(stopMicrophone: Boolean = true) {
+    val current = live ?: return
+    live = null
+    if (stopMicrophone) microphone.stop(current.audio)
+    tap.onSourceEnd(current.audio)
+  }
 
   // Every word of the microphone runs under the lock that stop and close take: nothing reaches the core or the take after its generation ended.
   private fun whileLive(generation: Long, deliver: (AudioInputHandle, ULong) -> Unit) {
@@ -99,8 +108,7 @@ internal class CameraAudioInput(
     synchronized(lock) {
       if (closed) return
       closed = true
-      live?.let { microphone.stop(it.audio) }
-      live = null
+      release()
     }
     opened.close()
     microphone.close()

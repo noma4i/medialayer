@@ -162,23 +162,22 @@ internal class WebpAnimation(val width: Int, val height: Int, val frames: List<W
   fun lastFrame(multiplier: Double = 1.0, check: () -> Unit = {}): Bitmap = BitmapSurface(width, height, multiplier).also { compose(it, check) }.bitmap
 
   companion object {
-    fun isAnimated(bytes: ByteArray): Boolean = bytes.size > 12 && parseHeader(bytes)?.let { buffer -> chunkTypes(bytes, buffer).contains(FOURCC_ANMF) } == true
+    fun isAnimated(bytes: ByteArray): Boolean = bytes.size > 12 && parseHeader(bytes)?.let { buffer -> chunks(bytes, buffer).any { it.type == FOURCC_ANMF } } == true
 
     fun parse(bytes: ByteArray): WebpAnimation {
       val buffer = requireNotNull(parseHeader(bytes)) { "not a WebP file" }
       var width = 0
       var height = 0
       val frames = mutableListOf<WebpFrame>()
-      var position = 12
-      while (position + 8 <= bytes.size) {
-        val type = buffer.getInt(position)
-        val size = buffer.getInt(position + 4)
-        val data = position + 8
-        if (type == FOURCC_VP8X) {
+      chunks(bytes, buffer).forEach { chunk ->
+        val type = chunk.type
+        val size = chunk.size
+        val data = chunk.data
+        if (type == FOURCC_VP8X && size >= VP8X_HEADER) {
           width = buffer.get24(data + 4) + 1
           height = buffer.get24(data + 7) + 1
         }
-        if (type == FOURCC_ANMF) {
+        if (type == FOURCC_ANMF && size >= ANMF_HEADER) {
           val flags = buffer.get(data + 15).toInt()
           frames += WebpFrame(
             x = buffer.get24(data) * 2,
@@ -193,7 +192,6 @@ internal class WebpAnimation(val width: Int, val height: Int, val frames: List<W
             chunkLength = size - ANMF_HEADER
           )
         }
-        position = data + size + (size and 1)
       }
       return WebpAnimation(width, height, frames)
     }
@@ -204,23 +202,30 @@ internal class WebpAnimation(val width: Int, val height: Int, val frames: List<W
       return buffer.takeIf { it.getInt(0) == FOURCC_RIFF && it.getInt(8) == FOURCC_WEBP }
     }
 
-    private fun chunkTypes(bytes: ByteArray, buffer: ByteBuffer): List<Int> {
-      val types = mutableListOf<Int>()
-      var position = 12
+    /** The one RIFF walk: sizes are unsigned, a chunk that does not fit the file ends the walk, the position only grows. */
+    private fun chunks(bytes: ByteArray, buffer: ByteBuffer): List<Chunk> {
+      val found = mutableListOf<Chunk>()
+      var position = 12L
       while (position + 8 <= bytes.size) {
-        types += buffer.getInt(position)
-        position += 8 + buffer.getInt(position + 4) + (buffer.getInt(position + 4) and 1)
+        val size = buffer.getInt(position.toInt() + 4).toLong() and 0xFFFFFFFFL
+        val data = position + 8
+        if (data + size > bytes.size) break
+        found += Chunk(buffer.getInt(position.toInt()), data.toInt(), size.toInt())
+        position = data + size + (size and 1)
       }
-      return types
+      return found
     }
   }
 }
+
+private class Chunk(val type: Int, val data: Int, val size: Int)
 
 private const val FOURCC_RIFF = 0x46464952
 private const val FOURCC_WEBP = 0x50424557
 private const val FOURCC_VP8X = 0x58385056
 private const val FOURCC_ANMF = 0x464D4E41
 private const val ANMF_HEADER = 16
+private const val VP8X_HEADER = 10
 private const val STILL_HEADER = 30
 private const val ALPHA = 0x10
 

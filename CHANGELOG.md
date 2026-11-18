@@ -71,6 +71,10 @@
 - Camera: a clip keeps the lens of its take, not the lens of the next session.
 - Camera: `stopRecording` during a starting take now ends it instead of being lost.
 - Camera: torch and zoom commands reach the platform only after the camera opened.
+- The Android camera take ends at its last video frame and cuts the sound there.
+- A codec that throws inside an Android camera take callback now fails the take cleanly.
+- A stopped microphone ends the sound of an Android camera take instead of hanging it.
+- A corrupt WebP with chunk size minus eight no longer loops forever.
 - iOS camera sound no longer runs past the last video frame.
 - Android voice records again when the AAC encoder announces its format before the file opens.
 - Android camera video uses AAC-LC when no encoder declares the camera AAC profile.

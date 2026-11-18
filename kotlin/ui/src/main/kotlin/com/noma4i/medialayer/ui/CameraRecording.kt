@@ -143,6 +143,8 @@ internal class CameraRecording(
     }
   }
 
+  override fun onSourceEnd(generation: Long) { current?.takeIf { it.audio == generation }?.take?.audioEnded() }
+
   fun audioLost() { current?.take?.audioEnded() }
 
   fun stop() { current?.let(::end) }

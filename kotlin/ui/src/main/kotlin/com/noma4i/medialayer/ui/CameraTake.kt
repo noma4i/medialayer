@@ -75,7 +75,7 @@ internal class CameraTake(
   private var heldVideo = ArrayList<Sample>()
   private var heldAudio = ArrayList<Sample>()
   private var lastPts = LongArray(2) { -1L }
-  private var endUs = 0L
+  private var tail = ArrayList<Sample>()
   private var needKeyframe = true
   private val pending = ArrayDeque<Pcm>()
   private val freeInputs = ArrayDeque<Int>()
@@ -116,7 +116,7 @@ internal class CameraTake(
     if (mismatch || chunk.frames <= 0 || size != chunk.frames * bytesPerFrame) return failLater("PCM does not match the audio encoder")
     if (!acquire(size.toLong())) return failLater("PCM exceeds the memory reserve")
     val copy = ByteArray(size).also { chunk.data.duplicate().get(it) }
-    handler.post {
+    post {
       if (ended.get() || audioEos) { held.addAndGet(-size.toLong()); return@post }
       live = true
       pending.addLast(Pcm(copy, 0, chunk.ptsUs, bytesPerFrame))
@@ -133,14 +133,21 @@ internal class CameraTake(
 
   override fun audioTimebase(generation: Long, originNanos: Long) {
     if (generation != settings.audioGeneration) return
-    handler.post { if (ended.get()) return@post; originUs = originNanos / 1000; drain() }
+    post { if (ended.get()) return@post; originUs = originNanos / 1000; drain() }
   }
 
-  private fun failLater(message: String) { if (failing.compareAndSet(false, true)) handler.post { fail(0, message) } }
+  private fun failLater(message: String) { if (failing.compareAndSet(false, true)) post { fail(0, message) } }
 
-  override fun confirm() { handler.post { confirmed = true; tryStart() } }
+  override fun confirm() { post { confirmed = true; tryStart() } }
 
-  override fun finish() { handler.post { if (ended.get()) return@post; if (!started) return@post fail(0, "the take ended before it started"); beginFinish() } }
+  override fun finish() { post { if (ended.get()) return@post; if (!started) return@post fail(0, "the take ended before it started"); beginFinish() } }
+
+  /** Every callback and Runnable of the take runs here: a codec that throws ends the take through the one failure path. */
+  private fun post(block: () -> Unit) { handler.post { safely(block) } }
+
+  private fun safely(block: () -> Unit) {
+    try { block() } catch (error: Throwable) { fail(0, error.message ?: error.javaClass.name) }
+  }
 
   private fun beginFinish() {
     if (finishing) return
@@ -157,8 +164,10 @@ internal class CameraTake(
     made.setCallback(object : MediaCodec.Callback() {
       override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
         if (ended.get()) return
-        freeInputs.addLast(index)
-        drain()
+        safely {
+          freeInputs.addLast(index)
+          drain()
+        }
       }
 
       override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) = output(codec, kind, index, info)
@@ -167,9 +176,11 @@ internal class CameraTake(
 
       override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
         if (ended.get()) return
-        val converted = MediaFormatUtil.createFormatFromMediaFormat(format)
-        if (kind == VIDEO) videoFormat = converted else audioFormat = converted
-        tryStart()
+        safely {
+          val converted = MediaFormatUtil.createFormatFromMediaFormat(format)
+          if (kind == VIDEO) videoFormat = converted else audioFormat = converted
+          tryStart()
+        }
       }
     }, handler)
     made.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
@@ -213,7 +224,7 @@ internal class CameraTake(
   /** Audio EOS waits for the PCM to cover the end of the last video sample, or for the end of the source. */
   private fun audioReachesVideoEnd(): Boolean = sourceEnded || (videoDone && videoEndUs >= 0 && audioEndUs - baseUs >= videoEndUs)
 
-  override fun audioEnded() { handler.post { sourceEnded = true; drain() } }
+  override fun audioEnded() { post { sourceEnded = true; drain() } }
 
 
   private fun output(codec: MediaCodec, kind: Int, index: Int, info: MediaCodec.BufferInfo) {
@@ -230,7 +241,7 @@ internal class CameraTake(
       if (eos) {
         if (kind == VIDEO) videoDone = true else audioDone = true
         if (kind == VIDEO && written[VIDEO] == 0) return fail(0, "the take ended without video")
-        if (kind == VIDEO) drain()
+        if (kind == VIDEO) { dropTail(); drain() }
         if (audioDone && videoDone) complete()
       }
     } catch (error: Throwable) {
@@ -267,8 +278,8 @@ internal class CameraTake(
       tracks[VIDEO] = opened.addTrack(videoFormat!!)
       if (hasAudio) tracks[AUDIO] = opened.addTrack(audioFormat!!)
       started = true
-      audible.forEach { write(AUDIO, it.ptsUs - baseUs, it.flags, ByteBuffer.wrap(it.bytes)) }
       heldVideo.forEach { write(VIDEO, it.ptsUs - baseUs, it.flags, ByteBuffer.wrap(it.bytes)) }
+      audible.forEach { write(AUDIO, it.ptsUs - baseUs, it.flags, ByteBuffer.wrap(it.bytes)) }
       clearHeld()
       listener.onStarted(generation, baseUs)
     } catch (error: Throwable) {
@@ -285,17 +296,46 @@ internal class CameraTake(
   private fun write(kind: Int, ptsUs: Long, flags: Int, buffer: ByteBuffer) {
     if (ptsUs < 0) return
     if (ptsUs > settings.maxDurationUs) return beginFinish()
+    if (kind == AUDIO) return writeAudio(ptsUs, flags, buffer)
+    mux(VIDEO, ptsUs, flags, buffer)
+    val interval = if (lastPts[VIDEO] >= 0) ptsUs - lastPts[VIDEO] else 0L
+    lastPts[VIDEO] = ptsUs
+    videoEndUs = ptsUs + interval
+    flushTail()
+  }
+
+  private fun mux(kind: Int, ptsUs: Long, flags: Int, buffer: ByteBuffer) {
     muxer!!.writeSampleData(tracks[kind], buffer, BufferInfo(ptsUs, buffer.remaining(), flags))
     written[kind]++
-    val interval = if (lastPts[kind] >= 0) ptsUs - lastPts[kind] else 0L
-    lastPts[kind] = ptsUs
-    endUs = maxOf(endUs, ptsUs + interval)
-    if (kind == VIDEO) videoEndUs = ptsUs + interval
+  }
+
+  /** INV-CAPTURE-51: a take ends at the end of its last written video frame; sound that starts at or after it is not in the file. */
+  private fun writeAudio(ptsUs: Long, flags: Int, buffer: ByteBuffer) {
+    if (ptsUs < videoEndUs) return mux(AUDIO, ptsUs, flags, buffer)
+    if (videoDone) return
+    val bytes = ByteArray(buffer.remaining()).also { buffer.get(it) }
+    held.addAndGet(bytes.size.toLong())
+    tail.add(Sample(AUDIO, ptsUs, flags, bytes))
+  }
+
+  private fun flushTail() {
+    val ready = tail.filter { it.ptsUs < videoEndUs }
+    if (ready.isEmpty()) return
+    tail = ArrayList(tail.filter { it.ptsUs >= videoEndUs })
+    ready.forEach {
+      held.addAndGet(-it.bytes.size.toLong())
+      mux(AUDIO, it.ptsUs, it.flags, ByteBuffer.wrap(it.bytes))
+    }
+  }
+
+  private fun dropTail() {
+    tail.forEach { held.addAndGet(-it.bytes.size.toLong()) }
+    tail = ArrayList()
   }
 
   private fun complete() {
     if (!started || written[VIDEO] == 0 || (hasAudio && written[AUDIO] == 0)) return fail(0, "the take ended without both streams")
-    end(file, endUs)
+    end(file, videoEndUs)
   }
 
   private fun fail(code: Long, message: String) = end(null, null, NativeFailure(FailureSource.RECORDER, "android.media.MediaCodec", code, message))
@@ -317,6 +357,7 @@ internal class CameraTake(
     pending.clear()
     freeInputs.clear()
     clearHeld()
+    dropTail()
     val success = done != null && outcome == null
     if (!success) file.delete()
     try {

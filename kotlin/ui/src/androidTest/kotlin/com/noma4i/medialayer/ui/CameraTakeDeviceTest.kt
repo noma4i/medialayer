@@ -49,6 +49,7 @@ class CameraTakeDeviceTest {
     val outcomes = AtomicInteger()
     @Volatile var surface: Surface? = null
     @Volatile var failure: NativeFailure? = null
+    @Volatile var durationUs = -1L
 
     override fun onBegan(generation: Long, inputSurface: Surface) { surface = inputSurface; events.add("began") }
 
@@ -56,7 +57,7 @@ class CameraTakeDeviceTest {
 
     override fun onStarted(generation: Long, baseUs: Long) { this.baseUs = baseUs; events.add("started") }
 
-    override fun onFinished(generation: Long, file: File, durationUs: Long) { outcomes.incrementAndGet(); events.add("finished") }
+    override fun onFinished(generation: Long, file: File, durationUs: Long) { this.durationUs = durationUs; outcomes.incrementAndGet(); events.add("finished") }
 
     override fun onFailed(generation: Long, failure: NativeFailure) { this.failure = failure; outcomes.incrementAndGet(); events.add("failed") }
 
@@ -276,6 +277,62 @@ class CameraTakeDeviceTest {
     val found = packets(target)
     assertEquals(0, found.audio)
     assertEquals(recorder.keptPackets(), found.video)
+    assertEquals(1, recorder.outcomes.get())
+  }
+
+  private fun lastSampleUs(file: File, prefix: String): Long {
+    val extractor = MediaExtractor()
+    try {
+      extractor.setDataSource(file.absolutePath)
+      val track = (0 until extractor.trackCount).first { extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)!!.startsWith(prefix) }
+      extractor.selectTrack(track)
+      val buffer = ByteBuffer.allocate(1 shl 20)
+      var last = -1L
+      while (extractor.readSampleData(buffer, 0) >= 0) { last = extractor.sampleTime; extractor.advance() }
+      return last
+    } finally {
+      extractor.release()
+    }
+  }
+
+  @Test
+  fun inv_capture_60_the_sound_is_cut_at_the_last_video_frame_and_the_duration_comes_from_it() {
+    val target = file()
+    val recorder = Recorder()
+    val take = take(target, settings(true), recorder)
+    take.begin()
+    recorder.expect("began")
+    val egl = source(recorder.surface!!)
+    draw(egl, 5)
+    assertTrue(recorder.firstEncoded.await(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+    admitLive(take, pcm(audioGeneration, 20))
+    recorder.expect("started")
+    draw(egl, 10)
+    take.finish()
+    recorder.expect("finished")
+    val video = lastSampleUs(target, "video/")
+    val audio = lastSampleUs(target, "audio/")
+    assertTrue("audio starts before the end of the last video frame: $audio vs $video", audio <= video + FRAME_NS / 1000)
+    assertTrue("the duration is the end of the video, not of the sound: ${recorder.durationUs}", recorder.durationUs in video..(video + 2 * FRAME_NS / 1000))
+  }
+
+  @Test
+  fun inv_capture_62_a_take_whose_source_ended_without_pcm_ends_its_sound_with_what_it_has() {
+    val target = file()
+    val recorder = Recorder()
+    val take = take(target, settings(true), recorder)
+    take.begin()
+    recorder.expect("began")
+    val egl = source(recorder.surface!!)
+    draw(egl, 5)
+    assertTrue(recorder.firstEncoded.await(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+    admitLive(take, pcm(audioGeneration, 2))
+    recorder.expect("started")
+    draw(egl, 10)
+    take.finish()
+    assertEquals("the take waits for the sound that does not come", null, recorder.events.poll(1, TimeUnit.SECONDS))
+    take.audioEnded()
+    recorder.expect("finished")
     assertEquals(1, recorder.outcomes.get())
   }
 
