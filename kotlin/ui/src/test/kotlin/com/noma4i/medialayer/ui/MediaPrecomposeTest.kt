@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.size
 import androidx.test.core.app.ApplicationProvider
 import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaSource
-import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -34,10 +33,13 @@ class MediaPrecomposeTest {
 
   private val context = ApplicationProvider.getApplicationContext<Context>()
   private val layer = RecordingLayer()
-  private val fetched = CopyOnWriteArrayList<String>()
+  private val fetched = SignallingList<String>()
   private val loader by lazy { mediaImageLoader(context, ImageBytes { url, _ -> fetched.add(url); com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) }).newBuilder().allowHardware(false).build() }
   private val slots = ExoPlayerSlotFactory(context, startMuted = true).onMainLooper()
   private val looper = shadowOf(android.os.Looper.getMainLooper())
+
+  /** Wakes on each recorded call or fetch, not on a poll: the work crosses a drain thread, so a loaded machine only delays it. */
+  private fun awaitWork(what: String, condition: () -> Boolean) = TestSignal.await(what, 5_000) { rule.waitForIdle(); looper.idle(); condition() }
 
   private fun visibles(url: String) = layer.calls.filter { it.startsWith("visible:$url:") }
 
@@ -64,7 +66,7 @@ class MediaPrecomposeTest {
     assertEquals("fetched=0 visible=0 attach=0 placeholder=0", work)
 
     placed = true
-    rule.waitUntil(5000) { looper.idle(); visibles(page.url) == listOf("visible:${page.url}:true") }
+    awaitWork("the work arrived") { visibles(page.url) == listOf("visible:${page.url}:true") }
   }
 
   @Test
@@ -122,8 +124,8 @@ class MediaPrecomposeTest {
     }
     var handle: androidx.compose.ui.layout.SubcomposeLayoutState.PrecomposedSlotHandle? = null
     rule.runOnIdle { handle = state.precompose("ahead") { MediaImage(page, Modifier.size(50.dp)) } }
-    rule.waitUntil(5000) { looper.idle(); fetched.toList() == listOf(page.url) }
-    rule.waitUntil(5000) { looper.idle(); visibles(page.url) == listOf("visible:${page.url}:true") }
+    awaitWork("the work arrived") { fetched.toList() == listOf(page.url) }
+    awaitWork("the work arrived") { visibles(page.url) == listOf("visible:${page.url}:true") }
     rule.runOnIdle { handle?.dispose() }
     rule.waitForIdle()
 
@@ -135,22 +137,22 @@ class MediaPrecomposeTest {
   fun aPrecomposedUnsizedImageStartsNoWorkUntilItIsPlaced() {
     val page = Page("https://o.test/full.png", Kind.IMAGE)
     workFor(page, measured = true) { MediaImage(page, Modifier.size(50.dp)) }
-    rule.waitUntil(5000) { looper.idle(); fetched.toList() == listOf(page.url) }
+    awaitWork("the work arrived") { fetched.toList() == listOf(page.url) }
   }
 
   @Test
   fun aPrecomposedSizedImageStartsNoWorkUntilItIsPlaced() {
     val page = Page("https://o.test/tile.png", Kind.IMAGE, size = 24 to 24)
     workFor(page, measured = true) { MediaImage(page, Modifier.size(50.dp)) }
-    rule.waitUntil(5000) { looper.idle(); fetched.toList() == listOf(page.url) }
+    awaitWork("the work arrived") { fetched.toList() == listOf(page.url) }
   }
 
   @Test
   fun aPrecomposedVideoClaimsNoKeyAndAttachesNoViewUntilItIsPlaced() {
     val page = Page("https://o.test/clip.mp4", Kind.VIDEO, cover = "https://o.test/cover.jpg")
     workFor(page, measured = true) { MediaVideo(page, modifier = Modifier.size(50.dp)) }
-    rule.waitUntil(5000) { looper.idle(); fetched.toList() == listOf("https://o.test/cover.jpg") }
-    rule.waitUntil(5000) { looper.idle(); attaches(page.url).isNotEmpty() }
+    awaitWork("the work arrived") { fetched.toList() == listOf("https://o.test/cover.jpg") }
+    awaitWork("the work arrived") { attaches(page.url).isNotEmpty() }
     assertEquals(1, attaches(page.url).size)
   }
 }
