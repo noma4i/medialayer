@@ -2,6 +2,12 @@
 
 What an app changes when it moves to a new MediaLayer version. Each section names the removed API, its replacement, and what the app shows.
 
+## Next version
+
+- `microphoneAvailability` no longer blinks `noSound` when a microphone starts: `noSound` comes only from a silence the platform reports. A gate that disables recording on `noSound` no longer cancels its own start.
+- `microphoneBusy` comes only from a call, from a voice start during a camera take (and a camera take during a voice), and from a second start of the same recorder. A recording of another app shows `otherApp` and no longer refuses a start.
+- A voice start right after a camera take, while the preview lives, records: the voice takes the microphone of the idle preview, and the preview gets it back after the voice.
+
 ## 3.41.0
 
 An app that moves from 3.33.1 or earlier makes every change below at once. MediaLayer owns the audio session (iOS) and the audio focus (Android) for playback, recording and calls, and every change it makes by itself reaches the app as a stream or a state on both platforms. The app keeps no audio session, focus, call, microphone or playing state of its own, no take timer, and polls nothing.

@@ -344,6 +344,19 @@ struct MediaCameraTests {
   }
 
   @Test
+  func inv_audio_87_a_recording_of_another_app_never_blocks_a_voice_start() async throws {
+    let rig = try makeRig(.moment)
+    let seen = Collected(rig.audio.link.availability)
+    rig.audio.link.send(.otherRecording(active: true))
+    await eventually("another app records") { seen.values.last == .otherApp }
+    let capture = InputVoiceCapture(link: { rig.audio.link })
+    let voice = MediaVoiceRecorder(capture: capture, maxDurationMs: 60_000, link: { rig.audio.link })
+    try await voice.start(to: FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).m4a"))
+    #expect(capture.log == ["voice start"], "the voice took the microphone next to another app")
+    _ = try? await voice.stop()
+  }
+
+  @Test
   func inv_audio_86_a_voice_right_after_the_camera_closed_starts_without_a_blink_of_no_sound() async throws {
     let rig = try makeRig(.moment) { backend, _ in backend.nativeMicrophone = true }
     await ready(rig)

@@ -760,6 +760,22 @@ class MediaCameraTest {
   }
 
   @Test
+  fun inv_audio_87_aRecordingOfAnotherAppIsOtherAppButNeverBlocksAVoiceStart() = runBlocking {
+    val microphones = AppMicrophones()
+    val rig = rig(moment)
+    val seen = CopyOnWriteArrayList<com.noma4i.medialayer.MicrophoneAvailability>()
+    val watch = rig.audio.onAvailability { seen.add(it) }
+    rig.fixture.port.send(FocusSignal.OtherRecording(true))
+    eventually("another app records") { seen.lastOrNull() == com.noma4i.medialayer.MicrophoneAvailability.OTHER_APP }
+    val voice = MediaVoiceRecorder(AppVoiceCapture({ rig.audio }, microphones), 60_000u, { rig.audio })
+    val started = withTimeout(5_000) { runCatching { voice.start(File.createTempFile("voice", ".m4a")) } }
+    assertNull("a voice start next to another app: ${started.exceptionOrNull()}", started.exceptionOrNull())
+    assertEquals("the voice took the microphone", setOf("voice"), microphones.live.keys)
+    runCatching { voice.stop() }
+    watch.close()
+  }
+
+  @Test
   fun inv_voice_36_theCameraRecordingEndsOnlyAfterItsMicrophoneIsReleasedSoTheNextVoiceStartIsAdmitted() = runBlocking {
     val rig = rig(moment)
     ready(rig)
