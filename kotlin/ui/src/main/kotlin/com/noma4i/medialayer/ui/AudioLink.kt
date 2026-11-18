@@ -104,8 +104,10 @@ internal sealed interface Admission {
   data class Refused(val reason: RecordingRefusal) : Admission
 }
 
-internal class RecordingTicket(val id: ULong, private val end: (ULong) -> Unit) : Closeable {
+internal class RecordingTicket(val id: ULong, private val end: (ULong) -> Unit, private val take: (ULong, Boolean) -> Unit = { _, _ -> }) : Closeable {
   private val closed = AtomicBoolean()
+  /** A camera take begins or ends: the core refuses a voice during a take and gives the voice the microphone of an idle preview. */
+  fun taking(on: Boolean) { if (!closed.get()) take(id, on) }
   private val gates = ArrayList<suspend () -> Unit>()
   private val ended = CompletableDeferred<Unit>()
   private val gateScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -378,7 +380,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
           }
           process(AudioInput.Applied(action.generation, if (abandoned) AppliedResult.Ok else AppliedResult.Failed(-1)))
         }
-        is AudioAction.Admit -> pending.remove(action.id)?.complete(Admission.Admitted(RecordingTicket(action.id, ::endTicket).also {
+        is AudioAction.Admit -> pending.remove(action.id)?.complete(Admission.Admitted(RecordingTicket(action.id, ::endTicket) { id, on -> send(AudioInput.CaptureTake(id, on)) }.also {
           tickets[action.id] = it
           recordingCount.incrementAndGet()
           (ports.focus as? AudioSystem)?.ownRecordings(recordingCount.get())

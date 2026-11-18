@@ -63,8 +63,51 @@ import org.junit.After
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
 
+private val APP_PCM = PcmSpec(android.media.MediaRecorder.AudioSource.MIC, 44_100, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT)
+
+private object NoTap : CameraAudioTap {
+  override fun onTimebase(generation: Long, originNanos: Long) = Unit
+  override fun onPcm(chunk: PcmChunk) = Unit
+}
+
+/** The microphones of one Android app: a source started while another source of the app records is silenced before its first PCM, as the A16 does. */
+private class AppMicrophones {
+  val live = java.util.concurrent.ConcurrentHashMap<String, Long>()
+  private val generations = java.util.concurrent.atomic.AtomicLong()
+  private val events = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+  fun microphone(name: String, listener: RecordingAudioListener) = object : CameraMicrophone {
+    override fun start(spec: PcmSpec): Long {
+      val generation = generations.incrementAndGet()
+      val shared = live.keys.any { it != name }
+      if (!shared) live[name] = generation
+      events.execute { if (shared) listener.onSilenced(generation, true) else listener.onLive(generation); TestSignal.fire() }
+      return generation
+    }
+    override fun stop(generation: Long) { live.remove(name, generation); TestSignal.fire() }
+    override fun close() = Unit
+  }
+}
+
+/** The voice take on the app's microphones: it starts on the first sound and is refused on a silenced source. */
+private class AppVoiceCapture(private val link: () -> AudioLink?, private val microphones: AppMicrophones) : VoiceCapture {
+  @Volatile private var input: CameraAudioInput? = null
+  override suspend fun start(file: File, maxDurationMs: ULong, ticket: RecordingTicket, onLimit: () -> Unit, onFailure: (Exception) -> Unit) {
+    val heard = CompletableDeferred<CaptureAudioIssue>()
+    input = CameraAudioInput(checkNotNull(link()), APP_PCM, NoTap, { heard.complete(it) }, com.noma4i.medialayer.RecordingKind.VOICE) { microphones.microphone("voice", it) }
+    if (heard.await() != CaptureAudioIssue.ACTIVE) { stop(); throw VoiceRefused(com.noma4i.medialayer.VoiceRefusal.MICROPHONE_SILENT) }
+    file.writeBytes(byteArrayOf(1, 2, 3))
+  }
+  override fun peak(): Float = 0f
+  override fun stop() { input?.close(); input = null }
+}
+
 private class FakeBackend : CaptureBackend {
   val log = CopyOnWriteArrayList<String>()
+  /** When set, the bound preview holds the app microphone of the camera, as CameraAudioHold does. */
+  @Volatile var microphones: AppMicrophones? = null
+  @Volatile var link: () -> AudioLink? = { null }
+  @Volatile private var held: CameraAudioInput? = null
   val mainCalls = AtomicInteger()
   @Volatile private var sink: (CaptureEvent) -> Unit = {}
   @Volatile private var audioSink: (CaptureAudioIssue) -> Unit = {}
@@ -107,12 +150,13 @@ private class FakeBackend : CaptureBackend {
   override fun useMemory(memory: CaptureMemory) { this.memory = memory }
 
   override fun bind(lens: CameraLens, profile: CaptureProfile) {
+    microphones?.let { mics -> if (profile.audio && held == null) held = CameraAudioInput(checkNotNull(link()), APP_PCM, NoTap, {}) { mics.microphone("camera", it) } }
     note("bind $lens")
     emit(CaptureEvent.Opened(hasFlash, 1f, 20f))
     emit(CaptureEvent.Streaming(true))
   }
 
-  override fun unbind() = note("unbind")
+  override fun unbind() { held?.close(); held = null; note("unbind") }
 
   override suspend fun takePhoto(file: File, flash: Boolean, profile: CaptureProfile) {
     note("photo flash=$flash")
@@ -660,6 +704,29 @@ class MediaCameraTest {
     assertTrue(stopping.await().isFailure)
     assertEquals(CameraPhase.IDLE to 0UL, rig.camera.state.value.phase to rig.camera.state.value.recordedMs)
     eventually("microphone given back") { !rig.audio.isRecording }
+  }
+
+  @Test
+  fun inv_audio_85_aVoiceRightAfterACircleStopRecordsWhileThePreviewLivesAndIsBusyDuringATake() = runBlocking {
+    val microphones = AppMicrophones()
+    val rig = rig(moment)
+    rig.backend.microphones = microphones
+    rig.backend.link = { rig.audio }
+    ready(rig)
+    eventually("the preview holds the microphone") { microphones.live.keys == setOf("camera") }
+    rig.camera.startRecording()
+    val during = MediaVoiceRecorder(AppVoiceCapture({ rig.audio }, microphones), 60_000u, { rig.audio })
+    val refused = withTimeout(5_000) { runCatching { during.start(File.createTempFile("busy", ".m4a")) } }.exceptionOrNull()
+    assertEquals("a voice during a camera take: $refused", com.noma4i.medialayer.VoiceRefusal.MICROPHONE_BUSY, (refused as? MediaException.Voice)?.reason)
+    assertEquals(setOf("camera"), microphones.live.keys)
+    rig.camera.stopRecording()
+
+    val voice = MediaVoiceRecorder(AppVoiceCapture({ rig.audio }, microphones), 60_000u, { rig.audio })
+    val started = withTimeout(5_000) { runCatching { voice.start(File.createTempFile("voice", ".m4a")) } }
+    assertNull("the voice right after the circle stop: ${started.exceptionOrNull()}", started.exceptionOrNull())
+    assertEquals("only the voice holds the AudioRecord", setOf("voice"), microphones.live.keys)
+    voice.stop()
+    eventually("the preview took its microphone back") { microphones.live.keys == setOf("camera") }
   }
 
   @Test

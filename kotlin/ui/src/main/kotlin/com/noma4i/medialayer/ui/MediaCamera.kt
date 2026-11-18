@@ -93,6 +93,7 @@ class MediaCamera internal constructor(
   private var retiringAudio: RecordingTicket? = null
   private var recordingStopped: (() -> Unit)? = null
   private var audioRevocation: java.io.Closeable? = null
+  private var takeTicket: RecordingTicket? = null
   private var binding: Job? = null
   private var shooting: Job? = null
   private var reading: Job? = null
@@ -401,6 +402,7 @@ class MediaCamera internal constructor(
       run = previous
       Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, failure)
     }
+    syncTake()
     if (cancelReading != null) {
       cancelReading.invokeOnCompletion {
         enqueue {
@@ -418,6 +420,14 @@ class MediaCamera internal constructor(
     onTestChange?.invoke()
     settleWaiters()
     syncTicker()
+  }
+
+  // The core hears every take of the camera: a voice is busy during it and takes the microphone of the idle preview after it.
+  private fun syncTake() {
+    val recording = run.starting || run.started
+    val ticket = audioHold
+    if (recording && takeTicket == null && ticket != null) { takeTicket = ticket; ticket.taking(true) }
+    else if (!recording) takeTicket?.let { takeTicket = null; it.taking(false) }
   }
 
   private fun settleWaiters() {
