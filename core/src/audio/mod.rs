@@ -17,6 +17,8 @@ struct Input {
     kind: RecordingKind,
     generation: u64,
     ready: bool,
+    /// The platform told this input is silent (no sound from a live source, or silenced before its first PCM); only its sound clears it.
+    silent: bool,
     life: StateMachine<input::Life>,
 }
 
@@ -125,7 +127,7 @@ impl AudioOwner {
             MicrophoneAvailability::ExternalCall
         } else if self.other_recording || self.system_blocked() {
             MicrophoneAvailability::OtherApp
-        } else if self.inputs.iter().any(|input| !input::is_live(&input.life) && !self.yields(input.kind)) {
+        } else if self.inputs.iter().any(|input| input.silent && !self.yields(input.kind)) {
             MicrophoneAvailability::NoSound
         } else {
             MicrophoneAvailability::Available
@@ -489,7 +491,7 @@ impl AudioOwner {
             }
             I::InputOpened { id, kind } => {
                 if !self.inputs.iter().any(|input| input.id == id) {
-                    self.inputs.push(Input { id, kind, generation: 0, ready: false, life: input::Life.state_machine() });
+                    self.inputs.push(Input { id, kind, generation: 0, ready: false, silent: false, life: input::Life.state_machine() });
                     fresh = true;
                 }
             }
@@ -497,7 +499,11 @@ impl AudioOwner {
                 self.feed(id, input::InputEvent::Block, &mut actions);
                 self.inputs.retain(|input| input.id != id);
             }
-            I::NoSound { id, generation, on } => self.feed(id, input::InputEvent::Sound { generation, heard: !on }, &mut actions),
+            I::NoSound { id, generation, on } => {
+                // NoSound is only the platform's word of silence for the current generation, never "not heard yet".
+                if let Some(input) = self.inputs.iter_mut().find(|input| input.id == id && input.generation == generation) { input.silent = on; }
+                self.feed(id, input::InputEvent::Sound { generation, heard: !on }, &mut actions)
+            }
             I::RestoreFailed { id, generation } => self.feed(id, input::InputEvent::Failed { generation }, &mut actions),
             I::Foreground { on } => {
                 self.foreground = on;
@@ -551,7 +557,7 @@ impl AudioOwner {
             let ready = open && held.is_some_and(|held| held == RecordingKind::Video || held == input.kind) && !(input.kind == RecordingKind::Video && voice);
             let edge = ready && !input.ready;
             input.ready = ready;
-            if !ready { feed_input(input, &input::InputEvent::Block, &mut actions, &mut self.wake); }
+            if !ready { input.silent = false; feed_input(input, &input::InputEvent::Block, &mut actions, &mut self.wake); }
             else if edge || woken { feed_input(input, &input::InputEvent::Wake, &mut actions, &mut self.wake); }
         }
         self.wake = false;

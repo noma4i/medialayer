@@ -863,12 +863,12 @@ fn inv_audio_84_an_input_is_connected_after_its_recording_session_by_generation_
     let stops = |actions: &[AudioAction]| actions.iter().filter_map(|action| if let A::StopInput { id, generation } = action { Some((*id, *generation)) } else { None }).collect::<Vec<_>>();
     let mut world = World::new();
     let opened = world.raw(I::InputOpened { id: 1, kind: RecordingKind::Voice });
-    assert_eq!((restores(&opened), availabilities(&opened)), (vec![], vec![MicrophoneAvailability::NoSound]), "a new input is no sound and waits for its session");
+    assert_eq!((restores(&opened), availabilities(&opened)), (vec![], vec![]), "a new input waits for its session and is no missing sound: only the platform tells silence");
     let generation = opened.iter().find_map(generation_of).expect("an input asks for a recording session");
     assert_eq!(restores(&world.raw(I::Applied { generation, result: AppliedResult::Ok })), vec![(1, RecordingKind::Voice, 1)], "the session is applied, then the input connects");
     assert_eq!(restores(&world.send(I::InputOpened { id: 2, kind: RecordingKind::Voice })), vec![(2, RecordingKind::Voice, 1)], "a session that covers the kind connects at once");
     assert_eq!(world.send(I::NoSound { id: 1, generation: 1, on: false }), vec![]);
-    assert_eq!(world.send(I::NoSound { id: 2, generation: 1, on: false }), vec![available(MicrophoneAvailability::Available)]);
+    assert_eq!(world.send(I::NoSound { id: 2, generation: 1, on: false }), vec![], "the first sound changes nothing: the start did not blink no sound");
     assert_eq!(world.send(I::NoSound { id: 1, generation: 0, on: true }), vec![], "the late word of an old generation changes nothing");
 
     assert_eq!(world.send(I::NoSound { id: 1, generation: 1, on: true }), vec![A::RestoreInput { id: 1, kind: RecordingKind::Voice, generation: 2 }, available(MicrophoneAvailability::NoSound)]);
@@ -881,14 +881,17 @@ fn inv_audio_84_an_input_is_connected_after_its_recording_session_by_generation_
     world.send(I::InputClosed { id: 1 });
 
     let ended = world.settle(I::CallEnded { id: 7 });
-    assert_eq!((restores(&ended), availabilities(&ended)), (vec![(2, RecordingKind::Voice, 2)], vec![MicrophoneAvailability::NoSound]), "the end of a call connects only the living input after its session and starts no take");
-    assert_eq!(world.send(I::NoSound { id: 2, generation: 2, on: false }), vec![available(MicrophoneAvailability::Available)]);
+    assert_eq!((restores(&ended), availabilities(&ended)), (vec![(2, RecordingKind::Voice, 2)], vec![MicrophoneAvailability::Available]), "the end of a call connects only the living input after its session and starts no take");
+    assert_eq!(world.send(I::NoSound { id: 2, generation: 2, on: false }), vec![]);
+    assert_eq!(world.send(I::NoSound { id: 2, generation: 2, on: true }), vec![A::RestoreInput { id: 2, kind: RecordingKind::Voice, generation: 3 }, available(MicrophoneAvailability::NoSound)], "a silence the platform tells is no sound");
+    assert_eq!(world.send(I::NoSound { id: 2, generation: 3, on: false }), vec![available(MicrophoneAvailability::Available)], "the sound of the new generation clears it");
 
-    assert_eq!(world.send(I::InputOpened { id: 3, kind: RecordingKind::Voice }), vec![A::RestoreInput { id: 3, kind: RecordingKind::Voice, generation: 1 }, available(MicrophoneAvailability::NoSound)]);
+    assert_eq!(world.send(I::InputOpened { id: 3, kind: RecordingKind::Voice }), vec![A::RestoreInput { id: 3, kind: RecordingKind::Voice, generation: 1 }]);
+    assert_eq!(world.send(I::NoSound { id: 3, generation: 1, on: true }), vec![available(MicrophoneAvailability::NoSound)], "a source silenced before its first sound is no sound");
     assert_eq!(world.send(I::InputClosed { id: 3 }), vec![A::StopInput { id: 3, generation: 1 }, available(MicrophoneAvailability::Available)], "closing a connecting owner stops it first");
     assert_eq!(world.send(I::NoSound { id: 3, generation: 1, on: false }), vec![], "the late sound of a closed owner is ignored");
     let last = world.send(I::InputClosed { id: 2 });
-    assert_eq!((stops(&last), restores(&last)), (vec![(2, 2)], vec![]), "closing the last live owner stops its generation and starts nothing");
+    assert_eq!((stops(&last), restores(&last)), (vec![(2, 3)], vec![]), "closing the last live owner stops its generation and starts nothing");
     assert_eq!(stops(&world.send(I::InputClosed { id: 2 })), vec![], "a second close changes nothing");
 }
 
@@ -916,7 +919,7 @@ fn inv_audio_85_a_voice_capture_takes_the_microphone_from_an_idle_camera_preview
     assert!(live.is_empty(), "the preview gave its AudioRecord back to the voice: {voice:?}");
     connections(&world.settle(I::InputOpened { id: 20, kind: RecordingKind::Voice }), &mut live);
     assert_eq!(live.keys().copied().collect::<Vec<_>>(), vec![20], "only the voice records");
-    assert_eq!(world.send(I::NoSound { id: 20, generation: live[&20], on: false }), vec![available(MicrophoneAvailability::Available)], "a yielded preview is no missing sound");
+    assert_eq!(world.send(I::NoSound { id: 20, generation: live[&20], on: false }), vec![], "a yielded preview is no missing sound");
 
     let take = world.settle(I::CaptureTake { id: 1, taking: true });
     assert!(take.contains(&A::Revoke { id: 1, reason: RecordingRefusal::MicrophoneBusy }), "a camera take while the voice records is busy: {take:?}");
@@ -962,9 +965,11 @@ fn inv_audio_85_any_sequence_keeps_one_microphone_owner_between_the_camera_and_t
                 _ => match live.iter().nth(dice.index(live.len().max(1))) { Some((id, generation)) => I::NoSound { id: *id, generation: *generation, on: dice.percent(20) }, None => I::Foreground { on: true } },
             };
             let label = format!("{input:?}");
+            let silence = matches!(input, I::NoSound { on: true, .. });
             let take = if let I::CaptureTake { id, taking: on } = &input { Some((*id, *on)) } else { None };
             let actions = world.settle(input);
             connections(&actions, &mut live);
+            assert!(silence || !actions.contains(&available(MicrophoneAvailability::NoSound)), "no sound without the platform's word of silence after {label}: {actions:?}");
             for action in &actions {
                 match action {
                     A::Admit { id } => { admitted.insert(*id); }

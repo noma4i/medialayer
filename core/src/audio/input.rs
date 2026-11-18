@@ -60,7 +60,3 @@ impl Life {
         }
     }
 }
-
-pub(super) fn is_live(machine: &StateMachine<Life>) -> bool {
-    matches!(machine.state(), State::Live {})
-}
