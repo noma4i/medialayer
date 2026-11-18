@@ -76,10 +76,11 @@ class CameraAudioInputTest {
   private fun chunk(generation: Long) = PcmChunk(generation, spec, ByteBuffer.allocate(2), 1, 0, 0)
 
   @Test
-  fun the_input_is_no_sound_until_its_first_pcm_and_again_after_the_microphone_is_lost() {
+  fun inv_audio_86_the_input_is_available_before_its_first_pcm_and_no_sound_only_after_the_microphone_is_lost() {
     val input = open()
     await("restore") { microphone.calls == listOf("start 1") }
-    await("no sound before the first pcm") { availability.toList() == listOf(MicrophoneAvailability.AVAILABLE, MicrophoneAvailability.NO_SOUND) }
+    Thread.sleep(200)
+    assertEquals("an input not heard yet does not blink no sound", listOf(MicrophoneAvailability.AVAILABLE), availability.toList())
     assertEquals(1L, input.audioGeneration)
     listener.onLive(1)
     await("heard") { availability.last() == MicrophoneAvailability.AVAILABLE }
@@ -102,7 +103,7 @@ class CameraAudioInputTest {
     await("a call stops it") { microphone.calls == listOf("start 1", "stop 1") && availability.last() == MicrophoneAvailability.EXTERNAL_CALL }
     assertEquals(null, input.audioGeneration)
     focus.send(FocusSignal.PhoneCall(false))
-    await("the end of the call restores it and waits for sound") { microphone.calls == listOf("start 1", "stop 1", "start 2") && availability.last() == MicrophoneAvailability.NO_SOUND }
+    await("the end of the call restores it and waits for sound") { microphone.calls == listOf("start 1", "stop 1", "start 2") && availability.last() == MicrophoneAvailability.AVAILABLE }
     listener.onPcm(chunk(2))
     assertEquals("the live generation passes its pcm and a restore starts no take", listOf("pcm 2"), tap.seen.toList())
     input.close()
@@ -117,7 +118,7 @@ class CameraAudioInputTest {
     val call = link.call(MediaCallKind.Unmanaged)
     await("an own call stops it") { microphone.calls == listOf("start 1", "stop 1") && availability.last() == MicrophoneAvailability.OWN_CALL }
     call.close()
-    await("the end of the call restores it") { microphone.calls == listOf("start 1", "stop 1", "start 2") && availability.last() == MicrophoneAvailability.NO_SOUND }
+    await("the end of the call restores it") { microphone.calls == listOf("start 1", "stop 1", "start 2") && availability.last() == MicrophoneAvailability.AVAILABLE }
     assertTrue("the end of a call starts no take", tap.seen.isEmpty())
     input.close()
   }

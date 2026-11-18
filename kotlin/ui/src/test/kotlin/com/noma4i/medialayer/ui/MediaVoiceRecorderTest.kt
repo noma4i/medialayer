@@ -151,7 +151,7 @@ class MediaVoiceRecorderTest {
 
     assertEquals(VoicePhase.IDLE, recorder.state.value.phase)
     assertFalse(target.exists())
-    await("no sound before the first PCM") { availability.lastOrNull() == MicrophoneAvailability.NO_SOUND }
+    assertFalse("the start does not blink no sound before the first PCM", MicrophoneAvailability.NO_SOUND in availability)
 
     microphone.listener!!.onLive(1)
     microphone.listener!!.onPcm(chunk(1))

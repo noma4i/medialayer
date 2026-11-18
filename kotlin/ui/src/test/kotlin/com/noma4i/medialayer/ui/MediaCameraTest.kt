@@ -75,11 +75,13 @@ private class AppMicrophones {
   val live = java.util.concurrent.ConcurrentHashMap<String, Long>()
   private val generations = java.util.concurrent.atomic.AtomicLong()
   private val events = java.util.concurrent.Executors.newSingleThreadExecutor()
+  /** The system silences every new source before its first PCM, as a muted microphone does. */
+  @Volatile var muted = false
 
   fun microphone(name: String, listener: RecordingAudioListener) = object : CameraMicrophone {
     override fun start(spec: PcmSpec): Long {
       val generation = generations.incrementAndGet()
-      val shared = live.keys.any { it != name }
+      val shared = muted || live.keys.any { it != name }
       if (!shared) live[name] = generation
       events.execute { if (shared) listener.onSilenced(generation, true) else listener.onLive(generation); TestSignal.fire() }
       return generation
@@ -727,6 +729,34 @@ class MediaCameraTest {
     assertEquals("only the voice holds the AudioRecord", setOf("voice"), microphones.live.keys)
     runCatching { voice.stop() } // the fake take holds no audio: EMPTY is its outcome, the microphone goes back either way
     eventually("the preview took its microphone back") { microphones.live.keys == setOf("camera") }
+  }
+
+  @Test
+  fun inv_audio_86_aVoiceRightAfterTheCameraClosedStartsWithoutABlinkOfNoSoundAndARealSilenceIsStillNoSound() = runBlocking {
+    val microphones = AppMicrophones()
+    val rig = rig(moment)
+    rig.backend.microphones = microphones
+    rig.backend.link = { rig.audio }
+    ready(rig)
+    eventually("the preview holds the microphone") { microphones.live.keys == setOf("camera") }
+    rig.detach()
+    eventually("the camera closed and gave the microphone back") { microphones.live.isEmpty() && !rig.audio.isRecording }
+
+    val seen = CopyOnWriteArrayList<com.noma4i.medialayer.MicrophoneAvailability>()
+    val watch = rig.audio.onAvailability { seen.add(it) }
+    val voice = MediaVoiceRecorder(AppVoiceCapture({ rig.audio }, microphones), 60_000u, { rig.audio })
+    val started = withTimeout(5_000) { runCatching { voice.start(File.createTempFile("voice", ".m4a")) } }
+    assertNull("the voice right after the camera closed: ${started.exceptionOrNull()}", started.exceptionOrNull())
+    assertFalse("the start blinked no sound: $seen", com.noma4i.medialayer.MicrophoneAvailability.NO_SOUND in seen)
+    runCatching { voice.stop() }
+    eventually("the voice gave the microphone back") { microphones.live.isEmpty() && !rig.audio.isRecording }
+
+    microphones.muted = true
+    val silent = MediaVoiceRecorder(AppVoiceCapture({ rig.audio }, microphones), 60_000u, { rig.audio })
+    val refused = withTimeout(5_000) { runCatching { silent.start(File.createTempFile("silent", ".m4a")) } }.exceptionOrNull()
+    assertEquals("a silenced source: $refused", com.noma4i.medialayer.VoiceRefusal.MICROPHONE_SILENT, (refused as? MediaException.Voice)?.reason)
+    eventually("a real silence is still no sound: $seen") { com.noma4i.medialayer.MicrophoneAvailability.NO_SOUND in seen }
+    watch.close()
   }
 
   @Test
