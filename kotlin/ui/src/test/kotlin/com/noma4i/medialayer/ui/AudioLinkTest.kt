@@ -38,7 +38,7 @@ import org.junit.runner.RunWith
 
 internal class RecordingFocusPort : AudioFocusPort {
   val calls = SignallingList<String>()
-  var answer = FocusAnswer.GRANTED
+  @Volatile var answer = FocusAnswer.GRANTED
   @Volatile var onRequest: (FocusPlan) -> Unit = {}
   private var sink: (FocusSignal) -> Unit = {}
 
@@ -46,9 +46,10 @@ internal class RecordingFocusPort : AudioFocusPort {
   fun send(signal: FocusSignal) = sink(signal)
 
   override fun request(plan: FocusPlan): FocusAnswer {
+    val reply = answer
     calls.add("request ${plan.gain} ${plan.usage}")
     onRequest(plan)
-    return answer
+    return reply
   }
 
   override fun abandon() { calls.add("abandon") }
