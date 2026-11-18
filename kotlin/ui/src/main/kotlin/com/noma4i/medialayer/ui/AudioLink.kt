@@ -229,8 +229,9 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
   private var closeCompleted = false
   private val availability = MutableStateFlow(MicrophoneAvailability.AVAILABLE)
   val microphoneAvailability: Flow<MicrophoneAvailability> = kotlinx.coroutines.flow.callbackFlow {
-    val observation = onAvailability { trySend(it) }
+    if (isClosed) channel.close()
     val close = onClose { channel.close() }
+    val observation = onAvailability { trySend(it) }
     awaitClose { observation.close(); close.close() }
   }
   private val listeners = LinkedHashSet<(MicrophoneAvailability) -> Unit>()

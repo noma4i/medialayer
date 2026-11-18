@@ -152,6 +152,16 @@ extension GlobalMedia {
       await app.close()
     }
 
+    // M4
+    @Test
+    func inv_audio_77_the_availability_read_after_close_is_a_stream_that_ends_at_once() async throws {
+      let app = try await AppLayer.open()
+      await app.close()
+      let after = Collected(app.media.microphoneAvailability)
+      await eventually("ended") { after.finished }
+      #expect(after.values.isEmpty)
+    }
+
     // M2
     @Test
     func inv_audio_61_a_microphone_held_by_another_app_shows_other_app() async throws {

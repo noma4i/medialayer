@@ -192,6 +192,12 @@ class AudioContractTest {
   }
 
   @Test
+  fun inv_audio_77_the_availability_read_after_close_is_a_stream_that_ends_at_once() = runBlocking {
+    app.closeAndAwait()
+    assertEquals(emptyList<MicrophoneAvailability>(), withTimeout(5_000) { app.layer.microphoneAvailability.toList() })
+  }
+
+  @Test
   fun inv_audio_60_another_app_recording_shows_in_the_availability() = runBlocking {
     app.focus.send(FocusSignal.OtherRecording(true))
     availability(MicrophoneAvailability.OTHER_APP)
