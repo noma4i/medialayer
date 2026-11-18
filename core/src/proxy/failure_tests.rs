@@ -37,6 +37,7 @@ async fn inv_failures_01_a_store_write_failure_still_delivers_the_image_and_repo
         let fetched = within(10, rig.proxy.fetch_bytes(IMAGE, &HashMap::new(), 1 << 20)).await.expect("the image is delivered");
         assert_eq!(fetched.bytes, pattern(3000, 1), "{failure:?}");
         assert_eq!(fetched.source, ImageOrigin::Network, "{failure:?}");
+        assert!(eventually(|| !collected.0.lock().unwrap().is_empty()).await, "{failure:?}");
         let reported = collected.0.lock().unwrap().clone();
         assert_eq!(reported.len(), 1, "{failure:?}");
         assert_eq!((reported[0].kind, reported[0].url.as_str(), reported[0].stage), (Kind::Image, IMAGE, FailureStage::Store), "{failure:?}");
@@ -49,6 +50,7 @@ async fn inv_failures_02_a_network_failure_reports_once() {
     rig.fetcher.set_offline(true);
     let fetched = within(10, rig.proxy.fetch_bytes(IMAGE, &HashMap::new(), 1 << 20)).await;
     assert!(fetched.is_err());
+    assert!(eventually(|| !collected.0.lock().unwrap().is_empty()).await);
     let reported = collected.0.lock().unwrap().clone();
     assert_eq!(reported.len(), 1);
     assert_eq!((reported[0].kind, reported[0].url.as_str(), reported[0].stage), (Kind::Image, IMAGE, FailureStage::Load));

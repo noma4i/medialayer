@@ -24,22 +24,57 @@ pub trait FailureListener: Send + Sync {
 }
 
 pub struct Failures {
-    state: Mutex<FailureState>,
+    state: Mutex<Option<Listeners>>,
     next: Mutex<u64>,
 }
 
-type Listeners = Vec<(u64, Arc<dyn FailureListener>, Arc<AtomicBool>)>;
+/// One listener with its own ordered mailbox: a slow listener delays only its own events (spec M6).
+struct Listener {
+    id: u64,
+    target: Arc<dyn FailureListener>,
+    active: Arc<AtomicBool>,
+    mailbox: Arc<Mailbox>,
+}
+
+type Listeners = Vec<Listener>;
 
 #[derive(Default)]
-struct FailureState {
-    listeners: Option<Listeners>,
-    pending: VecDeque<(Listeners, Option<MediaFailure>)>,
-    delivering: bool,
+struct Mailbox {
+    queue: Mutex<(VecDeque<Option<MediaFailure>>, bool)>,
+}
+
+impl Mailbox {
+    /// Queues an event; the first push of a burst starts one drain thread that delivers in order and ends when the queue is empty.
+    fn push(self: &Arc<Self>, listener: &Arc<dyn FailureListener>, active: &Arc<AtomicBool>, event: Option<MediaFailure>) {
+        let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
+        queue.0.push_back(event);
+        if queue.1 { return; }
+        queue.1 = true;
+        drop(queue);
+        let (mailbox, listener, active) = (self.clone(), listener.clone(), active.clone());
+        std::thread::spawn(move || loop {
+            let next = {
+                let mut queue = mailbox.queue.lock().unwrap_or_else(PoisonError::into_inner);
+                match queue.0.pop_front() {
+                    Some(event) => event,
+                    None => {
+                        queue.1 = false;
+                        return;
+                    }
+                }
+            };
+            if !active.load(Ordering::SeqCst) { continue; }
+            match next {
+                Some(failure) => listener.failed(failure),
+                None => listener.closed(),
+            }
+        });
+    }
 }
 
 impl Default for Failures {
     fn default() -> Self {
-        Self { state: Mutex::new(FailureState { listeners: Some(Vec::new()), ..FailureState::default() }), next: Mutex::new(0) }
+        Self { state: Mutex::new(Some(Vec::new())), next: Mutex::new(0) }
     }
 }
 
@@ -58,8 +93,8 @@ impl Failures {
         };
         let active = Arc::new(AtomicBool::new(true));
         let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(listeners) = state.listeners.as_mut() {
-            listeners.push((id, listener, active.clone()));
+        if let Some(listeners) = state.as_mut() {
+            listeners.push(Listener { id, target: listener, active: active.clone(), mailbox: Arc::default() });
         } else {
             drop(state);
             listener.closed();
@@ -70,38 +105,67 @@ impl Failures {
         crate::api::Subscription::cancelling(move || {
             active.store(false, Ordering::SeqCst);
             if let Some(failures) = failures.upgrade() {
-                if let Some(listeners) = failures.state.lock().unwrap_or_else(PoisonError::into_inner).listeners.as_mut() {
-                    listeners.retain(|(held, _, _)| *held != id);
+                if let Some(listeners) = failures.state.lock().unwrap_or_else(PoisonError::into_inner).as_mut() {
+                    listeners.retain(|held| held.id != id);
                 }
             }
         })
     }
 
     pub fn report(&self, failure: MediaFailure) {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        let Some(listeners) = state.listeners.clone() else { return };
-        state.pending.push_back((listeners, Some(failure)));
-        Self::deliver(&self.state, state);
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(listeners) = state.as_ref() else { return };
+        for held in listeners {
+            held.mailbox.push(&held.target, &held.active, Some(failure.clone()));
+        }
     }
 
     pub fn close(&self) {
-        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        let Some(listeners) = state.listeners.take() else { return };
-        state.pending.push_back((listeners, None));
-        Self::deliver(&self.state, state);
+        let Some(listeners) = self.state.lock().unwrap_or_else(PoisonError::into_inner).take() else { return };
+        for held in listeners {
+            held.mailbox.push(&held.target, &held.active, None);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    struct Sleepy(Duration);
+    impl FailureListener for Sleepy {
+        fn failed(&self, _: MediaFailure) { std::thread::sleep(self.0); }
+        fn closed(&self) {}
     }
 
-    fn deliver<'a>(shared: &'a Mutex<FailureState>, mut state: std::sync::MutexGuard<'a, FailureState>) {
-        if state.delivering { return; }
-        state.delivering = true;
-        while let Some((listeners, failure)) = state.pending.pop_front() {
-            drop(state);
-            for (_, listener, active) in listeners {
-                if !active.load(Ordering::SeqCst) { continue; }
-                if let Some(failure) = &failure { listener.failed(failure.clone()); } else { listener.closed(); }
-            }
-            state = shared.lock().unwrap_or_else(PoisonError::into_inner);
+    #[derive(Default)]
+    struct Log(Mutex<Vec<String>>);
+    impl FailureListener for Log {
+        fn failed(&self, failure: MediaFailure) { self.0.lock().unwrap().push(failure.url); }
+        fn closed(&self) { self.0.lock().unwrap().push("closed".into()); }
+    }
+
+    fn failure(url: &str) -> MediaFailure {
+        MediaFailure { kind: Kind::Image, url: url.into(), stage: FailureStage::Load, reason: String::new() }
+    }
+
+    #[test]
+    fn inv_api_67_a_slow_failure_listener_delays_neither_the_producer_nor_the_others_and_order_holds() {
+        let failures = Arc::new(Failures::default());
+        let _slow = failures.subscribe(Arc::new(Sleepy(Duration::from_millis(400))));
+        let log = Arc::new(Log::default());
+        let _fast = failures.subscribe(log.clone());
+        let started = Instant::now();
+        for index in 0..5 {
+            failures.report(failure(&index.to_string()));
         }
-        state.delivering = false;
+        failures.close();
+        assert!(started.elapsed() < Duration::from_millis(200));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while log.0.lock().unwrap().len() < 6 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(*log.0.lock().unwrap(), vec!["0", "1", "2", "3", "4", "closed"]);
     }
 }
