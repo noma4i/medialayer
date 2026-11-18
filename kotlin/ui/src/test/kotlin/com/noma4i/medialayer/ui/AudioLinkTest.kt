@@ -102,7 +102,6 @@ class AudioLinkTest {
     permission.change(com.noma4i.medialayer.MicrophonePermission.NOT_ASKED)
     assertEquals(Admission.Refused(RecordingRefusal.PERMISSION_DENIED), link.admit(RecordingKind.VOICE))
     await("never asked is shown") { seen.lastOrNull() == MicrophoneAvailability.PERMISSION_NOT_ASKED }
-  }
     permission.change(false)
     await("denied is another value") { seen.lastOrNull() == MicrophoneAvailability.PERMISSION_DENIED }
     assertTrue(seen.toList().containsAll(listOf(MicrophoneAvailability.PERMISSION_NOT_ASKED, MicrophoneAvailability.PERMISSION_DENIED)))
