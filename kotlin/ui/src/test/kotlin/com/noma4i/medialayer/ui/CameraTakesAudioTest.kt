@@ -162,7 +162,7 @@ class CameraTakesAudioTest {
     microphone.onPcm(chunk(3))
     TestSignal.await("the first pcm of attempt 3 confirmed the take", 5_000) { CaptureEvent.AudioFlow(true) in seen }
     current.listener.onStarted(current.generation, 0)
-    started.await()
+    kotlinx.coroutines.withTimeout(5_000) { started.await() }
     assertEquals(CameraPhase.RECORDING, camera.state.value.phase)
     assertEquals("one take", 1, takes.size)
     assertEquals(1, seen.count { it == CaptureEvent.RecordStarted })
@@ -182,7 +182,9 @@ class CameraTakesAudioTest {
     silence(2)
     TestSignal.await("attempt 3", 5_000) { source.starts.get() == 3L }
     microphone.onSilenced(3, true)
-    val error = started.await().exceptionOrNull() as com.noma4i.medialayer.MediaException.Camera
+    TestSignal.await("the silent take is asked to end", 5_000) { current.finishing }
+    current.listener.onCancelled(current.generation)
+    val error = kotlinx.coroutines.withTimeout(5_000) { started.await() }.exceptionOrNull() as com.noma4i.medialayer.MediaException.Camera
     assertEquals(com.noma4i.medialayer.CameraRefusal.MICROPHONE_SILENT, error.reason)
     assertEquals("exactly three sources", 3L, source.starts.get())
     assertEquals(false, timer.armed(MicrophoneRetry.PAUSE_MS))
