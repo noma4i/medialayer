@@ -566,8 +566,10 @@ class MediaVoiceRecorderTest {
   @Test
   fun inv_voice_22_every_outcome_is_published_with_the_number_of_its_own_take() = runBlocking<Unit> {
     val seed = System.getenv("ML_SEED")?.toLongOrNull() ?: System.nanoTime()
-    println("repeat: ML_SEED=$seed")
-    val random = java.util.Random(seed)
+    val blocks = System.getenv("ML_SEED_COUNT")?.toIntOrNull() ?: 1
+    println("repeat: ML_SEED=$seed ML_SEED_COUNT=$blocks")
+    val master = java.util.Random(seed)
+    val seeds = List(blocks) { if (blocks == 1) seed else master.nextLong() }
     val recorder = recorder()
     val seen = SignallingList<VoiceState>()
     val watching = scope.launch(start = CoroutineStart.UNDISPATCHED) { recorder.states.collect { seen.add(it) } }
@@ -577,27 +579,39 @@ class MediaVoiceRecorderTest {
         try { recorder.start(file()); return } catch (busy: MediaException.Voice) { assertEquals(VoiceRefusal.MICROPHONE_BUSY, busy.reason); Thread.yield() }
       }
     }
+    val rounds = 40
     var next: kotlinx.coroutines.Deferred<Unit>? = scope.async { begin() }
-    repeat(40) { round ->
-      await("the owner starts the microphone") { microphone.calls.contains("start ${generation + 1}") }
-      generation += 1
-      microphone.listener!!.onLive(generation)
-      microphone.listener!!.onPcm(chunk(generation))
-      withTimeout(5_000) { next!!.await() }
-      ticks.now += 1_000
-      val stop = scope.async { recorder.stop() }
-      // The next start races the end of this take: it either is refused as busy or comes after the outcome.
-      if (random.nextBoolean()) repeat(random.nextInt(50)) { Thread.yield() }
-      next = if (round < 39) scope.async { begin() } else null
-      stop.await()
+    for ((index, blockSeed) in seeds.withIndex()) {
+      if (blocks > 1) println("seed $index: $blockSeed")
+      val random = java.util.Random(blockSeed)
+      repeat(rounds) { round ->
+        await("the owner starts the microphone") { microphone.calls.contains("start ${generation + 1}") }
+        generation += 1
+        microphone.listener!!.onLive(generation)
+        microphone.listener!!.onPcm(chunk(generation))
+        withTimeout(5_000) { next!!.await() }
+        // A StateFlow joins states that follow each other: the model must have seen this take recording before its end, or the end looks like an outcome of a take that never started.
+        await("the model saw the take $generation recording") { seen.any { it.phase == VoicePhase.RECORDING && it.take == generation.toULong() } }
+        ticks.now += 1_000
+        val stop = scope.async { recorder.stop() }
+        // The next start races the end of this take: it either is refused as busy or comes after the outcome.
+        if (random.nextBoolean()) repeat(random.nextInt(50)) { Thread.yield() }
+        next = if (index < seeds.lastIndex || round < rounds - 1) scope.async { begin() } else null
+        stop.await()
+      }
     }
     watching.cancel()
     val states = seen.toList()
     var take = 0uL
+    var over = true
     states.forEach { state ->
-      if (state.phase == VoicePhase.RECORDING) { assertEquals("seed $seed", take + 1uL, state.take); take = state.take }
-      if (state.outcome != null) assertEquals("an outcome carries its own take, seed $seed", take, state.take)
+      if (state.phase == VoicePhase.RECORDING) {
+        // The level poll repeats RECORDING with the number of its own take; a new take is the next number, and nothing records after its outcome.
+        if (state.take != take) { assertTrue("a new take follows the end of the old one, seed $seed", over); assertEquals("seed $seed", take + 1uL, state.take); take = state.take; over = false }
+        else assertFalse("no recording state after the outcome of its take, seed $seed", over)
+      }
+      if (state.outcome != null) { assertEquals("an outcome carries its own take, seed $seed", take, state.take); over = true }
     }
-    assertEquals(40uL, take)
+    assertEquals((rounds * blocks).toULong(), take)
   }
 }
