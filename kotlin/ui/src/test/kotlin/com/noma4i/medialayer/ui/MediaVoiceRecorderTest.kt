@@ -112,7 +112,7 @@ class MediaVoiceRecorderTest {
   private fun file(): File = File.createTempFile("voice", ".m4a").apply { delete(); deleteOnExit() }
 
   private fun recorder(writer: Writer = Writer(), maxMs: Long = 60_000, minTakeMs: ULong = 0uL, screen: ScreenSwitch = ScreenSwitch(), clock: () -> ULong = ticks::read, reserve: suspend (Long) -> AutoCloseable = { AutoCloseable { holds.add("closed") } }): MediaVoiceRecorder {
-    writer.clock = { ticks.now }
+    writer.clock = { clock().toLong() }
     return MediaVoiceRecorder(SystemVoiceCapture(context, { link }, { writer }, reserve, { made, lease -> microphone.listener = made; microphone.lease = lease; microphone }), maxMs.toULong(), { link }, clock, 5, scope, minTakeMs, screen.awake())
   }
 
@@ -356,19 +356,18 @@ class MediaVoiceRecorderTest {
   }
 
   @Test
-  fun a_loss_while_recording_ends_the_take_once_without_a_file_and_the_first_healthy_pcm_closes_the_owner() = runBlocking<Unit> {
+  fun inv_voice_26_a_loss_while_recording_ends_the_take_once_without_a_file_and_closes_the_owner_at_once() = runBlocking<Unit> {
     val recorder = recorder()
     val target = file()
     record(recorder, target)
 
     microphone.listener!!.onSilenced(1, true)
     val ended = withTimeout(5_000) { recorder.state.first { it.outcome != null } }
-    await("the core restores the source") { microphone.calls.toList().take(3) == listOf("start 1", "stop 1", "start 2") }
-    microphone.listener!!.onPcm(chunk(1))
+    await("the owner closes without a restore") { microphone.calls.toList() == listOf("start 1", "stop 1", "close") }
     microphone.listener!!.onPcm(chunk(2, 16_384))
-    await("the first healthy PCM closes the owner") { microphone.calls.toList() == listOf("start 1", "stop 1", "start 2", "stop 2", "close") }
 
-    await("the hold goes back once, after the restored source") { holds.toList() == listOf("closed") }
+    await("the hold goes back once") { holds.toList() == listOf("closed") }
+    assertEquals(listOf("start 1", "stop 1", "close"), microphone.calls.toList())
     assertEquals(VoiceOutcome.Refused(VoiceRefusal.MICROPHONE_SILENT), ended.outcome)
     assertFalse(target.exists())
     assertEquals("no resume", VoicePhase.IDLE, recorder.state.value.phase)
