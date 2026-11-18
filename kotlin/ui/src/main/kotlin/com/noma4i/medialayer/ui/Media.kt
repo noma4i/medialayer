@@ -158,15 +158,14 @@ internal class MediaEnvironment(val media: MediaLayer, val players: SlotPlayers?
 private val EnvironmentLocal = staticCompositionLocalOf<MediaEnvironment?> { null }
 
 internal object ProcessMediaEnvironment {
-  var current: MediaEnvironment? by mutableStateOf(null)
-    private set
+  private var installed: MediaEnvironment? by mutableStateOf(null)
+
+  /** The environment of the process layer: it lives as long as the layer, not as long as a screen composition. */
+  val current: MediaEnvironment?
+    get() = installed?.takeUnless { it.media.uniffiIsDestroyed }
 
   fun install(environment: MediaEnvironment) {
-    current = environment
-  }
-
-  fun remove(environment: MediaEnvironment) {
-    if (current === environment) current = null
+    installed = environment
   }
 }
 
@@ -224,7 +223,7 @@ private fun MediaLayerEnvironment(media: MediaLayer?, imageLoader: ImageLoader?,
       Media.applyMuted(environment.media)
       ProcessMediaEnvironment.install(environment)
     }
-    onDispose { if (environment != null) ProcessMediaEnvironment.remove(environment) }
+    onDispose { }
   }
   CompositionLocalProvider(EnvironmentLocal provides environment, content = content)
 }

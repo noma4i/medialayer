@@ -126,9 +126,6 @@ final class ProcessMediaContext: @unchecked Sendable {
     current = context
   }
 
-  func remove(_ context: MediaContext) {
-    if current === context { current = nil }
-  }
 }
 
 @propertyWrapper
@@ -191,7 +188,6 @@ private struct MediaLayerModifier: ViewModifier {
     return content
       .environment(\.mediaContext, context)
       .onAppear { ProcessMediaContext.shared.install(context) }
-      .onDisappear { ProcessMediaContext.shared.remove(context) }
   }
 }
 
@@ -214,7 +210,6 @@ private struct OpeningMediaLayerModifier: ViewModifier {
           Media.recordFailure(error)
         }
       }
-      .onDisappear { context.map(ProcessMediaContext.shared.remove) }
   }
 }
 

@@ -6,6 +6,7 @@
 
 - A shown whole-strategy place is never failed by the full whole queue.
 - Android camera recording is not dropped by a GL error left by an earlier call.
+- A screen recreate no longer makes the process media environment Closed on Android and iOS.
 
 ## 3.41.2 - 2026-11-18
 
