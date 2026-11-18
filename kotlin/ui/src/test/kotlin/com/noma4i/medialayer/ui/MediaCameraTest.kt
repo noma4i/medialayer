@@ -980,7 +980,7 @@ class MediaCameraTest {
   }
 
   @Test
-  fun inv_capture_75_a_clip_stays_for_its_take_after_the_next_take_starts_and_goes_with_the_camera() = runBlocking {
+  fun inv_capture_70_a_clip_stays_for_its_take_after_the_next_take_starts_and_goes_with_the_camera() = runBlocking {
     val rig = rig(moment)
     ready(rig)
     val first = recordingTake(rig)
@@ -1004,16 +1004,18 @@ class MediaCameraTest {
   }
 
   @Test
-  fun inv_capture_76_a_stop_waiting_when_the_layer_closes_gets_an_end() = runBlocking {
+  fun inv_capture_71_a_stop_waiting_when_the_layer_closes_gets_interrupted() = runBlocking {
     val app = AppPath()
     val rig = rig(moment, app = app)
+    rig.counters.videoGate = CompletableDeferred()
     ready(rig)
     recordingTake(rig)
     val stopping = CoroutineScope(Dispatchers.Default).async { runCatching { rig.camera.stopRecording() } }
+    eventually("the clip is read") { rig.counters.straightened.isNotEmpty() }
 
     app.close()
 
-    val outcome = withTimeout(5_000) { stopping.await() }
-    if (outcome.isFailure) assertTrue(outcome.exceptionOrNull() is MediaException.Camera)
+    val failure = withTimeout(5_000) { stopping.await() }.exceptionOrNull()
+    assertEquals(CameraRefusal.INTERRUPTED, (failure as? MediaException.Camera)?.reason)
   }
 }

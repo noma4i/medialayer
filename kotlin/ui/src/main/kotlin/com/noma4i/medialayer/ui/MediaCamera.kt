@@ -549,7 +549,7 @@ class MediaCamera internal constructor(
 
   private fun failWaiters() {
     photoWaiter?.let { photoWaiter = null; it.completeExceptionally(refusal(CameraRefusal.NOT_READY)) }
-    stopWaiter?.let { stopWaiter = null; it.completeExceptionally(refusal(CameraRefusal.NOT_READY)) }
+    stopWaiter?.let { stopWaiter = null; it.completeExceptionally(refusal(CameraRefusal.INTERRUPTED)) }
   }
 
   private fun open(lens: CameraLens) {
