@@ -137,8 +137,7 @@ class ConnectWithoutAppMachineTest {
     assertSame("the process layer outlives the screen", second, outside.layer)
 
     second.destroy()
-    rule.waitForIdle()
-    assertNull(outside.layer)
+    assertNull("a closed layer is no process layer", ProcessMediaEnvironment.current)
   }
 
   @Test
