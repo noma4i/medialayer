@@ -260,6 +260,45 @@ class CameraNativeDeviceTest {
     }
   }
 
+  /** INV-AUDIO-85 on the platform: the circle stop of the Yupi A16 case, then a voice at once while the preview lives, three times; a voice during a take is busy. */
+  @Test
+  fun inv_audio_85_a_voice_right_after_a_circle_stop_records_while_the_preview_lives() = runBlocking {
+    val profile = captureProfile(CaptureKind.CIRCLE).copy(mirrorFrontVideo = true)
+    val composed = CompletableDeferred<MediaCamera>()
+    val launched = ActivityScenario.launch(ComponentActivity::class.java).also { scenario = it }
+    launched.onActivity { activity ->
+      activity.setContentView(ComposeView(activity).apply {
+        setContent {
+          MediaLayerProvider(checkNotNull(opened)) {
+            val made = remember { MediaCamera(profile, CameraLens.FRONT, CameraXBackend(context), diagnosing(null)) }
+            DisposableEffect(made) { onDispose { made.close() } }
+            LaunchedEffect(made) { composed.complete(made) }
+            MediaCameraPreview(made, Modifier.fillMaxSize())
+          }
+        }
+      })
+    }
+    val camera = withTimeout(TIMEOUT_MS) { composed.await() }
+    assertEquals(CameraPhase.READY, withTimeout(TIMEOUT_MS) { camera.state.first { it.isReady || it.phase == CameraPhase.FAILED } }.phase)
+    repeat(3) { run ->
+      camera.startRecording()
+      withTimeout(TIMEOUT_MS) { camera.state.first { it.isRecording && it.recordedMs >= profile.minTakeMs } }
+      val busy = MediaVoiceRecorder(context, maxDurationMs = 300_000)
+      val during = withTimeout(VOICE_MS) { runCatching { busy.start(File(context.cacheDir, "busy-$run.m4a")) } }.exceptionOrNull()
+      assertEquals("run $run: a voice during the take: $during", com.noma4i.medialayer.VoiceRefusal.MICROPHONE_BUSY, (during as? MediaException.Voice)?.reason)
+      files.add(camera.stopRecording().file)
+      val file = File(context.cacheDir, "voice-$run.m4a").also { files.add(it) }
+      val recorder = MediaVoiceRecorder(context, maxDurationMs = 300_000)
+      val asked = System.nanoTime()
+      val started = withTimeout(VOICE_MS) { runCatching { recorder.start(file) } }
+      println("V2V run=$run voice start returned after ${(System.nanoTime() - asked) / 1_000_000} ms: ${started.exceptionOrNull()}")
+      assertEquals("run $run: the voice right after the circle stop records", null, started.exceptionOrNull())
+      kotlinx.coroutines.delay(1_500)
+      val voice = recorder.stop()
+      assertTrue("run $run: the voice file has audio, ${voice.durationMs} ms", file.length() > 0 && voice.durationMs > 0L)
+    }
+  }
+
   @Test
   fun inv_capture_78_a_lens_change_during_a_take_gives_no_gl_failure() = record(audio = false, disturb = Disturbance.LENS)
 
@@ -285,6 +324,7 @@ class CameraNativeDeviceTest {
   fun audio_missing_at_the_tail_is_refused_and_the_file_deleted() = record(audio = true, damage = Damage.TAIL)
 
   private companion object {
+    const val VOICE_MS = 10_000L
     const val TIMEOUT_MS = 30_000L
     const val DISTURB_SETTLE_MS = 2_000L
   }
