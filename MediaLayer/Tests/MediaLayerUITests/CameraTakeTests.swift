@@ -127,6 +127,39 @@ struct CameraTakeTests {
   }
 
   @Test
+  func inv_capture_48_the_take_ends_with_the_last_video_frame_and_the_sound_is_cut_there() async throws {
+    let fixture = try Fixture.make()
+    var (take, events, url) = makeTake(fixture)
+    defer { try? FileManager.default.removeItem(at: url) }
+    for buffer in fixture.audio { take.appendAudio(buffer, generation: Fixture.generation) }
+    guard case .begin? = await events.next() else { Issue.record("no begin first"); return }
+    take.confirmBegin(generation: Fixture.generation)
+    guard case .started? = await events.next() else { Issue.record("no started after confirm"); return }
+    let shown = fixture.video.prefix(3)
+    for buffer in shown { take.appendVideo(buffer, generation: Fixture.generation) }
+    take.stop()
+    guard case let .outcome(.finished(_, durationMs, _))? = await events.next() else { Issue.record("no finished outcome"); return }
+    #expect(durationMs == 100)
+    let asset = AVURLAsset(url: url)
+    let audio = try #require(try await asset.loadTracks(withMediaType: .audio).first)
+    let video = try #require(try await asset.loadTracks(withMediaType: .video).first)
+    let audioEnd = try await audio.load(.timeRange).end.seconds
+    let videoEnd = try await video.load(.timeRange).end.seconds
+    #expect(abs(videoEnd - 0.1) < 0.02)
+    #expect(abs(audioEnd - videoEnd) < 0.03)
+  }
+
+  @Test
+  func inv_capture_48_a_frame_ends_at_its_duration_or_the_gap_before_it() {
+    let scale: CMTimeScale = 600
+    let pts = CMTime(value: 60, timescale: scale)
+    let step = CMTime(value: 20, timescale: scale)
+    #expect(CameraTake.frameEnd(pts: pts, duration: step, previous: .invalid) == pts + step)
+    #expect(CameraTake.frameEnd(pts: pts, duration: .invalid, previous: pts - step) == pts + step)
+    #expect(CameraTake.frameEnd(pts: pts, duration: .zero, previous: .invalid) == pts)
+  }
+
+  @Test
   func inv_capture_45_a_cancel_during_finish_ends_with_the_cancel_and_leaves_no_file() async throws {
     let fixture = try Fixture.make()
     nonisolated(unsafe) let video = fixture.video

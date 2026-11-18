@@ -29,11 +29,12 @@
 
 ### Changed
 
-- Voice take on iOS and Android: `MediaVoiceRecorder.start` returns when the first live PCM has arrived and its file is open; no file or `recording` state exists before that. A source without sound ends the take once with `microphoneSilent` and no file; the source may return by itself and is released at its first healthy sound, without resuming the take. A started source shows `NoSound` until it gives sound.
-- `MediaVoiceRecorder` does not request the microphone permission on iOS and Android; the app asks for it, and without it `start` throws `permissionDenied`.
-- Android `MediaVoiceRecorder` records through the audio input owner and a MediaCodec writer; the old `MediaRecorder` path is removed.
-- Android camera reads the encoder profile from the CameraX provider instead of the legacy `CamcorderProfile`.
-- Android camera `CONFIGURE_FAILED` of a video names the step that refused the plan (stream map, format, SDR profile, AAC encoder) with the camera facts.
+- `MediaVoiceRecorder.start` returns after the first live PCM, with the file already open.
+- A voice source without sound ends the take once with `microphoneSilent` and no file.
+- `MediaVoiceRecorder` leaves the microphone permission to the app on iOS and Android.
+- Android voice records through the audio input owner and MediaCodec, without `MediaRecorder`.
+- Android camera reads encoder profiles from the CameraX provider.
+- Android camera video `CONFIGURE_FAILED` names the refused plan step and the camera facts.
 - `playUrl` returns a library `MediaPlayer` with its own playback state.
 - A play during a call or recording is refused and shows its refusal.
 - After the library forgets a wish, one Play plays again.
@@ -66,9 +67,10 @@
 
 ### Fixed
 
-- Android camera video on devices whose camera profile asks for an AAC profile no encoder declares (Samsung A16 front): the take uses AAC-LC like CameraX instead of failing with `CONFIGURE_FAILED`.
-- A lens change while the camera is failed starts a new attempt with that lens and clears the fault (iOS and Android).
-- Android camera: a microphone restart after the capture session closed no longer reports `the capture memory is closed` as a recorder failure; the microphone leases the memory of the current session, ends quietly when that session is closed, and the memory closes after the audio input and the take.
+- iOS camera sound no longer runs past the last video frame.
+- Android camera video uses AAC-LC when no encoder declares the camera AAC profile.
+- A lens change on a failed camera starts a new attempt with that lens.
+- Android camera no longer reports a closed capture memory after the session ends.
 - Response bodies reach the core in pieces of up to 64 KiB instead of single network reads.
 - An Android camera switched with the flash on becomes ready and lights the torch on the new lens.
 - A place that starts playing while a camera preview or recording holds the session plays at once.

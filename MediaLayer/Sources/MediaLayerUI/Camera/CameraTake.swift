@@ -59,6 +59,8 @@ final class CameraTake: @unchecked Sendable {
   private var videoInput: AVAssetWriterInput?
   private var start = CMTime.invalid
   private var end = CMTime.invalid
+  private var videoEnd = CMTime.invalid
+  private var videoPTS = CMTime.invalid
   private var audioCount = 0
   private var videoCount = 0
   private var writtenMs: UInt64 = 0
@@ -203,7 +205,13 @@ final class CameraTake: @unchecked Sendable {
       return
     }
     guard input.append(buffer) else { return settle(.failed(writer?.error ?? Failure.appendFailed)) }
-    if isAudio { audioCount += 1 } else { videoCount += 1 }
+    if isAudio {
+      audioCount += 1
+    } else {
+      videoCount += 1
+      videoEnd = Self.frameEnd(pts: pts, duration: CMSampleBufferGetDuration(buffer), previous: videoPTS)
+      videoPTS = pts
+    }
     if carriesClock {
       let tail = pts + CMSampleBufferGetDuration(buffer)
       end = end.isValid ? max(end, tail) : tail
@@ -219,10 +227,11 @@ final class CameraTake: @unchecked Sendable {
     }
     guard let writer else { return settle(.failed(Failure.missingStream)) }
     guard videoCount > 0, settings.audio == nil || audioCount > 0 else { return settle(.failed(Failure.missingStream)) }
-    guard let duration = Self.milliseconds(end - start) else { return settle(.failed(Failure.invalidInterval)) }
+    guard let duration = Self.milliseconds(videoEnd - start) else { return settle(.failed(Failure.invalidInterval)) }
     phase = .finishing
     audioInput?.markAsFinished()
     videoInput?.markAsFinished()
+    writer.endSession(atSourceTime: videoEnd)
     writer.finishWriting { [self] in
       queue.async { [self] in
         guard phase == .finishing, let writer = self.writer else { return }
@@ -300,6 +309,14 @@ final class CameraTake: @unchecked Sendable {
   private static func bytes(_ buffer: CMSampleBuffer) -> Int {
     let payload = CMSampleBufferGetImageBuffer(buffer).map(CVPixelBufferGetDataSize) ?? CMSampleBufferGetTotalSampleSize(buffer)
     return payload > 0 ? payload + entryCost : 0
+  }
+
+  /// The end of a written video frame: its pts and duration, or the gap since the previous frame when the camera gives no duration.
+  /// The tracks of the take end here, so the sound never runs past the last picture (INV-CAPTURE-44).
+  static func frameEnd(pts: CMTime, duration: CMTime, previous: CMTime) -> CMTime {
+    if duration.isNumeric, duration > .zero { return pts + duration }
+    if previous.isNumeric, pts > previous { return pts + (pts - previous) }
+    return pts
   }
 
   private static func milliseconds(_ interval: CMTime) -> UInt64? {
