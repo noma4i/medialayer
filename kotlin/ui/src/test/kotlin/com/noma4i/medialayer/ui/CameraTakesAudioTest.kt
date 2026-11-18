@@ -202,7 +202,6 @@ class CameraTakesAudioTest {
     TestSignal.await("ready", 5_000) { camera.state.value.phase == CameraPhase.READY }
     microphone.onLive(1)
     microphone.onSilenced(1, true)
-    TestSignal.await("the preview microphone told silence", 5_000) { CaptureEvent.AudioFlow(false) in seen }
     val started = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { camera.startRecording() }
     TestSignal.await("the start waits for a fresh run of the microphone", 5_000) { source.starts.get() >= 2L && takes.size == 1 }
     val current = takes.last()

@@ -597,13 +597,19 @@ struct MediaCameraTests {
     let rig = try makeRig(.moment)
     await ready(rig)
     rig.backend.emit(.microphoneFlow(false))
+    rig.backend.soundOnTake = false
+    let silent = Task { try await rig.camera.startRecording() }
+    await eventually("a silent microphone does not refuse the start: the take waits") { rig.backend.count("record back") == 1 }
+    rig.backend.emit(.microphoneFlow(false))
     do {
-      try await rig.camera.startRecording()
+      try await silent.value
       Issue.record("a silent take started")
     } catch let MediaError.Camera(reason, detail, _) {
       #expect((reason, detail) == (.microphoneSilent, cameraRefusalText(reason: .microphoneSilent)))
     }
     #expect(files(rig).isEmpty)
+    rig.backend.soundOnTake = true
+    await eventually("ready after the silent take") { rig.camera.state.phase == .ready }
 
     rig.backend.emit(.microphoneFlow(true))
     try await rig.camera.startRecording()

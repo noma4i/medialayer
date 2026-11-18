@@ -180,7 +180,7 @@ class MediaCamera internal constructor(
         return@enqueue
       }
       // The start of a take retries a microphone that ended silent; the take waits for its sound (owner 2026-11-19).
-      if (profile.audio && run.audioFlowing == false) backend.retryMicrophone()
+      if (profile.audio) backend.retryMicrophone()
       apply(CaptureEvent.Start)
       take.set(run.state.take)
       if (run.starting) startWaiter = waiter else waiter.completeExceptionally(startFailure ?: refusal(CameraRefusal.NOT_READY))
