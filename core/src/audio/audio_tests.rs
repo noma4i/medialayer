@@ -455,7 +455,7 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
             let answers_flight = matches!(input, I::Applied { generation, .. } if Some(generation) == world.owner.inflight());
             let release_in_flight = world.owner.inflight().is_some_and(|generation| releases.contains(&generation));
             let busy_answer = answers_flight && release_in_flight && matches!(input, I::Applied { result: AppliedResult::Busy, .. });
-            let pending_release = world.owner.release_pending() && !matches!(input, I::Applied { .. });
+            let pending_release = world.owner.release_pending() && !matches!(input, I::Applied { .. } | I::FocusRequest { .. });
             if !matches!(input, I::Applied { .. } | I::FocusRequest { .. }) && release_in_flight {
                 heard_in_flight = true;
             }
@@ -501,7 +501,7 @@ fn inv_audio_12_any_sequence_keeps_one_recording_of_a_kind_one_hold_and_ends_rel
                 heard_in_flight = false;
             }
             assert!(!(refusal && actions.iter().any(|action| matches!(action, A::Apply { .. }))), "the answer to a refusal asked the system again: {label} {actions:?}");
-            assert!(!(owner.inflight().is_none() && matches!(owner.applied(), Some(SessionWant::Recording { .. })) && !owner.pending().is_empty()), "a capture waits although its recording session is applied: {label} {:?}", owner.pending());
+            assert!(!(owner.inflight().is_none() && matches!(session::held(&owner.session), Some(SessionWant::Recording { .. })) && !owner.pending().is_empty()), "a capture waits although its recording session is held: {label} {:?}", owner.pending());
             assert!(owner.captures().is_empty() || gate, "playback may start during a recording: {label} {actions:?}");
             assert!(!actions.contains(&A::ResumePaused) || silent_pause || (owner.inflight().is_none() && owner.applied().is_some()), "sounding players resume before their session is applied (a pause that covered no audible slot needs no session): {label} {actions:?}");
             assert!(owner.system() == System::Ducked || multiplier == 1.0, "the ducked volume outlived the duck: {label} {:?}", owner.system());
