@@ -10,6 +10,7 @@
 - A voice start right after a camera take records instead of hanging while the preview lives.
 - A voice start during a camera take is refused as microphone busy at once.
 - An Android microphone source silenced before its first sound now ends the waiting voice start.
+- An Android audio input starts only after the input stopped for it released its AudioRecord.
 
 ## 3.41.2 - 2026-11-18
 
