@@ -149,7 +149,7 @@ class PlaceholderTest {
   private val slots by lazy { ExoPlayerSlotFactory(context, startMuted = true).onMainLooper() }
 
   private fun until(what: String, condition: () -> Boolean) {
-    try { rule.waitUntil(15000) { looper.idle(); condition() } } catch (error: androidx.compose.ui.test.ComposeTimeoutException) {
+    try { rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); condition() } } catch (error: androidx.compose.ui.test.ComposeTimeoutException) {
       reportComposeTimeout(AssertionError("never became true: $what; events=${events.all}; nodes blurhash=${nodes("blurhash")} cover=${nodes("cover")}", error), "placeholder events=${events.all} mainPixelSizes=${mainPixelSizes.get()}")
     }
   }

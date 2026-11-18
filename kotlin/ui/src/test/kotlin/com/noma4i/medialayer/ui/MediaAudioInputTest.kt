@@ -133,7 +133,7 @@ class MediaAudioInputTest {
     }
   }
 
-  private fun waitForPlaying(key: String, expected: Boolean = true) = waitUntil(10_000) { looper.idle(); slot.playing(key) == expected }
+  private fun waitForPlaying(key: String, expected: Boolean = true) = waitUntil(COMPOSE_WAIT_MS) { looper.idle(); slot.playing(key) == expected }
 
   private fun mount(): AudioControl {
     rule.setContent {
@@ -150,7 +150,7 @@ class MediaAudioInputTest {
         }
       }
     }
-    waitUntil(10_000) { seen.isNotEmpty() }
+    waitUntil(COMPOSE_WAIT_MS) { seen.isNotEmpty() }
     return seen.last()
   }
 
@@ -160,7 +160,7 @@ class MediaAudioInputTest {
     looper.idle()
     val before = slot.count("rate")
     rule.runOnIdle { rate = 3f + before }
-    waitUntil(10_000) { looper.idle(); slot.count("rate") > before }
+    waitUntil(COMPOSE_WAIT_MS) { looper.idle(); slot.count("rate") > before }
   }
 
   @Test
@@ -227,7 +227,7 @@ class MediaAudioInputTest {
       url = "file:///second.mp4"
       playing = false
     }
-    waitUntil(10_000) { looper.idle(); seen.last() !== first }
+    waitUntil(COMPOSE_WAIT_MS) { looper.idle(); seen.last() !== first }
     rule.runOnIdle { assertFalse(seen.last().isPlaying) }
 
     rule.runOnIdle {

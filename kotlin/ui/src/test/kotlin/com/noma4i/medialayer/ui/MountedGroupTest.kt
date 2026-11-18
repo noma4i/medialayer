@@ -63,7 +63,7 @@ class MountedGroupTest {
 
   private val looper = shadowOf(Looper.getMainLooper())
 
-  private fun waitFor(transport: String) = rule.waitUntil(10_000) { looper.idle(); slot.transport == transport }
+  private fun waitFor(transport: String) = rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); slot.transport == transport }
 
   @Test
   fun inv_session_15_a_mounted_video_follows_a_change_of_its_group_only() {
@@ -93,7 +93,7 @@ class MountedGroupTest {
         MediaAudio(ClipSource(CLIP, Kind.AUDIO), group = group) { control = it; Box(Modifier.size(80.dp)) }
       }
     }
-    rule.waitUntil(10_000) { control != null }
+    rule.waitUntil(COMPOSE_WAIT_MS) { control != null }
     rule.runOnIdle { control!!.play() }
     waitFor("play")
     val hold = layer.suspendPlayback(listOf("system"))
@@ -113,7 +113,7 @@ class MountedGroupTest {
         MediaAudio(ClipSource(CLIP, Kind.AUDIO), group = group()) { control = it; Box(Modifier.size(80.dp)) }
       }
     }
-    rule.waitUntil(10_000) { control != null }
+    rule.waitUntil(COMPOSE_WAIT_MS) { control != null }
     rule.runOnIdle { control!!.play() }
     waitFor("play")
     return control!!
@@ -126,7 +126,7 @@ class MountedGroupTest {
     other.update(placeInput(playing = true, group = "chat"))
     other.release()
     rule.runOnIdle { audio.rate = 2f }
-    rule.waitUntil(10_000) { looper.idle(); slot.log.last() == "rate" }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); slot.log.last() == "rate" }
     assertEquals("play", slot.transport)
   }
 
@@ -141,7 +141,7 @@ class MountedGroupTest {
 
     val allowing = layer.suspendPlayback(listOf("system"))
     layer.setRate(CLIP, 2f)
-    rule.waitUntil(10_000) { slot.log.last() == "rate" }
+    rule.waitUntil(COMPOSE_WAIT_MS) { slot.log.last() == "rate" }
     assertEquals("play", slot.transport)
 
     val blocking = layer.suspendPlayback(listOf("ring"))

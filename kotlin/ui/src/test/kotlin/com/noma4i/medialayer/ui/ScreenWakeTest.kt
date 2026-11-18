@@ -64,7 +64,7 @@ class ScreenWakeTest {
   private val screenKeptOn: Boolean
     get() = rule.activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0
 
-  private fun until(condition: () -> Boolean) = rule.waitUntil(5_000) { looper.idle(); condition() }
+  private fun until(condition: () -> Boolean) = rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); condition() }
 
   private fun mount() {
     rule.setContent {

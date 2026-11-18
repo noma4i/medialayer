@@ -60,9 +60,9 @@ class PlaybackSuspendedTest {
     return layer
   }
 
-  private fun waitFor(expected: List<String>) = rule.waitUntil(10_000) { looper.idle(); slot.transport.toList() == expected }
+  private fun waitFor(expected: List<String>) = rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); slot.transport.toList() == expected }
 
-  private fun waitForLast(last: String) = rule.waitUntil(10_000) { looper.idle(); slot.transport.lastOrNull() == last }
+  private fun waitForLast(last: String) = rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); slot.transport.lastOrNull() == last }
 
   @Test
   fun inv_session_18_a_mounted_suspension_follows_active_and_never_duplicates() {
@@ -109,7 +109,7 @@ class PlaybackSuspendedTest {
     }
     waitFor(listOf("play", "pause"))
     rule.runOnIdle { mounted = false }
-    rule.waitUntil(1_500) { looper.idle(); slot.transport.toList() == listOf("play", "pause", "play") }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); slot.transport.toList() == listOf("play", "pause", "play") }
     layer.close()
   }
 
@@ -157,7 +157,7 @@ class PlaybackSuspendedTest {
     }
     waitForLast("pause")
     rule.runOnIdle { groups = listOf("two") }
-    rule.waitUntil(10_000) { looper.idle(); Media.failure != null }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); Media.failure != null }
     assertEquals(listOf("play", "pause"), slot.transport.toList())
     rule.runOnIdle { active = false }
     waitFor(listOf("play", "pause", "play"))
@@ -171,9 +171,9 @@ class PlaybackSuspendedTest {
     val owner = object : androidx.lifecycle.LifecycleOwner { override val lifecycle = androidx.lifecycle.LifecycleRegistry(this) }
     val signals = SystemSignals(context, layer.playerEvents(), owner.lifecycle)
     signals.onStop(owner)
-    rule.waitUntil(10_000) { looper.idle(); slot.unloads.size == 1 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); slot.unloads.size == 1 }
     signals.onStart(owner)
-    rule.waitUntil(10_000) { looper.idle(); slot.transport.count { it == "play" } == 2 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); slot.transport.count { it == "play" } == 2 }
     assertEquals(listOf("play", "play"), slot.transport.toList())
     layer.close()
   }

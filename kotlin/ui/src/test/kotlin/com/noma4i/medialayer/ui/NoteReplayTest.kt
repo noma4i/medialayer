@@ -64,7 +64,7 @@ class NoteReplayTest {
   private val looper = shadowOf(Looper.getMainLooper())
   private var shown by mutableStateOf(true)
 
-  private fun until(condition: () -> Boolean) = rule.waitUntil(10_000) { looper.idle(); condition() }
+  private fun until(condition: () -> Boolean) = rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); condition() }
 
   @Test
   fun inv_ingress_44_a_note_that_ended_and_was_unmounted_starts_from_the_start_when_mounted_again() {

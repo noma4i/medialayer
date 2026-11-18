@@ -26,7 +26,7 @@ class AudioPlayheadTest {
   private fun AudioControl.reported(value: PlayheadReport) {
     val before = playhead
     report(value)
-    rule.waitUntil(5_000) { shadowOf(Looper.getMainLooper()).idle(); playhead !== before }
+    rule.waitUntil(COMPOSE_WAIT_MS) { shadowOf(Looper.getMainLooper()).idle(); playhead !== before }
   }
 
   @Test
@@ -107,7 +107,7 @@ class AudioPlayheadTest {
 
     reports.forEach { together.report(it) }
 
-    rule.waitUntil(5_000) { shadowOf(Looper.getMainLooper()).idle(); kotlin.math.abs(together.playhead.progress(nanos(750)) - expected) < 1e-6f }
+    rule.waitUntil(COMPOSE_WAIT_MS) { shadowOf(Looper.getMainLooper()).idle(); kotlin.math.abs(together.playhead.progress(nanos(750)) - expected) < 1e-6f }
     assertEquals(0.325f, together.playhead.progress(nanos(750)), 1e-6f)
   }
 }

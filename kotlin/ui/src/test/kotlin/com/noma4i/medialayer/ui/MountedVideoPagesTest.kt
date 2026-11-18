@@ -67,7 +67,7 @@ class MountedVideoPagesTest {
         }
       }
     }
-    rule.waitUntil(10_000) { looper.idle(); slot.calls.isNotEmpty() }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); slot.calls.isNotEmpty() }
     rule.waitForIdle()
     looper.idleFor(java.time.Duration.ofMillis(1000))
 

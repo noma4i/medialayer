@@ -80,7 +80,7 @@ class PlaybackContractTest {
 
   private fun until(what: String, condition: () -> Boolean) {
     try {
-      rule.waitUntil(10_000) { looper.idle(); condition() }
+      rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); condition() }
     } catch (error: ComposeTimeoutException) {
       reportComposeTimeout(error, "$what url=$url playing=${controls.lastOrNull()?.isPlaying} play=${app.slots.count("play")} pause=${app.slots.count("pause")}")
     }

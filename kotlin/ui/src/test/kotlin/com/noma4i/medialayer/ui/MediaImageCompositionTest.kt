@@ -158,16 +158,16 @@ class MediaImageCompositionTest {
     fun settled(visible: Boolean, round: Int) = urls.all { count("visible:$it:$visible") == round }
     for (round in 1..2) {
       rule.runOnIdle { shown.value = total }
-      waitUntil(10000) { looper.idle(); settled(true, round) && urls.all { count("itemState:$it:Ready") == round } }
+      waitUntil(COMPOSE_WAIT_MS) { looper.idle(); settled(true, round) && urls.all { count("itemState:$it:Ready") == round } }
       rule.runOnIdle { shown.value = 0 }
-      waitUntil(10000) { looper.idle(); settled(false, round) }
+      waitUntil(COMPOSE_WAIT_MS) { looper.idle(); settled(false, round) }
     }
-    waitUntil(10000) { looper.idle(); drainFfi(); layer.counterWork.isNotEmpty() && layer.counterObserved == 0L }
+    waitUntil(COMPOSE_WAIT_MS) { looper.idle(); drainFfi(); layer.counterWork.isNotEmpty() && layer.counterObserved == 0L }
 
     rule.runOnIdle { shown.value = total }
-    waitUntil(10000) { looper.idle(); urls.all { count("itemState:$it:Ready") == 3 } }
+    waitUntil(COMPOSE_WAIT_MS) { looper.idle(); urls.all { count("itemState:$it:Ready") == 3 } }
     rule.runOnIdle { generation.value = 1 }
-    waitUntil(10000) { looper.idle(); urls.all { count("itemState:$it?changed:Ready") == 1 } }
+    waitUntil(COMPOSE_WAIT_MS) { looper.idle(); urls.all { count("itemState:$it?changed:Ready") == 1 } }
     assertEquals(emptyList<String>(), layer.mainThreadFfi.toList())
     assertEquals(true, pixelCalls.get() > 0)
     assertEquals(0, pixelMainCalls.get())
