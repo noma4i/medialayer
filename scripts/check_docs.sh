@@ -52,7 +52,7 @@ def read_all(patterns):
 
 platform = {
     "swift": read_all(["MediaLayer/Sources/**/*.swift"]),
-    "kotlin": read_all(["kotlin/src/main/**/*.kt", "kotlin/ui/src/main/**/*.kt"]),
+    "kotlin": read_all(["kotlin/src/main/**/*.kt", "kotlin/ui/src/main/**/*.kt", "kotlin/testing/src/main/**/*.kt"]),
 }
 declaration = {
     "swift": re.compile(r"\b(?:struct|class|enum|protocol|typealias|actor)\s+(\w+)"),
