@@ -174,7 +174,7 @@ extension GlobalMedia {
     }
 
     @Test
-    func aVoiceAndACameraTicketLiveTogetherOnTheHeardInputAndTheLastReleaseFreesTheSession() async throws {
+    func inv_audio_85_aVoiceTicketTakesTheMicrophoneOfTheIdleCameraInputAndGivesItBackAtItsEnd() async throws {
       let rig = try AudioRig()
       let input = open(rig)
       await connected(rig)
@@ -183,19 +183,16 @@ extension GlobalMedia {
         return
       }
 
-      camera.end()
-      _ = await rig.link.readVolume()
-      #expect(voice.isActive)
-      #expect(microphone.stops.isEmpty, "the input outlives a ticket")
-      #expect(rig.availability.last == .available)
+      await eventually("the camera input gave its microphone to the voice") { microphone.stops == [1] }
+      #expect(rig.availability.last == .available, "a yielded camera input is no missing sound")
 
+      camera.end()
       voice.end()
-      _ = await rig.link.readVolume()
-      #expect(microphone.stops.isEmpty, "the input lives between takes")
-      #expect(rig.availability.last == .available)
+      await connected(rig, generation: 2)
+      #expect(microphone.stops == [1], "the camera input is back after the voice and lives between takes")
 
       input.close()
-      await eventually("the input and the session are released") { microphone.stops == [1] && rig.session.log.last == "deactivate" }
+      await eventually("the input and the session are released") { microphone.stops == [1, 2] && rig.session.log.last == "deactivate" }
     }
 
     @Test
