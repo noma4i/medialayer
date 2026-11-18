@@ -47,8 +47,9 @@ The library gives app tests a fake fetcher and a player snapshot. Add both only 
 Recipe: open MediaLayer as the app does, start the take (`MediaVoiceRecorder.start`, `MediaCamera.startRecording`), call the driver, then read the state. A camera or voice take reports its refusal in `VoiceState.outcome` / `CameraState.outcome`, a start refused during the event throws the same refusal.
 
 ```swift
+let recorder = MediaVoiceRecorder(maxDuration: 120)
 let driver = MediaAudioDriver(media)
-try await recorder.start(to: file)
+try await recorder.start(to: fileURL)
 driver.startCall()
 // recorder.state.outcome == .refused(reason: .inCall)
 // media.microphoneAvailability yields .externalCall
@@ -56,6 +57,7 @@ driver.endCall()
 ```
 
 ```kotlin
+val recorder = MediaVoiceRecorder(context, maxDurationMs = 120_000)
 val driver = MediaAudioDriver(media)
 recorder.start(file)
 driver.silenceMicrophone()
