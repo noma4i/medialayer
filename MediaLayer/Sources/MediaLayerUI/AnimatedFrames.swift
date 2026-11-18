@@ -4,6 +4,9 @@ import ImageIO
 import MediaLayer
 import SwiftUI
 
+/// The one rule for a playback speed: finite and above zero, else normal speed. Mirrors Kotlin `playbackRateOf`.
+func playbackRateOf(_ rate: Double) -> Double { rate > 0 && rate.isFinite ? rate : 1 }
+
 final class FrameStream: @unchecked Sendable {
   static let window = 3
 
@@ -57,10 +60,10 @@ struct AnimatedFrames {
 
   let retainedBytes: Int
 
-  func loopDuration(rate: Double) -> TimeInterval { rate > 0 ? duration / rate : duration }
+  func loopDuration(rate: Double) -> TimeInterval { duration / playbackRateOf(rate) }
 
   func frameTick(elapsed: TimeInterval, rate: Double) -> Int {
-    let position = max(0, elapsed) * (rate > 0 ? rate : 1)
+    let position = max(0, elapsed) * playbackRateOf(rate)
     let round = Int(position / duration)
     let offset = position - Double(round) * duration
     var low = 0
@@ -73,7 +76,7 @@ struct AnimatedFrames {
   }
 
   func frameEnd(tick: Int, rate: Double) -> TimeInterval {
-    (Double(tick / frameCount) * duration + frameEnds[tick % frameCount]) / (rate > 0 ? rate : 1)
+    (Double(tick / frameCount) * duration + frameEnds[tick % frameCount]) / playbackRateOf(rate)
   }
 
   func image(at index: Int) -> CGImage? {

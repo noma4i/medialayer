@@ -307,11 +307,29 @@ extension GlobalMedia {
       let limited = try await MediaLayer.open(fetcher: URLSessionFetcher(), settings: settings, directory: directory, imageMemoryBytes: 5_000_000)
       let defaulted = try await MediaLayer.open(fetcher: URLSessionFetcher(), settings: settings, directory: directory.appendingPathComponent("b"))
 
-      #expect(ImageMemory.cache(for: limited).costLimit == 5_000_000)
+      #expect(ImageMemory.cache(for: limited).costLimit + ImageMemory.frames(for: limited).byteLimit == 5_000_000)
       #expect(ImageMemory.cache(for: defaulted).costLimit == 128 * 1024 * 1024)
       await #expect(throws: MediaError.self) {
         try await MediaLayer.open(fetcher: URLSessionFetcher(), settings: settings, directory: directory.appendingPathComponent("c"), imageMemoryBytes: 0)
       }
+    }
+
+    @Test
+    func inv_image_86_animated_frames_and_still_images_share_the_one_image_memory_budget() async throws {
+      let settings = UserDefaultsSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+      let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+      let tiny = try await MediaLayer.open(fetcher: URLSessionFetcher(), settings: settings, directory: directory, imageMemoryBytes: 1)
+      #expect(ImageMemory.cache(for: tiny).costLimit + ImageMemory.frames(for: tiny).byteLimit == 1)
+      let data = NSMutableData()
+      let destination = CGImageDestinationCreateWithData(data, UTType.gif.identifier as CFString, 2, nil)!
+      for _ in 0 ..< 2 {
+        let context = CGContext(data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        CGImageDestinationAddImage(destination, context.makeImage()!, [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.1]] as CFDictionary)
+      }
+      CGImageDestinationFinalize(destination)
+      let cache = ImageMemory.frames(for: tiny)
+      _ = await cache.load(identity: "a", data: data as Data, maxPixel: 8, admit: { _ in {} })
+      #expect(cache.bytes == 0 && cache.count == 0)
     }
 
     @Test

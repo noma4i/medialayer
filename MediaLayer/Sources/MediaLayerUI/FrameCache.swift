@@ -58,7 +58,7 @@ final class FrameCache: @unchecked Sendable {
     let cost: Int
   }
 
-  private let byteLimit: Int
+  let byteLimit: Int
   private let cost: @Sendable (AnimatedFrames) -> Int
   private let decode: @Sendable (Data, Int) async -> AnimatedFrames?
   private let lock = NSLock()

@@ -171,7 +171,7 @@ public struct MediaImage<Content: View>: View {
     self.source = source
     self.preview = preview
     self.contentMode = contentMode
-    self.playbackRate = playbackRate
+    self.playbackRate = playbackRateOf(playbackRate)
     self.animation = animation
     self.content = content
   }
@@ -306,7 +306,8 @@ public struct MediaImage<Content: View>: View {
   private func decodeFrames(_ job: FramesJob) async {
     guard job.needed, job.hasAnimation, let loaded, loaded.key == job.key, loaded.frames == nil, let data = loaded.animated, let pixels = job.key.pixels else { return }
 
-    let frames = await FrameCache.shared.load(identity: job.key.identity, data: data, maxPixel: Int(max(pixels.width, pixels.height)), admit: FrameCache.admit(from: context?.places as? MediaLayer))
+    let cache = context.map { ImageMemory.frames(for: $0.places) } ?? FrameCache.shared
+    let frames = await cache.load(identity: job.key.identity, data: data, maxPixel: Int(max(pixels.width, pixels.height)), admit: FrameCache.admit(from: context?.places as? MediaLayer))
     guard !Task.isCancelled, self.loaded?.key == job.key else { return }
 
     self.loaded?.frames = frames

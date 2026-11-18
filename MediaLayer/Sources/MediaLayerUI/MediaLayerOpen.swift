@@ -53,11 +53,13 @@ extension MediaLayer {
     build: @escaping @Sendable (OpenConfig) throws -> MediaLayer = { try MediaLayer.open(config: $0) }
   ) async throws -> MediaLayer {
     guard imageMemoryBytes > 0 else { throw MediaError.InvalidSpec(detail: "imageMemoryBytes must be positive") }
-    let imageCache = ImageCache(costLimit: imageMemoryBytes)
+    let budget = ImageMemory.split(imageMemoryBytes)
+    let imageCache = ImageCache(costLimit: budget.images)
+    let frameCache = FrameCache(byteLimit: budget.frames)
     let audio = MediaAudioSession()
     let work = Task.detached(priority: .userInitiated) {
       let (config, factory) = try makeConfig(
-        defaults: try defaults(), fetcher: fetcher, settings: settings, directory: directory, silent: onSimulator, audio: audio, audioFocus: audioFocus, imageCache: imageCache
+        defaults: try defaults(), fetcher: fetcher, settings: settings, directory: directory, silent: onSimulator, audio: audio, audioFocus: audioFocus, imageCache: imageCache, frameCache: frameCache
       )
       let resources = config.memoryReleaser as? OpenedResources
       do {
@@ -86,7 +88,7 @@ extension MediaLayer {
     }
     try media.setTonePreparation(preparation: ToneFrames(places: media))
     try media.setMutedAll(muted: Media.muted)
-    ImageMemory.install(imageCache, on: media)
+    ImageMemory.install(imageCache, frames: frameCache, on: media)
     LoadedSlots.install(factory.slots, on: media)
     HostLayers.install(factory.hosts, on: media)
     media.followSystem(events: media.playerEvents(), link: factory.events, center: .default, names: .system, audio: link)
@@ -104,7 +106,8 @@ extension MediaLayer {
     silent: Bool,
     audio: MediaAudioSession? = nil,
     audioFocus: MediaAudioFocus = .mix,
-    imageCache: ImageCache = ImageCache(costLimit: MediaImagePipeline.defaultMemoryLimit)
+    imageCache: ImageCache = ImageCache(costLimit: MediaImagePipeline.defaultMemoryLimit),
+    frameCache: FrameCache = .shared
   ) throws -> (OpenConfig, AVQueuePlayerSlotFactory) {
     let factory = AVQueuePlayerSlotFactory(startMuted: silent, audio: audio)
     let directory = try directory ?? defaultDirectory()
@@ -123,7 +126,7 @@ extension MediaLayer {
       evictVideo: defaults.evictVideo,
       evictImage: defaults.evictImage,
       evictAudio: defaults.evictAudio,
-      memoryReleaser: OpenedResources(images: ImageMemoryReleaser(cache: imageCache), factory: factory, audio: audio),
+      memoryReleaser: OpenedResources(images: ImageMemoryReleaser(cache: imageCache, frames: frameCache), factory: factory, audio: audio),
       silent: silent,
       audioFocus: audioFocus.core
     )

@@ -175,6 +175,17 @@ struct AnimatedFramesTests {
   }
 
   @Test
+  func inv_image_87_a_non_finite_or_non_positive_playback_rate_plays_at_normal_speed() throws {
+    let frames = try #require(AnimatedFrames.decode(transparentGif(frames: 40, side: 16, delay: 0.05), maxPixel: 16))
+    for rate in [Double.infinity, -Double.infinity, .nan, 0, -2] {
+      #expect(playbackRateOf(rate) == 1)
+      #expect(frames.frameTick(elapsed: 1.01, rate: rate) == frames.frameTick(elapsed: 1.01, rate: 1))
+      #expect(frames.loopDuration(rate: rate) == frames.duration)
+    }
+    #expect(playbackRateOf(2) == 2)
+  }
+
+  @Test
   func aStreamedGifShowsTheFrameOfTheElapsedTimeSoALateWakeNeverStretchesTheLoop() throws {
     let frames = try #require(AnimatedFrames.decode(transparentGif(frames: 40, side: 16, delay: 0.05), maxPixel: 16))
 

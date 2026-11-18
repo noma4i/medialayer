@@ -47,23 +47,21 @@ async fn load(mut request: ImageLoadRequest, fetcher: Arc<dyn fetch::Fetcher>, l
     let cache = Cache::open(request.dir.as_str(), cache_limits(request.cache_bytes)?);
     let key = cache_key(&request.url);
     let timeout = Duration::from_millis(request.timeout_ms);
-    let fetched = tokio::time::timeout(timeout, async {
+    tokio::time::timeout(timeout, async {
         cache.ready().await;
         if let Some(bytes) = cache.get(&key).await {
+            let _ = cache.flush().await;
             return Ok(ImageFetchResult { bytes, source: ImageOrigin::Cache });
         }
         let bytes = download(fetcher.as_ref(), Request { url: request.url.clone(), headers: request.headers.clone(), range: None }, limits).await?;
+        if let Err(error) = cache.put(&key, Kind::Image, &bytes).await {
+            cache.report_store_failure(Kind::Image, &request.url, &error);
+        }
+        let _ = cache.flush().await;
         Ok::<_, MediaError>(ImageFetchResult { bytes, source: ImageOrigin::Network })
     })
     .await
-    .map_err(|_| MediaError::Timeout { detail: format!("no answer within {} ms", request.timeout_ms) })??;
-    if fetched.source == ImageOrigin::Network {
-        if let Err(error) = cache.put(&key, Kind::Image, &fetched.bytes).await {
-            cache.report_store_failure(Kind::Image, &request.url, &error);
-        }
-    }
-    let _ = cache.flush().await;
-    Ok(fetched)
+    .map_err(|_| MediaError::Timeout { detail: format!("no answer within {} ms", request.timeout_ms) })?
 }
 
 async fn download(fetcher: &dyn fetch::Fetcher, request: Request, limits: InputLimits) -> Result<Vec<u8>, MediaError> {
