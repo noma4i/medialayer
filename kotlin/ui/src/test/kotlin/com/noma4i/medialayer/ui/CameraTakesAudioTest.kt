@@ -190,6 +190,10 @@ class CameraTakesAudioTest {
     assertEquals(com.noma4i.medialayer.CameraRefusal.MICROPHONE_SILENT, error.reason)
     assertEquals("exactly three sources", 3L, source.starts.get())
     assertEquals(false, timer.armed(MicrophoneRetry.PAUSE_MS))
+    TestSignal.await("ready after the silent take", 5_000) { camera.state.value.phase == CameraPhase.READY }
+    val again = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { runCatching { camera.startRecording() } }
+    TestSignal.await("the next start runs the attempts again", 5_000) { source.starts.get() == 4L }
+    again.cancel()
   }
 
   @Test
