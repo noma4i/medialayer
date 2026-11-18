@@ -862,18 +862,18 @@ fn inv_audio_84_an_input_is_connected_after_its_recording_session_by_generation_
     let restores = |actions: &[AudioAction]| actions.iter().filter_map(|action| if let A::RestoreInput { id, kind, generation } = action { Some((*id, *kind, *generation)) } else { None }).collect::<Vec<_>>();
     let stops = |actions: &[AudioAction]| actions.iter().filter_map(|action| if let A::StopInput { id, generation } = action { Some((*id, *generation)) } else { None }).collect::<Vec<_>>();
     let mut world = World::new();
-    let opened = world.raw(I::InputOpened { id: 1, kind: RecordingKind::Video });
+    let opened = world.raw(I::InputOpened { id: 1, kind: RecordingKind::Voice });
     assert_eq!((restores(&opened), availabilities(&opened)), (vec![], vec![MicrophoneAvailability::NoSound]), "a new input is no sound and waits for its session");
     let generation = opened.iter().find_map(generation_of).expect("an input asks for a recording session");
-    assert_eq!(restores(&world.raw(I::Applied { generation, result: AppliedResult::Ok })), vec![(1, RecordingKind::Video, 1)], "the session is applied, then the input connects");
+    assert_eq!(restores(&world.raw(I::Applied { generation, result: AppliedResult::Ok })), vec![(1, RecordingKind::Voice, 1)], "the session is applied, then the input connects");
     assert_eq!(restores(&world.send(I::InputOpened { id: 2, kind: RecordingKind::Voice })), vec![(2, RecordingKind::Voice, 1)], "a session that covers the kind connects at once");
     assert_eq!(world.send(I::NoSound { id: 1, generation: 1, on: false }), vec![]);
     assert_eq!(world.send(I::NoSound { id: 2, generation: 1, on: false }), vec![available(MicrophoneAvailability::Available)]);
     assert_eq!(world.send(I::NoSound { id: 1, generation: 0, on: true }), vec![], "the late word of an old generation changes nothing");
 
-    assert_eq!(world.send(I::NoSound { id: 1, generation: 1, on: true }), vec![A::RestoreInput { id: 1, kind: RecordingKind::Video, generation: 2 }, available(MicrophoneAvailability::NoSound)]);
+    assert_eq!(world.send(I::NoSound { id: 1, generation: 1, on: true }), vec![A::RestoreInput { id: 1, kind: RecordingKind::Voice, generation: 2 }, available(MicrophoneAvailability::NoSound)]);
     assert_eq!(world.send(I::RestoreFailed { id: 1, generation: 2 }), vec![], "a failed reconnect waits for a cause, it does not loop");
-    assert_eq!(world.send(I::Route { reason: RouteReason::NewDeviceAvailable, lost_private_output: false }), vec![A::RestoreInput { id: 1, kind: RecordingKind::Video, generation: 3 }]);
+    assert_eq!(world.send(I::Route { reason: RouteReason::NewDeviceAvailable, lost_private_output: false }), vec![A::RestoreInput { id: 1, kind: RecordingKind::Voice, generation: 3 }]);
     assert_eq!(world.send(I::NoSound { id: 1, generation: 2, on: false }), vec![], "the sound of the failed generation does not confirm the new one");
 
     let started = world.settle(I::CallStarted { id: 7, kind: CallKind::Unmanaged, speaker: false });
@@ -890,4 +890,104 @@ fn inv_audio_84_an_input_is_connected_after_its_recording_session_by_generation_
     let last = world.send(I::InputClosed { id: 2 });
     assert_eq!((stops(&last), restores(&last)), (vec![(2, 2)], vec![]), "closing the last live owner stops its generation and starts nothing");
     assert_eq!(stops(&world.send(I::InputClosed { id: 2 })), vec![], "a second close changes nothing");
+}
+
+fn connections(actions: &[AudioAction], live: &mut std::collections::BTreeMap<u64, u64>) {
+    for action in actions {
+        match action {
+            A::RestoreInput { id, generation, .. } => { live.insert(*id, *generation); }
+            A::StopInput { id, generation } => { if live.get(id) == Some(generation) { live.remove(id); } }
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn inv_audio_85_a_voice_capture_takes_the_microphone_from_an_idle_camera_preview_and_is_busy_during_a_camera_take() {
+    let mut world = World::new();
+    let mut live = std::collections::BTreeMap::new();
+    connections(&world.settle(I::Capture { id: 1, kind: RecordingKind::Video }), &mut live);
+    connections(&world.settle(I::InputOpened { id: 10, kind: RecordingKind::Video }), &mut live);
+    assert_eq!(live.keys().copied().collect::<Vec<_>>(), vec![10], "the preview holds its microphone");
+
+    let voice = world.settle(I::Capture { id: 2, kind: RecordingKind::Voice });
+    assert!(voice.contains(&A::Admit { id: 2 }), "the voice is admitted next to an idle preview: {voice:?}");
+    connections(&voice, &mut live);
+    assert!(live.is_empty(), "the preview gave its AudioRecord back to the voice: {voice:?}");
+    connections(&world.settle(I::InputOpened { id: 20, kind: RecordingKind::Voice }), &mut live);
+    assert_eq!(live.keys().copied().collect::<Vec<_>>(), vec![20], "only the voice records");
+    assert_eq!(world.send(I::NoSound { id: 20, generation: live[&20], on: false }), vec![available(MicrophoneAvailability::Available)], "a yielded preview is no missing sound");
+
+    let take = world.settle(I::CaptureTake { id: 1, taking: true });
+    assert!(take.contains(&A::Revoke { id: 1, reason: RecordingRefusal::MicrophoneBusy }), "a camera take while the voice records is busy: {take:?}");
+    connections(&take, &mut live);
+    assert_eq!(live.keys().copied().collect::<Vec<_>>(), vec![20], "the voice keeps the microphone");
+
+    connections(&world.settle(I::InputClosed { id: 20 }), &mut live);
+    connections(&world.settle(I::CaptureEnded { id: 2 }), &mut live);
+    assert_eq!(live.keys().copied().collect::<Vec<_>>(), vec![10], "the preview takes its microphone back after the voice ended");
+
+    connections(&world.settle(I::Capture { id: 3, kind: RecordingKind::Video }), &mut live);
+    connections(&world.settle(I::CaptureTake { id: 3, taking: true }), &mut live);
+    let busy = world.settle(I::Capture { id: 4, kind: RecordingKind::Voice });
+    assert!(busy.contains(&A::Refuse { id: 4, reason: RecordingRefusal::MicrophoneBusy }), "a voice during a camera take is refused busy at once: {busy:?}");
+    assert_eq!(live.keys().copied().collect::<Vec<_>>(), vec![10], "the take keeps its microphone");
+
+    connections(&world.settle(I::CaptureTake { id: 3, taking: false }), &mut live);
+    let after = world.settle(I::Capture { id: 5, kind: RecordingKind::Voice });
+    assert!(after.contains(&A::Admit { id: 5 }), "after the take the voice is admitted: {after:?}");
+}
+
+#[test]
+fn inv_audio_85_any_sequence_keeps_one_microphone_owner_between_the_camera_and_the_voice() {
+    let mut dice = crate::seeded::Dice::new("inv_audio_85_any_sequence_keeps_one_microphone_owner_between_the_camera_and_the_voice");
+    for _ in 0..300 {
+        let mut world = World::new();
+        let mut live = std::collections::BTreeMap::new();
+        let mut inputs: std::collections::BTreeMap<u64, RecordingKind> = std::collections::BTreeMap::new();
+        let mut captures: std::collections::BTreeMap<u64, RecordingKind> = std::collections::BTreeMap::new();
+        let mut admitted = std::collections::BTreeSet::new();
+        let mut taking = std::collections::BTreeSet::new();
+        let mut next = 0u64;
+        for _ in 0..40 {
+            next += 1;
+            let kind = if dice.percent(50) { RecordingKind::Voice } else { RecordingKind::Video };
+            let pick = |dice: &mut crate::seeded::Dice, from: &std::collections::BTreeMap<u64, RecordingKind>| from.keys().nth(dice.index(from.len().max(1))).copied().unwrap_or(0);
+            let input = match dice.below(8) {
+                0 | 1 => { captures.insert(next, kind); I::Capture { id: next, kind } }
+                2 => { let id = pick(&mut dice, &captures); captures.remove(&id); I::CaptureEnded { id } }
+                3 | 4 => I::CaptureTake { id: pick(&mut dice, &captures), taking: dice.percent(60) },
+                5 => { inputs.insert(next, kind); I::InputOpened { id: next, kind } }
+                6 => { let id = pick(&mut dice, &inputs); inputs.remove(&id); live.remove(&id); I::InputClosed { id } }
+                _ => match live.iter().nth(dice.index(live.len().max(1))) { Some((id, generation)) => I::NoSound { id: *id, generation: *generation, on: dice.percent(20) }, None => I::Foreground { on: true } },
+            };
+            let label = format!("{input:?}");
+            let take = if let I::CaptureTake { id, taking: on } = &input { Some((*id, *on)) } else { None };
+            let actions = world.settle(input);
+            connections(&actions, &mut live);
+            for action in &actions {
+                match action {
+                    A::Admit { id } => { admitted.insert(*id); }
+                    A::Revoke { id, .. } | A::Refuse { id, .. } => { admitted.remove(id); captures.remove(id); taking.remove(id); }
+                    _ => {}
+                }
+            }
+            admitted.retain(|id| captures.contains_key(id));
+            taking.retain(|id| captures.contains_key(id));
+            if let Some((id, on)) = take {
+                if on && admitted.contains(&id) && captures.get(&id) == Some(&RecordingKind::Video) { taking.insert(id); } else if !on { taking.remove(&id); }
+            }
+            let kinds = live.keys().filter_map(|id| inputs.get(id)).collect::<Vec<_>>();
+            assert!(!(kinds.contains(&&RecordingKind::Video) && kinds.contains(&&RecordingKind::Voice)), "the camera and the voice both hold an AudioRecord after {label}: {actions:?}");
+            let voice = admitted.iter().any(|id| captures.get(id) == Some(&RecordingKind::Voice));
+            assert!(!(voice && !taking.is_empty()), "a camera take and a voice capture run together after {label}: {actions:?}");
+        }
+        let ids = captures.iter().filter(|(_, kind)| **kind == RecordingKind::Voice).map(|(id, _)| *id).collect::<Vec<_>>();
+        for id in ids { connections(&world.settle(I::CaptureEnded { id }), &mut live); }
+        let voices = inputs.iter().filter(|(_, kind)| **kind == RecordingKind::Voice).map(|(id, _)| *id).collect::<Vec<_>>();
+        for id in voices { inputs.remove(&id); live.remove(&id); connections(&world.settle(I::InputClosed { id }), &mut live); }
+        let waiting = inputs.iter().filter(|(id, kind)| **kind == RecordingKind::Video && !live.contains_key(id)).count();
+        let held = captures.values().any(|kind| *kind == RecordingKind::Video) || inputs.values().any(|kind| *kind == RecordingKind::Video);
+        assert!(!held || waiting == 0, "the preview did not get its microphone back after the voice ended: inputs {inputs:?} live {live:?}");
+    }
 }

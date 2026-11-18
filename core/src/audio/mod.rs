@@ -37,6 +37,7 @@ pub struct AudioOwner {
     audible: BTreeSet<u64>,
     volume_readers: BTreeSet<u64>,
     captures: Vec<(u64, RecordingKind)>,
+    taking: BTreeSet<u64>,
     calls: Vec<Call>,
     observed: BTreeSet<String>,
     phone: bool,
@@ -69,6 +70,7 @@ impl AudioOwner {
             audible: BTreeSet::new(),
             volume_readers: BTreeSet::new(),
             captures: Vec::new(),
+            taking: BTreeSet::new(),
             calls: Vec::new(),
             observed: BTreeSet::new(),
             phone: false,
@@ -123,7 +125,7 @@ impl AudioOwner {
             MicrophoneAvailability::ExternalCall
         } else if self.other_recording || self.system_blocked() {
             MicrophoneAvailability::OtherApp
-        } else if self.inputs.iter().any(|input| !input::is_live(&input.life)) {
+        } else if self.inputs.iter().any(|input| !input::is_live(&input.life) && !self.yields(input.kind)) {
             MicrophoneAvailability::NoSound
         } else {
             MicrophoneAvailability::Available
@@ -131,6 +133,13 @@ impl AudioOwner {
     }
     fn system_blocked(&self) -> bool {
         matches!(self.system(), System::Interrupted | System::FocusLost | System::Transient | System::WaitForeground) || session::blocked(&self.session)
+    }
+    /// One AudioRecord per app: an input of the camera preview yields the microphone to a voice capture (Android silences the second AudioRecord of an app).
+    fn yields(&self, kind: RecordingKind) -> bool {
+        kind == RecordingKind::Video && (self.captures.iter().any(|(_, existing)| *existing == RecordingKind::Voice) || self.inputs.iter().any(|input| input.kind == RecordingKind::Voice))
+    }
+    fn video_taking(&self) -> bool {
+        self.captures.iter().any(|(id, kind)| *kind == RecordingKind::Video && self.taking.contains(id))
     }
     fn feed(&mut self, id: u64, event: input::InputEvent, actions: &mut Vec<AudioAction>) {
         if let Some(input) = self.inputs.iter_mut().find(|input| input.id == id) { feed_input(input, &event, actions, &mut self.wake); }
@@ -169,6 +178,7 @@ impl AudioOwner {
         None
     }
     fn revoke(&mut self, reason: RecordingRefusal, actions: &mut Vec<AudioAction>) {
+        self.taking.clear();
         for (id, _) in self.captures.drain(..) {
             actions.push(if self.pending.remove(&id) { AudioAction::Refuse { id, reason } } else { AudioAction::Revoke { id, reason } });
         }
@@ -272,7 +282,7 @@ impl AudioOwner {
                     Some(RecordingRefusal::InCall)
                 } else if self.system() == System::Interrupted {
                     Some(RecordingRefusal::Interrupted)
-                } else if self.captures.iter().any(|(_, existing)| *existing == kind) || self.other_recording {
+                } else if self.captures.iter().any(|(_, existing)| *existing == kind) || self.other_recording || (kind == RecordingKind::Voice && self.video_taking()) {
                     Some(RecordingRefusal::MicrophoneBusy)
                 } else {
                     None
@@ -295,6 +305,20 @@ impl AudioOwner {
             I::CaptureEnded { id } => {
                 self.captures.retain(|(capture, _)| *capture != id);
                 self.pending.remove(&id);
+                self.taking.remove(&id);
+            }
+            I::CaptureTake { id, taking } => {
+                let video = self.captures.iter().any(|(capture, kind)| *capture == id && *kind == RecordingKind::Video);
+                if !taking || !video {
+                    self.taking.remove(&id);
+                } else if self.yields(RecordingKind::Video) {
+                    // The voice holds the microphone: the take of the camera is the later one and is refused busy.
+                    self.captures.retain(|(capture, _)| *capture != id);
+                    let reason = RecordingRefusal::MicrophoneBusy;
+                    actions.push(if self.pending.remove(&id) { AudioAction::Refuse { id, reason } } else { AudioAction::Revoke { id, reason } });
+                } else {
+                    self.taking.insert(id);
+                }
             }
             I::CallStarted { id, kind, speaker } => {
                 fresh = !self.calls.iter().any(|call| call.id == id);
@@ -458,6 +482,7 @@ impl AudioOwner {
             I::Silenced { id } => {
                 if let Some(index) = self.captures.iter().position(|(capture, _)| *capture == id) {
                     self.captures.remove(index);
+                    self.taking.remove(&id);
                     let reason = RecordingRefusal::MicrophoneSilent;
                     actions.push(if self.pending.remove(&id) { AudioAction::Refuse { id, reason } } else { AudioAction::Revoke { id, reason } });
                 }
@@ -521,8 +546,9 @@ impl AudioOwner {
         let open = self.permission == MicrophonePermission::Granted && self.foreground && !hold && !self.other_recording && !self.system_blocked();
         let held = match session::held(&self.session) { Some(SessionWant::Recording { kind }) => Some(kind), _ => None };
         let woken = self.wake;
+        let voice = self.yields(RecordingKind::Video);
         for input in &mut self.inputs {
-            let ready = open && held.is_some_and(|held| held == RecordingKind::Video || held == input.kind);
+            let ready = open && held.is_some_and(|held| held == RecordingKind::Video || held == input.kind) && !(input.kind == RecordingKind::Video && voice);
             let edge = ready && !input.ready;
             input.ready = ready;
             if !ready { feed_input(input, &input::InputEvent::Block, &mut actions, &mut self.wake); }

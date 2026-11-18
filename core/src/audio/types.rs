@@ -117,6 +117,11 @@ pub enum AudioInput {
     CaptureEnded {
         id: u64,
     },
+    /// A video capture began (`taking`) or ended a take. While a take runs a voice capture is refused busy; while it does not the voice takes the microphone from the preview.
+    CaptureTake {
+        id: u64,
+        taking: bool,
+    },
     CallStarted {
         id: u64,
         kind: CallKind,
