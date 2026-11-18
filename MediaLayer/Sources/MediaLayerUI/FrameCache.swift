@@ -1,5 +1,6 @@
 import Foundation
 import MediaLayer
+import Nuke
 
 final class FrameCache: @unchecked Sendable {
   struct Key: Hashable {
