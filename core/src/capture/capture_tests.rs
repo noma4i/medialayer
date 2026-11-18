@@ -581,3 +581,157 @@ fn inv_capture_43_random_lens_and_fault_sequences_bind_once_per_lens_change_out_
         }
     }
 }
+
+fn started_take(profile: CaptureProfile) -> CaptureRun {
+    drive(profile, ready(profile), &[CaptureEvent::Start, CaptureEvent::RecordStarted]).0
+}
+
+#[test]
+fn inv_capture_52_leaving_the_screen_mid_take_gives_the_take_its_outcome() {
+    let profile = moment();
+    let take = started_take(profile).state.take;
+    for (name, run) in [
+        ("recording", started_take(profile)),
+        ("stopping", drive(profile, started_take(profile), &[CaptureEvent::Stop]).0),
+        ("reading the clip", drive(profile, started_take(profile), &[CaptureEvent::Stop, CaptureEvent::RecordFinished { end: RecordEnd::Completed }]).0),
+    ] {
+        let (after, actions) = drive(profile, run, &[CaptureEvent::DemandOff]);
+        assert_eq!((phase(&after), actions, after.state.take, after.state.outcome), (CameraPhase::Idle, vec![CaptureAction::Unbind], take, Some(TakeOutcome::Refused { reason: CameraRefusal::Interrupted })), "{name}");
+    }
+    let settled = drive(profile, started_take(profile), &[CaptureEvent::RecordFinished { end: RecordEnd::LimitReached }, CaptureEvent::RecordSettled { duration_ms: Some(9_000) }]).0;
+    let kept = drive(profile, settled, &[CaptureEvent::DemandOff]).0;
+    assert_eq!(kept.state.outcome, Some(TakeOutcome::Captured { take: take.unwrap() }), "a take that already ended keeps its outcome");
+}
+
+#[test]
+fn inv_capture_53_a_delivered_clip_carries_the_lens_of_its_take() {
+    let profile = moment();
+    let run = started_take(profile);
+    assert_eq!(run.take_lens, CameraLens::Back);
+    let (after, actions) = drive(profile, run, &[
+        CaptureEvent::Stop,
+        CaptureEvent::RecordFinished { end: RecordEnd::Completed },
+        CaptureEvent::SetLens { lens: CameraLens::Front },
+        CaptureEvent::RecordSettled { duration_ms: Some(9_000) },
+    ]);
+    assert_eq!(actions, vec![CaptureAction::EndRecording { discard: false }, CaptureAction::ReadClip, CaptureAction::Deliver, CaptureAction::Bind { lens: CameraLens::Front }]);
+    assert_eq!((after.state.lens, after.take_lens), (CameraLens::Front, CameraLens::Back), "the next session lens does not rewrite the lens of the delivered take");
+    let next = drive(profile, after, &[CaptureEvent::Opened { has_flash: true, zoom_min: 1.0, zoom_max: 30.0 }, CaptureEvent::Streaming { on: true }, CaptureEvent::AudioFlow { flowing: true }, CaptureEvent::Start]).0;
+    assert_eq!(next.take_lens, CameraLens::Front, "a new take takes the lens it starts on");
+}
+
+#[test]
+fn inv_capture_54_a_stop_during_a_pending_start_ends_the_take() {
+    let profile = moment();
+    let starting = drive(profile, ready(profile), &[CaptureEvent::Start]).0;
+    assert!(starting.starting && phase(&starting) == CameraPhase::Ready);
+    let (stopped, actions) = drive(profile, starting, &[CaptureEvent::Stop]);
+    assert_eq!((phase(&stopped), actions), (CameraPhase::Stopping, vec![CaptureAction::EndRecording { discard: false }]));
+    let (late, actions) = drive(profile, stopped, &[CaptureEvent::RecordStarted]);
+    assert_eq!((phase(&late), actions.len()), (CameraPhase::Stopping, 0), "a start that lands after the stop does not begin recording");
+    let (done, actions) = drive(profile, late, &[CaptureEvent::RecordFinished { end: RecordEnd::Completed }, CaptureEvent::RecordSettled { duration_ms: Some(50) }]);
+    assert_eq!((phase(&done), actions.last().copied()), (CameraPhase::Ready, Some(CaptureAction::Discard)));
+    assert_eq!(done.state.outcome, Some(TakeOutcome::Refused { reason: CameraRefusal::TooShort }));
+    let never = drive(profile, stopped, &[CaptureEvent::RecordFinished { end: RecordEnd::Completed }]).0;
+    assert_eq!(never.state.outcome, Some(TakeOutcome::Refused { reason: CameraRefusal::NotReady }));
+}
+
+#[test]
+fn inv_capture_55_torch_and_zoom_reach_the_platform_only_with_an_open_camera() {
+    let profile = moment();
+    let idle = capture_run(CameraLens::Back);
+    let opening = drive(profile, idle, &[CaptureEvent::DemandOn]).0;
+    let failed = drive(profile, opening, &[CaptureEvent::Refuse { reason: CameraRefusal::NoCamera }]).0;
+    for (name, run) in [("idle", idle), ("opening", opening), ("failed", failed)] {
+        let (after, actions) = drive(profile, run, &[CaptureEvent::SetFlash { on: true }, CaptureEvent::ZoomBy { factor: 2.0 }]);
+        assert_eq!((actions.len(), after.state.zoom), (0, 1.0), "{name}: nothing is sent to a camera that is not bound");
+    }
+    let (reopened, actions) = drive(profile, opening, &[CaptureEvent::SetFlash { on: true }, CaptureEvent::Opened { has_flash: true, zoom_min: 1.0, zoom_max: 8.0 }]);
+    assert_eq!((actions, reopened.state.flash), (vec![CaptureAction::SetTorch { on: true }], true), "the flash asked before the camera opened is applied when it opens");
+    let (_, actions) = drive(profile, ready(profile), &[CaptureEvent::SetFlash { on: true }, CaptureEvent::ZoomBy { factor: 2.0 }]);
+    assert_eq!(actions, vec![CaptureAction::SetTorch { on: true }, CaptureAction::SetZoom { ratio: 2.0 }]);
+}
+
+#[test]
+fn inv_capture_56_the_next_take_and_a_lens_change_never_drop_a_delivered_clip() {
+    let profile = moment();
+    let delivered = drive(profile, started_take(profile), &[CaptureEvent::RecordFinished { end: RecordEnd::LimitReached }, CaptureEvent::RecordSettled { duration_ms: Some(9_000) }]).0;
+    let first = delivered.state.take.unwrap();
+    let (second, actions) = drive(profile, delivered, &[CaptureEvent::Start]);
+    assert_eq!(actions, vec![CaptureAction::BeginRecording], "starting the next take drops nothing");
+    assert_eq!(second.state.take, Some(first + 1));
+    let (_, actions) = drive(profile, delivered, &[CaptureEvent::SetLens { lens: CameraLens::Front }, CaptureEvent::DemandOff]);
+    assert!(actions.iter().all(|action| !matches!(action, CaptureAction::Discard | CaptureAction::EndRecording { .. })), "a lens change and a leave touch no settled clip: {actions:?}");
+}
+
+fn model_event(dice: &mut crate::seeded::Dice) -> CaptureEvent {
+    match dice.below(20) {
+        0 => CaptureEvent::DemandOn,
+        1 => CaptureEvent::DemandOff,
+        2 => CaptureEvent::Opened { has_flash: true, zoom_min: 1.0, zoom_max: 30.0 },
+        3 => CaptureEvent::Streaming { on: dice.below(4) != 0 },
+        4 => CaptureEvent::Fault { kind: if dice.below(2) == 0 { FaultKind::Reset } else { FaultKind::Other } },
+        5 => CaptureEvent::Refuse { reason: CameraRefusal::NoCamera },
+        6 | 7 => CaptureEvent::Start,
+        8 => CaptureEvent::RecordStarted,
+        9 => CaptureEvent::Stop,
+        10 => CaptureEvent::Cancel,
+        11 => CaptureEvent::Revoked { reason: CameraRefusal::InCall },
+        12 => CaptureEvent::AudioFlow { flowing: dice.below(5) != 0 },
+        13 => CaptureEvent::RecordFinished { end: [RecordEnd::Completed, RecordEnd::LimitReached, RecordEnd::Failed][dice.below(3) as usize] },
+        14 => CaptureEvent::RecordSettled { duration_ms: if dice.below(4) == 0 { None } else { Some(dice.below(12_000) as u64) } },
+        15 => CaptureEvent::SetLens { lens: if dice.below(2) == 0 { CameraLens::Front } else { CameraLens::Back } },
+        16 => CaptureEvent::SetFlash { on: dice.below(2) == 0 },
+        17 => CaptureEvent::ZoomBy { factor: 1.5 },
+        18 => CaptureEvent::CameraClosed,
+        _ => CaptureEvent::LayerClosed,
+    }
+}
+
+#[test]
+fn inv_capture_57_random_sequences_give_every_started_take_one_outcome_and_its_own_lens() {
+    let name = "inv_capture_57_random_sequences_give_every_started_take_one_outcome_and_its_own_lens";
+    let mut dice = crate::seeded::Dice::new(name);
+    let profile = moment();
+    for round in 0..3_000 {
+        let mut run = capture_run(CameraLens::Back);
+        let mut trail: Vec<CaptureEvent> = Vec::new();
+        for _ in 0..60 {
+            let event = model_event(&mut dice);
+            trail.push(event);
+            let before = run;
+            let step = capture_step(before, event, profile);
+            let after = step.run;
+            let context = format!("round {round}: {trail:?}\nbefore {before:?}\nafter {after:?}");
+            let running = |r: &CaptureRun| r.starting || r.started;
+            if event == CaptureEvent::Start && !running(&before) && running(&after) {
+                assert_eq!((after.state.outcome, after.take_lens), (None, before.state.lens), "a new take starts clean on its lens\n{context}");
+            } else {
+                assert_eq!(after.take_lens, before.take_lens, "only Start sets the lens of a take\n{context}");
+                assert_eq!(after.state.take, before.state.take, "only Start numbers a take\n{context}");
+                if running(&before) && !running(&after) {
+                    assert!(after.state.outcome.is_some(), "a take that stopped running has an outcome\n{context}");
+                }
+                if before.state.outcome.is_some() {
+                    assert_eq!(after.state.outcome, before.state.outcome, "an outcome is written once\n{context}");
+                }
+            }
+            if matches!(event, CaptureEvent::Start) && running(&after) && !running(&before) {
+                assert!(step.actions.contains(&CaptureAction::BeginRecording), "{context}");
+            }
+            for action in &step.actions {
+                match action {
+                    CaptureAction::SetTorch { .. } | CaptureAction::SetZoom { .. } => assert!(after.open, "torch and zoom need an open camera\n{context}"),
+                    CaptureAction::Deliver => assert!(after.state.outcome == Some(TakeOutcome::Captured { take: after.state.take.unwrap() }), "{context}"),
+                    _ => {}
+                }
+            }
+            if event == CaptureEvent::Stop && before.starting && phase(&before) == CameraPhase::Ready {
+                assert_eq!((phase(&after), &step.actions), (CameraPhase::Stopping, &vec![CaptureAction::EndRecording { discard: false }]), "a stop in a pending start ends the take\n{context}");
+            }
+            if phase(&after) == CameraPhase::Recording { assert!(after.started, "{context}"); }
+            if phase(&before) == CameraPhase::Closed { assert_eq!((after, step.actions.len()), (before, 0), "{context}"); }
+            run = after;
+        }
+    }
+}

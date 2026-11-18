@@ -87,6 +87,7 @@ impl Capture {
                 context.run.audio_flowing = Some(true);
                 Transition(State::recording())
             }
+            CaptureRunEvent::Input(CaptureEvent::Stop) if context.recording_in_progress() => context.end_recording(false),
             CaptureRunEvent::Input(CaptureEvent::Cancel) if context.recording_in_progress() => context.end_recording(true),
             CaptureRunEvent::Input(CaptureEvent::SetLens { lens }) => {
                 if context.run.state.shooting { context.defer_lens(*lens); Handled }
@@ -116,6 +117,7 @@ impl Capture {
     fn stopping(event: &CaptureRunEvent, context: &mut CaptureRunInput) -> Outcome<State> {
         match event {
             CaptureRunEvent::Input(CaptureEvent::Cancel) => { context.run.discard = true; Handled }
+            CaptureRunEvent::Input(CaptureEvent::RecordStarted) if context.run.starting => { context.run.starting = false; context.run.started = true; Handled }
             CaptureRunEvent::Input(CaptureEvent::RecordSettled { duration_ms }) if context.run.end.is_some() => Transition(context.settle(*duration_ms)),
             CaptureRunEvent::Input(CaptureEvent::SetLens { lens }) => { context.defer_lens(*lens); Handled }
             CaptureRunEvent::Input(CaptureEvent::ZoomBy { factor }) => { context.zoom_by(*factor); Handled }
@@ -150,7 +152,7 @@ impl Capture {
                 CameraPhase::Closed => State::closed(),
             }),
             CaptureRunEvent::Input(CaptureEvent::LayerClosed) => { context.layer_closed(true); Transition(State::closed()) }
-            CaptureRunEvent::Input(CaptureEvent::DemandOff) => { context.reset_session(); context.actions.push(CaptureAction::Unbind); Transition(State::idle()) }
+            CaptureRunEvent::Input(CaptureEvent::DemandOff) => { context.end_take(TakeOutcome::Refused { reason: CameraRefusal::Interrupted }); context.reset_session(); context.actions.push(CaptureAction::Unbind); Transition(State::idle()) }
             CaptureRunEvent::Input(CaptureEvent::CameraClosed) => { context.run.open = false; Handled }
             CaptureRunEvent::Input(CaptureEvent::Streaming { on }) => { context.run.streaming = *on; Handled }
             CaptureRunEvent::Input(CaptureEvent::Fault { kind }) => Transition(context.fault(*kind)),
@@ -207,9 +209,14 @@ impl CaptureRunInput {
         self.actions.push(CaptureAction::Bind { lens: self.run.state.lens });
     }
 
+    /// The one exit of a take that is cut off: it gets its outcome once, a take that is not running keeps the outcome it has.
+    fn end_take(&mut self, outcome: TakeOutcome) {
+        if self.recording_in_progress() { self.run.state.outcome = Some(outcome); }
+    }
+
     fn layer_closed(&mut self, unbind: bool) {
         if self.recording_in_progress() {
-            self.run.state.outcome = Some(TakeOutcome::Refused { reason: CameraRefusal::Interrupted });
+            self.end_take(TakeOutcome::Refused { reason: CameraRefusal::Interrupted });
             self.actions.push(CaptureAction::EndRecording { discard: true });
         }
         if unbind { self.actions.push(CaptureAction::Unbind); }
@@ -236,7 +243,7 @@ impl CaptureRunInput {
     fn fault(&mut self, kind: FaultKind) -> State {
         match recovery_step(self.run.recovery_spent, kind) {
             RecoveryAction::Restart => {
-                if self.recording_in_progress() { self.run.state.outcome = Some(TakeOutcome::Lost { reason: CameraRefusal::Interrupted }); }
+                self.end_take(TakeOutcome::Lost { reason: CameraRefusal::Interrupted });
                 self.run.recovery_spent = true;
                 let lens = self.run.state.lens;
                 self.reset_session();
@@ -251,7 +258,7 @@ impl CaptureRunInput {
     }
 
     fn fail(&mut self, reason: CameraRefusal) {
-        if self.recording_in_progress() { self.run.state.outcome = Some(TakeOutcome::Refused { reason }); }
+        self.end_take(TakeOutcome::Refused { reason });
         self.reset_session();
         self.run.state.fault = Some(reason);
         self.actions.push(CaptureAction::Unbind);
@@ -268,6 +275,7 @@ impl CaptureRunInput {
         if !self.profile.is_video() || self.recording_in_progress() || self.run.state.shooting { return; }
         if self.profile.audio && self.run.audio_flowing == Some(false) { self.run.state.fault = Some(CameraRefusal::MicrophoneSilent); return; }
         self.run.starting = true;
+        self.run.take_lens = self.run.state.lens;
         self.run.state.take = Some(self.run.state.take.unwrap_or(0).saturating_add(1));
         self.run.state.outcome = None;
         self.run.started = false;
@@ -343,13 +351,14 @@ impl CaptureRunInput {
     }
 
     fn set_flash(&mut self, on: bool) {
-        let enabled = flash_plan(on, self.run.state.has_flash);
+        let enabled = if self.run.open { flash_plan(on, self.run.state.has_flash) } else { on };
         if enabled == self.run.state.flash { return; }
         self.run.state.flash = enabled;
-        if self.profile.is_video() { self.actions.push(CaptureAction::SetTorch { on: enabled }); }
+        if self.run.open && self.profile.is_video() { self.actions.push(CaptureAction::SetTorch { on: enabled }); }
     }
 
     fn zoom_by(&mut self, factor: f32) {
+        if !self.run.open { return; }
         let state = &self.run.state;
         let ratio = zoom_target(state.zoom, factor, state.zoom_min, state.zoom_max);
         if ratio != state.zoom { self.run.state.zoom = ratio; self.actions.push(CaptureAction::SetZoom { ratio }); }

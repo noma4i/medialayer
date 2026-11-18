@@ -67,6 +67,10 @@
 
 ### Fixed
 
+- Camera: leaving the screen mid-take now gives the take an `interrupted` outcome.
+- Camera: a clip keeps the lens of its take, not the lens of the next session.
+- Camera: `stopRecording` during a starting take now ends it instead of being lost.
+- Camera: torch and zoom commands reach the platform only after the camera opened.
 - iOS camera sound no longer runs past the last video frame.
 - Android voice records again when the AAC encoder announces its format before the file opens.
 - Android camera video uses AAC-LC when no encoder declares the camera AAC profile.

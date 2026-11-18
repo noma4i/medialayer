@@ -47,6 +47,8 @@ pub struct CaptureRun {
     pub end: Option<RecordEnd>,
     pub recovery_spent: bool,
     pub pending_lens: Option<CameraLens>,
+    /// The lens the running or last take was started on. A delivered clip carries this lens, not `state.lens`, which a lens change may already have moved on.
+    pub take_lens: CameraLens,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, uniffi::Enum)]
@@ -75,6 +77,8 @@ pub enum CaptureEvent {
     ZoomBy { factor: f32 },
 }
 
+/// A delivered clip belongs to its take: the platform keeps the clip of every `Captured { take }` until the app fetches it with `clip(take)` or the layer closes (`LayerClosed`).
+/// Starting the next take, `DemandOff`, a lens change and `Unbind` never drop it. Only a running or unsettled take is thrown away by `Unbind` and `Restart`.
 /// What the platform does after a step. `Unbind` and `Restart` also stop a running recording and delete its file.
 #[derive(Debug, Clone, Copy, PartialEq, uniffi::Enum)]
 pub enum CaptureAction {
@@ -111,6 +115,7 @@ pub fn capture_run(lens: CameraLens) -> CaptureRun {
         end: None,
         recovery_spent: false,
         pending_lens: None,
+        take_lens: lens,
     }
 }
 
