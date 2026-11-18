@@ -108,6 +108,12 @@ class CameraTakesAudioTest {
     fixture.close()
   }
 
+  /** The preview is ready and the audio link restored the input: the first microphone attempt runs, so a take finds its audio generation. */
+  private fun readyWithMicrophone() {
+    TestSignal.await("ready", 5_000) { camera.state.value.phase == CameraPhase.READY }
+    TestSignal.await("the first microphone attempt", 5_000) { source.starts.get() >= 1L && backend.audio.generation != null }
+  }
+
   private fun chunk(generation: Long) = PcmChunk(generation, spec, ByteBuffer.allocate(2), 1, 0, 0)
 
   private fun take(number: Int) = runBlocking {
@@ -128,7 +134,7 @@ class CameraTakesAudioTest {
   @Test
   fun two_takes_on_one_live_microphone_each_start_with_their_own_first_pcm_and_one_record_started() {
     camera.attachPreview(this, null, null)
-    TestSignal.await("ready", 5_000) { camera.state.value.phase == CameraPhase.READY }
+    readyWithMicrophone()
     microphone.onLive(1)
     take(1)
     take(2)
@@ -152,7 +158,7 @@ class CameraTakesAudioTest {
   @Test
   fun inv_audio_115_a_camera_take_whose_microphone_is_silenced_twice_starts_on_the_third_attempt_as_one_take() = runBlocking {
     camera.attachPreview(this@CameraTakesAudioTest, null, null)
-    TestSignal.await("ready", 5_000) { camera.state.value.phase == CameraPhase.READY }
+    readyWithMicrophone()
     val started = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { camera.startRecording() }
     TestSignal.await("take made", 5_000) { takes.size == 1 }
     val current = takes.last()
@@ -175,7 +181,7 @@ class CameraTakesAudioTest {
   @Test
   fun inv_audio_116_a_camera_take_whose_microphone_is_silenced_on_all_three_attempts_is_microphone_silent() = runBlocking {
     camera.attachPreview(this@CameraTakesAudioTest, null, null)
-    TestSignal.await("ready", 5_000) { camera.state.value.phase == CameraPhase.READY }
+    readyWithMicrophone()
     val started = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { runCatching { camera.startRecording() } }
     TestSignal.await("take made", 5_000) { takes.size == 1 }
     val current = takes.last()
@@ -199,7 +205,7 @@ class CameraTakesAudioTest {
   @Test
   fun inv_audio_117_a_camera_start_after_a_silent_microphone_retries_it_and_starts_on_its_sound() = runBlocking {
     camera.attachPreview(this@CameraTakesAudioTest, null, null)
-    TestSignal.await("ready", 5_000) { camera.state.value.phase == CameraPhase.READY }
+    readyWithMicrophone()
     microphone.onLive(1)
     microphone.onSilenced(1, true)
     val started = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { camera.startRecording() }
