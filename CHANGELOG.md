@@ -1,10 +1,11 @@
 # Changelog
 
-## Unreleased
+## 3.41.1 - 2026-11-18
 
 ### Fixed
 
 - iOS MediaLayerTesting package now depends on MediaLayerUI.
+- Docs: a camera start with sound returns with the first live sound.
 
 ## 3.41.0 - 2026-11-18
 
