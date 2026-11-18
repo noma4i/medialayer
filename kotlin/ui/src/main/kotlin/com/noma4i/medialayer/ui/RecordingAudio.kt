@@ -89,10 +89,12 @@ internal class RecordingAudio(
 
   fun start(spec: PcmSpec): Long {
     val source = Source(generations.incrementAndGet(), spec)
-    sources.update { it + 1 }
+    // A source counts only once its run is queued: its run alone gives the count back, so idle() never waits for a source that never ran.
     val previous = synchronized(lock) {
       check(!closed) { "RecordingAudio is closed" }
-      current.also { current = source }.also { hardware.execute(source::run) }
+      sources.update { it + 1 }
+      try { hardware.execute(source::run) } catch (refused: java.util.concurrent.RejectedExecutionException) { sources.update { it - 1 }; throw refused }
+      current.also { current = source }
     }
     previous?.stop()
     return source.generation

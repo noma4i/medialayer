@@ -201,6 +201,8 @@ class MediaCallAudio internal constructor(private val id: ULong, internal val ki
 internal interface AudioInputOwner {
   fun restore(input: AudioInputHandle, generation: ULong)
   fun stop(generation: ULong)
+  /** Returns once the microphone of this owner holds no AudioRecord: the system has it back. */
+  suspend fun idle() = Unit
 }
 
 internal class AudioInputHandle(internal val id: ULong, private val link: AudioLink) : AutoCloseable {
@@ -236,6 +238,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
   private val pending = HashMap<ULong, CompletableDeferred<Admission>>()
   private val tickets = HashMap<ULong, RecordingTicket>()
   private val inputRegistry = HashMap<ULong, InputRegistration>()
+  private val retiredInputs = ArrayList<java.lang.ref.WeakReference<AudioInputOwner>>()
   private val recordingCount = AtomicInteger()
   internal val isRecording: Boolean get() = recordingCount.get() != 0
   private val calls = LinkedHashMap<ULong, MediaCallAudio>()
@@ -305,7 +308,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
   }
   fun closeInput(id: ULong) {
     enqueue {
-      inputRegistry.remove(id)?.stopLive()
+      inputRegistry.remove(id)?.let { it.stopLive(); retiredInputs.add(it.owner) }
       process(AudioInput.InputClosed(id))
     }
   }
@@ -388,6 +391,11 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
         is AudioAction.Refuse -> pending.remove(action.id)?.complete(Admission.Refused(action.reason))
         is AudioAction.Revoke -> tickets[action.id]?.revoke(action.reason)
         is AudioAction.RestoreInput -> inputRegistry[action.id]?.let { input ->
+          // Android gives the microphone to an AudioRecord of the app only after the AudioRecord the core stopped is released: the input starts on that release event.
+          val released = inputRegistry.values.filter { it !== input && it.generation == null }.mapNotNull { it.owner.get() } + retiredInputs.mapNotNull { it.get() }
+          released.forEach { it.idle() }
+          retiredInputs.removeAll { owner -> owner.get().let { it == null || it in released } }
+          if (inputRegistry[action.id] !== input) return
           input.generation = action.generation
           input.handle.get()?.let { handle -> input.owner.get()?.restore(handle, action.generation) }
         }

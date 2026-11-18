@@ -52,6 +52,8 @@ internal class CameraAudioInput(
 
   val audioGeneration: Long? get() = synchronized(lock) { live?.audio }
 
+  override suspend fun idle() = microphone.idle()
+
   override fun restore(input: AudioInputHandle, generation: ULong) {
     synchronized(lock) {
       if (closed) return
