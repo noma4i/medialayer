@@ -127,7 +127,7 @@ struct CameraTakeTests {
   }
 
   @Test
-  func inv_capture_48_the_take_ends_with_the_last_video_frame_and_the_sound_is_cut_there() async throws {
+  func inv_capture_51_the_take_ends_with_the_last_video_frame_and_the_sound_is_cut_there() async throws {
     let fixture = try Fixture.make()
     var (take, events, url) = makeTake(fixture)
     defer { try? FileManager.default.removeItem(at: url) }
@@ -150,7 +150,7 @@ struct CameraTakeTests {
   }
 
   @Test
-  func inv_capture_48_a_frame_ends_at_its_duration_or_the_gap_before_it() {
+  func inv_capture_51_a_frame_ends_at_its_duration_or_the_gap_before_it() {
     let scale: CMTimeScale = 600
     let pts = CMTime(value: 60, timescale: scale)
     let step = CMTime(value: 20, timescale: scale)
