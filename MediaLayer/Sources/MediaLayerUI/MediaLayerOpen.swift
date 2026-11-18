@@ -53,9 +53,8 @@ extension MediaLayer {
     build: @escaping @Sendable (OpenConfig) throws -> MediaLayer = { try MediaLayer.open(config: $0) }
   ) async throws -> MediaLayer {
     guard imageMemoryBytes > 0 else { throw MediaError.InvalidSpec(detail: "imageMemoryBytes must be positive") }
-    let budget = ImageMemory.split(imageMemoryBytes)
-    let imageCache = ImageCache(costLimit: budget.images)
-    let frameCache = FrameCache(byteLimit: budget.frames)
+    let imageCache = ImageCache(costLimit: imageMemoryBytes)
+    let frameCache = FrameCache(byteLimit: imageMemoryBytes, sharing: imageCache)
     let audio = MediaAudioSession()
     let work = Task.detached(priority: .userInitiated) {
       let (config, factory) = try makeConfig(

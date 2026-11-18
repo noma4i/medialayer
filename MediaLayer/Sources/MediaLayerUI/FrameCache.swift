@@ -59,6 +59,7 @@ final class FrameCache: @unchecked Sendable {
   }
 
   let byteLimit: Int
+  private let stills: ImageCache?
   private let cost: @Sendable (AnimatedFrames) -> Int
   private let decode: @Sendable (Data, Int) async -> AnimatedFrames?
   private let lock = NSLock()
@@ -68,8 +69,9 @@ final class FrameCache: @unchecked Sendable {
   private var flights: [Key: Flight] = [:]
   private var decodeCount = 0
 
-  init(byteLimit: Int = defaultByteLimit, cost: @escaping @Sendable (AnimatedFrames) -> Int = { $0.retainedBytes }, decode: @escaping @Sendable (Data, Int) async -> AnimatedFrames? = { await AnimatedFrames.load($0, maxPixel: $1) }) {
+  init(byteLimit: Int = defaultByteLimit, sharing stills: ImageCache? = nil, cost: @escaping @Sendable (AnimatedFrames) -> Int = { $0.retainedBytes }, decode: @escaping @Sendable (Data, Int) async -> AnimatedFrames? = { await AnimatedFrames.load($0, maxPixel: $1) }) {
     self.byteLimit = byteLimit
+    self.stills = stills
     self.cost = cost
     self.decode = decode
   }
@@ -102,10 +104,19 @@ final class FrameCache: @unchecked Sendable {
       flights.removeAll()
       return pending.map { ($0, finish($0, with: nil)) }
     }
+    rebalance()
     for (flight, parked) in pending {
       flight.task.cancel()
       parked.forEach { $0.continuation?.resume(returning: nil) }
     }
+  }
+
+  /// One budget for the retained pictures: the stills in the shared image cache may hold only what the animated frames leave of `byteLimit`.
+  private func rebalance() {
+    guard let stills else { return }
+    let room = max(0, byteLimit - bytes)
+    stills.costLimit = room
+    stills.trim(toCost: room)
   }
 
   private func join(_ key: Key, data: Data, maxPixel: Int, admit: @escaping Admit) -> Joined {
@@ -128,6 +139,7 @@ final class FrameCache: @unchecked Sendable {
         if let frames { store(frames, for: key) }
         return (frames, finish(flight, with: frames))
       }
+      rebalance()
       parked.forEach { $0.continuation?.resume(returning: result) }
     }
     flights[key] = flight

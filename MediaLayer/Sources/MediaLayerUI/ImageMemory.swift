@@ -28,10 +28,4 @@ enum ImageMemory {
     objc_setAssociatedObject(places, &cacheKey, cache, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     objc_setAssociatedObject(places, &framesKey, frames, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
   }
-
-  /// The one `imageMemoryBytes` budget of the retained pictures: still images in the Nuke cache and animated frames in the frame cache never add up to more than it.
-  static func split(_ total: Int) -> (images: Int, frames: Int) {
-    let frames = total / 2
-    return (total - frames, frames)
-  }
 }
