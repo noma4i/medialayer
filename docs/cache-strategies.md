@@ -89,7 +89,7 @@ hold.release()
 - **Errors.** A failed block is tried 3 times, with waits of 0.5 and 1 second between the tries. Then the load stops and keeps what it has. It starts again at the next declaration or when the app returns to the foreground. There are no background retries.
 - **Timeout.** Writing bytes or completing a block resets the wait limit. A stalled load reports `TimedOut` after its retries and retains completed blocks. Total download duration is not limited.
 - **Disk.** Eviction removes ordinary entries before stored `whole` parts. Each group uses the configured [eviction strategy](limits-and-eviction.md). Completion checks every part. Missing parts fail the load. Protection belongs to stored entries and ends when those entries are removed.
-- **Admission.** Pending whole declarations are limited by `dedupeMaxEntries`. Excess declarations receive a failed completion and can be declared again later.
+- **Admission.** Pending whole declarations are limited by `dedupeMaxEntries`. Excess declarations receive a failed completion and can be declared again later. A source a place shows is never refused by this limit.
 - **Promotion.** Declaring a window source as whole downloads its remaining parts, including when its window load is still running.
 - **Reset.** Clear and purge cancel pending work and discard the remembered plan, byte accounting and completion state.
 - **Memory.** A `whole` load writes to disk in chunks and holds the same bounded proxy buffers as any download. The memory ceiling and the pool are unchanged.
