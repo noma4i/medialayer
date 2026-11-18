@@ -66,14 +66,14 @@ class NativeViewLifecycleTest {
         MediaVideo(LifecycleSource("first", Kind.VIDEO), modifier = Modifier.size(80.dp))
       }
     }
-    rule.waitUntil(5000) { looper.idle(); events.calls.any { it.startsWith("attach:first:") } }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); events.calls.any { it.startsWith("attach:first:") } }
     rule.runOnIdle { assertEquals(0, root.descendants.count { it is TextureView }) }
     val token = events.calls.last { it.startsWith("attach:first:") }.substringAfterLast(':').toULong()
     val slot = factory.createSlot(0u)
     slot.load("first", PlaybackRoute("file:///bundle/first.mp4", emptyMap(), null, false, false))
     slot.play()
     slot.attach(token)
-    rule.waitUntil(5000) { looper.idle(); counters.snapshot()["setVideoTextureView"] == 1L }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); counters.snapshot()["setVideoTextureView"] == 1L }
     rule.runOnIdle { assertEquals(1, root.descendants.count { it is TextureView }) }
   }
 
@@ -94,13 +94,13 @@ class NativeViewLifecycleTest {
     }
     alphas.indices.forEach { index ->
       val key = "page$index"
-      rule.waitUntil(5000) { looper.idle(); events.calls.any { it.startsWith("attach:$key:") } }
+      rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); events.calls.any { it.startsWith("attach:$key:") } }
       val token = events.calls.last { it.startsWith("attach:$key:") }.substringAfterLast(':').toULong()
       slots[index].load(key, PlaybackRoute("file:///bundle/$index.mp4", emptyMap(), null, false, false))
       slots[index].play()
       slots[index].attach(token)
     }
-    rule.waitUntil(5000) { looper.idle(); counters.snapshot()["setVideoTextureView"] == alphas.size.toLong() }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); counters.snapshot()["setVideoTextureView"] == alphas.size.toLong() }
     rule.runOnIdle {
       assertEquals(alphas.size, root.descendants.count { it is TextureView })
       assertEquals(0, root.descendants.count { it is android.view.SurfaceView })
@@ -125,13 +125,13 @@ class NativeViewLifecycleTest {
       }
       rule.runOnIdle { page = next }
       val key = "video$next"
-      rule.waitUntil(5000) { looper.idle(); events.calls.any { it.startsWith("attach:$key:") } }
+      rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); events.calls.any { it.startsWith("attach:$key:") } }
       val token = events.calls.last { it.startsWith("attach:$key:") }.substringAfterLast(':').toULong()
       val slot = slots[next % 3]
       slot.load(key, PlaybackRoute("file:///bundle/$next.mp4", emptyMap(), null, false, false))
       slot.play()
       slot.attach(token)
-      rule.waitUntil(5000) { looper.idle(); counters.snapshot()["setVideoTextureView"] == (next + 1).toLong() }
+      rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); counters.snapshot()["setVideoTextureView"] == (next + 1).toLong() }
       val before = counters.snapshot()
       rule.runOnIdle { muted = !muted }
       rule.waitForIdle()
@@ -168,7 +168,7 @@ class NativeViewLifecycleTest {
         }
       }
     }
-    rule.waitUntil(5000) { looper.idle(); reports >= 2 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); reports >= 2 }
     slot.pause()
     looper.idle()
     rule.waitForIdle()
@@ -180,7 +180,7 @@ class NativeViewLifecycleTest {
     assertEquals(paused, reports)
     assertEquals(samples, PlayerProgress.sampleCount)
     slot.seek(200uL)
-    rule.waitUntil(5000) { looper.idle(); reports > paused }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); reports > paused }
   }
 
   @Test
@@ -195,14 +195,14 @@ class NativeViewLifecycleTest {
         }
       }
     }
-    rule.waitUntil(5000) { looper.idle(); events.calls.any { it.startsWith("attach:first:") } }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); events.calls.any { it.startsWith("attach:first:") } }
     val first = events.calls.last { it.startsWith("attach:first:") }
     rule.runOnIdle { newer = true }
-    rule.waitUntil(5000) { looper.idle(); events.calls.count { it.startsWith("attach:first:") } == 2 && factory.players.liveViews == 2 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); events.calls.count { it.startsWith("attach:first:") } == 2 && factory.players.liveViews == 2 }
     val second = events.calls.last { it.startsWith("attach:first:") }
     assertNotEquals(first, second)
     rule.runOnIdle { newer = false }
-    rule.waitUntil(5000) { looper.idle(); factory.players.liveViews == 1 && layer.calls.contains("release:first") }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); factory.players.liveViews == 1 && layer.calls.contains("release:first") }
     assertEquals(1, layer.calls.count { it == "release:first" })
     assertEquals(2, events.calls.count { it.startsWith("attach:first:") })
   }
@@ -214,7 +214,7 @@ class NativeViewLifecycleTest {
         MediaVideo(LifecycleSource("first", Kind.VIDEO), modifier = Modifier.size(80.dp))
       }
     }
-    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("playing:first:true") }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.contains("playing:first:true") }
     assertTrue(layer.calls.contains("playing:first:true"))
   }
 
@@ -226,11 +226,11 @@ class NativeViewLifecycleTest {
         MediaVideo(LifecycleSource(url, Kind.VIDEO), modifier = Modifier.size(80.dp))
       }
     }
-    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("visible:first:true") }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.contains("visible:first:true") }
     rule.runOnIdle { url = "second" }
-    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("visible:second:true") }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.contains("visible:second:true") }
     val events = layer.playerEvents() as RecordingEvents
-    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("release:first") && events.calls.any { it.startsWith("attach:second:") } }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.contains("release:first") && events.calls.any { it.startsWith("attach:second:") } }
     assertTrue(layer.calls.contains("visible:first:false"))
   }
 
@@ -243,10 +243,10 @@ class NativeViewLifecycleTest {
         MediaAudio(LifecycleSource(url, Kind.AUDIO)) { control = it; Box(Modifier.size(80.dp)) }
       }
     }
-    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("visible:first:true") }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.contains("visible:first:true") }
     val previous = control
     rule.runOnIdle { url = "second" }
-    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("visible:second:true") }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.contains("visible:second:true") }
     assertNotSame(previous, control)
     assertTrue(layer.calls.contains("visible:first:false"))
   }
@@ -267,10 +267,10 @@ class NativeViewLifecycleTest {
         }
       }
     }
-    rule.waitUntil(5000) { clock.advanceTime(50); looper.idle(); slot.player?.isPlaying == true && control != null }
+    rule.waitUntil(COMPOSE_WAIT_MS) { clock.advanceTime(50); looper.idle(); slot.player?.isPlaying == true && control != null }
     rule.runOnIdle { control!!.play() }
     clock.advanceTime(1000)
-    rule.waitUntil(5000) { looper.idleFor(java.time.Duration.ofMillis(100)); control!!.progress > 0 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idleFor(java.time.Duration.ofMillis(100)); control!!.progress > 0 }
     rule.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
     rule.waitForIdle()
     val background = control!!.progress
@@ -278,12 +278,12 @@ class NativeViewLifecycleTest {
     looper.idleFor(java.time.Duration.ofMillis(1000))
     assertEquals(background, control!!.progress)
     rule.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
-    rule.waitUntil(5000) { looper.idleFor(java.time.Duration.ofMillis(100)); control!!.progress > background }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idleFor(java.time.Duration.ofMillis(100)); control!!.progress > background }
     rule.runOnIdle { offset = 10000.dp }
     rule.waitForIdle()
     val offscreen = control!!.progress
     clock.advanceTime(1000)
-    rule.waitUntil(5000) { looper.idleFor(java.time.Duration.ofMillis(100)); control!!.progress > offscreen }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idleFor(java.time.Duration.ofMillis(100)); control!!.progress > offscreen }
   }
 
   @Test
@@ -299,14 +299,14 @@ class NativeViewLifecycleTest {
         MediaAudio(LifecycleSource("first", Kind.AUDIO)) { control = it; Box(Modifier.size(0.dp)) }
       }
     }
-    rule.waitUntil(5000) { clock.advanceTime(50); looper.idle(); slot.player?.isPlaying == true && control != null }
+    rule.waitUntil(COMPOSE_WAIT_MS) { clock.advanceTime(50); looper.idle(); slot.player?.isPlaying == true && control != null }
     rule.runOnIdle { control!!.play() }
     clock.advanceTime(1000)
-    rule.waitUntil(5000) { looper.idleFor(java.time.Duration.ofMillis(100)); control!!.progress > 0 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idleFor(java.time.Duration.ofMillis(100)); control!!.progress > 0 }
     rule.runOnIdle { control!!.seek(0.5f) }
-    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("seek:first:0.5") }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.contains("seek:first:0.5") }
     layer.emit("first", com.noma4i.medialayer.MediaState.Ended)
-    rule.waitUntil(5000) { looper.idle(); !control!!.isPlaying }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); !control!!.isPlaying }
     assertEquals(com.noma4i.medialayer.MediaState.Ended, control!!.state)
   }
 
@@ -323,7 +323,7 @@ class NativeViewLifecycleTest {
         MediaAudio(LifecycleSource("first", Kind.AUDIO)) { control = it; Box(Modifier.size(80.dp)) }
       }
     }
-    rule.waitUntil(5000) { clock.advanceTime(50); looper.idle(); slot.player?.isPlaying == true && control != null }
+    rule.waitUntil(COMPOSE_WAIT_MS) { clock.advanceTime(50); looper.idle(); slot.player?.isPlaying == true && control != null }
     rule.runOnIdle { control!!.play() }
 
     rule.waitUntil(30000) { clock.advanceTime(1000); looper.idle(); slot.player!!.playbackState == androidx.media3.common.Player.STATE_ENDED }
@@ -332,7 +332,7 @@ class NativeViewLifecycleTest {
     assertEquals(androidx.media3.common.Player.STATE_ENDED, slot.player!!.playbackState)
     assertTrue("the player ended and stopped the control without the core", control!!.isPlaying)
     layer.emit("first", com.noma4i.medialayer.MediaState.Ended)
-    rule.waitUntil(5000) { looper.idle(); !control!!.isPlaying }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); !control!!.isPlaying }
   }
 
   @Test
@@ -344,16 +344,16 @@ class NativeViewLifecycleTest {
         MediaAudio(LifecycleSource("first", Kind.AUDIO), playing = true, onEnd = { ends++ }) { control = it; Box(Modifier.size(80.dp)) }
       }
     }
-    rule.waitUntil(5000) { looper.idle(); control != null }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); control != null }
 
     layer.emit("first", com.noma4i.medialayer.MediaState.Ended)
-    rule.waitUntil(5000) { looper.idle(); ends == 1 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); ends == 1 }
     layer.emit("first", com.noma4i.medialayer.MediaState.Ended)
     layer.emit("first", com.noma4i.medialayer.MediaState.Ready)
-    rule.waitUntil(5000) { looper.idle(); control!!.state == com.noma4i.medialayer.MediaState.Ready }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); control!!.state == com.noma4i.medialayer.MediaState.Ready }
     layer.emit("first", com.noma4i.medialayer.MediaState.Ended)
-    rule.waitUntil(5000) { looper.idle(); ends == 2 }
-    rule.waitUntil(5000) { looper.idle(); layer.calls.count { it == "seek:first:0.0" } == 2 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); ends == 2 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.count { it == "seek:first:0.0" } == 2 }
 
     assertEquals(2, ends)
     assertTrue(!control!!.isPlaying && control!!.progress == 0f)
@@ -373,21 +373,21 @@ class NativeViewLifecycleTest {
         MediaVideo(LifecycleSource("first", Kind.VIDEO), modifier = Modifier.offset(y = offset).size(80.dp), onProgress = { reports++ })
       }
     }
-    rule.waitUntil(5000) { clock.advanceTime(50); looper.idle(); slot.sample().durationMs != null && reports >= 2 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { clock.advanceTime(50); looper.idle(); slot.sample().durationMs != null && reports >= 2 }
     rule.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
     rule.waitForIdle()
     val background = reports
     repeat(20) { rule.mainClock.advanceTimeBy(25); looper.idle() }
     assertEquals(background, reports)
     rule.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
-    rule.waitUntil(5000) { looper.idle(); reports > background }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); reports > background }
     rule.runOnIdle { offset = 10000.dp }
     rule.waitForIdle()
     val offscreen = reports
     repeat(20) { rule.mainClock.advanceTimeBy(25); looper.idle() }
     assertEquals(offscreen, reports)
     rule.runOnIdle { offset = 0.dp }
-    rule.waitUntil(5000) { looper.idle(); reports > offscreen }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); reports > offscreen }
   }
 
   // mutation: drop the TextureView when the slot leaves a view that is still composed (ViewHandle.show(null) removes
@@ -403,13 +403,13 @@ class NativeViewLifecycleTest {
         MediaVideo(LifecycleSource(url, Kind.VIDEO), modifier = Modifier.size(80.dp))
       }
     }
-    rule.waitUntil(5000) { looper.idle(); events.calls.any { it.startsWith("attach:outgoing:") } }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); events.calls.any { it.startsWith("attach:outgoing:") } }
     val token = events.calls.last { it.startsWith("attach:outgoing:") }.substringAfterLast(':').toULong()
     val slot = factory.createSlot(0u)
     slot.load("outgoing", PlaybackRoute("file:///bundle/outgoing.mp4", emptyMap(), null, false, false))
     slot.play()
     slot.attach(token)
-    rule.waitUntil(5000) { looper.idle(); counters.snapshot()["setVideoTextureView"] == 1L }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); counters.snapshot()["setVideoTextureView"] == 1L }
     val shown = rule.runOnIdle { root.descendants.filterIsInstance<TextureView>().single() }
 
     slot.detach()

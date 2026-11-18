@@ -103,7 +103,7 @@ class ImageAnimationTest {
 
   private fun until(condition: () -> Boolean) {
     rule.waitForIdle()
-    rule.waitUntil(5000) { looper.idle(); condition() }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); condition() }
   }
 
   @Test

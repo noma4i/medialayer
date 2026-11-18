@@ -80,7 +80,7 @@ class SourceKeyTest {
       if (index > 0) reports = 0
       rule.runOnIdle { declared = raw }
       try {
-        rule.waitUntil(5000) { looper.idle(); reports >= 1 }
+        rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); reports >= 1 }
       } catch (error: androidx.compose.ui.test.ComposeTimeoutException) {
         reportComposeTimeout(error, "source=$declared reports=$reports readOn=$readOn cacheKeyReads=${layer.cacheKeyReads.get()} calls=${layer.calls}")
       }

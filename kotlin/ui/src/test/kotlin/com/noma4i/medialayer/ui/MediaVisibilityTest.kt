@@ -60,7 +60,7 @@ class MediaVisibilityTest {
 
   private fun until(condition: () -> Boolean) {
     rule.waitForIdle()
-    rule.waitUntil(5000) { looper.idleFor(java.time.Duration.ofMillis(50)); condition() }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idleFor(java.time.Duration.ofMillis(50)); condition() }
   }
 
   private fun left() = cancelled.get() == 1 && claims().lastOrNull() == "visible:$url:false"
@@ -76,7 +76,7 @@ class MediaVisibilityTest {
         if (mounted) Box(Modifier.fillMaxSize()) { Box(Modifier.offset { IntOffset(x, 0) }) { MediaImage(page, Modifier.size(50.dp)) } }
       }
     }
-    rule.waitUntil(5000) { looper.idle(); started.get() == 1 && claims() == listOf("visible:$url:true") }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); started.get() == 1 && claims() == listOf("visible:$url:true") }
 
     x = FAR
     until { left() }
@@ -117,10 +117,10 @@ class MediaVisibilityTest {
       rule.setContent {
         MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { MediaImage(page, Modifier.size(50.dp)) }
       }
-      rule.waitUntil(5000) { looper.idle(); started.get() == 1 }
+      rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); started.get() == 1 }
       gate.complete(Unit)
       val tail = url.takeLast(24)
-      rule.waitUntil(5000) { looper.idle(); org.robolectric.shadows.ShadowLog.getLogsForTag(MediaTrace.TAG).any { it.msg.endsWith(" image load $tail done") } }
+      rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); org.robolectric.shadows.ShadowLog.getLogsForTag(MediaTrace.TAG).any { it.msg.endsWith(" image load $tail done") } }
       val seen = org.robolectric.shadows.ShadowLog.getLogsForTag(MediaTrace.TAG).map { it.msg.substringAfter(' ').substringAfter(' ') }
       assertEquals(listOf("view onScreen $tail true", "image load $tail start", "image load $tail done"), seen.filter { it.startsWith("view ") || it.startsWith("image ") })
     } finally {
@@ -151,7 +151,7 @@ class MediaVisibilityTest {
         Box(Modifier.fillMaxSize()) { Box(Modifier.offset { IntOffset(x, 0) }) { MediaImage(page, Modifier.size(50.dp)) } }
       }
     }
-    rule.waitUntil(5000) { looper.idle(); started.get() == 1 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); started.get() == 1 }
     x = FAR
     until { left() }
     assertEquals("started=1 cancelled=1 decodes=0 claims=[visible:$url:true, visible:$url:false]", counters())
@@ -159,7 +159,7 @@ class MediaVisibilityTest {
     x = 0
     until { started.get() == 2 }
     gate.complete(Unit)
-    rule.waitUntil(5000) { looper.idle(); layer.calls.any { it == "itemState:$url:Ready" } }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.any { it == "itemState:$url:Ready" } }
 
     drainFfi()
     assertEquals("started=2 cancelled=1 decodes=1 claims=[visible:$url:true, visible:$url:false, visible:$url:true]", counters())
@@ -180,7 +180,7 @@ class MediaVisibilityTest {
     x = 0
     until { started.get() == 1 }
     gate.complete(Unit)
-    rule.waitUntil(5000) { looper.idle(); layer.calls.any { it == "itemState:$url:Ready" } }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.any { it == "itemState:$url:Ready" } }
 
     drainFfi()
     assertEquals("started=1 cancelled=0 decodes=1 claims=[visible:$url:true]", counters())
@@ -197,7 +197,7 @@ class MediaVisibilityTest {
         }
       }
     }
-    rule.waitUntil(5000) { looper.idle(); started.get() == 2 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); started.get() == 2 }
 
     x = FAR
     until { left() }

@@ -85,7 +85,7 @@ class MediaComposeTest {
       }
     }
     val looper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
-    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("muted:https://o.test/a.mp4:true") }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.contains("muted:https://o.test/a.mp4:true") }
     val declared = layer.calls.toList()
 
     unrelated++
@@ -93,11 +93,11 @@ class MediaComposeTest {
     assertEquals(declared, layer.calls.toList())
 
     playing = true
-    rule.waitUntil(5000) { looper.idle(); layer.calls.size == declared.size + 1 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.size == declared.size + 1 }
     assertEquals(declared + "playing:https://o.test/a.mp4:true", layer.calls.toList())
 
     shown = false
-    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("release:https://o.test/a.mp4") }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.contains("release:https://o.test/a.mp4") }
     assertEquals(listOf("release:https://o.test/a.mp4", "visible:https://o.test/a.mp4:false"), layer.calls.toList().takeLast(2))
     assertEquals(listOf("mutedAll:false", "visible:https://o.test/a.mp4:true", "muted:https://o.test/a.mp4:true"), declared)
     assertEquals(listOf("attach:https://o.test/a.mp4:1"), events.calls.toList())
@@ -125,17 +125,17 @@ class MediaComposeTest {
         MediaVideo(clip, modifier = Modifier.size(100.dp)) { state -> Text(if (state is MediaState.Failed) "failed ${state.detail}" else "state") }
       }
     }
-    rule.waitUntil(5000) { layer.listeners.isNotEmpty() && rule.onAllNodesWithContentDescription("cover").fetchSemanticsNodes().isNotEmpty() }
+    rule.waitUntil(COMPOSE_WAIT_MS) { layer.listeners.isNotEmpty() && rule.onAllNodesWithContentDescription("cover").fetchSemanticsNodes().isNotEmpty() }
     rule.onNodeWithContentDescription("cover").assertIsDisplayed()
 
     layer.emit(clip.url, MediaState.Ready)
     rule.waitForIdle()
     rule.onNodeWithContentDescription("cover").assertIsDisplayed()
     layer.emit(clip.url, MediaState.Rendered)
-    rule.waitUntil(5000) { rule.onAllNodesWithContentDescription("cover").fetchSemanticsNodes().isEmpty() }
+    rule.waitUntil(COMPOSE_WAIT_MS) { rule.onAllNodesWithContentDescription("cover").fetchSemanticsNodes().isEmpty() }
 
     layer.emit(clip.url, MediaState.Failed("boom"))
-    rule.waitUntil(5000) { rule.onAllNodesWithTextCount("failed boom") == 1 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { rule.onAllNodesWithTextCount("failed boom") == 1 }
   }
 
   @Test
@@ -146,7 +146,7 @@ class MediaComposeTest {
     rule.setContent {
       MediaLayerProvider(CompletableDeferred(layer), cover, slots.players) { MediaVideo(clip, modifier = Modifier.size(50.dp)) }
     }
-    rule.waitUntil(10000) { stats.snapshot().decodes == 1uL }
+    rule.waitUntil(COMPOSE_WAIT_MS) { stats.snapshot().decodes == 1uL }
 
     val side = Math.round(50 * context.resources.displayMetrics.density).toULong()
     val stepped = (side + 7uL) / 8uL * 8uL
@@ -164,7 +164,7 @@ class MediaComposeTest {
         MediaVideo(clip, loop = false, onFirstFrame = { firstFrames++ }, onEnd = { ends++ }, modifier = Modifier.size(100.dp))
       }
     }
-    rule.waitUntil(5000) { layer.listeners.isNotEmpty() }
+    rule.waitUntil(COMPOSE_WAIT_MS) { layer.listeners.isNotEmpty() }
     val states = listOf(MediaState.Loading, MediaState.Ready, MediaState.Rendered, MediaState.Ended, MediaState.Rendered, MediaState.Ended)
 
     states.forEach { state ->
@@ -186,7 +186,7 @@ class MediaComposeTest {
         if (mounted) MediaVideo(clip, loop = false, onEnd = { events += "end"; mounted = false }, onProgress = { events += "progress $it" }, modifier = Modifier.size(100.dp))
       }
     }
-    rule.waitUntil(5000) { layer.listeners.isNotEmpty() }
+    rule.waitUntil(COMPOSE_WAIT_MS) { layer.listeners.isNotEmpty() }
 
     listOf(MediaState.Rendered, MediaState.Ended).forEach { state ->
       layer.emit(clip.url, state)
@@ -207,7 +207,7 @@ class MediaComposeTest {
         MediaVideo(clip, playing = true, loop = false, onEnd = { ends++ }, modifier = Modifier.size(100.dp))
       }
     }
-    rule.waitUntil(5000) { layer.listeners.isNotEmpty() }
+    rule.waitUntil(COMPOSE_WAIT_MS) { layer.listeners.isNotEmpty() }
 
     listOf(MediaState.Ready, MediaState.Rendered, MediaState.Ended).forEach { state ->
       layer.emit(clip.url, state)
@@ -238,7 +238,7 @@ class MediaComposeTest {
       }
     }
 
-    rule.waitUntil(5000) {
+    rule.waitUntil(COMPOSE_WAIT_MS) {
       org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
       layer.calls.any { it == "itemState:https://o.test/p.png:Ready" }
     }
@@ -255,7 +255,7 @@ class MediaComposeTest {
 
   private fun shown(imageLoader: coil3.ImageLoader, count: Int) {
     val looper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
-    rule.waitUntil(5000) { looper.idle(); imageLoader.memoryCache!!.keys.size == count }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); imageLoader.memoryCache!!.keys.size == count }
   }
 
   @Test
@@ -306,7 +306,7 @@ class MediaComposeTest {
         if (visible) MediaImage(Plain("https://o.test/again.png"), Modifier.size(50.dp)) { seen.add(it) }
       }
     }
-    rule.waitUntil(5000) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); seen.lastOrNull() == MediaState.Ready }
+    rule.waitUntil(COMPOSE_WAIT_MS) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); seen.lastOrNull() == MediaState.Ready }
     val before = seen.size
 
     visible = false
@@ -325,10 +325,10 @@ class MediaComposeTest {
     val looper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
     rule.setContent { MediaLayerProvider(CompletableDeferred(layer), gated, slots.players) { MediaImage(BlurredPhoto("https://o.test/b.png"), Modifier.size(50.dp)) } }
 
-    rule.waitUntil(5000) { looper.idle(); rule.onAllNodesWithContentDescription("blurhash").fetchSemanticsNodes().isNotEmpty() }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); rule.onAllNodesWithContentDescription("blurhash").fetchSemanticsNodes().isNotEmpty() }
     gate.complete(Unit)
 
-    rule.waitUntil(5000) { looper.idle(); rule.onAllNodesWithContentDescription("blurhash").fetchSemanticsNodes().isEmpty() }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); rule.onAllNodesWithContentDescription("blurhash").fetchSemanticsNodes().isEmpty() }
     assertEquals("itemState:https://o.test/b.png:Ready", layer.calls.last { it.startsWith("itemState") })
   }
 
@@ -386,7 +386,7 @@ class MediaComposeTest {
 
     layer.placeholderGate!!.complete(Unit)
     layer.emit(clip.url, MediaState.Rendered)
-    rule.waitUntil(5000) { rule.onAllNodesWithContentDescription("cover").fetchSemanticsNodes().isEmpty() }
+    rule.waitUntil(COMPOSE_WAIT_MS) { rule.onAllNodesWithContentDescription("cover").fetchSemanticsNodes().isEmpty() }
   }
 }
 

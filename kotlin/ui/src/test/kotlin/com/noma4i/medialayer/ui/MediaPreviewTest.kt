@@ -53,13 +53,13 @@ class MediaPreviewTest {
     rule.setContent {
       MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { MediaImage(main, Modifier.size(50.dp), preview = local) }
     }
-    rule.waitUntil(5000) { looper.idle(); layer.imageStats().snapshot().decodes == 1uL }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.imageStats().snapshot().decodes == 1uL }
     previews().assertCountEquals(1)
     assertEquals(listOf(local.url, main.url), asked.toList().sortedBy { if (it == local.url) 0 else 1 })
 
     gate.complete(Unit)
-    rule.waitUntil(5000) { looper.idle(); layer.calls.any { it == "itemState:${main.url}:Ready" } }
-    rule.waitUntil(5000) { looper.idle(); previews().fetchSemanticsNodes().isEmpty() }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.any { it == "itemState:${main.url}:Ready" } }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); previews().fetchSemanticsNodes().isEmpty() }
 
     assertTrue(layer.calls.toString(), layer.calls.none { local.url in it })
     drainFfi()

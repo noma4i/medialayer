@@ -93,7 +93,7 @@ class ToneFramesTest {
           override fun failed(error: com.noma4i.medialayer.MediaException) = Unit
         })
         try {
-          rule.waitUntil(10_000) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); changes.get() == index + 1 }
+          rule.waitUntil(COMPOSE_WAIT_MS) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); changes.get() == index + 1 }
           assertEquals(ToneSource.PIXELS, runBlocking { media.tone(source, 0.15f) }?.source)
           assertEquals(index + 1, reads.get())
           assertEquals(index + 1, decodes.get())
@@ -175,7 +175,7 @@ class ToneFramesTest {
       MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { MediaImage(Poster("https://o.test/p.png"), Modifier.size(24.dp)) }
     }
 
-    rule.waitUntil(10_000) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); layer.calls.contains("itemState:https://o.test/p.png:Ready") }
+    rule.waitUntil(COMPOSE_WAIT_MS) { org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle(); layer.calls.contains("itemState:https://o.test/p.png:Ready") }
     assertTrue(layer.preparedTones != null)
     assertEquals(0, layer.toneChecks.get())
   }

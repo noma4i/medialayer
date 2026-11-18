@@ -56,10 +56,10 @@ class MediaImageRetryTest {
         key(attempt) { MediaImage(photo, Modifier.size(50.dp)) { state -> shown = state } }
       }
     }
-    rule.waitUntil(5000) { looper.idle(); shown is MediaState.Failed }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); shown is MediaState.Failed }
 
     attempt += 1
-    rule.waitUntil(5000) { looper.idle(); shown == MediaState.Ready }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); shown == MediaState.Ready }
 
     assertEquals(2, fetches.get())
     drainFfi()
@@ -74,10 +74,10 @@ class MediaImageRetryTest {
         MediaImage(photo, Modifier.size(50.dp)) { state -> shown = state }
       }
     }
-    rule.waitUntil(5000) { looper.idle(); shown is MediaState.Failed }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); shown is MediaState.Failed }
 
     runBlocking { Media.retry(photo) }
-    rule.waitUntil(5000) { looper.idle(); shown == MediaState.Ready }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); shown == MediaState.Ready }
 
     assertEquals(2, fetches.get())
     assertEquals(listOf("retry:${photo.url}"), layer.calls.filter { it.startsWith("retry:") })

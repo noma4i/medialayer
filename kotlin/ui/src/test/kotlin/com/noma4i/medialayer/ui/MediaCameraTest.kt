@@ -448,7 +448,7 @@ class MediaCameraTest {
     rig.camera.startRecording()
 
     rig.fixture.port.send(FocusSignal.PhoneCall(true))
-    eventually("call revokes recording") { !rig.audio.isRecording }
+    eventually("call revokes recording") { !rig.audio.isRecording && rig.camera.state.value.phase != CameraPhase.RECORDING }
     try {
       val ended = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
       assertEquals(CameraRefusal.IN_CALL to cameraRefusalText(CameraRefusal.IN_CALL), ended.reason to ended.detail)

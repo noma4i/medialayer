@@ -80,7 +80,7 @@ class ConnectWithoutAppMachineTest {
     assertEquals(emptyList<String>(), visibles(layer))
 
     opened.complete(layer)
-    rule.waitUntil(5000) { looper.idle(); visibles(layer).isNotEmpty() }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); visibles(layer).isNotEmpty() }
   }
 
   @Test
@@ -90,7 +90,7 @@ class ConnectWithoutAppMachineTest {
     rule.setContent { MediaLayerProvider(opened, loader, slots.players) { } }
 
     opened.completeExceptionally(MediaException.Fetch("connect boom"))
-    rule.waitUntil(5000) { looper.idle(); Media.failure != null }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); Media.failure != null }
 
     assertEquals("connect boom", (Media.failure as MediaException.Fetch).detail)
     Media.failure = null
@@ -103,7 +103,7 @@ class ConnectWithoutAppMachineTest {
     rule.setContent { MediaLayerProvider(opened, loader, slots.players) { } }
 
     opened.completeExceptionally(IllegalStateException("native library missing"))
-    rule.waitUntil(5000) { looper.idle(); Media.failure != null }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); Media.failure != null }
 
     assertTrue((Media.failure as MediaException.Unexpected).toString().contains("native library missing"))
     Media.failure = null
@@ -125,7 +125,7 @@ class ConnectWithoutAppMachineTest {
       }
     }
     rule.waitForIdle()
-    rule.waitUntil(5000) { looper.idle(); outside.layer === second }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); outside.layer === second }
     assertSame(first, insideFirst.layer)
 
     showFirst = false
@@ -157,6 +157,6 @@ class ConnectWithoutAppMachineTest {
     assertNull(outside.layer)
 
     opened.complete(layer)
-    rule.waitUntil(5000) { looper.idle(); inside.layer === layer && outside.layer === layer }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); inside.layer === layer && outside.layer === layer }
   }
 }

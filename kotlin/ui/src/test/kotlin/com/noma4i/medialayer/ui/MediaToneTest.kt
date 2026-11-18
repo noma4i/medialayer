@@ -57,7 +57,7 @@ class MediaToneTest {
     }
   }
 
-  private fun until(condition: () -> Boolean) = rule.waitUntil(5000) { looper.idle(); condition() }
+  private fun until(condition: () -> Boolean) = rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); condition() }
 
   @Test
   fun inv_tone_20_mounting_subscribes_once_and_unmounting_cancels() {

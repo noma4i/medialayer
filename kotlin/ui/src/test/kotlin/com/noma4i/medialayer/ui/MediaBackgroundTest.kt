@@ -51,7 +51,7 @@ class MediaBackgroundTest {
 
   private fun until(advance: () -> Unit = { looper.idleFor(java.time.Duration.ofMillis(50)) }, condition: () -> Boolean) {
     try {
-      rule.waitUntil(5000) { advance(); condition() }
+      rule.waitUntil(COMPOSE_WAIT_MS) { advance(); condition() }
     } catch (error: Throwable) {
       reportComposeTimeout(error, "lifecycle=${rule.activityRule.scenario.state} started=${started.get()} cancelled=${cancelled.get()} claims=${claims()} fetchActive=${fetchJob.get()?.isActive} fetchCancelled=${fetchJob.get()?.isCancelled} trace=${org.robolectric.shadows.ShadowLog.getLogsForTag(MediaTrace.TAG).map { it.msg }}")
     }

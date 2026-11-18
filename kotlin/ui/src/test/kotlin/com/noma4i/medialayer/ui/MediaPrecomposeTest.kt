@@ -93,9 +93,9 @@ class MediaPrecomposeTest {
     val page = Page("https://o.test/leaves.mp4", Kind.VIDEO)
     var shown by mutableStateOf(true)
     rule.setContent { MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { if (shown) MediaVideo(page, modifier = Modifier.size(50.dp)) } }
-    rule.waitUntil(5000) { looper.idle(); slots.players.liveViews == 1 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); slots.players.liveViews == 1 }
     shown = false
-    rule.waitUntil(5000) { looper.idle(); slots.players.liveViews == 0 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); slots.players.liveViews == 0 }
   }
 
   @Test

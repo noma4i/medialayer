@@ -81,24 +81,24 @@ class LoadedAnimationVisibilityTest {
         }
       }
     }
-    rule.waitUntil(5000) { looper.idle(); animation.isRunning && layer.calls.contains("visible:${page.url}:true") }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); animation.isRunning && layer.calls.contains("visible:${page.url}:true") }
     x = 5000
     rule.waitForIdle()
-    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("visible:${page.url}:false") }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.contains("visible:${page.url}:false") }
     rule.waitForIdle()
     assertFalse("Animation still runs after confirmed visible=false", animation.isRunning)
     repeat(2) {
       x = 0
       rule.waitForIdle()
-      rule.waitUntil(5000) { looper.idle(); animation.isRunning }
+      rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); animation.isRunning }
       rule.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
       rule.waitForIdle()
       assertFalse("Animation still runs below STARTED", animation.isRunning)
       rule.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
-      rule.waitUntil(5000) { looper.idle(); animation.isRunning }
+      rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); animation.isRunning }
       x = 5000
       rule.waitForIdle()
-      rule.waitUntil(5000) { looper.idle(); !animation.isRunning }
+      rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); !animation.isRunning }
     }
   }
 
@@ -135,16 +135,16 @@ class LoadedAnimationVisibilityTest {
         }
       }
     }
-    rule.waitUntil(5000) { looper.idle(); animations.size == 2 && animations.all { it.isRunning } }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); animations.size == 2 && animations.all { it.isRunning } }
     x = 5000
     rule.waitForIdle()
-    rule.waitUntil(5000) { looper.idle(); animations.count { it.isRunning } == 1 }
-    rule.waitUntil(5000) { looper.idle(); layer.calls.contains("visible:${page.url}:false") }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); animations.count { it.isRunning } == 1 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.contains("visible:${page.url}:false") }
     assertEquals("Only the leaving tile hides its own place", 1, layer.calls.count { it == "visible:${page.url}:false" })
     assertFalse("The staying tile keeps its place", layer.calls.contains("release:${page.url}"))
     x = 0
     rule.waitForIdle()
-    rule.waitUntil(5000) { looper.idle(); animations.all { it.isRunning } }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); animations.all { it.isRunning } }
     assertEquals("Returning owners must reuse their loaded drawables", 2, animations.size)
     shown = false
     rule.waitForIdle()

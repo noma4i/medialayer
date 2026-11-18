@@ -55,10 +55,10 @@ class MediaTileTest {
         }
       }
     }
-    rule.waitUntil(5000) { looper.idle(); ready("https://o.test/tile.png") }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); ready("https://o.test/tile.png") }
     full = true
 
-    rule.waitUntil(5000) { looper.idle(); ready("https://o.test/full.png") }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); ready("https://o.test/full.png") }
 
     assertEquals(0, layer.toneChecks.get())
   }
@@ -70,10 +70,10 @@ class MediaTileTest {
     val url = "https://o.test/blur.png"
     rule.setContent { MediaLayerProvider(CompletableDeferred(layer), gated, slots.players) { MediaImage(Thumb(url, HASH), Modifier.size(50.dp)) } }
 
-    rule.waitUntil(5000) { looper.idle(); rule.onAllNodesWithContentDescription("blurhash").fetchSemanticsNodes().isNotEmpty() }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); rule.onAllNodesWithContentDescription("blurhash").fetchSemanticsNodes().isNotEmpty() }
     gate.complete(Unit)
-    rule.waitUntil(5000) { looper.idle(); rule.onAllNodesWithContentDescription("blurhash").fetchSemanticsNodes().isEmpty() }
-    rule.waitUntil(5000) { looper.idle(); ready(url) }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); rule.onAllNodesWithContentDescription("blurhash").fetchSemanticsNodes().isEmpty() }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); ready(url) }
 
     assertEquals(listOf(url to false), layer.placeholders.toList())
   }
@@ -88,7 +88,7 @@ class MediaTileTest {
         }
       }
     }
-    rule.waitUntil(5000) { looper.idle(); ready("https://o.test/a.png") && ready("https://o.test/b.png") }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); ready("https://o.test/a.png") && ready("https://o.test/b.png") }
 
     assertEquals(emptyList<String>(), layer.listeners.map { it.first })
   }
@@ -104,18 +104,18 @@ class MediaTileTest {
       }
     }
     val shown = List(3) { "visible:$url:true" }
-    rule.waitUntil(5000) { looper.idle(); ready(url) && visibles(url) == shown }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); ready(url) && visibles(url) == shown }
 
     unrelated++
     rule.waitForIdle()
     assertEquals(shown, visibles(url))
 
     count = 1
-    rule.waitUntil(5000) { looper.idle(); visibles(url).size == 5 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); visibles(url).size == 5 }
     assertEquals(shown + List(2) { "visible:$url:false" }, visibles(url))
 
     count = 0
-    rule.waitUntil(5000) { looper.idle(); visibles(url).size == 6 }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); visibles(url).size == 6 }
     assertEquals(shown + List(3) { "visible:$url:false" }, visibles(url))
   }
 }

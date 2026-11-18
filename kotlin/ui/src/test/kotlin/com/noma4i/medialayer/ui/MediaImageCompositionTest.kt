@@ -59,11 +59,11 @@ class MediaImageCompositionTest {
       }
     }
     pending.complete(Unit)
-    waitUntil(5000) { looper.idle(); layer.calls.contains("itemState:$url:Ready") }
+    waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.contains("itemState:$url:Ready") }
     rule.runOnIdle { offset.value = 10000 }
-    waitUntil(5000) { looper.idle(); layer.calls.contains("visible:$url:false") }
+    waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.contains("visible:$url:false") }
     rule.runOnIdle { offset.value = 0 }
-    waitUntil(5000) { looper.idle(); layer.calls.count { it == "visible:$url:true" } == 2 }
+    waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.count { it == "visible:$url:true" } == 2 }
     rule.waitForIdle()
     assertEquals(1, layer.calls.count { it == "itemState:$url:Ready" })
   }
@@ -90,7 +90,7 @@ class MediaImageCompositionTest {
           }
         }
       }
-      waitUntil(5000) { looper.idle(); layer.calls.count { it.startsWith("visible:") && it.endsWith(":true") } == 1 }
+      waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.count { it.startsWith("visible:") && it.endsWith(":true") } == 1 }
       rule.waitForIdle()
 
       assertEquals(listOf(1, 1), counts.toList())
@@ -107,10 +107,10 @@ class MediaImageCompositionTest {
         Column { for (index in 0 until count.value) MediaImage(SizedImage("https://o.test/ffi-$index.png"), Modifier.size(10.dp)) }
       }
     }
-    waitUntil(5000) { looper.idle(); layer.calls.contains("visible:https://o.test/ffi-0.png:true") }
+    waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.contains("visible:https://o.test/ffi-0.png:true") }
     layer.mainThreadFfi.clear()
     rule.runOnIdle { count.value = 20 }
-    waitUntil(5000) { looper.idle(); layer.calls.count { it.startsWith("visible:") && it.endsWith(":true") } == 20 }
+    waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.count { it.startsWith("visible:") && it.endsWith(":true") } == 20 }
     rule.waitForIdle()
     assertEquals(0, layer.mainThreadFfi.count { it == "imageStats" })
     assertEquals(0, layer.mainThreadFfi.count { it == "cacheKey" })
@@ -126,7 +126,7 @@ class MediaImageCompositionTest {
         Column { for (index in 0 until tiles) MediaImage(SizedImage("https://o.test/tile-$index.png"), Modifier.size(10.dp)) }
       }
     }
-    waitUntil(5000) { looper.idle(); layer.calls.count { it.startsWith("visible:") && it.endsWith(":true") } == tiles }
+    waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.count { it.startsWith("visible:") && it.endsWith(":true") } == tiles }
     rule.waitForIdle()
 
     fun painters(group: CompositionGroup): Int =
@@ -186,7 +186,7 @@ class MediaImageCompositionTest {
         if (shown.value) MediaImage(SizedImage(url), Modifier.size(50.dp))
       }
     }
-    waitUntil(5000) { looper.idle(); layer.calls.contains("itemState:$url:Ready") }
+    waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.contains("itemState:$url:Ready") }
     rule.runOnIdle { shown.value = false }
     rule.waitForIdle()
     kotlinx.coroutines.runBlocking {
