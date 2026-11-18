@@ -202,7 +202,9 @@ public final class MediaCamera: @unchecked Sendable {
             if gate.cancelled { return continuation.resume(throwing: CancellationError()) }
             guard self.startWaiter == nil else { return continuation.resume(throwing: Self.refusal(.notReady)) }
             if self.profile.audio && self.audioHold == nil { return continuation.resume(throwing: Self.refusal(.notReady)) }
-            if self.profile.audio, let fault = self.microphoneFault { return continuation.resume(throwing: Self.refusal(fault)) }
+            if self.profile.audio, let fault = self.microphoneFault, fault != .microphoneSilent { return continuation.resume(throwing: Self.refusal(fault)) }
+            // The start of a take retries a microphone that ended silent; the take waits for its sound (owner 2026-11-19).
+            if self.profile.audio, self.microphoneFault == .microphoneSilent { self.audioInput?.retry() }
             let wasReady = self.run.state.phase == .ready && self.profile.mode == .video
             if wasReady { self.ended = nil }
             self.apply(.start)

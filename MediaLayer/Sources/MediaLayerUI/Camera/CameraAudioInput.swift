@@ -66,6 +66,8 @@ final class CameraAudioInput: AudioInputOwner, CameraMicrophoneListener, @unchec
   /// The run waiting the pause before its next attempt.
   private var pause: Run?
   private var cancelClock: (@Sendable () -> Void)?
+  /// The core generation of the last run that ended silent: a start of a take runs the attempts again (`retry`).
+  private var silent: UInt64?
   private var input: AudioInputHandle?
   private var opened: AudioInputHandle?
   private var audioGeneration: UInt64 = 0
@@ -89,6 +91,15 @@ final class CameraAudioInput: AudioInputOwner, CameraMicrophoneListener, @unchec
     }
   }
 
+  /// A start of a take retries a microphone whose last run ended silent (owner 2026-11-19): a fresh run of attempts on the same core generation, told to nobody.
+  func retry() {
+    lock.withLock {
+      guard !closed, let core = silent, input != nil else { return }
+      release()
+      attempt(Run(core: core))
+    }
+  }
+
   func stop(generation: UInt64) {
     lock.withLock {
       guard (live?.run ?? pause)?.core == generation else { return }
@@ -101,6 +112,7 @@ final class CameraAudioInput: AudioInputOwner, CameraMicrophoneListener, @unchec
       guard var current = live, current.audio == generation, !current.heard, let input else { return }
       current.heard = true
       live = current
+      silent = nil
       stopClock()
       issue(nil)
       input.sound(generation: current.run.core, heard: true)
@@ -114,6 +126,7 @@ final class CameraAudioInput: AudioInputOwner, CameraMicrophoneListener, @unchec
       if refusal != .permissionDenied, retry(current) { return false }
       release()
       guard let error else {
+        silent = current.run.core
         if !current.heard { issue(.microphoneSilent) }
         input.sound(generation: current.run.core, heard: false)
         return !current.heard
@@ -143,6 +156,7 @@ final class CameraAudioInput: AudioInputOwner, CameraMicrophoneListener, @unchec
       cancelClock = nil
       if retry(current) { return false }
       // The last attempt gave no sound in time: the same word as a source the system silenced.
+      silent = current.run.core
       issue(.microphoneSilent)
       input.sound(generation: current.run.core, heard: false)
       return true
@@ -179,6 +193,7 @@ final class CameraAudioInput: AudioInputOwner, CameraMicrophoneListener, @unchec
 
   /// Ends the run: its clock, its pause and its source. Runs under the lock.
   private func release() {
+    silent = nil
     stopClock()
     pause = nil
     if let live { microphone.stop(generation: live.audio) }

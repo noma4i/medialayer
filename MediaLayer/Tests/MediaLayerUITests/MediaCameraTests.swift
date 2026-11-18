@@ -404,6 +404,14 @@ struct MediaCameraTests {
     }
     #expect(rig.backend.count("mic start") == 3, "exactly three sources")
     #expect(!retry.armed(MicrophoneRetry.pauseMs))
+    await eventually("ready after the silent take") { rig.camera.state.phase == .ready }
+    let again = Task { try await rig.camera.startRecording() }
+    await eventually("the next start runs the attempts again") { rig.backend.count("mic start") == 4 }
+    rig.backend.micHeard()
+    rig.backend.emit(.microphoneFlow(true))
+    try await again.value
+    #expect(rig.camera.state.phase == .recording, "the sound of the retry starts the take")
+    _ = try await rig.camera.stopRecording()
   }
 
   @Test
