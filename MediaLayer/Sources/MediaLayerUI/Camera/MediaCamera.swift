@@ -101,6 +101,7 @@ public final class MediaCamera: @unchecked Sendable {
   private var epoch = 0
   private var sessionHold: CameraServices.Release?
   private var audioHold: RecordingTicket?
+  private var takeTicket: RecordingTicket?
   private var revokedAudio: RecordingTicket?
   private var audioInput: CameraAudioInput?
   private var microphoneFault: CameraRefusal?
@@ -365,6 +366,7 @@ public final class MediaCamera: @unchecked Sendable {
     let step = captureStep(run: run, event: event, profile: profile)
     run = step.run
     for action in step.actions { perform(action, before: before) }
+    syncTake()
     if taking && !run.starting && !run.started && run.state.phase == .ready { installTap() }
     if run.discard, run.end != nil, reading != nil {
       reading?.cancel()
@@ -375,6 +377,13 @@ public final class MediaCamera: @unchecked Sendable {
     publish(run.state)
     settleWaiters()
     syncTicker()
+  }
+
+  // The core hears every take of the camera: a voice is busy during it and takes the microphone of the idle preview after it.
+  private func syncTake() {
+    let recording = run.starting || run.started
+    if recording, takeTicket == nil, let ticket = audioHold { takeTicket = ticket; ticket.taking(true) }
+    else if !recording, let ticket = takeTicket { takeTicket = nil; ticket.taking(false) }
   }
 
   private func publish(_ state: CameraState) {

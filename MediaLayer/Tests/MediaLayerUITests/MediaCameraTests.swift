@@ -127,6 +127,33 @@ private final class FakeBackend: CaptureBackend, CameraMicrophone, @unchecked Se
   func setFrameTap(_ tap: (@Sendable (CVPixelBuffer, UInt64) -> Void)?) { lock.withLock { self.tap = tap }; TestSignal.shared.fire() }
 }
 
+/// The voice take on its own microphone: it starts once the core connects its input and the microphone hears sound.
+private final class InputVoiceCapture: VoiceCapture, CameraMicrophone, @unchecked Sendable {
+  private let link: @Sendable () -> AudioLink?
+  private let lock = NSLock()
+  private var input: CameraAudioInput?
+  private(set) var log: [String] = []
+  private var heard: CheckedContinuation<Void, Never>?
+  init(link: @escaping @Sendable () -> AudioLink?) { self.link = link }
+
+  func start(file: URL, maxDurationMs: UInt64, onLimit: @escaping @Sendable () -> Void, onFailure: @escaping @Sendable (Error) -> Void) async throws {
+    guard let link = link() else { throw MediaError.Closed }
+    await withCheckedContinuation { continuation in
+      lock.withLock { heard = continuation }
+      let made = CameraAudioInput(link: link, microphone: self, kind: .voice, failureSource: nil) { _ in }
+      lock.withLock { input = made }
+    }
+    try Data([1, 2, 3]).write(to: file)
+  }
+  func start(generation: UInt64, listener: CameraMicrophoneListener) {
+    let waiting = lock.withLock { log.append("voice start"); defer { heard = nil }; return heard }
+    DispatchQueue.global().async { listener.microphoneHeard(generation: generation); waiting?.resume() }
+  }
+  func stop(generation: UInt64) { lock.withLock { log.append("voice stop") } }
+  func peak() -> Float { 0 }
+  func stop() throws { lock.withLock { let made = input; input = nil; return made }?.close() }
+}
+
 private final class Counters: @unchecked Sendable {
   private let lock = NSLock()
   private var taken = 0
@@ -291,6 +318,31 @@ private func files(_ rig: Rig) -> [String] {
 
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct MediaCameraTests {
+  @Test
+  func inv_audio_85_a_voice_right_after_a_circle_stop_takes_the_microphone_of_the_live_preview_and_is_busy_during_a_take() async throws {
+    let rig = try makeRig(.moment) { backend, _ in backend.nativeMicrophone = true }
+    await ready(rig)
+    await eventually("the preview holds the microphone") { rig.backend.count("mic start") == 1 }
+    try await rig.camera.startRecording()
+    let during = MediaVoiceRecorder(capture: InputVoiceCapture(link: { rig.audio.link }), maxDurationMs: 60_000, link: { rig.audio.link })
+    do {
+      try await during.start(to: FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).m4a"))
+      Issue.record("a voice during a camera take started")
+    } catch let MediaError.Voice(_, reason) {
+      #expect(reason == .microphoneBusy)
+    }
+    #expect(rig.backend.count("mic stop") == 0, "the take keeps its microphone")
+    _ = try await rig.camera.stopRecording()
+
+    let capture = InputVoiceCapture(link: { rig.audio.link })
+    let voice = MediaVoiceRecorder(capture: capture, maxDurationMs: 60_000, link: { rig.audio.link })
+    try await voice.start(to: FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).m4a"))
+    #expect(rig.backend.count("mic stop") == 1, "the preview gave its microphone to the voice")
+    #expect(capture.log == ["voice start"])
+    _ = try? await voice.stop()
+    await eventually("the preview took its microphone back") { rig.backend.count("mic start") == 2 }
+  }
+
   @Test
   func inv_capture_13_the_session_takes_its_memory_before_the_bind_and_gives_it_back_when_the_preview_leaves() async throws {
     let rig = try makeRig()

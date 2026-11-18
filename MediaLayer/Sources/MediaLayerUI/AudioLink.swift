@@ -547,6 +547,11 @@ final class RecordingTicket: @unchecked Sendable {
     sink.finish()
     link?.endTicket(id: id)
   }
+  /// A camera take begins or ends: the core refuses a voice during a take and gives the voice the microphone of an idle preview.
+  func taking(_ on: Bool) {
+    guard !isEnded else { return }
+    link?.send(.captureTake(id: id, taking: on))
+  }
   func waitForStop() { stopped.wait() }
   deinit { end() }
 }
