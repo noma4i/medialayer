@@ -47,6 +47,11 @@ private final class FakePCMSource: VoicePCMSource, @unchecked Sendable {
     }
   }
 
+  func drop() {
+    let (sink, generation) = lock.withLock { (self.sink, started.last ?? 0) }
+    sink?.dropped(generation: generation)
+  }
+
   func lose(_ error: Error? = nil) {
     let (sink, generation) = lock.withLock { (self.sink, started.last ?? 0) }
     sink?.lost(generation: generation, error: error)
@@ -75,6 +80,13 @@ private func pcmBuffer(firstFrame: Int64) throws -> CMSampleBuffer {
 
 private func check(_ status: OSStatus) throws {
   guard status == noErr else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
+}
+
+private final class BrokenLog: @unchecked Sendable {
+  private let lock = NSLock()
+  private var list: [String] = []
+  func add(_ value: String) { lock.withLock { list.append(value) } }
+  var values: [String] { lock.withLock { list } }
 }
 
 /// A writer boundary that stays ready for a number of buffers and then is not: the bounded resource of the take.
@@ -415,25 +427,24 @@ extension GlobalMedia {
       #expect(try await VoiceTake(url: file, writer: writer, settings: [:], maxDurationMs: 60_000, onStarted: {}, onLimit: {}, onBroken: { _ in }).finish() == 0, "a take that never wrote has no length")
     }
 
-    /// O-21: whether the real realtime writer input ever reports not-ready for audio that arrives far faster than real time.
+    /// O-21: audio that reaches the real writer far faster than real time is written whole: a not-ready input only makes the buffers wait.
     @Test
-    func inv_voice_31_the_real_writer_input_reports_not_ready_for_a_burst_of_pcm() async throws {
+    func inv_voice_31_a_burst_of_pcm_is_written_whole_by_the_real_writer() async throws {
       let file = temporaryFile("m4a")
       defer { try? FileManager.default.removeItem(at: file) }
       let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: pcmRate, AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 64_000]
-      let writer = AssetVoiceWriter(url: file)
-      try writer.open(first: try pcmBuffer(firstFrame: 0), settings: settings)
-      var notReady = 0
-      for index in 0..<3_000 {
-        if !writer.isReady { notReady += 1; continue }
-        try writer.append(try pcmBuffer(firstFrame: Int64(index) * pcmFrames))
-      }
-      #expect(notReady > 0, "O-21 reproduced when the real input reports not-ready in a burst; none seen in 3000 buffers")
-      try await writer.finish()
+      let broken = BrokenLog()
+      let take = VoiceTake(url: file, writer: AssetVoiceWriter(url: file), settings: settings, maxDurationMs: 600_000, onStarted: {}, onLimit: {}, onBroken: { broken.add("\($0)") })
+      let buffers = 600
+      for index in 0..<buffers { take.pcm(generation: 1, try pcmBuffer(firstFrame: Int64(index) * pcmFrames)) }
+      let length = try await take.finish()
+      #expect(broken.values.isEmpty, "\(broken.values)")
+      #expect(length == UInt64(buffers) * 100_000)
+      #expect(FileManager.default.fileExists(atPath: file.path))
     }
 
     @Test
-    func aWriterThatIsNotReadyIsOneTypedFailureWithoutAFileAndTheOwnerIsClosed() async throws {
+    func inv_voice_31_a_buffer_dropped_by_the_capture_is_one_typed_failure_without_a_file_and_the_owner_is_closed() async throws {
       let voice = try Voice(writer: { BoundedWriter(url: $0, capacity: 3) })
       let file = temporaryFile("m4a")
       let failures = Collected(Media.failures)
@@ -442,7 +453,7 @@ extension GlobalMedia {
       try voice.source.emit(2)
       #expect(FileManager.default.fileExists(atPath: file.path), "the bounded writer has the file while it takes buffers")
 
-      try voice.source.emit()
+      voice.source.drop()
 
       await eventually("one typed failure") { if case .failed? = states.last?.outcome { true } else { false } }
       #expect(!FileManager.default.fileExists(atPath: file.path))

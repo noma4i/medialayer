@@ -3,7 +3,7 @@ import CoreMedia
 import Foundation
 import MediaLayer
 
-/// One voice take: the PCM of the first live generation written to a file by the writer, which is opened by the first live buffer. It works on the queue of its source and keeps no buffers of its own.
+/// One voice take: the PCM of the first live generation written to a file by the writer, which is opened by the first live buffer. It works on the queue of its source. A buffer the writer cannot take yet waits retained in a queue and goes in when the writer is ready; the pool of the capture is the only bound: a buffer it dropped is a hole in the sound and ends the take.
 final class VoiceTake: VoicePCMSink, @unchecked Sendable {
   enum Failure: Error {
     case writerRejected
@@ -32,6 +32,7 @@ final class VoiceTake: VoicePCMSink, @unchecked Sendable {
   private var bound: UInt64?
   private var start = CMTime.invalid
   private var end = CMTime.invalid
+  private var pending: [CMSampleBuffer] = []
   private var limited = false
   private var peak: Float = 0
 
@@ -59,7 +60,8 @@ final class VoiceTake: VoicePCMSink, @unchecked Sendable {
           bound = generation
           phase = .writing
         }
-        try append(buffer)
+        pending.append(buffer)
+        try drain()
         peak = max(peak, Self.linearPeak(of: buffer))
         if limited { return .limit }
         return opened ? .started : .none
@@ -76,6 +78,16 @@ final class VoiceTake: VoicePCMSink, @unchecked Sendable {
       onLimit()
     case let .failed(error): onBroken(.failed(error))
     }
+  }
+
+  /// The capture dropped a buffer: the sound has a hole, the take ends with `audioBehind`.
+  func dropped(generation: UInt64) {
+    let report = lock.withLock { () -> Bool in
+      guard phase == .waiting || phase == .writing, bound == nil || bound == generation else { return false }
+      discard()
+      return true
+    }
+    if report { onBroken(.failed(Failure.audioBehind)) }
   }
 
   func lost(generation: UInt64, error: Error?) {
@@ -100,7 +112,10 @@ final class VoiceTake: VoicePCMSink, @unchecked Sendable {
     }
     guard writing else { return 0 }
     var failure: Error?
-    do { try await writer.finish() } catch { failure = error }
+    do {
+      try await flush()
+      try await writer.finish()
+    } catch { failure = error }
     let cancelled = lock.withLock { () -> Bool in
       defer { phase = .settled }
       return phase == .finishingCancelled
@@ -120,8 +135,30 @@ final class VoiceTake: VoicePCMSink, @unchecked Sendable {
     lock.withLock { discard() }
   }
 
+  /// Goes in while the writer is ready; the rest waits for the next buffer or for `flush`.
+  private func drain() throws {
+    while let buffer = pending.first, writer.isReady {
+      pending.removeFirst()
+      try append(buffer)
+    }
+  }
+
+  /// At the end every waiting buffer goes in before the file closes; a cancel or a failed writer ends the wait.
+  private func flush() async throws {
+    while true {
+      let state = try lock.withLock { () -> Bool? in
+        guard phase == .finishing, !pending.isEmpty else { return false }
+        if let error = writer.failure { throw error }
+        try drain()
+        return pending.isEmpty ? false : nil
+      }
+      if state == false { return }
+      await Task.yield()
+      try await Task.sleep(nanoseconds: 2_000_000)
+    }
+  }
+
   private func append(_ buffer: CMSampleBuffer) throws {
-    guard writer.isReady else { throw Failure.audioBehind }
     try writer.append(buffer)
     let tail = CMSampleBufferGetPresentationTimeStamp(buffer) + CMSampleBufferGetDuration(buffer)
     let elapsed = (tail - start).seconds
@@ -134,10 +171,12 @@ final class VoiceTake: VoicePCMSink, @unchecked Sendable {
     switch phase {
     case .settled, .finishingCancelled: return
     case .finishing:
+      pending = []
       phase = .finishingCancelled
       return
     case .waiting: phase = .settled
     case .writing:
+      pending = []
       phase = .settled
       writer.cancel()
     }

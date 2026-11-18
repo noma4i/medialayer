@@ -6,6 +6,8 @@ import MediaLayer
 protocol VoicePCMSink: AnyObject, Sendable {
   func pcm(generation: UInt64, _ buffer: CMSampleBuffer)
   func lost(generation: UInt64, error: Error?)
+  /// The source dropped a buffer: the sound has a hole.
+  func dropped(generation: UInt64)
 }
 
 /// The native PCM boundary of a voice take, driven by the input owner of the audio core one generation at a time.
@@ -50,6 +52,11 @@ final class VoiceMicrophone: CameraMicrophone, VoicePCMSink, @unchecked Sendable
     take?.pcm(generation: generation, buffer)
     listener?.microphoneHeard(generation: generation)
     if take == nil { idle?() }
+  }
+
+  func dropped(generation: UInt64) {
+    let take = lock.withLock { active == generation ? self.take : nil }
+    take?.dropped(generation: generation)
   }
 
   func lost(generation: UInt64, error: Error?) {
@@ -155,5 +162,12 @@ final class AVCaptureVoiceSource: NSObject, VoicePCMSource, AVCaptureAudioDataOu
   func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
     guard output === self.output, let sink else { return }
     sink.pcm(generation: generation, sampleBuffer)
+  }
+
+  func captureOutput(_ output: AVCaptureOutput, didDrop sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+    queue.async { [self] in
+      guard output === self.output, let sink else { return }
+      sink.dropped(generation: generation)
+    }
   }
 }
