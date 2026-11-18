@@ -35,6 +35,7 @@ final class VoiceTake: VoicePCMSink, @unchecked Sendable {
   private var pending: [CMSampleBuffer] = []
   private var limited = false
   private var peak: Float = 0
+  private var flushWaiter: CheckedContinuation<Error?, Never>?
 
   init(url: URL, writer: VoiceFileWriter, settings: [String: Any], maxDurationMs: UInt64, onStarted: @escaping @Sendable () -> Void, onLimit: @escaping @Sendable () -> Void, onBroken: @escaping @Sendable (Broken) -> Void) {
     self.url = url
@@ -59,6 +60,7 @@ final class VoiceTake: VoicePCMSink, @unchecked Sendable {
           start = CMSampleBufferGetPresentationTimeStamp(buffer)
           bound = generation
           phase = .writing
+          writer.whenReady { [weak self] in self?.writerReady() }
         }
         pending.append(buffer)
         try drain()
@@ -143,19 +145,44 @@ final class VoiceTake: VoicePCMSink, @unchecked Sendable {
     }
   }
 
-  /// At the end every waiting buffer goes in before the file closes; a cancel or a failed writer ends the wait.
-  private func flush() async throws {
-    while true {
-      let state = try lock.withLock { () -> Bool? in
-        guard phase == .finishing, !pending.isEmpty else { return false }
-        if let error = writer.failure { throw error }
-        try drain()
-        return pending.isEmpty ? false : nil
+  /// The writer can take more: waiting buffers go in. At the end the last one wakes `flush`; a failed append ends the take or the wait.
+  private func writerReady() {
+    var failure: Error?
+    let report = lock.withLock { () -> Bool in
+      switch phase {
+      case .writing:
+        do { try drain() } catch { discard(); failure = error; return true }
+      case .finishing:
+        do { try drain() } catch { failure = error }
+        if failure != nil || pending.isEmpty { wake(failure) }
+      default: break
       }
-      if state == false { return }
-      await Task.yield()
-      try await Task.sleep(nanoseconds: 2_000_000)
+      return false
     }
+    if report, let failure { onBroken(.failed(failure)) }
+  }
+
+  /// Called under the lock.
+  private func wake(_ error: Error?) {
+    let waiter = flushWaiter
+    flushWaiter = nil
+    waiter?.resume(returning: error)
+  }
+
+  /// At the end every waiting buffer goes in before the file closes. The wait is one continuation that the ready callback of the writer, a cancel or a failed writer wakes.
+  private func flush() async throws {
+    let failure: Error? = await withCheckedContinuation { (continuation: CheckedContinuation<Error?, Never>) in
+      let now = lock.withLock { () -> (Bool, Error?) in
+        guard phase == .finishing, !pending.isEmpty else { return (true, nil) }
+        if let error = writer.failure { return (true, error) }
+        do { try drain() } catch { return (true, error) }
+        if pending.isEmpty { return (true, nil) }
+        flushWaiter = continuation
+        return (false, nil)
+      }
+      if now.0 { continuation.resume(returning: now.1) }
+    }
+    if let failure { throw failure }
   }
 
   private func append(_ buffer: CMSampleBuffer) throws {
@@ -173,6 +200,7 @@ final class VoiceTake: VoicePCMSink, @unchecked Sendable {
     case .finishing:
       pending = []
       phase = .finishingCancelled
+      wake(nil)
       return
     case .waiting: phase = .settled
     case .writing:

@@ -9,6 +9,8 @@ protocol VoiceFileWriter: AnyObject, Sendable {
   /// Set once the native writer has failed: nothing more will be taken.
   var failure: Error? { get }
   func open(first: CMSampleBuffer, settings: [String: Any]) throws
+  /// After `open`: `handler` runs on the queue of the writer every time it can take more samples, until the writer finishes or is cancelled.
+  func whenReady(_ handler: @escaping @Sendable () -> Void)
   func append(_ buffer: CMSampleBuffer) throws
   func finish() async throws
   func cancel()
@@ -16,6 +18,7 @@ protocol VoiceFileWriter: AnyObject, Sendable {
 
 extension VoiceFileWriter {
   var failure: Error? { nil }
+  func whenReady(_ handler: @escaping @Sendable () -> Void) {}
 }
 
 final class AssetVoiceWriter: VoiceFileWriter, @unchecked Sendable {
@@ -39,6 +42,12 @@ final class AssetVoiceWriter: VoiceFileWriter, @unchecked Sendable {
     input = audio
     guard made.startWriting() else { throw made.error ?? VoiceTake.Failure.writerRejected }
     made.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(first))
+  }
+
+  func whenReady(_ handler: @escaping @Sendable () -> Void) {
+    guard let ready = input else { return }
+    nonisolated(unsafe) let input = ready
+    input.requestMediaDataWhenReady(on: DispatchQueue(label: "MediaLayer.voiceWriter.ready.\(UUID().uuidString)")) { handler() }
   }
 
   func append(_ buffer: CMSampleBuffer) throws {
