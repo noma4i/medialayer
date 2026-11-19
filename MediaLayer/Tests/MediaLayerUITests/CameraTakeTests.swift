@@ -49,7 +49,7 @@ struct CameraTakeTests {
       return Fixture(audio: audio, video: video, stale: stale)
     }
 
-    private static func audioBuffer(at pts: CMTime) throws -> CMSampleBuffer {
+    static func audioBuffer(at pts: CMTime) throws -> CMSampleBuffer {
       var description = AudioStreamBasicDescription(
         mSampleRate: sampleRate, mFormatID: kAudioFormatLinearPCM, mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
         mBytesPerPacket: 2, mFramesPerPacket: 1, mBytesPerFrame: 2, mChannelsPerFrame: 1, mBitsPerChannel: 16, mReserved: 0
@@ -65,12 +65,12 @@ struct CameraTakeTests {
       return buffer!
     }
 
-    private static func videoBuffer(at pts: CMTime) throws -> CMSampleBuffer {
+    static func videoBuffer(at pts: CMTime, duration: CMTime = CMTime(value: 1, timescale: 30)) throws -> CMSampleBuffer {
       var pixels: CVPixelBuffer?
       try check(CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_32BGRA, nil, &pixels))
       var format: CMVideoFormatDescription?
       try check(CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: pixels!, formatDescriptionOut: &format))
-      var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 30), presentationTimeStamp: pts, decodeTimeStamp: .invalid)
+      var timing = CMSampleTimingInfo(duration: duration, presentationTimeStamp: pts, decodeTimeStamp: .invalid)
       var buffer: CMSampleBuffer?
       try check(CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: pixels!, formatDescription: format!, sampleTiming: &timing, sampleBufferOut: &buffer))
       return buffer!
@@ -117,9 +117,9 @@ struct CameraTakeTests {
     guard case .started? = await events.next() else { Issue.record("no started after confirm"); return }
     for buffer in fixture.video { take.appendVideo(buffer, generation: Fixture.generation) }
     take.stop()
-    guard case let .outcome(.finished(finished, _, reachedLimit, _))? = await events.next() else { Issue.record("no finished outcome"); return }
+    guard case let .outcome(.finished(finished, _, end, _))? = await events.next() else { Issue.record("no finished outcome"); return }
     #expect(finished == url)
-    #expect(!reachedLimit)
+    #expect(end == .completed)
     let facts = try await scanCaptureFacts(at: url)
     guard case let .read(video) = facts.video, case let .read(audio) = facts.audio else { Issue.record("a stream is missing: \(facts)"); return }
     #expect(video.samples > 0)
@@ -183,6 +183,75 @@ struct CameraTakeTests {
     take.audioEnded()
     guard case let .outcome(.finished(_, _, _, coverage))? = await events.next() else { Issue.record("the take did not end with the source"); return }
     #expect(coverage.verdict != .covered, "the verdict is the ledger of what was written: the sound stops short of the video")
+  }
+
+  /// A take fed with `audioSeconds` of sound and `videoSeconds` of picture, in 10 ms buffers and 30 fps frames.
+  private func longTake(audioSeconds: Double, videoSeconds: Double) throws -> (CameraTake, AsyncStream<Event>.Iterator, URL) {
+    let fixture = try Fixture.make()
+    var settings = fixture.settings
+    settings.maxPendingAudio = 10_000
+    settings.maxPendingVideo = 10_000
+    settings.maxHeldAudio = 10_000
+    settings.memoryBudgetBytes = 1 << 30
+    let (take, events, url) = makeTake(fixture, settings: settings)
+    let step = CMTime(value: CMTimeValue(Fixture.framesPerAudio), timescale: CMTimeScale(Fixture.sampleRate))
+    for index in 0..<Int(audioSeconds * 100) { take.appendAudio(try Fixture.audioBuffer(at: Fixture.arm + CMTimeMultiply(step, multiplier: Int32(index))), generation: Fixture.generation) }
+    return (take, events, url)
+  }
+
+  /// 10 frames a second, paced, so the real-time writer keeps every frame.
+  private func feedVideo(_ take: CameraTake, seconds: Double) async throws {
+    let frame = CMTime(value: 1, timescale: 10)
+    for index in 0..<Int((seconds * 10).rounded()) {
+      take.appendVideo(try Fixture.videoBuffer(at: Fixture.arm + CMTimeMultiply(frame, multiplier: Int32(index)), duration: frame), generation: Fixture.generation)
+      try await Task.sleep(for: .milliseconds(5))
+    }
+  }
+
+  @Test
+  func inv_capture_80_a_take_whose_sound_stops_while_the_picture_goes_on_ends_by_itself_with_microphone_lost() async throws {
+    var (take, events, url) = try longTake(audioSeconds: 3, videoSeconds: 5)
+    defer { try? FileManager.default.removeItem(at: url) }
+    guard case .begin? = await events.next() else { Issue.record("no begin first"); return }
+    take.confirmBegin(generation: Fixture.generation)
+    guard case .started? = await events.next() else { Issue.record("no started after confirm"); return }
+    try await feedVideo(take, seconds: 5)
+    guard case let .outcome(.finished(_, durationMs, end, coverage))? = await events.next() else { Issue.record("the take did not end by itself"); return }
+    #expect(end == .microphoneLost)
+    #expect(abs(Int(durationMs) - 3000) <= 20)
+    #expect(coverage.verdict == .covered)
+  }
+
+  @Test
+  func inv_capture_80_a_picture_less_than_a_second_ahead_of_the_sound_does_not_end_the_take() async throws {
+    var (take, events, url) = try longTake(audioSeconds: 3, videoSeconds: 3.9)
+    defer { try? FileManager.default.removeItem(at: url) }
+    guard case .begin? = await events.next() else { Issue.record("no begin first"); return }
+    take.confirmBegin(generation: Fixture.generation)
+    guard case .started? = await events.next() else { Issue.record("no started after confirm"); return }
+    try await feedVideo(take, seconds: 3.9)
+    take.stop()
+    take.audioEnded()
+    guard case let .outcome(.finished(_, durationMs, end, _))? = await events.next() else { Issue.record("no finished outcome"); return }
+    #expect(end == .completed)
+    #expect(durationMs >= 3800)
+  }
+
+  @Test
+  func inv_capture_80_a_take_that_reaches_its_limit_ends_with_the_limit() async throws {
+    let fixture = try Fixture.make()
+    var settings = fixture.settings
+    settings.maxDurationMs = 100
+    var (take, events, url) = makeTake(fixture, settings: settings)
+    defer { try? FileManager.default.removeItem(at: url) }
+    for buffer in fixture.audio.prefix(3) { take.appendAudio(buffer, generation: Fixture.generation) }
+    guard case .begin? = await events.next() else { Issue.record("no begin first"); return }
+    take.confirmBegin(generation: Fixture.generation)
+    guard case .started? = await events.next() else { Issue.record("no started after confirm"); return }
+    for buffer in fixture.video { take.appendVideo(buffer, generation: Fixture.generation) }
+    for buffer in fixture.audio.dropFirst(3) { take.appendAudio(buffer, generation: Fixture.generation) }
+    guard case let .outcome(.finished(_, _, end, _))? = await events.next() else { Issue.record("no finished outcome"); return }
+    #expect(end == .limitReached)
   }
 
   @Test

@@ -21,7 +21,7 @@ final class CameraTake: @unchecked Sendable {
   }
 
   enum Outcome {
-    case finished(url: URL, durationMs: UInt64, reachedLimit: Bool, coverage: AudioCoverage)
+    case finished(url: URL, durationMs: UInt64, end: RecordEnd, coverage: AudioCoverage)
     case cancelled
     case failed(Error)
   }
@@ -63,7 +63,7 @@ final class CameraTake: @unchecked Sendable {
   private var videoPTS = CMTime.invalid
   private var audioEnd = CMTime.invalid
   private var sourceEnded = false
-  private var reachedLimit = false
+  private var recordEnd = RecordEnd.completed
   private var ledger = TakeLedger(audio: nil)
   private var audioCount = 0
   private var videoCount = 0
@@ -143,7 +143,7 @@ final class CameraTake: @unchecked Sendable {
   }
 
   func stop() {
-    queue.async { [self] in finish(reachedLimit: false) }
+    queue.async { [self] in finish(end: .completed) }
   }
 
   func cancel() {
@@ -234,7 +234,7 @@ final class CameraTake: @unchecked Sendable {
     let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
     let carriesClock = isAudio || settings.audio == nil
     if carriesClock, phase == .writing, settings.maxDurationMs > 0, let elapsed = Self.milliseconds(pts - start), elapsed >= settings.maxDurationMs {
-      return finish(reachedLimit: true)
+      return finish(end: .limitReached)
     }
     guard input.isReadyForMoreMediaData else {
       if isAudio {
@@ -257,6 +257,7 @@ final class CameraTake: @unchecked Sendable {
       videoEnd = Self.frameEnd(pts: pts, duration: CMSampleBufferGetDuration(buffer), previous: videoPTS)
       videoPTS = pts
       if let first = microseconds(pts), let last = microseconds(videoEnd) { ledger.video(startUs: first, endUs: last) }
+      if settings.audio != nil, phase == .writing, endIfMicrophoneLost() { return }
     }
     if carriesClock {
       let tail = pts + CMSampleBufferGetDuration(buffer)
@@ -265,7 +266,18 @@ final class CameraTake: @unchecked Sendable {
     }
   }
 
-  private func finish(reachedLimit: Bool) {
+  /// The sound source stopped delivering while the picture goes on: the take ends at the last sound written, and the video bound of the ledger ends there too (INV-CAPTURE-80).
+  private func endIfMicrophoneLost() -> Bool {
+    let audioUs = audioEnd.isValid ? microseconds(audioEnd - start) ?? -1 : -1
+    guard let videoUs = microseconds(videoEnd - start), microphoneLost(audioEndUs: audioUs, videoEndUs: videoUs), audioEnd.isValid else { return false }
+    MediaTrace.emit("camera", "take microphone lost audioEndUs=\(audioUs) videoEndUs=\(videoUs)")
+    videoEnd = audioEnd
+    if let bound = microseconds(audioEnd) { ledger.clipVideo(to: bound) }
+    finish(end: .microphoneLost)
+    return true
+  }
+
+  private func finish(end: RecordEnd) {
     switch phase {
     case .stopping, .finishing, .settled: return
     case .waiting, .held: return settle(.failed(Failure.missingStream))
@@ -274,7 +286,7 @@ final class CameraTake: @unchecked Sendable {
     guard let writer else { return settle(.failed(Failure.missingStream)) }
     guard videoCount > 0, settings.audio == nil || audioCount > 0 else { return settle(.failed(Failure.missingStream)) }
     guard Self.milliseconds(videoEnd - start) != nil else { return settle(.failed(Failure.invalidInterval)) }
-    self.reachedLimit = reachedLimit
+    recordEnd = end
     phase = .stopping
     endIfCovered()
   }
@@ -288,7 +300,7 @@ final class CameraTake: @unchecked Sendable {
 
   private func endSession() {
     guard phase == .stopping, let writer, let duration = Self.milliseconds(videoEnd - start) else { return }
-    let reachedLimit = self.reachedLimit
+    let recordEnd = self.recordEnd
     phase = .finishing
     audioInput?.markAsFinished()
     videoInput?.markAsFinished()
@@ -298,7 +310,7 @@ final class CameraTake: @unchecked Sendable {
         guard phase == .finishing, let writer = self.writer else { return }
         if let pendingOutcome { return conclude(pendingOutcome) }
         guard writer.status == .completed else { return conclude(.failed(writer.error ?? Failure.appendFailed)) }
-        conclude(.finished(url: url, durationMs: duration, reachedLimit: reachedLimit, coverage: ledger.coverage()))
+        conclude(.finished(url: url, durationMs: duration, end: recordEnd, coverage: ledger.coverage()))
       }
     }
   }

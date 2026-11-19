@@ -26,6 +26,11 @@ struct TakeLedger: Sendable {
     videoEndUs = max(videoEndUs ?? endUs, endUs)
   }
 
+  /// The video of the take ends at `endUs`: the picture past the last sound is not part of the take.
+  mutating func clipVideo(to endUs: Int64) {
+    videoEndUs = videoEndUs.map { min($0, endUs) }
+  }
+
   func coverage() -> AudioCoverage {
     coverageFinish(scan: scan, video: VideoBounds(startUs: firstVideoUs ?? 0, endUs: videoEndUs ?? 0))
   }

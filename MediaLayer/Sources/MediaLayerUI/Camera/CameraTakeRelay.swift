@@ -107,9 +107,9 @@ final class CameraTakeRelay: @unchecked Sendable {
     guard live(generation) != nil else { return }
     lock.withLock { take = nil }
     switch outcome {
-    case let .finished(_, _, reachedLimit, coverage):
+    case let .finished(_, _, end, coverage):
       lock.withLock { finishedCoverage = coverage; finishedTagged = takeIsTagged }
-      emit(.recordFinished(end: reachedLimit ? .limitReached : .completed))
+      emit(.recordFinished(end: end))
     case let .failed(error):
       Media.recordNativeFailure(error, source: .camera)
       emit(.recordFinished(end: .failed))
