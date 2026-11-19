@@ -424,11 +424,11 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
       },
       center.addObserver(forName: .AVPlayerItemNewErrorLogEntry, object: item, queue: .main) { [weak self] _ in
         guard let self, MediaTrace.isOn, let event = item.errorLog()?.events.last else { return }
-        MediaTrace.emit("player", "slot=\(id) errorlog status=\(event.errorStatusCode) domain=\(event.errorDomain) uri=\(event.uri.map(MediaTrace.tail) ?? "-") comment=\(event.errorComment ?? "-")")
+        MediaTrace.emit("player", "slot=\(id) errorlog status=\(event.errorStatusCode) domain=\(event.errorDomain) uri=\(event.uri.map(MediaTrace.tail) ?? "-")")
       },
       center.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main) { [weak self] note in
         guard let self else { return }
-        MediaTrace.emit("player", "slot=\(id) failed-to-end key=\(key.map(MediaTrace.tail) ?? "-") \(String(describing: note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey]))")
+        MediaTrace.emit("player", "slot=\(id) failed-to-end key=\(key.map(MediaTrace.tail) ?? "-") \(MediaTrace.errorLabel(note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? NSError))")
       },
       center.addObserver(forName: .AVPlayerItemPlaybackStalled, object: item, queue: .main) { [weak self] _ in
         guard let self, item === self.item, generation == loadGeneration else { return }
@@ -490,7 +490,7 @@ public final class AVQueuePlayerSlot: NSObject, PlayerSlot, @unchecked Sendable 
       prerollIfReady()
     case .failed:
       finishSeek()
-      MediaTrace.emit("player", "slot=\(id) item failed key=\(key.map(MediaTrace.tail) ?? "-") \(item.error.map { String(describing: $0) } ?? "-")")
+      MediaTrace.emit("player", "slot=\(id) item failed key=\(key.map(MediaTrace.tail) ?? "-") \(MediaTrace.errorLabel(item.error as NSError?))")
       events.with { $0.failed(slot: id, generation: generation, status: Self.httpStatus(of: item), detail: item.error?.localizedDescription ?? "failed") }
     default:
       break

@@ -34,7 +34,9 @@ pub fn now_ms() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_millis())
 }
 
+/// The last 24 characters of the url path: the query and the fragment, where a token or a signature sits, are cut first.
 pub fn tail(url: &str) -> &str {
+    let url = url.split(['?', '#']).next().unwrap_or(url);
     let start = url.char_indices().rev().nth(23).map_or(0, |(index, _)| index);
     &url[start..]
 }
@@ -68,6 +70,13 @@ mod tests {
         fn line(&self, text: String) {
             self.0.lock().unwrap().push(text);
         }
+    }
+
+    #[test]
+    fn tail_cuts_query_and_fragment_before_taking_the_end() {
+        assert_eq!(tail("https://cdn.example.com/media/clip.mp4?token=SECRETSECRETSECRETSECRET#frag"), "/media/clip.mp4");
+        assert_eq!(tail("https://cdn.example.com/a/very/long/path/to/clip.mp4"), "/long/path/to/clip.mp4");
+        assert_eq!(tail("?token=abc"), "");
     }
 
     #[test]

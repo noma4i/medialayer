@@ -41,4 +41,15 @@ import Testing
     #expect(lines[0].1.hasPrefix("ML "))
     #expect(lines[0].1.hasSuffix(" slot hello"))
   }
+
+  @Test func tail_drops_query_and_fragment_before_the_end() {
+    #expect(MediaTrace.tail("https://cdn.example.com/media/clip.mp4?token=SECRETSECRETSECRETSECRET#frag") == "/media/clip.mp4")
+    #expect(MediaTrace.tail("https://cdn.example.com/a/very/long/path/to/clip.mp4") == "/long/path/to/clip.mp4")
+  }
+
+  @Test func error_label_has_no_description() {
+    let error = NSError(domain: "d", code: 7, userInfo: [NSLocalizedDescriptionKey: "https://x/y?token=SECRET"])
+    #expect(MediaTrace.errorLabel(error) == "d#7")
+    #expect(MediaTrace.errorLabel(nil) == "-")
+  }
 }

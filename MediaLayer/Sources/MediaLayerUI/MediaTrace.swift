@@ -8,7 +8,7 @@ enum MediaTrace {
   /// `ML_TRACE` in the environment, or the `MLTrace` default (the launch argument `-MLTrace YES` sets it). Read once, at the first emit.
   static let isOn: Bool = {
     let on = enabled(environment: ProcessInfo.processInfo.environment, defaults: .standard)
-    if on { setTraceSink(OSLogSink()) }
+    if on { setTraceSink(sink: OSLogSink()) }
     return on
   }()
 
@@ -35,7 +35,13 @@ enum MediaTrace {
   }
 
   static func tail(_ text: String) -> String {
-    String(text.suffix(24))
+    let path = text.prefix { $0 != "?" && $0 != "#" }
+    return String(path.suffix(24))
+  }
+
+  /// Domain and code only: the description of an error can carry a url with its token.
+  static func errorLabel(_ error: NSError?) -> String {
+    error.map { "\($0.domain)#\($0.code)" } ?? "-"
   }
 
   /// The core prints its trace lines here, so a device without a stderr shows them next to the slot lines.
