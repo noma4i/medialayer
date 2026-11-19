@@ -14885,13 +14885,14 @@ public func FfiConverterTypePressure_lower(_ value: Pressure) -> RustBuffer {
 
 
 /**
- * How a recording ended on the platform: by the app, by the limit, or by a failure.
+ * How a recording ended on the platform: by the app, by the limit, by a microphone that stopped delivering (handled as the limit), or by a failure.
  */
 
 public enum RecordEnd: Equatable, Hashable {
     
     case completed
     case limitReached
+    case microphoneLost
     case failed
 
 
@@ -14918,7 +14919,9 @@ public struct FfiConverterTypeRecordEnd: FfiConverterRustBuffer {
         
         case 2: return .limitReached
         
-        case 3: return .failed
+        case 3: return .microphoneLost
+        
+        case 4: return .failed
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -14936,8 +14939,12 @@ public struct FfiConverterTypeRecordEnd: FfiConverterRustBuffer {
             writeInt(&buf, Int32(2))
         
         
-        case .failed:
+        case .microphoneLost:
             writeInt(&buf, Int32(3))
+        
+        
+        case .failed:
+            writeInt(&buf, Int32(4))
         
         }
     }
@@ -17835,6 +17842,18 @@ public func frameGate(lastMs: UInt64?, nowMs: UInt64, perSecond: Double) -> Bool
 })
 }
 /**
+ * Whether the microphone stopped delivering mid-take: the sound has started (`audio_end_us >= 0`) and the video runs ahead of it by more than the owner lag.
+ */
+public func microphoneLost(audioEndUs: Int64, videoEndUs: Int64) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_func_microphone_lost(
+        FfiConverterInt64.lower(audioEndUs),
+        FfiConverterInt64.lower(videoEndUs),uniffiCallStatus
+    )
+})
+}
+/**
  * The verdict of a finished recording. Closed or thrown away is `Skip`, a recording that never started is `CameraNotReady`, a failed end or a missing length is `Failed`,
  * a length not above the least take is `TooShort`, anything else is `Deliver`. The end by the limit is a good end.
  */
@@ -18498,6 +18517,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_frame_gate() != 23372) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_medialayer_checksum_func_microphone_lost() != 46528) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_record_verdict() != 43405) {
