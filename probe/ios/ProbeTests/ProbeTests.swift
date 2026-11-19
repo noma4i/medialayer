@@ -139,6 +139,36 @@ final class ProbeTests: XCTestCase {
 
   @MainActor func testB_takeFront60s() async throws { try await take("take_front_60s", profile: .circle, lens: .front, seconds: 60) }
 
+  /// A running session must not hiccup when a take starts: the largest gap between frames around the start stays far under 100 ms.
+  @MainActor private func startContinuity(_ name: String, profile: CaptureProfile, lens: CameraLens) async throws {
+    let (camera, _) = try await open(profile, lens)
+    let times = NSMutableArray()
+    let guardLock = NSLock()
+    let observation = camera.observeFrames(maxPerSecond: 120) { _ in
+      let now = CACurrentMediaTime()
+      guardLock.lock(); times.add(now); guardLock.unlock()
+    }
+    try await Task.sleep(nanoseconds: 1_000_000_000)
+    let t0 = CACurrentMediaTime()
+    try await camera.startRecording()
+    try await Task.sleep(nanoseconds: 2_000_000_000)
+    _ = try await camera.stopRecording()
+    observation.cancel()
+    guardLock.lock()
+    let stamps = (times as? [Double] ?? []).filter { $0 >= t0 - 0.5 && $0 <= t0 + 1.5 }
+    guardLock.unlock()
+    var maxGapMs = 0.0
+    for index in stamps.indices.dropFirst() { maxGapMs = max(maxGapMs, (stamps[index] - stamps[index - 1]) * 1000) }
+    probe(name, [("maxGapMs", String(format: "%.1f", maxGapMs)), ("frames", stamps.count)])
+    try await close(camera)
+    XCTAssertLessThan(maxGapMs, 100)
+  }
+
+  @MainActor func testC_startContinuity() async throws {
+    try await startContinuity("start_front_circle", profile: .circle, lens: .front)
+    try await startContinuity("start_back_moment", profile: .moment, lens: .back)
+  }
+
   func test8_noRefusals() {
     let refused = Self.collected.filter { $0.contains(" camera refuse ") }
     for line in refused { print("PROBE refused \(line)") }
