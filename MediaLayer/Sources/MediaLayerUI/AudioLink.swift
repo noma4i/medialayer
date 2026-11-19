@@ -63,6 +63,8 @@ final class AudioLink: @unchecked Sendable {
   private var pending: [UInt64: CheckedContinuation<Result<RecordingTicket, Error>, Never>] = [:]
   var tickets: [UInt64: WeakRecordingTicket] = [:]
   var inputRegistry: [UInt64: InputRegistration] = [:]
+  /// Testing driver silence: nil until a driver signal, true while silenced, false after a restore.
+  var driverSilenced: Bool?
   private var pendingStops: [RecordingTicket] = []
   private var calls: [UInt64: CallSignals] = [:]
   private var unmanagedSpeakers: [UInt64: Bool] = [:]
@@ -372,6 +374,7 @@ final class AudioLink: @unchecked Sendable {
         input.generation = generation
         inputRegistry[id] = input
         owner.restore(handle, generation: generation)
+        if let silenced = driverSilenced { send(.noSound(id: id, generation: generation, on: silenced)) }
       case let .stopInput(id, generation):
         guard var input = inputRegistry[id] else { continue }
         input.generation = nil

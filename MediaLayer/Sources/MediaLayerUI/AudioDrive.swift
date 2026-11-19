@@ -18,6 +18,7 @@ extension AudioLink {
     switch signal {
     case .silenceMicrophone:
       inbox.async {
+        self.driverSilenced = true
         self.tickets.keys.forEach { self.process(.silenced(id: $0)) }
         self.inputRegistry.forEach { id, input in
           if let generation = input.generation { self.process(.noSound(id: id, generation: generation, on: true)) }
@@ -25,6 +26,7 @@ extension AudioLink {
       }
     case .restoreMicrophone:
       inbox.async {
+        self.driverSilenced = false
         self.inputRegistry.forEach { id, input in
           if let generation = input.generation { self.process(.noSound(id: id, generation: generation, on: false)) }
         }
