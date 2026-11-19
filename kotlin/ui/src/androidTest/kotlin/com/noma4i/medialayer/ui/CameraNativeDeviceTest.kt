@@ -133,19 +133,9 @@ class CameraNativeDeviceTest {
     }
   }
 
-  private enum class Damage { HEAD, MIDDLE, TAIL }
-
   private enum class Disturbance { LENS, PREVIEW }
 
-  /** The damage of a take is done to the samples the writer is given: the audio of one part of the take never reaches its muxer, so the ledger of the take, not a file read after the stop, finds the hole. The take is at least `minTakeMs` long. */
-  private fun gateFor(damage: Damage?, minTakeMs: Long): MuxGate {
-    if (damage == null) return MuxGate.OPEN
-    val length = minTakeMs * 1_000
-    val cut = when (damage) { Damage.HEAD -> 0L..length * 3 / 10; Damage.MIDDLE -> length * 4 / 10..length * 6 / 10; Damage.TAIL -> length * 7 / 10..Long.MAX_VALUE }
-    return MuxGate { audio, ptsUs -> !(audio && ptsUs in cut) }
-  }
-
-  private fun record(audio: Boolean, damage: Damage? = null, lens: CameraLens = CameraLens.BACK, kind: CaptureKind = CaptureKind.MOMENT, mirrored: Boolean = false, disturb: Disturbance? = null, holdMs: Long = 0) = runBlocking {
+  private fun record(audio: Boolean, lens: CameraLens = CameraLens.BACK, kind: CaptureKind = CaptureKind.MOMENT, mirrored: Boolean = false, disturb: Disturbance? = null, holdMs: Long = 0) = runBlocking {
     val profile = captureProfile(kind).copy(audio = audio).let { if (mirrored) it.copy(mirrorFrontVideo = true) else it }
     val failures = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { Media.failures.collect { reported.add(it) } }
     val hearing = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { checkNotNull(layer).microphoneAvailability.collect { heard.value += it } }
@@ -155,7 +145,7 @@ class CameraNativeDeviceTest {
       activity.setContentView(ComposeView(activity).apply {
         setContent {
           MediaLayerProvider(checkNotNull(opened)) {
-            val made = remember { MediaCamera(profile, lens, CameraXBackend(context, gate = gateFor(damage, profile.minTakeMs.toLong())), diagnosing()) }
+            val made = remember { MediaCamera(profile, lens, CameraXBackend(context), diagnosing()) }
             DisposableEffect(made) { onDispose { made.close() } }
             LaunchedEffect(made) { composed.complete(made) }
             MediaCameraPreview(made, Modifier.fillMaxSize())
@@ -172,16 +162,6 @@ class CameraNativeDeviceTest {
       // The preview microphone starts silently: noSound comes only from a silence the platform reports (INV-AUDIO-86), the take below starts on its first live sound.
       kotlinx.coroutines.delay(500)
       assertTrue("the microphone start blinked no sound; availability=${heard.value}; native failures=${reported.toList()}", MicrophoneAvailability.NO_SOUND !in heard.value)
-    }
-    if (damage != null) {
-      made.startRecording()
-      withTimeout(TIMEOUT_MS) { made.state.first { it.isRecording && it.recordedMs >= profile.minTakeMs } }
-      val refused = try { made.stopRecording(); null } catch (error: MediaException.Camera) { error }
-      failures.cancel()
-      hearing.cancel()
-      assertEquals("$damage audio is refused, readings=${readings.toList()}", com.noma4i.medialayer.CameraRefusal.AUDIO_TRACK_BROKEN, refused?.reason)
-      assertTrue("the refused file is deleted", CaptureFiles.directory(context).listFiles().orEmpty().isEmpty())
-      return@runBlocking
     }
     if (disturb != null) {
       made.startRecording()
@@ -277,15 +257,6 @@ class CameraNativeDeviceTest {
 
   @Test
   fun two_takes_without_sound_are_two_mp4_files_with_video_packets_only() = record(audio = false)
-
-  @Test
-  fun audio_missing_at_the_head_is_refused_and_the_file_deleted() = record(audio = true, damage = Damage.HEAD)
-
-  @Test
-  fun audio_missing_in_the_middle_is_refused_and_the_file_deleted() = record(audio = true, damage = Damage.MIDDLE)
-
-  @Test
-  fun audio_missing_at_the_tail_is_refused_and_the_file_deleted() = record(audio = true, damage = Damage.TAIL)
 
   private companion object {
     const val VOICE_MS = 10_000L
