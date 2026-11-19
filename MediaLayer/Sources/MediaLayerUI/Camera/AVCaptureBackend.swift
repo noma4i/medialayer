@@ -22,7 +22,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
   private var audioInterrupted = false
   private var frameOutput: AVCaptureVideoDataOutput?
   private var relay: CameraTakeRelay!
-  private var recordingOutput = false
   private var stabilization: AVCaptureVideoStabilizationMode?
   private var photoDelegates: [UUID: PhotoDelegate] = [:]
   private var tap: (@Sendable (CVPixelBuffer, UInt64) -> Void)?
@@ -36,10 +35,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     super.init()
     relay = CameraTakeRelay(
       queue: queue, emit: { [weak self] in self?.emit($0) },
-      idle: { [weak self] in
-        self?.recordingOutput = false
-        self?.installFrameOutput()
-      }
+      idle: {}
     )
     session.automaticallyConfiguresApplicationAudioSession = false
     let center = NotificationCenter.default
@@ -115,8 +111,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     }
     let photo = profile.mode == .photo ? AVCapturePhotoOutput() : nil
     relay.cancel()
-    recordingOutput = false
-    session.beginConfiguration()
+    beginSession()
     session.inputs.forEach(session.removeInput)
     session.outputs.forEach(session.removeOutput)
     previewLinks = [:]
@@ -129,7 +124,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     if let photo { outputs.append(photo) }
     let added = inputs.allSatisfy { session.canAddInput($0) } && outputs.allSatisfy { session.canAddOutput($0) }
     guard added else {
-      session.commitConfiguration()
+      commitSession(why: "configure")
       return emit(.refuse(reason: .configureFailed))
     }
     inputs.forEach(session.addInput)
@@ -145,12 +140,13 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     stabilization = profile.mode == .video ? stabilizationMode(requested: profile.stabilization, supported: supported)?.avMode : nil
     videoPort = inputs.first?.ports(for: .video, sourceDeviceType: device.deviceType, sourceDevicePosition: device.position).first
     previews.keys.forEach(linkPreview)
-    session.commitConfiguration()
+    if frameOutputNeeded(videoMode: profile.mode == .video, hasTap: lock.withLock({ tap }) != nil) { addFrameOutput() }
+    commitSession(why: "configure")
     guard session.hardwareCost <= 1 else {
-      session.beginConfiguration()
+      beginSession()
       session.inputs.forEach(session.removeInput)
       session.outputs.forEach(session.removeOutput)
-      session.commitConfiguration()
+      commitSession(why: "configure")
       audioOutput = nil
       microphoneInput = nil
       return emit(.refuse(reason: .configureFailed))
@@ -166,7 +162,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
       photo.maxPhotoDimensions = CMVideoDimensions(width: Int32(size.width), height: Int32(size.height))
     }
     lock.withLock { chosenPhotoSize = choice?.photoSize }
-    installFrameOutput()
     if !session.isRunning { session.startRunning() }
     MediaTrace.emit("camera", "bind audio=\(profile.audio) microphone=\(session.inputs.contains { $0.ports.contains { $0.mediaType == .audio } }) videoMode=\(profile.mode == .video)")
     let hasFlash = profile.mode == .photo ? device.isFlashAvailable : device.hasTorch
@@ -207,9 +202,9 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
       layer.setSessionWithNoConnection(self.session)
       self.previews[id] = WeakPreview(layer)
       guard self.videoPort != nil else { return }
-      self.session.beginConfiguration()
+      self.beginSession()
       self.linkPreview(id)
-      self.session.commitConfiguration()
+      self.commitSession(why: "previewAttach")
     }
   }
 
@@ -219,9 +214,9 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
       let id = ObjectIdentifier(layer)
       self.previews[id] = nil
       guard let link = self.previewLinks.removeValue(forKey: id) else { return }
-      self.session.beginConfiguration()
+      self.beginSession()
       self.session.removeConnection(link)
-      self.session.commitConfiguration()
+      self.commitSession(why: "previewDetach")
     }
   }
 
@@ -245,12 +240,11 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
   func unbind(completion: @escaping @Sendable () -> Void) {
     queue.async {
       self.relay.cancel()
-      self.recordingOutput = false
       self.session.stopRunning()
-      self.session.beginConfiguration()
+      self.beginSession()
       self.session.inputs.forEach(self.session.removeInput)
       self.session.outputs.forEach(self.session.removeOutput)
-      self.session.commitConfiguration()
+      self.commitSession(why: "unbind")
       self.previewLinks = [:]
       self.videoPort = nil
       self.camera = nil
@@ -299,12 +293,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     queue.async { [weak self] in
       guard let self else { return }
       guard videoMode, camera != nil, !relay.isActive, session.isRunning else { return emit(.recordFinished(end: .failed)) }
-      recordingOutput = true
-      installFrameOutput()
       guard let settings = takeSettings(profile: profile, lens: lens) else {
         Media.recordNativeFailure(NSError(domain: AVFoundationErrorDomain, code: -1), source: .camera)
-        recordingOutput = false
-        installFrameOutput()
         return emit(.recordFinished(end: .failed))
       }
       relay.begin(url: url, settings: settings, ticket: ticket, refused: refused)
@@ -344,9 +334,9 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
       self.removeMicrophone()
       self.wanted = (generation, listener)
       guard self.camera != nil else { return }
-      self.session.beginConfiguration()
+      self.beginSession()
       let failure = self.addMicrophone()
-      self.session.commitConfiguration()
+      self.commitSession(why: "microphone")
       // A source not heard yet is not silent: the owner tells the silence of its last attempt (owner 2026-11-19, MicrophoneRetry).
       if self.audioOutput != nil { self.audioFlowing = false }
       if let failure { self.loseMicrophone(failure) }
@@ -382,10 +372,10 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
 
   private func removeMicrophone() {
     guard let input = microphoneInput, let output = audioOutput else { return }
-    session.beginConfiguration()
+    beginSession()
     session.removeOutput(output)
     session.removeInput(input)
-    session.commitConfiguration()
+    commitSession(why: "microphone")
     microphoneInput = nil
     audioOutput = nil
     audioFlowing = false
@@ -416,30 +406,49 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
 
   func setFrameTap(_ tap: (@Sendable (CVPixelBuffer, UInt64) -> Void)?) {
     lock.withLock { self.tap = tap }
-    queue.async { self.installFrameOutput() }
+    queue.async { self.syncFrameOutput() }
   }
 
-  private func installFrameOutput() {
-    if lock.withLock({ tap }) == nil && !recordingOutput {
-      guard let output = frameOutput else { return }
-      session.beginConfiguration()
+  /// Only a tap change on a camera that is not in video mode reconfigures a live session; a video camera carries its frame output from `configure` until `unbind`, so a take starts and ends without touching the graph.
+  private func syncFrameOutput() {
+    guard camera != nil else { return }
+    let needed = frameOutputNeeded(videoMode: videoMode, hasTap: lock.withLock({ tap }) != nil)
+    guard needed != (frameOutput != nil) else { return }
+    beginSession()
+    if needed {
+      addFrameOutput()
+    } else if let output = frameOutput {
       session.removeOutput(output)
-      session.commitConfiguration()
       frameOutput = nil
-      return
     }
-    guard frameOutput == nil, camera != nil else { return }
+    commitSession(why: "frameOutput")
+  }
+
+  /// Runs inside a begin/commit of the session.
+  private func addFrameOutput() {
     let output = AVCaptureVideoDataOutput()
     output.alwaysDiscardsLateVideoFrames = true
     output.setSampleBufferDelegate(self, queue: frames)
-    session.beginConfiguration()
-    if session.canAddOutput(output) {
-      session.addOutput(output)
-      frameOutput = output
-      if let stabilization { output.connection(with: .video)?.preferredVideoStabilizationMode = stabilization }
-    }
-    session.commitConfiguration()
+    guard session.canAddOutput(output) else { return }
+    session.addOutput(output)
+    frameOutput = output
+    if let stabilization { output.connection(with: .video)?.preferredVideoStabilizationMode = stabilization }
   }
+
+  /// The one place that opens and closes a session transaction, so the trace counts every graph change.
+  private func beginSession() {
+    session.beginConfiguration()
+  }
+
+  private func commitSession(why: String) {
+    session.commitConfiguration()
+    MediaTrace.emit("camera", "session commit why=\(why)")
+  }
+}
+
+/// Whether the session carries a video data output: a video camera always (take frames and stabilization are set once), a photo camera only for a frame tap.
+func frameOutputNeeded(videoMode: Bool, hasTap: Bool) -> Bool {
+  videoMode || hasTap
 }
 
 extension AVCaptureBackend: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {

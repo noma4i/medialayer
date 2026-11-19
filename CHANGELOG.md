@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- A video camera keeps its session graph still while a take starts and ends, so the preview does not flicker.
 - A shown video place loads its whole before preload wholes queued ahead of it.
 - A recorded video takes the turn of its preview, so no device pose turns it.
 - A late encoder failure after a normal camera take end no longer warns on a dead thread.
