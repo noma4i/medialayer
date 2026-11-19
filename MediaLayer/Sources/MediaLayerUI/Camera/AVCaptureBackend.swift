@@ -402,6 +402,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     session.removeOutput(output)
     session.removeInput(input)
     commitSession(why: "microphone")
+    relay.audioEnded()
     microphoneInput = nil
     audioOutput = nil
     audioFlowing = false

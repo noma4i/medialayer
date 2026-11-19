@@ -38,6 +38,7 @@ enum CoverageClips {
     guard await iterator.next() == "started" else { throw NSError(domain: "coverage", code: 2) }
     for buffer in fixture.video { take.appendVideo(buffer, generation: Fixture.generation) }
     take.stop()
+    take.audioEnded()
     guard await iterator.next() == "finished" else { throw NSError(domain: "coverage", code: 3) }
     guard let coverage = judged.value else { throw NSError(domain: "coverage", code: 4) }
     return (url, coverage)

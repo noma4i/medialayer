@@ -51,7 +51,7 @@ final class CameraTake: @unchecked Sendable {
   private var refused = false
   private var pendingOutcome: Outcome?
 
-  private enum Phase { case waiting, held, writing, finishing, settled }
+  private enum Phase { case waiting, held, writing, stopping, finishing, settled }
   private var phase = Phase.waiting
   private var held: [(buffer: CMSampleBuffer, bytes: Int)] = []
   private var writer: AVAssetWriter?
@@ -61,6 +61,9 @@ final class CameraTake: @unchecked Sendable {
   private var end = CMTime.invalid
   private var videoEnd = CMTime.invalid
   private var videoPTS = CMTime.invalid
+  private var audioEnd = CMTime.invalid
+  private var sourceEnded = false
+  private var reachedLimit = false
   private var ledger = TakeLedger(audio: nil)
   private var audioCount = 0
   private var videoCount = 0
@@ -127,6 +130,14 @@ final class CameraTake: @unchecked Sendable {
     queue.async { [self] in settle(.cancelled) }
   }
 
+  /// The sound source delivers no more samples: a stop that waits for the sound ends with what was written.
+  func audioEnded() {
+    queue.async { [self] in
+      sourceEnded = true
+      if phase == .stopping { endSession() }
+    }
+  }
+
   private func handleAudio(_ buffer: CMSampleBuffer, bytes: Int) -> Bool {
     switch phase {
     case .waiting:
@@ -143,6 +154,9 @@ final class CameraTake: @unchecked Sendable {
       return true
     case .writing:
       appendWritten(buffer, to: audioInput, isAudio: true)
+    case .stopping:
+      appendWritten(buffer, to: audioInput, isAudio: true)
+      if phase == .stopping { endIfCovered() }
     case .finishing, .settled:
       break
     }
@@ -196,10 +210,10 @@ final class CameraTake: @unchecked Sendable {
   }
 
   private func appendWritten(_ buffer: CMSampleBuffer, to input: AVAssetWriterInput?, isAudio: Bool) {
-    guard phase == .writing, let input else { return }
+    guard phase == .writing || phase == .stopping, let input else { return }
     let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
     let carriesClock = isAudio || settings.audio == nil
-    if carriesClock, settings.maxDurationMs > 0, let elapsed = Self.milliseconds(pts - start), elapsed >= settings.maxDurationMs {
+    if carriesClock, phase == .writing, settings.maxDurationMs > 0, let elapsed = Self.milliseconds(pts - start), elapsed >= settings.maxDurationMs {
       return finish(reachedLimit: true)
     }
     guard input.isReadyForMoreMediaData else {
@@ -210,6 +224,8 @@ final class CameraTake: @unchecked Sendable {
     if isAudio {
       audioCount += 1
       ledger.audio(TakeLedger.interval(of: buffer))
+      let tail = pts + CMSampleBufferGetDuration(buffer)
+      audioEnd = audioEnd.isValid ? max(audioEnd, tail) : tail
     } else {
       videoCount += 1
       videoEnd = Self.frameEnd(pts: pts, duration: CMSampleBufferGetDuration(buffer), previous: videoPTS)
@@ -225,13 +241,28 @@ final class CameraTake: @unchecked Sendable {
 
   private func finish(reachedLimit: Bool) {
     switch phase {
-    case .finishing, .settled: return
+    case .stopping, .finishing, .settled: return
     case .waiting, .held: return settle(.failed(Failure.missingStream))
     case .writing: break
     }
     guard let writer else { return settle(.failed(Failure.missingStream)) }
     guard videoCount > 0, settings.audio == nil || audioCount > 0 else { return settle(.failed(Failure.missingStream)) }
-    guard let duration = Self.milliseconds(videoEnd - start) else { return settle(.failed(Failure.invalidInterval)) }
+    guard Self.milliseconds(videoEnd - start) != nil else { return settle(.failed(Failure.invalidInterval)) }
+    self.reachedLimit = reachedLimit
+    phase = .stopping
+    endIfCovered()
+  }
+
+  /// The tracks end at the last video frame; the end waits until the written sound covers it or the sound source has ended, with no timer (INV-CAPTURE-51, INV-CAPTURE-80).
+  private func endIfCovered() {
+    guard phase == .stopping else { return }
+    let covered = settings.audio == nil || sourceEnded || (audioEnd.isValid && audioEnd >= videoEnd)
+    if covered { endSession() }
+  }
+
+  private func endSession() {
+    guard phase == .stopping, let writer, let duration = Self.milliseconds(videoEnd - start) else { return }
+    let reachedLimit = self.reachedLimit
     phase = .finishing
     audioInput?.markAsFinished()
     videoInput?.markAsFinished()

@@ -56,6 +56,11 @@ final class CameraTakeRelay: @unchecked Sendable {
     lock.withLock { take }?.stop()
   }
 
+  /// The microphone is gone: a take that waits for the sound ends with what it has.
+  func audioEnded() {
+    lock.withLock { take }?.audioEnded()
+  }
+
   func cancel() {
     lock.withLock { () -> CameraTake? in
       defer { take = nil }

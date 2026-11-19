@@ -150,6 +150,41 @@ struct CameraTakeTests {
   }
 
   @Test
+  func inv_capture_51_a_stop_waits_for_the_sound_that_arrives_after_it_to_reach_the_video_end() async throws {
+    let fixture = try Fixture.make()
+    var (take, events, url) = makeTake(fixture)
+    defer { try? FileManager.default.removeItem(at: url) }
+    // 10 audio buffers of 10 ms cover 100 ms; the 6 frames last 200 ms.
+    for buffer in fixture.audio.prefix(10) { take.appendAudio(buffer, generation: Fixture.generation) }
+    guard case .begin? = await events.next() else { Issue.record("no begin first"); return }
+    take.confirmBegin(generation: Fixture.generation)
+    guard case .started? = await events.next() else { Issue.record("no started after confirm"); return }
+    for buffer in fixture.video { take.appendVideo(buffer, generation: Fixture.generation) }
+    take.stop()
+    for buffer in fixture.audio.dropFirst(10) { take.appendAudio(buffer, generation: Fixture.generation) }
+    guard case let .outcome(.finished(_, durationMs, _, coverage))? = await events.next() else { Issue.record("no finished outcome"); return }
+    #expect(durationMs == 200)
+    #expect(coverage.verdict == .covered)
+    let lastUs = try #require(coverage.lastUs)
+    #expect(lastUs >= 190_000, "the written sound reaches the video end")
+  }
+
+  @Test
+  func inv_capture_51_a_stop_whose_sound_source_ended_finishes_with_the_sound_it_has() async throws {
+    let fixture = try Fixture.make()
+    var (take, events, url) = makeTake(fixture)
+    defer { try? FileManager.default.removeItem(at: url) }
+    for buffer in fixture.audio.prefix(10) { take.appendAudio(buffer, generation: Fixture.generation) }
+    guard case .begin? = await events.next() else { Issue.record("no begin first"); return }
+    take.confirmBegin(generation: Fixture.generation)
+    guard case .started? = await events.next() else { Issue.record("no started after confirm"); return }
+    for buffer in fixture.video { take.appendVideo(buffer, generation: Fixture.generation) }
+    take.stop()
+    take.audioEnded()
+    guard case .outcome(.finished)? = await events.next() else { Issue.record("the take did not end with the source"); return }
+  }
+
+  @Test
   func inv_capture_51_a_frame_ends_at_its_duration_or_the_gap_before_it() {
     let scale: CMTimeScale = 600
     let pts = CMTime(value: 60, timescale: scale)
