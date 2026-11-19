@@ -110,7 +110,8 @@ final class ProbeTests: XCTestCase {
 
   @MainActor func test1_open() async throws {
     let (camera, readyMs) = try await open(.circle, .front)
-    probe("open", [("layerOpenMs", try await ProbeApp.opening.value), ("readyMs", readyMs)])
+    _ = try await ProbeApp.opening.value
+    probe("open", [("layerOpenMs", ProbeApp.openMs), ("readyMs", readyMs)])
     try await close(camera)
     XCTAssertLessThanOrEqual(readyMs, 5000)
   }
