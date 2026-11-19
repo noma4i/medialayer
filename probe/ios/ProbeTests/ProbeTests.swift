@@ -47,6 +47,7 @@ final class ProbeTests: XCTestCase {
   /// Opens a camera on the probe screen and waits for READY. Returns the camera and the wait in ms.
   @MainActor private func open(_ profile: CaptureProfile, _ lens: CameraLens) async throws -> (MediaCamera, Int) {
     await permissions()
+    _ = try await ProbeApp.opening.value
     let camera = try MediaCamera(profile: profile, lens: lens)
     let started = Date()
     ProbeScreen.shared.camera = camera
@@ -109,7 +110,7 @@ final class ProbeTests: XCTestCase {
 
   @MainActor func test1_open() async throws {
     let (camera, readyMs) = try await open(.circle, .front)
-    probe("open", [("readyMs", readyMs)])
+    probe("open", [("layerOpenMs", try await ProbeApp.opening.value), ("readyMs", readyMs)])
     try await close(camera)
     XCTAssertLessThanOrEqual(readyMs, 5000)
   }
@@ -152,6 +153,7 @@ final class ProbeTests: XCTestCase {
 
   @MainActor func test7_voice5s() async throws {
     await permissions()
+    _ = try await ProbeApp.opening.value
     let recorder = MediaVoiceRecorder()
     let file = Self.folder.appendingPathComponent("voice_5s.m4a")
     try? FileManager.default.removeItem(at: file)

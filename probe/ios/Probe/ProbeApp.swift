@@ -12,8 +12,15 @@ final class ProbeScreen: ObservableObject {
 
 @main
 struct ProbeApp: App {
+  /// The app opens the layer at launch, as docs/getting-started.md says; the value is the time it took in ms.
+  static let opening = Task { () -> Int in
+    let started = Date()
+    try await MediaLayer.open()
+    return Int(Date().timeIntervalSince(started) * 1000)
+  }
+
   var body: some Scene {
-    WindowGroup { ProbeView() }
+    WindowGroup { ProbeView().mediaLayer(opening: Self.opening) }
   }
 }
 
