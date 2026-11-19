@@ -227,6 +227,9 @@ final class CameraTake: @unchecked Sendable {
       let tail = pts + CMSampleBufferGetDuration(buffer)
       audioEnd = audioEnd.isValid ? max(audioEnd, tail) : tail
     } else {
+      if videoCount == 0, let image = CMSampleBufferGetImageBuffer(buffer) {
+        MediaTrace.emit("camera", "take first frame width=\(CVPixelBufferGetWidth(image)) height=\(CVPixelBufferGetHeight(image)) writer=\(settings.video[AVVideoWidthKey] ?? "?")x\(settings.video[AVVideoHeightKey] ?? "?")")
+      }
       videoCount += 1
       videoEnd = Self.frameEnd(pts: pts, duration: CMSampleBufferGetDuration(buffer), previous: videoPTS)
       videoPTS = pts
