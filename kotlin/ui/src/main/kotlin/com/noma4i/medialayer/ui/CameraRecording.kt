@@ -1,5 +1,6 @@
 package com.noma4i.medialayer.ui
 
+import android.media.MediaFormat
 import android.view.Surface
 import com.noma4i.medialayer.AudioCoverage
 import com.noma4i.medialayer.CaptureEvent
@@ -27,6 +28,9 @@ internal interface CameraTaking {
   fun cancel()
 }
 
+/** What the writer knows of a finished take: the verdict of its sound, its length (the end of the last video frame it wrote) and its upright frame. The file is never read back. */
+internal class WrittenTake(val coverage: AudioCoverage, val durationUs: Long, val frame: com.noma4i.medialayer.ImageSize?)
+
 internal interface CameraEncoderFeed {
   fun attach(generation: Long, target: Surface)
 
@@ -39,10 +43,10 @@ internal interface CameraEncoderFeed {
 internal class CameraRecording(
   private val main: Executor,
   private val emit: (CaptureEvent) -> Unit,
-  private val judged: (AudioCoverage) -> Unit = {},
+  private val judged: (WrittenTake) -> Unit = {},
   private val make: (Long, File, CameraTakeSettings, CameraTakeListener) -> CameraTaking
 ) : CameraAudioTap {
-  private class Take(val generation: Long, val audio: Long?, val feed: CameraEncoderFeed, val gate: (() -> Unit) -> Unit, val stale: () -> Boolean, val finalized: () -> Unit) {
+  private class Take(val generation: Long, val frame: com.noma4i.medialayer.ImageSize?, val audio: Long?, val feed: CameraEncoderFeed, val gate: (() -> Unit) -> Unit, val stale: () -> Boolean, val finalized: () -> Unit) {
     var take: CameraTaking? = null
     val firstPcm = AtomicBoolean()
     @Volatile var baseUs = -1L
@@ -62,7 +66,8 @@ internal class CameraRecording(
 
   fun start(file: File, settings: CameraTakeSettings, feed: CameraEncoderFeed, gate: (() -> Unit) -> Unit, stale: () -> Boolean, generation: Long, finalized: () -> Unit) {
     recordedNanos = 0
-    val entry = Take(generation, settings.audio?.let { settings.audioGeneration }, feed, gate, stale, finalized)
+    val frame = settings.video.let { if (it.containsKey(MediaFormat.KEY_WIDTH) && it.containsKey(MediaFormat.KEY_HEIGHT)) com.noma4i.medialayer.ImageSize(it.getInteger(MediaFormat.KEY_WIDTH).toUInt(), it.getInteger(MediaFormat.KEY_HEIGHT).toUInt()) else null }
+    val entry = Take(generation, frame, settings.audio?.let { settings.audioGeneration }, feed, gate, stale, finalized)
     try {
       val made = make(generation, file, settings, listener(entry)).also { entry.take = it }
       current = entry
@@ -99,7 +104,7 @@ internal class CameraRecording(
     }
 
     override fun onFinished(generation: Long, file: File, durationUs: Long, coverage: AudioCoverage) = main.execute {
-      if (current === entry && !entry.stale()) judged(coverage)
+      if (current === entry && !entry.stale()) judged(WrittenTake(coverage, durationUs, entry.frame))
       settle(entry, if (entry.stopping) RecordEnd.COMPLETED else RecordEnd.LIMIT_REACHED)
     }
 

@@ -105,28 +105,7 @@ class CameraNativeDeviceTest {
     }
   }
 
-  private fun diagnosing(): CameraServices {
-    val live = CameraServices.live(context)
-    return CameraServices(live.admitSession, live.admitShot, live.audio, { file ->
-      live.clipInfo(file).also { readings.add("clipInfo ${file.name} = $it") }
-    }, { file ->
-      diagnostics.add(File(context.cacheDir, "diagnostic-${System.nanoTime()}.mp4").also { file.copyTo(it, overwrite = true) })
-      try {
-        val rewrote = live.uprightVideo(file)
-        readings.add("uprightVideo ${file.name} rewrote=$rewrote, after: ${describe(file)}")
-        rewrote
-      } catch (error: Exception) {
-        readings.add("uprightVideo ${file.name} threw $error, after: ${describe(file)}")
-        throw error
-      }
-    }, live.upright, live.directory, { file ->
-      val began = System.nanoTime()
-      live.audioCoverage(file).also { read ->
-        android.util.Log.i("T29", "coverage read ${(System.nanoTime() - began) / 1_000_000} ms ${read.verdict}")
-        readings.add("coverage ${file.name} = $read timeline=${timeline(file)}")
-      }
-    })
-  }
+  private fun diagnosing(): CameraServices = CameraServices.live(context)
 
   /** Per track: the container duration, the first and the last packet PTS, the packet count and the last packet size, read from the file as it is. */
   private fun timeline(file: File): String {

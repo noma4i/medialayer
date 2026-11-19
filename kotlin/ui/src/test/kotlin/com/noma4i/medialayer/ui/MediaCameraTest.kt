@@ -558,24 +558,6 @@ class MediaCameraTest {
   }
 
   @Test
-  fun inv_audio_79_a_two_packet_clip_whose_last_pts_is_a_few_microseconds_past_the_container_duration_is_covered_by_its_whole_sound() {
-    val step = 1024L * 1_000_000L / 44_100L
-    for ((last, duration) in listOf(33_411L to 33_400L, 33_344L to 33_300L, 100_144L to 100_100L)) {
-      val video = checkNotNull(videoBoundsOf(0L, last, duration)) { "a clip whose last PTS is $last of $duration is broken" }
-      var scan = com.noma4i.medialayer.coverageBegin(com.noma4i.medialayer.CoverageConfig(true, true, 44_100u, 1024u))
-      var at = 0L
-      while (at < video.endUs - step) {
-        scan = com.noma4i.medialayer.coveragePush(scan, com.noma4i.medialayer.AudioInterval(at, at + step, 1024uL))
-        at += step
-      }
-      scan = com.noma4i.medialayer.coveragePush(scan, com.noma4i.medialayer.AudioInterval(at, at + step, 1024uL))
-      assertEquals("last $last of $duration", com.noma4i.medialayer.CoverageVerdict.COVERED, com.noma4i.medialayer.coverageFinish(scan, video).verdict)
-    }
-    assertEquals(null, videoBoundsOf(-1L, -1L, 100L))
-    assertEquals(null, videoBoundsOf(0L, 10L, 0L))
-  }
-
-  @Test
   fun inv_audio_73_aac_frame_samples_come_from_the_audio_specific_config_and_only_for_lc_at_the_output_rate() {
     val lc = java.nio.ByteBuffer.wrap(androidx.media3.extractor.AacUtil.buildAacLcAudioSpecificConfig(44_100, 1))
     assertEquals(1024, aacFrameSamples(lc, 44_100))

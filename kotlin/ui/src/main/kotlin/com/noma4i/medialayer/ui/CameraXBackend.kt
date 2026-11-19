@@ -165,11 +165,11 @@ internal class CameraXBackend(private val context: Context, private val audioLin
   private val take = java.util.concurrent.atomic.AtomicLong()
   @Volatile private var sink: (CaptureEvent) -> Unit = {}
   @Volatile private var audioIssue: (CaptureAudioIssue) -> Unit = {}
-  @Volatile private var judged: (com.noma4i.medialayer.AudioCoverage) -> Unit = {}
+  @Volatile private var judged: (WrittenTake) -> Unit = {}
 
   override fun setAudioIssueSink(sink: (CaptureAudioIssue) -> Unit) { audioIssue = sink }
 
-  override fun setCoverageSink(sink: (com.noma4i.medialayer.AudioCoverage) -> Unit) { judged = sink }
+  override fun setTakeSink(sink: (WrittenTake) -> Unit) { judged = sink }
   private var view: PreviewView? = null
   private var owner: LifecycleOwner? = null
   private var cameras: ProcessCameraProvider? = null

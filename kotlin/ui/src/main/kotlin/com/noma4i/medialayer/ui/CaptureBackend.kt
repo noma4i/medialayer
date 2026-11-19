@@ -39,8 +39,8 @@ internal interface CaptureBackend {
 
   fun setAudioIssueSink(sink: (CaptureAudioIssue) -> Unit) = Unit
 
-  /** The verdict of the sound a finished take wrote, judged at its write point: it arrives before the `RecordFinished` of the same take. */
-  fun setCoverageSink(sink: (com.noma4i.medialayer.AudioCoverage) -> Unit) = Unit
+  /** The verdict of the sound, the length and the frame of a finished take, as its writer knew them at its write point: it arrives before the `RecordFinished` of the same take. */
+  fun setTakeSink(sink: (WrittenTake) -> Unit) = Unit
 
   fun setHost(view: PreviewView?, owner: LifecycleOwner?)
 
@@ -100,12 +100,8 @@ internal class CameraServices(
   val admitSession: suspend (Long) -> AutoCloseable,
   val admitShot: suspend (Long) -> AutoCloseable,
   val audio: () -> AudioLink?,
-  val clipInfo: suspend (File) -> MediaInfo?,
-  /** True when it rewrote the file. */
-  val uprightVideo: suspend (File) -> Boolean,
   val upright: suspend (File, Double) -> File,
-  val directory: File,
-  val audioCoverage: suspend (File) -> com.noma4i.medialayer.AudioCoverage
+  val directory: File
 ) {
   companion object {
     fun live(context: Context): CameraServices {
@@ -118,11 +114,8 @@ internal class CameraServices(
         },
         admitShot = { bytes -> environment().media.decodeAdmit()(bytes) },
         audio = { Media.link },
-        clipInfo = { file -> readMediaInfo(context, "file://${file.absolutePath}") },
-        uprightVideo = { file -> uprightVideoAt(context, file) },
         upright = { raw, quality -> prepareImageAt(directory, raw, quality, environment().media.decodeAdmit()).file },
-        directory = directory,
-        audioCoverage = { file -> scanAudioCoverage(file) }
+        directory = directory
       )
     }
   }
