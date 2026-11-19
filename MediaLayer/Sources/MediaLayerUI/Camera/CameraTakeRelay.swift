@@ -11,6 +11,7 @@ final class CameraTakeRelay: @unchecked Sendable {
   private let lock = NSLock()
   private var take: CameraTake?
   private var lastGeneration: UInt64 = 0
+  private var finishedCoverage: AudioCoverage?
 
   init(queue: DispatchQueue, emit: @escaping @Sendable (CaptureEvent) -> Void, idle: @escaping @Sendable () -> Void) {
     self.queue = queue
@@ -24,6 +25,7 @@ final class CameraTakeRelay: @unchecked Sendable {
   func begin(url: URL, settings: CameraTake.Settings, ticket: RecordingTicket?, refused: @escaping @Sendable (RecordingRefusal) -> Void) {
     let generation = lock.withLock { () -> UInt64 in
       lastGeneration &+= 1
+      finishedCoverage = nil
       return lastGeneration
     }
     let take = CameraTake(
@@ -33,6 +35,11 @@ final class CameraTakeRelay: @unchecked Sendable {
       onOutcome: { [weak self] outcome in self?.queue.async { self?.settled(generation, outcome) } }
     )
     lock.withLock { self.take = take }
+  }
+
+  /// The verdict of the take that finished last, once: the camera reads it when the take ends.
+  func takeCoverage() -> AudioCoverage? {
+    lock.withLock { defer { finishedCoverage = nil }; return finishedCoverage }
   }
 
   func appendAudio(_ buffer: CMSampleBuffer) {
@@ -86,7 +93,9 @@ final class CameraTakeRelay: @unchecked Sendable {
     guard live(generation) != nil else { return }
     lock.withLock { take = nil }
     switch outcome {
-    case let .finished(_, _, reachedLimit): emit(.recordFinished(end: reachedLimit ? .limitReached : .completed))
+    case let .finished(_, _, reachedLimit, coverage):
+      lock.withLock { finishedCoverage = coverage }
+      emit(.recordFinished(end: reachedLimit ? .limitReached : .completed))
     case let .failed(error):
       Media.recordNativeFailure(error, source: .camera)
       emit(.recordFinished(end: .failed))

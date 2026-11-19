@@ -21,7 +21,7 @@ final class CameraTake: @unchecked Sendable {
   }
 
   enum Outcome {
-    case finished(url: URL, durationMs: UInt64, reachedLimit: Bool)
+    case finished(url: URL, durationMs: UInt64, reachedLimit: Bool, coverage: AudioCoverage)
     case cancelled
     case failed(Error)
   }
@@ -61,6 +61,7 @@ final class CameraTake: @unchecked Sendable {
   private var end = CMTime.invalid
   private var videoEnd = CMTime.invalid
   private var videoPTS = CMTime.invalid
+  private var ledger = TakeLedger(audio: nil)
   private var audioCount = 0
   private var videoCount = 0
   private var writtenMs: UInt64 = 0
@@ -177,6 +178,7 @@ final class CameraTake: @unchecked Sendable {
       writer.startSession(atSourceTime: start)
       phase = .writing
       if settings.audio != nil {
+        ledger = TakeLedger(audio: TakeLedger.audioFormat(of: first) ?? (rate: 0, frameSamples: 0))
         let flushed = held
         held = []
         for (index, sample) in flushed.enumerated() {
@@ -207,10 +209,12 @@ final class CameraTake: @unchecked Sendable {
     guard input.append(buffer) else { return settle(.failed(writer?.error ?? Failure.appendFailed)) }
     if isAudio {
       audioCount += 1
+      ledger.audio(TakeLedger.interval(of: buffer))
     } else {
       videoCount += 1
       videoEnd = Self.frameEnd(pts: pts, duration: CMSampleBufferGetDuration(buffer), previous: videoPTS)
       videoPTS = pts
+      if let first = microseconds(pts), let last = microseconds(videoEnd) { ledger.video(startUs: first, endUs: last) }
     }
     if carriesClock {
       let tail = pts + CMSampleBufferGetDuration(buffer)
@@ -237,7 +241,7 @@ final class CameraTake: @unchecked Sendable {
         guard phase == .finishing, let writer = self.writer else { return }
         if let pendingOutcome { return conclude(pendingOutcome) }
         guard writer.status == .completed else { return conclude(.failed(writer.error ?? Failure.appendFailed)) }
-        conclude(.finished(url: url, durationMs: duration, reachedLimit: reachedLimit))
+        conclude(.finished(url: url, durationMs: duration, reachedLimit: reachedLimit, coverage: ledger.coverage()))
       }
     }
   }

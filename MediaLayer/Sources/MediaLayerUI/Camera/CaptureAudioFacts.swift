@@ -157,7 +157,7 @@ private func brokenCoverage() -> AudioCoverage {
   coverageFinish(scan: coverageBegin(config: CoverageConfig(audioRequired: true, audioTrack: true, sampleRate: 0, frameSamples: 0)), video: nil)
 }
 
-private func microseconds(_ time: CMTime) -> Int64? {
+func microseconds(_ time: CMTime) -> Int64? {
   guard time.isNumeric else { return nil }
   let converted = CMTimeConvertScale(time, timescale: 1_000_000, method: .roundHalfAwayFromZero)
   return converted.isNumeric ? converted.value : nil
