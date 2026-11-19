@@ -22,12 +22,9 @@ final class CameraPreviewLayer: AVCaptureVideoPreviewLayer {
 }
 
 final class CameraPreviewLayerView: UIView {
-  override class var layerClass: AnyClass { CameraPreviewLayer.self }
-
-  var previewLayer: CameraPreviewLayer {
-    guard let layer = layer as? CameraPreviewLayer else { preconditionFailure("the layer class is CameraPreviewLayer") }
-    return layer
-  }
+  /// The preview layer is a sublayer, not the backing layer: the backend joins it to the session on the session queue, and UIKit must not see that as a layout of the view off Main.
+  let previewLayer = CameraPreviewLayer()
+  private var previewingObservation: NSKeyValueObservation?
 
   private var camera: MediaCamera
   private var attached = false
@@ -44,8 +41,15 @@ final class CameraPreviewLayerView: UIView {
   init(camera: MediaCamera) {
     self.camera = camera
     super.init(frame: .zero)
-    camera.registerPreview(previewLayer)
+    previewLayer.backgroundColor = UIColor.clear.cgColor
+    previewLayer.isHidden = true
     previewLayer.videoGravity = .resizeAspectFill
+    layer.addSublayer(previewLayer)
+    previewingObservation = previewLayer.observe(\.isPreviewing, options: [.new]) { [weak self] _, change in
+      let previewing = change.newValue ?? false
+      DispatchQueue.main.async { self?.applyPreviewing(previewing) }
+    }
+    camera.registerPreview(previewLayer)
     addGestureRecognizer(pinchRecognizer)
   }
 
@@ -54,6 +58,24 @@ final class CameraPreviewLayerView: UIView {
 
   deinit {
     camera.unregisterPreview(previewLayer)
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    previewLayer.frame = bounds
+    CATransaction.commit()
+  }
+
+  /// Shows the preview layer once it draws frames and hides it again when it stops, so the app's fill stays visible until then.
+  func applyPreviewing(_ previewing: Bool) {
+    guard previewLayer.isHidden == previewing else { return }
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    previewLayer.isHidden = !previewing
+    CATransaction.commit()
+    MediaTrace.emit("preview", previewing ? "preview shown" : "preview hidden")
   }
 
   override func didMoveToWindow() {
