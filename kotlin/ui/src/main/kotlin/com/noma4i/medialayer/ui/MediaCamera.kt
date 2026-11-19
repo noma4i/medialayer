@@ -99,6 +99,7 @@ class MediaCamera internal constructor(
   private var reading: Job? = null
   private var ticker: Job? = null
   private var recordingFile: File? = null
+  private var recordingCoverage: com.noma4i.medialayer.AudioCoverage? = null
   private var clipInfo: MediaInfo? = null
   private var ended: Result<CapturedClip>? = null
   private var photoOutcome: Result<CapturedPhoto>? = null
@@ -139,6 +140,7 @@ class MediaCamera internal constructor(
     }
     backend.setSink { event -> post(event) }
     backend.setAudioIssueSink { issue -> enqueue { microphoneFailed(issue) } }
+    backend.setCoverageSink { coverage -> enqueue { if (!closed) recordingCoverage = coverage } }
   }
 
   /** The state now: readiness, recording and its length, flash, zoom, the side and the last refusal. */
@@ -496,6 +498,7 @@ class MediaCamera internal constructor(
       CaptureAction.BeginRecording -> {
         val file = CaptureFiles.name(CaptureFileKind.CLIP, services.directory)
         recordingFile = file
+        recordingCoverage = null
         clipInfo = null
         val ticket = audioHold
         backend.beginRecording(file, profile, run.state.lens) { start ->
@@ -540,6 +543,7 @@ class MediaCamera internal constructor(
     reading = null
     recordingFile?.let(::deleteMediaFile)
     recordingFile = null
+    recordingCoverage = null
     clipInfo = null
   }
 
@@ -680,11 +684,8 @@ class MediaCamera internal constructor(
     reading = scope.launch {
       var silent: CameraRefusal? = null
       val info = try {
-        silent = audioRefusal(file)
-        if (silent == null) {
-          services.uprightVideo(file)
-          silent = audioRefusal(file)
-        }
+        silent = takeRefusal()
+        if (silent == null && services.uprightVideo(file)) silent = audioRefusal(file)
         if (silent == null) services.clipInfo(file) else null
       } catch (failure: Exception) {
         if (failure is kotlinx.coroutines.CancellationException) throw failure
@@ -702,7 +703,11 @@ class MediaCamera internal constructor(
     }
   }
 
-  /** The refusal of the core for the audio of a recorded file, null when it is covered or the profile holds no audio. The core owns the rule, the scan only reads the file. */
+  /** The refusal of the core for the sound the take wrote, judged at its write point: no file is read. A take with sound whose verdict never arrived is refused as broken. */
+  private fun takeRefusal(): CameraRefusal? =
+    if (!profile.audio) null else recordingCoverage.let { if (it == null) CameraRefusal.AUDIO_TRACK_BROKEN else audioCoverageRefusal(it.verdict) }
+
+  /** The refusal of the core for the audio of a file the upright pass rewrote, null when it is covered or the profile holds no audio. The core owns the rule, the scan only reads the file. */
   private suspend fun audioRefusal(file: File): CameraRefusal? =
     if (!profile.audio) null else audioCoverageRefusal(services.audioCoverage(file).verdict)
 
@@ -713,6 +718,7 @@ class MediaCamera internal constructor(
     val take = run.state.take
     if (file == null || info == null || length == null || take == null || closed) return discard()
     recordingFile = null
+    recordingCoverage = null
     clipInfo = null
     val clip = CapturedClip(file, length.toLong(), info.frame, run.takeLens)
     clips[take] = clip
@@ -726,6 +732,7 @@ class MediaCamera internal constructor(
     reading = null
     recordingFile?.let(::deleteMediaFile)
     recordingFile = null
+    recordingCoverage = null
     clipInfo = null
     ended = Result.failure(refusal(run.state.fault ?: CameraRefusal.NOT_READY, run.state.refusedMs))
   }

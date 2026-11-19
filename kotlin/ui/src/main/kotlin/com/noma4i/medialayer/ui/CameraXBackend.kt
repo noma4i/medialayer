@@ -156,7 +156,7 @@ internal fun uprightVertex(rotationDegrees: Int, mirror: Boolean): FloatArray = 
  * The format of the profile is picked by the one rule of the core, from the sizes this camera offers.
  */
 @androidx.annotation.OptIn(markerClass = [ExperimentalCamera2Interop::class])
-internal class CameraXBackend(private val context: Context, private val audioLink: () -> AudioLink? = { Media.link }) : CaptureBackend {
+internal class CameraXBackend(private val context: Context, private val audioLink: () -> AudioLink? = { Media.link }, private val gate: MuxGate = MuxGate.OPEN) : CaptureBackend {
   private class Plan(val quality: Quality, val photoSize: PixelSize?, val frameRate: FpsRange, val encoders: Encoders?)
 
   private val main = ContextCompat.getMainExecutor(context)
@@ -165,8 +165,11 @@ internal class CameraXBackend(private val context: Context, private val audioLin
   private val take = java.util.concurrent.atomic.AtomicLong()
   @Volatile private var sink: (CaptureEvent) -> Unit = {}
   @Volatile private var audioIssue: (CaptureAudioIssue) -> Unit = {}
+  @Volatile private var judged: (com.noma4i.medialayer.AudioCoverage) -> Unit = {}
 
   override fun setAudioIssueSink(sink: (CaptureAudioIssue) -> Unit) { audioIssue = sink }
+
+  override fun setCoverageSink(sink: (com.noma4i.medialayer.AudioCoverage) -> Unit) { judged = sink }
   private var view: PreviewView? = null
   private var owner: LifecycleOwner? = null
   private var cameras: ProcessCameraProvider? = null
@@ -177,7 +180,7 @@ internal class CameraXBackend(private val context: Context, private val audioLin
   private var encoders: Encoders? = null
   @Volatile private var memory: CaptureMemory? = null
   private var analysis: ImageAnalysis? = null
-  private val recording = CameraRecording(main, { sink(it) }) { generation, file, settings, listener -> CameraTake(generation, file, settings, leases(), listener) }
+  private val recording = CameraRecording(main, { sink(it) }, { judged(it) }) { generation, file, settings, listener -> CameraTake(generation, file, settings, leases(), listener, gate) }
   private val audio = CameraAudioHold({ audioLink() }, recording, { audioIssue(it) }) { listener -> RecordingAudio(listener, ::lease, main).asMicrophone() }
   private var analyzer: ImageAnalysis.Analyzer? = null
   private var lastBind: Pair<CameraLens, CaptureProfile>? = null

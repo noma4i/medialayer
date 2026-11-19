@@ -97,7 +97,7 @@ class CameraRecordingAudioTest {
     assertEquals(listOf("timebase 1 77", "begin", "audio 1", "confirm", "audio 1"), takes[0].calls.toList())
     takes[0].listener.onStarted(1, 0)
     recording.stop()
-    takes[0].listener.onFinished(1, File("take-1.mp4"), 1)
+    takes[0].listener.onFinished(1, File("take-1.mp4"), 1, CoreCoverage.covered())
     start(2, hold.generation!!)
     takes[1].listener.onBegan(2, surface)
     assertEquals("the second take has the origin of the source without a new word and no confirm before its pcm", listOf("timebase 1 77", "begin"), takes[1].calls.toList())

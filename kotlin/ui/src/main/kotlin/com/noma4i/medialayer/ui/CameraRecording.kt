@@ -1,6 +1,7 @@
 package com.noma4i.medialayer.ui
 
 import android.view.Surface
+import com.noma4i.medialayer.AudioCoverage
 import com.noma4i.medialayer.CaptureEvent
 import com.noma4i.medialayer.FailureSource
 import com.noma4i.medialayer.NativeFailure
@@ -38,6 +39,7 @@ internal interface CameraEncoderFeed {
 internal class CameraRecording(
   private val main: Executor,
   private val emit: (CaptureEvent) -> Unit,
+  private val judged: (AudioCoverage) -> Unit = {},
   private val make: (Long, File, CameraTakeSettings, CameraTakeListener) -> CameraTaking
 ) : CameraAudioTap {
   private class Take(val generation: Long, val audio: Long?, val feed: CameraEncoderFeed, val gate: (() -> Unit) -> Unit, val stale: () -> Boolean, val finalized: () -> Unit) {
@@ -96,7 +98,10 @@ internal class CameraRecording(
       }
     }
 
-    override fun onFinished(generation: Long, file: File, durationUs: Long) = main.execute { settle(entry, if (entry.stopping) RecordEnd.COMPLETED else RecordEnd.LIMIT_REACHED) }
+    override fun onFinished(generation: Long, file: File, durationUs: Long, coverage: AudioCoverage) = main.execute {
+      if (current === entry && !entry.stale()) judged(coverage)
+      settle(entry, if (entry.stopping) RecordEnd.COMPLETED else RecordEnd.LIMIT_REACHED)
+    }
 
     override fun onFailed(generation: Long, failure: NativeFailure) = main.execute {
       if (current === entry && !entry.stale()) Media.recordNativeFailure(failure)

@@ -113,6 +113,9 @@ private class FakeBackend : CaptureBackend {
   val mainCalls = AtomicInteger()
   @Volatile private var sink: (CaptureEvent) -> Unit = {}
   @Volatile private var audioSink: (CaptureAudioIssue) -> Unit = {}
+  @Volatile private var coverageSink: (com.noma4i.medialayer.AudioCoverage) -> Unit = {}
+  /** The verdict the fake take hands with every finished recording, as the real take does from its ledger. */
+  @Volatile var coverage: com.noma4i.medialayer.AudioCoverage = CoreCoverage.covered()
   @Volatile var tap: ImageAnalysis.Analyzer? = null
   @Volatile var recordingFile: File? = null
   @Volatile var photoFails = false
@@ -124,7 +127,10 @@ private class FakeBackend : CaptureBackend {
   val recordedReads = AtomicInteger()
   override val photoSize: PixelSize? = PixelSize(3000u, 4000u)
 
-  fun emit(event: CaptureEvent) = sink(event)
+  fun emit(event: CaptureEvent) {
+    if (event is CaptureEvent.RecordFinished && event.end != RecordEnd.FAILED) coverageSink(coverage)
+    sink(event)
+  }
 
   /** The microphone sound reported after a take begins, as CameraX AudioStats do; C4 turns it off to hold it. */
   var soundOnRecord = true
@@ -144,6 +150,8 @@ private class FakeBackend : CaptureBackend {
   }
 
   override fun setAudioIssueSink(sink: (CaptureAudioIssue) -> Unit) { audioSink = sink }
+
+  override fun setCoverageSink(sink: (com.noma4i.medialayer.AudioCoverage) -> Unit) { coverageSink = sink }
 
   override fun setHost(view: PreviewView?, owner: LifecycleOwner?) = Unit
 
@@ -238,7 +246,8 @@ private class Counters {
   @Volatile var denySessions = false
   @Volatile var denyShots = false
   @Volatile var info: MediaInfo? = MediaInfo(2000UL, ImageSize(720u, 1280u))
-  @Volatile var coverage = CoreCoverage.covered()
+  /** True when the fake upright pass rewrites the file. */
+  @Volatile var rewrites = false
   val coverageSeen = CopyOnWriteArrayList<File>()
   @Volatile var videoGate: CompletableDeferred<Unit>? = null
   @Volatile var focusAnswer = com.noma4i.medialayer.FocusAnswer.GRANTED
@@ -310,6 +319,7 @@ class MediaCameraTest {
           counters.straightenCancelled.set(true)
           throw cancel
         }
+        counters.rewrites
       },
       upright = { raw, quality ->
         counters.checkThread()
@@ -319,7 +329,7 @@ class MediaCameraTest {
         made
       },
       directory = directory,
-      audioCoverage = { file -> counters.coverageSeen.add(file); counters.coverage }
+      audioCoverage = { file -> counters.coverageSeen.add(file); CoreCoverage.covered() }
     )
     return Rig(MediaCamera(profile, lens, backend, services, scope, screen = screen.awake()), backend, counters, directory, fixture)
   }
@@ -504,7 +514,7 @@ class MediaCameraTest {
     val watching = launch(Dispatchers.Default, start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { rig.camera.state.collect { state -> state.outcome?.let { outcomes.add(it) } } }
     CoreCoverage.refused.forEach { (verdict, answer) ->
       assertEquals(verdict, answer.verdict)
-      rig.counters.coverage = answer
+      rig.backend.coverage = answer
       rig.camera.startRecording()
       val ended = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
       assertEquals(CameraRefusal.AUDIO_TRACK_BROKEN, ended.reason)
@@ -513,15 +523,27 @@ class MediaCameraTest {
     }
     watching.cancel()
     assertEquals(listOf<Any>(com.noma4i.medialayer.TakeOutcome.Refused(CameraRefusal.AUDIO_TRACK_BROKEN)), outcomes.distinct())
+    assertTrue(rig.counters.coverageSeen.isEmpty())
   }
 
   @Test
-  fun inv_audio_71_the_sound_is_read_from_the_raw_file_before_the_upright_pass_and_again_after_it() = runBlocking {
+  fun inv_audio_71_a_take_the_ledger_covers_is_delivered_with_no_read_of_its_file_after_the_stop() = runBlocking {
     val rig = rig(moment)
     ready(rig)
     rig.camera.startRecording()
     val clip = rig.camera.stopRecording()
-    assertEquals(listOf(clip.file, clip.file), rig.counters.coverageSeen.toList())
+    assertTrue(rig.counters.coverageSeen.isEmpty())
+    assertEquals(listOf(clip.file), rig.counters.straightened.toList())
+  }
+
+  @Test
+  fun inv_audio_71_a_take_the_upright_pass_rewrote_is_read_once_after_the_rewrite() = runBlocking {
+    val rig = rig(moment)
+    ready(rig)
+    rig.counters.rewrites = true
+    rig.camera.startRecording()
+    val clip = rig.camera.stopRecording()
+    assertEquals(listOf(clip.file), rig.counters.coverageSeen.toList())
     assertEquals(listOf(clip.file), rig.counters.straightened.toList())
   }
 
@@ -529,7 +551,7 @@ class MediaCameraTest {
   fun inv_audio_72_a_take_with_no_audio_in_its_profile_skips_the_sound_read() = runBlocking {
     val rig = rig(moment.copy(audio = false))
     ready(rig)
-    rig.counters.coverage = CoreCoverage.missing()
+    rig.backend.coverage = CoreCoverage.missing()
     rig.camera.startRecording()
     rig.camera.stopRecording()
     assertTrue(rig.counters.coverageSeen.isEmpty())

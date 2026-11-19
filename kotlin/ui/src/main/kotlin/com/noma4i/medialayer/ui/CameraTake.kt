@@ -10,6 +10,7 @@ import androidx.media3.common.util.MediaFormatUtil
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.muxer.BufferInfo
 import androidx.media3.muxer.Mp4Muxer
+import com.noma4i.medialayer.AudioCoverage
 import com.noma4i.medialayer.FailureSource
 import com.noma4i.medialayer.NativeFailure
 import java.io.File
@@ -36,7 +37,8 @@ internal interface CameraTakeListener {
 
   fun onStarted(generation: Long, baseUs: Long)
 
-  fun onFinished(generation: Long, file: File, durationUs: Long)
+  /** [coverage] is the verdict of the sound the take wrote, judged at its write point. */
+  fun onFinished(generation: Long, file: File, durationUs: Long, coverage: AudioCoverage)
 
   fun onFailed(generation: Long, failure: NativeFailure)
 
@@ -44,12 +46,22 @@ internal interface CameraTakeListener {
 }
 
 @OptIn(UnstableApi::class)
+/** What may reach the muxer of a take. The take lets everything through, a device test damages the stream here, before the write point. */
+internal fun interface MuxGate {
+  fun admits(audio: Boolean, ptsUs: Long): Boolean
+
+  companion object {
+    val OPEN = MuxGate { _, _ -> true }
+  }
+}
+
 internal class CameraTake(
   val generation: Long,
   private val file: File,
   private val settings: CameraTakeSettings,
   private val admit: (Long) -> AutoCloseable,
-  private val listener: CameraTakeListener
+  private val listener: CameraTakeListener,
+  private val gate: MuxGate = MuxGate.OPEN
 ) : CameraTaking {
   private class Sample(val track: Int, val ptsUs: Long, val flags: Int, val bytes: ByteArray)
   private class Pcm(val bytes: ByteArray, var offset: Int, var ptsUs: Long, val bytesPerFrame: Int)
@@ -61,6 +73,7 @@ internal class CameraTake(
   private val failing = AtomicBoolean()
   private var begun = false
   private val hasAudio = settings.audio != null
+  private val audioRate = settings.audio?.getInteger(MediaFormat.KEY_SAMPLE_RATE) ?: 0
   private var reserve: AutoCloseable? = null
   private var videoCodec: MediaCodec? = null
   private var audioCodec: MediaCodec? = null
@@ -72,6 +85,8 @@ internal class CameraTake(
   private var tracks = IntArray(2)
   private var baseUs = 0L
   private var written = IntArray(2)
+  private var ledger: TakeLedger? = null
+  private var ledgerFrame = 0
   private var heldVideo = ArrayList<Sample>()
   private var heldAudio = ArrayList<Sample>()
   private var lastPts = LongArray(2) { -1L }
@@ -278,6 +293,8 @@ internal class CameraTake(
       val opened = Mp4Muxer.Builder(stream).build().also { muxer = it }
       tracks[VIDEO] = opened.addTrack(videoFormat!!)
       if (hasAudio) tracks[AUDIO] = opened.addTrack(audioFormat!!)
+      ledgerFrame = audioFormat?.initializationData?.firstOrNull()?.let { aacFrameSamples(ByteBuffer.wrap(it), audioRate) } ?: 0
+      ledger = TakeLedger.of(hasAudio, audioRate, ledgerFrame)
       started = true
       heldVideo.forEach { write(VIDEO, it.ptsUs - baseUs, it.flags, ByteBuffer.wrap(it.bytes)) }
       audible.forEach { write(AUDIO, it.ptsUs - baseUs, it.flags, ByteBuffer.wrap(it.bytes)) }
@@ -302,12 +319,17 @@ internal class CameraTake(
     val interval = if (lastPts[VIDEO] >= 0) ptsUs - lastPts[VIDEO] else 0L
     lastPts[VIDEO] = ptsUs
     videoEndUs = ptsUs + interval
+    ledger!!.video(ptsUs, videoEndUs)
     flushTail()
   }
 
+  /** The one write point of the take: every sample that reaches the muxer is entered in the ledger of the take, nothing else is. */
   private fun mux(kind: Int, ptsUs: Long, flags: Int, buffer: ByteBuffer) {
-    muxer!!.writeSampleData(tracks[kind], buffer, BufferInfo(ptsUs, buffer.remaining(), flags))
+    if (!gate.admits(kind == AUDIO, ptsUs)) return
+    val size = buffer.remaining()
+    muxer!!.writeSampleData(tracks[kind], buffer, BufferInfo(ptsUs, size, flags))
     written[kind]++
+    if (kind == AUDIO) ledger!!.audio(ptsUs, ptsUs + ledgerFrame * 1_000_000L / audioRate, ledgerFrame)
   }
 
   /** INV-CAPTURE-51: a take ends at the end of its last written video frame; sound that starts at or after it is not in the file. */
@@ -336,12 +358,12 @@ internal class CameraTake(
 
   private fun complete() {
     if (!started || written[VIDEO] == 0 || (hasAudio && written[AUDIO] == 0)) return fail(0, "the take ended without both streams")
-    end(file, videoEndUs)
+    end(file, videoEndUs, ledger!!.coverage())
   }
 
   private fun fail(code: Long, message: String) = end(null, null, NativeFailure(FailureSource.RECORDER, "android.media.MediaCodec", code, message))
 
-  private fun end(done: File?, durationUs: Long?, failure: NativeFailure? = null) {
+  private fun end(done: File?, durationUs: Long?, failure: NativeFailure? = null, coverage: AudioCoverage? = null) {
     if (!ended.compareAndSet(false, true)) return
     var outcome = failure
     fun guarded(step: () -> Unit) {
@@ -363,7 +385,7 @@ internal class CameraTake(
     if (!success) file.delete()
     try {
       when {
-        success -> listener.onFinished(generation, file, durationUs!!)
+        success -> listener.onFinished(generation, file, durationUs!!, coverage!!)
         outcome != null -> listener.onFailed(generation, outcome!!)
         else -> listener.onCancelled(generation)
       }

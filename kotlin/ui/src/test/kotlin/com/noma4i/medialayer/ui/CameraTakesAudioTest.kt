@@ -65,12 +65,14 @@ class CameraTakesAudioTest {
   private val backend = object : CaptureBackend {
     @Volatile var events: (CaptureEvent) -> Unit = {}
     @Volatile var issues: (CaptureAudioIssue) -> Unit = {}
-    val recording = CameraRecording(Executor { it.run() }, { seen.add(it); events(it) }) { generation, _, _, listener -> FakeTake(generation, listener).also { takes.add(it); TestSignal.fire() } }
+    @Volatile var judged: (com.noma4i.medialayer.AudioCoverage) -> Unit = {}
+    val recording = CameraRecording(Executor { it.run() }, { seen.add(it); events(it) }, { judged(it) }) { generation, _, _, listener -> FakeTake(generation, listener).also { takes.add(it); TestSignal.fire() } }
     val audio = CameraAudioHold({ fixture.link }, recording, { issues(it) }, timer) { made -> microphone = made; source }
     private var generation = 0L
     override val photoSize: PixelSize? = null
     override fun setSink(sink: (CaptureEvent) -> Unit) { events = sink }
     override fun setAudioIssueSink(sink: (CaptureAudioIssue) -> Unit) { issues = sink }
+    override fun setCoverageSink(sink: (com.noma4i.medialayer.AudioCoverage) -> Unit) { judged = sink }
     override fun setHost(view: PreviewView?, owner: LifecycleOwner?) = Unit
     override fun bind(lens: CameraLens, profile: CaptureProfile) {
       audio.keep(spec)
@@ -100,7 +102,7 @@ class CameraTakesAudioTest {
 
   private val camera = MediaCamera(
     captureProfile(CaptureKind.MOMENT).copy(minTakeMs = 0uL), CameraLens.BACK, backend,
-    CameraServices({ AutoCloseable {} }, { AutoCloseable {} }, { fixture.link }, { MediaInfo(2000UL, ImageSize(720u, 1280u)) }, {}, { raw, _ -> raw }, File(context.cacheDir, "takes-${System.nanoTime()}"), { _ -> CoreCoverage.covered() })
+    CameraServices({ AutoCloseable {} }, { AutoCloseable {} }, { fixture.link }, { MediaInfo(2000UL, ImageSize(720u, 1280u)) }, { false }, { raw, _ -> raw }, File(context.cacheDir, "takes-${System.nanoTime()}"), { _ -> CoreCoverage.covered() })
   )
 
   @After fun close() {
@@ -127,7 +129,7 @@ class CameraTakesAudioTest {
     started.await()
     val stopped = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { camera.stopRecording() }
     TestSignal.await("the take is asked to finish", 5_000) { current.finishing }
-    current.listener.onFinished(current.generation, File("take-$number.mp4"), 1_000_000)
+    current.listener.onFinished(current.generation, File("take-$number.mp4"), 1_000_000, CoreCoverage.covered())
     stopped.await()
   }
 

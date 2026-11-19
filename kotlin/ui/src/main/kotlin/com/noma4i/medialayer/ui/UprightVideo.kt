@@ -22,14 +22,15 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 @androidx.annotation.OptIn(UnstableApi::class)
-internal suspend fun uprightVideoAt(context: Context, file: File) {
+/** Straightens the file by a re-encode when its rotation is not 0: true when it rewrote the file, false when it left it as it was. */
+internal suspend fun uprightVideoAt(context: Context, file: File): Boolean {
   val retriever = MediaMetadataRetriever()
   val bitrate: Int
   try {
     retriever.setDataSource(file.absolutePath)
     val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toInt()
       ?: throw IOException("the video has no rotation metadata")
-    if (rotation == 0) return
+    if (rotation == 0) return false
     bitrate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toIntOrNull()?.takeIf { it > 0 } ?: 8_000_000
   } finally {
     retriever.release()
@@ -60,6 +61,7 @@ internal suspend fun uprightVideoAt(context: Context, file: File) {
       }
     }
     if (!output.renameTo(file)) throw IOException("cannot replace the video")
+    return true
   } finally {
     if (cleanup) deleteMediaFile(output)
   }

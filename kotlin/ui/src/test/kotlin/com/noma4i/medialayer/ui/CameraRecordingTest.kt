@@ -74,7 +74,7 @@ class CameraRecordingTest {
     assertEquals(listOf<CaptureEvent>(CaptureEvent.AudioFlow(true), CaptureEvent.RecordStarted), events.toList())
     assertEquals(40L, recording.recordedMs())
     recording.stop()
-    takes[0].listener.onFinished(1, File("take-1.mp4"), 40_000)
+    takes[0].listener.onFinished(1, File("take-1.mp4"), 40_000, CoreCoverage.covered())
     assertEquals(listOf<CaptureEvent>(CaptureEvent.AudioFlow(true), CaptureEvent.RecordStarted, CaptureEvent.RecordFinished(RecordEnd.COMPLETED)), events.toList())
     assertEquals(false, recording.active)
     assertEquals(listOf("attach 1", "gate 1", "encoded 1", "detach 1", "finalized 1"), log.toList())
@@ -86,7 +86,7 @@ class CameraRecordingTest {
     takes[0].listener.onBegan(1, surface)
     assertEquals(listOf("attach 1", "gate 1"), log.take(2))
     takes[0].listener.onStarted(1, 0)
-    takes[0].listener.onFinished(1, File("take-1.mp4"), 10_000_000)
+    takes[0].listener.onFinished(1, File("take-1.mp4"), 10_000_000, CoreCoverage.covered())
     assertEquals(CaptureEvent.RecordFinished(RecordEnd.LIMIT_REACHED), events.last())
   }
 
@@ -111,7 +111,7 @@ class CameraRecordingTest {
     assertEquals(listOf("begin", "cancel"), takes[0].calls.toList())
     takes[0].listener.onCancelled(1)
     takes[0].listener.onCancelled(1)
-    takes[0].listener.onFinished(1, File("take-1.mp4"), 1)
+    takes[0].listener.onFinished(1, File("take-1.mp4"), 1, CoreCoverage.covered())
     assertEquals(listOf<CaptureEvent>(CaptureEvent.RecordFinished(RecordEnd.FAILED)), events.toList())
     assertEquals(1, stopped)
   }
@@ -126,7 +126,7 @@ class CameraRecordingTest {
     stale = true
     recording.onPcm(chunk(5))
     takes[0].listener.onStarted(1, 0)
-    takes[0].listener.onFinished(1, File("take-1.mp4"), 1)
+    takes[0].listener.onFinished(1, File("take-1.mp4"), 1, CoreCoverage.covered())
     assertEquals(emptyList<CaptureEvent>(), events.toList())
     assertEquals("a stale take is detached and never finalized for the app", listOf("attach 1", "detach 1"), log.toList())
   }
@@ -178,7 +178,7 @@ class CameraRecordingTest {
     takes[0].listener.onVideoEncoded(1, 900_000)
     takes[0].listener.onStarted(1, 5)
     takes[0].listener.onFailed(1, NativeFailure(FailureSource.RECORDER, "old", 1L, "late"))
-    takes[0].listener.onFinished(1, File("take-1.mp4"), 1)
+    takes[0].listener.onFinished(1, File("take-1.mp4"), 1, CoreCoverage.covered())
     takes[1].listener.onVideoEncoded(2, 50)
     assertEquals("only the encoded frame of the current take counts", 0L, recording.recordedMs())
     assertEquals(true, recording.active)

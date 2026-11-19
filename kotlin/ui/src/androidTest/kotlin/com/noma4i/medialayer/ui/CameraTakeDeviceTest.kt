@@ -50,6 +50,7 @@ class CameraTakeDeviceTest {
     @Volatile var surface: Surface? = null
     @Volatile var failure: NativeFailure? = null
     @Volatile var durationUs = -1L
+    @Volatile var coverage: com.noma4i.medialayer.AudioCoverage? = null
 
     override fun onBegan(generation: Long, inputSurface: Surface) { surface = inputSurface; events.add("began") }
 
@@ -57,7 +58,7 @@ class CameraTakeDeviceTest {
 
     override fun onStarted(generation: Long, baseUs: Long) { this.baseUs = baseUs; events.add("started") }
 
-    override fun onFinished(generation: Long, file: File, durationUs: Long) { this.durationUs = durationUs; outcomes.incrementAndGet(); events.add("finished") }
+    override fun onFinished(generation: Long, file: File, durationUs: Long, coverage: com.noma4i.medialayer.AudioCoverage) { this.coverage = coverage; this.durationUs = durationUs; outcomes.incrementAndGet(); events.add("finished") }
 
     override fun onFailed(generation: Long, failure: NativeFailure) { this.failure = failure; outcomes.incrementAndGet(); events.add("failed") }
 

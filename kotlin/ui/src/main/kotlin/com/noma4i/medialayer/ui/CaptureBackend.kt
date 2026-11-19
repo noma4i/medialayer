@@ -39,6 +39,9 @@ internal interface CaptureBackend {
 
   fun setAudioIssueSink(sink: (CaptureAudioIssue) -> Unit) = Unit
 
+  /** The verdict of the sound a finished take wrote, judged at its write point: it arrives before the `RecordFinished` of the same take. */
+  fun setCoverageSink(sink: (com.noma4i.medialayer.AudioCoverage) -> Unit) = Unit
+
   fun setHost(view: PreviewView?, owner: LifecycleOwner?)
 
   fun useMemory(memory: CaptureMemory) = Unit
@@ -98,7 +101,8 @@ internal class CameraServices(
   val admitShot: suspend (Long) -> AutoCloseable,
   val audio: () -> AudioLink?,
   val clipInfo: suspend (File) -> MediaInfo?,
-  val uprightVideo: suspend (File) -> Unit,
+  /** True when it rewrote the file. */
+  val uprightVideo: suspend (File) -> Boolean,
   val upright: suspend (File, Double) -> File,
   val directory: File,
   val audioCoverage: suspend (File) -> com.noma4i.medialayer.AudioCoverage
