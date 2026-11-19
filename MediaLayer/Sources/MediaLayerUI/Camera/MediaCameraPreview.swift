@@ -42,7 +42,6 @@ final class CameraPreviewLayerView: UIView {
     self.camera = camera
     super.init(frame: .zero)
     previewLayer.backgroundColor = UIColor.clear.cgColor
-    previewLayer.isHidden = true
     previewLayer.videoGravity = .resizeAspectFill
     layer.addSublayer(previewLayer)
     previewingObservation = previewLayer.observe(\.isPreviewing, options: [.new]) { [weak self] _, change in
@@ -68,13 +67,8 @@ final class CameraPreviewLayerView: UIView {
     CATransaction.commit()
   }
 
-  /// Shows the preview layer once it draws frames and hides it again when it stops, so the app's fill stays visible until then.
+  /// Only traces: the layer stays visible, a hidden layer is not drawn and might never start previewing.
   func applyPreviewing(_ previewing: Bool) {
-    guard previewLayer.isHidden == previewing else { return }
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    previewLayer.isHidden = !previewing
-    CATransaction.commit()
     MediaTrace.emit("preview", previewing ? "preview shown" : "preview hidden")
   }
 

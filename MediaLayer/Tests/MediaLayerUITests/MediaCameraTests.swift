@@ -983,20 +983,19 @@ struct MediaCameraTests {
   }
 
   @Test @MainActor
-  func the_preview_layer_is_a_hidden_clear_sublayer_that_shows_while_previewing() throws {
+  func the_preview_layer_is_a_visible_clear_sublayer() throws {
     let rig = try makeRig()
     let view = CameraPreviewLayerView(camera: rig.camera)
     #expect(!(view.layer is CameraPreviewLayer))
     #expect(view.previewLayer.superlayer === view.layer)
-    #expect(view.previewLayer.isHidden)
+    #expect(!view.previewLayer.isHidden)
     #expect(view.previewLayer.backgroundColor == UIColor.clear.cgColor)
     view.frame = CGRect(x: 0, y: 0, width: 120, height: 80)
     view.layoutIfNeeded()
     #expect(view.previewLayer.frame == view.bounds)
     view.applyPreviewing(true)
-    #expect(!view.previewLayer.isHidden)
     view.applyPreviewing(false)
-    #expect(view.previewLayer.isHidden)
+    #expect(!view.previewLayer.isHidden)
   }
 
   @Test @MainActor
