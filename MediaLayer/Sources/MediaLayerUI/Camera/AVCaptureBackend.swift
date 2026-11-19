@@ -15,6 +15,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
   private var photoOutput: AVCapturePhotoOutput?
   private var videoMode = false
   private var audioOutput: AVCaptureAudioDataOutput?
+  /// Audio buffers dropped by the capture output, counted on its delegate queue for the trace.
+  private var audioDropCount = 0
   private var microphoneInput: AVCaptureDeviceInput?
   private var audioProfile = false
   private var wanted: (generation: UInt64, listener: CameraMicrophoneListener)?
@@ -552,6 +554,14 @@ extension AVCaptureBackend: AVCaptureVideoDataOutputSampleBufferDelegate, AVCapt
     guard let handler = lock.withLock({ tap }), let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
     let seconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
     handler(buffer, seconds.isFinite && seconds > 0 ? UInt64(seconds * 1000) : 0)
+  }
+
+  func captureOutput(_ output: AVCaptureOutput, didDrop sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+    guard output is AVCaptureAudioDataOutput, output === audioOutput else { return }
+    audioDropCount += 1
+    guard audioDropCount == 1 || audioDropCount % 50 == 0 else { return }
+    let reason = CMGetAttachment(sampleBuffer, key: kCMSampleBufferAttachmentKey_DroppedFrameReason, attachmentModeOut: nil).map { String(describing: $0) } ?? "none"
+    MediaTrace.emit("camera", "audio dropped reason=\(reason) count=\(audioDropCount)")
   }
 }
 

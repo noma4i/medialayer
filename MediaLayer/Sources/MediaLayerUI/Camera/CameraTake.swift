@@ -68,6 +68,12 @@ final class CameraTake: @unchecked Sendable {
   private var audioCount = 0
   private var videoCount = 0
   private var writtenMs: UInt64 = 0
+  /// Audio callbacks by outcome, for the trace line at the end of the take; guarded by `lock`.
+  private struct AudioTrace {
+    var taken = 0, early = 0, badDuration = 0, notFresh = 0, generation = 0, dropped = 0, notReady = 0
+    var lastArrivedUs: Int64 = -1
+  }
+  private var audioTrace = AudioTrace()
 
   /// The length of the clock stream written so far, for the ticker of the camera.
   var recordedMs: UInt64 { lock.withLock { writtenMs } }
@@ -87,10 +93,24 @@ final class CameraTake: @unchecked Sendable {
   }
 
   func appendAudio(_ buffer: CMSampleBuffer, generation: UInt64) {
-    guard generation == self.generation, settings.audio != nil, isFresh(buffer, mediaType: kCMMediaType_Audio, subType: kAudioFormatLinearPCM) else { return }
+    guard settings.audio != nil else { return }
+    guard generation == self.generation else { return lock.withLock { audioTrace.generation += 1 } }
+    let arrived = microseconds(CMSampleBufferGetPresentationTimeStamp(buffer))
+    let reason = freshness(buffer, mediaType: kCMMediaType_Audio, subType: kAudioFormatLinearPCM)
+    lock.withLock {
+      if let arrived { audioTrace.lastArrivedUs = arrived }
+      switch reason {
+      case .fresh: break
+      case .early: audioTrace.early += 1
+      case .badDuration: audioTrace.badDuration += 1
+      case .other: audioTrace.notFresh += 1
+      }
+    }
+    guard reason == .fresh else { return }
     let bytes = Self.bytes(buffer)
     switch admit(audio: true, bytes: bytes) {
     case .taken:
+      lock.withLock { audioTrace.taken += 1 }
       queue.async { [self] in
         let retained = handleAudio(buffer, bytes: bytes)
         releaseSlot(audio: true)
@@ -99,7 +119,7 @@ final class CameraTake: @unchecked Sendable {
     case .refused(let failure):
       queue.async { [self] in settle(.failed(failure)) }
     case .dropped:
-      break
+      lock.withLock { audioTrace.dropped += 1 }
     }
   }
 
@@ -217,7 +237,10 @@ final class CameraTake: @unchecked Sendable {
       return finish(reachedLimit: true)
     }
     guard input.isReadyForMoreMediaData else {
-      if isAudio { settle(.failed(Failure.audioBehind)) }
+      if isAudio {
+        lock.withLock { audioTrace.notReady += 1 }
+        settle(.failed(Failure.audioBehind))
+      }
       return
     }
     guard input.append(buffer) else { return settle(.failed(writer?.error ?? Failure.appendFailed)) }
@@ -291,6 +314,11 @@ final class CameraTake: @unchecked Sendable {
   private func conclude(_ outcome: Outcome) {
     guard phase != .settled else { return }
     phase = .settled
+    if settings.audio != nil {
+      let t = lock.withLock { audioTrace }
+      let written = microseconds(audioEnd).map { String($0) } ?? "none"
+      MediaTrace.emit("camera", "take audio taken=\(t.taken) notFresh=\(t.notFresh) early=\(t.early) badDuration=\(t.badDuration) generation=\(t.generation) dropped=\(t.dropped) notReady=\(t.notReady) lastArrivedUs=\(t.lastArrivedUs) lastWrittenUs=\(written)")
+    }
     for sample in held { releaseBytes(sample.bytes) }
     held = []
     if case .finished = outcome {} else {
@@ -332,14 +360,22 @@ final class CameraTake: @unchecked Sendable {
     lock.withLock { reservedBytes -= bytes }
   }
 
+  private enum Freshness { case fresh, early, badDuration, other }
+
   private func isFresh(_ buffer: CMSampleBuffer, mediaType: CMMediaType, subType: FourCharCode?) -> Bool {
+    freshness(buffer, mediaType: mediaType, subType: subType) == .fresh
+  }
+
+  private func freshness(_ buffer: CMSampleBuffer, mediaType: CMMediaType, subType: FourCharCode?) -> Freshness {
     guard CMSampleBufferIsValid(buffer), CMSampleBufferDataIsReady(buffer), CMSampleBufferGetNumSamples(buffer) > 0,
           let format = CMSampleBufferGetFormatDescription(buffer), CMFormatDescriptionGetMediaType(format) == mediaType,
-          subType.map({ CMFormatDescriptionGetMediaSubType(format) == $0 }) ?? true else { return false }
+          subType.map({ CMFormatDescriptionGetMediaSubType(format) == $0 }) ?? true else { return .other }
     let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
     let duration = CMSampleBufferGetDuration(buffer)
-    guard pts.isNumeric, pts >= settings.armPTS, mediaType != kCMMediaType_Audio || (duration.isNumeric && duration > .zero) else { return false }
-    return true
+    guard pts.isNumeric else { return .other }
+    guard pts >= settings.armPTS else { return .early }
+    guard mediaType != kCMMediaType_Audio || (duration.isNumeric && duration > .zero) else { return .badDuration }
+    return .fresh
   }
 
   static let entryCost = MemoryLayout<(buffer: CMSampleBuffer, bytes: Int)>.stride
