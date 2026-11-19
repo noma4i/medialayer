@@ -87,5 +87,23 @@ struct TakeTransformTests {
       #expect(try await topCenterIsMarked(url), "mirror \(mirror)")
     }
   }
+
+  @Test
+  func the_take_capture_angle_follows_the_lens_offset_against_the_back_camera() {
+    #expect(takeCaptureAngle(lensCapture: 90, backCapture: 90) == 90)
+    #expect(takeCaptureAngle(lensCapture: 0, backCapture: 90) == 0)
+    #expect(takeCaptureAngle(lensCapture: 180, backCapture: 180) == 90)
+    #expect(takeCaptureAngle(lensCapture: 270, backCapture: 0) == 0)
+  }
+
+  @Test
+  func the_take_capture_angle_is_the_same_in_every_pose() {
+    for offset: CGFloat in [-90, 0, 90, 180] {
+      let angles = [CGFloat(0), 90, 180, 270].map { pose in
+        takeCaptureAngle(lensCapture: (pose + offset + 360).truncatingRemainder(dividingBy: 360), backCapture: (pose + 90).truncatingRemainder(dividingBy: 360))
+      }
+      #expect(Set(angles).count == 1, "offset \(offset)")
+    }
+  }
 }
 #endif

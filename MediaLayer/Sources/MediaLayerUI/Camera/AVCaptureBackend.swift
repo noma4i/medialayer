@@ -32,6 +32,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
   private var videoLens = CameraLens.back
   private var mirrorsVideo = false
   private var turnValue = FrameTurn()
+  /// The capture angle of the take frames of the current bind (see `takeCaptureAngle`).
+  private var frameAngle = previewAngle
   private var videoPort: AVCaptureInput.Port?
 
   override init() {
@@ -361,7 +363,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     }
     let turn = frameTurn
     let transform = takeWriterTransform(turn: turn, mirror: lens == .front && profile.mirrorFrontVideo)
-    MediaTrace.emit("camera", "take angle=\(Int(previewAngle)) preview=\(previewLinks.values.first.map { String(describing: $0.connection.videoRotationAngle) } ?? "none") upright=\(turn.upright)")
+    MediaTrace.emit("camera", "take angle=\(Int(frameAngle)) preview=\(previewLinks.values.first.map { String(describing: $0.connection.videoRotationAngle) } ?? "none") upright=\(turn.upright)")
     let outputConnection = frameOutput?.connection(with: .video)
     MediaTrace.emit("camera", "take output angle=\(outputConnection.map { String(describing: $0.videoRotationAngle) } ?? "none") mirrored=\(outputConnection.map { String(describing: $0.isVideoMirrored) } ?? "none") width=\(String(describing: video[AVVideoWidthKey])) height=\(String(describing: video[AVVideoHeightKey])) transformIdentity=\(transform == .identity)")
     if let camera { traceAspect(camera, lens: lens) }
@@ -493,7 +495,15 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     if let stabilization { connection.preferredVideoStabilizationMode = stabilization }
     // The frames come out upright (and mirrored as the profile wants), so the file needs no rotation tag and no re-encode after stop. A connection that cannot do it keeps the raw frames and the tag.
     // Decided before anything is touched: a connection that cannot do the whole turn keeps the raw frames, the tag and the old path.
-    let angleSupported = connection.isVideoRotationAngleSupported(previewAngle)
+    var angle = previewAngle
+    if let bound = session.inputs.compactMap({ $0 as? AVCaptureDeviceInput }).first(where: { $0.device.hasMediaType(.video) })?.device,
+       let back = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) {
+      let lensCapture = AVCaptureDevice.RotationCoordinator(device: bound, previewLayer: nil).videoRotationAngleForHorizonLevelCapture
+      let backCapture = AVCaptureDevice.RotationCoordinator(device: back, previewLayer: nil).videoRotationAngleForHorizonLevelCapture
+      angle = takeCaptureAngle(lensCapture: lensCapture, backCapture: backCapture)
+    }
+    frameAngle = angle
+    let angleSupported = connection.isVideoRotationAngleSupported(angle)
     let upright = turnsFramesUpright(angleSupported: angleSupported, mirroringSupported: connection.isVideoMirroringSupported, mirrorWanted: mirrorsVideo)
     MediaTrace.emit("camera", "turn decide lens=\(videoLens == .front ? "front" : "back") angleSupported=\(angleSupported) mirroringSupported=\(connection.isVideoMirroringSupported) mirrorWanted=\(mirrorsVideo) upright=\(upright)")
     if let bound = session.inputs.compactMap({ $0 as? AVCaptureDeviceInput }).first(where: { $0.device.hasMediaType(.video) })?.device {
@@ -501,7 +511,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
       MediaTrace.emit("camera", "rotation lens=\(videoLens == .front ? "front" : "back") device=\(bound.deviceType.rawValue) capture=\(coordinator.videoRotationAngleForHorizonLevelCapture) preview=\(coordinator.videoRotationAngleForHorizonLevelPreview) library=\(previewAngle)")
     }
     guard upright else { return setTurn(FrameTurn()) }
-    connection.videoRotationAngle = previewAngle
+    connection.videoRotationAngle = angle
     if connection.isVideoMirroringSupported {
       connection.automaticallyAdjustsVideoMirroring = false
       connection.isVideoMirrored = mirrorsVideo

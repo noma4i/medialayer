@@ -7,6 +7,12 @@ import MediaLayer
 /// so the recorded pixels match the preview by construction, in any pose of the device, whatever the defaults of AVFoundation are.
 let previewAngle: CGFloat = 90
 
+/// The capture angle of the take frames for a lens: the rotation coordinators give the same pose term for every lens, so it cancels against the back wide camera, whose portrait capture angle is the preview angle.
+func takeCaptureAngle(lensCapture: CGFloat, backCapture: CGFloat) -> CGFloat {
+  let value = (previewAngle + lensCapture - backCapture).truncatingRemainder(dividingBy: 360)
+  return value < 0 ? value + 360 : value
+}
+
 func takeTransform(mirror: Bool) -> CGAffineTransform {
   let turned = CGAffineTransform(rotationAngle: previewAngle * .pi / 180)
   return mirror ? turned.concatenating(CGAffineTransform(scaleX: -1, y: 1)) : turned
