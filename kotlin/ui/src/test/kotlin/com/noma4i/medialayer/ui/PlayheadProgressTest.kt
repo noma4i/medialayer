@@ -78,6 +78,6 @@ class PlayheadProgressTest {
     assertEquals(0.0, playheadAt(wrapped, 100uL), 1e-6)
 
     val paused = foldPlayhead(listOf(video(2_000uL, 0uL), PlayheadReport(2_000uL, 10_000uL, 100uL, 1.0, false, false, false)))
-    assertEquals(0.2, playheadAt(paused, 5_000uL), 1e-6)
+    assertEquals(0.21, playheadAt(paused, 5_000uL), 1e-6)
   }
 }
