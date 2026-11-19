@@ -64,7 +64,7 @@ internal class CameraTake(
   private val listener: CameraTakeListener,
   private val gate: MuxGate = MuxGate.OPEN
 ) : CameraTaking {
-  private class Sample(val track: Int, val ptsUs: Long, val flags: Int, val bytes: ByteArray)
+  private class Sample(val track: Int, val ptsUs: Long, val flags: Int, val bytes: ByteArray, val endUs: Long = 0L)
   private class Pcm(val bytes: ByteArray, var offset: Int, var ptsUs: Long, val bytesPerFrame: Int)
 
   private val thread = HandlerThread("CameraTake-$generation").apply { start() }
@@ -92,6 +92,9 @@ internal class CameraTake(
   private var heldAudio = ArrayList<Sample>()
   private var lastPts = LongArray(2) { -1L }
   private var tail = ArrayList<Sample>()
+  /** Encoded video waits here until the recorded sound reaches its pts: a take that loses its microphone drops it, so the file has no video after the end of the sound. */
+  private val videoQueue = ArrayDeque<Sample>()
+  private var lastQueuedPts = -1L
   private var needKeyframe = true
   private val pending = ArrayDeque<Pcm>()
   private val freeInputs = ArrayDeque<Int>()
@@ -228,6 +231,7 @@ internal class CameraTake(
       audioEndUs = lastAudioInputUs + size / head.bytesPerFrame * 1_000_000L / settings.audio!!.getInteger(MediaFormat.KEY_SAMPLE_RATE)
       head.offset += size
       head.ptsUs += size / head.bytesPerFrame * 1_000_000L / settings.audio!!.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+      releaseVideo()
       if (head.offset >= head.bytes.size) {
         pending.removeFirst()
         held.addAndGet(-head.bytes.size.toLong())
@@ -259,7 +263,7 @@ internal class CameraTake(
       codec.releaseOutputBuffer(index, false)
       if (kind == VIDEO && info.size > 0 && !config) listener.onVideoEncoded(generation, info.presentationTimeUs)
       if (eos) {
-        if (kind == VIDEO) videoDone = true else audioDone = true
+        if (kind == VIDEO) { videoDone = true; flushVideo() } else audioDone = true
         if (kind == VIDEO && written[VIDEO] == 0) return fail(0, "the take ended without video")
         if (kind == VIDEO) { dropTail(); drain() }
         if (audioDone && videoDone) complete()
@@ -320,20 +324,51 @@ internal class CameraTake(
     if (ptsUs > settings.maxDurationUs) return beginFinish()
     if (kind == AUDIO) return writeAudio(ptsUs, flags, buffer)
     if (microphoneEnded) return
-    val interval = if (lastPts[VIDEO] >= 0) ptsUs - lastPts[VIDEO] else 0L
-    if (!finishing && hasAudio && microphoneLost(if (pcmQueued) audioEndUs - baseUs else -1L, ptsUs + interval)) return endByMicrophone()
-    mux(VIDEO, ptsUs, flags, buffer)
-    lastPts[VIDEO] = ptsUs
-    videoEndUs = ptsUs + interval
-    ledger!!.video(ptsUs, videoEndUs)
+    val interval = if (lastQueuedPts >= 0) ptsUs - lastQueuedPts else 0L
+    lastQueuedPts = ptsUs
+    val end = ptsUs + interval
+    if (!hasAudio) return writeVideo(Sample(VIDEO, ptsUs, flags, ByteArray(0), end), buffer)
+    if (!finishing && microphoneLost(if (pcmQueued) audioEndUs - baseUs else -1L, end)) return endByMicrophone(end)
+    val bytes = ByteArray(buffer.remaining()).also { buffer.get(it) }
+    if (!acquire(bytes.size.toLong())) return fail(0, "held video exceeds the memory reserve")
+    videoQueue.addLast(Sample(VIDEO, ptsUs, flags, bytes, end))
+    releaseVideo()
+  }
+
+  private fun writeVideo(sample: Sample, buffer: ByteBuffer) {
+    mux(VIDEO, sample.ptsUs, sample.flags, buffer)
+    lastPts[VIDEO] = sample.ptsUs
+    videoEndUs = sample.endUs
+    ledger!!.video(sample.ptsUs, videoEndUs)
     flushTail()
   }
 
+  private fun takeQueued(): Sample {
+    val sample = videoQueue.removeFirst()
+    held.addAndGet(-sample.bytes.size.toLong())
+    return sample
+  }
+
+  /** A queued video sample is written once the sound the take has taken in reaches its pts. */
+  private fun releaseVideo() {
+    if (!started || ended.get() || !pcmQueued) return
+    while (videoQueue.isNotEmpty() && audioEndUs - baseUs >= videoQueue.first().ptsUs) takeQueued().let { writeVideo(it, ByteBuffer.wrap(it.bytes)) }
+  }
+
+  /** The video of the take is over (a stop or the limit): what waits is written whole. */
+  private fun flushVideo() {
+    if (!started || ended.get()) return
+    while (videoQueue.isNotEmpty()) takeQueued().let { writeVideo(it, ByteBuffer.wrap(it.bytes)) }
+  }
+
+  private fun dropVideo() { while (videoQueue.isNotEmpty()) takeQueued() }
+
   /** The microphone stopped delivering: no video after the end of the sound is written, the take finishes as a stop does and its length is the end of the sound. */
-  private fun endByMicrophone() {
+  private fun endByMicrophone(newestEndUs: Long) {
     val audioEnd = audioEndUs - baseUs
-    MediaTrace.emit("camera") { "take microphone lost audioEndUs=$audioEnd videoEndUs=$videoEndUs" }
+    MediaTrace.emit("camera") { "take microphone lost audioEndUs=$audioEnd videoEndUs=$newestEndUs" }
     microphoneEnded = true
+    dropVideo()
     videoEndUs = minOf(videoEndUs, audioEnd)
     beginFinish()
   }
@@ -395,6 +430,7 @@ internal class CameraTake(
     pending.clear()
     freeInputs.clear()
     clearHeld()
+    dropVideo()
     dropTail()
     val success = done != null && outcome == null
     if (!success) file.delete()
