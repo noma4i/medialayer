@@ -121,7 +121,9 @@ class CameraNativeDeviceTest {
     }, live.upright, live.directory, { file ->
       val seen = if (damage == null) file else damaged(file, damage).also { files.add(it) }
       val began = System.nanoTime()
-      live.audioCoverage(seen).also { readings.add("coverage ${file.name} $damage = $it timeline=${timeline(seen)}"); println("T29 coverage read ${(System.nanoTime() - began) / 1_000_000} ms ${it.verdict}") }
+      val read = live.audioCoverage(seen)
+      android.util.Log.i("T29", "coverage read ${(System.nanoTime() - began) / 1_000_000} ms ${read.verdict}")
+      read.also { readings.add("coverage ${file.name} $damage = $it timeline=${timeline(seen)}") }
     })
   }
 
@@ -244,7 +246,7 @@ class CameraNativeDeviceTest {
         withTimeout(TIMEOUT_MS) { made.state.first { it.isRecording && it.recordedMs >= profile.minTakeMs } }
         if (holdMs > 0) kotlinx.coroutines.delay(holdMs)
         val stopping = System.nanoTime()
-        made.stopRecording().also { clip -> files.add(clip.file); println("T29 stop-to-clip ${(System.nanoTime() - stopping) / 1_000_000} ms, clip ${clip.durationMs} ms, ${describe(clip.file)}") }
+        made.stopRecording().also { clip -> files.add(clip.file); android.util.Log.i("T29", "stop-to-clip ${(System.nanoTime() - stopping) / 1_000_000} ms, clip ${clip.durationMs} ms, ${describe(clip.file)}") }
       } catch (error: MediaException.Camera) {
         throw AssertionError("take $it of 2 failed: $error; availability=${heard.value}; native failures=${reported.toList()}; readers=${readings.toList()}; producer files before upright=${diagnostics.map(::describe)}", error)
       }
@@ -312,9 +314,9 @@ class CameraNativeDeviceTest {
   @Test
   fun two_circle_takes_from_the_front_camera_with_the_mirror_are_two_mp4_files_with_video_and_aac_packets() = record(audio = true, lens = CameraLens.FRONT, kind = CaptureKind.CIRCLE, mirrored = true)
 
-  /** INV-AUDIO-71: the wait after the stop of a 15 s take holds no PCM decode, the sound is read from the packet table. */
+  /** INV-AUDIO-71: the wait after the stop of a 9 s take (the circle and moment cap is 10 s) holds no PCM decode, the sound is read from the packet table. */
   @Test
-  fun inv_audio_71_a_fifteen_second_take_with_sound_is_delivered_covered() = record(audio = true, holdMs = 15_000)
+  fun inv_audio_71_a_nine_second_take_with_sound_is_delivered_covered() = record(audio = true, holdMs = 9_000)
 
   @Test
   fun two_takes_without_sound_are_two_mp4_files_with_video_packets_only() = record(audio = false)

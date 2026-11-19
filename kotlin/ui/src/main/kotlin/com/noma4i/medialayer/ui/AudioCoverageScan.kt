@@ -75,7 +75,7 @@ internal suspend fun scanAudioCoverage(file: File): AudioCoverage = withContext(
     extractor.selectTrack(track)
     val span = frame.toLong() * 1_000_000L / rate
     while (extractor.sampleTrackIndex >= 0) {
-      kotlinx.coroutines.ensureActive()
+      ensureActive()
       val time = extractor.sampleTime
       if (time < 0) return@withContext broken()
       scan = coveragePush(scan, AudioInterval(time, Math.addExact(time, span), frame.toULong()))

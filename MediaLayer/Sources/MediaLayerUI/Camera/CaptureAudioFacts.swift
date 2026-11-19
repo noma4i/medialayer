@@ -80,54 +80,77 @@ private func readAudioCoverage(of asset: AVURLAsset) async throws -> AudioCovera
   }
 }
 
+/// The packet table of the track, no PCM is decoded: every packet is one interval at its time with the samples its duration holds at the track rate, run through the core rule.
 private func decodeCoverage(asset: AVURLAsset, track: AVAssetTrack, format stored: AudioStreamBasicDescription) async throws -> CoverageScan? {
   let reader = try AVAssetReader(asset: asset)
-  let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
-    AVFormatIDKey: kAudioFormatLinearPCM,
-    AVSampleRateKey: stored.mSampleRate,
-    AVNumberOfChannelsKey: Int(stored.mChannelsPerFrame),
-    AVLinearPCMBitDepthKey: 32,
-    AVLinearPCMIsFloatKey: true,
-    AVLinearPCMIsBigEndianKey: false,
-    AVLinearPCMIsNonInterleaved: false
-  ])
+  let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
   output.alwaysCopiesSampleData = false
   guard reader.canAdd(output) else { return nil }
   reader.add(output)
   guard reader.startReading() else { return nil }
-  var scan: CoverageScan?
+  let rate = stored.mSampleRate
+  var shiftUs: Int64 = 0
+  var scan = coverageBegin(config: CoverageConfig(audioRequired: true, audioTrack: true, sampleRate: UInt32(rate.rounded()), frameSamples: stored.mFramesPerPacket))
   while let buffer = output.copyNextSampleBuffer() {
     if Task.isCancelled {
       reader.cancelReading()
       throw CancellationError()
     }
-    if scan == nil { scan = coverageBegin(config: decodedConfig(of: buffer, stored: stored)) }
-    guard let current = scan else { return nil }
-    if let interval = decodedInterval(of: buffer) { scan = coveragePush(scan: current, interval: interval) }
+    guard let intervals = packetIntervals(of: buffer, rate: rate, shiftUs: &shiftUs) else { return nil }
+    for interval in intervals { scan = coveragePush(scan: scan, interval: interval) }
   }
   guard reader.status == .completed else { return nil }
-  return scan ?? coverageBegin(config: CoverageConfig(audioRequired: true, audioTrack: true, sampleRate: UInt32(stored.mSampleRate.rounded()), frameSamples: stored.mFramesPerPacket))
+  return scan
 }
 
-// The rate is the decoder output's, the frame is the stored track's native codec frame.
-private func decodedConfig(of buffer: CMSampleBuffer, stored: AudioStreamBasicDescription) -> CoverageConfig {
-  let rate = CMSampleBufferGetFormatDescription(buffer).flatMap(CMAudioFormatDescriptionGetStreamBasicDescription)?.pointee.mSampleRate ?? 0
-  let valid = rate.isFinite && rate > 0 && rate <= Double(UInt32.max)
-  return CoverageConfig(audioRequired: true, audioTrack: true, sampleRate: valid ? UInt32(rate.rounded()) : 0, frameSamples: stored.mFramesPerPacket)
-}
-
-// A buffer the reader trimmed to nothing is no PCM; one that cannot be told is an interval the core refuses.
-private func decodedInterval(of buffer: CMSampleBuffer) -> AudioInterval? {
+// A buffer that holds no packet is nothing; a packet whose time or length cannot be told is an interval the core refuses.
+private func packetIntervals(of buffer: CMSampleBuffer, rate: Double, shiftUs: inout Int64) -> [AudioInterval]? {
   let count = CMSampleBufferGetNumSamples(buffer)
   let refused = AudioInterval(startUs: 0, endUs: 1, samples: 0)
-  guard CMSampleBufferIsValid(buffer), CMSampleBufferDataIsReady(buffer) else { return refused }
-  guard count > 0 else { return CMSampleBufferGetTotalSampleSize(buffer) == 0 ? nil : refused }
-  let pts = CMSampleBufferGetOutputPresentationTimeStamp(buffer)
-  let duration = CMSampleBufferGetOutputDuration(buffer)
-  guard duration.isNumeric, duration >= .zero else { return refused }
-  guard duration > .zero else { return nil }
-  guard let start = microseconds(pts), let end = microseconds(pts + duration) else { return refused }
-  return AudioInterval(startUs: start, endUs: end, samples: UInt64(count))
+  guard CMSampleBufferIsValid(buffer), CMSampleBufferDataIsReady(buffer) else { return [refused] }
+  guard count > 0 else { return CMSampleBufferGetTotalSampleSize(buffer) == 0 ? [] : [refused] }
+  var needed = 0
+  CMSampleBufferGetSampleTimingInfoArray(buffer, entryCount: 0, arrayToFill: nil, entriesNeededOut: &needed)
+  var timings = [CMSampleTimingInfo](repeating: CMSampleTimingInfo(), count: needed)
+  guard needed > 0, CMSampleBufferGetSampleTimingInfoArray(buffer, entryCount: needed, arrayToFill: &timings, entriesNeededOut: &needed) == noErr else { return [refused] }
+  var result: [AudioInterval] = []
+  for index in 0..<count {
+    let timing = timings.count == count ? timings[index] : timings[0]
+    let shift = timings.count == count ? CMTime.zero : CMTimeMultiply(timing.duration, multiplier: Int32(index))
+    let pts = timing.presentationTimeStamp + shift
+    guard timing.duration.isNumeric, timing.duration >= .zero else { return [refused] }
+    guard timing.duration > .zero else { continue }
+    guard let start = microseconds(pts), let end = microseconds(pts + timing.duration) else { return [refused] }
+    result.append(AudioInterval(startUs: start, endUs: end, samples: UInt64((timing.duration.seconds * rate).rounded())))
+  }
+  return trimmed(result, by: buffer, rate: rate, shiftUs: &shiftUs)
+}
+
+/// The reader marks the priming of the encoder at the start and the padding at the end of a track as a trim of the buffer, the decoder never plays them and plays the track from its first heard sample: the table drops the same samples from the first and the last packets and moves every packet by the start trim.
+private func trimmed(_ intervals: [AudioInterval], by buffer: CMSampleBuffer, rate: Double, shiftUs: inout Int64) -> [AudioInterval] {
+  func trim(_ key: CFString) -> UInt64 {
+    guard let raw = CMGetAttachment(buffer, key: key, attachmentModeOut: nil) else { return 0 }
+    let time = CMTimeMakeFromDictionary(raw as! CFDictionary)
+    return time.isNumeric && time > .zero ? UInt64((time.seconds * rate).rounded()) : 0
+  }
+  var list = intervals
+  var head = trim(kCMSampleBufferAttachmentKey_TrimDurationAtStart)
+  let removed = head
+  while head > 0, let first = list.first {
+    if head >= first.samples { head -= first.samples; list.removeFirst(); continue }
+    let cut = Int64((Double(head) / rate * 1_000_000).rounded())
+    list[0] = AudioInterval(startUs: first.startUs + cut, endUs: first.endUs, samples: first.samples - head)
+    head = 0
+  }
+  shiftUs += Int64((Double(removed) / rate * 1_000_000).rounded())
+  var tail = trim(kCMSampleBufferAttachmentKey_TrimDurationAtEnd)
+  while tail > 0, let last = list.last {
+    if tail >= last.samples { tail -= last.samples; list.removeLast(); continue }
+    let cut = Int64((Double(tail) / rate * 1_000_000).rounded())
+    list[list.count - 1] = AudioInterval(startUs: last.startUs, endUs: last.endUs - cut, samples: last.samples - tail)
+    tail = 0
+  }
+  return list.map { AudioInterval(startUs: $0.startUs - shiftUs, endUs: $0.endUs - shiftUs, samples: $0.samples) }
 }
 
 private func brokenCoverage() -> AudioCoverage {
