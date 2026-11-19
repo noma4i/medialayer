@@ -1,6 +1,8 @@
 package com.noma4i.medialayer.ui
 
 import android.content.Context
+import android.graphics.Color
+import android.view.View
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.runtime.Composable
@@ -13,9 +15,11 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.Observer
 import androidx.lifecycle.findViewTreeLifecycleOwner
 import com.noma4i.medialayer.CameraLens
 import com.noma4i.medialayer.CaptureProfile
+import com.noma4i.medialayer.MediaTrace
 
 /**
  * The preview of a camera. The camera runs while this composable is in the composition and its lifecycle is started. The picture fills the frame (`FILL_CENTER`).
@@ -41,6 +45,13 @@ fun MediaCameraPreview(camera: MediaCamera, modifier: Modifier = Modifier, zooms
       camera.detachPreview(view)
     }
   }
+  // The view draws nothing until its first frame, so what lies under it stays visible; it hides again when the stream leaves STREAMING.
+  DisposableEffect(view, owner) {
+    if (owner == null) return@DisposableEffect onDispose { }
+    val observer = Observer<PreviewView.StreamState> { applyStreamState(view, it) }
+    view.previewStreamState.observe(owner, observer)
+    onDispose { view.previewStreamState.removeObserver(observer) }
+  }
   val pinch = if (zoomsByPinch) Modifier.pointerInput(camera) { detectTransformGestures { _, _, zoom, _ -> if (zoom != 1f) camera.zoomBy(zoom.toDouble()) } } else Modifier
   AndroidView(factory = { view }, modifier = modifier.then(pinch))
 }
@@ -48,6 +59,17 @@ fun MediaCameraPreview(camera: MediaCamera, modifier: Modifier = Modifier, zooms
 internal fun cameraPreviewView(context: Context): PreviewView = PreviewView(context).apply {
   implementationMode = PreviewView.ImplementationMode.COMPATIBLE
   scaleType = PreviewView.ScaleType.FILL_CENTER
+  setBackgroundColor(Color.TRANSPARENT)
+  visibility = View.INVISIBLE
+}
+
+/** Shows the preview only while its stream is STREAMING. */
+internal fun applyStreamState(view: PreviewView, state: PreviewView.StreamState) {
+  val streaming = state == PreviewView.StreamState.STREAMING
+  val shown = view.visibility == View.VISIBLE
+  if (streaming == shown) return
+  view.visibility = if (streaming) View.VISIBLE else View.INVISIBLE
+  MediaTrace.emit("camera") { if (streaming) "preview shown" else "preview hidden" }
 }
 
 /** A camera for the composition: made once for [profile] and [lens], closed when it leaves the composition. */
