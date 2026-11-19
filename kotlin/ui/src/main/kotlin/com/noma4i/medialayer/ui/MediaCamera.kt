@@ -64,7 +64,7 @@ val CameraState.isRecording: Boolean get() = phase == CameraPhase.RECORDING
  * and a refusal of the memory budget are a [MediaException.Camera] with the reason and the text of the core.
  */
 class MediaCamera internal constructor(
-  private val profile: CaptureProfile,
+  internal val profile: CaptureProfile,
   lens: CameraLens,
   private val backend: CaptureBackend,
   private val services: CameraServices,
