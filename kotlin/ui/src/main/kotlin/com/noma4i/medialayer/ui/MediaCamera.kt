@@ -78,7 +78,7 @@ class MediaCamera internal constructor(
   private val queue = Executors.newSingleThreadExecutor { Thread(it, "medialayer-camera").apply { isDaemon = true } }
   private var run = CaptureRun(
     CameraState(CameraPhase.IDLE, lens, false, false, 1f, 1f, 1f, 0uL, false, null, null, null, null),
-    false, false, null, false, false, false, null, false, null, lens
+    false, false, null, false, false, false, false, null, false, null, lens
   )
   private val published = MutableStateFlow(run.state)
   private val awake = ScreenAwakeHold(ScreenHoldKind.ALWAYS, screen)
