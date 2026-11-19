@@ -172,7 +172,8 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
     if (!provider.hasCamera(selector)) return sink(CaptureEvent.Refuse(CameraRefusal.NO_CAMERA))
     val ready = if (profile.mode == CaptureMode.VIDEO) plan.getOrElse { return configureFailed(it, generation) } else plan.getOrNull()
     photoSize = ready?.photoSize
-    val made = Preview.Builder().setResolutionSelector(previewSelector(ready, profile)).build().apply { surfaceProvider = host.surfaceProvider }
+    val made = Preview.Builder().setResolutionSelector(previewSelector(ready, profile))
+      .setMirrorMode(if (profile.mirrorFrontVideo) MirrorMode.MIRROR_MODE_ON_FRONT_ONLY else MirrorMode.MIRROR_MODE_OFF).build().apply { surfaceProvider = host.surfaceProvider }
     val cases = mutableListOf<UseCase>(made)
     preview = made
     if (profile.mode == CaptureMode.PHOTO) {
