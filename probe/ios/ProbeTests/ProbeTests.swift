@@ -30,7 +30,7 @@ final class ProbeTests: XCTestCase {
     let text = "PROBE \(name) " + values.map { "\($0.0)=\($0.1)" }.joined(separator: " ")
     print(text)
     if let handle = try? FileHandle(forWritingTo: Self.folder.appendingPathComponent("probe.log")) {
-      handle.seekToEnd(); handle.write(Data((text + "\n").utf8)); try? handle.close()
+      _ = try? handle.seekToEnd(); handle.write(Data((text + "\n").utf8)); try? handle.close()
     } else {
       try? Data((text + "\n").utf8).write(to: Self.folder.appendingPathComponent("probe.log"))
     }
