@@ -19,7 +19,6 @@ import com.noma4i.medialayer.CaptureProfile
 import com.noma4i.medialayer.CaptureRun
 import com.noma4i.medialayer.ImageSize
 import com.noma4i.medialayer.MediaException
-import com.noma4i.medialayer.MediaInfo
 import com.noma4i.medialayer.RecordingKind
 import com.noma4i.medialayer.RecordingRefusal
 import com.noma4i.medialayer.cameraRefusalText
@@ -99,8 +98,8 @@ class MediaCamera internal constructor(
   private var reading: Job? = null
   private var ticker: Job? = null
   private var recordingFile: File? = null
-  private var recordingCoverage: com.noma4i.medialayer.AudioCoverage? = null
-  private var clipInfo: MediaInfo? = null
+  private var recordingWritten: WrittenTake? = null
+  private var clipInfo: WrittenTake? = null
   private var ended: Result<CapturedClip>? = null
   private var photoOutcome: Result<CapturedPhoto>? = null
   private var photoWaiter: CompletableDeferred<CapturedPhoto>? = null
@@ -140,7 +139,7 @@ class MediaCamera internal constructor(
     }
     backend.setSink { event -> post(event) }
     backend.setAudioIssueSink { issue -> enqueue { microphoneFailed(issue) } }
-    backend.setCoverageSink { coverage -> enqueue { if (!closed) recordingCoverage = coverage } }
+    backend.setTakeSink { written -> enqueue { if (!closed) recordingWritten = written } }
   }
 
   /** The state now: readiness, recording and its length, flash, zoom, the side and the last refusal. */
@@ -498,7 +497,7 @@ class MediaCamera internal constructor(
       CaptureAction.BeginRecording -> {
         val file = CaptureFiles.name(CaptureFileKind.CLIP, services.directory)
         recordingFile = file
-        recordingCoverage = null
+        recordingWritten = null
         clipInfo = null
         val ticket = audioHold
         backend.beginRecording(file, profile, run.state.lens) { start ->
@@ -543,7 +542,7 @@ class MediaCamera internal constructor(
     reading = null
     recordingFile?.let(::deleteMediaFile)
     recordingFile = null
-    recordingCoverage = null
+    recordingWritten = null
     clipInfo = null
   }
 
@@ -585,7 +584,8 @@ class MediaCamera internal constructor(
           } catch (failure: Exception) {
             if (failure is kotlinx.coroutines.CancellationException) throw failure
             MediaTrace.emit("camera") { "session refused cost=${captureCost(profile)} failure=$failure" }
-            enqueue { if (epoch == current) apply(CaptureEvent.Refuse(CameraRefusal.MEMORY)) }
+            val refusal = reservationRefusal(failure)
+            enqueue { if (epoch == current) apply(CaptureEvent.Refuse(refusal)) }
             return@launch
           }
         }
@@ -631,6 +631,13 @@ class MediaCamera internal constructor(
     }
   }
 
+  /** A closed MediaLayer is not a lack of memory: it is not ready, a full budget is memory, any other failure is reported and the camera is not ready. */
+  private fun reservationRefusal(failure: Exception): CameraRefusal = when (failure) {
+    is MediaException.Closed -> CameraRefusal.NOT_READY
+    is MediaException.Overloaded -> CameraRefusal.MEMORY
+    else -> { Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, failure); CameraRefusal.NOT_READY }
+  }
+
   private fun shoot() {
     val current = epoch
     val flash = run.state.flash
@@ -651,7 +658,8 @@ class MediaCamera internal constructor(
         services.admitShot(bytes.toLong())
       } catch (failure: Exception) {
         if (failure is kotlinx.coroutines.CancellationException) throw failure
-        return@launch finish(Result.failure(refusal(CameraRefusal.MEMORY)))
+        MediaTrace.emit("camera") { "shot refused cost=$bytes failure=$failure" }
+        return@launch finish(Result.failure(refusal(reservationRefusal(failure))))
       }
       val file = try { CaptureFiles.name(CaptureFileKind.PHOTO, services.directory) } catch (failure: Exception) {
         hold.close()
@@ -679,49 +687,37 @@ class MediaCamera internal constructor(
     }
   }
 
+  /** The clip is judged from what its writer knew at the write point: the verdict of its sound, its length and its frame. The file is never opened here. */
   private fun readClip() {
     val file = recordingFile ?: return
     reading?.cancel()
+    val silent = takeRefusal()
+    val info = if (silent == null) recordingWritten else null
     reading = scope.launch {
-      var silent: CameraRefusal? = null
-      val info = try {
-        silent = takeRefusal()
-        if (silent == null && services.uprightVideo(file)) silent = audioRefusal(file)
-        if (silent == null) services.clipInfo(file) else null
-      } catch (failure: Exception) {
-        if (failure is kotlinx.coroutines.CancellationException) throw failure
-        Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, failure)
-        null
-      }
       enqueue {
         if (recordingFile != file) return@enqueue
         if (reading?.isCancelled == true) return@enqueue
         reading = null
         clipInfo = info
         silent?.let { apply(CaptureEvent.Revoked(it)) }
-        apply(CaptureEvent.RecordSettled(info?.durationMs))
+        apply(CaptureEvent.RecordSettled(info?.let { (it.durationUs / 1000).toULong() }))
       }
     }
   }
 
   /** The refusal of the core for the sound the take wrote, judged at its write point: no file is read. A take with sound whose verdict never arrived is refused as broken. */
   private fun takeRefusal(): CameraRefusal? =
-    if (!profile.audio) null else recordingCoverage.let { if (it == null) CameraRefusal.AUDIO_TRACK_BROKEN else audioCoverageRefusal(it.verdict) }
-
-  /** The refusal of the core for the audio of a file the upright pass rewrote, null when it is covered or the profile holds no audio. The core owns the rule, the scan only reads the file. */
-  private suspend fun audioRefusal(file: File): CameraRefusal? =
-    if (!profile.audio) null else audioCoverageRefusal(services.audioCoverage(file).verdict)
+    if (!profile.audio) null else recordingWritten.let { if (it == null) CameraRefusal.AUDIO_TRACK_BROKEN else audioCoverageRefusal(it.coverage.verdict) }
 
   private fun deliver() {
     val file = recordingFile
     val info = clipInfo
-    val length = info?.durationMs
     val take = run.state.take
-    if (file == null || info == null || length == null || take == null || closed) return discard()
+    if (file == null || info == null || take == null || closed) return discard()
     recordingFile = null
-    recordingCoverage = null
+    recordingWritten = null
     clipInfo = null
-    val clip = CapturedClip(file, length.toLong(), info.frame, run.takeLens)
+    val clip = CapturedClip(file, info.durationUs / 1000, info.frame, run.takeLens)
     clips[take] = clip
     ended = Result.success(clip)
   }
@@ -733,7 +729,7 @@ class MediaCamera internal constructor(
     reading = null
     recordingFile?.let(::deleteMediaFile)
     recordingFile = null
-    recordingCoverage = null
+    recordingWritten = null
     clipInfo = null
     ended = Result.failure(refusal(run.state.fault ?: CameraRefusal.NOT_READY, run.state.refusedMs))
   }

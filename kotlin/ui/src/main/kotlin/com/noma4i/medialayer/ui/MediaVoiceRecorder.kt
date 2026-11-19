@@ -319,7 +319,7 @@ internal class SystemVoiceCapture(
     val spec = PcmSpec(MediaRecorder.AudioSource.MIC, settings.sampleRateHz.toInt(), if (settings.channels.toInt() == 1) AudioFormat.CHANNEL_IN_MONO else AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
     val cost = try { pcmSizes(spec).lease } catch (error: PcmSizeError) { throw VoiceNativeFailure(NativeFailure(FailureSource.RECORDER, "android.media.AudioRecord", error.code, error.message ?: "bad PCM spec")) }
     val hold = try { reserve(cost) } catch (error: Exception) {
-      if (error is kotlinx.coroutines.CancellationException) throw error
+      if (error is kotlinx.coroutines.CancellationException || error is MediaException.Closed || error is MediaException.Overloaded) throw error
       throw VoiceNativeFailure(NativeFailure(FailureSource.RECORDER, error.javaClass.name, 0L, error.message ?: error.toString()))
     }
     val memory = CaptureMemory(cost)

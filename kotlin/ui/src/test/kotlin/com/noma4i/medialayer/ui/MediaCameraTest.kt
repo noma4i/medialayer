@@ -22,7 +22,6 @@ import com.noma4i.medialayer.CaptureProfile
 import com.noma4i.medialayer.FaultKind
 import com.noma4i.medialayer.ImageSize
 import com.noma4i.medialayer.MediaException
-import com.noma4i.medialayer.MediaInfo
 import com.noma4i.medialayer.PixelSize
 import com.noma4i.medialayer.RecordEnd
 import com.noma4i.medialayer.VideoStabilization
@@ -113,7 +112,10 @@ private class FakeBackend : CaptureBackend {
   val mainCalls = AtomicInteger()
   @Volatile private var sink: (CaptureEvent) -> Unit = {}
   @Volatile private var audioSink: (CaptureAudioIssue) -> Unit = {}
-  @Volatile private var coverageSink: (com.noma4i.medialayer.AudioCoverage) -> Unit = {}
+  @Volatile private var takeSink: (WrittenTake) -> Unit = {}
+  /** The length the fake writer reports for a finished take; null makes the writer fail the take. */
+  @Volatile var durationUs: Long? = 2_000_000L
+  @Volatile var frame: ImageSize? = ImageSize(720u, 1280u)
   /** The verdict the fake take hands with every finished recording, as the real take does from its ledger. */
   @Volatile var coverage: com.noma4i.medialayer.AudioCoverage = CoreCoverage.covered()
   @Volatile var tap: ImageAnalysis.Analyzer? = null
@@ -128,7 +130,11 @@ private class FakeBackend : CaptureBackend {
   override val photoSize: PixelSize? = PixelSize(3000u, 4000u)
 
   fun emit(event: CaptureEvent) {
-    if (event is CaptureEvent.RecordFinished && event.end != RecordEnd.FAILED) coverageSink(coverage)
+    val length = durationUs
+    if (event is CaptureEvent.RecordFinished && event.end != RecordEnd.FAILED) {
+      if (length == null) return sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
+      takeSink(WrittenTake(coverage, length, frame))
+    }
     sink(event)
   }
 
@@ -151,7 +157,7 @@ private class FakeBackend : CaptureBackend {
 
   override fun setAudioIssueSink(sink: (CaptureAudioIssue) -> Unit) { audioSink = sink }
 
-  override fun setCoverageSink(sink: (com.noma4i.medialayer.AudioCoverage) -> Unit) { coverageSink = sink }
+  override fun setTakeSink(sink: (WrittenTake) -> Unit) { takeSink = sink }
 
   override fun setHost(view: PreviewView?, owner: LifecycleOwner?) = Unit
 
@@ -184,8 +190,12 @@ private class FakeBackend : CaptureBackend {
     if (soundOnRecord && profile.audio) audioIssue(CaptureAudioIssue.ACTIVE)
   }
 
+  /** While set, the writer never reports the end of a stopped take. */
+  @Volatile var finishHeld = false
+
   override fun endRecording() {
     note("endRecording")
+    if (finishHeld) return
     emit(CaptureEvent.RecordFinished(RecordEnd.COMPLETED))
   }
 
@@ -243,16 +253,9 @@ private class Counters {
   val released = AtomicInteger()
   val qualities = CopyOnWriteArrayList<Double>()
   val mainCalls = AtomicInteger()
-  @Volatile var denySessions = false
-  @Volatile var denyShots = false
-  @Volatile var info: MediaInfo? = MediaInfo(2000UL, ImageSize(720u, 1280u))
-  /** True when the fake upright pass rewrites the file. */
-  @Volatile var rewrites = false
-  val coverageSeen = CopyOnWriteArrayList<File>()
-  @Volatile var videoGate: CompletableDeferred<Unit>? = null
+  @Volatile var sessionFailure: Exception? = null
+  @Volatile var shotFailure: Exception? = null
   @Volatile var focusAnswer = com.noma4i.medialayer.FocusAnswer.GRANTED
-  val straightened = CopyOnWriteArrayList<File>()
-  val straightenCancelled = java.util.concurrent.atomic.AtomicBoolean()
 
   fun checkThread() {
     if (Looper.myLooper() == Looper.getMainLooper()) mainCalls.incrementAndGet()
@@ -295,32 +298,17 @@ class MediaCameraTest {
     val services = CameraServices(
       admitSession = { _ ->
         counters.checkThread()
-        if (counters.denySessions) throw MediaException.Overloaded("no memory")
+        counters.sessionFailure?.let { throw it }
         counters.taken.incrementAndGet()
         AutoCloseable { counters.released.incrementAndGet(); TestSignal.fire() }
       },
       admitShot = { _ ->
         counters.checkThread()
-        if (counters.denyShots) throw MediaException.Overloaded("no memory")
+        counters.shotFailure?.let { throw it }
         counters.taken.incrementAndGet()
         AutoCloseable { counters.released.incrementAndGet(); TestSignal.fire() }
       },
       audio = audio,
-      clipInfo = { _ ->
-        counters.checkThread()
-        counters.info
-      },
-      uprightVideo = { file ->
-        counters.straightened.add(file)
-        TestSignal.fire()
-        try {
-          counters.videoGate?.await()
-        } catch (cancel: kotlinx.coroutines.CancellationException) {
-          counters.straightenCancelled.set(true)
-          throw cancel
-        }
-        counters.rewrites
-      },
       upright = { raw, quality ->
         counters.checkThread()
         counters.qualities.add(quality)
@@ -328,8 +316,7 @@ class MediaCameraTest {
         made.outputStream().use { Bitmap.createBitmap(3, 5, Bitmap.Config.ARGB_8888).compress(Bitmap.CompressFormat.JPEG, 90, it) }
         made
       },
-      directory = directory,
-      audioCoverage = { file -> counters.coverageSeen.add(file); CoreCoverage.covered() }
+      directory = directory
     )
     return Rig(MediaCamera(profile, lens, backend, services, scope, screen = screen.awake()), backend, counters, directory, fixture)
   }
@@ -370,7 +357,7 @@ class MediaCameraTest {
 
   @Test
   fun inv_capture_13_aRefusalOfTheMemoryBudgetFailsTheCameraWithoutABind() {
-    val rig = rig { _, counters -> counters.denySessions = true }
+    val rig = rig { _, counters -> counters.sessionFailure = MediaException.Overloaded("no memory") }
     rig.attach()
     eventually("failed") { rig.camera.state.value.phase == CameraPhase.FAILED }
     assertEquals(CameraRefusal.MEMORY, rig.camera.state.value.fault)
@@ -387,7 +374,7 @@ class MediaCameraTest {
     assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.takePhoto() } }
     assertEquals(3 to 2, rig.counters.taken.get() to rig.counters.released.get())
     assertEquals(CameraRefusal.PHOTO_FAILED, rig.camera.state.value.fault)
-    rig.counters.denyShots = true
+    rig.counters.shotFailure = MediaException.Overloaded("no memory")
     val refused = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.takePhoto() } }
     assertEquals(CameraRefusal.MEMORY, refused.reason)
   }
@@ -431,13 +418,13 @@ class MediaCameraTest {
     assertEquals(listOf(delivered.file.name), rig.files())
     eventually("ready") { rig.camera.state.value.phase == CameraPhase.READY }
 
-    rig.counters.info = MediaInfo(300UL, null)
+    rig.backend.durationUs = 300_000L
     rig.camera.startRecording()
     val tooShort = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
     assertEquals(CameraRefusal.TOO_SHORT to cameraRefusalText(CameraRefusal.TOO_SHORT), tooShort.reason to tooShort.detail)
     assertEquals(listOf(delivered.file.name), rig.files())
 
-    rig.counters.info = null
+    rig.backend.durationUs = null
     eventually("ready again") { rig.camera.state.value.phase == CameraPhase.READY }
     rig.camera.startRecording()
     assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
@@ -523,38 +510,66 @@ class MediaCameraTest {
     }
     watching.cancel()
     assertEquals(listOf<Any>(com.noma4i.medialayer.TakeOutcome.Refused(CameraRefusal.AUDIO_TRACK_BROKEN)), outcomes.distinct())
-    assertTrue(rig.counters.coverageSeen.isEmpty())
   }
 
   @Test
-  fun inv_audio_71_a_take_the_ledger_covers_is_delivered_with_no_read_of_its_file_after_the_stop() = runBlocking {
+  fun inv_audio_71_a_take_the_ledger_covers_is_delivered_with_the_file_untouched_after_the_stop() = runBlocking {
     val rig = rig(moment)
     ready(rig)
     rig.camera.startRecording()
     val clip = rig.camera.stopRecording()
-    assertTrue(rig.counters.coverageSeen.isEmpty())
-    assertEquals(listOf(clip.file), rig.counters.straightened.toList())
+    assertEquals(listOf<Byte>(1, 2, 3), clip.file.readBytes().toList())
   }
 
   @Test
-  fun inv_audio_71_a_take_the_upright_pass_rewrote_is_read_once_after_the_rewrite() = runBlocking {
+  fun inv_capture_51_the_length_of_a_clip_is_the_length_its_writer_reported_with_the_writer_frame() = runBlocking {
     val rig = rig(moment)
     ready(rig)
-    rig.counters.rewrites = true
+    rig.backend.durationUs = 2_345_678L
+    rig.backend.frame = ImageSize(540u, 960u)
     rig.camera.startRecording()
     val clip = rig.camera.stopRecording()
-    assertEquals(listOf(clip.file), rig.counters.coverageSeen.toList())
-    assertEquals(listOf(clip.file), rig.counters.straightened.toList())
+    assertEquals(2_345L to ImageSize(540u, 960u), clip.durationMs to clip.frame)
   }
 
   @Test
-  fun inv_audio_72_a_take_with_no_audio_in_its_profile_skips_the_sound_read() = runBlocking {
+  fun inv_capture_13_a_session_reservation_that_fails_is_refused_by_its_kind() {
+    val rows = listOf<Pair<Exception, CameraRefusal>>(
+      MediaException.Closed() to CameraRefusal.NOT_READY,
+      MediaException.Overloaded("no memory") to CameraRefusal.MEMORY,
+      IllegalStateException("boom") to CameraRefusal.NOT_READY
+    )
+    rows.forEach { (failure, refusal) ->
+      val rig = rig { _, counters -> counters.sessionFailure = failure }
+      rig.attach()
+      eventually("failed by $failure") { rig.camera.state.value.phase == CameraPhase.FAILED }
+      assertEquals("$failure", refusal, rig.camera.state.value.fault)
+    }
+  }
+
+  @Test
+  fun inv_capture_13_a_shot_reservation_that_fails_is_refused_by_its_kind() = runBlocking {
+    val rows = listOf<Pair<Exception, CameraRefusal>>(
+      MediaException.Closed() to CameraRefusal.NOT_READY,
+      MediaException.Overloaded("no memory") to CameraRefusal.MEMORY,
+      IllegalStateException("boom") to CameraRefusal.NOT_READY
+    )
+    rows.forEach { (failure, refusal) ->
+      val rig = rig()
+      ready(rig)
+      rig.counters.shotFailure = failure
+      val refused = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.takePhoto() } }
+      assertEquals("$failure", refusal, refused.reason)
+    }
+  }
+
+  @Test
+  fun inv_audio_72_a_take_with_no_audio_in_its_profile_skips_the_sound_read() = runBlocking<Unit> {
     val rig = rig(moment.copy(audio = false))
     ready(rig)
     rig.backend.coverage = CoreCoverage.missing()
     rig.camera.startRecording()
     rig.camera.stopRecording()
-    assertTrue(rig.counters.coverageSeen.isEmpty())
   }
 
   @Test
@@ -877,12 +892,12 @@ class MediaCameraTest {
   fun inv_capture_28_aTooShortRecordingCarriesItsLengthInTheError() = runBlocking {
     val rig = rig(moment)
     ready(rig)
-    rig.counters.info = MediaInfo(400UL, null)
+    rig.backend.durationUs = 400_000L
     rig.camera.startRecording()
     val tooShort = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
     assertEquals(CameraRefusal.TOO_SHORT to 400UL, tooShort.reason to tooShort.recordedMs)
 
-    rig.counters.info = null
+    rig.backend.durationUs = null
     eventually("ready again") { rig.camera.state.value.phase == CameraPhase.READY }
     rig.camera.startRecording()
     val failed = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
@@ -897,23 +912,6 @@ class MediaCameraTest {
   }
 
   @Test
-  fun inv_capture_29_aFinishedTakeIsStraightenedWhileStoppingAndACancelThenThrowsItAway() = runBlocking {
-    val gate = CompletableDeferred<Unit>()
-    val rig = rig(moment) { _, counters -> counters.videoGate = gate }
-    ready(rig)
-    rig.camera.startRecording()
-    val recorded = rig.backend.recordingFile!!
-    rig.backend.emit(CaptureEvent.RecordFinished(RecordEnd.LIMIT_REACHED))
-    eventually("straightening while stopping") { rig.counters.straightened.toList() == listOf(recorded) && rig.camera.state.value.phase == CameraPhase.STOPPING }
-    rig.camera.cancelRecording()
-    eventually("ready after the cancel") { rig.camera.state.value.phase == CameraPhase.READY }
-    assertTrue("the conversion was cancelled", rig.counters.straightenCancelled.get())
-    assertFalse(recorded.exists())
-    val refused = runCatching { rig.camera.stopRecording() }.exceptionOrNull()
-    assertTrue("$refused", refused is MediaException.Camera)
-  }
-
-  @Test
   fun inv_capture_31_theClipOfATakeIsGivenOnce() = runBlocking {
     val rig = rig(moment)
     ready(rig)
@@ -923,7 +921,6 @@ class MediaCameraTest {
     eventually("settled") { rig.camera.state.value.phase == CameraPhase.READY }
     val clip = rig.camera.stopRecording()
     assertTrue(clip.file.isFile)
-    assertEquals(listOf(recorded), rig.counters.straightened.toList())
     val again = runCatching { rig.camera.stopRecording() }.exceptionOrNull()
     assertEquals(CameraRefusal.NOT_READY, (again as? MediaException.Camera)?.reason)
   }
@@ -955,7 +952,7 @@ class MediaCameraTest {
       val rows = listOf<Triple<CameraRefusal, CameraPhase, (Rig) -> Unit>>(
         Triple(CameraRefusal.IN_CALL, CameraPhase.READY, { _ -> call = app.layer.callAudio(MediaCallKind.Unmanaged) }),
         Triple(CameraRefusal.MICROPHONE_SILENT, CameraPhase.READY, { rig -> rig.backend.audioIssue(CaptureAudioIssue.SILENCED) }),
-        Triple(CameraRefusal.TOO_SHORT, CameraPhase.READY, { rig -> rig.counters.info = MediaInfo(400UL, null); rig.backend.emit(CaptureEvent.RecordFinished(RecordEnd.LIMIT_REACHED)) }),
+        Triple(CameraRefusal.TOO_SHORT, CameraPhase.READY, { rig -> rig.backend.durationUs = 400_000L; rig.backend.emit(CaptureEvent.RecordFinished(RecordEnd.LIMIT_REACHED)) }),
         Triple(CameraRefusal.CONFIGURE_FAILED, CameraPhase.FAILED, { rig -> rig.backend.emit(CaptureEvent.Fault(FaultKind.OTHER)) })
       )
       val seen = rows.map { (reason, phase, cause) ->
@@ -1183,11 +1180,11 @@ class MediaCameraTest {
   fun inv_capture_71_a_stop_waiting_when_the_layer_closes_gets_interrupted() = runBlocking {
     val app = AppPath()
     val rig = rig(moment, app = app)
-    rig.counters.videoGate = CompletableDeferred()
     ready(rig)
     recordingTake(rig)
+    rig.backend.finishHeld = true
     val stopping = CoroutineScope(Dispatchers.Default).async { runCatching { rig.camera.stopRecording() } }
-    eventually("the clip is read") { rig.counters.straightened.isNotEmpty() }
+    eventually("the stop waits for the writer") { rig.backend.count("endRecording") == 1 }
 
     app.close()
 

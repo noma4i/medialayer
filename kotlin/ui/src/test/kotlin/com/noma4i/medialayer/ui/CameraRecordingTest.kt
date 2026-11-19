@@ -39,7 +39,8 @@ class CameraRecordingTest {
   private val log = CopyOnWriteArrayList<String>()
   private val events = CopyOnWriteArrayList<CaptureEvent>()
   private val takes = CopyOnWriteArrayList<FakeTake>()
-  private val recording = CameraRecording(Executor { it.run() }, { events.add(it) }) { _, _, _, listener -> FakeTake(listener).also { takes.add(it) } }
+  private val written = CopyOnWriteArrayList<WrittenTake>()
+  private val recording = CameraRecording(Executor { it.run() }, { events.add(it) }, { written.add(it) }) { _, _, _, listener -> FakeTake(listener).also { takes.add(it) } }
   private val surface = Surface(SurfaceTexture(0))
   private val spec = PcmSpec(MediaRecorder.AudioSource.CAMCORDER, 44_100, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
   private val feed = object : CameraEncoderFeed {
@@ -78,6 +79,17 @@ class CameraRecordingTest {
     assertEquals(listOf<CaptureEvent>(CaptureEvent.AudioFlow(true), CaptureEvent.RecordStarted, CaptureEvent.RecordFinished(RecordEnd.COMPLETED)), events.toList())
     assertEquals(false, recording.active)
     assertEquals(listOf("attach 1", "gate 1", "encoded 1", "detach 1", "finalized 1"), log.toList())
+  }
+
+  @Test
+  fun the_length_and_the_frame_of_a_finished_take_are_the_ones_its_writer_reports() {
+    val video = MediaFormat().apply { setInteger(MediaFormat.KEY_WIDTH, 720); setInteger(MediaFormat.KEY_HEIGHT, 1280) }
+    recording.start(File("take-1.mp4"), CameraTakeSettings(video, null, VideoTimebase.BOOTTIME, 0, 1L shl 20, 10_000_000L), feed, { work -> work() }, { false }, 1) {}
+    takes[0].listener.onBegan(1, surface)
+    takes[0].listener.onStarted(1, 0)
+    recording.stop()
+    takes[0].listener.onFinished(1, File("take-1.mp4"), 2_345_678, CoreCoverage.covered())
+    assertEquals(listOf(2_345_678L to com.noma4i.medialayer.ImageSize(720u, 1280u)), written.map { it.durationUs to it.frame })
   }
 
   @Test

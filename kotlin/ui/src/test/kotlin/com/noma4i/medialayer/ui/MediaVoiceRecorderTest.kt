@@ -502,6 +502,24 @@ class MediaVoiceRecorderTest {
   }
 
   @Test
+  fun a_closed_layer_and_a_full_budget_at_the_reservation_surface_as_themselves() {
+    listOf<Pair<Exception, Class<out MediaException>>>(
+      MediaException.Closed() to MediaException.Closed::class.java,
+      MediaException.Overloaded("no memory") to MediaException.Overloaded::class.java
+    ).forEach { (failure, kind) ->
+      val writer = Writer()
+      val recorder = recorder(writer, reserve = { throw failure })
+      val target = file()
+
+      assertThrows(kind) { runBlocking { recorder.start(target) } }
+
+      assertTrue(microphone.calls.isEmpty() && writer.calls.isEmpty() && holds.isEmpty())
+      assertFalse(target.exists())
+    }
+    assertTrue(failures.isEmpty())
+  }
+
+  @Test
   fun a_native_error_of_the_source_while_recording_is_one_failure_of_the_recorder() = runBlocking<Unit> {
     val recorder = recorder()
     val target = file()
