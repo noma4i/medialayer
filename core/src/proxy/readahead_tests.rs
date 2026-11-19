@@ -80,7 +80,7 @@ struct Rig {
 }
 
 async fn rig() -> Rig {
-    let config = Config { hold_ceiling: Duration::from_millis(1_500), probe_limit: Duration::from_millis(150), ..Config::default() };
+    let config = Config { hold_ceiling: Duration::from_millis(1_500), probe_limit: Duration::from_millis(150), header_read_timeout: None, ..Config::default() };
     rig_with(config, true).await
 }
 
@@ -174,7 +174,7 @@ async fn inv_readahead_03_the_playing_item_is_never_blocked_by_an_unknown_or_lat
     assert_eq!(late.status, 200);
     assert!(started.elapsed() < Duration::from_millis(600), "a late playhead held the request for {:?}", started.elapsed());
 
-    let bare = rig_with(Config::default(), false).await;
+    let bare = rig_with(Config { header_read_timeout: None, ..Config::default() }, false).await;
     let targets = playlist_lines(&bare).await;
     let started = Instant::now();
     assert_eq!(get(bare.proxy.port(), &targets[7]).await.status, 200);

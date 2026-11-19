@@ -31,7 +31,7 @@ fn segment(index: usize) -> String {
 
 #[tokio::test(start_paused = true)]
 async fn inv_proxy_37_a_held_request_wakes_by_events_and_one_ceiling_not_by_polling() {
-    let config = Config { hold_ceiling: HOLD, ..Config::default() };
+    let config = Config { hold_ceiling: HOLD, header_read_timeout: None, ..Config::default() };
     let proxy = Proxy::start(config, Arc::new(MockFetcher::new()), Arc::new(MemoryStore::new())).await.unwrap();
     let playhead = Arc::new(Idle { probes: AtomicUsize::new(0) });
     proxy.set_playhead(playhead.clone());

@@ -6,7 +6,7 @@ use super::proxy_harness::eventually;
 use std::time::Duration;
 
 async fn rig(max_concurrent: usize) -> (Proxy, Arc<MockFetcher>) {
-    let config = Config { max_concurrent, playback_reserved: 0, ..Config::default() };
+    let config = Config { max_concurrent, playback_reserved: 0, header_read_timeout: None, ..Config::default() };
     let fetcher = Arc::new(MockFetcher::new());
     let proxy = Proxy::start(config, fetcher.clone(), Arc::new(MemoryStore::new())).await.unwrap();
     (proxy, fetcher)

@@ -25,7 +25,7 @@ async fn inv_proxy_15_stored_playlist_reuses_the_same_version() {
     let store = super::super::memory_store::MemoryStore::new();
     let target = "https://cdn.test/p.m3u8";
     store.seed(target, b"#EXTM3U\n#EXTINF:2,\na.ts\n#EXT-X-ENDLIST\n");
-    let proxy = super::super::Proxy::start(super::super::Config { namespace_headers: vec!["authorization".into()], ..Default::default() }, Arc::new(crate::fetch::mock::MockFetcher::new()), Arc::new(store.clone())).await.unwrap();
+    let proxy = super::super::Proxy::start(super::super::Config { namespace_headers: vec!["authorization".into()], header_read_timeout: None, ..Default::default() }, Arc::new(crate::fetch::mock::MockFetcher::new()), Arc::new(store.clone())).await.unwrap();
     let inner = proxy.inner.clone();
     crate::hls::work::URLS.with(|value| value.set(0));
     for _ in 0..2 {

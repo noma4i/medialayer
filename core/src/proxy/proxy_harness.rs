@@ -20,6 +20,7 @@ pub(super) struct Rig {
 
 pub(super) fn config(max_concurrent: usize) -> Config {
     let mut config = Config::default();
+    config.header_read_timeout = None;
     config.max_concurrent = max_concurrent;
     config.policy = config.policy.with_timeout(Duration::from_secs(5));
     config

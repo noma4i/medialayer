@@ -24,7 +24,8 @@ pub struct Config {
     pub playlist_ttl: Duration,
     pub max_waiting: usize,
     pub max_playlist_bytes: u64,
-    pub header_read_timeout: Duration,
+    // Paused-clock tests set None: the virtual clock would auto-advance to this timer and close a connection before its request bytes arrive.
+    pub header_read_timeout: Option<Duration>,
     pub ping_timeout: Duration,
     pub ledger: Ledger,
     pub min_buffer: usize,
@@ -46,7 +47,7 @@ impl Config {
             playlist_ttl: PLAYLIST_TTL,
             max_waiting: MAX_WAITING,
             max_playlist_bytes: InputLimits::default().playlist_bytes,
-            header_read_timeout: HEADER_READ_TIMEOUT,
+            header_read_timeout: Some(HEADER_READ_TIMEOUT),
             ping_timeout: PING_TIMEOUT,
             ledger: Ledger::unbounded(),
             min_buffer: MIN_BUFFER,
