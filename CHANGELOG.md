@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.48.1 - 2026-11-20
+
+### Fixed
+
+- iOS camera preview no longer blinks when a take starts: the movie connection is set at open.
+- Whole downloads that failed no longer fill the whole queue and refuse new ones.
+- iOS reports no failure when the system refuses the audio session in the background.
+
 ## 3.48.0 - 2026-11-20
 
 ### Changed
