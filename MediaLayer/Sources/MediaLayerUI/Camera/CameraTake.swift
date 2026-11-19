@@ -185,6 +185,11 @@ final class CameraTake: @unchecked Sendable {
 
   private func handleVideo(_ buffer: CMSampleBuffer) {
     if phase == .waiting, settings.audio == nil { return open(first: buffer) }
+    if phase == .stopping, settings.audio != nil {
+      // A stop waits for sound that never comes when the microphone died: the picture that goes on is the clock (INV-CAPTURE-85).
+      if clipToLostMicrophone(videoEnd: CMSampleBufferGetPresentationTimeStamp(buffer)) { endSession() }
+      return
+    }
     guard phase == .writing, CMSampleBufferGetPresentationTimeStamp(buffer) >= start else { return }
     appendWritten(buffer, to: videoInput, isAudio: false)
   }
@@ -268,12 +273,19 @@ final class CameraTake: @unchecked Sendable {
 
   /// The sound source stopped delivering while the picture goes on: the take ends at the last sound written, and the video bound of the ledger ends there too (INV-CAPTURE-80).
   private func endIfMicrophoneLost() -> Bool {
+    guard clipToLostMicrophone(videoEnd: videoEnd) else { return false }
+    finish(end: .microphoneLost)
+    return true
+  }
+
+  /// True when the sound ended a second or more before `videoEnd`: the video bound of the take and of the ledger moves back to the last sound written.
+  private func clipToLostMicrophone(videoEnd candidate: CMTime) -> Bool {
     let audioUs = audioEnd.isValid ? microseconds(audioEnd - start) ?? -1 : -1
-    guard let videoUs = microseconds(videoEnd - start), microphoneLost(audioEndUs: audioUs, videoEndUs: videoUs), audioEnd.isValid else { return false }
+    guard let videoUs = microseconds(candidate - start), microphoneLost(audioEndUs: audioUs, videoEndUs: videoUs), audioEnd.isValid, audioEnd < videoEnd else { return false }
     MediaTrace.emit("camera", "take microphone lost audioEndUs=\(audioUs) videoEndUs=\(videoUs)")
     videoEnd = audioEnd
     if let bound = microseconds(audioEnd) { ledger.clipVideo(to: bound) }
-    finish(end: .microphoneLost)
+    recordEnd = .microphoneLost
     return true
   }
 

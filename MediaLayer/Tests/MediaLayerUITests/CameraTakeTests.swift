@@ -238,6 +238,42 @@ struct CameraTakeTests {
   }
 
   @Test
+  func inv_capture_85_a_stop_whose_sound_died_before_it_ends_by_the_picture_that_goes_on() async throws {
+    var (take, events, url) = try longTake(audioSeconds: 3, videoSeconds: 3.5)
+    defer { try? FileManager.default.removeItem(at: url) }
+    guard case .begin? = await events.next() else { Issue.record("no begin first"); return }
+    take.confirmBegin(generation: Fixture.generation)
+    guard case .started? = await events.next() else { Issue.record("no started after confirm"); return }
+    try await feedVideo(take, seconds: 3.5)
+    take.stop()
+    // No sound arrives any more and the source never reports an end; the picture runs past one second ahead.
+    let frame = CMTime(value: 1, timescale: 10)
+    for index in 35..<50 {
+      take.appendVideo(try Fixture.videoBuffer(at: Fixture.arm + CMTimeMultiply(frame, multiplier: Int32(index)), duration: frame), generation: Fixture.generation)
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    guard case let .outcome(.finished(_, durationMs, end, _))? = await events.next() else { Issue.record("the stop hangs on a dead microphone"); return }
+    #expect(end == .microphoneLost)
+    #expect(abs(Int(durationMs) - 3000) <= 20)
+  }
+
+  @Test
+  func inv_capture_85_a_stop_with_sound_arriving_completes_as_before() async throws {
+    var (take, events, url) = try longTake(audioSeconds: 3, videoSeconds: 3.5)
+    defer { try? FileManager.default.removeItem(at: url) }
+    guard case .begin? = await events.next() else { Issue.record("no begin first"); return }
+    take.confirmBegin(generation: Fixture.generation)
+    guard case .started? = await events.next() else { Issue.record("no started after confirm"); return }
+    try await feedVideo(take, seconds: 3.5)
+    take.stop()
+    let step = CMTime(value: CMTimeValue(Fixture.framesPerAudio), timescale: CMTimeScale(Fixture.sampleRate))
+    for index in 300..<360 { take.appendAudio(try Fixture.audioBuffer(at: Fixture.arm + CMTimeMultiply(step, multiplier: Int32(index))), generation: Fixture.generation) }
+    guard case let .outcome(.finished(_, durationMs, end, _))? = await events.next() else { Issue.record("no finished outcome"); return }
+    #expect(end == .completed)
+    #expect(durationMs >= 3400)
+  }
+
+  @Test
   func inv_capture_80_a_take_that_reaches_its_limit_ends_with_the_limit() async throws {
     let fixture = try Fixture.make()
     var settings = fixture.settings
