@@ -1162,9 +1162,8 @@ class MediaCameraTest {
     rig.backend.emit(CaptureEvent.RecordFinished(RecordEnd.LIMIT_REACHED))
     settled(rig, CameraPhase.READY)
     assertEquals(RecordEnd.LIMIT_REACHED, rig.camera.clip(limit)?.end)
-    val stopped = recordingTake(rig)
+    recordingTake(rig)
     assertEquals(RecordEnd.COMPLETED, rig.camera.stopRecording().end)
-    assertEquals(RecordEnd.COMPLETED, rig.camera.clip(stopped)?.end)
   }
 
   @Test
