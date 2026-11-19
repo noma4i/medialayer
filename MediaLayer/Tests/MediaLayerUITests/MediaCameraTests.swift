@@ -2,6 +2,7 @@
 import AVFoundation
 import Foundation
 import MediaLayer
+import SwiftUI
 import Testing
 import UIKit
 @testable import MediaLayerUI
@@ -252,6 +253,40 @@ private final class StateObservation {
 
 private func takeCoverageOf(_ verdict: CoverageVerdict) -> AudioCoverage {
   AudioCoverage(verdict: verdict, samples: 0, firstUs: nil, lastUs: nil, gapAtUs: nil, gapUs: nil)
+}
+
+@MainActor
+private final class LayerLog {
+  var count = 0
+}
+
+@MainActor
+private final class PhaseLog {
+  var last: CameraPhase?
+}
+
+@MainActor
+private final class CameraSwap: ObservableObject {
+  @Published var camera: MediaCamera
+  init(camera: MediaCamera) { self.camera = camera }
+}
+
+private struct SwapCell: View {
+  @ObservedObject var model: CameraSwap
+  let layers: LayerLog
+  var body: some View {
+    MediaCameraPreview(camera: model.camera) { _ in layers.count += 1 }
+  }
+}
+
+private struct StateCell: View {
+  @ObservedObject var model: CameraSwap
+  let seen: PhaseLog
+  var body: some View {
+    WithMediaCameraState(camera: model.camera) { state in
+      Color.clear.onAppear { seen.last = state.phase }.onChange(of: state.phase) { seen.last = $0 }
+    }
+  }
 }
 
 private struct Rig {
@@ -967,6 +1002,48 @@ struct MediaCameraTests {
     #expect(rig.backend.count("zoom 1.5") == 1)
     view.sync(onScreen: false)
     await eventually("unbound") { rig.backend.count("unbind") == 1 }
+  }
+
+  @Test @MainActor
+  func a_mounted_preview_that_gets_another_camera_moves_the_demand_to_it() async throws {
+    let first = try makeRig()
+    let second = try makeRig()
+    let layers = LayerLog()
+    let model = CameraSwap(camera: first.camera)
+    let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+    let host = UIHostingController(rootView: SwapCell(model: model, layers: layers))
+    window.rootViewController = host
+    window.makeKeyAndVisible()
+    await eventually("the first camera is ready") { first.camera.state.phase == .ready }
+    #expect(layers.count == 1)
+    model.camera = second.camera
+    await eventually("the second camera got the preview") { second.camera.state.phase == .ready }
+    await eventually("the first camera was released") { first.backend.count("unbind") == 1 }
+    #expect(second.backend.count("attachPreview") == 1)
+    #expect(first.backend.count("detachPreview") == 1)
+    #expect(layers.count == 2)
+    window.isHidden = true
+    window.rootViewController = nil
+  }
+
+  @Test @MainActor
+  func with_media_camera_state_follows_the_camera_it_is_given_now() async throws {
+    let first = try makeRig()
+    let second = try makeRig()
+    await ready(second)
+    let model = CameraSwap(camera: first.camera)
+    let seen = PhaseLog()
+    let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+    window.rootViewController = UIHostingController(rootView: StateCell(model: model, seen: seen))
+    window.makeKeyAndVisible()
+    await eventually("the first camera is shown") { seen.last == first.camera.state.phase }
+    #expect(first.camera.state.phase != .ready)
+    model.camera = second.camera
+    await eventually("the second camera is shown") { seen.last == .ready }
+    await MainActor.run { first.camera.attachPreview() }
+    await eventually("the first camera is ready") { first.camera.state.phase == .ready }
+    window.isHidden = true
+    window.rootViewController = nil
   }
 
   @Test @MainActor
