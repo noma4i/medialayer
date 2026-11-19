@@ -669,7 +669,7 @@ struct MediaCameraTests {
   }
 
   @Test
-  func inv_audio_43_a_take_without_microphone_sound_is_refused_and_a_lost_sound_throws_the_take_away() async throws {
+  func inv_audio_43_a_take_without_microphone_sound_is_refused() async throws {
     let rig = try makeRig(.moment)
     await ready(rig)
     rig.backend.emit(.microphoneFlow(false))
@@ -686,19 +686,20 @@ struct MediaCameraTests {
     #expect(files(rig).isEmpty)
     rig.backend.soundOnTake = true
     await eventually("ready after the silent take") { rig.camera.state.phase == .ready }
+  }
 
+  @Test
+  func inv_capture_84_a_take_that_lost_its_microphone_ends_and_delivers_the_sound_so_far() async throws {
+    let rig = try makeRig(.moment)
+    await ready(rig)
     rig.backend.emit(.microphoneFlow(true))
     try await rig.camera.startRecording()
     rig.backend.emit(.microphoneFlow(false))
 
     await eventually("the take ended") { rig.camera.state.phase != .recording }
-    do {
-      _ = try await rig.camera.stopRecording()
-      Issue.record("a take survived the lost sound")
-    } catch let MediaError.Camera(reason, _, _) {
-      #expect(reason == .microphoneSilent)
-    }
-    #expect(files(rig).isEmpty)
+    let clip = try await rig.camera.stopRecording()
+    #expect(clip.durationMs > 0)
+    #expect(rig.camera.state.fault == nil)
   }
 
   @Test
