@@ -384,6 +384,8 @@ fn inv_failures_07_closing_the_layer_ends_every_failure_subscription_once_and_a_
 
     caller.block_on(layer.await_closed());
 
+    // The end goes through the mailbox of the listener, so it lands after the close on its own thread.
+    caller.block_on(eventually(|| early.ended() == 1));
     assert_eq!(early.ended(), 1, "closing the layer did not end the failure subscription");
     let late: Arc<Reported> = shared();
     let _late = layer.subscribe_failures(late.clone());
