@@ -18,6 +18,11 @@ struct FrameTurn: Equatable, Sendable {
   var mirrored = false
 }
 
+/// Whether the connection turns the frames: only when it can do the whole turn (the angle, and the mirror when the profile wants one), else nothing is applied and the old path stays.
+func turnsFramesUpright(angleSupported: Bool, mirroringSupported: Bool, mirrorWanted: Bool) -> Bool {
+  angleSupported && (!mirrorWanted || mirroringSupported)
+}
+
 /// Upright frames carry no turn in the file; frames the connection could not turn keep the transform of the take (INV-CAPTURE-29).
 func takeWriterTransform(turn: FrameTurn, mirror: Bool) -> CGAffineTransform {
   turn.upright ? .identity : takeTransform(mirror: mirror)

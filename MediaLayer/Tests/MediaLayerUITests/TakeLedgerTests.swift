@@ -88,5 +88,13 @@ struct TakeLedgerTests {
     #expect(tapOrientation(lens: .front, turn: FrameTurn(upright: true, mirrored: true)) == .up)
     #expect(tapOrientation(lens: .front, turn: FrameTurn(upright: true, mirrored: false)) == .upMirrored)
   }
+
+  @Test
+  func inv_capture_82_the_connection_is_turned_only_when_it_can_do_the_whole_turn() {
+    #expect(turnsFramesUpright(angleSupported: false, mirroringSupported: true, mirrorWanted: false) == false)
+    #expect(turnsFramesUpright(angleSupported: true, mirroringSupported: false, mirrorWanted: true) == false)
+    #expect(turnsFramesUpright(angleSupported: true, mirroringSupported: false, mirrorWanted: false))
+    #expect(turnsFramesUpright(angleSupported: true, mirroringSupported: true, mirrorWanted: true))
+  }
 }
 #endif

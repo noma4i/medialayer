@@ -462,15 +462,14 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     guard let connection = output.connection(with: .video) else { return }
     if let stabilization { connection.preferredVideoStabilizationMode = stabilization }
     // The frames come out upright (and mirrored as the profile wants), so the file needs no rotation tag and no re-encode after stop. A connection that cannot do it keeps the raw frames and the tag.
-    guard connection.isVideoRotationAngleSupported(previewAngle) else { return setTurn(FrameTurn()) }
+    // Decided before anything is touched: a connection that cannot do the whole turn keeps the raw frames, the tag and the old path.
+    guard turnsFramesUpright(angleSupported: connection.isVideoRotationAngleSupported(previewAngle), mirroringSupported: connection.isVideoMirroringSupported, mirrorWanted: mirrorsVideo) else { return setTurn(FrameTurn()) }
     connection.videoRotationAngle = previewAngle
-    var mirrored = false
     if connection.isVideoMirroringSupported {
       connection.automaticallyAdjustsVideoMirroring = false
       connection.isVideoMirrored = mirrorsVideo
-      mirrored = mirrorsVideo
     }
-    setTurn(mirrored == mirrorsVideo ? FrameTurn(upright: true, mirrored: mirrored) : FrameTurn())
+    setTurn(FrameTurn(upright: true, mirrored: mirrorsVideo))
   }
 
   /// The one place that opens and closes a session transaction, so the trace counts every graph change.
