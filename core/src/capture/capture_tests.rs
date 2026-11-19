@@ -132,6 +132,27 @@ fn inv_capture_06_the_verdict_of_a_recording_follows_the_table() {
 }
 
 #[test]
+fn the_microphone_is_lost_when_the_video_runs_over_a_second_ahead_of_the_sound() {
+    for (audio, video, expected) in [(-1, 5_000_000, false), (4_000_000, 5_000_000, false), (4_000_000, 5_000_001, true), (5_000_000, 4_000_000, false), (0, 1_000_000, false), (0, 1_000_001, true)] {
+        assert_eq!(microphone_lost(audio, video), expected, "{audio} {video}");
+    }
+}
+
+#[test]
+fn a_take_ended_by_a_lost_microphone_is_judged_like_the_limit() {
+    let profile = moment();
+    let recording = drive(profile, ready(profile), &[CaptureEvent::Start, CaptureEvent::RecordStarted]).0;
+    for (length, delivered) in [(Some(10_000), true), (Some(501), true), (Some(500), false), (Some(400), false)] {
+        let (lost, lost_actions) = drive(profile, recording, &[CaptureEvent::RecordFinished { end: RecordEnd::MicrophoneLost }, CaptureEvent::RecordSettled { duration_ms: length }]);
+        let (limit, limit_actions) = drive(profile, recording, &[CaptureEvent::RecordFinished { end: RecordEnd::LimitReached }, CaptureEvent::RecordSettled { duration_ms: length }]);
+        assert_eq!((lost.state.outcome, lost.state.refused_ms), (limit.state.outcome, limit.state.refused_ms), "{length:?}");
+        assert_eq!(lost_actions, limit_actions, "{length:?}");
+        assert_eq!(matches!(lost.state.outcome, Some(TakeOutcome::Captured { .. })), delivered, "{length:?}");
+        if !delivered { assert_eq!(lost.state.outcome, Some(TakeOutcome::Refused { reason: CameraRefusal::TooShort })); }
+    }
+}
+
+#[test]
 fn inv_capture_08_the_frame_gate_passes_the_first_frame_and_then_the_rate() {
     assert!(frame_gate(None, 5, 12.0));
     assert!(!frame_gate(Some(1000), 1050, 12.0));

@@ -1,11 +1,14 @@
 const ZOOM_CEILING: f32 = 15.0;
 const TICK_MS: u64 = 100;
+/// How far the video may run ahead of the written sound before the microphone counts as lost. Owner number: 1000 ms.
+pub const MICROPHONE_LOST_LAG_US: i64 = 1_000_000;
 
-/// How a recording ended on the platform: by the app, by the limit, or by a failure.
+/// How a recording ended on the platform: by the app, by the limit, by a microphone that stopped delivering (handled as the limit), or by a failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum RecordEnd {
     Completed,
     LimitReached,
+    MicrophoneLost,
     Failed,
 }
 
@@ -60,6 +63,12 @@ pub fn record_verdict(started: bool, closed: bool, discard: bool, end: RecordEnd
         (_, Some(length)) if length <= min_take_ms => RecordVerdict::TooShort,
         _ => RecordVerdict::Deliver,
     }
+}
+
+/// Whether the microphone stopped delivering mid-take: the sound has started (`audio_end_us >= 0`) and the video runs ahead of it by more than the owner lag.
+#[uniffi::export]
+pub fn microphone_lost(audio_end_us: i64, video_end_us: i64) -> bool {
+    audio_end_us >= 0 && video_end_us.saturating_sub(audio_end_us) > MICROPHONE_LOST_LAG_US
 }
 
 /// One restart after a reset of the camera service, then a failure. Any other fault is a failure. `spent` tells that the restart was used.
