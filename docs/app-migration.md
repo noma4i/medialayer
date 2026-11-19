@@ -4,7 +4,7 @@ What an app changes when it moves to a new MediaLayer version. Each section name
 
 ## Next version
 
-- `microphoneAvailability` no longer blinks `noSound` when a microphone starts: `noSound` comes only from a silence the platform reports. A gate that disables recording on `noSound` no longer cancels its own start.
+- `microphoneAvailability` no longer blinks `noSound` when a microphone starts: `noSound` comes only from a silence the platform reports. An app that disables recording on `noSound` no longer cancels its own start.
 - `microphoneBusy` comes only from a call, from a voice start during a camera take (and a camera take during a voice), and from a second start of the same recorder. A recording of another app shows `otherApp` and no longer refuses a start.
 - A voice start right after a camera take, while the preview lives, records: the voice takes the microphone of the idle preview, and the preview gets it back after the voice.
 
