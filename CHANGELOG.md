@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- iOS judges the sound of a camera clip from the file again; the write-time ledger is only traced.
+
 ## 3.45.0 - 2026-11-19
 
 ### Added

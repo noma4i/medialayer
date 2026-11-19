@@ -677,19 +677,20 @@ public final class MediaCamera: @unchecked Sendable {
   private func readClip() {
     guard let url = recordingURL else { return }
     reading?.cancel()
-    // The writer judged the sound of the take while it wrote: the file is read back only when the straightening rewrote it.
-    let coverage = backend.takeCoverage()
+    // The file is the judge of the sound; the writer ledger is only traced next to the file verdict.
+    let ledger = backend.takeCoverage()
     reading = Task { [services] in
       let info: MediaInfo?
       do {
-        if let coverage {
-          if let refusal = audioCoverageRefusal(verdict: coverage.verdict) { return self.refuseClip(url, refusal) }
-        } else if let refusal = try await self.audioRefusal(of: url) {
-          return self.refuseClip(url, refusal)
-        }
+        let first = try await self.fileCoverage(of: url)
+        MediaTrace.emit("camera", "take coverage \(Self.describe(ledger, label: "ledger")) \(Self.describe(first, label: "file"))")
+        if let refusal = audioCoverageRefusal(verdict: first.verdict) { return self.refuseClip(url, refusal) }
         let rewrote = try await services.uprightVideo(url)
         try Task.checkCancellation()
-        if rewrote, let refusal = try await self.audioRefusal(of: url) { return self.refuseClip(url, refusal) }
+        if rewrote {
+          let again = try await self.fileCoverage(of: url)
+          if let refusal = audioCoverageRefusal(verdict: again.verdict) { return self.refuseClip(url, refusal) }
+        }
         info = try await services.clipInfo(url)
       } catch {
         if !(error is CancellationError) { Media.recordNativeFailure(error, source: .camera) }
@@ -705,10 +706,16 @@ public final class MediaCamera: @unchecked Sendable {
     }
   }
 
-  private func audioRefusal(of url: URL) async throws -> CameraRefusal? {
+  private func fileCoverage(of url: URL) async throws -> AudioCoverage {
     let coverage = try await services.audioCoverage(url, profile.audio)
     try Task.checkCancellation()
-    return audioCoverageRefusal(verdict: coverage.verdict)
+    return coverage
+  }
+
+  private static func describe(_ coverage: AudioCoverage?, label: String) -> String {
+    guard let coverage else { return "\(label)=- first=- last=- gapAt=- gap=- samples=-" }
+    func us(_ value: Int64?) -> String { value.map(String.init) ?? "-" }
+    return "\(label)=\(coverage.verdict) first=\(us(coverage.firstUs)) last=\(us(coverage.lastUs)) gapAt=\(us(coverage.gapAtUs)) gap=\(us(coverage.gapUs)) samples=\(coverage.samples)"
   }
 
   private func refuseClip(_ url: URL, _ refusal: CameraRefusal) {
