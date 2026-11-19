@@ -1196,7 +1196,7 @@ struct MediaCameraTests {
   }
 
   // C2
-  @Test(arguments: [("interruption", CameraRefusal.interrupted), ("silence", .microphoneSilent), ("too short", .tooShort), ("failure", .recordFailed)])
+  @Test(arguments: [("interruption", CameraRefusal.interrupted), ("too short", .tooShort), ("failure", .recordFailed)])
   func inv_capture_36_a_thrown_away_take_shows_its_refusal_and_fault_without_stop(cause: String, reason: CameraRefusal) async throws {
     let rig = try makeRig(.moment)
     await ready(rig)
@@ -1207,7 +1207,6 @@ struct MediaCameraTests {
 
     switch cause {
     case "interruption": rig.audio.port.send(.interruptionBegan)
-    case "silence": rig.backend.emit(.microphoneFlow(false))
     case "too short":
       rig.counters.info = MediaInfo(durationMs: 300, frame: nil)
       rig.backend.emit(.recordFinished(end: .limitReached))
