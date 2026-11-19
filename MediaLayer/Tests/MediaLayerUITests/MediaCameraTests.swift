@@ -171,20 +171,10 @@ private final class Counters: @unchecked Sendable {
   private var given = 0
   private var uprightQualities: [Double] = []
   private var mainCalls = 0
-  var denySessions = false
-  var denyShots = false
   var info: MediaInfo? = MediaInfo(durationMs: 2000, frame: ImageSize(width: 720, height: 1280))
-  /// Nil reads the real file with the real rule; a verdict answers for a file the test does not write.
-  var verdict: CoverageVerdict? = .covered
-  private var coverageAsked: [(url: URL, required: Bool)] = []
-  var coverageCalls: [(url: URL, required: Bool)] { lock.withLock { coverageAsked } }
-
-  func coverage(_ url: URL, _ required: Bool) async throws -> AudioCoverage {
-    lock.withLock { coverageAsked.append((url, required)) }
-    TestSignal.shared.fire()
-    guard let verdict else { return try await scanAudioCoverage(at: url, required: required) }
-    return AudioCoverage(verdict: required ? verdict : .skipped, samples: 0, firstUs: nil, lastUs: nil, gapAtUs: nil, gapUs: nil)
-  }
+  /// An error the reservation of a session or a shot throws; nil lets it pass.
+  var sessionError: Error?
+  var shotError: Error?
 
   var sessionsTaken: Int { lock.withLock { taken } }
   var released: Int { lock.withLock { given } }
@@ -213,13 +203,11 @@ private final class Counters: @unchecked Sendable {
     continuation?.resume()
   }
 
-  /// Whether the straightening rewrote the file, as the real one answers.
-  var rewrites = false
 
-  func straighten(_ url: URL) async throws -> Bool {
+  func straighten(_ url: URL) async throws {
     let hold = lock.withLock { straightenedURLs.append(url); return holdVideo }
     TestSignal.shared.fire()
-    guard hold else { return lock.withLock { rewrites } }
+    guard hold else { return }
     if let lag = lock.withLock({ parkLag }) { try await Task.sleep(for: lag) }
     try await withTaskCancellationHandler {
       try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -239,7 +227,6 @@ private final class Counters: @unchecked Sendable {
       }
       continuation?.resume(throwing: CancellationError())
     }
-    return lock.withLock { rewrites }
   }
 }
 
@@ -326,23 +313,22 @@ private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .bac
   let services = CameraServices(
     admitSession: { _ in
       counters.checkThread()
-      if counters.denySessions { throw MediaError.Overloaded(detail: "no memory") }
+      if let error = counters.sessionError { throw error }
       counters.took()
       return { counters.gave() }
     },
     admitShot: { _ in
       counters.checkThread()
-      if counters.denyShots { throw MediaError.Overloaded(detail: "no memory") }
+      if let error = counters.shotError { throw error }
       counters.took()
       return { counters.gave() }
     },
     link: { audio.link },
-    clipInfo: { _ in
+    clipInfo: { url in
       counters.checkThread()
+      try await counters.straighten(url)
       return counters.info
     },
-    uprightVideo: { url in try await counters.straighten(url) },
-    audioCoverage: { url, required in try await counters.coverage(url, required) },
     upright: { raw, quality in
       counters.checkThread()
       counters.upright(quality)
@@ -502,11 +488,40 @@ struct MediaCameraTests {
 
   @Test
   func inv_capture_13_a_refusal_of_the_memory_budget_fails_the_camera_without_a_bind() async throws {
-    let rig = try makeRig { _, counters in counters.denySessions = true }
+    let rig = try makeRig { _, counters in counters.sessionError = MediaError.Overloaded(detail: "no memory") }
     rig.camera.attachPreview()
     await eventually("failed") { rig.camera.state.phase == .failed }
     #expect(rig.camera.state.fault == .memory)
     #expect(rig.backend.log.filter { $0.hasPrefix("bind") }.isEmpty)
+  }
+
+  @Test(arguments: [
+    (error: MediaError.Closed, reason: CameraRefusal.notReady),
+    (error: MediaError.Overloaded(detail: "queue"), reason: CameraRefusal.memory),
+    (error: MediaError.Unexpected(detail: "native"), reason: CameraRefusal.notReady),
+  ])
+  func inv_capture_13_a_refused_session_reservation_tells_its_cause(error: MediaError, reason: CameraRefusal) async throws {
+    let rig = try makeRig { _, counters in counters.sessionError = error }
+    rig.camera.attachPreview()
+    await eventually("failed") { rig.camera.state.phase == .failed }
+    #expect(rig.camera.state.fault == reason)
+  }
+
+  @Test(arguments: [
+    (error: MediaError.Closed, reason: CameraRefusal.notReady),
+    (error: MediaError.Overloaded(detail: "queue"), reason: CameraRefusal.memory),
+    (error: MediaError.Unexpected(detail: "native"), reason: CameraRefusal.notReady),
+  ])
+  func inv_capture_13_a_refused_shot_reservation_tells_its_cause(error: MediaError, reason: CameraRefusal) async throws {
+    let rig = try makeRig()
+    await ready(rig)
+    rig.counters.shotError = error
+    do {
+      _ = try await rig.camera.takePhoto()
+      Issue.record("a refused shot was taken")
+    } catch let MediaError.Camera(got, _, _) {
+      #expect(got == reason)
+    }
   }
 
   @Test
@@ -519,7 +534,7 @@ struct MediaCameraTests {
     await #expect(throws: MediaError.self) { _ = try await rig.camera.takePhoto() }
     #expect((rig.counters.sessionsTaken, rig.counters.released) == (3, 2))
     #expect(rig.camera.state.fault == .photoFailed)
-    rig.counters.denyShots = true
+    rig.counters.shotError = MediaError.Overloaded(detail: "no memory")
     do {
       _ = try await rig.camera.takePhoto()
       Issue.record("a shot above the budget was taken")
@@ -672,100 +687,51 @@ struct MediaCameraTests {
   }
 
   @Test
-  func inv_capture_50_a_take_whose_ledger_is_covered_reads_its_file_once_and_is_delivered_and_a_take_without_sound_asks_nothing() async throws {
-    let rig = try makeRig(.moment) { backend, _ in backend.coverage = takeCoverageOf(.covered) }
-    await ready(rig)
-    try await rig.camera.startRecording()
-    _ = try await rig.camera.stopRecording()
-    #expect(rig.counters.coverageCalls.count == 1)
-    #expect(rig.counters.straightened.count == 1)
-    let quiet = try makeRig(.photo)
-    quiet.counters.verdict = nil
-    await ready(quiet)
-    #expect(quiet.counters.coverageCalls.isEmpty)
-  }
-
-  @Test
-  func inv_capture_50_a_ledger_hole_with_a_covered_file_is_delivered_because_the_file_is_the_judge() async throws {
-    let rig = try makeRig(.moment) { backend, _ in backend.coverage = takeCoverageOf(.midGap) }
+  func inv_capture_50_a_take_whose_ledger_is_covered_is_delivered_and_a_hole_file_is_never_read_for_the_sound() async throws {
+    let judged = try await CoverageClips.writeJudged(audio: CoverageClips.hole)
+    defer { try? FileManager.default.removeItem(at: judged.url) }
+    let rig = try makeRig(.moment) { backend, _ in
+      backend.clipFile = judged.url
+      backend.coverage = takeCoverageOf(.covered)
+    }
     await ready(rig)
     try await rig.camera.startRecording()
     let clip = try await rig.camera.stopRecording()
-    #expect(clip.durationMs > 0)
-    #expect(rig.counters.coverageCalls.count == 1)
-    #expect(rig.counters.straightened.count == 1)
+    #expect(clip.durationMs > 0, "the ledger is the judge: the file is not scanned after stop")
+    #expect(rig.counters.straightened.count == 1, "the stop path asks the duration of the clip and nothing else")
   }
 
   @Test
-  func inv_capture_50_a_file_hole_is_refused_and_the_file_is_deleted_whatever_the_ledger_says() async throws {
-    let rig = try makeRig(.moment) { backend, counters in
-      backend.coverage = takeCoverageOf(.covered)
-      counters.verdict = .midGap
+  func inv_capture_50_a_ledger_hole_is_refused_and_the_file_is_deleted() async throws {
+    let judged = try await CoverageClips.writeJudged(audio: CoverageClips.hole)
+    defer { try? FileManager.default.removeItem(at: judged.url) }
+    let rig = try makeRig(.moment) { backend, _ in
+      backend.clipFile = judged.url
+      backend.coverage = judged.coverage
     }
     await ready(rig)
     try await rig.camera.startRecording()
     do {
       _ = try await rig.camera.stopRecording()
-      Issue.record("a take with a hole in its file was delivered")
-    } catch let MediaError.Camera(reason, _, _) {
-      #expect(reason == .audioTrackBroken)
-    }
-    await eventually("ready again") { rig.camera.state.phase == .ready }
-    #expect(files(rig).isEmpty)
-    #expect(rig.counters.coverageCalls.count == 1)
-    #expect(rig.counters.straightened.isEmpty)
-  }
-
-  @Test
-  func inv_capture_50_a_straightening_that_rewrote_the_file_reads_it_twice() async throws {
-    let rewritten = try makeRig(.moment) { backend, counters in
-      backend.coverage = takeCoverageOf(.covered)
-      counters.rewrites = true
-    }
-    await ready(rewritten)
-    try await rewritten.camera.startRecording()
-    _ = try await rewritten.camera.stopRecording()
-    #expect(rewritten.counters.coverageCalls.count == 2)
-    #expect(rewritten.counters.coverageCalls.allSatisfy { $0.required })
-
-    let bare = try makeRig(.moment)
-    await ready(bare)
-    try await bare.camera.startRecording()
-    _ = try await bare.camera.stopRecording()
-    #expect(bare.counters.coverageCalls.count == 1)
-  }
-
-  @Test
-  func inv_capture_50_a_real_clip_whose_pcm_misses_the_middle_is_refused_once_and_leaves_no_file_and_a_ready_preview() async throws {
-    let clip = try await CoverageClips.write(audio: CoverageClips.hole)
-    defer { try? FileManager.default.removeItem(at: clip) }
-    let rig = try makeRig(.moment) { backend, counters in
-      backend.clipFile = clip
-      counters.verdict = nil
-    }
-    await ready(rig)
-    try await rig.camera.startRecording()
-    do {
-      _ = try await rig.camera.stopRecording()
-      Issue.record("a clip with a hole in its sound was delivered")
+      Issue.record("a take with a hole in its sound was delivered")
     } catch let MediaError.Camera(reason, _, _) {
       #expect(reason == .audioTrackBroken)
     }
     await eventually("ready again") { rig.camera.state.phase == .ready }
     #expect(rig.camera.state.outcome == .refused(reason: .audioTrackBroken))
     #expect(files(rig).isEmpty)
-    #expect(rig.counters.coverageCalls.count == 1)
     #expect(rig.counters.straightened.isEmpty)
     #expect(rig.backend.count("unbind") == 0)
   }
 
   @Test
   func inv_capture_50_a_real_clip_with_covered_sound_is_delivered_and_two_takes_on_one_source_each_start_on_their_own_pcm() async throws {
-    let clip = try await CoverageClips.write(audio: CoverageClips.whole)
+    let judged = try await CoverageClips.writeJudged(audio: CoverageClips.whole)
+    let clip = judged.url
     defer { try? FileManager.default.removeItem(at: clip) }
-    let rig = try makeRig(.moment) { backend, counters in
+    let rig = try makeRig(.moment) { backend, _ in
       backend.clipFile = clip
-      counters.verdict = nil
+      backend.coverage = judged.coverage
     }
     await ready(rig)
     for _ in 0..<2 {

@@ -592,7 +592,8 @@ public final class MediaCamera: @unchecked Sendable {
         let release = try await services.admitSession(captureCost(profile: profile))
         guard holds.install(release) else { return }
       } catch {
-        queue.async { if self.epoch == current { self.apply(.refuse(reason: .memory)) } }
+        let reason = Self.reservationReason(error)
+        queue.async { if self.epoch == current { self.apply(.refuse(reason: reason)) } }
         return
       }
     }
@@ -642,7 +643,7 @@ public final class MediaCamera: @unchecked Sendable {
       do {
         hold = try await services.admitShot(sizeBytes)
       } catch {
-        return finish(.failure(Self.refusal(.memory)))
+        return finish(.failure(Self.refusal(Self.reservationReason(error))))
       }
       let file = CaptureFiles.name(.photo, in: services.directory)
       let raw = file.deletingPathExtension().appendingPathExtension("raw")
@@ -665,6 +666,17 @@ public final class MediaCamera: @unchecked Sendable {
     }
   }
 
+  /// A refused reservation tells its cause: a closed layer is not ready, an overloaded one is memory, anything else is a native failure that is recorded.
+  static func reservationReason(_ error: Error) -> CameraRefusal {
+    switch error as? MediaError {
+    case .Closed?: return .notReady
+    case .Overloaded?: return .memory
+    default:
+      if !(error is CancellationError) { Media.recordNativeFailure(error, source: .camera) }
+      return .notReady
+    }
+  }
+
   private static func pixelSize(of file: URL) -> (width: Int, height: Int) {
     guard let source = CGImageSourceCreateWithURL(file as CFURL, nil),
           let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
@@ -677,20 +689,13 @@ public final class MediaCamera: @unchecked Sendable {
   private func readClip() {
     guard let url = recordingURL else { return }
     reading?.cancel()
-    // The file is the judge of the sound; the writer ledger is only traced next to the file verdict.
+    // The sound verdict is the ledger of the writer, kept while it wrote (INV-CAPTURE-80: the file is not rotated and not read back for the sound).
     let ledger = backend.takeCoverage()
     reading = Task { [services] in
       let info: MediaInfo?
       do {
-        let first = try await self.fileCoverage(of: url)
-        MediaTrace.emit("camera", "take coverage \(Self.describe(ledger, label: "ledger")) \(Self.describe(first, label: "file"))")
-        if let refusal = audioCoverageRefusal(verdict: first.verdict) { return self.refuseClip(url, refusal) }
-        let rewrote = try await services.uprightVideo(url)
-        try Task.checkCancellation()
-        if rewrote {
-          let again = try await self.fileCoverage(of: url)
-          if let refusal = audioCoverageRefusal(verdict: again.verdict) { return self.refuseClip(url, refusal) }
-        }
+        MediaTrace.emit("camera", "take coverage \(Self.describe(ledger, label: "ledger"))")
+        if let ledger, let refusal = audioCoverageRefusal(verdict: ledger.verdict) { return self.refuseClip(url, refusal) }
         info = try await services.clipInfo(url)
       } catch {
         if !(error is CancellationError) { Media.recordNativeFailure(error, source: .camera) }
@@ -704,12 +709,6 @@ public final class MediaCamera: @unchecked Sendable {
         self.apply(.recordSettled(durationMs: info?.durationMs))
       }
     }
-  }
-
-  private func fileCoverage(of url: URL) async throws -> AudioCoverage {
-    let coverage = try await services.audioCoverage(url, profile.audio)
-    try Task.checkCancellation()
-    return coverage
   }
 
   private static func describe(_ coverage: AudioCoverage?, label: String) -> String {
