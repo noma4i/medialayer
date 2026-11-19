@@ -37,21 +37,11 @@ internal interface CaptureBackend {
 
   fun setSink(sink: (CaptureEvent) -> Unit)
 
-  fun setAudioIssueSink(sink: (CaptureAudioIssue) -> Unit) = Unit
-
-  /** The verdict of the sound, the length and the frame of a finished take, as its writer knew them at its write point: it arrives before the `RecordFinished` of the same take. */
-  fun setTakeSink(sink: (WrittenTake) -> Unit) = Unit
-
   fun setHost(view: PreviewView?, owner: LifecycleOwner?)
-
-  fun useMemory(memory: CaptureMemory) = Unit
 
   fun bind(lens: CameraLens, profile: CaptureProfile)
 
   fun unbind()
-
-  /** Calls back once the audio input, the microphone and the take of the last [unbind] are closed: the memory of the session closes after it. */
-  fun unbound(done: () -> Unit) = done()
 
   /** Writes the JPEG of a photo into [file]. */
   suspend fun takePhoto(file: File, flash: Boolean, profile: CaptureProfile)
@@ -62,19 +52,6 @@ internal interface CaptureBackend {
   }
 
   fun endRecording()
-
-  fun endRecording(done: () -> Unit) { try { endRecording() } finally { done() } }
-
-  fun awaitRecordingStopped(done: () -> Unit) = done()
-
-  /** Returns once the camera's microphones hold no AudioRecord: the recording ticket ends after it. */
-  suspend fun audioIdle() = Unit
-
-  /** The audio source of the take is gone. */
-  fun audioLost() = Unit
-
-  /** A start of a take with sound runs the microphone attempts again when its last run ended silent (owner 2026-11-19, [MicrophoneRetry]). */
-  fun retryMicrophone() = Unit
 
   fun recordedMs(): Long
 
@@ -100,6 +77,7 @@ internal class CameraServices(
   val admitSession: suspend (Long) -> AutoCloseable,
   val admitShot: suspend (Long) -> AutoCloseable,
   val audio: () -> AudioLink?,
+  val clipInfo: suspend (File) -> MediaInfo?,
   val upright: suspend (File, Double) -> File,
   val directory: File
 ) {
@@ -114,6 +92,7 @@ internal class CameraServices(
         },
         admitShot = { bytes -> environment().media.decodeAdmit()(bytes) },
         audio = { Media.link },
+        clipInfo = { file -> runCatching { readMediaInfo(context, "file://${file.absolutePath}") }.getOrNull() },
         upright = { raw, quality -> prepareImageAt(directory, raw, quality, environment().media.decodeAdmit()).file },
         directory = directory
       )

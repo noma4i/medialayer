@@ -87,7 +87,6 @@ class MediaCamera internal constructor(
   private var closed = false
   private var epoch = 0
   private var sessionHold: AutoCloseable? = null
-  private var sessionMemory: CaptureMemory? = null
   private var audioHold: RecordingTicket? = null
   private var audioFailure: RecordingRefusal? = null
   private var retiringAudio: RecordingTicket? = null
@@ -99,8 +98,8 @@ class MediaCamera internal constructor(
   private var reading: Job? = null
   private var ticker: Job? = null
   private var recordingFile: File? = null
-  private var recordingWritten: WrittenTake? = null
-  private var clipInfo: WrittenTake? = null
+  private var recordedEnd = RecordEnd.COMPLETED
+  private var clipInfo: MediaInfo? = null
   private var ended: Result<CapturedClip>? = null
   private var photoOutcome: Result<CapturedPhoto>? = null
   private var photoWaiter: CompletableDeferred<CapturedPhoto>? = null
@@ -138,9 +137,7 @@ class MediaCamera internal constructor(
         Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, error)
       }
     }
-    backend.setSink { event -> post(event) }
-    backend.setAudioIssueSink { issue -> enqueue { microphoneFailed(issue) } }
-    backend.setTakeSink { written -> enqueue { if (!closed) recordingWritten = written } }
+    backend.setSink { event -> if (event is CaptureEvent.RecordFinished) enqueue { if (!closed) { recordedEnd = event.end; apply(event) } } else post(event) }
   }
 
   /** The state now: readiness, recording and its length, flash, zoom, the side and the last refusal. */
@@ -181,8 +178,6 @@ class MediaCamera internal constructor(
         waiter.completeExceptionally(audioFailure?.let(::microphoneRefusal) ?: refusal(CameraRefusal.NOT_READY))
         return@enqueue
       }
-      // The start of a take retries a microphone that ended silent; the take waits for its sound (owner 2026-11-19).
-      if (profile.audio) backend.retryMicrophone()
       apply(CaptureEvent.Start)
       take.set(run.state.take)
       if (run.starting) startWaiter = waiter else waiter.completeExceptionally(startFailure ?: refusal(CameraRefusal.NOT_READY))
@@ -348,7 +343,6 @@ class MediaCamera internal constructor(
   }
 
   private fun installAudio(ticket: RecordingTicket) {
-    ticket.gate { backend.audioIdle() }
     audioHold?.close()
     audioRevocation?.close()
     audioHold = ticket
@@ -364,7 +358,6 @@ class MediaCamera internal constructor(
           retiringAudio = ticket
           recordingStopped = done
           failMicrophone(microphoneRefusal(reason))
-          recordingStopped?.let { pending -> recordingStopped = null; backend.awaitRecordingStopped(pending) }
         } else { ticket.close(); done() }
       }) done()
     }
@@ -374,20 +367,9 @@ class MediaCamera internal constructor(
     if (!queue.isShutdown) enqueue { if (!closed) apply(event) }
   }
 
-  private fun microphoneFailed(issue: CaptureAudioIssue) {
-    if (closed) return
-    when (issue) {
-      CaptureAudioIssue.SILENCED -> { apply(CaptureEvent.AudioFlow(false)); backend.audioLost() }
-      CaptureAudioIssue.ACTIVE -> apply(CaptureEvent.AudioFlow(true))
-      CaptureAudioIssue.PERMISSION_DENIED -> if (run.starting || run.started) failMicrophone(microphoneRefusal(RecordingRefusal.PERMISSION_DENIED))
-      CaptureAudioIssue.SOURCE_ERROR, CaptureAudioIssue.ENCODER_ERROR -> if (run.starting || run.started) failMicrophone(refusal(CameraRefusal.RECORD_FAILED))
-    }
-  }
-
   private fun failMicrophone(failure: MediaException.Camera) {
     startFailure = failure
     apply(CaptureEvent.Revoked(failure.reason))
-    backend.audioLost()
   }
 
   private fun reconcile() {
@@ -407,6 +389,7 @@ class MediaCamera internal constructor(
       Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, failure)
     }
     syncTake()
+    if (!run.starting && !run.started) recordingStopped?.let { recordingStopped = null; it() }
     if (cancelReading != null) {
       cancelReading.invokeOnCompletion {
         enqueue {
@@ -498,7 +481,7 @@ class MediaCamera internal constructor(
       CaptureAction.BeginRecording -> {
         val file = CaptureFiles.name(CaptureFileKind.CLIP, services.directory)
         recordingFile = file
-        recordingWritten = null
+        recordedEnd = RecordEnd.COMPLETED
         clipInfo = null
         val ticket = audioHold
         backend.beginRecording(file, profile, run.state.lens) { start ->
@@ -506,11 +489,7 @@ class MediaCamera internal constructor(
           if (refused != null) enqueue { failMicrophone(microphoneRefusal(refused)) }
         }
       }
-      is CaptureAction.EndRecording -> {
-        val stopped = recordingStopped
-        recordingStopped = null
-        if (stopped == null) backend.endRecording() else backend.endRecording(stopped)
-      }
+      is CaptureAction.EndRecording -> backend.endRecording()
       CaptureAction.ReadClip -> readClip()
       CaptureAction.Deliver -> deliver()
       CaptureAction.Discard -> discard()
@@ -543,17 +522,13 @@ class MediaCamera internal constructor(
     reading = null
     recordingFile?.let(::deleteMediaFile)
     recordingFile = null
-    recordingWritten = null
     clipInfo = null
   }
 
   private fun releaseHolds() {
     val hold = sessionHold
-    val memory = sessionMemory
     sessionHold = null
-    sessionMemory = null
-    // The audio input, the microphone and the take of the session are closed by the backend first; the memory and its hold go after them.
-    if (memory != null && hold != null) backend.unbound { memory.close { hold.close() } } else hold?.close()
+    hold?.close()
     audioRevocation?.close()
     audioRevocation = null
     retiringAudio?.close()
@@ -615,10 +590,7 @@ class MediaCamera internal constructor(
             try { admittedHold?.close() } finally { admittedSession?.close() }
             return@enqueue
           }
-          admittedHold?.let {
-            sessionHold = it
-            sessionMemory = CaptureMemory(captureCost(profile).toLong()).also(backend::useMemory)
-          }
+          admittedHold?.let { sessionHold = it }
           admittedSession?.let { installAudio(it) }
           backend.bind(lens, profile)
           installTap()
@@ -688,37 +660,31 @@ class MediaCamera internal constructor(
     }
   }
 
-  /** The clip is judged from what its writer knew at the write point: the verdict of its sound, its length and its frame. The file is never opened here. */
+  /** The length and the frame of the finished file come from its header: the CameraX Recorder wrote it. */
   private fun readClip() {
     val file = recordingFile ?: return
     reading?.cancel()
-    val silent = takeRefusal()
-    val info = if (silent == null) recordingWritten else null
     reading = scope.launch {
+      val info = services.clipInfo(file)
       enqueue {
         if (recordingFile != file) return@enqueue
         if (reading?.isCancelled == true) return@enqueue
         reading = null
         clipInfo = info
-        silent?.let { apply(CaptureEvent.Revoked(it)) }
-        apply(CaptureEvent.RecordSettled(info?.let { (it.durationUs / 1000).toULong() }))
+        apply(CaptureEvent.RecordSettled(info?.durationMs))
       }
     }
   }
 
-  /** The refusal of the core for the sound the take wrote, judged at its write point: no file is read. A take with sound whose verdict never arrived is refused as broken. */
-  private fun takeRefusal(): CameraRefusal? =
-    if (!profile.audio) null else recordingWritten.let { if (it == null) CameraRefusal.AUDIO_TRACK_BROKEN else audioCoverageRefusal(it.coverage.verdict) }
-
   private fun deliver() {
     val file = recordingFile
     val info = clipInfo
+    val length = info?.durationMs
     val take = run.state.take
-    if (file == null || info == null || take == null || closed) return discard()
+    if (file == null || info == null || length == null || take == null || closed) return discard()
     recordingFile = null
-    recordingWritten = null
     clipInfo = null
-    val clip = CapturedClip(file, info.durationUs / 1000, info.frame, run.takeLens, info.end)
+    val clip = CapturedClip(file, length.toLong(), info.frame, run.takeLens, recordedEnd)
     clips[take] = clip
     ended = Result.success(clip)
   }
@@ -730,7 +696,6 @@ class MediaCamera internal constructor(
     reading = null
     recordingFile?.let(::deleteMediaFile)
     recordingFile = null
-    recordingWritten = null
     clipInfo = null
     ended = Result.failure(refusal(run.state.fault ?: CameraRefusal.NOT_READY, run.state.refusedMs))
   }
