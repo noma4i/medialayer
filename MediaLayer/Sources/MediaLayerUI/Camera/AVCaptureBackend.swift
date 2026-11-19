@@ -110,6 +110,11 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     videoPort = inputs.first?.ports(for: .video, sourceDeviceType: device.deviceType, sourceDevicePosition: device.position).first
     previewMirrored = lens == .front && profile.mirrorFrontVideo
     previews.keys.forEach(linkPreview)
+    // The movie connection is set once per bind: a take only starts writing, the running session is not touched at its start.
+    if let connection = movie?.connection(with: .video), connection.isVideoMirroringSupported {
+      connection.automaticallyAdjustsVideoMirroring = false
+      connection.isVideoMirrored = lens == .front && profile.mirrorFrontVideo
+    }
     session.commitConfiguration()
     camera = device
     photoOutput = photo
@@ -120,6 +125,15 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     catch {
       Media.recordNativeFailure(error, source: .camera)
       choice = nil
+    }
+    // Stabilization depends on the active format, so it is set after applyFormat, still inside the bind.
+    if let connection = movie?.connection(with: .video) {
+      let supported = [VideoStabilization.standard, .cinematic].filter { device.activeFormat.isVideoStabilizationModeSupported($0.avMode) }
+      if let mode = stabilizationMode(requested: profile.stabilization, supported: supported) {
+        session.beginConfiguration()
+        connection.preferredVideoStabilizationMode = mode.avMode
+        session.commitConfiguration()
+      }
     }
     if let photo, let size = choice?.photoSize {
       photo.maxPhotoDimensions = CMVideoDimensions(width: Int32(size.width), height: Int32(size.height))
@@ -250,21 +264,19 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
       guard let self else { return }
       guard let output = self.movieOutput, !output.isRecording, self.session.isRunning else { return self.emit(.recordFinished(end: .failed)) }
       if let connection = output.connection(with: .video) {
-        if connection.isVideoMirroringSupported {
-          connection.automaticallyAdjustsVideoMirroring = false
-          connection.isVideoMirrored = lens == .front && profile.mirrorFrontVideo
-        }
         let angle = self.rotation?.videoRotationAngleForHorizonLevelCapture ?? 90
         if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
-        if let camera = self.camera {
-          let supported = [VideoStabilization.standard, .cinematic].filter { camera.activeFormat.isVideoStabilizationModeSupported($0.avMode) }
-          if let mode = stabilizationMode(requested: profile.stabilization, supported: supported) { connection.preferredVideoStabilizationMode = mode.avMode }
-        }
       }
       // The movie output writes the sound itself: the core only needs to hear that the microphone of this take is live.
       if profile.audio { self.emit(.audioFlow(flowing: true)) }
       output.maxRecordedDuration = CMTime(value: CMTimeValue(profile.maxDurationMs), timescale: 1000)
-      let delegate = MovieDelegate(onStart: { [weak self] in self?.emit(.recordStarted) }, onFinish: { [weak self] end in self?.emit(.recordFinished(end: end)) })
+      let delegate = MovieDelegate(onStart: { [weak self] in
+        guard let self else { return }
+        if let connection = self.movieOutput?.connection(with: .video) {
+          NSLog("movie stabilization preferred=%ld active=%ld", connection.preferredVideoStabilizationMode.rawValue, connection.activeVideoStabilizationMode.rawValue)
+        }
+        self.emit(.recordStarted)
+      }, onFinish: { [weak self] end in self?.emit(.recordFinished(end: end)) })
       self.recording = delegate
       output.startRecording(to: url, recordingDelegate: delegate)
     }
