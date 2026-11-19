@@ -92,6 +92,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     }
     let photo = profile.mode == .photo ? AVCapturePhotoOutput() : nil
     let movie = profile.mode == .video ? AVCaptureMovieFileOutput() : nil
+    // A fragmented movie (default every 10 s) hides its audio track from AVFoundation: write one plain movie.
+    movie?.movieFragmentInterval = .invalid
     session.beginConfiguration()
     session.inputs.forEach(session.removeInput)
     session.outputs.forEach(session.removeOutput)
