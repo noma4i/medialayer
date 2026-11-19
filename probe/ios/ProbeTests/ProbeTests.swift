@@ -8,23 +8,37 @@ import XCTest
 /// Every check runs on the phone with the real camera and microphone, through the public API the app uses. The only seam is `MediaTrace.observer`, which reads the library's own trace lines.
 final class ProbeTests: XCTestCase {
   private static let lock = NSLock()
-  private nonisolated(unsafe) static var lines: [String] = []
-  private nonisolated(unsafe) static var takeCount = 0
+  /// One folder per run: scripts/check_device_ios.sh passes PROBE_RUN, so a relaunch of the app after a failed test keeps the clips, probe.log and trace.log of the earlier tests.
   private static let folder: URL = {
-    let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("probe")
-    try? FileManager.default.removeItem(at: url)
+    let run = ProcessInfo.processInfo.environment["PROBE_RUN"] ?? "manual"
+    let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("probe").appendingPathComponent(run)
     try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     return url
   }()
 
   override class func setUp() {
     UserDefaults.standard.set(true, forKey: "MLTrace")
-    MediaTrace.observer = { line in lock.withLock { lines.append(line) } }
+    MediaTrace.observer = { line in
+      lock.withLock {
+        let file = folder.appendingPathComponent("trace.log")
+        if let handle = try? FileHandle(forWritingTo: file) {
+          _ = try? handle.seekToEnd(); handle.write(Data((line + "\n").utf8)); try? handle.close()
+        } else {
+          try? Data((line + "\n").utf8).write(to: file)
+        }
+      }
+    }
   }
 
   override func setUp() { continueAfterFailure = false }
 
-  private static var collected: [String] { lock.withLock { lines } }
+  private static var collected: [String] {
+    lock.withLock { ((try? String(contentsOf: folder.appendingPathComponent("trace.log"), encoding: .utf8)) ?? "").split(separator: "\n").map(String.init) }
+  }
+
+  private static var takeCount: Int {
+    ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).filter { $0.hasPrefix("take_") && $0.hasSuffix(".mp4") }.count
+  }
 
   private func probe(_ name: String, _ values: [(String, Any)]) {
     let text = "PROBE \(name) " + values.map { "\($0.0)=\($0.1)" }.joined(separator: " ")
@@ -91,7 +105,6 @@ final class ProbeTests: XCTestCase {
     let stopped = Date()
     let clip = try await camera.stopRecording()
     let stopToClipMs = Int(Date().timeIntervalSince(stopped) * 1000)
-    Self.lock.withLock { Self.takeCount += 1 }
     let kept = Self.folder.appendingPathComponent("\(name).mp4")
     try? FileManager.default.removeItem(at: kept)
     try FileManager.default.copyItem(at: clip.url, to: kept)

@@ -11,6 +11,7 @@ run="$root/target/device-ios/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$run"
 
 extra=()
+probe_run="$(basename "$run")"
 [ -z "${DEVELOPMENT_TEAM:-}" ] || extra+=("DEVELOPMENT_TEAM=$DEVELOPMENT_TEAM")
 [ -z "${PROBE_BUNDLE_ID:-}" ] || extra+=("PROBE_BUNDLE_ID=$PROBE_BUNDLE_ID")
 if [ ! -f "$project/Local.xcconfig" ]; then
@@ -25,7 +26,8 @@ fi
 
 (cd "$project" && xcodegen generate --quiet)
 status=0
-xcodebuild test -project "$project/MediaLayerProbe.xcodeproj" -scheme MediaLayerProbe \
+# TEST_RUNNER_ variables reach the test process as PROBE_RUN: one folder per run, never wiped by the tests.
+TEST_RUNNER_PROBE_RUN="$probe_run" xcodebuild test -project "$project/MediaLayerProbe.xcodeproj" -scheme MediaLayerProbe \
   -destination "platform=iOS,id=$udid" -allowProvisioningUpdates \
   -derivedDataPath "$run/DerivedData" -resultBundlePath "$run/result.xcresult" ${extra[@]+"${extra[@]}"} > "$run/xcodebuild.log" 2>&1 || status=$?
 
@@ -35,7 +37,7 @@ bundle="${bundle:-${PROBE_BUNDLE_ID:-$(sed -n 's/^PROBE_BUNDLE_ID *= *//p' "$pro
 bundle="${bundle:-com.noma4i.medialayer.probe}"
 mkdir -p "$run/files"
 xcrun devicectl device copy from --device "$udid" --domain-type appDataContainer --domain-identifier "$bundle" \
-  --source Documents/probe --destination "$run/files" > "$run/copy.log" 2>&1 || echo "check_device_ios: the files were not copied, see $run/copy.log" >&2
+  --source "Documents/probe/$probe_run" --destination "$run/files" > "$run/copy.log" 2>&1 || echo "check_device_ios: the files were not copied, see $run/copy.log" >&2
 
 grep -h '^PROBE ' "$run/xcodebuild.log" "$run"/files/probe.log "$run"/files/*/probe.log 2>/dev/null | sort -u || true
 grep -E "Test Suite 'All tests'|Executed [0-9]+ tests|TEST (SUCCEEDED|FAILED)|error:" "$run/xcodebuild.log" | tail -n 12 || true
