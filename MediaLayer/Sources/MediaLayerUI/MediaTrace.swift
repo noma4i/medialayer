@@ -1,15 +1,49 @@
 import Foundation
+import MediaLayer
+import os
 
 enum MediaTrace {
-  static let isOn = ProcessInfo.processInfo.environment["ML_TRACE"] != nil
+  static let subsystem = "com.noma4i.medialayer"
+
+  /// `ML_TRACE` in the environment, or the `MLTrace` default (the launch argument `-MLTrace YES` sets it). Read once, at the first emit.
+  static let isOn: Bool = {
+    let on = enabled(environment: ProcessInfo.processInfo.environment, defaults: .standard)
+    if on { setTraceSink(OSLogSink()) }
+    return on
+  }()
+
+  static func enabled(environment: [String: String], defaults: UserDefaults) -> Bool {
+    environment["ML_TRACE"] != nil || defaults.bool(forKey: "MLTrace")
+  }
 
   static func emit(_ source: String, _ message: @autoclosure () -> String) {
-    guard isOn else { return }
+    emit(source, message(), on: isOn, write: write)
+  }
+
+  static func emit(_ source: String, _ message: @autoclosure () -> String, on: Bool, write: (String, String) -> Void) {
+    guard on else { return }
     let milliseconds = Int(Date().timeIntervalSince1970 * 1000)
-    FileHandle.standardError.write(Data("ML \(milliseconds) \(source) \(message())\n".utf8))
+    write(source, "ML \(milliseconds) \(source) \(message())")
+  }
+
+  /// A line to the unified log (device syslog, Console.app) and to stderr for a run under `ML_TRACE`.
+  static func write(_ source: String, _ line: String) {
+    Logger(subsystem: subsystem, category: source).notice("\(line, privacy: .public)")
+    if ProcessInfo.processInfo.environment["ML_TRACE"] != nil {
+      FileHandle.standardError.write(Data((line + "\n").utf8))
+    }
   }
 
   static func tail(_ text: String) -> String {
     String(text.suffix(24))
+  }
+
+  /// The core prints its trace lines here, so a device without a stderr shows them next to the slot lines.
+  private final class OSLogSink: TraceSink {
+    private let logger = Logger(subsystem: MediaTrace.subsystem, category: "core")
+
+    func line(text: String) {
+      logger.notice("\(text, privacy: .public)")
+    }
   }
 }

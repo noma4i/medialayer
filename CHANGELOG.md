@@ -4,6 +4,7 @@
 
 ### Added
 
+- iOS trace lines go to the unified log, switched on by the MLTrace user default.
 - A trace line names a url that a place shows with another strategy than its whole hold.
 
 ### Fixed
