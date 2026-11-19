@@ -146,6 +146,26 @@ class CameraRecordingTest {
   }
 
   @Test
+  fun inv_capture_52_a_late_encoder_failure_after_the_take_ended_cancels_nothing_and_warns_nothing() {
+    val queue = java.util.concurrent.LinkedBlockingQueue<Runnable>()
+    val real = CameraRecording(Executor { queue.add(it) }, { events.add(it) }) { generation, file, settings, listener ->
+      CameraTake(generation, file, settings, { AutoCloseable {} }, listener)
+    }
+    val unknown = CameraTakeSettings(MediaFormat(), null, VideoTimebase.UNKNOWN, 5, 1L shl 20, 10_000_000L)
+    real.start(File("take-late.mp4"), unknown, feed, { it() }, { false }, 1) {}
+    val ended = queue.poll(5, java.util.concurrent.TimeUnit.SECONDS)!!
+    val deadline = System.nanoTime() + 5_000_000_000L
+    while (Thread.getAllStackTraces().keys.any { it.name == "CameraTake-1" && it.isAlive } && System.nanoTime() < deadline) Thread.sleep(5)
+    real.encoderFailed(1, NativeFailure(FailureSource.RECORDER, "CameraVideoOutput", 3L, "swap failed"))
+    queue.take().run()
+    ended.run()
+    queue.toList().also { queue.clear() }.forEach { it.run() }
+    val warned = org.robolectric.shadows.ShadowLog.getLogs().filter { it.msg.contains("dead thread") }
+    assertEquals("a cancel after the end of the take posts nothing to its dead thread", emptyList<String>(), warned.map { it.msg })
+    assertEquals(listOf<CaptureEvent>(CaptureEvent.RecordFinished(RecordEnd.FAILED)), events.toList())
+  }
+
+  @Test
   fun the_late_words_of_a_closed_or_replaced_take_change_no_progress_and_no_credit() {
     start(1, false)
     takes[0].listener.onBegan(1, surface)
