@@ -133,6 +133,8 @@ final class ProbeTests: XCTestCase {
   @MainActor func test3_takeBack5s() async throws { try await take("take_back_5s", profile: .moment, lens: .back, seconds: 5) }
   @MainActor func test4_takeFront15s() async throws { try await take("take_front_15s", profile: .circle, lens: .front, seconds: 15) }
 
+  @MainActor func test8_takeFront60s() async throws { try await take("take_front_60s", profile: .circle, lens: .front, seconds: 60) }
+
   func test5_traceRules() {
     let lines = Self.collected
     let takes = lines.filter { $0.contains(" camera take first frame ") }
