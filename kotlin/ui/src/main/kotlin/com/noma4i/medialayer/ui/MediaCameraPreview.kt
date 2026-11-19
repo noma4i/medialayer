@@ -18,7 +18,6 @@ import androidx.lifecycle.Observer
 import androidx.lifecycle.findViewTreeLifecycleOwner
 import com.noma4i.medialayer.CameraLens
 import com.noma4i.medialayer.CaptureProfile
-import com.noma4i.medialayer.MediaTrace
 
 /**
  * The preview of a camera. The camera runs while this composable is in the composition and its lifecycle is started. The picture fills the frame (`FILL_CENTER`).
