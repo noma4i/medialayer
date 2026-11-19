@@ -9,6 +9,7 @@ What an app changes when it moves to a new MediaLayer version. Each section name
 - A voice start right after a camera take, while the preview lives, records: the voice takes the microphone of the idle preview, and the preview gets it back after the voice.
 - 3.43.0: a recorded video stands as its preview showed it, whatever the pose of the phone. The app rotates nothing and needs no change.
 - 3.43.0, iOS: trace lines go to the unified log (subsystem `com.noma4i.medialayer`) when the app sets the `MLTrace` user default before its first MediaLayer call. Set it in Debug builds only: without the key the trace does nothing.
+- 3.44.0: the ring of a recorder is drawn by the library. Swift `MediaTakeProgress(camera)` and `MediaVideoProgress(source)`, Kotlin `rememberTakeProgress(camera)` and `rememberPlayheadProgress(source)` give a fraction from 0 to 1 at the display frame rate. Remove a ring driven by `recordedMs` or `onProgress`, and any app timer for it.
 
 ## 3.41.0
 
