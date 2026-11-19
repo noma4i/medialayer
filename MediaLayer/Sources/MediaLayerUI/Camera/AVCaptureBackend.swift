@@ -32,18 +32,13 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     tokens = [
       center.addObserver(forName: AVCaptureSession.didStartRunningNotification, object: session, queue: nil) { [weak self] _ in self?.emit(.streaming(on: true)) },
       center.addObserver(forName: AVCaptureSession.didStopRunningNotification, object: session, queue: nil) { [weak self] _ in self?.emit(.streaming(on: false)) },
-      center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { [weak self] note in
-        let reason = (note.userInfo?[AVCaptureSessionInterruptionReasonKey] as? NSNumber)?.intValue
-        MediaTrace.emit("camera", "camera session interrupted reason=\(reason.map(String.init) ?? "unknown")")
-        self?.emit(.streaming(on: false))
-      },
+      center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { [weak self] _ in self?.emit(.streaming(on: false)) },
       center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) { [weak self] _ in
         guard let self else { return }
         self.emit(.streaming(on: self.session.isRunning))
       },
       center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil) { [weak self] note in
         let error = note.userInfo?[AVCaptureSessionErrorKey] as? AVError
-        MediaTrace.emit("camera", "camera session runtimeError=\(error.map { String($0.code.rawValue) } ?? "unknown")")
         self?.emit(.fault(kind: error?.code == .mediaServicesWereReset ? .reset : .other))
       }
     ]
@@ -264,9 +259,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
       output.maxRecordedDuration = CMTime(value: CMTimeValue(profile.maxDurationMs), timescale: 1000)
       let delegate = MovieDelegate(onStart: { [weak self] in self?.emit(.recordStarted) }, onFinish: { [weak self] end in self?.emit(.recordFinished(end: end)) })
       self.recording = delegate
-      let audioConnection = output.connection(with: .audio)
-      let audioSession = AVAudioSession.sharedInstance()
-      MediaTrace.emit("camera", "camera movie start lens=\(lens == .front ? "front" : "back") audioInputs=\(self.session.inputs.filter { $0.ports.contains { $0.mediaType == .audio } }.count) audioConn=\(audioConnection != nil) active=\(audioConnection.map { String($0.isActive) } ?? "none") enabled=\(audioConnection.map { String($0.isEnabled) } ?? "none") sessionRunning=\(self.session.isRunning) route=\(audioSession.currentRoute.inputs.first?.portType.rawValue ?? "none") category=\(audioSession.category.rawValue)")
       output.startRecording(to: url, recordingDelegate: delegate)
     }
   }
@@ -371,7 +363,6 @@ private final class MovieDelegate: NSObject, AVCaptureFileOutputRecordingDelegat
   }
 
   func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
-    MediaTrace.emit("camera", "camera movie finish error=\(error?.localizedDescription ?? "none")")
     onFinish(Self.end(of: error))
   }
 
