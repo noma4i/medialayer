@@ -21,4 +21,4 @@ Android coordinates are `com.noma4i:medialayer:X.Y.Z`, `com.noma4i:medialayer-ui
 
 The root `Package.swift` uses the release URL and checksum for SwiftPM. Keep `MediaLayer/Package.swift` and `scripts/build_ios.sh` for local development.
 
-Gate INV-CAPTURE-80: no tag without the green recorded-video guard on both platforms: Swift `TakeTransformTests` and Kotlin `CaptureUprightTest` pass in the full run.
+Rule INV-CAPTURE-80: no tag without the green recorded-video guard on both platforms: Swift `TakeTransformTests` and Kotlin `CaptureUprightTest` pass in the full run.
