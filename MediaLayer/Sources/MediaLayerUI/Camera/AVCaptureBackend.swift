@@ -348,6 +348,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     let turn = frameTurn
     let transform = takeWriterTransform(turn: turn, mirror: lens == .front && profile.mirrorFrontVideo)
     MediaTrace.emit("camera", "take angle=\(Int(previewAngle)) preview=\(previewLinks.values.first.map { String(describing: $0.connection.videoRotationAngle) } ?? "none") upright=\(turn.upright)")
+    let outputConnection = frameOutput?.connection(with: .video)
+    MediaTrace.emit("camera", "take output angle=\(outputConnection.map { String(describing: $0.videoRotationAngle) } ?? "none") mirrored=\(outputConnection.map { String(describing: $0.isVideoMirrored) } ?? "none") width=\(String(describing: video[AVVideoWidthKey])) height=\(String(describing: video[AVVideoHeightKey])) transformIdentity=\(transform == .identity)")
     let budget = Int(clamping: captureCost(profile: profile))
     return CameraTake.Settings(
       video: video, audio: audio, transform: transform, maxDurationMs: profile.maxDurationMs, fileType: fileType,
@@ -421,6 +423,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
 
   private func loseMicrophone(_ error: Error?) {
     guard let wanted else { return }
+    MediaTrace.emit("camera", "microphone lost error=\(error.map { "\(($0 as NSError).domain):\(($0 as NSError).code) \($0.localizedDescription)" } ?? "none")")
     wanted.listener.microphoneLost(generation: wanted.generation, error: error)
   }
 
@@ -475,12 +478,16 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     if let stabilization { connection.preferredVideoStabilizationMode = stabilization }
     // The frames come out upright (and mirrored as the profile wants), so the file needs no rotation tag and no re-encode after stop. A connection that cannot do it keeps the raw frames and the tag.
     // Decided before anything is touched: a connection that cannot do the whole turn keeps the raw frames, the tag and the old path.
-    guard turnsFramesUpright(angleSupported: connection.isVideoRotationAngleSupported(previewAngle), mirroringSupported: connection.isVideoMirroringSupported, mirrorWanted: mirrorsVideo) else { return setTurn(FrameTurn()) }
+    let angleSupported = connection.isVideoRotationAngleSupported(previewAngle)
+    let upright = turnsFramesUpright(angleSupported: angleSupported, mirroringSupported: connection.isVideoMirroringSupported, mirrorWanted: mirrorsVideo)
+    MediaTrace.emit("camera", "turn decide lens=\(videoLens == .front ? "front" : "back") angleSupported=\(angleSupported) mirroringSupported=\(connection.isVideoMirroringSupported) mirrorWanted=\(mirrorsVideo) upright=\(upright)")
+    guard upright else { return setTurn(FrameTurn()) }
     connection.videoRotationAngle = previewAngle
     if connection.isVideoMirroringSupported {
       connection.automaticallyAdjustsVideoMirroring = false
       connection.isVideoMirrored = mirrorsVideo
     }
+    MediaTrace.emit("camera", "turn set angle=\(connection.videoRotationAngle) mirrored=\(connection.isVideoMirrored) auto=\(connection.automaticallyAdjustsVideoMirroring)")
     setTurn(FrameTurn(upright: true, mirrored: mirrorsVideo))
   }
 
