@@ -43,6 +43,7 @@ class CameraPhoneProbeTest {
   private val context = instrumentation.targetContext
   private val files = ArrayList<File>()
   private var layer: MediaLayer? = null
+  private var opened: kotlinx.coroutines.Deferred<MediaLayer>? = null
   private var scenario: ActivityScenario<ComponentActivity>? = null
 
   @Before
@@ -51,7 +52,7 @@ class CameraPhoneProbeTest {
     val memory = android.app.ActivityManager.MemoryInfo().also { (context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(it) }
     val manager = context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
     probe("device", "totalMb" to memory.totalMem / MB, "heapClassMb" to manager.memoryClass, "lowRam" to manager.isLowRamDevice, "availMb" to memory.availMem / MB)
-    layer = withTimeout(TIMEOUT_MS) { MediaLayer.open(context).await() }
+    opened = MediaLayer.open(context).also { layer = withTimeout(TIMEOUT_MS) { it.await() } }
   }
 
   @After
@@ -95,10 +96,12 @@ class CameraPhoneProbeTest {
     launched.onActivity { activity ->
       activity.setContentView(ComposeView(activity).apply {
         setContent {
-          val made = remember { MediaCamera(context, profile, lens) }
-          DisposableEffect(made) { onDispose { made.close() } }
-          LaunchedEffect(made) { composed.complete(made) }
-          MediaCameraPreview(made, Modifier.fillMaxSize())
+          MediaLayerProvider(checkNotNull(opened)) {
+            val made = remember { MediaCamera(context, profile, lens) }
+            DisposableEffect(made) { onDispose { made.close() } }
+            LaunchedEffect(made) { composed.complete(made) }
+            MediaCameraPreview(made, Modifier.fillMaxSize())
+          }
         }
       })
     }
