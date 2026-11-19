@@ -149,6 +149,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
       Media.recordNativeFailure(error, source: .camera)
       choice = nil
     }
+    traceAspect(device, lens: lens)
     let supported = [VideoStabilization.standard, .cinematic].filter { device.activeFormat.isVideoStabilizationModeSupported($0.avMode) }
     stabilization = profile.mode == .video ? stabilizationMode(requested: profile.stabilization, supported: supported)?.avMode : nil
     videoPort = inputs.first?.ports(for: .video, sourceDeviceType: device.deviceType, sourceDevicePosition: device.position).first
@@ -206,6 +207,19 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     device.videoZoomFactor = 1
     device.unlockForConfiguration()
     return choice
+  }
+
+  private func traceAspect(_ device: AVCaptureDevice, lens: CameraLens) {
+    let name = lens == .front ? "front" : "back"
+    guard #available(iOS 26.0, *) else {
+      MediaTrace.emit("camera", "aspect unavailable lens=\(name)")
+      return
+    }
+    let format = device.activeFormat
+    let size = format.formatDescription.dimensions
+    let dynamic = device.dynamicDimensions
+    let supported = format.supportedDynamicAspectRatios.map(\.rawValue).joined(separator: ",")
+    MediaTrace.emit("camera", "aspect lens=\(name) format=\(size.width)x\(size.height) supported=\(supported) current=\(device.dynamicAspectRatio?.rawValue ?? "none") dims=\(dynamic.width)x\(dynamic.height)")
   }
 
   /// The preview layer joins the session here, on the session queue: both the join and its connection take the session lock, so Main never touches the session.
@@ -350,6 +364,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     MediaTrace.emit("camera", "take angle=\(Int(previewAngle)) preview=\(previewLinks.values.first.map { String(describing: $0.connection.videoRotationAngle) } ?? "none") upright=\(turn.upright)")
     let outputConnection = frameOutput?.connection(with: .video)
     MediaTrace.emit("camera", "take output angle=\(outputConnection.map { String(describing: $0.videoRotationAngle) } ?? "none") mirrored=\(outputConnection.map { String(describing: $0.isVideoMirrored) } ?? "none") width=\(String(describing: video[AVVideoWidthKey])) height=\(String(describing: video[AVVideoHeightKey])) transformIdentity=\(transform == .identity)")
+    if let camera { traceAspect(camera, lens: lens) }
     let budget = Int(clamping: captureCost(profile: profile))
     return CameraTake.Settings(
       video: video, audio: audio, transform: transform, maxDurationMs: profile.maxDurationMs, fileType: fileType,
