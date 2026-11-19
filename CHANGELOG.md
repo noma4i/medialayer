@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.48.0 - 2026-11-20
+
+### Changed
+
+- Camera video is recorded by the system writers again, as in 3.33.1: iOS `AVCaptureMovieFileOutput`, Android CameraX `Recorder`. Orientation and the front mirror come from the platform; the library adds no angle of its own.
+- The camera preview mirrors exactly when the recorded file does: the front lens with `mirrorFrontVideo`, so preview, file and bubble show the same picture.
+- `RecordEnd.microphoneLost` is no longer produced: the system writers own the microphone during a take.
+
+### Fixed
+
+- iOS takes longer than 10 s keep their audio track: the movie is written in one piece, not in fragments.
+- A stop waiting when the layer closes ends with `interrupted` on Android, never hangs.
+
 ## 3.47.0 - 2026-11-20
 
 ### Added

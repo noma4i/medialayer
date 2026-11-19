@@ -4,7 +4,7 @@ What an app changes when it moves to a new MediaLayer version. Each section name
 
 ## Next version
 
-- Unreleased, iOS: a video take is recorded by the system writer (`AVCaptureMovieFileOutput`) again, as in 3.33.1. The microphone is no longer watched while the take runs, so iOS no longer ends a take with `RecordEnd.microphoneLost` and no longer refuses a clip for a hole in its sound; a take whose microphone fails ends as `recordFailed`. Nothing else changes in the API.
+- 3.48.0: a video take is recorded by the system writer again, as in 3.33.1 (iOS `AVCaptureMovieFileOutput`, Android CameraX `Recorder`). The preview mirrors exactly when the file does (`mirrorFrontVideo` on the front lens): pass `true` to mirror preview, file and bubble, `false` to mirror none. The microphone is no longer watched while the take runs, so iOS no longer ends a take with `RecordEnd.microphoneLost` and no longer refuses a clip for a hole in its sound; a take whose microphone fails ends as `recordFailed`. Nothing else changes in the API.
 - `microphoneAvailability` no longer blinks `noSound` when a microphone starts: `noSound` comes only from a silence the platform reports. An app that disables recording on `noSound` no longer cancels its own start.
 - `microphoneBusy` comes only from a call, from a voice start during a camera take (and a camera take during a voice), and from a second start of the same recorder. A recording of another app shows `otherApp` and no longer refuses a start.
 - A voice start right after a camera take, while the preview lives, records: the voice takes the microphone of the idle preview, and the preview gets it back after the voice.
