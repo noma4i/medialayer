@@ -359,6 +359,8 @@ class MediaCamera internal constructor(
           retiringAudio = ticket
           recordingStopped = done
           failMicrophone(microphoneRefusal(reason))
+          // The layer close revokes before it closes the camera, and the revoke is acknowledged only when the writer is done: a stop waiting for that writer ends now, never with the close.
+          if (reason == RecordingRefusal.INTERRUPTED) stopWaiter?.let { stopWaiter = null; it.completeExceptionally(refusal(CameraRefusal.INTERRUPTED)) }
         } else { ticket.close(); done() }
       }) done()
     }
