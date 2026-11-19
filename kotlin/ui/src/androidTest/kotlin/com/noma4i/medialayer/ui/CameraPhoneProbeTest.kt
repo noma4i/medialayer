@@ -48,6 +48,9 @@ class CameraPhoneProbeTest {
   @Before
   fun open() = runBlocking {
     listOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO).forEach { instrumentation.uiAutomation.grantRuntimePermission(context.packageName, it) }
+    val memory = android.app.ActivityManager.MemoryInfo().also { (context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(it) }
+    val manager = context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+    probe("device", "totalMb" to memory.totalMem / MB, "heapClassMb" to manager.memoryClass, "lowRam" to manager.isLowRamDevice, "availMb" to memory.availMem / MB)
     layer = withTimeout(TIMEOUT_MS) { MediaLayer.open(context).await() }
   }
 
@@ -101,7 +104,8 @@ class CameraPhoneProbeTest {
     }
     val camera = withTimeout(TIMEOUT_MS) { composed.await() }
     val ready = withTimeout(TIMEOUT_MS) { camera.state.first { it.isReady || it.phase == CameraPhase.FAILED } }
-    assertEquals("the camera is ready, fault ${ready.fault}", CameraPhase.READY, ready.phase)
+    probe("$name-ready", "phase" to ready.phase, "fault" to ready.fault, "state" to ready)
+    assertEquals("the camera is ready, last state $ready", CameraPhase.READY, ready.phase)
     delay(500)
     camera.startRecording()
     withTimeout(TIMEOUT_MS) { camera.state.first { it.isRecording && it.recordedMs >= profile.minTakeMs } }
@@ -130,6 +134,7 @@ class CameraPhoneProbeTest {
   fun a_fifteen_second_take_with_sound_is_delivered_without_a_long_pause() = take("take15s", CaptureKind.CIRCLE, CameraLens.FRONT, 15_000)
 
   private companion object {
+    const val MB = 1024L * 1024L
     const val TAG = "MediaLayerProbe"
     const val TIMEOUT_MS = 30_000L
     const val STOP_TO_CLIP_MAX_MS = 1_500L

@@ -584,6 +584,7 @@ class MediaCamera internal constructor(
             hold = services.admitSession(captureCost(profile).toLong())
           } catch (failure: Exception) {
             if (failure is kotlinx.coroutines.CancellationException) throw failure
+            MediaTrace.emit("camera") { "session refused cost=${captureCost(profile)} failure=$failure" }
             enqueue { if (epoch == current) apply(CaptureEvent.Refuse(CameraRefusal.MEMORY)) }
             return@launch
           }

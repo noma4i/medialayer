@@ -33,6 +33,7 @@ fi
 
 "$adb" get-state >/dev/null 2>&1 || fail 'no device on adb'
 "$adb" install -r -t "$APK" > "$out/install.log" 2>&1 || { cat "$out/install.log" >&2; fail 'install failed'; }
+"$adb" shell setprop log.tag.MediaLayerTrace VERBOSE
 "$adb" logcat -c
 "$adb" shell am instrument -w -e class "$classes" "$package/androidx.test.runner.AndroidJUnitRunner" < /dev/null > "$out/instrument.txt" 2>&1 || true
 "$adb" logcat -d -s MediaLayerTrace MediaLayerProbe > "$out/logcat.txt" 2>&1 || true
@@ -47,5 +48,6 @@ else
   verdict=FAIL
   echo 'no test ran' >&2
 fi
+if [ "$verdict" = FAIL ]; then grep -h 'refused\|camera' "$out/logcat.txt" || true; fi
 echo "verdict=$verdict run=$out"
 [ "$verdict" = PASS ]
