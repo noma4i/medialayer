@@ -6673,6 +6673,10 @@ public struct CaptureRun: Equatable, Hashable {
     public var starting: Bool
     public var started: Bool
     public var discard: Bool
+    /**
+     * The microphone stopped delivering after the take had its sound: the take is ended and delivered with the sound it has.
+     */
+    public var microphoneLost: Bool
     public var end: RecordEnd?
     public var recoverySpent: Bool
     public var pendingLens: CameraLens?
@@ -6683,7 +6687,10 @@ public struct CaptureRun: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(state: CameraState, `open`: Bool, streaming: Bool, audioFlowing: Bool?, starting: Bool, started: Bool, discard: Bool, end: RecordEnd?, recoverySpent: Bool, pendingLens: CameraLens?, 
+    public init(state: CameraState, `open`: Bool, streaming: Bool, audioFlowing: Bool?, starting: Bool, started: Bool, discard: Bool, 
+        /**
+         * The microphone stopped delivering after the take had its sound: the take is ended and delivered with the sound it has.
+         */microphoneLost: Bool, end: RecordEnd?, recoverySpent: Bool, pendingLens: CameraLens?, 
         /**
          * The lens the running or last take was started on. A delivered clip carries this lens, not `state.lens`, which a lens change may already have moved on.
          */takeLens: CameraLens) {
@@ -6694,6 +6701,7 @@ public struct CaptureRun: Equatable, Hashable {
         self.starting = starting
         self.started = started
         self.discard = discard
+        self.microphoneLost = microphoneLost
         self.end = end
         self.recoverySpent = recoverySpent
         self.pendingLens = pendingLens
@@ -6723,6 +6731,7 @@ public struct FfiConverterTypeCaptureRun: FfiConverterRustBuffer {
                 starting: FfiConverterBool.read(from: &buf), 
                 started: FfiConverterBool.read(from: &buf), 
                 discard: FfiConverterBool.read(from: &buf), 
+                microphoneLost: FfiConverterBool.read(from: &buf), 
                 end: FfiConverterOptionTypeRecordEnd.read(from: &buf), 
                 recoverySpent: FfiConverterBool.read(from: &buf), 
                 pendingLens: FfiConverterOptionTypeCameraLens.read(from: &buf), 
@@ -6738,6 +6747,7 @@ public struct FfiConverterTypeCaptureRun: FfiConverterRustBuffer {
         FfiConverterBool.write(value.starting, into: &buf)
         FfiConverterBool.write(value.started, into: &buf)
         FfiConverterBool.write(value.discard, into: &buf)
+        FfiConverterBool.write(value.microphoneLost, into: &buf)
         FfiConverterOptionTypeRecordEnd.write(value.end, into: &buf)
         FfiConverterBool.write(value.recoverySpent, into: &buf)
         FfiConverterOptionTypeCameraLens.write(value.pendingLens, into: &buf)
