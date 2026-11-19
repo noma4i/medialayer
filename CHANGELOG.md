@@ -1,10 +1,18 @@
 # Changelog
 
-## Unreleased
+## 3.46.0 - 2026-11-19
+
+### Changed
+
+- A refused memory reservation tells its cause: closed layer is notReady, full budget is memory.
+- Android takes clip length and frame from its writer, never reading the file.
 
 ### Fixed
 
-- iOS judges the sound of a camera clip from the file again; the write-time ledger is only traced.
+- iOS stop waits until the sound reaches the last video frame.
+- iOS judges clip sound by the write-time ledger, never reading the file back.
+- iOS front camera of iPhone 17 records upright: the take angle comes per lens.
+- iOS preview and camera state follow a camera swapped on a mounted view.
 
 ## 3.45.0 - 2026-11-19
 

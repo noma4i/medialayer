@@ -12,6 +12,8 @@ What an app changes when it moves to a new MediaLayer version. Each section name
 - 3.44.0: the ring of a recorder is drawn by the library. Swift `MediaTakeProgress(camera)` and `MediaVideoProgress(source)`, Kotlin `rememberTakeProgress(camera)` and `rememberPlayheadProgress(source)` give a fraction from 0 to 1 at the display frame rate. Remove a ring driven by `recordedMs` or `onProgress`, and any app timer for it.
 - 3.45.0: the review of a camera clip opens right after stop: the sound is judged while the take records and iOS writes upright frames, so the file is not read back or re-encoded. Nothing changes for the app. `CameraFrame.orientation` of the iOS frame tap is now `.up` (`.upMirrored` for an unmirrored front lens): an app that reads tap frames must use the field and not assume `.right`.
 - 3.45.0: the voice recorder has the same smooth ring: Swift `MediaTakeProgress(recorder)`, Kotlin `rememberTakeProgress(recorder)`.
+- 3.46.0: a refused memory reservation of the camera or voice tells its cause. A closed MediaLayer refuses with `notReady` (was `memory`); `memory` now means the budget is full; any other failure is `notReady` with a native failure in `Media.failures`. An app that shows "not enough memory" on `memory` now shows it only when it is true.
+- 3.46.0: a camera clip keeps its whole sound on iOS: the stop waits until the sound reaches the last frame. The front camera of iPhone 17 records upright. Nothing changes for the app.
 
 ## 3.41.0
 
