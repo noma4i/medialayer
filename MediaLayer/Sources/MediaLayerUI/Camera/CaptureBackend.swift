@@ -53,10 +53,16 @@ protocol CaptureBackend: AnyObject, Sendable {
   func setTorch(_ on: Bool) throws
   func setZoom(_ ratio: Float) throws
   func setFrameTap(_ tap: (@Sendable (CVPixelBuffer, UInt64) -> Void)?)
+  /// The verdict of the sound of the take that finished last, judged by the writer while it wrote. Nil when the backend keeps no ledger.
+  func takeCoverage() -> AudioCoverage?
+  /// How the frames of the tap are turned.
+  var frameTurn: FrameTurn { get }
 }
 
 extension CaptureBackend {
   var audio: CaptureAudio { .managed }
+  func takeCoverage() -> AudioCoverage? { nil }
+  var frameTurn: FrameTurn { FrameTurn() }
 
   func unbind(completion: @escaping @Sendable () -> Void) { unbind(); completion() }
 
@@ -77,7 +83,8 @@ struct CameraServices {
   var admitShot: @Sendable (UInt64) async throws -> Release
   var link: @Sendable () -> AudioLink?
   var clipInfo: @Sendable (URL) async throws -> MediaInfo?
-  var uprightVideo: @Sendable (URL) async throws -> Void
+  /// Whether it rewrote the file.
+  var uprightVideo: @Sendable (URL) async throws -> Bool
   var audioCoverage: @Sendable (URL, Bool) async throws -> AudioCoverage
   var upright: @Sendable (URL, Double) async throws -> URL
   var directory: URL

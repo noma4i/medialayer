@@ -2,8 +2,10 @@
 import Foundation
 import MediaLayer
 
-func uprightVideo(at url: URL) async throws {
-  let task = Task.detached {
+/// Turns the pixels of a clip that carries a rotation tag and drops the tag. Gives whether it rewrote the file: a clip of upright frames is left as it is.
+@discardableResult
+func uprightVideo(at url: URL) async throws -> Bool {
+  let task = Task.detached { () -> Bool in
     try Task.checkCancellation()
     let asset = AVURLAsset(url: url)
     guard let track = try await asset.loadTracks(withMediaType: .video).first else { throw UprightVideoError.invalidVideo }
@@ -12,7 +14,7 @@ func uprightVideo(at url: URL) async throws {
       let audioTracks = (try? await asset.loadTracks(withMediaType: .audio).count) ?? 0
       MediaTrace.emit("camera", "clip audioTracks=\(audioTracks) rewrite=\(transform != .identity)")
     }
-    guard transform != .identity else { return }
+    guard transform != .identity else { return false }
     guard let format = descriptions.first else { throw UprightVideoError.invalidVideo }
     let codec: AVVideoCodecType
     switch CMFormatDescriptionGetMediaSubType(format) {
@@ -76,8 +78,9 @@ func uprightVideo(at url: URL) async throws {
     guard writer.status == .completed else { throw writer.error ?? UprightVideoError.invalidVideo }
     try Task.checkCancellation()
     _ = try FileManager.default.replaceItemAt(url, withItemAt: temporary)
+    return true
   }
-  try await withTaskCancellationHandler {
+  return try await withTaskCancellationHandler {
     try await task.value
   } onCancel: {
     task.cancel()

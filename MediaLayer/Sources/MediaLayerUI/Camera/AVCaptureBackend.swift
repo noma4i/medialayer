@@ -28,7 +28,10 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
   private var chosenPhotoSize: PixelSize?
   private var tokens: [NSObjectProtocol] = []
   private var previews: [ObjectIdentifier: WeakPreview] = [:]
-  private var previewLinks: [ObjectIdentifier: AVCaptureConnection] = [:]
+  private var previewLinks: [ObjectIdentifier: PreviewLink] = [:]
+  private var videoLens = CameraLens.back
+  private var mirrorsVideo = false
+  private var turnValue = FrameTurn()
   private var videoPort: AVCaptureInput.Port?
 
   override init() {
@@ -117,6 +120,9 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     previewLinks = [:]
     videoPort = nil
     frameOutput = nil
+    setTurn(FrameTurn())
+    videoLens = lens
+    mirrorsVideo = lens == .front && profile.mirrorFrontVideo
     audioOutput = nil
     microphoneInput = nil
     audioProfile = profile.audio
@@ -215,8 +221,9 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
       let id = ObjectIdentifier(layer)
       self.previews[id] = nil
       guard let link = self.previewLinks.removeValue(forKey: id) else { return }
+      guard link.owned else { return }
       self.beginSession()
-      self.session.removeConnection(link)
+      self.session.removeConnection(link.connection)
       self.commitSession(why: "previewDetach")
     }
   }
@@ -228,10 +235,26 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
       return
     }
     let link = AVCaptureConnection(inputPort: port, videoPreviewLayer: layer)
-    guard session.canAddConnection(link) else { return }
+    guard session.canAddConnection(link) else {
+      // A layer registered before `configure` was connected by `addInput`: the implicit connection is the one that draws, so it gets the angle and is kept (not removed with the layer).
+      guard let implicit = layer.connection else { return }
+      if implicit.isVideoRotationAngleSupported(previewAngle) { implicit.videoRotationAngle = previewAngle }
+      previewLinks[id] = PreviewLink(connection: implicit, owned: false)
+      return
+    }
     if link.isVideoRotationAngleSupported(previewAngle) { link.videoRotationAngle = previewAngle }
     session.addConnection(link)
-    previewLinks[id] = link
+    previewLinks[id] = PreviewLink(connection: link, owned: true)
+  }
+
+  var frameTurn: FrameTurn { lock.withLock { turnValue } }
+
+  private func setTurn(_ value: FrameTurn) {
+    lock.withLock { turnValue = value }
+  }
+
+  func takeCoverage() -> AudioCoverage? {
+    relay.takeCoverage()
   }
 
   func unbind() {
@@ -247,6 +270,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
       self.session.outputs.forEach(self.session.removeOutput)
       self.commitSession(why: "unbind")
       self.previewLinks = [:]
+      self.setTurn(FrameTurn())
       self.videoPort = nil
       self.camera = nil
       self.photoOutput = nil
@@ -310,8 +334,9 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
       guard let settings = audioOutput?.recommendedAudioSettingsForAssetWriter(writingTo: fileType) as? [String: Any] else { return nil }
       audio = settings
     }
-    let transform = takeTransform(mirror: lens == .front && profile.mirrorFrontVideo)
-    MediaTrace.emit("camera", "take angle=\(Int(previewAngle)) preview=\(previewLinks.values.first.map { String(describing: $0.videoRotationAngle) } ?? "none")")
+    let turn = frameTurn
+    let transform = takeWriterTransform(turn: turn, mirror: lens == .front && profile.mirrorFrontVideo)
+    MediaTrace.emit("camera", "take angle=\(Int(previewAngle)) preview=\(previewLinks.values.first.map { String(describing: $0.connection.videoRotationAngle) } ?? "none") upright=\(turn.upright)")
     let budget = Int(clamping: captureCost(profile: profile))
     return CameraTake.Settings(
       video: video, audio: audio, transform: transform, maxDurationMs: profile.maxDurationMs, fileType: fileType,
@@ -421,6 +446,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     } else if let output = frameOutput {
       session.removeOutput(output)
       frameOutput = nil
+      setTurn(FrameTurn())
     }
     commitSession(why: "frameOutput")
   }
@@ -433,7 +459,18 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     guard session.canAddOutput(output) else { return }
     session.addOutput(output)
     frameOutput = output
-    if let stabilization { output.connection(with: .video)?.preferredVideoStabilizationMode = stabilization }
+    guard let connection = output.connection(with: .video) else { return }
+    if let stabilization { connection.preferredVideoStabilizationMode = stabilization }
+    // The frames come out upright (and mirrored as the profile wants), so the file needs no rotation tag and no re-encode after stop. A connection that cannot do it keeps the raw frames and the tag.
+    guard connection.isVideoRotationAngleSupported(previewAngle) else { return setTurn(FrameTurn()) }
+    connection.videoRotationAngle = previewAngle
+    var mirrored = false
+    if connection.isVideoMirroringSupported {
+      connection.automaticallyAdjustsVideoMirroring = false
+      connection.isVideoMirrored = mirrorsVideo
+      mirrored = mirrorsVideo
+    }
+    setTurn(mirrored == mirrorsVideo ? FrameTurn(upright: true, mirrored: mirrored) : FrameTurn())
   }
 
   /// The one place that opens and closes a session transaction, so the trace counts every graph change.
@@ -469,6 +506,12 @@ extension AVCaptureBackend: AVCaptureVideoDataOutputSampleBufferDelegate, AVCapt
     let seconds = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
     handler(buffer, seconds.isFinite && seconds > 0 ? UInt64(seconds * 1000) : 0)
   }
+}
+
+private struct PreviewLink {
+  let connection: AVCaptureConnection
+  /// The explicit connection of the backend, removed with the layer; the implicit one belongs to the session.
+  let owned: Bool
 }
 
 private struct WeakPreview {

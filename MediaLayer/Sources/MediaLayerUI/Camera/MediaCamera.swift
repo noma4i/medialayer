@@ -677,13 +677,19 @@ public final class MediaCamera: @unchecked Sendable {
   private func readClip() {
     guard let url = recordingURL else { return }
     reading?.cancel()
+    // The writer judged the sound of the take while it wrote: the file is read back only when the straightening rewrote it.
+    let coverage = backend.takeCoverage()
     reading = Task { [services] in
       let info: MediaInfo?
       do {
-        if let refusal = try await self.audioRefusal(of: url) { return self.refuseClip(url, refusal) }
-        try await services.uprightVideo(url)
+        if let coverage {
+          if let refusal = audioCoverageRefusal(verdict: coverage.verdict) { return self.refuseClip(url, refusal) }
+        } else if let refusal = try await self.audioRefusal(of: url) {
+          return self.refuseClip(url, refusal)
+        }
+        let rewrote = try await services.uprightVideo(url)
         try Task.checkCancellation()
-        if let refusal = try await self.audioRefusal(of: url) { return self.refuseClip(url, refusal) }
+        if rewrote, let refusal = try await self.audioRefusal(of: url) { return self.refuseClip(url, refusal) }
         info = try await services.clipInfo(url)
       } catch {
         if !(error is CancellationError) { Media.recordNativeFailure(error, source: .camera) }
@@ -755,7 +761,7 @@ public final class MediaCamera: @unchecked Sendable {
       }
       return (published.lens, passing)
     }
-    let orientation: CGImagePropertyOrientation = lens == .front ? .leftMirrored : .right
+    let orientation = tapOrientation(lens: lens, turn: backend.frameTurn)
     let frame = CameraFrame(pixelBuffer: buffer, orientation: orientation, lens: lens)
     for handler in targets { handler(frame) }
   }
