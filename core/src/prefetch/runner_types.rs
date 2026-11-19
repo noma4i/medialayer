@@ -47,6 +47,7 @@ pub(super) struct PrefetchState {
     pub(super) last: HashMap<WindowKey, (Vec<PrefetchJob>, HashMap<String, Source>)>,
     pub(super) running: HashMap<String, Job>,
     pub(super) wholes: HashMap<String, WholeHold>,
+    pub(super) mixed: HashSet<String>,
     pub(super) next_id: u64,
     pub(super) busy: bool,
     pub(super) suspended: bool,

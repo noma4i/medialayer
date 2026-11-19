@@ -65,3 +65,74 @@ async fn inv_strategy_30_whole_videos_and_audios_load_one_at_a_time_in_declarati
     let (running, after_release) = parallel(8, &urls, 1).await;
     assert_eq!((running, after_release), (1, 2));
 }
+
+#[tokio::test]
+async fn inv_strategy_34_a_shown_place_reads_through_the_proxy_while_the_whole_queue_is_busy() {
+    let stack = stack().await;
+    let busy = "https://o.test/busy.mp4";
+    let shown = "https://o.test/shown.mp4";
+    stack.fetcher.route(busy, Script::ok(vec![7; 2048]).hanging());
+    stack.fetcher.route(shown, Script::ok(vec![9; 4096]));
+    let prefetcher = over_proxy(&stack);
+    prefetcher.keep_whole(whole(busy, SourceKind::Video));
+    eventually(|| stack.fetcher.calls_for(busy) > 0).await;
+    prefetcher.keep_shown_whole(whole(shown, SourceKind::Video));
+    prefetcher.wait_whole_queued(false, 1).await;
+
+    let parsed = url::Url::parse(&stack.proxy.url_for(shown, &HashMap::new()).unwrap()).unwrap();
+    let target = format!("{}?{}", parsed.path(), parsed.query().unwrap_or_default());
+    let reply = tokio::time::timeout(std::time::Duration::from_secs(3), crate::proxy::test_client::request(stack.proxy.port(), "GET", &target, &[("Range", "bytes=0-1023")]))
+        .await
+        .expect("the shown place waited for the whole queue");
+    assert_eq!(reply.body.len(), 1024);
+}
+
+#[tokio::test]
+async fn inv_strategy_35_a_window_image_of_a_shown_place_loads_while_whole_loads_hold_the_queues() {
+    for max_concurrent in [2u32, 3, 8] {
+        let stack = stack().await;
+        stack.proxy.set_limits(&Limits { max_concurrent, ..Limits::default() });
+        let held: Vec<String> = ["https://o.test/a.jpg", "https://o.test/b.jpg", "https://o.test/clip.mp4"].map(String::from).to_vec();
+        for url in &held {
+            stack.fetcher.route(url, Script::ok(vec![7; 2048]).hanging());
+        }
+        let poster = "https://o.test/poster.jpg";
+        stack.fetcher.route(poster, Script::ok(vec![5; 2048]));
+        let prefetcher = over_proxy(&stack);
+        for url in &held {
+            prefetcher.keep_whole(whole(url, kind_of(url)));
+        }
+        eventually(|| started(&stack, &held) >= 2).await;
+        let loaded = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            stack.proxy.fetch_into_store(poster, &HashMap::new(), crate::proxy::Priority::Image, None),
+        )
+        .await;
+        assert!(loaded.is_ok(), "the shown window image waited for whole loads, max_concurrent {max_concurrent}");
+    }
+}
+
+#[tokio::test]
+async fn inv_strategy_35_a_window_image_of_a_url_queued_as_whole_loads_without_the_queue() {
+    let stack = stack().await;
+    stack.proxy.set_limits(&Limits { max_concurrent: 8, ..Limits::default() });
+    let held: Vec<String> = ["https://o.test/a.jpg", "https://o.test/b.jpg"].map(String::from).to_vec();
+    for url in &held {
+        stack.fetcher.route(url, Script::ok(vec![7; 2048]).hanging());
+    }
+    let poster = "https://o.test/poster.jpg";
+    stack.fetcher.route(poster, Script::ok(vec![5; 2048]));
+    let prefetcher = over_proxy(&stack);
+    for url in &held {
+        prefetcher.keep_whole(whole(url, SourceKind::Image));
+    }
+    eventually(|| started(&stack, &held) >= 2).await;
+    prefetcher.keep_shown_whole(whole(poster, SourceKind::Image));
+    prefetcher.wait_whole_queued(true, 1).await;
+    let loaded = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        stack.proxy.fetch_into_store(poster, &HashMap::new(), crate::proxy::Priority::Image, None),
+    )
+    .await;
+    assert!(loaded.is_ok(), "the shown window image waited for the whole queue of its own url");
+}

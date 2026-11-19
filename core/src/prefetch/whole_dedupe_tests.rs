@@ -244,3 +244,29 @@ async fn inv_strategy_33_a_shown_whole_video_loads_before_the_preload_wholes_que
     eventually(|| rig.loader.urls().len() >= 2).await;
     assert_eq!(rig.loader.urls()[1], shown.url, "the place the user sees waits for its whole behind preload");
 }
+
+struct Lines(std::sync::Mutex<Vec<String>>);
+
+impl crate::trace::TraceSink for Lines {
+    fn line(&self, text: String) {
+        self.0.lock().unwrap().push(text);
+    }
+}
+
+#[tokio::test]
+async fn inv_strategy_35_one_url_shown_with_another_strategy_than_its_whole_hold_traces_one_line() {
+    let _owner = crate::trace::sink_test_guard();
+    let lines = std::sync::Arc::new(Lines(Default::default()));
+    crate::trace::set_trace_sink(Some(lines.clone()));
+    let rig = rig();
+    rig.loader.hang_all();
+    let held = clip("mixed-poster");
+    rig.prefetcher.keep_whole(held.clone());
+    let shown = Source { strategy: CacheStrategy::Window, ..held.clone() };
+    rig.prefetcher.note_shown_strategy(&shown);
+    rig.prefetcher.note_shown_strategy(&shown);
+    rig.prefetcher.note_shown_strategy(&held);
+    crate::trace::set_trace_sink(None);
+    let seen = lines.0.lock().unwrap().iter().filter(|line| line.contains("mixed-poster")).count();
+    assert_eq!(seen, 1, "one trace line per url");
+}

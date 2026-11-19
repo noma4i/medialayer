@@ -355,6 +355,9 @@ impl Stage {
         }
         let now = self.now();
         self.declare_shown_whole(&source);
+        if source.is_remote() {
+            self.inner.prefetcher.note_shown_strategy(&source.for_prefetch());
+        }
         let declaration = std::sync::Arc::new(());
         let (state, commands) = {
             let mut state = self.state();

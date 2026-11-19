@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- A trace line names a url that a place shows with another strategy than its whole hold.
+
 ### Fixed
 
 - A shown video place loads its whole before preload wholes queued ahead of it.

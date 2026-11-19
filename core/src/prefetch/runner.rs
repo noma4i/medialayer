@@ -34,7 +34,7 @@ impl Prefetcher {
             gate: Gate::new(limits.max_concurrent as usize),
             whole_gates: [Gate::new(WHOLE_MEDIA_PARALLEL), Gate::new(WHOLE_IMAGE_PARALLEL)],
             clock,
-            state: Mutex::new(PrefetchState { ledger, windows: HashMap::new(), last: HashMap::new(), running: HashMap::new(), wholes: HashMap::new(), next_id: 0, busy: false, suspended: false }),
+            state: Mutex::new(PrefetchState { ledger, windows: HashMap::new(), last: HashMap::new(), running: HashMap::new(), wholes: HashMap::new(), mixed: HashSet::new(), next_id: 0, busy: false, suspended: false }),
             live: AtomicUsize::new(0),
             events: broadcast::channel(EVENT_CAPACITY).0,
             #[cfg(test)]
@@ -249,6 +249,18 @@ impl Prefetcher {
         }
     }
 
+    /// A place shows a url that a whole hold also holds, with another strategy: one trace line per url, the load itself is shared by key.
+    pub fn note_shown_strategy(&self, source: &Source) {
+        if source.strategy == CacheStrategy::Whole {
+            return;
+        }
+        let key = self.shared.loader.cache_key(&source.url, &source.headers);
+        let mut state = self.shared.state();
+        if state.wholes.contains_key(&key) && state.mixed.insert(key) {
+            crate::trace!("prefetch", "mixed strategy {} shown as {:?} while held whole", crate::trace::tail(&source.url), source.strategy);
+        }
+    }
+
     pub fn hold_whole(&self, owner: u64, source: Source) {
         self.admit_whole(owner, source, false);
     }
@@ -305,6 +317,7 @@ impl Prefetcher {
             return;
         }
         state.wholes.remove(key);
+        state.mixed.remove(key);
         if state.running.get(key).is_some_and(|job| job.whole) && !state.is_wanted(key) {
             state.cancel_job(key);
             state.ledger.set_distance(key, usize::MAX);
