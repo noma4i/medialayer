@@ -218,6 +218,7 @@ final class AudioLink: @unchecked Sendable {
   func endTicket(id: UInt64) {
     inbox.async {
       self.tickets[id] = nil
+      MediaTrace.emit("audio", "audio ticket end id=\(id)")
       self.process(.captureEnded(id: id))
     }
   }
@@ -248,6 +249,7 @@ final class AudioLink: @unchecked Sendable {
       self.sessionQueue.async {
         stops.forEach { $0.waitForStop() }
         if self.sessionConfigured {
+          MediaTrace.emit("audio", "audio session deactivate generation=- reason=close")
           do { try self.ports.session.deactivate(); self.sessionConfigured = false }
           catch { Media.recordNativeFailure(error, source: .session) }
         }
@@ -332,6 +334,7 @@ final class AudioLink: @unchecked Sendable {
         sessionQueue.async {
           stops.forEach { $0.waitForStop() }
           let result: AppliedResult
+          MediaTrace.emit("audio", "audio session activate generation=\(generation) reason=apply activate=\(activate)")
           do { try self.ports.session.apply(plan, activate: activate); self.sessionConfigured = true; result = .ok }
           catch { self.report(error, source: .session); result = .failed(code: Int64((error as NSError).code)) }
           self.send(.applied(generation: generation, result: result))
@@ -345,6 +348,7 @@ final class AudioLink: @unchecked Sendable {
         sessionQueue.async {
           stops.forEach { $0.waitForStop() }
           let result: AppliedResult
+          MediaTrace.emit("audio", "audio session deactivate generation=\(generation) reason=deactivate")
           do { try self.ports.session.deactivate(); self.sessionConfigured = false; result = .ok }
           catch is AudioSessionBusy { result = .busy }
           catch { self.report(error, source: .session); result = .failed(code: Int64((error as NSError).code)) }
@@ -354,6 +358,7 @@ final class AudioLink: @unchecked Sendable {
         guard let continuation = pending.removeValue(forKey: id) else { continue }
         let ticket = RecordingTicket(id: id, link: self)
         tickets[id] = WeakRecordingTicket(value: ticket)
+        MediaTrace.emit("audio", "audio ticket begin id=\(id)")
         continuation.resume(returning: .success(ticket))
       case let .refuse(id, reason): pending.removeValue(forKey: id)?.resume(returning: .failure(reason))
       case let .revoke(id, reason):
