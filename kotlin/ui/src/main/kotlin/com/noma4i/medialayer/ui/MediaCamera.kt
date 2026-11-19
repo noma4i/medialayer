@@ -50,7 +50,7 @@ import kotlinx.coroutines.launch
 data class CapturedPhoto(val file: File, val width: Int, val height: Int, val lens: CameraLens)
 
 /** A recorded clip: an mp4 file, its length and its frame as the screen shows it. The file belongs to the app from now on. */
-data class CapturedClip(val file: File, val durationMs: Long, val frame: ImageSize?, val lens: CameraLens)
+data class CapturedClip(val file: File, val durationMs: Long, val frame: ImageSize?, val lens: CameraLens, val end: RecordEnd)
 
 val CameraState.isReady: Boolean get() = phase == CameraPhase.READY
 
@@ -717,7 +717,7 @@ class MediaCamera internal constructor(
     recordingFile = null
     recordingWritten = null
     clipInfo = null
-    val clip = CapturedClip(file, info.durationUs / 1000, info.frame, run.takeLens)
+    val clip = CapturedClip(file, info.durationUs / 1000, info.frame, run.takeLens, info.end)
     clips[take] = clip
     ended = Result.success(clip)
   }

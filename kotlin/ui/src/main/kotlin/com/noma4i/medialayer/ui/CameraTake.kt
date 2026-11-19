@@ -13,6 +13,7 @@ import androidx.media3.muxer.Mp4Muxer
 import com.noma4i.medialayer.AudioCoverage
 import com.noma4i.medialayer.FailureSource
 import com.noma4i.medialayer.NativeFailure
+import com.noma4i.medialayer.microphoneLost
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
@@ -37,8 +38,8 @@ internal interface CameraTakeListener {
 
   fun onStarted(generation: Long, baseUs: Long)
 
-  /** [coverage] is the verdict of the sound the take wrote, judged at its write point. */
-  fun onFinished(generation: Long, file: File, durationUs: Long, coverage: AudioCoverage)
+  /** [coverage] is the verdict of the sound the take wrote, judged at its write point. [microphoneLost] tells that the take ended by itself because its microphone stopped delivering. */
+  fun onFinished(generation: Long, file: File, durationUs: Long, coverage: AudioCoverage, microphoneLost: Boolean = false)
 
   fun onFailed(generation: Long, failure: NativeFailure)
 
@@ -103,6 +104,8 @@ internal class CameraTake(
   private var audioDone = !hasAudio
   private var videoDone = false
   private var started = false
+  private var pcmQueued = false
+  private var microphoneEnded = false
 
   override fun begin(): Boolean = handler.post {
     if (begun || ended.get()) return@post
@@ -220,6 +223,7 @@ internal class CameraTake(
       if (size <= 0) return fail(0, "audio input buffer holds no whole frame")
       buffer.put(head.bytes, head.offset, size)
       lastAudioInputUs = origin + head.ptsUs
+      pcmQueued = true
       codec.queueInputBuffer(index, 0, size, lastAudioInputUs, 0)
       audioEndUs = lastAudioInputUs + size / head.bytesPerFrame * 1_000_000L / settings.audio!!.getInteger(MediaFormat.KEY_SAMPLE_RATE)
       head.offset += size
@@ -315,12 +319,23 @@ internal class CameraTake(
     if (ptsUs < 0) return
     if (ptsUs > settings.maxDurationUs) return beginFinish()
     if (kind == AUDIO) return writeAudio(ptsUs, flags, buffer)
-    mux(VIDEO, ptsUs, flags, buffer)
+    if (microphoneEnded) return
     val interval = if (lastPts[VIDEO] >= 0) ptsUs - lastPts[VIDEO] else 0L
+    if (!finishing && hasAudio && microphoneLost(if (pcmQueued) audioEndUs - baseUs else -1L, ptsUs + interval)) return endByMicrophone()
+    mux(VIDEO, ptsUs, flags, buffer)
     lastPts[VIDEO] = ptsUs
     videoEndUs = ptsUs + interval
     ledger!!.video(ptsUs, videoEndUs)
     flushTail()
+  }
+
+  /** The microphone stopped delivering: no video after the end of the sound is written, the take finishes as a stop does and its length is the end of the sound. */
+  private fun endByMicrophone() {
+    val audioEnd = audioEndUs - baseUs
+    MediaTrace.emit("camera") { "take microphone lost audioEndUs=$audioEnd videoEndUs=$videoEndUs" }
+    microphoneEnded = true
+    videoEndUs = minOf(videoEndUs, audioEnd)
+    beginFinish()
   }
 
   /** The one write point of the take: every sample that reaches the muxer is entered in the ledger of the take, nothing else is. */
@@ -358,12 +373,12 @@ internal class CameraTake(
 
   private fun complete() {
     if (!started || written[VIDEO] == 0 || (hasAudio && written[AUDIO] == 0)) return fail(0, "the take ended without both streams")
-    end(file, videoEndUs, coverage = ledger!!.coverage())
+    end(file, videoEndUs, coverage = ledger!!.coverage(), microphoneLost = microphoneEnded)
   }
 
   private fun fail(code: Long, message: String) = end(null, null, NativeFailure(FailureSource.RECORDER, "android.media.MediaCodec", code, message))
 
-  private fun end(done: File?, durationUs: Long?, failure: NativeFailure? = null, coverage: AudioCoverage? = null) {
+  private fun end(done: File?, durationUs: Long?, failure: NativeFailure? = null, coverage: AudioCoverage? = null, microphoneLost: Boolean = false) {
     if (!ended.compareAndSet(false, true)) return
     var outcome = failure
     fun guarded(step: () -> Unit) {
@@ -385,7 +400,7 @@ internal class CameraTake(
     if (!success) file.delete()
     try {
       when {
-        success -> listener.onFinished(generation, file, durationUs!!, coverage!!)
+        success -> listener.onFinished(generation, file, durationUs!!, coverage!!, microphoneLost)
         outcome != null -> listener.onFailed(generation, outcome!!)
         else -> listener.onCancelled(generation)
       }

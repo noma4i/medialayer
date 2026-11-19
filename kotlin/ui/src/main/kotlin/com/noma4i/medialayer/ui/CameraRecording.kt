@@ -28,8 +28,8 @@ internal interface CameraTaking {
   fun cancel()
 }
 
-/** What the writer knows of a finished take: the verdict of its sound, its length (the end of the last video frame it wrote) and its upright frame. The file is never read back. */
-internal class WrittenTake(val coverage: AudioCoverage, val durationUs: Long, val frame: com.noma4i.medialayer.ImageSize?)
+/** What the writer knows of a finished take: the verdict of its sound, its length (the end of the last video frame it wrote) and its upright frame and how it ended. The file is never read back. */
+internal class WrittenTake(val coverage: AudioCoverage, val durationUs: Long, val frame: com.noma4i.medialayer.ImageSize?, val end: RecordEnd)
 
 internal interface CameraEncoderFeed {
   fun attach(generation: Long, target: Surface)
@@ -103,9 +103,10 @@ internal class CameraRecording(
       }
     }
 
-    override fun onFinished(generation: Long, file: File, durationUs: Long, coverage: AudioCoverage) = main.execute {
-      if (current === entry && !entry.stale()) judged(WrittenTake(coverage, durationUs, entry.frame))
-      settle(entry, if (entry.stopping) RecordEnd.COMPLETED else RecordEnd.LIMIT_REACHED)
+    override fun onFinished(generation: Long, file: File, durationUs: Long, coverage: AudioCoverage, microphoneLost: Boolean) = main.execute {
+      val end = if (microphoneLost) RecordEnd.MICROPHONE_LOST else if (entry.stopping) RecordEnd.COMPLETED else RecordEnd.LIMIT_REACHED
+      if (current === entry && !entry.stale()) judged(WrittenTake(coverage, durationUs, entry.frame, end))
+      settle(entry, end)
     }
 
     override fun onFailed(generation: Long, failure: NativeFailure) = main.execute {
