@@ -19,11 +19,11 @@ import com.noma4i.medialayer.CaptureProfile
 import com.noma4i.medialayer.CaptureRun
 import com.noma4i.medialayer.ImageSize
 import com.noma4i.medialayer.MediaException
+import com.noma4i.medialayer.MediaInfo
 import com.noma4i.medialayer.RecordEnd
 import com.noma4i.medialayer.RecordingKind
 import com.noma4i.medialayer.RecordingRefusal
 import com.noma4i.medialayer.cameraRefusalText
-import com.noma4i.medialayer.audioCoverageRefusal
 import com.noma4i.medialayer.captureCost
 import com.noma4i.medialayer.captureRun
 import com.noma4i.medialayer.captureStep

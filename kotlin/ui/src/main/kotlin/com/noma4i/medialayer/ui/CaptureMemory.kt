@@ -44,12 +44,3 @@ internal class CaptureMemory(val total: Long) : AutoCloseable {
     if (now) onDrained()
   }
 }
-
-internal fun framesInFlight(total: Long, width: Int, height: Int): Int {
-  require(width > 0 && height > 0) { "the frame has no size" }
-  val frames = total / (width.toLong() * height * RGBA_BYTES)
-  check(frames > 0) { "$total bytes do not hold one ${width}x$height frame" }
-  return frames.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-}
-
-private const val RGBA_BYTES = 4L

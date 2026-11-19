@@ -56,14 +56,4 @@ class CaptureMemoryTest {
     CaptureMemory(10).close { now++ }
     assertEquals("a memory without leases is drained at once", 1, now)
   }
-
-  @Test
-  fun the_frames_in_flight_round_down_and_zero_frames_or_a_huge_frame_is_a_refusal() {
-    val frame = 1280L * 720 * 4
-    assertEquals(3, framesInFlight(frame * 3, 1280, 720))
-    assertEquals(2, framesInFlight(frame * 3 - 1, 1280, 720))
-    assertThrows(IllegalStateException::class.java) { framesInFlight(frame - 1, 1280, 720) }
-    assertThrows(IllegalStateException::class.java) { framesInFlight(Int.MAX_VALUE.toLong(), 65_536, 65_536) }
-    assertThrows(IllegalArgumentException::class.java) { framesInFlight(frame, 0, 720) }
-  }
 }
