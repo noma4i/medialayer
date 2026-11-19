@@ -17,6 +17,21 @@ internal class CameraAudioHold(
 
   val generation: Long? get() = input?.audioGeneration
 
+  private var waiting: (() -> Unit)? = null
+
+  /**
+   * Runs [run] once the microphone is connected, at once when it is. The core hands the microphone to the camera only after the recording before it ended
+   * (a voice stop): a take that starts in that gap waits for it instead of finding none. Returns the handle that drops the wait.
+   */
+  fun whenConnected(run: () -> Unit): AutoCloseable {
+    synchronized(made) { waiting = run }
+    // The generation is read outside the lock: the input tells `connected` under its own lock.
+    if (generation != null) connected()
+    return AutoCloseable { synchronized(made) { if (waiting === run) waiting = null } }
+  }
+
+  private fun connected() { synchronized(made) { waiting.also { waiting = null } }?.invoke() }
+
   fun keep(wanted: PcmSpec?) {
     if (closed && wanted == null) return
     check(!closed) { "the audio hold is closed" }
@@ -26,7 +41,7 @@ internal class CameraAudioHold(
     spec = null
     if (wanted == null) return
     val audio = checkNotNull(link()) { "no audio link for the camera microphone" }
-    input = CameraAudioInput(audio, wanted, tap, issue, timer = timer) { heard -> microphone(heard).also { synchronized(made) { made.add(it) } } }
+    input = CameraAudioInput(audio, wanted, tap, issue, timer = timer, connected = ::connected) { heard -> microphone(heard).also { synchronized(made) { made.add(it) } } }
     spec = wanted
   }
 

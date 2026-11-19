@@ -384,8 +384,40 @@ internal class CameraXBackend(private val context: Context, private val audioLin
   override fun beginRecording(file: File, profile: CaptureProfile, lens: CameraLens, start: (() -> Unit) -> Unit) {
     val generation = session.get()
     val recordingGeneration = take.incrementAndGet()
+    val begin = { begin(file, profile, lens, start, generation, recordingGeneration) }
     main.execute {
       if (generation != session.get() || recordingGeneration != take.get()) return@execute
+      beginWait?.close()
+      // The microphone of the camera comes back after the recording before it ended (a voice stop): the take waits for it, at most one sound wait (T26).
+      if (profile.audio && audio.generation == null) beginWait = waitMicrophone(begin) else begin()
+    }
+  }
+
+  private var beginWait: AutoCloseable? = null
+
+  /** Runs [begin] on the connection of the microphone or after the sound wait; closing the handle before drops the take as one failed start. Runs on main. */
+  private fun waitMicrophone(begin: () -> Unit): AutoCloseable {
+    val fired = java.util.concurrent.atomic.AtomicBoolean()
+    var clock: AutoCloseable? = null
+    var hold: AutoCloseable? = null
+    val release = { clock?.close(); hold?.close() }
+    val fire = {
+      main.execute {
+        if (fired.compareAndSet(false, true)) {
+          beginWait = null
+          release()
+          begin()
+        }
+      }
+    }
+    clock = RetryTimer.system.schedule(MicrophoneRetry.SOUND_WAIT_MS) { fire() }
+    hold = audio.whenConnected { fire() }
+    return AutoCloseable { if (fired.compareAndSet(false, true)) { release(); sink(CaptureEvent.RecordFinished(com.noma4i.medialayer.RecordEnd.FAILED)) } }
+  }
+
+  private fun begin(file: File, profile: CaptureProfile, lens: CameraLens, start: (() -> Unit) -> Unit, generation: Long, recordingGeneration: Long) {
+    if (generation != session.get() || recordingGeneration != take.get()) return
+    run {
       try {
         val encoder = checkNotNull(output) { "no video output is bound" }
         val recorded = checkNotNull(encoders) { "no encoder profile is bound" }
@@ -415,12 +447,14 @@ internal class CameraXBackend(private val context: Context, private val audioLin
   }
 
   override fun endRecording() {
-    main.execute { recording.stop() }
+    main.execute { dropBeginWait(); recording.stop() }
   }
 
   override fun endRecording(done: () -> Unit) {
-    main.execute { recording.stop(done) }
+    main.execute { dropBeginWait(); recording.stop(done) }
   }
+
+  private fun dropBeginWait() { beginWait?.let { beginWait = null; it.close() } }
 
   override fun audioLost() {
     main.execute { recording.audioLost() }

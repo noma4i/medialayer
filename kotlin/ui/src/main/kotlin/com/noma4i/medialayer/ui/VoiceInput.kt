@@ -60,7 +60,7 @@ internal class VoiceInput(
     result.exceptionOrNull()?.let { return fail(voiceFailure(it)) }
     synchronized(lock) {
       if (phase != Phase.PREPARING) return
-      owner = CameraAudioInput(link, spec, this, ::issue, RecordingKind.VOICE, ::fail, timer, microphone)
+      owner = CameraAudioInput(link, spec, this, ::issue, RecordingKind.VOICE, ::fail, timer, microphone = microphone)
       phase = Phase.WAITING
     }
   }

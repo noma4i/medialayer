@@ -80,6 +80,28 @@ class CameraAudioHoldTest {
     assertEquals(1L, hold.generation)
   }
 
+  /** INV-AUDIO-87 (T26): a take that starts before the core handed the microphone back waits for it and goes on at its connection, once; a dropped wait never fires. */
+  @Test
+  fun inv_audio_87_a_wait_for_the_microphone_goes_on_at_its_connection_once_and_a_dropped_wait_never() {
+    val fired = java.util.concurrent.atomic.AtomicInteger()
+    val dropped = java.util.concurrent.atomic.AtomicInteger()
+    val early = hold.whenConnected { fired.incrementAndGet() }
+    assertEquals("no microphone yet: the take waits", 0, fired.get())
+    hold.keep(spec(44_100))
+    await("the connection told the wait") { fired.get() == 1 }
+    early.close()
+    hold.keep(spec(44_100))
+    hold.keep(null)
+    hold.whenConnected { dropped.incrementAndGet() }.close()
+    hold.keep(spec(44_100))
+    await("the microphone connected again") { calls.last().startsWith("start") }
+    assertEquals("a wait is told once", 1, fired.get())
+    assertEquals("a dropped wait is not told", 0, dropped.get())
+    var now = 0
+    hold.whenConnected { now += 1 }
+    await("a connected microphone tells at once") { now == 1 }
+  }
+
   @Test
   fun a_new_format_replaces_the_input_and_audio_turned_off_or_a_photo_closes_it_and_the_next_audio_opens_a_fresh_one() {
     hold.keep(spec(44_100))

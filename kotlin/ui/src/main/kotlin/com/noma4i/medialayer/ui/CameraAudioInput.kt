@@ -40,6 +40,8 @@ internal class CameraAudioInput(
   kind: RecordingKind = RecordingKind.VIDEO,
   private val failed: (NativeFailure) -> Unit = { Media.recordNativeFailure(it) },
   private val timer: RetryTimer = RetryTimer.system,
+  /** The microphone of a run connected (its source started), or gave up: whoever waited for it goes on. */
+  private val connected: () -> Unit = {},
   microphone: (RecordingAudioListener) -> CameraMicrophone
 ) : AudioInputOwner, RecordingAudioListener, AutoCloseable {
   /**
@@ -138,11 +140,13 @@ internal class CameraAudioInput(
       failed(NativeFailure(FailureSource.RECORDER, error.javaClass.name, 0L, error.message ?: error.toString()))
       issue(CaptureAudioIssue.SOURCE_ERROR)
       handle.restoreFailed(run.core)
+      connected()
       return
     }
     if (run.tap == null) run.tap = audio
     val current = Live(run, audio)
     live = current
+    connected()
     clock = timer.schedule(MicrophoneRetry.SOUND_WAIT_MS) {
       synchronized(lock) {
         if (live !== current || current.heard) return@synchronized
