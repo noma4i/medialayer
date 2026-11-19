@@ -1,0 +1,55 @@
+name: MediaLayerProbe
+options:
+  bundleIdPrefix: com.noma4i
+  deploymentTarget:
+    iOS: "17.0"
+configFiles:
+  Debug: Local.xcconfig
+  Release: Local.xcconfig
+packages:
+  MediaLayer:
+    path: ../../MediaLayer
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+targets:
+  MediaLayerProbe:
+    type: application
+    platform: iOS
+    sources: [Probe]
+    dependencies:
+      - package: MediaLayer
+        product: MediaLayer
+      - package: MediaLayer
+        product: MediaLayerUI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PROBE_BUNDLE_ID:default=com.noma4i.medialayer.probe)
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_NSCameraUsageDescription: MediaLayerProbe records a test clip with the camera.
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: MediaLayerProbe records the sound of a test clip.
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIFileSharingEnabled: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+  MediaLayerProbeTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [ProbeTests]
+    dependencies:
+      - target: MediaLayerProbe
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PROBE_BUNDLE_ID:default=com.noma4i.medialayer.probe).tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/MediaLayerProbe.app/MediaLayerProbe
+        BUNDLE_LOADER: $(TEST_HOST)
+schemes:
+  MediaLayerProbe:
+    build:
+      targets:
+        MediaLayerProbe: all
+        MediaLayerProbeTests: [test]
+    test:
+      targets: [MediaLayerProbeTests]
