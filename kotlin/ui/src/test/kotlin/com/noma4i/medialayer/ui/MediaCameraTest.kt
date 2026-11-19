@@ -105,19 +105,12 @@ private class AppVoiceCapture(private val link: () -> AudioLink?, private val mi
 
 private class FakeBackend : CaptureBackend {
   val log = CopyOnWriteArrayList<String>()
-  /** When set, the bound preview holds the app microphone of the camera, as CameraAudioHold does. */
-  @Volatile var microphones: AppMicrophones? = null
-  @Volatile var link: () -> AudioLink? = { null }
-  @Volatile private var held: CameraAudioInput? = null
   val mainCalls = AtomicInteger()
   @Volatile private var sink: (CaptureEvent) -> Unit = {}
   @Volatile private var audioSink: (CaptureAudioIssue) -> Unit = {}
-  @Volatile private var takeSink: (WrittenTake) -> Unit = {}
   /** The length the fake writer reports for a finished take; null makes the writer fail the take. */
   @Volatile var durationUs: Long? = 2_000_000L
   @Volatile var frame: ImageSize? = ImageSize(720u, 1280u)
-  /** The verdict the fake take hands with every finished recording, as the real take does from its ledger. */
-  @Volatile var coverage: com.noma4i.medialayer.AudioCoverage = CoreCoverage.covered()
   @Volatile var tap: ImageAnalysis.Analyzer? = null
   @Volatile var recordingFile: File? = null
   @Volatile var photoFails = false
@@ -130,11 +123,7 @@ private class FakeBackend : CaptureBackend {
   override val photoSize: PixelSize? = PixelSize(3000u, 4000u)
 
   fun emit(event: CaptureEvent) {
-    val length = durationUs
-    if (event is CaptureEvent.RecordFinished && event.end != RecordEnd.FAILED) {
-      if (length == null) return sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
-      takeSink(WrittenTake(coverage, length, frame, event.end))
-    }
+    if (event is CaptureEvent.RecordFinished && event.end != RecordEnd.FAILED && durationUs == null) return sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
     sink(event)
   }
 
@@ -157,22 +146,15 @@ private class FakeBackend : CaptureBackend {
 
   override fun setAudioIssueSink(sink: (CaptureAudioIssue) -> Unit) { audioSink = sink }
 
-  override fun setTakeSink(sink: (WrittenTake) -> Unit) { takeSink = sink }
-
   override fun setHost(view: PreviewView?, owner: LifecycleOwner?) = Unit
 
-  @Volatile var memory: CaptureMemory? = null
-
-  override fun useMemory(memory: CaptureMemory) { this.memory = memory }
-
   override fun bind(lens: CameraLens, profile: CaptureProfile) {
-    microphones?.let { mics -> if (profile.audio && held == null) held = CameraAudioInput(checkNotNull(link()), APP_PCM, NoTap, {}) { mics.microphone("camera", it) } }
     note("bind $lens")
     emit(CaptureEvent.Opened(hasFlash, 1f, 20f))
     emit(CaptureEvent.Streaming(true))
   }
 
-  override fun unbind() { held?.close(); held = null; note("unbind") }
+  override fun unbind() { note("unbind") }
 
   override suspend fun takePhoto(file: File, flash: Boolean, profile: CaptureProfile) {
     note("photo flash=$flash")
@@ -196,29 +178,13 @@ private class FakeBackend : CaptureBackend {
   override fun endRecording() {
     note("endRecording")
     if (finishHeld) return
+    if (holdStops) return run { heldStops.add { emit(CaptureEvent.RecordFinished(RecordEnd.COMPLETED)) }; note("endRecording held") }
     emit(CaptureEvent.RecordFinished(RecordEnd.COMPLETED))
   }
 
   /** While set, a stop of the take waits for [finalizeHeldStops], as CameraX waits for its Finalize event. */
   @Volatile var holdStops = false
   val heldStops = CopyOnWriteArrayList<() -> Unit>()
-
-  override fun endRecording(done: () -> Unit) {
-    if (!holdStops) return super.endRecording(done)
-    heldStops.add { emit(CaptureEvent.RecordFinished(RecordEnd.COMPLETED)); done() }
-    note("endRecording held")
-  }
-
-  /** While set, the fake microphone of the camera still holds the system's AudioRecord. */
-  @Volatile var audioIdleGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
-
-  override suspend fun audioIdle() { audioIdleGate?.await() }
-
-  override fun awaitRecordingStopped(done: () -> Unit) {
-    if (!holdStops) return done()
-    heldStops.add(done)
-    note("stop held")
-  }
 
   fun finalizeHeldStops() {
     holdStops = false
@@ -309,6 +275,7 @@ class MediaCameraTest {
         AutoCloseable { counters.released.incrementAndGet(); TestSignal.fire() }
       },
       audio = audio,
+      clipInfo = { _ -> backend.durationUs?.let { com.noma4i.medialayer.MediaInfo((it / 1000).toULong(), backend.frame) } },
       upright = { raw, quality ->
         counters.checkThread()
         counters.qualities.add(quality)
@@ -336,23 +303,6 @@ class MediaCameraTest {
     rig.detach()
     eventually("released") { rig.counters.released.get() == 1 }
     assertEquals(1, rig.backend.count("unbind"))
-  }
-
-  @Test
-  fun inv_capture_13_theLedgerHoldStaysUntilTheBackendReturnedEveryLeaseAndARebindKeepsTheSameTotal() {
-    val rig = rig()
-    ready(rig)
-    val memory = rig.backend.memory!!
-    val lease = memory.lease(1024)
-    rig.camera.setLens(CameraLens.FRONT)
-    eventually("rebound") { rig.backend.count("bind FRONT") == 1 }
-    assertTrue("a rebind keeps the one total", rig.backend.memory === memory && rig.counters.taken.get() == 1)
-    rig.detach()
-    eventually("unbound") { rig.backend.count("unbind") == 1 }
-    runBlocking { rig.camera.awaitQueue() }
-    assertEquals("a lease still lives: the Ledger hold stays", 0, rig.counters.released.get())
-    lease.close()
-    eventually("the hold is given back after the last lease") { rig.counters.released.get() == 1 }
   }
 
   @Test
@@ -479,39 +429,6 @@ class MediaCameraTest {
   }
 
   @Test
-  fun inv_capture_84_aTakeThatLosesItsMicrophoneSoundEndsAndDeliversTheSoundSoFar() = runBlocking {
-    val rig = rig(moment)
-    ready(rig)
-    rig.camera.startRecording()
-
-    rig.backend.audioIssue(CaptureAudioIssue.SILENCED)
-
-    eventually("the take ended") { rig.camera.state.value.phase != CameraPhase.RECORDING }
-    val clip = rig.camera.stopRecording()
-    assertTrue(clip.file.exists())
-    assertEquals(null, rig.camera.state.value.fault)
-  }
-
-  @Test
-  fun inv_audio_70_a_recorded_file_whose_sound_the_core_refuses_is_deleted_with_the_broken_track_refusal_and_one_outcome() = runBlocking {
-    val rig = rig(moment)
-    ready(rig)
-    val outcomes = CopyOnWriteArrayList<Any>()
-    val watching = launch(Dispatchers.Default, start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { rig.camera.state.collect { state -> state.outcome?.let { outcomes.add(it) } } }
-    CoreCoverage.refused.forEach { (verdict, answer) ->
-      assertEquals(verdict, answer.verdict)
-      rig.backend.coverage = answer
-      rig.camera.startRecording()
-      val ended = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
-      assertEquals(CameraRefusal.AUDIO_TRACK_BROKEN, ended.reason)
-      assertTrue(rig.files().isEmpty())
-      eventually("ready after $verdict") { rig.camera.state.value.phase == CameraPhase.READY }
-    }
-    watching.cancel()
-    assertEquals(listOf<Any>(com.noma4i.medialayer.TakeOutcome.Refused(CameraRefusal.AUDIO_TRACK_BROKEN)), outcomes.distinct())
-  }
-
-  @Test
   fun inv_audio_71_a_take_the_ledger_covers_is_delivered_with_the_file_untouched_after_the_stop() = runBlocking {
     val rig = rig(moment)
     ready(rig)
@@ -560,24 +477,6 @@ class MediaCameraTest {
       val refused = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.takePhoto() } }
       assertEquals("$failure", refusal, refused.reason)
     }
-  }
-
-  @Test
-  fun inv_audio_72_a_take_with_no_audio_in_its_profile_skips_the_sound_read() = runBlocking<Unit> {
-    val rig = rig(moment.copy(audio = false))
-    ready(rig)
-    rig.backend.coverage = CoreCoverage.missing()
-    rig.camera.startRecording()
-    rig.camera.stopRecording()
-  }
-
-  @Test
-  fun inv_audio_73_aac_frame_samples_come_from_the_audio_specific_config_and_only_for_lc_at_the_output_rate() {
-    val lc = java.nio.ByteBuffer.wrap(androidx.media3.extractor.AacUtil.buildAacLcAudioSpecificConfig(44_100, 1))
-    assertEquals(1024, aacFrameSamples(lc, 44_100))
-    assertEquals(0, aacFrameSamples(lc, 48_000))
-    assertEquals(0, aacFrameSamples(java.nio.ByteBuffer.wrap(byteArrayOf(0x42, 0x08)), 44_100))
-    assertEquals(0, aacFrameSamples(null, 44_100))
   }
 
   @Test
@@ -757,57 +656,6 @@ class MediaCameraTest {
   }
 
   @Test
-  fun inv_audio_85_aVoiceRightAfterACircleStopRecordsWhileThePreviewLivesAndIsBusyDuringATake() = runBlocking {
-    val microphones = AppMicrophones()
-    val rig = rig(moment)
-    rig.backend.microphones = microphones
-    rig.backend.link = { rig.audio }
-    ready(rig)
-    eventually("the preview holds the microphone") { microphones.live.keys == setOf("camera") }
-    rig.camera.startRecording()
-    val during = MediaVoiceRecorder(AppVoiceCapture({ rig.audio }, microphones), 60_000u, { rig.audio })
-    val refused = withTimeout(5_000) { runCatching { during.start(File.createTempFile("busy", ".m4a")) } }.exceptionOrNull()
-    assertEquals("a voice during a camera take: $refused", com.noma4i.medialayer.VoiceRefusal.MICROPHONE_BUSY, (refused as? MediaException.Voice)?.reason)
-    assertEquals(setOf("camera"), microphones.live.keys)
-    rig.camera.stopRecording()
-
-    val voice = MediaVoiceRecorder(AppVoiceCapture({ rig.audio }, microphones), 60_000u, { rig.audio })
-    val started = withTimeout(5_000) { runCatching { voice.start(File.createTempFile("voice", ".m4a")) } }
-    assertNull("the voice right after the circle stop: ${started.exceptionOrNull()}", started.exceptionOrNull())
-    assertEquals("only the voice holds the AudioRecord", setOf("voice"), microphones.live.keys)
-    runCatching { voice.stop() } // the fake take holds no audio: EMPTY is its outcome, the microphone goes back either way
-    eventually("the preview took its microphone back") { microphones.live.keys == setOf("camera") }
-  }
-
-  @Test
-  fun inv_audio_86_aVoiceRightAfterTheCameraClosedStartsWithoutABlinkOfNoSoundAndARealSilenceIsStillNoSound() = runBlocking {
-    val microphones = AppMicrophones()
-    val rig = rig(moment)
-    rig.backend.microphones = microphones
-    rig.backend.link = { rig.audio }
-    ready(rig)
-    eventually("the preview holds the microphone") { microphones.live.keys == setOf("camera") }
-    rig.detach()
-    eventually("the camera closed and gave the microphone back") { microphones.live.isEmpty() && !rig.audio.isRecording }
-
-    val seen = CopyOnWriteArrayList<com.noma4i.medialayer.MicrophoneAvailability>()
-    val watch = rig.audio.onAvailability { seen.add(it); TestSignal.fire() }
-    val voice = MediaVoiceRecorder(AppVoiceCapture({ rig.audio }, microphones), 60_000u, { rig.audio })
-    val started = withTimeout(5_000) { runCatching { voice.start(File.createTempFile("voice", ".m4a")) } }
-    assertNull("the voice right after the camera closed: ${started.exceptionOrNull()}", started.exceptionOrNull())
-    assertFalse("the start blinked no sound: $seen", com.noma4i.medialayer.MicrophoneAvailability.NO_SOUND in seen)
-    runCatching { voice.stop() }
-    eventually("the voice gave the microphone back") { microphones.live.isEmpty() && !rig.audio.isRecording }
-
-    microphones.muted = true
-    val silent = MediaVoiceRecorder(AppVoiceCapture({ rig.audio }, microphones), 60_000u, { rig.audio })
-    val refused = withTimeout(5_000) { runCatching { silent.start(File.createTempFile("silent", ".m4a")) } }.exceptionOrNull()
-    assertEquals("a silenced source: $refused", com.noma4i.medialayer.VoiceRefusal.MICROPHONE_SILENT, (refused as? MediaException.Voice)?.reason)
-    eventually("a real silence is still no sound: $seen") { com.noma4i.medialayer.MicrophoneAvailability.NO_SOUND in seen }
-    watch.close()
-  }
-
-  @Test
   fun inv_audio_87_aRecordingOfAnotherAppIsOtherAppButNeverBlocksAVoiceStart() = runBlocking {
     val microphones = AppMicrophones()
     val rig = rig(moment)
@@ -821,20 +669,6 @@ class MediaCameraTest {
     assertEquals("the voice took the microphone", setOf("voice"), microphones.live.keys)
     runCatching { voice.stop() }
     watch.close()
-  }
-
-  @Test
-  fun inv_voice_36_theCameraRecordingEndsOnlyAfterItsMicrophoneIsReleasedSoTheNextVoiceStartIsAdmitted() = runBlocking {
-    val rig = rig(moment)
-    ready(rig)
-    val released = kotlinx.coroutines.CompletableDeferred<Unit>()
-    rig.backend.audioIdleGate = released
-    rig.detach()
-    eventually("the camera let the microphone go") { rig.backend.count("unbind") == 1 }
-    assertNull("the recording ended while the AudioRecord was still held", kotlinx.coroutines.withTimeoutOrNull(300) { while (!rig.audio.isRecording.not()) kotlinx.coroutines.delay(10) })
-    assertTrue(rig.audio.isRecording)
-    released.complete(Unit)
-    eventually("the recording ended after the release") { !rig.audio.isRecording }
   }
 
   @Test
