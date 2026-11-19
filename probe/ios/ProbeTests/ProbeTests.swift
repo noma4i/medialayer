@@ -130,12 +130,15 @@ final class ProbeTests: XCTestCase {
   }
 
   @MainActor func test2_takeFront5s() async throws { try await take("take_front_5s", profile: .circle, lens: .front, seconds: 5) }
-  @MainActor func test3_takeBack5s() async throws { try await take("take_back_5s", profile: .moment, lens: .back, seconds: 5) }
-  @MainActor func test4_takeFront15s() async throws { try await take("take_front_15s", profile: .circle, lens: .front, seconds: 15) }
+  @MainActor func test3_takeFront5sAgain() async throws { try await take("take_front_5s_b", profile: .circle, lens: .front, seconds: 5) }
+  @MainActor func test4_takeBack5s() async throws { try await take("take_back_5s", profile: .moment, lens: .back, seconds: 5) }
+  @MainActor func test5_takeFront5sAfterMoment() async throws { try await take("take_front_5s_after_moment", profile: .circle, lens: .front, seconds: 5) }
+  @MainActor func test6_takeMomentFront5s() async throws { try await take("take_moment_front_5s", profile: .moment, lens: .front, seconds: 5) }
+  @MainActor func testA_takeFront15s() async throws { try await take("take_front_15s", profile: .circle, lens: .front, seconds: 15) }
 
-  @MainActor func test8_takeFront60s() async throws { try await take("take_front_60s", profile: .circle, lens: .front, seconds: 60) }
+  @MainActor func testB_takeFront60s() async throws { try await take("take_front_60s", profile: .circle, lens: .front, seconds: 60) }
 
-  func test5_traceRules() {
+  func test7_traceRules() {
     let lines = Self.collected
     let takes = lines.filter { $0.contains(" camera take first frame ") }
     let outputs = lines.filter { $0.contains(" camera take output ") }
@@ -163,7 +166,7 @@ final class ProbeTests: XCTestCase {
     XCTAssertEqual(frameOutputInBind, 0)
   }
 
-  func test6_coverage() {
+  func test8_coverage() {
     let lines = Self.collected
     let coverage = lines.filter { $0.contains("take coverage") }
     let refused = lines.filter { $0.contains(" camera refuse ") }
@@ -173,7 +176,7 @@ final class ProbeTests: XCTestCase {
     XCTAssertTrue(refused.isEmpty, "a take was refused")
   }
 
-  @MainActor func test7_voice5s() async throws {
+  @MainActor func test9_voice5s() async throws {
     await permissions()
     _ = try await ProbeApp.opening.value
     let recorder = MediaVoiceRecorder()
