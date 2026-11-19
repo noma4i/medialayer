@@ -23,8 +23,13 @@ enum MediaTrace {
   static func emit(_ source: String, _ message: @autoclosure () -> String, on: Bool, write: (String, String) -> Void) {
     guard on else { return }
     let milliseconds = Int(Date().timeIntervalSince1970 * 1000)
-    write(source, "ML \(milliseconds) \(source) \(message())")
+    let line = "ML \(milliseconds) \(source) \(message())"
+    observer?(line)
+    write(source, line)
   }
+
+  /// Sees every emitted line when the trace is on. The device probe reads the library's own lines through it.
+  nonisolated(unsafe) static var observer: ((String) -> Void)?
 
   /// A line to the unified log (device syslog, Console.app) and to stderr for a run under `ML_TRACE`.
   static func write(_ source: String, _ line: String) {

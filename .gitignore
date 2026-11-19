@@ -20,3 +20,5 @@ MediaLayer/Package.resolved
 
 /kotlin/src/test/kotlin/app/media/
 __pycache__/
+
+/probe/ios/Local.xcconfig
