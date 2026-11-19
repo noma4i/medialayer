@@ -99,8 +99,12 @@ private final class FakeBackend: CaptureBackend, @unchecked Sendable {
     emit(.recordStarted)
   }
 
+  /// The movie delegate of a real take reports the finished file later: a test holds it so a stop stays waiting.
+  var holdRecordEnd = false
+
   func endRecording() {
     note("endRecording")
+    if lock.withLock({ holdRecordEnd }) { return }
     emit(.recordFinished(end: .completed))
   }
 
@@ -656,6 +660,43 @@ struct MediaCameraTests {
     #expect(rig.camera.state.lens == .front)
     #expect(!FileManager.default.fileExists(atPath: recorded.path))
     await #expect(throws: MediaError.self) { _ = try await rig.camera.stopRecording() }
+  }
+
+  @Test
+  func inv_capture_71_a_stop_waiting_for_the_movie_delegate_fails_interrupted_when_the_layer_closes() async throws {
+    let rig = try makeRig(.moment) { backend, _ in backend.holdRecordEnd = true }
+    await ready(rig)
+    try await rig.camera.startRecording()
+    let stopping = Task { try await rig.camera.stopRecording() }
+    await eventually("stop reached the movie output") { rig.backend.count("endRecording") == 1 }
+
+    rig.audio.link.close()
+
+    do {
+      _ = try await stopping.value
+      Issue.record("a stop waiting at the layer close returned a clip")
+    } catch let MediaError.Camera(reason, _, _) {
+      #expect(reason == .interrupted)
+    }
+  }
+
+  @Test
+  func inv_capture_71_a_stop_waiting_for_the_movie_delegate_fails_interrupted_when_the_camera_unbinds() async throws {
+    let rig = try makeRig(.moment) { backend, _ in backend.holdRecordEnd = true }
+    await ready(rig)
+    try await rig.camera.startRecording()
+    let stopping = Task { try await rig.camera.stopRecording() }
+    await eventually("stop reached the movie output") { rig.backend.count("endRecording") == 1 }
+
+    rig.camera.detachPreview()
+
+    do {
+      _ = try await stopping.value
+      Issue.record("a stop waiting at the camera unbind returned a clip")
+    } catch let MediaError.Camera(reason, _, _) {
+      #expect(reason == .interrupted)
+    }
+    await eventually("unbound") { rig.backend.count("unbind") == 1 }
   }
 
   @Test
