@@ -7,6 +7,24 @@ import MediaLayerTesting
 import Testing
 @testable import MediaLayerUI
 
+/// One buffer of 1024 silent 16-bit mono samples at 48 kHz.
+private func silentPCM() throws -> CMSampleBuffer {
+  func check(_ status: OSStatus) throws { guard status == noErr else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) } }
+  var description = AudioStreamBasicDescription(
+    mSampleRate: 48_000, mFormatID: kAudioFormatLinearPCM, mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+    mBytesPerPacket: 2, mFramesPerPacket: 1, mBytesPerFrame: 2, mChannelsPerFrame: 1, mBitsPerChannel: 16, mReserved: 0
+  )
+  var format: CMAudioFormatDescription?
+  try check(CMAudioFormatDescriptionCreate(allocator: nil, asbd: &description, layoutSize: 0, layout: nil, magicCookieSize: 0, magicCookie: nil, extensions: nil, formatDescriptionOut: &format))
+  let frames = 1024
+  var block: CMBlockBuffer?
+  try check(CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: frames * 2, blockAllocator: nil, customBlockSource: nil, offsetToData: 0, dataLength: frames * 2, flags: kCMBlockBufferAssureMemoryNowFlag, blockBufferOut: &block))
+  try check(CMBlockBufferFillDataBytes(with: 0, blockBuffer: block!, offsetIntoDestination: 0, dataLength: frames * 2))
+  var buffer: CMSampleBuffer?
+  try check(CMAudioSampleBufferCreateReadyWithPacketDescriptions(allocator: nil, dataBuffer: block!, formatDescription: format!, sampleCount: frames, presentationTimeStamp: .zero, packetDescriptions: nil, sampleBufferOut: &buffer))
+  return buffer!
+}
+
 private final class FakeMicrophone: CameraMicrophone, @unchecked Sendable {
   private let lock = NSLock()
   private var started: [UInt64] = []
@@ -208,7 +226,7 @@ extension GlobalMedia {
 
     @Test
     func onlyAValidBufferWithSamplesIsSound() throws {
-      let buffer = try #require(CameraTakeTests.Fixture.make().audio.first)
+      let buffer = try silentPCM()
       #expect(isLivePCM(buffer))
       CMSampleBufferInvalidate(buffer)
       #expect(!isLivePCM(buffer))
