@@ -9,6 +9,8 @@ internal class SignallingList<T> : CopyOnWriteArrayList<T>() {
   override fun add(element: T): Boolean = super.add(element).also { TestSignal.fire() }
 }
 
+private const val TICK_MS = 20L
+
 internal object TestSignal {
   private val lock = Any()
   private var version = 0L
@@ -36,7 +38,7 @@ internal object TestSignal {
         while (true) {
           val seen = snapshot()
           if (condition()) return@withTimeoutOrNull true
-          changedSince(seen)
+          withTimeoutOrNull(TICK_MS) { changedSince(seen) }
         }
       }
     }

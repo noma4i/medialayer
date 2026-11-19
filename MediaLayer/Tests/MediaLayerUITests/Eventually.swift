@@ -58,6 +58,8 @@ func eventually(_ holds: () async -> Bool) async -> Bool {
   await waits(timeout: .seconds(10), holds)
 }
 
+let waitTickMs = 20
+
 @discardableResult
 func waits(timeout: Duration = .seconds(10), _ holds: () async -> Bool) async -> Bool {
   TestChange.install { TestSignal.shared.fire() }
@@ -68,7 +70,7 @@ func waits(timeout: Duration = .seconds(10), _ holds: () async -> Bool) async ->
     let generation = TestSignal.shared.current
     if await holds() { return true }
     if DispatchTime.now() >= deadline { return false }
-    if !(await TestSignal.shared.changed(since: generation, deadline: deadline)) { return false }
+    _ = await TestSignal.shared.changed(since: generation, deadline: min(deadline, DispatchTime.now() + .milliseconds(waitTickMs)))
   }
 }
 
