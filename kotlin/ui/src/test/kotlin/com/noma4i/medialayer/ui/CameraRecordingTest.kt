@@ -146,7 +146,7 @@ class CameraRecordingTest {
   }
 
   @Test
-  fun inv_capture_52_a_late_encoder_failure_after_the_take_ended_cancels_nothing_and_warns_nothing() {
+  fun inv_capture_79_a_late_encoder_failure_after_the_take_ended_cancels_nothing_and_warns_nothing() {
     val queue = java.util.concurrent.LinkedBlockingQueue<Runnable>()
     val real = CameraRecording(Executor { queue.add(it) }, { events.add(it) }) { generation, file, settings, listener ->
       CameraTake(generation, file, settings, { AutoCloseable {} }, listener)
