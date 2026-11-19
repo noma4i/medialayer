@@ -82,7 +82,7 @@ class CameraAudioHoldTest {
 
   /** INV-AUDIO-87 (T26): a take that starts before the core handed the microphone back waits for it and goes on at its connection, once; a dropped wait never fires. */
   @Test
-  fun inv_audio_87_a_wait_for_the_microphone_goes_on_at_its_connection_once_and_a_dropped_wait_never() {
+  fun inv_audio_118_a_wait_for_the_microphone_goes_on_at_its_connection_once_and_a_dropped_wait_never() {
     val fired = java.util.concurrent.atomic.AtomicInteger()
     val dropped = java.util.concurrent.atomic.AtomicInteger()
     val early = hold.whenConnected { fired.incrementAndGet() }
