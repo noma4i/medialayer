@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.47.0 - 2026-11-20
+
+### Added
+
+- `CapturedClip.end` tells how a take ended, including the new `RecordEnd.microphoneLost`.
+
+### Changed
+
+- A microphone lost mid-take ends the take and delivers the clip with its sound.
+
+### Fixed
+
+- iOS stop never waits forever for the sound of a dead microphone.
+- The camera preview is transparent until its first frame on both platforms.
+- iOS preview layer no longer triggers a layout off the main thread.
+
 ## 3.46.0 - 2026-11-19
 
 ### Changed

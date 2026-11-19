@@ -14,6 +14,8 @@ What an app changes when it moves to a new MediaLayer version. Each section name
 - 3.45.0: the voice recorder has the same smooth ring: Swift `MediaTakeProgress(recorder)`, Kotlin `rememberTakeProgress(recorder)`.
 - 3.46.0: a refused memory reservation of the camera or voice tells its cause. A closed MediaLayer refuses with `notReady` (was `memory`); `memory` now means the budget is full; any other failure is `notReady` with a native failure in `Media.failures`. An app that shows "not enough memory" on `memory` now shows it only when it is true.
 - 3.46.0: a camera clip keeps its whole sound on iOS: the stop waits until the sound reaches the last frame. The front camera of iPhone 17 records upright. Nothing changes for the app.
+- 3.47.0: a take whose microphone is lost mid-take (headphones taking the route, a system stop, a flow loss after the start) ends by itself when the video runs 1 s ahead of the written sound; the clip arrives the usual way (`stopRecording`, outcome captured) cut at the end of its sound. `CapturedClip.end` tells how the take ended: Swift `.completed`, `.limitReached`, `.microphoneLost`; Kotlin `RecordEnd.COMPLETED`, `LIMIT_REACHED`, `MICROPHONE_LOST`. A take shorter than `profile.minTakeMs` is still refused `tooShort`; a take that never had sound is still refused `microphoneSilent`. Show the clip and, on `microphoneLost`, a note that the recording stopped because the microphone was lost.
+- 3.47.0: the camera preview is transparent until its first frame: what the app draws under `MediaCameraPreview` stays visible during the open.
 
 ## 3.41.0
 
