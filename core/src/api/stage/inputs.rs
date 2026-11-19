@@ -344,6 +344,9 @@ impl Stage {
             }
             state.declarations.remove(&url);
             state.retire(&url);
+            if let Some(held) = state.catalog.get(&url).filter(|held| held.strategy == CacheStrategy::Whole && held.is_remote()) {
+                self.inner.prefetcher.unshow_whole(&held.for_prefetch());
+            }
             let commands = state.ring.untouch(&url);
             self.inner.places.retired(&url);
             self.dispatch(state, commands);

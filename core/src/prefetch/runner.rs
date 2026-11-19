@@ -240,6 +240,15 @@ impl Prefetcher {
         self.admit_whole(WINDOW_OWNER, source, true);
     }
 
+    /// The place left the screen: its queued whole goes back behind the places that are still seen.
+    pub fn unshow_whole(&self, source: &Source) {
+        let key = self.shared.loader.cache_key(&source.url, &source.headers);
+        let state = self.shared.state();
+        if let Some(job) = state.running.get(&key) {
+            job.distance.store(usize::MAX, Ordering::SeqCst);
+        }
+    }
+
     pub fn hold_whole(&self, owner: u64, source: Source) {
         self.admit_whole(owner, source, false);
     }
@@ -267,7 +276,12 @@ impl Prefetcher {
             return;
         }
         state.wholes.entry(key.clone()).or_insert_with(|| WholeHold { source: source.clone(), owners: HashSet::new() }).owners.insert(owner);
-        self.start_whole(&mut state, key, source, now, true);
+        self.start_whole(&mut state, key.clone(), source, now, true);
+        if shown {
+            if let Some(job) = state.running.get(&key) {
+                job.distance.store(0, Ordering::SeqCst);
+            }
+        }
     }
 
     pub fn release_whole(&self, owner: u64, source: &Source) {

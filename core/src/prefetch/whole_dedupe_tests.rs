@@ -220,3 +220,27 @@ async fn inv_strategy_32_random_holds_refuse_only_preload_past_the_limit() {
         assert_eq!(rig.prefetcher.counters().failed, refused, "limit {limit}");
     }
 }
+
+fn clip(name: &str) -> Source {
+    Source { url: format!("https://o.test/{name}.mp4"), headers: HashMap::new(), kind: SourceKind::Video, strategy: CacheStrategy::Whole }
+}
+
+#[tokio::test]
+async fn inv_strategy_33_a_shown_whole_video_loads_before_the_preload_wholes_queued_ahead_of_it() {
+    let rig = rig();
+    let busy = clip("busy");
+    rig.loader.hang(&busy.url);
+    rig.prefetcher.keep_whole(busy.clone());
+    eventually(|| rig.loader.alive() == [busy.url.clone()]).await;
+    for name in ["p1", "p2", "p3"] {
+        rig.prefetcher.keep_whole(clip(name));
+    }
+    rig.prefetcher.wait_whole_queued(false, 3).await;
+    let shown = clip("shown");
+    rig.prefetcher.keep_shown_whole(shown.clone());
+    rig.prefetcher.wait_whole_queued(false, 4).await;
+
+    rig.loader.release(&busy.url);
+    eventually(|| rig.loader.urls().len() >= 2).await;
+    assert_eq!(rig.loader.urls()[1], shown.url, "the place the user sees waits for its whole behind preload");
+}
