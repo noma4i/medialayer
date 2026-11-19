@@ -113,3 +113,36 @@ fn inv_playhead_11_a_resume_after_a_long_pause_continues_from_the_frozen_positio
     near(playhead_at(paused, 6000), 0.225);
     near(playhead_at(resumed, 6500), 0.275);
 }
+
+#[test]
+fn inv_playhead_15_take_ticks_every_100_ms_never_move_the_ring_back_and_reach_one_at_the_limit() {
+    let limit = 3000u64;
+    let take = |start: u64, tick_ms: u64, late: u64| PlayheadReport {
+        position_ms: tick_ms.saturating_sub(late),
+        duration_ms: limit,
+        at_ms: start + tick_ms,
+        rate: 1.0,
+        playing: true,
+        jump: tick_ms == 0,
+        settling: false,
+    };
+    let mut shown = None;
+    let mut previous = 0.0;
+    let mut samples = 0;
+    for tick in (0..=limit).step_by(100) {
+        let late = if tick % 300 == 100 { 30 } else if tick % 200 == 0 { 0 } else { 15 };
+        let next = playhead_next(shown, take(5000, tick, late));
+        for now in (5000 + tick..5000 + tick + 100).step_by(16) {
+            let value = playhead_at(next, now);
+            assert!(value >= previous - 1e-12, "ring moved back at {now}: {value} < {previous}");
+            previous = value;
+            samples += 1;
+        }
+        shown = Some(next);
+    }
+    assert!(samples > 150);
+    near(playhead_at(shown.unwrap(), 5000 + limit), 1.0);
+
+    let again = playhead_next(shown, take(20_000, 0, 0));
+    near(playhead_at(again, 20_000), 0.0);
+}

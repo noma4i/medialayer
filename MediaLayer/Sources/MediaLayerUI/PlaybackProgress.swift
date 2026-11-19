@@ -11,6 +11,7 @@ final class PlaybackProgress {
     var consumers: [UUID: AsyncStream<Double>.Continuation] = [:]
     var reporters: [UUID: AsyncStream<PlayheadReport>.Continuation] = [:]
     var last: Double?
+    var previousMs: UInt64?
 
     func stopObservingTime() {
       if let observer { player?.removeTimeObserver(observer) }
@@ -71,6 +72,7 @@ final class PlaybackProgress {
     if demand.slot !== slot {
       demand.stop()
       demand.last = nil
+      demand.previousMs = nil
       demand.slot = slot
       demand.player = slot?.player
     }
@@ -84,18 +86,27 @@ final class PlaybackProgress {
     emit(key)
   }
 
+  /// A position behind the previous one while the player plays and no seek is in flight is the loop wrap: the ring jumps, it does not wait.
+  static func wrapped(previousMs: UInt64?, positionMs: UInt64, playing: Bool, seeking: Bool) -> Bool {
+    guard let previousMs, playing, !seeking else { return false }
+    return positionMs < previousMs
+  }
+
   private func emit(_ key: String) {
     guard let demand = demands[key], let slot = demand.slot else { return }
     samples += 1
     let sample = slot.sample()
+    let playing = slot.player.timeControlStatus == .playing
+    let wrapped = Self.wrapped(previousMs: demand.previousMs, positionMs: sample.positionMs, playing: playing, seeking: slot.isSeeking)
+    demand.previousMs = sample.positionMs
     if !demand.reporters.isEmpty {
       let report = PlayheadReport(
         positionMs: sample.positionMs,
         durationMs: sample.durationMs ?? 0,
         atMs: UInt64(Date().timeIntervalSince1970 * 1000),
         rate: Double(slot.player.rate),
-        playing: slot.player.timeControlStatus == .playing,
-        jump: false,
+        playing: playing,
+        jump: wrapped,
         settling: slot.isSeeking
       )
       for reporter in demand.reporters.values { reporter.yield(report) }

@@ -86,6 +86,7 @@ extension CameraState {
 /// A refused permission, a busy camera, a recording that is too short and a refusal of the memory budget are a `MediaError.Camera` with the reason and the text of the core.
 public final class MediaCamera: @unchecked Sendable {
   private let profile: CaptureProfile
+  var limitMs: UInt64 { profile.maxDurationMs }
   private let services: CameraServices
   private let backend: CaptureBackend
   private let queue = DispatchQueue(label: "com.noma4i.medialayer.camera")

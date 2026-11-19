@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `MediaVideoProgress` and `rememberPlayheadProgress(source)` draw the video position smoothly between player reports.
+- `MediaTakeProgress` and `rememberTakeProgress(camera)` draw the running take against its limit smoothly.
+
 ## 3.43.0 - 2026-11-19
 
 ### Added

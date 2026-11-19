@@ -73,6 +73,19 @@ fun MomentCamera() {
 - Closing MediaLayer ends a running take with `refused(interrupted)`, releases the camera and sets `phase` to `closed`. A closed camera takes no command. Swift `states` ends.
 - The files of a capture live in `<cache>/capture` as `capture-<id>.jpg` and `capture-<id>.mp4`. A delivered file belongs to the app, files that nobody took are removed when `open` runs.
 
+## Take progress
+
+`CameraState.recordedMs` steps every 100 ms. For a smooth ring use `MediaTakeProgress` (Swift) or `rememberTakeProgress(camera)` (Kotlin): it is the recorded time against the limit of the profile (`maxDurationMs`), 0 to 1, drawn every display frame. It never steps back, a new take starts from 0, and a finished take stops at its last position.
+
+```swift
+MediaTakeProgress(camera) { fraction in Ring(fraction: fraction) }
+```
+
+```kotlin
+val fraction by rememberTakeProgress(camera)
+Ring(fraction = fraction)
+```
+
 ## Frames for a face search
 
 `observeFrames(maxPerSecond:_:)` (Swift, a `CVPixelBuffer` and its orientation) and `observeFrames(maxPerSecond, analyzer)` (Kotlin, an `ImageAnalysis.Analyzer`, with `camera.sensorToView`) give the frames of the preview
