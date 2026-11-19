@@ -463,7 +463,6 @@ class MediaCameraTest {
   fun inv_audio_80_aDrivenSystemEventThrowsACameraTakeAwayWithItsRefusal() = runBlocking {
     for ((signal, expected) in listOf(
       AudioDriveSignal.StartCall to CameraRefusal.IN_CALL,
-      AudioDriveSignal.SilenceMicrophone to CameraRefusal.MICROPHONE_SILENT,
       AudioDriveSignal.BeginInterruption to CameraRefusal.INTERRUPTED
     )) {
       val rig = rig(moment)
@@ -480,7 +479,7 @@ class MediaCameraTest {
   }
 
   @Test
-  fun inv_audio_43_aTakeThatLosesItsMicrophoneSoundIsThrownAwayWithTheSilentRefusal() = runBlocking {
+  fun inv_capture_84_aTakeThatLosesItsMicrophoneSoundEndsAndDeliversTheSoundSoFar() = runBlocking {
     val rig = rig(moment)
     ready(rig)
     rig.camera.startRecording()
@@ -488,9 +487,9 @@ class MediaCameraTest {
     rig.backend.audioIssue(CaptureAudioIssue.SILENCED)
 
     eventually("the take ended") { rig.camera.state.value.phase != CameraPhase.RECORDING }
-    val ended = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
-    assertEquals(CameraRefusal.MICROPHONE_SILENT to cameraRefusalText(CameraRefusal.MICROPHONE_SILENT), ended.reason to ended.detail)
-    assertTrue(rig.files().isEmpty())
+    val clip = rig.camera.stopRecording()
+    assertTrue(clip.file.exists())
+    assertEquals(null, rig.camera.state.value.fault)
   }
 
   @Test
@@ -588,7 +587,7 @@ class MediaCameraTest {
     rig.camera.startRecording()
     rig.backend.audioIssue(CaptureAudioIssue.SILENCED)
     eventually("the take ended") { rig.camera.state.value.phase != CameraPhase.RECORDING }
-    assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
+    rig.camera.stopRecording()
     val before = rig.backend.log.count { it.startsWith("record ") }
 
     rig.camera.startRecording()
@@ -951,7 +950,6 @@ class MediaCameraTest {
       var call: MediaCallAudio? = null
       val rows = listOf<Triple<CameraRefusal, CameraPhase, (Rig) -> Unit>>(
         Triple(CameraRefusal.IN_CALL, CameraPhase.READY, { _ -> call = app.layer.callAudio(MediaCallKind.Unmanaged) }),
-        Triple(CameraRefusal.MICROPHONE_SILENT, CameraPhase.READY, { rig -> rig.backend.audioIssue(CaptureAudioIssue.SILENCED) }),
         Triple(CameraRefusal.TOO_SHORT, CameraPhase.READY, { rig -> rig.backend.durationUs = 400_000L; rig.backend.emit(CaptureEvent.RecordFinished(RecordEnd.LIMIT_REACHED)) }),
         Triple(CameraRefusal.CONFIGURE_FAILED, CameraPhase.FAILED, { rig -> rig.backend.emit(CaptureEvent.Fault(FaultKind.OTHER)) })
       )

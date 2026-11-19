@@ -93,7 +93,7 @@ class CameraRecordingTest {
   }
 
   @Test
-  fun a_take_whose_microphone_was_lost_ends_with_microphone_lost_and_the_others_keep_their_ends() {
+  fun inv_capture_84_a_take_whose_microphone_was_lost_ends_with_microphone_lost_and_the_others_keep_their_ends() {
     start(1, true)
     takes[0].listener.onBegan(1, surface)
     recording.onPcm(chunk(5))
