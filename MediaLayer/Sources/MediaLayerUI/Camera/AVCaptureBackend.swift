@@ -31,8 +31,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
   private var tokens: [NSObjectProtocol] = []
   private var previews: [ObjectIdentifier: WeakPreview] = [:]
   private var previewLinks: [ObjectIdentifier: PreviewLink] = [:]
-  private var videoLens = CameraLens.back
-  private var mirrorsVideo = false
   private var videoPort: AVCaptureInput.Port?
 
   override init() {
@@ -128,8 +126,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     previewLinks = [:]
     videoPort = nil
     frameOutput = nil
-    videoLens = lens
-    mirrorsVideo = lens == .front && profile.mirrorFrontVideo
     audioOutput = nil
     microphoneInput = nil
     audioProfile = profile.audio
@@ -266,12 +262,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     if link.isVideoRotationAngleSupported(previewAngle) { link.videoRotationAngle = previewAngle }
     session.addConnection(link)
     previewLinks[id] = PreviewLink(connection: link, owned: true)
-  }
-
-  var frameTurn: FrameTurn { lock.withLock { turnValue } }
-
-  private func setTurn(_ value: FrameTurn) {
-    lock.withLock { turnValue = value }
   }
 
   func takeCoverage() -> AudioCoverage? {

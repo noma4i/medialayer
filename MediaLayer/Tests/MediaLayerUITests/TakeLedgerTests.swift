@@ -72,29 +72,9 @@ struct TakeLedgerTests {
   }
 
   @Test
-  func inv_capture_82_upright_frames_take_an_identity_transform_and_raw_frames_keep_the_turn_of_the_take() {
-    let raw = FrameTurn()
-    let upright = FrameTurn(upright: true, mirrored: false)
-    #expect(takeWriterTransform(turn: upright, mirror: true) == .identity)
-    #expect(takeWriterTransform(turn: raw, mirror: false) == takeTransform(mirror: false))
-    #expect(takeWriterTransform(turn: raw, mirror: true) == takeTransform(mirror: true))
-  }
-
-  @Test
-  func inv_capture_82_the_tap_orientation_follows_the_turn_of_the_frames_and_the_mirror_of_the_front_lens() {
-    #expect(tapOrientation(lens: .back, turn: FrameTurn()) == .right)
-    #expect(tapOrientation(lens: .front, turn: FrameTurn()) == .leftMirrored)
-    #expect(tapOrientation(lens: .back, turn: FrameTurn(upright: true, mirrored: false)) == .up)
-    #expect(tapOrientation(lens: .front, turn: FrameTurn(upright: true, mirrored: true)) == .up)
-    #expect(tapOrientation(lens: .front, turn: FrameTurn(upright: true, mirrored: false)) == .upMirrored)
-  }
-
-  @Test
-  func inv_capture_82_the_connection_is_turned_only_when_it_can_do_the_whole_turn() {
-    #expect(turnsFramesUpright(angleSupported: false, mirroringSupported: true, mirrorWanted: false) == false)
-    #expect(turnsFramesUpright(angleSupported: true, mirroringSupported: false, mirrorWanted: true) == false)
-    #expect(turnsFramesUpright(angleSupported: true, mirroringSupported: false, mirrorWanted: false))
-    #expect(turnsFramesUpright(angleSupported: true, mirroringSupported: true, mirrorWanted: true))
+  func inv_capture_82_the_tap_orientation_is_the_platform_default_of_the_lens() {
+    #expect(tapOrientation(lens: .back) == .right)
+    #expect(tapOrientation(lens: .front) == .leftMirrored)
   }
 }
 #endif

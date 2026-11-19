@@ -34,7 +34,7 @@ struct CameraTakeTests {
       return CameraTake.Settings(
         video: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: Self.width, AVVideoHeightKey: Self.height],
         audio: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVNumberOfChannelsKey: 1, AVSampleRateKey: Self.sampleRate],
-        transform: .identity, maxDurationMs: 0, fileType: .mp4, fragmentInterval: CMTime(seconds: 10, preferredTimescale: 600),
+        maxDurationMs: 0, fileType: .mp4, fragmentInterval: CMTime(seconds: 10, preferredTimescale: 600),
         armPTS: Self.arm, maxPendingAudio: audio.count + stale.count, maxPendingVideo: video.count,
         maxHeldAudio: audio.count, memoryBudgetBytes: bytes
       )
