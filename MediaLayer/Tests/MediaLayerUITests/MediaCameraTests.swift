@@ -339,11 +339,6 @@ private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .bac
       counters.checkThread()
       return counters.info
     },
-    uprightVideo: { url in
-      counters.checkThread()
-      return try await counters.straighten(url)
-    },
-    audioCoverage: { url, _ in counters.rescan(url) },
     upright: { raw, quality in
       counters.checkThread()
       counters.upright(quality)
@@ -351,6 +346,11 @@ private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .bac
       try image.write(to: made)
       return made
     },
+    uprightVideo: { url in
+      counters.checkThread()
+      return try await counters.straighten(url)
+    },
+    audioCoverage: { url, _ in counters.rescan(url) },
     directory: directory,
     center: center,
     signals: names,
@@ -1141,7 +1141,7 @@ struct MediaCameraTests {
 
   @Test
   func inv_capture_29_a_tagged_take_is_straightened_once_and_the_rescan_of_the_rewritten_file_decides_the_sound() async throws {
-    let rig = try makeRig(.moment) { backend, counters in backend.tagged = true; counters.rescanVerdict = .hole }
+    let rig = try makeRig(.moment) { backend, counters in backend.tagged = true; counters.rescanVerdict = .midGap }
     await ready(rig)
     try await rig.camera.startRecording()
     let recorded = try #require(rig.backend.recordingURL)
@@ -1153,7 +1153,7 @@ struct MediaCameraTests {
 
   @Test
   func inv_capture_29_a_tagged_take_the_pass_did_not_rewrite_is_not_scanned_again() async throws {
-    let rig = try makeRig(.moment) { backend, counters in backend.tagged = true; counters.rewrites = false; counters.rescanVerdict = .hole }
+    let rig = try makeRig(.moment) { backend, counters in backend.tagged = true; counters.rewrites = false; counters.rescanVerdict = .midGap }
     await ready(rig)
     try await rig.camera.startRecording()
     rig.backend.emit(.recordFinished(end: .limitReached))
