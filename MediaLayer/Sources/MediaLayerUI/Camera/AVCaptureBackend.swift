@@ -264,6 +264,10 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     relay.takeCoverage()
   }
 
+  func takeTagged() -> Bool {
+    relay.takeTagged()
+  }
+
   func unbind() {
     unbind(completion: {})
   }

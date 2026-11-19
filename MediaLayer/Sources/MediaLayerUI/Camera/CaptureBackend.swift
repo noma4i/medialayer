@@ -55,6 +55,8 @@ protocol CaptureBackend: AnyObject, Sendable {
   func setFrameTap(_ tap: (@Sendable (CVPixelBuffer, UInt64) -> Void)?)
   /// The verdict of the sound of the take that finished last, judged by the writer while it wrote. Nil when the backend keeps no ledger.
   func takeCoverage() -> AudioCoverage?
+  /// Whether the take that finished last carries a rotation tag in its file (a connection that cannot turn the frames): the camera straightens it before the take ends.
+  func takeTagged() -> Bool
   /// How the frames of the tap are turned.
   var frameTurn: FrameTurn { get }
 }
@@ -62,6 +64,7 @@ protocol CaptureBackend: AnyObject, Sendable {
 extension CaptureBackend {
   var audio: CaptureAudio { .managed }
   func takeCoverage() -> AudioCoverage? { nil }
+  func takeTagged() -> Bool { false }
   var frameTurn: FrameTurn { FrameTurn() }
 
   func unbind(completion: @escaping @Sendable () -> Void) { unbind(); completion() }
@@ -84,6 +87,8 @@ struct CameraServices {
   var link: @Sendable () -> AudioLink?
   var clipInfo: @Sendable (URL) async throws -> MediaInfo?
   var upright: @Sendable (URL, Double) async throws -> URL
+  var uprightVideo: @Sendable (URL) async throws -> Bool
+  var audioCoverage: @Sendable (URL, Bool) async throws -> AudioCoverage
   var directory: URL
   var center: NotificationCenter
   var signals: SystemSignalNames
@@ -110,6 +115,8 @@ struct CameraServices {
         guard let layer = Media.current as? MediaLayer else { throw MediaError.Closed }
         return try await layer.prepareImage(MediaSourceValue.file(url, kind: .image), quality: quality).url
       },
+      uprightVideo: { url in try await MediaLayerUI.uprightVideo(at: url) },
+      audioCoverage: { url, required in try await scanAudioCoverage(at: url, required: required) },
       directory: CaptureFiles.directory,
       center: .default,
       signals: .system,

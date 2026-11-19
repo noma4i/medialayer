@@ -37,6 +37,9 @@ private final class FakeBackend: CaptureBackend, CameraMicrophone, @unchecked Se
   /// The verdict the writer of a take gives with its outcome; nil is a backend without a ledger.
   var coverage: AudioCoverage? = AudioCoverage(verdict: .covered, samples: 0, firstUs: nil, lastUs: nil, gapAtUs: nil, gapUs: nil)
   func takeCoverage() -> AudioCoverage? { lock.withLock { coverage } }
+  /// A take whose writer tagged a rotation (a connection that could not turn the frames): the camera straightens it.
+  var tagged = false
+  func takeTagged() -> Bool { lock.withLock { tagged } }
 
   func setSink(_ sink: @escaping @Sendable (CaptureEvent) -> Void) { lock.withLock { self.sink = sink } }
 
@@ -190,6 +193,13 @@ private final class Counters: @unchecked Sendable {
   private var straightenedURLs: [URL] = []
   private var cancelledStraighten = false
   var holdVideo = false
+  /// What the upright pass gives: whether it rewrote the file.
+  var rewrites = true
+  /// The verdict the rescan of a rewritten file gives, and the files it was asked for.
+  var rescanVerdict = CoverageVerdict.covered
+  private var rescannedURLs: [URL] = []
+  var rescanned: [URL] { lock.withLock { rescannedURLs } }
+  func rescan(_ url: URL) -> AudioCoverage { lock.withLock { rescannedURLs.append(url) }; return takeCoverageOf(rescanVerdict) }
   /// The straightening of a real file reaches its wait later than it reports its start: a test sets how much later.
   var parkLag: Duration?
   var straightened: [URL] { lock.withLock { straightenedURLs } }
@@ -204,10 +214,10 @@ private final class Counters: @unchecked Sendable {
   }
 
 
-  func straighten(_ url: URL) async throws {
+  func straighten(_ url: URL) async throws -> Bool {
     let hold = lock.withLock { straightenedURLs.append(url); return holdVideo }
     TestSignal.shared.fire()
-    guard hold else { return }
+    guard hold else { return rewrites }
     if let lag = lock.withLock({ parkLag }) { try await Task.sleep(for: lag) }
     try await withTaskCancellationHandler {
       try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -227,6 +237,7 @@ private final class Counters: @unchecked Sendable {
       }
       continuation?.resume(throwing: CancellationError())
     }
+    return rewrites
   }
 }
 
@@ -326,9 +337,13 @@ private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .bac
     link: { audio.link },
     clipInfo: { url in
       counters.checkThread()
-      try await counters.straighten(url)
       return counters.info
     },
+    uprightVideo: { url in
+      counters.checkThread()
+      return try await counters.straighten(url)
+    },
+    audioCoverage: { url, _ in counters.rescan(url) },
     upright: { raw, quality in
       counters.checkThread()
       counters.upright(quality)
@@ -698,7 +713,7 @@ struct MediaCameraTests {
     try await rig.camera.startRecording()
     let clip = try await rig.camera.stopRecording()
     #expect(clip.durationMs > 0, "the ledger is the judge: the file is not scanned after stop")
-    #expect(rig.counters.straightened.count == 1, "the stop path asks the duration of the clip and nothing else")
+    #expect(rig.counters.straightened.isEmpty && rig.counters.rescanned.isEmpty, "an untagged take: no file call but the duration of the clip")
   }
 
   @Test
@@ -1111,7 +1126,7 @@ struct MediaCameraTests {
 
   @Test
   func inv_capture_29_a_finished_take_is_straightened_while_stopping_and_a_cancel_then_throws_it_away() async throws {
-    let rig = try makeRig(.moment) { _, counters in counters.holdVideo = true }
+    let rig = try makeRig(.moment) { backend, counters in backend.tagged = true; counters.holdVideo = true }
     await ready(rig)
     try await rig.camera.startRecording()
     let recorded = try #require(rig.backend.recordingURL)
@@ -1125,8 +1140,32 @@ struct MediaCameraTests {
   }
 
   @Test
+  func inv_capture_29_a_tagged_take_is_straightened_once_and_the_rescan_of_the_rewritten_file_decides_the_sound() async throws {
+    let rig = try makeRig(.moment) { backend, counters in backend.tagged = true; counters.rescanVerdict = .hole }
+    await ready(rig)
+    try await rig.camera.startRecording()
+    let recorded = try #require(rig.backend.recordingURL)
+    rig.backend.emit(.recordFinished(end: .limitReached))
+    await eventually("refused") { rig.camera.state.outcome == .refused(reason: .audioTrackBroken) }
+    #expect(rig.counters.straightened == [recorded])
+    #expect(rig.counters.rescanned == [recorded])
+  }
+
+  @Test
+  func inv_capture_29_a_tagged_take_the_pass_did_not_rewrite_is_not_scanned_again() async throws {
+    let rig = try makeRig(.moment) { backend, counters in backend.tagged = true; counters.rewrites = false; counters.rescanVerdict = .hole }
+    await ready(rig)
+    try await rig.camera.startRecording()
+    rig.backend.emit(.recordFinished(end: .limitReached))
+    await eventually("settled") { rig.camera.state.phase == .ready }
+    #expect(rig.counters.straightened.count == 1)
+    #expect(rig.counters.rescanned.isEmpty)
+    #expect(rig.camera.state.outcome != .refused(reason: .audioTrackBroken))
+  }
+
+  @Test
   func inv_capture_31_the_clip_of_a_take_is_given_once() async throws {
-    let rig = try makeRig(.moment)
+    let rig = try makeRig(.moment) { backend, _ in backend.tagged = true }
     await ready(rig)
     try await rig.camera.startRecording()
     let recorded = try #require(rig.backend.recordingURL)
@@ -1256,7 +1295,7 @@ struct MediaCameraTests {
   // CAPTURE-70: the clip of a take stays until its owner takes it, and it keeps the lens of its take.
   @Test
   func inv_capture_70_a_delivered_clip_survives_the_next_take_and_keeps_the_lens_of_its_take() async throws {
-    let rig = try makeRig(.moment) { _, counters in counters.holdVideo = true; counters.parkLag = .milliseconds(200) }
+    let rig = try makeRig(.moment) { backend, counters in backend.tagged = true; counters.holdVideo = true; counters.parkLag = .milliseconds(200) }
     await ready(rig)
     try await rig.camera.startRecording()
     rig.backend.emit(.recordFinished(end: .limitReached))
@@ -1277,7 +1316,7 @@ struct MediaCameraTests {
   // CAPTURE-71: a stop waiting while the preview leaves gets the real end.
   @Test
   func inv_capture_71_a_stop_waiting_while_the_preview_leaves_ends_with_the_interrupted_refusal() async throws {
-    let rig = try makeRig(.moment) { _, counters in counters.holdVideo = true }
+    let rig = try makeRig(.moment) { backend, counters in backend.tagged = true; counters.holdVideo = true }
     await ready(rig)
     try await rig.camera.startRecording()
     let stop = Task { try await rig.camera.stopRecording() }
