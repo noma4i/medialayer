@@ -386,6 +386,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
         is AudioAction.Admit -> pending.remove(action.id)?.complete(Admission.Admitted(RecordingTicket(action.id, ::endTicket) { id, on -> send(AudioInput.CaptureTake(id, on)) }.also {
           tickets[action.id] = it
           recordingCount.incrementAndGet()
+          onTestChange?.invoke()
           (ports.focus as? AudioSystem)?.ownRecordings(recordingCount.get())
         }))
         is AudioAction.Refuse -> pending.remove(action.id)?.complete(Admission.Refused(action.reason))
@@ -433,7 +434,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
       throw failure
     }
   }
-  private fun endTicket(id: ULong) { recordingCount.decrementAndGet(); enqueue {
+  private fun endTicket(id: ULong) { recordingCount.decrementAndGet(); onTestChange?.invoke(); enqueue {
     tickets.remove(id)
     process(AudioInput.CaptureEnded(id))
     (ports.focus as? AudioSystem)?.ownRecordings(recordingCount.get())
