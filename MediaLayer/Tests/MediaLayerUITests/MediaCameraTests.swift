@@ -654,10 +654,10 @@ struct MediaCameraTests {
       _ = try await rig.camera.stopRecording()
       Issue.record("a clip with a hole in its sound was delivered")
     } catch let MediaError.Camera(reason, _, _) {
-      #expect(reason == .microphoneSilent)
+      #expect(reason == .audioTrackBroken)
     }
     await eventually("ready again") { rig.camera.state.phase == .ready }
-    #expect(rig.camera.state.outcome == .refused(reason: .microphoneSilent))
+    #expect(rig.camera.state.outcome == .refused(reason: .audioTrackBroken))
     #expect(files(rig).isEmpty)
     #expect(rig.counters.coverageCalls.count == 1)
     #expect(rig.counters.straightened.isEmpty)

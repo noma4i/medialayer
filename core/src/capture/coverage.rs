@@ -159,6 +159,6 @@ pub fn coverage_finish(scan: CoverageScan, video: Option<VideoBounds>) -> AudioC
 pub fn audio_coverage_refusal(verdict: CoverageVerdict) -> Option<CameraRefusal> {
     match verdict {
         CoverageVerdict::Skipped | CoverageVerdict::Covered => None,
-        _ => Some(CameraRefusal::MicrophoneSilent),
+        _ => Some(CameraRefusal::AudioTrackBroken),
     }
 }

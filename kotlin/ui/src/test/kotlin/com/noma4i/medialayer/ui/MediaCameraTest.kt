@@ -497,7 +497,7 @@ class MediaCameraTest {
   }
 
   @Test
-  fun inv_audio_70_a_recorded_file_whose_sound_the_core_refuses_is_deleted_with_the_silent_refusal_and_one_outcome() = runBlocking {
+  fun inv_audio_70_a_recorded_file_whose_sound_the_core_refuses_is_deleted_with_the_broken_track_refusal_and_one_outcome() = runBlocking {
     val rig = rig(moment)
     ready(rig)
     val outcomes = CopyOnWriteArrayList<Any>()
@@ -507,12 +507,12 @@ class MediaCameraTest {
       rig.counters.coverage = answer
       rig.camera.startRecording()
       val ended = assertThrows(MediaException.Camera::class.java) { runBlocking { rig.camera.stopRecording() } }
-      assertEquals(CameraRefusal.MICROPHONE_SILENT, ended.reason)
+      assertEquals(CameraRefusal.AUDIO_TRACK_BROKEN, ended.reason)
       assertTrue(rig.files().isEmpty())
       eventually("ready after $verdict") { rig.camera.state.value.phase == CameraPhase.READY }
     }
     watching.cancel()
-    assertEquals(listOf<Any>(com.noma4i.medialayer.TakeOutcome.Refused(CameraRefusal.MICROPHONE_SILENT)), outcomes.distinct())
+    assertEquals(listOf<Any>(com.noma4i.medialayer.TakeOutcome.Refused(CameraRefusal.AUDIO_TRACK_BROKEN)), outcomes.distinct())
   }
 
   @Test

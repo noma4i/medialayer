@@ -219,7 +219,7 @@ class CameraNativeDeviceTest {
       val refused = try { made.stopRecording(); null } catch (error: MediaException.Camera) { error }
       failures.cancel()
       hearing.cancel()
-      assertEquals("$damage audio is refused, readings=${readings.toList()}", com.noma4i.medialayer.CameraRefusal.MICROPHONE_SILENT, refused?.reason)
+      assertEquals("$damage audio is refused, readings=${readings.toList()}", com.noma4i.medialayer.CameraRefusal.AUDIO_TRACK_BROKEN, refused?.reason)
       assertTrue("the refused file is deleted", CaptureFiles.directory(context).listFiles().orEmpty().isEmpty())
       return@runBlocking
     }

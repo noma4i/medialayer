@@ -11425,6 +11425,11 @@ public enum AudioInput: Equatable, Hashable {
     )
     case captureEnded(id: UInt64
     )
+    /**
+     * A video capture began (`taking`) or ended a take. While a take runs a voice capture is refused busy; while it does not the voice takes the microphone from the preview.
+     */
+    case captureTake(id: UInt64, taking: Bool
+    )
     case callStarted(id: UInt64, kind: CallKind, speaker: Bool
     )
     case callSpeaker(id: UInt64, speaker: Bool
@@ -11511,76 +11516,79 @@ public struct FfiConverterTypeAudioInput: FfiConverterRustBuffer {
         case 6: return .captureEnded(id: try FfiConverterUInt64.read(from: &buf)
         )
         
-        case 7: return .callStarted(id: try FfiConverterUInt64.read(from: &buf), kind: try FfiConverterTypeCallKind.read(from: &buf), speaker: try FfiConverterBool.read(from: &buf)
+        case 7: return .captureTake(id: try FfiConverterUInt64.read(from: &buf), taking: try FfiConverterBool.read(from: &buf)
         )
         
-        case 8: return .callSpeaker(id: try FfiConverterUInt64.read(from: &buf), speaker: try FfiConverterBool.read(from: &buf)
+        case 8: return .callStarted(id: try FfiConverterUInt64.read(from: &buf), kind: try FfiConverterTypeCallKind.read(from: &buf), speaker: try FfiConverterBool.read(from: &buf)
         )
         
-        case 9: return .callEnded(id: try FfiConverterUInt64.read(from: &buf)
+        case 9: return .callSpeaker(id: try FfiConverterUInt64.read(from: &buf), speaker: try FfiConverterBool.read(from: &buf)
         )
         
-        case 10: return .callSystemActivated(id: try FfiConverterUInt64.read(from: &buf)
+        case 10: return .callEnded(id: try FfiConverterUInt64.read(from: &buf)
         )
         
-        case 11: return .callSystemDeactivated(id: try FfiConverterUInt64.read(from: &buf)
+        case 11: return .callSystemActivated(id: try FfiConverterUInt64.read(from: &buf)
         )
         
-        case 12: return .applied(generation: try FfiConverterUInt64.read(from: &buf), result: try FfiConverterTypeAppliedResult.read(from: &buf)
+        case 12: return .callSystemDeactivated(id: try FfiConverterUInt64.read(from: &buf)
         )
         
-        case 13: return .interruptionBegan
-        
-        case 14: return .interruptionEnded(shouldResume: try FfiConverterBool.read(from: &buf)
+        case 13: return .applied(generation: try FfiConverterUInt64.read(from: &buf), result: try FfiConverterTypeAppliedResult.read(from: &buf)
         )
         
-        case 15: return .resumptionRecommendation(shouldResume: try FfiConverterBool.read(from: &buf)
+        case 14: return .interruptionBegan
+        
+        case 15: return .interruptionEnded(shouldResume: try FfiConverterBool.read(from: &buf)
         )
         
-        case 16: return .focus(change: try FfiConverterTypeFocusChange.read(from: &buf)
+        case 16: return .resumptionRecommendation(shouldResume: try FfiConverterBool.read(from: &buf)
         )
         
-        case 17: return .focusRequest(generation: try FfiConverterUInt64.read(from: &buf), answer: try FfiConverterTypeFocusAnswer.read(from: &buf)
+        case 17: return .focus(change: try FfiConverterTypeFocusChange.read(from: &buf)
         )
         
-        case 18: return .mediaReset
-        
-        case 19: return .route(reason: try FfiConverterTypeRouteReason.read(from: &buf), lostPrivateOutput: try FfiConverterBool.read(from: &buf)
+        case 18: return .focusRequest(generation: try FfiConverterUInt64.read(from: &buf), answer: try FfiConverterTypeFocusAnswer.read(from: &buf)
         )
         
-        case 20: return .noisy
+        case 19: return .mediaReset
         
-        case 21: return .observedCalls(uuids: try FfiConverterSequenceString.read(from: &buf)
+        case 20: return .route(reason: try FfiConverterTypeRouteReason.read(from: &buf), lostPrivateOutput: try FfiConverterBool.read(from: &buf)
         )
         
-        case 22: return .phoneCall(active: try FfiConverterBool.read(from: &buf)
+        case 21: return .noisy
+        
+        case 22: return .observedCalls(uuids: try FfiConverterSequenceString.read(from: &buf)
         )
         
-        case 23: return .communicationMode(active: try FfiConverterBool.read(from: &buf)
+        case 23: return .phoneCall(active: try FfiConverterBool.read(from: &buf)
         )
         
-        case 24: return .permission(state: try FfiConverterTypeMicrophonePermission.read(from: &buf)
+        case 24: return .communicationMode(active: try FfiConverterBool.read(from: &buf)
         )
         
-        case 25: return .otherRecording(active: try FfiConverterBool.read(from: &buf)
+        case 25: return .permission(state: try FfiConverterTypeMicrophonePermission.read(from: &buf)
         )
         
-        case 26: return .silenced(id: try FfiConverterUInt64.read(from: &buf)
+        case 26: return .otherRecording(active: try FfiConverterBool.read(from: &buf)
         )
         
-        case 27: return .inputOpened(id: try FfiConverterUInt64.read(from: &buf), kind: try FfiConverterTypeRecordingKind.read(from: &buf)
+        case 27: return .silenced(id: try FfiConverterUInt64.read(from: &buf)
         )
         
-        case 28: return .inputClosed(id: try FfiConverterUInt64.read(from: &buf)
+        case 28: return .inputOpened(id: try FfiConverterUInt64.read(from: &buf), kind: try FfiConverterTypeRecordingKind.read(from: &buf)
         )
         
-        case 29: return .noSound(id: try FfiConverterUInt64.read(from: &buf), generation: try FfiConverterUInt64.read(from: &buf), on: try FfiConverterBool.read(from: &buf)
+        case 29: return .inputClosed(id: try FfiConverterUInt64.read(from: &buf)
         )
         
-        case 30: return .restoreFailed(id: try FfiConverterUInt64.read(from: &buf), generation: try FfiConverterUInt64.read(from: &buf)
+        case 30: return .noSound(id: try FfiConverterUInt64.read(from: &buf), generation: try FfiConverterUInt64.read(from: &buf), on: try FfiConverterBool.read(from: &buf)
         )
         
-        case 31: return .foreground(on: try FfiConverterBool.read(from: &buf)
+        case 31: return .restoreFailed(id: try FfiConverterUInt64.read(from: &buf), generation: try FfiConverterUInt64.read(from: &buf)
+        )
+        
+        case 32: return .foreground(on: try FfiConverterBool.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -11623,135 +11631,141 @@ public struct FfiConverterTypeAudioInput: FfiConverterRustBuffer {
             FfiConverterUInt64.write(id, into: &buf)
             
         
-        case let .callStarted(id,kind,speaker):
+        case let .captureTake(id,taking):
             writeInt(&buf, Int32(7))
+            FfiConverterUInt64.write(id, into: &buf)
+            FfiConverterBool.write(taking, into: &buf)
+            
+        
+        case let .callStarted(id,kind,speaker):
+            writeInt(&buf, Int32(8))
             FfiConverterUInt64.write(id, into: &buf)
             FfiConverterTypeCallKind.write(kind, into: &buf)
             FfiConverterBool.write(speaker, into: &buf)
             
         
         case let .callSpeaker(id,speaker):
-            writeInt(&buf, Int32(8))
+            writeInt(&buf, Int32(9))
             FfiConverterUInt64.write(id, into: &buf)
             FfiConverterBool.write(speaker, into: &buf)
             
         
         case let .callEnded(id):
-            writeInt(&buf, Int32(9))
-            FfiConverterUInt64.write(id, into: &buf)
-            
-        
-        case let .callSystemActivated(id):
             writeInt(&buf, Int32(10))
             FfiConverterUInt64.write(id, into: &buf)
             
         
-        case let .callSystemDeactivated(id):
+        case let .callSystemActivated(id):
             writeInt(&buf, Int32(11))
             FfiConverterUInt64.write(id, into: &buf)
             
         
-        case let .applied(generation,result):
+        case let .callSystemDeactivated(id):
             writeInt(&buf, Int32(12))
+            FfiConverterUInt64.write(id, into: &buf)
+            
+        
+        case let .applied(generation,result):
+            writeInt(&buf, Int32(13))
             FfiConverterUInt64.write(generation, into: &buf)
             FfiConverterTypeAppliedResult.write(result, into: &buf)
             
         
         case .interruptionBegan:
-            writeInt(&buf, Int32(13))
+            writeInt(&buf, Int32(14))
         
         
         case let .interruptionEnded(shouldResume):
-            writeInt(&buf, Int32(14))
-            FfiConverterBool.write(shouldResume, into: &buf)
-            
-        
-        case let .resumptionRecommendation(shouldResume):
             writeInt(&buf, Int32(15))
             FfiConverterBool.write(shouldResume, into: &buf)
             
         
-        case let .focus(change):
+        case let .resumptionRecommendation(shouldResume):
             writeInt(&buf, Int32(16))
+            FfiConverterBool.write(shouldResume, into: &buf)
+            
+        
+        case let .focus(change):
+            writeInt(&buf, Int32(17))
             FfiConverterTypeFocusChange.write(change, into: &buf)
             
         
         case let .focusRequest(generation,answer):
-            writeInt(&buf, Int32(17))
+            writeInt(&buf, Int32(18))
             FfiConverterUInt64.write(generation, into: &buf)
             FfiConverterTypeFocusAnswer.write(answer, into: &buf)
             
         
         case .mediaReset:
-            writeInt(&buf, Int32(18))
+            writeInt(&buf, Int32(19))
         
         
         case let .route(reason,lostPrivateOutput):
-            writeInt(&buf, Int32(19))
+            writeInt(&buf, Int32(20))
             FfiConverterTypeRouteReason.write(reason, into: &buf)
             FfiConverterBool.write(lostPrivateOutput, into: &buf)
             
         
         case .noisy:
-            writeInt(&buf, Int32(20))
+            writeInt(&buf, Int32(21))
         
         
         case let .observedCalls(uuids):
-            writeInt(&buf, Int32(21))
+            writeInt(&buf, Int32(22))
             FfiConverterSequenceString.write(uuids, into: &buf)
             
         
         case let .phoneCall(active):
-            writeInt(&buf, Int32(22))
-            FfiConverterBool.write(active, into: &buf)
-            
-        
-        case let .communicationMode(active):
             writeInt(&buf, Int32(23))
             FfiConverterBool.write(active, into: &buf)
             
         
-        case let .permission(state):
+        case let .communicationMode(active):
             writeInt(&buf, Int32(24))
+            FfiConverterBool.write(active, into: &buf)
+            
+        
+        case let .permission(state):
+            writeInt(&buf, Int32(25))
             FfiConverterTypeMicrophonePermission.write(state, into: &buf)
             
         
         case let .otherRecording(active):
-            writeInt(&buf, Int32(25))
+            writeInt(&buf, Int32(26))
             FfiConverterBool.write(active, into: &buf)
             
         
         case let .silenced(id):
-            writeInt(&buf, Int32(26))
+            writeInt(&buf, Int32(27))
             FfiConverterUInt64.write(id, into: &buf)
             
         
         case let .inputOpened(id,kind):
-            writeInt(&buf, Int32(27))
+            writeInt(&buf, Int32(28))
             FfiConverterUInt64.write(id, into: &buf)
             FfiConverterTypeRecordingKind.write(kind, into: &buf)
             
         
         case let .inputClosed(id):
-            writeInt(&buf, Int32(28))
+            writeInt(&buf, Int32(29))
             FfiConverterUInt64.write(id, into: &buf)
             
         
         case let .noSound(id,generation,on):
-            writeInt(&buf, Int32(29))
+            writeInt(&buf, Int32(30))
             FfiConverterUInt64.write(id, into: &buf)
             FfiConverterUInt64.write(generation, into: &buf)
             FfiConverterBool.write(on, into: &buf)
             
         
         case let .restoreFailed(id,generation):
-            writeInt(&buf, Int32(30))
+            writeInt(&buf, Int32(31))
             FfiConverterUInt64.write(id, into: &buf)
             FfiConverterUInt64.write(generation, into: &buf)
             
         
         case let .foreground(on):
-            writeInt(&buf, Int32(31))
+            writeInt(&buf, Int32(32))
             FfiConverterBool.write(on, into: &buf)
             
         }
@@ -12270,6 +12284,7 @@ public enum CameraRefusal: Equatable, Hashable {
     case inCall
     case interrupted
     case microphoneSilent
+    case audioTrackBroken
 
 
 
@@ -12316,6 +12331,8 @@ public struct FfiConverterTypeCameraRefusal: FfiConverterRustBuffer {
         case 12: return .interrupted
         
         case 13: return .microphoneSilent
+        
+        case 14: return .audioTrackBroken
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -12375,6 +12392,10 @@ public struct FfiConverterTypeCameraRefusal: FfiConverterRustBuffer {
         
         case .microphoneSilent:
             writeInt(&buf, Int32(13))
+        
+        
+        case .audioTrackBroken:
+            writeInt(&buf, Int32(14))
         
         }
     }
@@ -17648,7 +17669,7 @@ public func coverageFinish(scan: CoverageScan, video: VideoBounds?) -> AudioCove
 })
 }
 /**
- * One rule for the audio of a recorded clip on both platforms: inside the stream one PCM sample of rounding is allowed (a longer hole is `MidGap`, an overlap, a repeat or a count that does not fit its length is `Broken`), the ends may differ from the video by one native codec frame. The first defect stays, a scan changed from outside is `Broken`.
+ * One rule for the audio of a recorded clip on both platforms: inside the stream one PCM sample of rounding is allowed, counted in samples of the track rate (a longer hole is `MidGap`, an overlap, a repeat or a count that does not fit its length is `Broken`), the ends may differ from the video by one native codec frame. The first defect stays, a scan changed from outside is `Broken`.
  */
 public func coveragePush(scan: CoverageScan, interval: AudioInterval) -> CoverageScan  {
     return try!  FfiConverterTypeCoverageScan_lift(try! rustCall() {
@@ -18437,7 +18458,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_medialayer_checksum_func_coverage_finish() != 56229) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_medialayer_checksum_func_coverage_push() != 62985) {
+    if (uniffi_medialayer_checksum_func_coverage_push() != 42193) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_format_candidates() != 39713) {

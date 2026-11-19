@@ -66,7 +66,7 @@ fun MomentCamera() {
   | Outcome | When | What the app does |
   | --- | --- | --- |
   | `captured(take)` | `stopRecording`, or the limit ended the take | `clip(take:)` (Swift) or `clip(take)` (Kotlin) gives the clip. The clip is given once: by `clip` or by `stopRecording`. A clip nobody fetched stays until `clip(take)` takes it or the camera closes: the next take, a lens change and leaving the screen do not delete it |
-  | `refused(reason)` | A call, an interruption, a silent microphone, a take that is too short, an unrecoverable fault, closing MediaLayer | Shows the reason, the file is deleted |
+  | `refused(reason)` | A call, an interruption, a silent microphone, a take whose sound track is broken (`audioTrackBroken`), a take that is too short, an unrecoverable fault, closing MediaLayer | Shows the reason, the file is deleted |
   | `lost(reason)` | A recoverable fault of the camera during the take | The take is gone, the camera opens again by itself |
 
   A take with sound starts only after the microphone gave sound: `phase` stays out of `recording` until then. A flash or zoom command that the system refused is a `camera` event of `Media.failures`, and `state` keeps the old flash and zoom.

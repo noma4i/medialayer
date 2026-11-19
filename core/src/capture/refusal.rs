@@ -16,6 +16,7 @@ pub enum CameraRefusal {
     InCall,
     Interrupted,
     MicrophoneSilent,
+    AudioTrackBroken,
 }
 
 /// The text of a refusal, the same on both platforms.
@@ -35,6 +36,7 @@ pub fn camera_refusal_text(reason: CameraRefusal) -> String {
         CameraRefusal::InCall => "a call is running, there is no recording",
         CameraRefusal::Interrupted => "the system interrupted the recording",
         CameraRefusal::MicrophoneSilent => "the microphone gives no sound, the recording did not start",
+        CameraRefusal::AudioTrackBroken => "the sound of the recording is broken, the recording was thrown away",
     }
     .to_string()
 }

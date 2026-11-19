@@ -97,7 +97,7 @@ fn inv_coverage_02_untrusted_intervals_are_broken_and_give_a_refusal() {
     ];
     for (name, config, intervals) in table {
         let got = read(config, &intervals, video(2_000_000));
-        assert_eq!((got.verdict, audio_coverage_refusal(got.verdict)), (CoverageVerdict::Broken, Some(CameraRefusal::MicrophoneSilent)), "{name}");
+        assert_eq!((got.verdict, audio_coverage_refusal(got.verdict)), (CoverageVerdict::Broken, Some(CameraRefusal::AudioTrackBroken)), "{name}");
     }
     let huge = AudioInterval { start_us: 0, end_us: 1_000_000, samples: u64::MAX };
     let overflow = coverage_push(coverage_push(coverage_begin(CoverageConfig { sample_rate: 1_000_000, ..config() }), AudioInterval { samples: 1_000_000, ..huge }), AudioInterval { start_us: 1_000_000, end_us: 2_000_000, samples: 1_000_000 });
@@ -154,12 +154,12 @@ fn inv_coverage_05_only_a_lost_sound_gives_a_refusal() {
     for (v, want) in [
         (CoverageVerdict::Skipped, None),
         (CoverageVerdict::Covered, None),
-        (CoverageVerdict::Missing, Some(CameraRefusal::MicrophoneSilent)),
-        (CoverageVerdict::Empty, Some(CameraRefusal::MicrophoneSilent)),
-        (CoverageVerdict::Broken, Some(CameraRefusal::MicrophoneSilent)),
-        (CoverageVerdict::HeadGap, Some(CameraRefusal::MicrophoneSilent)),
-        (CoverageVerdict::MidGap, Some(CameraRefusal::MicrophoneSilent)),
-        (CoverageVerdict::TailCut, Some(CameraRefusal::MicrophoneSilent)),
+        (CoverageVerdict::Missing, Some(CameraRefusal::AudioTrackBroken)),
+        (CoverageVerdict::Empty, Some(CameraRefusal::AudioTrackBroken)),
+        (CoverageVerdict::Broken, Some(CameraRefusal::AudioTrackBroken)),
+        (CoverageVerdict::HeadGap, Some(CameraRefusal::AudioTrackBroken)),
+        (CoverageVerdict::MidGap, Some(CameraRefusal::AudioTrackBroken)),
+        (CoverageVerdict::TailCut, Some(CameraRefusal::AudioTrackBroken)),
     ] {
         assert_eq!(audio_coverage_refusal(v), want, "{v:?}");
     }

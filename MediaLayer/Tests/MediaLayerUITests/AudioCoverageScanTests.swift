@@ -23,7 +23,7 @@ struct AudioCoverageScanTests {
     defer { try? FileManager.default.removeItem(at: url) }
     let coverage = try await scanAudioCoverage(at: url, required: true)
     #expect(coverage.verdict == .tailCut)
-    #expect(audioCoverageRefusal(verdict: coverage.verdict) == .microphoneSilent)
+    #expect(audioCoverageRefusal(verdict: coverage.verdict) == .audioTrackBroken)
     #expect(samples.contains(coverage.samples), "\(coverage)")
     let span = Double((coverage.lastUs ?? 0) - (coverage.firstUs ?? 0))
     #expect(abs(span - Double(coverage.samples) / 48_000 * 1_000_000) <= 25_000, "no hole inside the decoded stream: \(coverage)")
@@ -38,7 +38,7 @@ struct AudioCoverageScanTests {
     try Data([1, 2, 3]).write(to: junk)
     defer { try? FileManager.default.removeItem(at: junk) }
     let broken = try await scanAudioCoverage(at: junk, required: true)
-    #expect(audioCoverageRefusal(verdict: broken.verdict) == .microphoneSilent)
+    #expect(audioCoverageRefusal(verdict: broken.verdict) == .audioTrackBroken)
   }
 }
 #endif

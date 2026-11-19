@@ -101,6 +101,7 @@ media.microphoneAvailability.collect { recordEnabled = it == MicrophoneAvailabil
 | ------- | ---- | ------------------ |
 | `interrupted` | The system interrupted the audio (an alarm, Siri, a call screen) during the recording, or before it started, or MediaLayer closed or the screen left mid-take | "Recording stopped", the user records again |
 | `microphoneSilent` | The microphone gave no sound when a take started, or its sound stopped during the take | "No sound from the microphone", the user records again |
+| `audioTrackBroken` | New value: the recorded file's sound track has a hole, is cut, empty or unreadable, so the take was thrown away | Show it as a failed recording, "The recording failed", the user records again |
 | `inCall` | A call runs | The call banner |
 | `microphoneBusy` | The system refused the recording session, another app records, or a second `start` came during a take | The busy banner |
 

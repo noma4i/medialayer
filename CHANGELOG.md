@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- CameraRefusal audioTrackBroken: a clip whose sound track fails the coverage check, not microphoneSilent.
+
 ### Changed
 
 - A voice or camera start retries the microphone three times, 1 s each, 200 ms apart.
@@ -13,7 +17,7 @@
 - A screen recreate no longer makes the process media environment Closed on Android and iOS.
 - A voice start right after a camera take records instead of hanging while the preview lives.
 - A voice start during a camera take is refused as microphone busy at once.
-- A camera clip with a one-sample audio joint is no longer refused as a silent microphone.
+- A camera clip with a one-sample audio joint is no longer refused as a broken sound track.
 - An Android microphone source silenced before its first sound now ends the waiting voice start.
 - An Android audio input starts only after the input stopped for it released its AudioRecord.
 - Microphone availability shows no sound only on a silence the platform reports.
