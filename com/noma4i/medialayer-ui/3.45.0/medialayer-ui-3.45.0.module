@@ -1,0 +1,259 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.noma4i",
+    "module": "medialayer-ui",
+    "version": "3.45.0",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.8.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "releaseVariantReleaseApiPublication",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.libraryelements": "aar",
+        "org.gradle.usage": "java-api"
+      },
+      "dependencies": [
+        {
+          "group": "com.noma4i",
+          "module": "medialayer",
+          "version": {
+            "requires": "3.45.0"
+          }
+        },
+        {
+          "group": "androidx.core",
+          "module": "core-telecom",
+          "version": {
+            "requires": "1.1.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.21"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "medialayer-ui-3.45.0.aar",
+          "url": "medialayer-ui-3.45.0.aar",
+          "size": 1285636,
+          "sha512": "95deef6536cfd0007c0bed3e944e7e89e4041ae6430cc6559d1c3bb48eb4aaa5db99c00030f8ed7231aad9272bcccc0a7984ac4bb9a1f79b3f7a84b3c4213bc5",
+          "sha256": "b7dba3190744ab013b72e25e600cdbed8d466fb88217351142eaa5e743d5d01a",
+          "sha1": "2e3293bd8ae36efec49426b55f7aab930badb78e",
+          "md5": "723cd73e667ceba1190008eb1965eaf5"
+        }
+      ]
+    },
+    {
+      "name": "releaseVariantReleaseRuntimePublication",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.libraryelements": "aar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "androidx.compose",
+          "module": "compose-bom",
+          "version": {
+            "requires": "2026.09.00"
+          },
+          "attributes": {
+            "org.gradle.category": "platform"
+          },
+          "endorseStrictVersions": true
+        },
+        {
+          "group": "androidx.compose.ui",
+          "module": "ui"
+        },
+        {
+          "group": "androidx.compose.foundation",
+          "module": "foundation"
+        },
+        {
+          "group": "androidx.compose.runtime",
+          "module": "runtime"
+        },
+        {
+          "group": "androidx.media3",
+          "module": "media3-exoplayer",
+          "version": {
+            "requires": "1.11.1"
+          }
+        },
+        {
+          "group": "androidx.media3",
+          "module": "media3-exoplayer-hls",
+          "version": {
+            "requires": "1.11.1"
+          }
+        },
+        {
+          "group": "androidx.media3",
+          "module": "media3-transformer",
+          "version": {
+            "requires": "1.11.1"
+          }
+        },
+        {
+          "group": "androidx.media3",
+          "module": "media3-effect",
+          "version": {
+            "requires": "1.11.1"
+          }
+        },
+        {
+          "group": "androidx.media3",
+          "module": "media3-inspector",
+          "version": {
+            "requires": "1.11.1"
+          }
+        },
+        {
+          "group": "androidx.media3",
+          "module": "media3-datasource-okhttp",
+          "version": {
+            "requires": "1.11.1"
+          }
+        },
+        {
+          "group": "androidx.media3",
+          "module": "media3-ui-compose",
+          "version": {
+            "requires": "1.11.1"
+          }
+        },
+        {
+          "group": "androidx.core",
+          "module": "core-ktx",
+          "version": {
+            "requires": "1.19.1"
+          }
+        },
+        {
+          "group": "androidx.lifecycle",
+          "module": "lifecycle-process",
+          "version": {
+            "requires": "2.10.0"
+          }
+        },
+        {
+          "group": "androidx.camera",
+          "module": "camera-camera2",
+          "version": {
+            "requires": "1.6.2"
+          }
+        },
+        {
+          "group": "androidx.camera",
+          "module": "camera-lifecycle",
+          "version": {
+            "requires": "1.6.2"
+          }
+        },
+        {
+          "group": "androidx.camera",
+          "module": "camera-video",
+          "version": {
+            "requires": "1.6.2"
+          }
+        },
+        {
+          "group": "androidx.camera",
+          "module": "camera-view",
+          "version": {
+            "requires": "1.6.2"
+          }
+        },
+        {
+          "group": "com.squareup.okhttp3",
+          "module": "okhttp",
+          "version": {
+            "requires": "5.5.0"
+          }
+        },
+        {
+          "group": "io.coil-kt.coil3",
+          "module": "coil-compose",
+          "version": {
+            "requires": "3.6.3"
+          }
+        },
+        {
+          "group": "io.coil-kt.coil3",
+          "module": "coil-gif",
+          "version": {
+            "requires": "3.6.3"
+          }
+        },
+        {
+          "group": "net.java.dev.jna",
+          "module": "jna",
+          "version": {
+            "requires": "5.19.1"
+          },
+          "excludes": [
+            {
+              "group": "*",
+              "module": "*"
+            }
+          ],
+          "thirdPartyCompatibility": {
+            "artifactSelector": {
+              "name": "jna",
+              "type": "aar",
+              "extension": "aar"
+            }
+          }
+        },
+        {
+          "group": "com.noma4i",
+          "module": "medialayer",
+          "version": {
+            "requires": "3.45.0"
+          }
+        },
+        {
+          "group": "androidx.core",
+          "module": "core-telecom",
+          "version": {
+            "requires": "1.1.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.4.21"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "medialayer-ui-3.45.0.aar",
+          "url": "medialayer-ui-3.45.0.aar",
+          "size": 1285636,
+          "sha512": "95deef6536cfd0007c0bed3e944e7e89e4041ae6430cc6559d1c3bb48eb4aaa5db99c00030f8ed7231aad9272bcccc0a7984ac4bb9a1f79b3f7a84b3c4213bc5",
+          "sha256": "b7dba3190744ab013b72e25e600cdbed8d466fb88217351142eaa5e743d5d01a",
+          "sha1": "2e3293bd8ae36efec49426b55f7aab930badb78e",
+          "md5": "723cd73e667ceba1190008eb1965eaf5"
+        }
+      ]
+    }
+  ]
+}
