@@ -16,3 +16,5 @@ strip = "debuginfo" did not change the checked files compared to the default pro
 Extra symbol stripping is off, so names stay available for diagnostics.
 After a profile change, check bindgen and that medialayer.swift and medialayer.kt are equal.
 Check the size of the final app apart from the size of the static library.
+
+Release gate INV-CAPTURE-80: a tag does not go out without the green guard on both platforms. Swift `TakeTransformTests` (marker pixel, mirror) and Kotlin `CaptureUprightTest` must pass in the full test run of the release.

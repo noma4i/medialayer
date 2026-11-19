@@ -20,3 +20,5 @@ The release script requires a clean `master` tree, the Android result directory,
 Android coordinates are `com.noma4i:medialayer:X.Y.Z`, `com.noma4i:medialayer-ui:X.Y.Z` and `com.noma4i:medialayer-testing:X.Y.Z`. The Maven branch contains `com/noma4i/medialayer/X.Y.Z/`, `com/noma4i/medialayer-ui/X.Y.Z/` and `com/noma4i/medialayer-testing/X.Y.Z/` at its root. Publication uses local Maven staging and does not need credentials.
 
 The root `Package.swift` uses the release URL and checksum for SwiftPM. Keep `MediaLayer/Package.swift` and `scripts/build_ios.sh` for local development.
+
+Gate INV-CAPTURE-80: no tag without the green recorded-video guard on both platforms: Swift `TakeTransformTests` and Kotlin `CaptureUprightTest` pass in the full run.

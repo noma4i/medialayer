@@ -21,7 +21,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
   private var audioFlowing = false
   private var audioInterrupted = false
   private var frameOutput: AVCaptureVideoDataOutput?
-  private var rotation: AVCaptureDevice.RotationCoordinator?
   private var relay: CameraTakeRelay!
   private var recordingOutput = false
   private var stabilization: AVCaptureVideoStabilizationMode?
@@ -163,7 +162,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     audioInterrupted = false
     if audioOutput != nil { emit(.microphoneFlow(false)) }
     if let microphoneFailure { loseMicrophone(microphoneFailure) }
-    rotation = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
     if let photo, let size = choice?.photoSize {
       photo.maxPhotoDimensions = CMVideoDimensions(width: Int32(size.width), height: Int32(size.height))
     }
@@ -235,6 +233,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     }
     let link = AVCaptureConnection(inputPort: port, videoPreviewLayer: layer)
     guard session.canAddConnection(link) else { return }
+    if link.isVideoRotationAngleSupported(previewAngle) { link.videoRotationAngle = previewAngle }
     session.addConnection(link)
     previewLinks[id] = link
   }
@@ -264,7 +263,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
       self.audioInterrupted = false
       self.emit(.microphoneFlow(true))
       self.frameOutput = nil
-      self.rotation = nil
       completion()
     }
   }
@@ -321,8 +319,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
       guard let settings = audioOutput?.recommendedAudioSettingsForAssetWriter(writingTo: fileType) as? [String: Any] else { return nil }
       audio = settings
     }
-    var transform = CGAffineTransform(rotationAngle: CGFloat(rotation?.videoRotationAngleForHorizonLevelCapture ?? 90) * .pi / 180)
-    if lens == .front && profile.mirrorFrontVideo { transform = transform.concatenating(CGAffineTransform(scaleX: -1, y: 1)) }
+    let transform = takeTransform(mirror: lens == .front && profile.mirrorFrontVideo)
+    MediaTrace.emit("camera", "take angle=\(Int(previewAngle)) preview=\(previewLinks.values.first.map { String(describing: $0.videoRotationAngle) } ?? "none")")
     let budget = Int(clamping: captureCost(profile: profile))
     return CameraTake.Settings(
       video: video, audio: audio, transform: transform, maxDurationMs: profile.maxDurationMs, fileType: fileType,
