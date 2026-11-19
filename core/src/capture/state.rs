@@ -44,6 +44,8 @@ pub struct CaptureRun {
     pub starting: bool,
     pub started: bool,
     pub discard: bool,
+    /// The microphone stopped delivering after the take had its sound: the take is ended and delivered with the sound it has.
+    pub microphone_lost: bool,
     pub end: Option<RecordEnd>,
     pub recovery_spent: bool,
     pub pending_lens: Option<CameraLens>,
@@ -112,6 +114,7 @@ pub fn capture_run(lens: CameraLens) -> CaptureRun {
         starting: false,
         started: false,
         discard: false,
+        microphone_lost: false,
         end: None,
         recovery_spent: false,
         pending_lens: None,

@@ -466,7 +466,7 @@ fn inv_capture_30_a_lens_change_in_a_passing_phase_is_applied_when_that_phase_se
 }
 
 #[test]
-fn inv_capture_32_a_take_starts_only_while_its_microphone_sound_flows_and_losing_it_throws_the_take_away() {
+fn inv_capture_32_a_take_starts_only_while_its_microphone_sound_flows_and_losing_it_before_the_take_has_sound_refuses_it() {
     let profile = moment();
     let silent = drive(profile, ready(profile), &[CaptureEvent::AudioFlow { flowing: false }]).0;
     let (waiting, actions) = drive(profile, silent, &[CaptureEvent::Start, CaptureEvent::RecordStarted]);
@@ -480,8 +480,6 @@ fn inv_capture_32_a_take_starts_only_while_its_microphone_sound_flows_and_losing
     let (started, actions) = drive(profile, flowing, &[CaptureEvent::Start, CaptureEvent::RecordStarted]);
     assert_eq!((actions, phase(&started)), (vec![CaptureAction::BeginRecording], CameraPhase::Recording));
 
-    let (ended, actions) = drive(profile, started, &[CaptureEvent::AudioFlow { flowing: false }, CaptureEvent::RecordFinished { end: RecordEnd::Completed }]);
-    assert_eq!((actions, ended.state.fault, phase(&ended)), (vec![CaptureAction::EndRecording { discard: true }, CaptureAction::Discard], Some(CameraRefusal::MicrophoneSilent), CameraPhase::Ready));
 
     let quiet = CaptureProfile { audio: false, ..moment() };
     let muted = drive(quiet, ready(quiet), &[CaptureEvent::AudioFlow { flowing: false }]).0;
@@ -489,11 +487,37 @@ fn inv_capture_32_a_take_starts_only_while_its_microphone_sound_flows_and_losing
 }
 
 #[test]
+fn inv_capture_84_a_take_that_lost_its_microphone_ends_and_delivers_the_sound_so_far() {
+    let profile = moment();
+    let flowing = drive(profile, ready(profile), &[CaptureEvent::AudioFlow { flowing: true }]).0;
+    let started = drive(profile, flowing, &[CaptureEvent::Start, CaptureEvent::RecordStarted]).0;
+    assert_eq!(phase(&started), CameraPhase::Recording);
+
+    let (stopping, actions) = drive(profile, started, &[CaptureEvent::AudioFlow { flowing: false }]);
+    assert_eq!((actions, stopping.state.fault, phase(&stopping), stopping.microphone_lost), (vec![CaptureAction::EndRecording { discard: false }], None, CameraPhase::Stopping, true));
+    let (read, actions) = drive(profile, stopping, &[CaptureEvent::RecordFinished { end: RecordEnd::MicrophoneLost }]);
+    assert_eq!((actions, read.microphone_lost), (vec![CaptureAction::ReadClip], false));
+    let (done, actions) = drive(profile, read, &[CaptureEvent::RecordSettled { duration_ms: Some(2_000) }]);
+    assert_eq!((actions, done.state.outcome), (vec![CaptureAction::Deliver], Some(TakeOutcome::Captured { take: 1 })));
+
+    let (completed, actions) = drive(profile, stopping, &[CaptureEvent::RecordFinished { end: RecordEnd::Completed }, CaptureEvent::RecordSettled { duration_ms: Some(2_000) }]);
+    assert_eq!((actions, completed.state.fault), (vec![CaptureAction::ReadClip, CaptureAction::Deliver], None), "the platform may report the stop as completed: the lost microphone still delivers");
+
+    let (short, actions) = drive(profile, stopping, &[CaptureEvent::RecordFinished { end: RecordEnd::MicrophoneLost }, CaptureEvent::RecordSettled { duration_ms: Some(300) }]);
+    assert_eq!((actions, short.state.outcome), (vec![CaptureAction::ReadClip, CaptureAction::Discard], Some(TakeOutcome::Refused { reason: CameraRefusal::TooShort })));
+
+    let silent = drive(profile, ready(profile), &[CaptureEvent::AudioFlow { flowing: false }]).0;
+    let waiting = drive(profile, silent, &[CaptureEvent::Start, CaptureEvent::RecordStarted]).0;
+    let (cut, actions) = drive(profile, waiting, &[CaptureEvent::AudioFlow { flowing: false }, CaptureEvent::RecordFinished { end: RecordEnd::Completed }]);
+    assert_eq!((actions, cut.state.outcome), (vec![CaptureAction::EndRecording { discard: true }, CaptureAction::Discard], Some(TakeOutcome::Refused { reason: CameraRefusal::MicrophoneSilent })), "a take that never had sound keeps the refusal");
+}
+
+#[test]
 fn inv_capture_33_the_silence_of_a_take_ends_with_it_and_the_next_start_follows_the_sensor() {
     let profile = moment();
     let silent_take = || {
         let flowing = drive(profile, ready(profile), &[CaptureEvent::AudioFlow { flowing: true }]).0;
-        drive(profile, flowing, &[CaptureEvent::Start, CaptureEvent::RecordStarted, CaptureEvent::AudioFlow { flowing: false }, CaptureEvent::RecordFinished { end: RecordEnd::Completed }]).0
+        drive(profile, flowing, &[CaptureEvent::Start, CaptureEvent::RecordStarted, CaptureEvent::AudioFlow { flowing: false }, CaptureEvent::RecordFinished { end: RecordEnd::MicrophoneLost }, CaptureEvent::RecordSettled { duration_ms: Some(2_000) }]).0
     };
     let (_, actions) = drive(profile, silent_take(), &[CaptureEvent::Start]);
     assert_eq!(actions, vec![CaptureAction::BeginRecording], "a sensor that reports only during a take (CameraX AudioStats) does not lock the camera after a silent take");

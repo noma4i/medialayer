@@ -176,9 +176,15 @@ impl Capture {
             CaptureRunEvent::Input(CaptureEvent::AudioFlow { flowing }) => {
                 context.run.audio_flowing = Some(*flowing);
                 if !flowing && context.profile.audio && context.recording_in_progress() {
-                    context.run.state.fault = Some(CameraRefusal::MicrophoneSilent);
-                    context.cancel = true;
-                    Handled
+                    if context.run.started && context.run.state.phase == CameraPhase::Recording {
+                        // The take had its sound and lost it: it ends here and the clip with the sound so far is delivered.
+                        context.run.microphone_lost = true;
+                        context.end_recording(false)
+                    } else {
+                        context.run.state.fault = Some(CameraRefusal::MicrophoneSilent);
+                        context.cancel = true;
+                        Handled
+                    }
                 } else { Handled }
             }
             CaptureRunEvent::Input(CaptureEvent::RecordFinished { end }) if context.recording_in_progress() => Transition(context.record_finished(*end)),
@@ -200,7 +206,7 @@ impl CaptureRunInput {
         state.shooting = false;
         state.fault = None;
         state.refused_ms = None;
-        self.run = CaptureRun { open: false, streaming: false, starting: false, started: false, discard: false, end: None, pending_lens: None, ..self.run };
+        self.run = CaptureRun { open: false, streaming: false, starting: false, started: false, discard: false, microphone_lost: false, end: None, pending_lens: None, ..self.run };
     }
 
     fn demand_on(&mut self) {
@@ -280,6 +286,7 @@ impl CaptureRunInput {
         self.run.state.outcome = None;
         self.run.started = false;
         self.run.discard = false;
+        self.run.microphone_lost = false;
         self.run.end = None;
         self.run.state.recorded_ms = 0;
         self.run.state.fault = None;
@@ -294,11 +301,13 @@ impl CaptureRunInput {
     }
 
     fn record_finished(&mut self, end: RecordEnd) -> State {
-        if self.profile.audio && self.run.audio_flowing != Some(true) && self.run.state.fault.is_none() {
+        let lost = self.run.microphone_lost || end == RecordEnd::MicrophoneLost;
+        if self.profile.audio && !lost && self.run.audio_flowing != Some(true) && self.run.state.fault.is_none() {
             self.run.state.fault = Some(CameraRefusal::MicrophoneSilent);
             self.run.discard = true;
         }
         self.run.audio_flowing = None;
+        self.run.microphone_lost = false;
         self.run.starting = false;
         self.run.end = Some(end);
         if self.run.started && end != RecordEnd::Failed && !self.run.discard {
