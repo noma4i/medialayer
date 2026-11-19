@@ -149,6 +149,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
       commitSession(why: "configure")
       audioOutput = nil
       microphoneInput = nil
+      frameOutput = nil
       return emit(.refuse(reason: .configureFailed))
     }
     camera = device
