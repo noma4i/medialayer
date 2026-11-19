@@ -120,7 +120,8 @@ class CameraNativeDeviceTest {
       }
     }, live.upright, live.directory, { file ->
       val seen = if (damage == null) file else damaged(file, damage).also { files.add(it) }
-      live.audioCoverage(seen).also { readings.add("coverage ${file.name} $damage = $it timeline=${timeline(seen)}") }
+      val began = System.nanoTime()
+      live.audioCoverage(seen).also { readings.add("coverage ${file.name} $damage = $it timeline=${timeline(seen)}"); println("T29 coverage read ${(System.nanoTime() - began) / 1_000_000} ms ${it.verdict}") }
     })
   }
 
@@ -185,7 +186,7 @@ class CameraNativeDeviceTest {
     }
   }
 
-  private fun record(audio: Boolean, damage: Damage? = null, lens: CameraLens = CameraLens.BACK, kind: CaptureKind = CaptureKind.MOMENT, mirrored: Boolean = false, disturb: Disturbance? = null) = runBlocking {
+  private fun record(audio: Boolean, damage: Damage? = null, lens: CameraLens = CameraLens.BACK, kind: CaptureKind = CaptureKind.MOMENT, mirrored: Boolean = false, disturb: Disturbance? = null, holdMs: Long = 0) = runBlocking {
     val profile = captureProfile(kind).copy(audio = audio).let { if (mirrored) it.copy(mirrorFrontVideo = true) else it }
     val failures = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { Media.failures.collect { reported.add(it) } }
     val hearing = async(Dispatchers.Default, start = CoroutineStart.UNDISPATCHED) { checkNotNull(layer).microphoneAvailability.collect { heard.value += it } }
@@ -241,7 +242,9 @@ class CameraNativeDeviceTest {
       try {
         made.startRecording()
         withTimeout(TIMEOUT_MS) { made.state.first { it.isRecording && it.recordedMs >= profile.minTakeMs } }
-        made.stopRecording().also { clip -> files.add(clip.file) }
+        if (holdMs > 0) kotlinx.coroutines.delay(holdMs)
+        val stopping = System.nanoTime()
+        made.stopRecording().also { clip -> files.add(clip.file); println("T29 stop-to-clip ${(System.nanoTime() - stopping) / 1_000_000} ms, clip ${clip.durationMs} ms, ${describe(clip.file)}") }
       } catch (error: MediaException.Camera) {
         throw AssertionError("take $it of 2 failed: $error; availability=${heard.value}; native failures=${reported.toList()}; readers=${readings.toList()}; producer files before upright=${diagnostics.map(::describe)}", error)
       }
@@ -308,6 +311,10 @@ class CameraNativeDeviceTest {
 
   @Test
   fun two_circle_takes_from_the_front_camera_with_the_mirror_are_two_mp4_files_with_video_and_aac_packets() = record(audio = true, lens = CameraLens.FRONT, kind = CaptureKind.CIRCLE, mirrored = true)
+
+  /** INV-AUDIO-71: the wait after the stop of a 15 s take holds no PCM decode, the sound is read from the packet table. */
+  @Test
+  fun inv_audio_71_a_fifteen_second_take_with_sound_is_delivered_covered() = record(audio = true, holdMs = 15_000)
 
   @Test
   fun two_takes_without_sound_are_two_mp4_files_with_video_packets_only() = record(audio = false)

@@ -12,6 +12,7 @@
 - A shown video place loads its whole before preload wholes queued ahead of it.
 - A recorded video takes the turn of its preview, so no device pose turns it.
 - A late encoder failure after a normal camera take end no longer warns on a dead thread.
+- Camera clips read sound coverage from the packet table, and a rounded video end is no defect.
 
 ## 3.42.0 - 2026-11-19
 
