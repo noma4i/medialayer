@@ -358,7 +358,7 @@ internal class CameraTake(
 
   private fun complete() {
     if (!started || written[VIDEO] == 0 || (hasAudio && written[AUDIO] == 0)) return fail(0, "the take ended without both streams")
-    end(file, videoEndUs, ledger!!.coverage())
+    end(file, videoEndUs, coverage = ledger!!.coverage())
   }
 
   private fun fail(code: Long, message: String) = end(null, null, NativeFailure(FailureSource.RECORDER, "android.media.MediaCodec", code, message))
