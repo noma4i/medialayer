@@ -117,15 +117,16 @@ fn inv_trace_04_a_suspension_leaves_a_suspend_line_with_its_id_and_groups_and_a_
     let caller = caller();
     let lines = Arc::new(Lines(Default::default()));
     crate::trace::set_trace_sink(Some(lines.clone()));
-    let find = |marker: &str| lines.0.lock().unwrap().iter().find(|line| line.contains(marker)).cloned();
 
     let suspension = layer.suspend_playback(vec!["chat".to_string(), "voice".to_string()]).unwrap();
-    caller.block_on(eventually(|| find("stage suspend ").is_some()));
-    let suspend = find("stage suspend ").unwrap();
+    let own_suspend = || lines.0.lock().unwrap().iter().find(|line| line.contains("stage suspend ") && line.contains("allow=[\"chat\", \"voice\"]")).cloned();
+    caller.block_on(eventually(|| own_suspend().is_some()));
+    let suspend = own_suspend().unwrap();
     let id = suspend.split("stage suspend ").nth(1).unwrap().split(' ').next().unwrap().to_string();
+    let exact = format!("stage resume {id}");
     suspension.release();
-    caller.block_on(eventually(|| find("stage resume ").is_some()));
-    let resume = find("stage resume ").unwrap();
+    caller.block_on(eventually(|| lines.0.lock().unwrap().iter().any(|line| line.ends_with(&exact))));
+    let resume = lines.0.lock().unwrap().iter().find(|line| line.ends_with(&exact)).cloned().unwrap();
     crate::trace::set_trace_sink(None);
 
     assert!(suspend.contains("allow=[\"chat\", \"voice\"]"), "{suspend}");
