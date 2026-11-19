@@ -19,11 +19,6 @@ extension CameraMicrophone {
   func gaveUp(generation: UInt64, error: Error?) {}
 }
 
-enum CaptureAudio {
-  case managed
-  case native(CameraMicrophone)
-}
-
 func isLivePCM(_ buffer: CMSampleBuffer) -> Bool {
   CMSampleBufferIsValid(buffer) && CMSampleBufferDataIsReady(buffer) && CMSampleBufferGetNumSamples(buffer) > 0
 }

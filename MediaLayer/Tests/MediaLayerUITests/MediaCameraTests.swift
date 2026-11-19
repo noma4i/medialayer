@@ -11,7 +11,11 @@ private struct DeniedMicrophone: MicrophonePermissionPort {
   func state() -> MicrophonePermission { .denied }
 }
 
-private final class FakeBackend: CaptureBackend, CameraMicrophone, @unchecked Sendable {
+extension CaptureEvent {
+  static func microphoneFlow(_ flowing: Bool) -> CaptureEvent { .audioFlow(flowing: flowing) }
+}
+
+private final class FakeBackend: CaptureBackend, @unchecked Sendable {
   enum Answer { case opens, refuses(CameraRefusal), silent }
 
   let session = AVCaptureSession()
@@ -31,12 +35,7 @@ private final class FakeBackend: CaptureBackend, CameraMicrophone, @unchecked Se
   var soundOnBind = true
   /// The first PCM of a take, as the relay reports it to the core before the take starts; a test of a silent source turns it off.
   var soundOnTake = true
-  /// A real file the take writes instead of three bytes.
-  var clipFile: URL?
   var photoSize: PixelSize? { PixelSize(width: 3000, height: 4000) }
-  /// The verdict the writer of a take gives with its outcome; nil is a backend without a ledger.
-  var coverage: AudioCoverage? = AudioCoverage(verdict: .covered, samples: 0, firstUs: nil, lastUs: nil, gapAtUs: nil, gapUs: nil)
-  func takeCoverage() -> AudioCoverage? { lock.withLock { coverage } }
   func setSink(_ sink: @escaping @Sendable (CaptureEvent) -> Void) { lock.withLock { self.sink = sink } }
 
   func emit(_ event: CaptureEvent) { lock.withLock { sink }?(event) }
@@ -77,19 +76,6 @@ private final class FakeBackend: CaptureBackend, CameraMicrophone, @unchecked Se
     held.forEach { $0() }
   }
 
-  /// A native microphone: the camera opens its audio input only after the recording is admitted.
-  var nativeMicrophone = false
-  var audio: CaptureAudio { nativeMicrophone ? .native(self) : .managed }
-  private var microphoneListener: (UInt64, CameraMicrophoneListener)?
-  func start(generation: UInt64, listener: CameraMicrophoneListener) {
-    lock.withLock { microphoneListener = (generation, listener) }
-    note("mic start")
-  }
-  /// The native microphone of the current generation hears sound or loses it.
-  func micHeard() { if let (generation, listener) = lock.withLock({ microphoneListener }) { listener.microphoneHeard(generation: generation) } }
-  func micLost() { if let (generation, listener) = lock.withLock({ microphoneListener }) { listener.microphoneLost(generation: generation, error: nil) } }
-  func stop(generation: UInt64) { note("mic stop") }
-
   /// The hardware does not report the start of a take until the test does.
   var holdRecordStart = false
   func attachPreviewLayer(_ layer: AVCaptureVideoPreviewLayer) {
@@ -107,7 +93,7 @@ private final class FakeBackend: CaptureBackend, CameraMicrophone, @unchecked Se
   func beginRecording(to url: URL, profile: CaptureProfile, lens: CameraLens) {
     note("record \(lens)")
     lock.withLock { recordingURL = url; recordedProfile = profile }
-    if let clipFile { try? FileManager.default.copyItem(at: clipFile, to: url) } else { try? Data([1, 2, 3]).write(to: url) }
+    try? Data([1, 2, 3]).write(to: url)
     if holdRecordStart { return }
     if profile.audio && soundOnTake { emit(.microphoneFlow(true)) }
     emit(.recordStarted)
@@ -184,9 +170,6 @@ private final class Counters: @unchecked Sendable {
   func gave() { lock.withLock { given += 1 }; TestSignal.shared.fire() }
   func upright(_ quality: Double) { lock.withLock { uprightQualities.append(quality) }; TestSignal.shared.fire() }
   func checkThread() { if Thread.isMainThread { lock.withLock { mainCalls += 1 } } }
-  private var rescannedURLs: [URL] = []
-  var rescanned: [URL] { lock.withLock { rescannedURLs } }
-  func rescan(_ url: URL) -> AudioCoverage { lock.withLock { rescannedURLs.append(url) }; return takeCoverageOf(.covered) }
 }
 
 private final class StateObservation {
@@ -195,10 +178,6 @@ private final class StateObservation {
     task = Task { for await _ in states { TestSignal.shared.fire() } }
   }
   deinit { task.cancel() }
-}
-
-private func takeCoverageOf(_ verdict: CoverageVerdict) -> AudioCoverage {
-  AudioCoverage(verdict: verdict, samples: 0, firstUs: nil, lastUs: nil, gapAtUs: nil, gapUs: nil)
 }
 
 @MainActor
@@ -261,7 +240,7 @@ private func jpeg() -> Data {
   }
 }
 
-private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .back, screen: ScreenSwitch = ScreenSwitch(), permission: MicrophonePermissionPort = GrantedMicrophone(), retry: RetryTimer = .system, configure: (FakeBackend, Counters) -> Void = { _, _ in }) throws -> Rig {
+private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .back, screen: ScreenSwitch = ScreenSwitch(), permission: MicrophonePermissionPort = GrantedMicrophone(), configure: (FakeBackend, Counters) -> Void = { _, _ in }) throws -> Rig {
   let backend = FakeBackend()
   let counters = Counters()
   configure(backend, counters)
@@ -294,13 +273,12 @@ private func makeRig(_ profile: CaptureProfile = .photo, lens: CameraLens = .bac
       try image.write(to: made)
       return made
     },
-    audioCoverage: { url, _ in counters.rescan(url) },
     directory: directory,
     center: center,
     signals: names,
     clock: { 0 }
   )
-  let camera = try MediaCamera(profile: profile, lens: lens, backend: backend, services: services, screen: screen.awake(), retry: retry)
+  let camera = try MediaCamera(profile: profile, lens: lens, backend: backend, services: services, screen: screen.awake())
   let observation = StateObservation(camera.states)
   return Rig(camera: camera, backend: backend, counters: counters, center: center, directory: directory, audio: audio, signals: names, observation: observation)
 }
@@ -317,95 +295,6 @@ private func files(_ rig: Rig) -> [String] {
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct MediaCameraTests {
   @Test
-  func inv_audio_85_a_voice_right_after_a_circle_stop_takes_the_microphone_of_the_live_preview_and_is_busy_during_a_take() async throws {
-    let rig = try makeRig(.moment) { backend, _ in backend.nativeMicrophone = true }
-    await ready(rig)
-    await eventually("the preview holds the microphone") { rig.backend.count("mic start") == 1 }
-    try await rig.camera.startRecording()
-    let during = MediaVoiceRecorder(capture: InputVoiceCapture(link: { rig.audio.link }), maxDurationMs: 60_000, link: { rig.audio.link })
-    do {
-      try await during.start(to: FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).m4a"))
-      Issue.record("a voice during a camera take started")
-    } catch let MediaError.Voice(_, reason) {
-      #expect(reason == .microphoneBusy)
-    }
-    #expect(rig.backend.count("mic stop") == 0, "the take keeps its microphone")
-    _ = try await rig.camera.stopRecording()
-
-    let capture = InputVoiceCapture(link: { rig.audio.link })
-    let voice = MediaVoiceRecorder(capture: capture, maxDurationMs: 60_000, link: { rig.audio.link })
-    try await voice.start(to: FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).m4a"))
-    #expect(rig.backend.count("mic stop") == 1, "the preview gave its microphone to the voice")
-    #expect(capture.log == ["voice start"])
-    _ = try? await voice.stop()
-    await eventually("the preview took its microphone back") { rig.backend.count("mic start") == 2 }
-  }
-
-  /// A camera whose native microphone is silent until the test says so, on the manual clock of the attempts.
-  private func silentMicrophoneRig(_ retry: ManualTimer) async throws -> Rig {
-    let rig = try makeRig(.moment, retry: retry.timer) { backend, _ in
-      backend.nativeMicrophone = true
-      backend.soundOnBind = false
-      backend.soundOnTake = false
-    }
-    await ready(rig)
-    await eventually("the preview holds the microphone") { rig.backend.count("mic start") == 1 }
-    return rig
-  }
-
-  private func loseAttempt(_ rig: Rig, _ retry: ManualTimer, _ attempt: Int) async {
-    await eventually("attempt \(attempt)") { rig.backend.count("mic start") == attempt }
-    rig.backend.micLost()
-    await eventually("the pause after attempt \(attempt)") { retry.armed(MicrophoneRetry.pauseMs) }
-    retry.fire(MicrophoneRetry.pauseMs)
-  }
-
-  @Test
-  func inv_audio_115_a_camera_take_whose_microphone_is_lost_twice_starts_on_the_third_attempt_as_one_take() async throws {
-    let retry = ManualTimer()
-    let rig = try await silentMicrophoneRig(retry)
-    let start = Task { try await rig.camera.startRecording() }
-    await eventually("the take began") { rig.backend.count("record back") == 1 }
-    await loseAttempt(rig, retry, 1)
-    await loseAttempt(rig, retry, 2)
-    await eventually("attempt 3") { rig.backend.count("mic start") == 3 }
-    rig.backend.micHeard()
-    rig.backend.emit(.microphoneFlow(true))
-    try await start.value
-    #expect(rig.camera.state.phase == .recording)
-    #expect(rig.backend.count("record back") == 1, "one take")
-    _ = try await rig.camera.stopRecording()
-  }
-
-  @Test
-  func inv_audio_116_a_camera_take_whose_microphone_is_lost_on_all_three_attempts_is_microphone_silent() async throws {
-    let retry = ManualTimer()
-    let rig = try await silentMicrophoneRig(retry)
-    let start = Task { try await rig.camera.startRecording() }
-    await eventually("the take began") { rig.backend.count("record back") == 1 }
-    await loseAttempt(rig, retry, 1)
-    await loseAttempt(rig, retry, 2)
-    await eventually("attempt 3") { rig.backend.count("mic start") == 3 }
-    rig.backend.micLost()
-    do {
-      try await start.value
-      Issue.record("a take without sound started")
-    } catch let MediaError.Camera(reason, _, _) {
-      #expect(reason == .microphoneSilent)
-    }
-    #expect(rig.backend.count("mic start") == 3, "exactly three sources")
-    #expect(!retry.armed(MicrophoneRetry.pauseMs))
-    await eventually("ready after the silent take") { rig.camera.state.phase == .ready }
-    let again = Task { try await rig.camera.startRecording() }
-    await eventually("the next start runs the attempts again") { rig.backend.count("mic start") == 4 }
-    rig.backend.micHeard()
-    rig.backend.emit(.microphoneFlow(true))
-    try await again.value
-    #expect(rig.camera.state.phase == .recording, "the sound of the retry starts the take")
-    _ = try await rig.camera.stopRecording()
-  }
-
-  @Test
   func inv_audio_87_a_recording_of_another_app_never_blocks_a_voice_start() async throws {
     let rig = try makeRig(.moment)
     let seen = Collected(rig.audio.link.availability)
@@ -415,23 +304,6 @@ struct MediaCameraTests {
     let voice = MediaVoiceRecorder(capture: capture, maxDurationMs: 60_000, link: { rig.audio.link })
     try await voice.start(to: FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).m4a"))
     #expect(capture.log == ["voice start"], "the voice took the microphone next to another app")
-    _ = try? await voice.stop()
-  }
-
-  @Test
-  func inv_audio_86_a_voice_right_after_the_camera_closed_starts_without_a_blink_of_no_sound() async throws {
-    let rig = try makeRig(.moment) { backend, _ in backend.nativeMicrophone = true }
-    await ready(rig)
-    await eventually("the preview holds the microphone") { rig.backend.count("mic start") == 1 }
-    rig.camera.detachPreview()
-    await eventually("the camera closed") { rig.backend.count("mic stop") == 1 && !rig.audio.isRecording }
-
-    let seen = Collected(rig.audio.link.availability)
-    let capture = InputVoiceCapture(link: { rig.audio.link })
-    let voice = MediaVoiceRecorder(capture: capture, maxDurationMs: 60_000, link: { rig.audio.link })
-    try await voice.start(to: FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).m4a"))
-    _ = await rig.audio.link.readVolume()
-    #expect(!seen.values.contains(.noSound), "the start blinked no sound: \(seen.values)")
     _ = try? await voice.stop()
   }
 
@@ -644,83 +516,6 @@ struct MediaCameraTests {
     let clip = try await rig.camera.stopRecording()
     #expect(clip.durationMs > 0)
     #expect(rig.camera.state.fault == nil)
-  }
-
-  @Test
-  func inv_capture_50_a_take_whose_ledger_is_covered_is_delivered_and_a_hole_file_is_never_read_for_the_sound() async throws {
-    let judged = try await CoverageClips.writeJudged(audio: CoverageClips.hole)
-    defer { try? FileManager.default.removeItem(at: judged.url) }
-    let rig = try makeRig(.moment) { backend, _ in
-      backend.clipFile = judged.url
-      backend.coverage = takeCoverageOf(.covered)
-    }
-    await ready(rig)
-    try await rig.camera.startRecording()
-    let clip = try await rig.camera.stopRecording()
-    #expect(clip.durationMs > 0, "the ledger is the judge: the file is not scanned after stop")
-    #expect(rig.counters.rescanned.isEmpty, "no file call but the duration of the clip")
-  }
-
-  @Test
-  func inv_capture_50_a_take_with_sound_and_no_ledger_is_refused_as_audio_track_broken() async throws {
-    let rig = try makeRig(.moment) { backend, _ in backend.coverage = nil }
-    await ready(rig)
-    try await rig.camera.startRecording()
-    do {
-      _ = try await rig.camera.stopRecording()
-      Issue.record("a take without a verdict was delivered")
-    } catch let MediaError.Camera(reason, _, _) {
-      #expect(reason == .audioTrackBroken)
-    }
-    await eventually("ready again") { rig.camera.state.phase == .ready }
-    #expect(files(rig).isEmpty)
-  }
-
-  @Test
-  func inv_capture_50_a_ledger_hole_is_refused_and_the_file_is_deleted() async throws {
-    let judged = try await CoverageClips.writeJudged(audio: CoverageClips.hole)
-    defer { try? FileManager.default.removeItem(at: judged.url) }
-    let rig = try makeRig(.moment) { backend, _ in
-      backend.clipFile = judged.url
-      backend.coverage = judged.coverage
-    }
-    await ready(rig)
-    try await rig.camera.startRecording()
-    do {
-      _ = try await rig.camera.stopRecording()
-      Issue.record("a take with a hole in its sound was delivered")
-    } catch let MediaError.Camera(reason, _, _) {
-      #expect(reason == .audioTrackBroken)
-    }
-    await eventually("ready again") { rig.camera.state.phase == .ready }
-    #expect(rig.camera.state.outcome == .refused(reason: .audioTrackBroken))
-    #expect(files(rig).isEmpty)
-    #expect(rig.backend.count("unbind") == 0)
-  }
-
-  @Test
-  func inv_capture_50_a_real_clip_with_covered_sound_is_delivered_and_two_takes_on_one_source_each_start_on_their_own_pcm() async throws {
-    let judged = try await CoverageClips.writeJudged(audio: CoverageClips.whole)
-    let clip = judged.url
-    defer { try? FileManager.default.removeItem(at: clip) }
-    let rig = try makeRig(.moment) { backend, _ in
-      backend.clipFile = clip
-      backend.coverage = judged.coverage
-    }
-    await ready(rig)
-    for _ in 0..<2 {
-      try await rig.camera.startRecording()
-      let delivered = try await rig.camera.stopRecording()
-      #expect(FileManager.default.fileExists(atPath: delivered.url.path))
-      try? FileManager.default.removeItem(at: delivered.url)
-    }
-    rig.backend.soundOnTake = false
-    let third = Task { try await rig.camera.startRecording() }
-    await eventually("the third take began") { rig.backend.count("record back") == 3 }
-    #expect(rig.camera.state.phase != .recording)
-    rig.backend.emit(.microphoneFlow(true))
-    try await third.value
-    #expect(rig.camera.state.phase == .recording)
   }
 
   @Test
@@ -1198,16 +993,6 @@ struct MediaCameraTests {
     #expect(rig.camera.state.flash == false)
     try await rig.camera.startRecording()
     #expect(rig.camera.state.phase == .recording)
-  }
-
-  // CAPTURE-69: a refused microphone opens no audio demand.
-  @Test
-  func inv_capture_69_a_refused_microphone_opens_no_audio_input_and_changes_no_audio_session() async throws {
-    let rig = try makeRig(.moment, permission: DeniedMicrophone()) { backend, _ in backend.nativeMicrophone = true }
-    rig.camera.attachPreview()
-    await eventually("the camera is refused") { rig.camera.state.fault == .permissionDenied }
-    #expect(rig.backend.count("mic start") == 0)
-    #expect(!rig.audio.port.log.contains { $0.hasPrefix("apply") })
   }
 
   // CAPTURE-70: the clip of a take stays until its owner takes it, and it keeps the lens of its take.
