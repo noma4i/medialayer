@@ -50,6 +50,7 @@ class CameraTakeDeviceTest {
     @Volatile var surface: Surface? = null
     @Volatile var failure: NativeFailure? = null
     @Volatile var durationUs = -1L
+    @Volatile var microphoneLost = false
     @Volatile var coverage: com.noma4i.medialayer.AudioCoverage? = null
 
     override fun onBegan(generation: Long, inputSurface: Surface) { surface = inputSurface; events.add("began") }
@@ -58,7 +59,7 @@ class CameraTakeDeviceTest {
 
     override fun onStarted(generation: Long, baseUs: Long) { this.baseUs = baseUs; events.add("started") }
 
-    override fun onFinished(generation: Long, file: File, durationUs: Long, coverage: com.noma4i.medialayer.AudioCoverage) { this.coverage = coverage; this.durationUs = durationUs; outcomes.incrementAndGet(); events.add("finished") }
+    override fun onFinished(generation: Long, file: File, durationUs: Long, coverage: com.noma4i.medialayer.AudioCoverage, microphoneLost: Boolean) { this.microphoneLost = microphoneLost; this.coverage = coverage; this.durationUs = durationUs; outcomes.incrementAndGet(); events.add("finished") }
 
     override fun onFailed(generation: Long, failure: NativeFailure) { this.failure = failure; outcomes.incrementAndGet(); events.add("failed") }
 
@@ -335,6 +336,24 @@ class CameraTakeDeviceTest {
     take.audioEnded()
     recorder.expect("finished")
     assertEquals(1, recorder.outcomes.get())
+  }
+
+  @Test
+  fun a_take_whose_microphone_stops_at_3_s_ends_by_itself_at_the_end_of_the_sound() {
+    val target = file()
+    val recorder = Recorder()
+    val take = take(target, settings(true), recorder)
+    take.begin()
+    recorder.expect("began")
+    val egl = source(recorder.surface!!)
+    draw(egl, 5)
+    assertTrue(recorder.firstEncoded.await(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+    admitLive(take, pcm(audioGeneration, 30))
+    recorder.expect("started")
+    draw(egl, 145)
+    recorder.expect("finished")
+    assertTrue(recorder.microphoneLost)
+    assertTrue("the length is the end of the sound: ${recorder.durationUs}", recorder.durationUs in 2_900_000L..3_100_000L)
   }
 
   private companion object {

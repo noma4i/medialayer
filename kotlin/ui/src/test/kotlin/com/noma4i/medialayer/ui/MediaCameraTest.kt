@@ -133,7 +133,7 @@ private class FakeBackend : CaptureBackend {
     val length = durationUs
     if (event is CaptureEvent.RecordFinished && event.end != RecordEnd.FAILED) {
       if (length == null) return sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
-      takeSink(WrittenTake(coverage, length, frame))
+      takeSink(WrittenTake(coverage, length, frame, event.end))
     }
     sink(event)
   }
@@ -1148,6 +1148,23 @@ class MediaCameraTest {
     assertTrue("the analyzer waited for the queue it runs on", ran.await(5, java.util.concurrent.TimeUnit.SECONDS))
     assertNotNull(fetched.get())
     listening.close()
+  }
+
+  @Test
+  fun a_clip_carries_the_end_of_its_take() = runBlocking {
+    val rig = rig(moment)
+    ready(rig)
+    val lost = recordingTake(rig)
+    rig.backend.emit(CaptureEvent.RecordFinished(RecordEnd.MICROPHONE_LOST))
+    settled(rig, CameraPhase.READY)
+    assertEquals(RecordEnd.MICROPHONE_LOST, rig.camera.clip(lost)?.end)
+    val limit = recordingTake(rig)
+    rig.backend.emit(CaptureEvent.RecordFinished(RecordEnd.LIMIT_REACHED))
+    settled(rig, CameraPhase.READY)
+    assertEquals(RecordEnd.LIMIT_REACHED, rig.camera.clip(limit)?.end)
+    val stopped = recordingTake(rig)
+    assertEquals(RecordEnd.COMPLETED, rig.camera.stopRecording().end)
+    assertEquals(RecordEnd.COMPLETED, rig.camera.clip(stopped)?.end)
   }
 
   @Test

@@ -93,6 +93,31 @@ class CameraRecordingTest {
   }
 
   @Test
+  fun a_take_whose_microphone_was_lost_ends_with_microphone_lost_and_the_others_keep_their_ends() {
+    start(1, true)
+    takes[0].listener.onBegan(1, surface)
+    recording.onPcm(chunk(5))
+    takes[0].listener.onStarted(1, 0)
+    takes[0].listener.onFinished(1, File("take-1.mp4"), 3_000_000, CoreCoverage.covered(), true)
+    assertEquals(CaptureEvent.RecordFinished(RecordEnd.MICROPHONE_LOST), events.last())
+    assertEquals(listOf(RecordEnd.MICROPHONE_LOST to 3_000_000L), written.map { it.end to it.durationUs })
+    start(2, true)
+    takes[1].listener.onBegan(2, surface)
+    recording.onPcm(chunk(5))
+    takes[1].listener.onStarted(2, 0)
+    recording.stop()
+    takes[1].listener.onFinished(2, File("take-2.mp4"), 2_000_000, CoreCoverage.covered())
+    assertEquals(CaptureEvent.RecordFinished(RecordEnd.COMPLETED), events.last())
+    start(3, true)
+    takes[2].listener.onBegan(3, surface)
+    recording.onPcm(chunk(5))
+    takes[2].listener.onStarted(3, 0)
+    takes[2].listener.onFinished(3, File("take-3.mp4"), 10_000_000, CoreCoverage.covered())
+    assertEquals(CaptureEvent.RecordFinished(RecordEnd.LIMIT_REACHED), events.last())
+    assertEquals(listOf(RecordEnd.MICROPHONE_LOST, RecordEnd.COMPLETED, RecordEnd.LIMIT_REACHED), written.map { it.end })
+  }
+
+  @Test
   fun a_take_without_sound_confirms_at_once_and_a_limit_finishes_it_by_itself() {
     start(1, false)
     takes[0].listener.onBegan(1, surface)
