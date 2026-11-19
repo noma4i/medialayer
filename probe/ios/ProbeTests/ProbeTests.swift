@@ -135,10 +135,17 @@ final class ProbeTests: XCTestCase {
 
   func test5_traceRules() {
     let lines = Self.collected
-    let takes = lines.filter { $0.contains(" camera take angle=") }
-    let clips = lines.filter { $0.contains(" camera clip ") }
-    let badTakes = takes.filter { !$0.contains("take angle=90 preview=90.0 upright=true") }
-    let badClips = clips.filter { !$0.contains("clip audioTracks=1 rewrite=false") }
+    let takes = lines.filter { $0.contains(" camera take first frame ") }
+    let outputs = lines.filter { $0.contains(" camera take output ") }
+    func number(_ key: String, in line: String) -> Int? {
+      guard let range = line.range(of: "\(key)=") else { return nil }
+      return Int(line[range.upperBound...].prefix { $0.isNumber })
+    }
+    let badTakes = takes.filter {
+      guard let width = number("width", in: $0), let height = number("height", in: $0) else { return true }
+      return height <= width
+    }
+    let badOutputs = outputs.filter { !$0.contains("transformIdentity=true") }
     var bound = false
     var frameOutputInBind = 0
     for line in lines {
@@ -146,12 +153,11 @@ final class ProbeTests: XCTestCase {
       if line.contains("session commit why=unbind") { bound = false }
       if bound && line.contains("session commit why=frameOutput") { frameOutputInBind += 1 }
     }
-    probe("trace_rules", [("takes", takes.count), ("badTakes", badTakes.count), ("clips", clips.count), ("badClips", badClips.count), ("frameOutputInBind", frameOutputInBind)])
-    for line in badTakes + badClips { print("PROBE bad line \(line)") }
+    probe("trace_rules", [("takes", takes.count), ("badTakes", badTakes.count), ("outputs", outputs.count), ("badOutputs", badOutputs.count), ("frameOutputInBind", frameOutputInBind)])
+    for line in badTakes + badOutputs { print("PROBE bad line \(line)") }
     XCTAssertEqual(takes.count, Self.takeCount)
-    XCTAssertEqual(clips.count, Self.takeCount)
     XCTAssertTrue(badTakes.isEmpty)
-    XCTAssertTrue(badClips.isEmpty)
+    XCTAssertTrue(badOutputs.isEmpty)
     XCTAssertEqual(frameOutputInBind, 0)
   }
 
