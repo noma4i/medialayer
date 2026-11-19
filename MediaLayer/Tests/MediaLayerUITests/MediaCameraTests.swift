@@ -33,6 +33,9 @@ private final class FakeBackend: CaptureBackend, CameraMicrophone, @unchecked Se
   /// A real file the take writes instead of three bytes.
   var clipFile: URL?
   var photoSize: PixelSize? { PixelSize(width: 3000, height: 4000) }
+  /// The verdict the writer of a take gives with its outcome; nil is a backend without a ledger.
+  var coverage: AudioCoverage?
+  func takeCoverage() -> AudioCoverage? { lock.withLock { coverage } }
 
   func setSink(_ sink: @escaping @Sendable (CaptureEvent) -> Void) { lock.withLock { self.sink = sink } }
 
@@ -209,10 +212,13 @@ private final class Counters: @unchecked Sendable {
     continuation?.resume()
   }
 
-  func straighten(_ url: URL) async throws {
+  /// Whether the straightening rewrote the file, as the real one answers.
+  var rewrites = false
+
+  func straighten(_ url: URL) async throws -> Bool {
     let hold = lock.withLock { straightenedURLs.append(url); return holdVideo }
     TestSignal.shared.fire()
-    guard hold else { return }
+    guard hold else { return lock.withLock { rewrites } }
     if let lag = lock.withLock({ parkLag }) { try await Task.sleep(for: lag) }
     try await withTaskCancellationHandler {
       try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -232,6 +238,7 @@ private final class Counters: @unchecked Sendable {
       }
       continuation?.resume(throwing: CancellationError())
     }
+    return lock.withLock { rewrites }
   }
 }
 
@@ -241,6 +248,10 @@ private final class StateObservation {
     task = Task { for await _ in states { TestSignal.shared.fire() } }
   }
   deinit { task.cancel() }
+}
+
+private func takeCoverageOf(_ verdict: CoverageVerdict) -> AudioCoverage {
+  AudioCoverage(verdict: verdict, samples: 0, firstUs: nil, lastUs: nil, gapAtUs: nil, gapUs: nil)
 }
 
 private struct Rig {
@@ -626,18 +637,53 @@ struct MediaCameraTests {
   }
 
   @Test
-  func inv_capture_50_the_rule_runs_on_the_raw_file_before_the_turn_and_on_the_final_file_after_it_and_not_without_audio() async throws {
-    let rig = try makeRig(.moment)
+  func inv_capture_50_a_take_whose_ledger_is_covered_is_delivered_with_zero_reads_of_its_file_and_a_take_without_sound_asks_nothing() async throws {
+    let rig = try makeRig(.moment) { backend, _ in backend.coverage = takeCoverageOf(.covered) }
     await ready(rig)
     try await rig.camera.startRecording()
     _ = try await rig.camera.stopRecording()
-    let calls = rig.counters.coverageCalls
-    #expect(calls.count == 2)
-    #expect(calls.allSatisfy { $0.required })
+    #expect(rig.counters.coverageCalls.isEmpty)
+    #expect(rig.counters.straightened.count == 1)
     let quiet = try makeRig(.photo)
     quiet.counters.verdict = nil
     await ready(quiet)
     #expect(quiet.counters.coverageCalls.isEmpty)
+  }
+
+  @Test
+  func inv_capture_50_a_ledger_hole_is_refused_and_the_file_is_deleted_without_a_read_of_it() async throws {
+    let rig = try makeRig(.moment) { backend, _ in backend.coverage = takeCoverageOf(.midGap) }
+    await ready(rig)
+    try await rig.camera.startRecording()
+    do {
+      _ = try await rig.camera.stopRecording()
+      Issue.record("a take with a hole in its ledger was delivered")
+    } catch let MediaError.Camera(reason, _, _) {
+      #expect(reason == .audioTrackBroken)
+    }
+    await eventually("ready again") { rig.camera.state.phase == .ready }
+    #expect(files(rig).isEmpty)
+    #expect(rig.counters.coverageCalls.isEmpty)
+    #expect(rig.counters.straightened.isEmpty)
+  }
+
+  @Test
+  func inv_capture_50_a_straightening_that_rewrote_the_file_reads_it_once_and_a_take_without_a_ledger_reads_the_file_instead() async throws {
+    let rewritten = try makeRig(.moment) { backend, counters in
+      backend.coverage = takeCoverageOf(.covered)
+      counters.rewrites = true
+    }
+    await ready(rewritten)
+    try await rewritten.camera.startRecording()
+    _ = try await rewritten.camera.stopRecording()
+    #expect(rewritten.counters.coverageCalls.count == 1)
+    #expect(rewritten.counters.coverageCalls.allSatisfy { $0.required })
+
+    let bare = try makeRig(.moment)
+    await ready(bare)
+    try await bare.camera.startRecording()
+    _ = try await bare.camera.stopRecording()
+    #expect(bare.counters.coverageCalls.count == 1)
   }
 
   @Test

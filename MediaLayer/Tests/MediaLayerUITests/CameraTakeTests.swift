@@ -117,7 +117,7 @@ struct CameraTakeTests {
     guard case .started? = await events.next() else { Issue.record("no started after confirm"); return }
     for buffer in fixture.video { take.appendVideo(buffer, generation: Fixture.generation) }
     take.stop()
-    guard case let .outcome(.finished(finished, _, reachedLimit))? = await events.next() else { Issue.record("no finished outcome"); return }
+    guard case let .outcome(.finished(finished, _, reachedLimit, _))? = await events.next() else { Issue.record("no finished outcome"); return }
     #expect(finished == url)
     #expect(!reachedLimit)
     let facts = try await scanCaptureFacts(at: url)
@@ -138,7 +138,7 @@ struct CameraTakeTests {
     let shown = fixture.video.prefix(3)
     for buffer in shown { take.appendVideo(buffer, generation: Fixture.generation) }
     take.stop()
-    guard case let .outcome(.finished(_, durationMs, _))? = await events.next() else { Issue.record("no finished outcome"); return }
+    guard case let .outcome(.finished(_, durationMs, _, _))? = await events.next() else { Issue.record("no finished outcome"); return }
     #expect(durationMs == 100)
     let asset = AVURLAsset(url: url)
     let audio = try #require(try await asset.loadTracks(withMediaType: .audio).first)

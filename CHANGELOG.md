@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A camera clip is judged for its sound while it records, the file is not read back after stop.
+- iOS records upright frames from the camera, so no re-encode runs after stop.
+
 ## 3.44.0 - 2026-11-19
 
 ### Added

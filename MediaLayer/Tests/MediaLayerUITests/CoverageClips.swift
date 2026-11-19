@@ -2,6 +2,7 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import MediaLayer
 @testable import MediaLayerUI
 
 /// Real mp4 files written by the real `CameraTake`: the PCM that reaches the writer is chosen by the test, the video always covers the whole fixture.
