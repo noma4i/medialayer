@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- `MediaTakeProgress(recorder)` and `rememberTakeProgress(recorder)` draw the voice take smoothly.
+
 ### Fixed
 
 - A camera clip is judged for its sound while it records, the file is not read back after stop.

@@ -2,15 +2,15 @@ import Foundation
 import MediaLayer
 import SwiftUI
 
-/// The report of a camera take for the one playhead rule of the core: the position is the recorded time, the duration is the limit of the profile.
-func takeReport(state: CameraState, limitMs: UInt64, nowMs: UInt64, previousTake: UInt64?) -> PlayheadReport {
+/// The report of a take of a camera or a voice recorder for the one playhead rule of the core: the position is the recorded time, the duration is the limit of the take.
+func takeReport(recordedMs: UInt64, recording: Bool, take: UInt64?, limitMs: UInt64, nowMs: UInt64, previousTake: UInt64?) -> PlayheadReport {
   PlayheadReport(
-    positionMs: state.recordedMs,
+    positionMs: recordedMs,
     durationMs: limitMs,
     atMs: nowMs,
     rate: 1,
-    playing: state.phase == .recording,
-    jump: state.take != previousTake,
+    playing: recording,
+    jump: take != previousTake,
     settling: false
   )
 }
@@ -45,14 +45,32 @@ public struct MediaVideoProgress<Content: View>: View {
   }
 }
 
-/// The progress of the running take of a camera against the limit of its profile, drawn between the published states.
+/// The progress of the running take of a camera against the limit of its profile, or of a voice recorder against its limit, drawn between the published states.
 public struct MediaTakeProgress<Content: View>: View {
+  private enum Source {
+    case camera(MediaCamera)
+    case voice(MediaVoiceRecorder)
+
+    var id: ObjectIdentifier {
+      switch self {
+      case .camera(let camera): ObjectIdentifier(camera)
+      case .voice(let recorder): ObjectIdentifier(recorder)
+      }
+    }
+  }
+
   @State private var playhead = AudioPlayhead()
-  private let camera: MediaCamera
+  private let source: Source
   private let content: (Double) -> Content
 
   public init(_ camera: MediaCamera, @ViewBuilder content: @escaping (Double) -> Content) {
-    self.camera = camera
+    self.source = .camera(camera)
+    self.content = content
+  }
+
+  /// The same ring for a voice recorder: the recorded time against its limit. A recorder without a limit (0) gives 0.
+  public init(_ recorder: MediaVoiceRecorder, @ViewBuilder content: @escaping (Double) -> Content) {
+    self.source = .voice(recorder)
     self.content = content
   }
 
@@ -60,16 +78,27 @@ public struct MediaTakeProgress<Content: View>: View {
     TimelineView(.animation(paused: playhead.anchor.perMs == 0)) { context in
       content(playhead.progress(at: context.date))
     }
-    .task(id: ObjectIdentifier(camera)) { await follow() }
+    .task(id: source.id) { await follow() }
   }
 
   private func follow() async {
     playhead = AudioPlayhead()
     var previous: UInt64?
-    for await state in camera.states {
-      let report = takeReport(state: state, limitMs: camera.limitMs, nowMs: AudioPlayhead.milliseconds(Date()), previousTake: previous)
-      previous = state.take
-      playhead = AudioPlayhead(anchor: playheadNext(shown: playhead.anchor, report: report))
+    switch source {
+    case .camera(let camera):
+      for await state in camera.states {
+        previous = apply(recordedMs: state.recordedMs, recording: state.phase == .recording, take: state.take, limitMs: camera.limitMs, previous: previous)
+      }
+    case .voice(let recorder):
+      for await state in recorder.states {
+        previous = apply(recordedMs: state.recordedMs, recording: state.phase == .recording, take: state.take, limitMs: recorder.maxDurationMs, previous: previous)
+      }
     }
+  }
+
+  private func apply(recordedMs: UInt64, recording: Bool, take: UInt64?, limitMs: UInt64, previous: UInt64?) -> UInt64? {
+    let report = takeReport(recordedMs: recordedMs, recording: recording, take: take, limitMs: limitMs, nowMs: AudioPlayhead.milliseconds(Date()), previousTake: previous)
+    playhead = AudioPlayhead(anchor: playheadNext(shown: playhead.anchor, report: report))
+    return take
   }
 }

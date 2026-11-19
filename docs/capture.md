@@ -97,6 +97,28 @@ fun TakeRing(camera: MediaCamera) {
 }
 ```
 
+The voice recorder has the same ring: `MediaTakeProgress(recorder)` (Swift) and `rememberTakeProgress(recorder)` (Kotlin) follow `VoiceState.recordedMs` against the limit of the recorder. A recorder without a limit (0) gives 0.
+
+```swift
+struct VoiceRing: View {
+  let recorder: MediaVoiceRecorder
+
+  var body: some View {
+    MediaTakeProgress(recorder) { fraction in
+      Capsule().frame(width: 200 * fraction, height: 4)
+    }
+  }
+}
+```
+
+```kotlin
+@Composable
+fun VoiceRing(recorder: MediaVoiceRecorder) {
+  val fraction = rememberTakeProgress(recorder)
+  Box(Modifier.drawBehind { drawRect(Color.Black, size = androidx.compose.ui.geometry.Size(size.width * fraction.value, 4f)) })
+}
+```
+
 ## Frames for a face search
 
 `observeFrames(maxPerSecond:_:)` (Swift, a `CVPixelBuffer` and its orientation) and `observeFrames(maxPerSecond, analyzer)` (Kotlin, an `ImageAnalysis.Analyzer`, with `camera.sensorToView`) give the frames of the preview

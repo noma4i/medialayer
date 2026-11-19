@@ -76,7 +76,7 @@ private fun voiceError(reason: VoiceRefusal) = MediaException.Voice(voiceRefusal
  */
 class MediaVoiceRecorder internal constructor(
   private val capture: VoiceCapture,
-  private val maxDurationMs: ULong,
+  internal val maxDurationMs: ULong,
   private val link: () -> AudioLink? = { Media.link },
   private val clock: () -> ULong = { SystemClock.elapsedRealtime().toULong() },
   private val levelIntervalMs: Long = LEVEL_INTERVAL_MS,

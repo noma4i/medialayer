@@ -16,20 +16,21 @@ import com.noma4i.medialayer.CameraState
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.PlayheadAnchor
 import com.noma4i.medialayer.PlayheadReport
+import com.noma4i.medialayer.VoicePhase
 import com.noma4i.medialayer.playheadNext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.withContext
 
-/** The report of a camera take: the recorded time against the limit of the profile, at [nowMs]. A new take (or none) after another one is a jump. */
-internal fun takeReport(state: CameraState, limitMs: ULong, nowMs: ULong, previousTake: ULong?): PlayheadReport = PlayheadReport(
-  positionMs = state.recordedMs,
+/** The report of a take of a camera or a voice recorder: the recorded time against the limit of the take, at [nowMs]. A new take (or none) after another one is a jump. */
+internal fun takeReport(recordedMs: ULong, recording: Boolean, take: ULong?, limitMs: ULong, nowMs: ULong, previousTake: ULong?): PlayheadReport = PlayheadReport(
+  positionMs = recordedMs,
   durationMs = limitMs,
   atMs = nowMs,
   rate = 1.0,
-  playing = state.phase == CameraPhase.RECORDING,
-  jump = state.take != previousTake,
+  playing = recording,
+  jump = take != previousTake,
   settling = false
 )
 
@@ -88,7 +89,21 @@ fun rememberTakeProgress(camera: MediaCamera): State<Float> {
   LaunchedEffect(fold) {
     var previous: ULong? = null
     camera.state.collect { state ->
-      fold.reports.trySend(takeReport(state, camera.profile.maxDurationMs, (System.nanoTime() / 1_000_000).toULong(), previous))
+      fold.reports.trySend(takeReport(state.recordedMs, state.phase == CameraPhase.RECORDING, state.take, camera.profile.maxDurationMs, (System.nanoTime() / 1_000_000).toULong(), previous))
+      previous = state.take
+    }
+  }
+  return frame
+}
+
+/** The progress of the running take of a voice recorder against its limit, 0..1, drawn per display frame between the published states. A recorder without a limit (0) gives 0. */
+@Composable
+fun rememberTakeProgress(recorder: MediaVoiceRecorder): State<Float> {
+  val (fold, frame) = rememberAnchorFold(recorder)
+  LaunchedEffect(fold) {
+    var previous: ULong? = null
+    recorder.state.collect { state ->
+      fold.reports.trySend(takeReport(state.recordedMs, state.phase == VoicePhase.RECORDING, state.take, recorder.maxDurationMs, (System.nanoTime() / 1_000_000).toULong(), previous))
       previous = state.take
     }
   }

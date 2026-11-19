@@ -5,6 +5,8 @@ import com.noma4i.medialayer.CameraPhase
 import com.noma4i.medialayer.CameraState
 import com.noma4i.medialayer.PlayheadAnchor
 import com.noma4i.medialayer.PlayheadReport
+import com.noma4i.medialayer.VoicePhase
+import com.noma4i.medialayer.VoiceState
 import com.noma4i.medialayer.playheadAt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -14,10 +16,32 @@ import org.junit.Test
 private fun cameraState(phase: CameraPhase, recordedMs: ULong, take: ULong?) =
   CameraState(phase, CameraLens.BACK, false, false, 1f, 1f, 1f, recordedMs, false, null, null, take, null)
 
+private fun cameraReport(state: CameraState, limitMs: ULong, nowMs: ULong, previousTake: ULong?) =
+  takeReport(state.recordedMs, state.phase == CameraPhase.RECORDING, state.take, limitMs, nowMs, previousTake)
+
+private fun voiceReport(state: VoiceState, limitMs: ULong, nowMs: ULong, previousTake: ULong?) =
+  takeReport(state.recordedMs, state.phase == VoicePhase.RECORDING, state.take, limitMs, nowMs, previousTake)
+
 class PlayheadProgressTest {
   @Test
+  fun a_voice_state_goes_through_the_same_report_builder() {
+    val recording = voiceReport(VoiceState(3uL, VoicePhase.RECORDING, null, 300uL), 120_000uL, 1_000uL, 3uL)
+    val fresh = voiceReport(VoiceState(4uL, VoicePhase.RECORDING, null, 0uL), 120_000uL, 2_000uL, 3uL)
+    val idle = voiceReport(VoiceState(4uL, VoicePhase.IDLE, null, 0uL), 120_000uL, 3_000uL, 4uL)
+
+    assertTrue(recording.playing)
+    assertFalse(recording.jump)
+    assertEquals(300uL, recording.positionMs)
+    assertEquals(120_000uL, recording.durationMs)
+    assertTrue(fresh.jump)
+    assertFalse(idle.playing)
+    assertFalse(idle.jump)
+    assertEquals(0.0, foldPlayhead(listOf(fresh, idle)).perMs, 0.0)
+  }
+
+  @Test
   fun the_take_report_reads_the_recorded_time_against_the_limit_at_rate_one() {
-    val report = takeReport(cameraState(CameraPhase.RECORDING, 300uL, 7uL), 10_000uL, 5_000uL, 7uL)
+    val report = cameraReport(cameraState(CameraPhase.RECORDING, 300uL, 7uL), 10_000uL, 5_000uL, 7uL)
 
     assertEquals(300uL, report.positionMs)
     assertEquals(10_000uL, report.durationMs)
@@ -30,9 +54,9 @@ class PlayheadProgressTest {
 
   @Test
   fun a_new_take_is_a_jump_and_a_state_out_of_recording_does_not_play() {
-    val start = takeReport(cameraState(CameraPhase.RECORDING, 0uL, 8uL), 10_000uL, 0uL, 7uL)
-    val ended = takeReport(cameraState(CameraPhase.READY, 4_000uL, 8uL), 10_000uL, 0uL, 8uL)
-    val none = takeReport(cameraState(CameraPhase.READY, 0uL, null), 10_000uL, 0uL, 8uL)
+    val start = cameraReport(cameraState(CameraPhase.RECORDING, 0uL, 8uL), 10_000uL, 0uL, 7uL)
+    val ended = cameraReport(cameraState(CameraPhase.READY, 4_000uL, 8uL), 10_000uL, 0uL, 8uL)
+    val none = cameraReport(cameraState(CameraPhase.READY, 0uL, null), 10_000uL, 0uL, 8uL)
 
     assertTrue(start.jump)
     assertFalse(ended.playing)
@@ -48,7 +72,7 @@ class PlayheadProgressTest {
     for (tick in 0..10) {
       val late = if (tick % 2 == 1) 30 else 0
       val position = (tick * 100 - late).coerceAtLeast(0).toULong()
-      reports += takeReport(cameraState(CameraPhase.RECORDING, position, 1uL), limit, (tick * 100).toULong(), previous)
+      reports += cameraReport(cameraState(CameraPhase.RECORDING, position, 1uL), limit, (tick * 100).toULong(), previous)
       previous = 1uL
     }
     var anchor: PlayheadAnchor? = null

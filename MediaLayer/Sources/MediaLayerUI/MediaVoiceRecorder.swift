@@ -49,7 +49,7 @@ public final class MediaVoiceRecorder: @unchecked Sendable {
   }
 
   private let capture: VoiceCapture
-  private let maxDurationMs: UInt64
+  let maxDurationMs: UInt64
   private let minTakeMs: UInt64
   private let link: @Sendable () -> AudioLink?
   private let clock: @Sendable () -> UInt64
