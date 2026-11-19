@@ -68,6 +68,8 @@ public struct CapturedClip: Sendable, Equatable {
   public let durationMs: UInt64
   public let frame: ImageSize?
   public let lens: CameraLens
+  /// How the take ended: stopped, at the length limit, or because the microphone stopped delivering.
+  public let end: RecordEnd
 }
 
 extension CaptureProfile {
@@ -114,6 +116,8 @@ public final class MediaCamera: @unchecked Sendable {
   private var recordingURL: URL?
   private var clipInfo: MediaInfo?
   private var ended: Result<CapturedClip, Error>?
+  /// How the last take ended, kept from `recordFinished` until the clip of that take is delivered.
+  private var finishedEnd = RecordEnd.completed
   private var photoWaiter: CheckedContinuation<CapturedPhoto, Error>?
   private var startWaiter: (gate: StartGate, continuation: CheckedContinuation<Void, Error>)?
   private var kept: [UInt64: CapturedClip] = [:]
@@ -362,7 +366,8 @@ public final class MediaCamera: @unchecked Sendable {
   }
 
   private func apply(_ event: CaptureEvent) {
-    if case .recordFinished = event {
+    if case let .recordFinished(end) = event {
+      finishedEnd = end
       revokedAudio?.end()
       revokedAudio = nil
     }
@@ -741,7 +746,7 @@ public final class MediaCamera: @unchecked Sendable {
     }
     recordingURL = nil
     clipInfo = nil
-    let clip = CapturedClip(url: url, durationMs: length, frame: info.frame, lens: run.takeLens)
+    let clip = CapturedClip(url: url, durationMs: length, frame: info.frame, lens: run.takeLens, end: finishedEnd)
     if let take = run.state.take { kept[take] = clip }
     ended = .success(clip)
   }

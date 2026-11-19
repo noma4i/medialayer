@@ -1310,7 +1310,21 @@ struct MediaCameraTests {
     let clip = try #require(rig.camera.clip(take: take))
     #expect(FileManager.default.fileExists(atPath: clip.url.path))
     #expect(clip.lens == .back)
+    #expect(clip.end == .limitReached)
     #expect(rig.camera.clip(take: take) == nil)
+  }
+
+  // CAPTURE-80: a take whose microphone stopped delivering is delivered with the end it had.
+  @Test
+  func inv_capture_80_a_clip_of_a_take_that_lost_the_microphone_carries_that_end() async throws {
+    let rig = try makeRig(.moment) { backend, _ in backend.tagged = false }
+    await ready(rig)
+    try await rig.camera.startRecording()
+    let take = try #require(rig.camera.state.take)
+    rig.backend.emit(.recordFinished(end: .microphoneLost))
+    await eventually("the take is captured") { rig.camera.state.outcome != nil }
+    let clip = try #require(rig.camera.clip(take: take))
+    #expect(clip.end == .microphoneLost)
   }
 
   // CAPTURE-71: a stop waiting while the preview leaves gets the real end.
