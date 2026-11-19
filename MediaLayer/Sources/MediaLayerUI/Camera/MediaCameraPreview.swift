@@ -29,7 +29,7 @@ final class CameraPreviewLayerView: UIView {
     return layer
   }
 
-  private let camera: MediaCamera
+  private var camera: MediaCamera
   private var attached = false
   private var lastScale: Double = 1
   private lazy var pinchRecognizer = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
@@ -60,6 +60,19 @@ final class CameraPreviewLayerView: UIView {
     super.didMoveToWindow()
     sync(onScreen: window != nil)
   }
+
+  /// Moves the view to another camera: the old one lets the preview go, the new one registers the layer and gets the demand when the view is on screen.
+  func rebind(to next: MediaCamera) {
+    guard next !== camera else { return }
+    let wasAttached = attached
+    sync(onScreen: false)
+    camera.unregisterPreview(previewLayer)
+    camera = next
+    camera.registerPreview(previewLayer)
+    sync(onScreen: wasAttached)
+  }
+
+  func isBound(to other: MediaCamera) -> Bool { other === camera }
 
   func sync(onScreen: Bool) {
     guard onScreen != attached else { return }
@@ -105,7 +118,11 @@ public struct MediaCameraPreview: UIViewRepresentable {
   }
 
   public func updateUIView(_ view: UIView, context: Context) {
-    (view as? CameraPreviewLayerView)?.zoomsByPinch = zoomsByPinch
+    guard let view = view as? CameraPreviewLayerView else { return }
+    view.zoomsByPinch = zoomsByPinch
+    if view.isBound(to: camera) { return }
+    view.rebind(to: camera)
+    onLayer?(view.previewLayer)
   }
 
   public static func dismantleUIView(_ view: UIView, coordinator: ()) {
@@ -126,7 +143,8 @@ public struct WithMediaCameraState<Content: View>: View {
   }
 
   public var body: some View {
-    content(state).task {
+    content(state).task(id: ObjectIdentifier(camera)) {
+      state = camera.state
       for await next in camera.states { state = next }
     }
   }
