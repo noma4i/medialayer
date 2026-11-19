@@ -44,7 +44,10 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     let center = NotificationCenter.default
     tokens = [
       center.addObserver(forName: AVCaptureSession.didStartRunningNotification, object: session, queue: nil) { [weak self] _ in self?.emit(.streaming(on: true)) },
-      center.addObserver(forName: AVCaptureSession.didStopRunningNotification, object: session, queue: nil) { [weak self] _ in self?.emit(.streaming(on: false)) },
+      center.addObserver(forName: AVCaptureSession.didStopRunningNotification, object: session, queue: nil) { [weak self] _ in
+        self?.emit(.streaming(on: false))
+        self?.queue.async { self?.relay.audioEnded() }
+      },
       center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { [weak self] note in
         let reason = (note.userInfo?[AVCaptureSessionInterruptionReasonKey] as? NSNumber)?.intValue
         self?.queue.async { [weak self] in
@@ -57,6 +60,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
             loseMicrophone(nil)
           }
           emit(.streaming(on: false))
+          relay.audioEnded()
         }
       },
       center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) { [weak self] _ in
@@ -69,7 +73,10 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
       center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil) { [weak self] note in
         let error = note.userInfo?[AVCaptureSessionErrorKey] as? AVError
         self?.emit(.fault(kind: error?.code == .mediaServicesWereReset ? .reset : .other))
-        self?.queue.async { if self?.audioOutput != nil { self?.loseMicrophone(error ?? NSError(domain: AVFoundationErrorDomain, code: AVError.unknown.rawValue)) } }
+        self?.queue.async {
+          self?.relay.audioEnded()
+          if self?.audioOutput != nil { self?.loseMicrophone(error ?? NSError(domain: AVFoundationErrorDomain, code: AVError.unknown.rawValue)) }
+        }
       }
     ]
   }

@@ -181,7 +181,8 @@ struct CameraTakeTests {
     for buffer in fixture.video { take.appendVideo(buffer, generation: Fixture.generation) }
     take.stop()
     take.audioEnded()
-    guard case .outcome(.finished)? = await events.next() else { Issue.record("the take did not end with the source"); return }
+    guard case let .outcome(.finished(_, _, _, coverage))? = await events.next() else { Issue.record("the take did not end with the source"); return }
+    #expect(coverage.verdict != .covered, "the verdict is the ledger of what was written: the sound stops short of the video")
   }
 
   @Test

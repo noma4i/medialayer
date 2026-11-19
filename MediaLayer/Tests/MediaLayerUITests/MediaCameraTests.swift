@@ -35,7 +35,7 @@ private final class FakeBackend: CaptureBackend, CameraMicrophone, @unchecked Se
   var clipFile: URL?
   var photoSize: PixelSize? { PixelSize(width: 3000, height: 4000) }
   /// The verdict the writer of a take gives with its outcome; nil is a backend without a ledger.
-  var coverage: AudioCoverage?
+  var coverage: AudioCoverage? = AudioCoverage(verdict: .covered, samples: 0, firstUs: nil, lastUs: nil, gapAtUs: nil, gapUs: nil)
   func takeCoverage() -> AudioCoverage? { lock.withLock { coverage } }
 
   func setSink(_ sink: @escaping @Sendable (CaptureEvent) -> Void) { lock.withLock { self.sink = sink } }
@@ -699,6 +699,21 @@ struct MediaCameraTests {
     let clip = try await rig.camera.stopRecording()
     #expect(clip.durationMs > 0, "the ledger is the judge: the file is not scanned after stop")
     #expect(rig.counters.straightened.count == 1, "the stop path asks the duration of the clip and nothing else")
+  }
+
+  @Test
+  func inv_capture_50_a_take_with_sound_and_no_ledger_is_refused_as_audio_track_broken() async throws {
+    let rig = try makeRig(.moment) { backend, _ in backend.coverage = nil }
+    await ready(rig)
+    try await rig.camera.startRecording()
+    do {
+      _ = try await rig.camera.stopRecording()
+      Issue.record("a take without a verdict was delivered")
+    } catch let MediaError.Camera(reason, _, _) {
+      #expect(reason == .audioTrackBroken)
+    }
+    await eventually("ready again") { rig.camera.state.phase == .ready }
+    #expect(files(rig).isEmpty)
   }
 
   @Test

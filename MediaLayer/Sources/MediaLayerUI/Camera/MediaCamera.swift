@@ -691,11 +691,14 @@ public final class MediaCamera: @unchecked Sendable {
     reading?.cancel()
     // The sound verdict is the ledger of the writer, kept while it wrote (INV-CAPTURE-80: the file is not rotated and not read back for the sound).
     let ledger = backend.takeCoverage()
+    let audio = profile.audio
     reading = Task { [services] in
       let info: MediaInfo?
       do {
         MediaTrace.emit("camera", "take coverage \(Self.describe(ledger, label: "ledger"))")
-        if let ledger, let refusal = audioCoverageRefusal(verdict: ledger.verdict) { return self.refuseClip(url, refusal) }
+        // A take with sound and no ledger has no verdict: it is refused, as on Android.
+        let refusal: CameraRefusal? = ledger.flatMap { audioCoverageRefusal(verdict: $0.verdict) } ?? (ledger == nil && audio ? .audioTrackBroken : nil)
+        if let refusal { return self.refuseClip(url, refusal) }
         info = try await services.clipInfo(url)
       } catch {
         if !(error is CancellationError) { Media.recordNativeFailure(error, source: .camera) }
