@@ -496,6 +496,10 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     let angleSupported = connection.isVideoRotationAngleSupported(previewAngle)
     let upright = turnsFramesUpright(angleSupported: angleSupported, mirroringSupported: connection.isVideoMirroringSupported, mirrorWanted: mirrorsVideo)
     MediaTrace.emit("camera", "turn decide lens=\(videoLens == .front ? "front" : "back") angleSupported=\(angleSupported) mirroringSupported=\(connection.isVideoMirroringSupported) mirrorWanted=\(mirrorsVideo) upright=\(upright)")
+    if let camera {
+      let coordinator = AVCaptureDevice.RotationCoordinator(device: camera, previewLayer: nil)
+      MediaTrace.emit("camera", "rotation lens=\(videoLens == .front ? "front" : "back") device=\(camera.deviceType.rawValue) capture=\(coordinator.videoRotationAngleForHorizonLevelCapture) preview=\(coordinator.videoRotationAngleForHorizonLevelPreview) library=\(previewAngle)")
+    }
     guard upright else { return setTurn(FrameTurn()) }
     connection.videoRotationAngle = previewAngle
     if connection.isVideoMirroringSupported {
