@@ -105,25 +105,26 @@ class CameraNativeDeviceTest {
     }
   }
 
-  private fun diagnosing(damage: Damage? = null): CameraServices {
+  private fun diagnosing(): CameraServices {
     val live = CameraServices.live(context)
     return CameraServices(live.admitSession, live.admitShot, live.audio, { file ->
       live.clipInfo(file).also { readings.add("clipInfo ${file.name} = $it") }
     }, { file ->
       diagnostics.add(File(context.cacheDir, "diagnostic-${System.nanoTime()}.mp4").also { file.copyTo(it, overwrite = true) })
       try {
-        live.uprightVideo(file)
-        readings.add("uprightVideo ${file.name} done, after: ${describe(file)}")
+        val rewrote = live.uprightVideo(file)
+        readings.add("uprightVideo ${file.name} rewrote=$rewrote, after: ${describe(file)}")
+        rewrote
       } catch (error: Exception) {
         readings.add("uprightVideo ${file.name} threw $error, after: ${describe(file)}")
         throw error
       }
     }, live.upright, live.directory, { file ->
-      val seen = if (damage == null) file else damaged(file, damage).also { files.add(it) }
       val began = System.nanoTime()
-      val read = live.audioCoverage(seen)
-      android.util.Log.i("T29", "coverage read ${(System.nanoTime() - began) / 1_000_000} ms ${read.verdict}")
-      read.also { readings.add("coverage ${file.name} $damage = $it timeline=${timeline(seen)}") }
+      live.audioCoverage(file).also { read ->
+        android.util.Log.i("T29", "coverage read ${(System.nanoTime() - began) / 1_000_000} ms ${read.verdict}")
+        readings.add("coverage ${file.name} = $read timeline=${timeline(file)}")
+      }
     })
   }
 
@@ -157,35 +158,12 @@ class CameraNativeDeviceTest {
 
   private enum class Disturbance { LENS, PREVIEW }
 
-  /** A real copy of the file with the audio packets of one part removed, so the scan reads it through the real extractor and decoder. */
-  private fun damaged(file: File, damage: Damage): File {
-    val output = File(context.cacheDir, "damaged-${System.nanoTime()}.mp4")
-    val extractor = MediaExtractor()
-    val muxer = android.media.MediaMuxer(output.absolutePath, android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-    try {
-      extractor.setDataSource(file.absolutePath)
-      val formats = (0 until extractor.trackCount).map { extractor.getTrackFormat(it) }
-      val video = formats.indexOfFirst { it.getString(MediaFormat.KEY_MIME)!!.startsWith("video/") }
-      val length = formats[video].getLong(MediaFormat.KEY_DURATION)
-      val cut = when (damage) { Damage.HEAD -> 0L..length * 3 / 10; Damage.MIDDLE -> length * 4 / 10..length * 6 / 10; Damage.TAIL -> length * 7 / 10..length }
-      val mapped = formats.indices.map { muxer.addTrack(formats[it]) }
-      formats.indices.forEach { extractor.selectTrack(it) }
-      muxer.start()
-      val buffer = java.nio.ByteBuffer.allocate(1 shl 20)
-      val info = android.media.MediaCodec.BufferInfo()
-      while (extractor.sampleTrackIndex >= 0) {
-        val track = extractor.sampleTrackIndex
-        val time = extractor.sampleTime
-        info.set(0, extractor.readSampleData(buffer, 0), time, extractor.sampleFlags)
-        if (track == video || time !in cut) muxer.writeSampleData(mapped[track], buffer, info)
-        extractor.advance()
-      }
-      muxer.stop()
-      return output
-    } finally {
-      extractor.release()
-      muxer.release()
-    }
+  /** The damage of a take is done to the samples the writer is given: the audio of one part of the take never reaches its muxer, so the ledger of the take, not a file read after the stop, finds the hole. The take is at least `minTakeMs` long. */
+  private fun gateFor(damage: Damage?, minTakeMs: Long): MuxGate {
+    if (damage == null) return MuxGate.OPEN
+    val length = minTakeMs * 1_000
+    val cut = when (damage) { Damage.HEAD -> 0L..length * 3 / 10; Damage.MIDDLE -> length * 4 / 10..length * 6 / 10; Damage.TAIL -> length * 7 / 10..Long.MAX_VALUE }
+    return MuxGate { audio, ptsUs -> !(audio && ptsUs in cut) }
   }
 
   private fun record(audio: Boolean, damage: Damage? = null, lens: CameraLens = CameraLens.BACK, kind: CaptureKind = CaptureKind.MOMENT, mirrored: Boolean = false, disturb: Disturbance? = null, holdMs: Long = 0) = runBlocking {
@@ -198,7 +176,7 @@ class CameraNativeDeviceTest {
       activity.setContentView(ComposeView(activity).apply {
         setContent {
           MediaLayerProvider(checkNotNull(opened)) {
-            val made = remember { MediaCamera(profile, lens, CameraXBackend(context), diagnosing(damage)) }
+            val made = remember { MediaCamera(profile, lens, CameraXBackend(context, gate = gateFor(damage, profile.minTakeMs.toLong())), diagnosing()) }
             DisposableEffect(made) { onDispose { made.close() } }
             LaunchedEffect(made) { composed.complete(made) }
             MediaCameraPreview(made, Modifier.fillMaxSize())
@@ -273,7 +251,7 @@ class CameraNativeDeviceTest {
       activity.setContentView(ComposeView(activity).apply {
         setContent {
           MediaLayerProvider(checkNotNull(opened)) {
-            val made = remember { MediaCamera(profile, CameraLens.FRONT, CameraXBackend(context), diagnosing(null)) }
+            val made = remember { MediaCamera(profile, CameraLens.FRONT, CameraXBackend(context), diagnosing()) }
             DisposableEffect(made) { onDispose { made.close() } }
             LaunchedEffect(made) { composed.complete(made) }
             MediaCameraPreview(made, Modifier.fillMaxSize())
@@ -314,7 +292,7 @@ class CameraNativeDeviceTest {
   @Test
   fun two_circle_takes_from_the_front_camera_with_the_mirror_are_two_mp4_files_with_video_and_aac_packets() = record(audio = true, lens = CameraLens.FRONT, kind = CaptureKind.CIRCLE, mirrored = true)
 
-  /** INV-AUDIO-71: the wait after the stop of a 9 s take (the circle and moment cap is 10 s) holds no PCM decode, the sound is read from the packet table. */
+  /** INV-AUDIO-71: the wait after the stop of a 9 s take (the circle and moment cap is 10 s) is judged from the ledger of the take, the file is not read after the stop. */
   @Test
   fun inv_audio_71_a_nine_second_take_with_sound_is_delivered_covered() = record(audio = true, holdMs = 9_000)
 
