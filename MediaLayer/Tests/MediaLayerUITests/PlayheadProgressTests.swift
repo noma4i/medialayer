@@ -2,10 +2,6 @@ import MediaLayer
 import Testing
 @testable import MediaLayerUI
 
-private func state(_ phase: CameraPhase, recordedMs: UInt64, take: UInt64?) -> CameraState {
-  CameraState(phase: phase, lens: .back, flash: false, hasFlash: false, zoom: 1, zoomMin: 1, zoomMax: 1, recordedMs: recordedMs, shooting: false, fault: nil, refusedMs: nil, take: take, outcome: nil)
-}
-
 private func voice(_ phase: VoicePhase, recordedMs: UInt64, take: UInt64) -> VoiceState {
   VoiceState(take: take, phase: phase, outcome: nil, recordedMs: recordedMs)
 }
@@ -13,7 +9,7 @@ private func voice(_ phase: VoicePhase, recordedMs: UInt64, take: UInt64) -> Voi
 struct PlayheadProgressTests {
   @Test
   func inv_playhead_15_aRecordingStateBecomesAPlayingReportAgainstTheProfileLimit() {
-    let report = takeReport(recordedMs: 300, recording: .recording == .recording, take: 7, limitMs: 60_000, nowMs: 1_000, previousTake: 7)
+    let report = takeReport(recordedMs: 300, recording: true, take: 7, limitMs: 60_000, nowMs: 1_000, previousTake: 7)
 
     #expect(report.positionMs == 300)
     #expect(report.durationMs == 60_000)
@@ -26,8 +22,8 @@ struct PlayheadProgressTests {
 
   @Test
   func inv_playhead_15_aNewTakeJumpsAndAFinishedTakeStopsTheRing() {
-    let start = takeReport(recordedMs: 0, recording: .recording == .recording, take: 8, limitMs: 60_000, nowMs: 1_000, previousTake: 7)
-    let end = takeReport(recordedMs: 5_000, recording: .stopping == .recording, take: 8, limitMs: 60_000, nowMs: 6_000, previousTake: 8)
+    let start = takeReport(recordedMs: 0, recording: true, take: 8, limitMs: 60_000, nowMs: 1_000, previousTake: 7)
+    let end = takeReport(recordedMs: 5_000, recording: false, take: 8, limitMs: 60_000, nowMs: 6_000, previousTake: 8)
 
     #expect(start.jump)
     #expect(!end.playing)
