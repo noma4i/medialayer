@@ -664,12 +664,12 @@ class MediaCameraTest {
   fun inv_capture_23b_thePreviewViewDrawsNothingUntilItsFirstFrame() {
     val view = cameraPreviewView(context)
     assertEquals(android.graphics.Color.TRANSPARENT, (view.background as? android.graphics.drawable.ColorDrawable)?.color)
-    assertEquals(0f, view.alpha, 0f)
     assertEquals(android.view.View.VISIBLE, view.visibility)
-    applyStreamState(view, PreviewView.StreamState.STREAMING)
     assertEquals(1f, view.alpha, 0f)
+    applyStreamState(view, PreviewView.StreamState.STREAMING)
     applyStreamState(view, PreviewView.StreamState.IDLE)
-    assertEquals(0f, view.alpha, 0f)
+    assertEquals(android.view.View.VISIBLE, view.visibility)
+    assertEquals(1f, view.alpha, 0f)
   }
 
   @Test

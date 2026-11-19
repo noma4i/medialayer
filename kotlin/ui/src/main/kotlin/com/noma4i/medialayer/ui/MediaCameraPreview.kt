@@ -44,7 +44,7 @@ fun MediaCameraPreview(camera: MediaCamera, modifier: Modifier = Modifier, zooms
       camera.detachPreview(view)
     }
   }
-  // The view draws nothing until its first frame, so what lies under it stays visible; it hides again when the stream leaves STREAMING.
+  // The transparent view draws nothing until its first frame, so what lies under it stays visible; the stream state is only traced.
   DisposableEffect(view, owner) {
     if (owner == null) return@DisposableEffect onDispose { }
     val observer = Observer<PreviewView.StreamState> { applyStreamState(view, it) }
@@ -59,15 +59,11 @@ internal fun cameraPreviewView(context: Context): PreviewView = PreviewView(cont
   implementationMode = PreviewView.ImplementationMode.COMPATIBLE
   scaleType = PreviewView.ScaleType.FILL_CENTER
   setBackgroundColor(Color.TRANSPARENT)
-  alpha = 0f
 }
 
-/** Shows the preview only while its stream is STREAMING; alpha keeps the TextureView drawn, so its surface lives and the stream can start. */
+/** Traces when the preview starts and stops streaming; the view itself stays shown, its transparent background and TextureView draw nothing before the first frame. */
 internal fun applyStreamState(view: PreviewView, state: PreviewView.StreamState) {
   val streaming = state == PreviewView.StreamState.STREAMING
-  val shown = view.alpha == 1f
-  if (streaming == shown) return
-  view.alpha = if (streaming) 1f else 0f
   MediaTrace.emit("camera") { if (streaming) "preview shown" else "preview hidden" }
 }
 
