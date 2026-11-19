@@ -23,7 +23,7 @@ if [ -z "${APK:-}" ]; then
   [ -n "${BUILD_SSH:-}" ] && [ -n "${BUILD_DIR:-}" ] || fail 'set APK, or BUILD_SSH and BUILD_DIR'
   gradle="${GRADLE:-gradle}"
   # shellcheck disable=SC2029
-  ssh -n -o BatchMode=yes "$BUILD_SSH" "set -e; ${BUILD_ENV:-:}; cd '$BUILD_DIR'; (cd core && cargo ndk -t arm64-v8a -o '$BUILD_DIR/kotlin/src/main/jniLibs' build --release); timeout 1800 '$gradle' --offline -p kotlin :ui:assembleDebugAndroidTest" > "$out/build.log" 2>&1 || { tail -n 40 "$out/build.log" >&2; fail "build failed, log $out/build.log"; }
+  ssh -n -o BatchMode=yes "$BUILD_SSH" "set -e; ${BUILD_ENV:-:}; cd '$BUILD_DIR'; bash scripts/build_kotlin.sh --release; timeout 1800 '$gradle' --offline -p kotlin :ui:assembleDebugAndroidTest" > "$out/build.log" 2>&1 || { tail -n 40 "$out/build.log" >&2; fail "build failed, log $out/build.log"; }
   remote="$(ssh -n -o BatchMode=yes "$BUILD_SSH" "ls -t '$BUILD_DIR'/kotlin/ui/build/outputs/apk/androidTest/debug/*.apk | head -n 1")"
   [ -n "$remote" ] || fail 'no test APK produced'
   scp -q -o BatchMode=yes "$BUILD_SSH:$remote" "$out/test.apk"
