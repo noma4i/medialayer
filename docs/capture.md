@@ -78,12 +78,23 @@ fun MomentCamera() {
 `CameraState.recordedMs` steps every 100 ms. For a smooth ring use `MediaTakeProgress` (Swift) or `rememberTakeProgress(camera)` (Kotlin): it is the recorded time against the limit of the profile (`maxDurationMs`), 0 to 1, drawn every display frame. It never steps back, a new take starts from 0, and a finished take stops at its last position.
 
 ```swift
-MediaTakeProgress(camera) { fraction in Ring(fraction: fraction) }
+struct TakeRing: View {
+  let camera: MediaCamera
+
+  var body: some View {
+    MediaTakeProgress(camera) { fraction in
+      Capsule().frame(width: 200 * fraction, height: 4)
+    }
+  }
+}
 ```
 
 ```kotlin
-val fraction by rememberTakeProgress(camera)
-Ring(fraction = fraction)
+@Composable
+fun TakeRing(camera: MediaCamera) {
+  val fraction = rememberTakeProgress(camera)
+  Box(Modifier.drawBehind { drawRect(Color.Black, size = androidx.compose.ui.geometry.Size(size.width * fraction.value, 4f)) })
+}
 ```
 
 ## Frames for a face search

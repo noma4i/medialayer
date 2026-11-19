@@ -466,7 +466,9 @@ MediaVideo(VoiceClip(url: clip.url), playing: true, onProgress: { fraction in ri
 `onProgress` steps 10 times a second. For a smooth ring use `MediaVideoProgress` (Swift) or `rememberPlayheadProgress(source)` (Kotlin): the position moves every display frame between the player reports, never steps back, and jumps when the loop wraps. It only reads the slot of the source: it mounts and plays nothing, and shows 0 while the source has no slot or no duration.
 
 ```swift
-MediaVideoProgress(VoiceClip(url: clip.url)) { fraction in Ring(fraction: fraction) }
+MediaVideoProgress(VoiceClip(url: clip.url)) { fraction in
+  Capsule().frame(width: 200 * fraction, height: 4)
+}
 ```
 
 ### Kotlin
@@ -480,8 +482,8 @@ MediaVideo(
 ```
 
 ```kotlin
-val fraction by rememberPlayheadProgress(VoiceClip(url = clip.url))
-Ring(fraction = fraction)
+val position = rememberPlayheadProgress(VoiceClip(url = clip.url))
+Box(Modifier.drawBehind { drawRect(Color.Black, size = androidx.compose.ui.geometry.Size(size.width * position.value, 4f)) })
 ```
 
 ## Audio speed
