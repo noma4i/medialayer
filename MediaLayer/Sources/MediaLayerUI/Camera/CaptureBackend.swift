@@ -5,10 +5,6 @@ import CoreVideo
 import Foundation
 import MediaLayer
 
-extension CaptureEvent {
-  static func microphoneFlow(_ flowing: Bool) -> CaptureEvent { .audioFlow(flowing: flowing) }
-}
-
 /// A frame of the camera for analysis in the app. `orientation` tells how the buffer is turned against an upright picture.
 public struct CameraFrame: @unchecked Sendable {
   public let pixelBuffer: CVPixelBuffer
@@ -38,7 +34,6 @@ public final class CameraFrameObservation: @unchecked Sendable {
 protocol CaptureBackend: AnyObject, Sendable {
   var session: AVCaptureSession { get }
   var photoSize: PixelSize? { get }
-  var audio: CaptureAudio { get }
   func setSink(_ sink: @escaping @Sendable (CaptureEvent) -> Void)
   func bind(lens: CameraLens, profile: CaptureProfile)
   func unbind()
@@ -53,14 +48,9 @@ protocol CaptureBackend: AnyObject, Sendable {
   func setTorch(_ on: Bool) throws
   func setZoom(_ ratio: Float) throws
   func setFrameTap(_ tap: (@Sendable (CVPixelBuffer, UInt64) -> Void)?)
-  /// The verdict of the sound of the take that finished last, judged by the writer while it wrote. Nil when the backend keeps no ledger.
-  func takeCoverage() -> AudioCoverage?
 }
 
 extension CaptureBackend {
-  var audio: CaptureAudio { .managed }
-  func takeCoverage() -> AudioCoverage? { nil }
-
   func unbind(completion: @escaping @Sendable () -> Void) { unbind(); completion() }
 
   func beginRecording(to url: URL, profile: CaptureProfile, lens: CameraLens, ticket: RecordingTicket?, refused: @escaping @Sendable (RecordingRefusal) -> Void) {
@@ -81,7 +71,6 @@ struct CameraServices {
   var link: @Sendable () -> AudioLink?
   var clipInfo: @Sendable (URL) async throws -> MediaInfo?
   var upright: @Sendable (URL, Double) async throws -> URL
-  var audioCoverage: @Sendable (URL, Bool) async throws -> AudioCoverage
   var directory: URL
   var center: NotificationCenter
   var signals: SystemSignalNames
@@ -108,7 +97,6 @@ struct CameraServices {
         guard let layer = Media.current as? MediaLayer else { throw MediaError.Closed }
         return try await layer.prepareImage(MediaSourceValue.file(url, kind: .image), quality: quality).url
       },
-      audioCoverage: { url, required in try await scanAudioCoverage(at: url, required: required) },
       directory: CaptureFiles.directory,
       center: .default,
       signals: .system,

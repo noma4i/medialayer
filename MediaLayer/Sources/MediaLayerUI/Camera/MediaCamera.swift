@@ -68,7 +68,7 @@ public struct CapturedClip: Sendable, Equatable {
   public let durationMs: UInt64
   public let frame: ImageSize?
   public let lens: CameraLens
-  /// How the take ended: stopped, at the length limit, or because the microphone stopped delivering.
+  /// How the take ended: stopped or at the length limit.
   public let end: RecordEnd
 }
 
@@ -106,9 +106,6 @@ public final class MediaCamera: @unchecked Sendable {
   private var audioHold: RecordingTicket?
   private var takeTicket: RecordingTicket?
   private var revokedAudio: RecordingTicket?
-  private var audioInput: CameraAudioInput?
-  private var microphoneFault: CameraRefusal?
-  private let retry: RetryTimer
   private var binding: Task<Void, Never>?
   private var shooting: Task<Void, Never>?
   private var reading: Task<Void, Never>?
@@ -130,8 +127,7 @@ public final class MediaCamera: @unchecked Sendable {
     try self.init(profile: profile, lens: lens, backend: AVCaptureBackend(), services: .live, screen: .shared)
   }
 
-  init(profile: CaptureProfile, lens: CameraLens, backend: CaptureBackend, services: CameraServices, screen: ScreenAwake = .shared, retry: RetryTimer = .system) throws {
-    self.retry = retry
+  init(profile: CaptureProfile, lens: CameraLens, backend: CaptureBackend, services: CameraServices, screen: ScreenAwake = .shared) throws {
     awake = ScreenAwakeHold(kind: .always, awake: screen)
     self.profile = try checkCaptureProfile(profile: profile)
     self.services = services
@@ -155,7 +151,6 @@ public final class MediaCamera: @unchecked Sendable {
     let ticket = audioHold
     backend.unbind { hold?(); ticket?.end() }
     for task in [binding, shooting, reading, ticker] { task?.cancel() }
-    audioInput?.close()
     if let url = recordingURL { removeFile(url) }
     kept.values.forEach { removeFile($0.url) }
   }
@@ -207,9 +202,6 @@ public final class MediaCamera: @unchecked Sendable {
             if gate.cancelled { return continuation.resume(throwing: CancellationError()) }
             guard self.startWaiter == nil else { return continuation.resume(throwing: Self.refusal(.notReady)) }
             if self.profile.audio && self.audioHold == nil { return continuation.resume(throwing: Self.refusal(.notReady)) }
-            if self.profile.audio, let fault = self.microphoneFault, fault != .microphoneSilent { return continuation.resume(throwing: Self.refusal(fault)) }
-            // The start of a take retries a microphone that ended silent; the take waits for its sound (owner 2026-11-19).
-            if self.profile.audio, self.microphoneFault == .microphoneSilent { self.audioInput?.retry() }
             let wasReady = self.run.state.phase == .ready && self.profile.mode == .video
             if wasReady { self.ended = nil }
             self.apply(.start)
@@ -341,7 +333,6 @@ public final class MediaCamera: @unchecked Sendable {
   private func closeFromLayer() {
     queue.sync {
       apply(.layerClosed)
-      closeAudioInput()
       awake.set(playing: false)
       kept.values.forEach { removeFile($0.url) }
       kept = [:]
@@ -458,7 +449,6 @@ public final class MediaCamera: @unchecked Sendable {
       audioHold = nil
       let hold = sessionHold
       sessionHold = nil
-      closeAudioInput()
       // The memory and the microphone go back only after the hardware stopped, so no new camera is admitted beside a session that still runs.
       teardownHardware { hold?(); ticket?.end() }
       failWaiters()
@@ -558,24 +548,6 @@ public final class MediaCamera: @unchecked Sendable {
     }
   }
 
-  private func openAudioInput() {
-    guard profile.audio, audioInput == nil, case let .native(microphone) = backend.audio else { return }
-    guard let link = services.link() else { return post(.refuse(reason: .notReady)) }
-    audioInput = CameraAudioInput(link: link, microphone: microphone, timer: retry) { [weak self] fault in
-      self?.queue.async {
-        self?.microphoneFault = fault
-        // The last attempt of the microphone gave no sound: a take that waits for its first sound ends silent, the way Android tells it.
-        if fault == .microphoneSilent { self?.apply(.audioFlow(flowing: false)) }
-      }
-    }
-  }
-
-  private func closeAudioInput() {
-    audioInput?.close()
-    audioInput = nil
-    microphoneFault = nil
-  }
-
   private func open(_ lens: CameraLens) {
     epoch += 1
     let current = epoch
@@ -621,7 +593,6 @@ public final class MediaCamera: @unchecked Sendable {
         guard self.epoch == current, let (release, session) = holds.take() else { return }
         if let release { self.sessionHold = release }
         if let session { self.audioHold = session; self.watch(session) }
-        self.openAudioInput()
         self.backend.bind(lens: lens, profile: self.profile)
         self.installTap()
       }
@@ -694,16 +665,9 @@ public final class MediaCamera: @unchecked Sendable {
   private func readClip() {
     guard let url = recordingURL else { return }
     reading?.cancel()
-    // The sound verdict is the ledger of the writer, kept while it wrote (INV-CAPTURE-80: the file is not rotated and not read back for the sound).
-    let ledger = backend.takeCoverage()
-    let audio = profile.audio
     reading = Task { [services] in
       let info: MediaInfo?
       do {
-        MediaTrace.emit("camera", "take coverage \(Self.describe(ledger, label: "ledger"))")
-        // A take with sound and no ledger has no verdict: it is refused, as on Android.
-        let refusal: CameraRefusal? = ledger.flatMap { audioCoverageRefusal(verdict: $0.verdict) } ?? (ledger == nil && audio ? .audioTrackBroken : nil)
-        if let refusal { return self.refuseClip(url, refusal) }
         info = try await services.clipInfo(url)
       } catch {
         if !(error is CancellationError) { Media.recordNativeFailure(error, source: .camera) }
@@ -716,19 +680,6 @@ public final class MediaCamera: @unchecked Sendable {
         self.clipInfo = info
         self.apply(.recordSettled(durationMs: info?.durationMs))
       }
-    }
-  }
-
-  private static func describe(_ coverage: AudioCoverage?, label: String) -> String {
-    guard let coverage else { return "\(label)=- first=- last=- gapAt=- gap=- samples=-" }
-    func us(_ value: Int64?) -> String { value.map(String.init) ?? "-" }
-    return "\(label)=\(coverage.verdict) first=\(us(coverage.firstUs)) last=\(us(coverage.lastUs)) gapAt=\(us(coverage.gapAtUs)) gap=\(us(coverage.gapUs)) samples=\(coverage.samples)"
-  }
-
-  private func refuseClip(_ url: URL, _ refusal: CameraRefusal) {
-    queue.async {
-      guard self.recordingURL == url, self.reading != nil else { return }
-      self.apply(.revoked(reason: refusal))
     }
   }
 
@@ -779,5 +730,10 @@ public final class MediaCamera: @unchecked Sendable {
     let frame = CameraFrame(pixelBuffer: buffer, orientation: orientation, lens: lens)
     for handler in targets { handler(frame) }
   }
+}
+
+/// How a frame of the tap is turned against an upright picture: the buffer is as the platform delivers it, the sensor orientation of the lens (a front lens is also a selfie view).
+func tapOrientation(lens: CameraLens) -> CGImagePropertyOrientation {
+  lens == .front ? .leftMirrored : .right
 }
 #endif
