@@ -23,6 +23,7 @@ import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FallbackStrategy
+import androidx.camera.video.AudioStats
 import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
@@ -79,6 +80,7 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
   private val calculations = java.util.concurrent.Executors.newSingleThreadExecutor()
   private val session = java.util.concurrent.atomic.AtomicLong()
   @Volatile private var sink: (CaptureEvent) -> Unit = {}
+  @Volatile private var audioIssue: (CaptureAudioIssue) -> Unit = {}
   private var view: PreviewView? = null
   private var owner: LifecycleOwner? = null
   private var cameras: ProcessCameraProvider? = null
@@ -107,6 +109,8 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
   override fun setSink(sink: (CaptureEvent) -> Unit) {
     this.sink = sink
   }
+
+  override fun setAudioIssueSink(sink: (CaptureAudioIssue) -> Unit) { audioIssue = sink }
 
   override fun setHost(view: PreviewView?, owner: LifecycleOwner?) {
     this.view = view
@@ -277,7 +281,10 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
           recording = pending.start(main) { event ->
             when (event) {
               is VideoRecordEvent.Start -> sink(CaptureEvent.RecordStarted)
-              is VideoRecordEvent.Status -> recordedNanos = event.recordingStats.recordedDurationNanos
+              is VideoRecordEvent.Status -> {
+                recordedNanos = event.recordingStats.recordedDurationNanos
+                if (profile.audio) audioIssueOf(event.recordingStats.audioStats.audioState)?.let(audioIssue)
+              }
               is VideoRecordEvent.Finalize -> {
                 recording = null
                 sink(CaptureEvent.RecordFinished(endOf(event.error)))
@@ -287,6 +294,7 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
           }
         } catch (error: Exception) {
           Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.RECORDER, error)
+          if (error is SecurityException) audioIssue(CaptureAudioIssue.PERMISSION_DENIED)
           sink(CaptureEvent.RecordFinished(RecordEnd.FAILED))
         }
       }
@@ -377,6 +385,15 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
     VideoRecordEvent.Finalize.ERROR_NONE -> RecordEnd.COMPLETED
     VideoRecordEvent.Finalize.ERROR_DURATION_LIMIT_REACHED -> RecordEnd.LIMIT_REACHED
     else -> RecordEnd.FAILED
+  }
+
+  /** The state of the sound of a take, as CameraX reports it with every status: the core hears the sound flow and its loss from it. */
+  private fun audioIssueOf(state: Int) = when (state) {
+    AudioStats.AUDIO_STATE_ACTIVE -> CaptureAudioIssue.ACTIVE
+    AudioStats.AUDIO_STATE_SOURCE_SILENCED -> CaptureAudioIssue.SILENCED
+    AudioStats.AUDIO_STATE_SOURCE_ERROR -> CaptureAudioIssue.SOURCE_ERROR
+    AudioStats.AUDIO_STATE_ENCODER_ERROR -> CaptureAudioIssue.ENCODER_ERROR
+    else -> null
   }
 
   private fun isRecoverable(code: Int) = code == CameraState.ERROR_CAMERA_IN_USE || code == CameraState.ERROR_MAX_CAMERAS_IN_USE || code == CameraState.ERROR_OTHER_RECOVERABLE_ERROR

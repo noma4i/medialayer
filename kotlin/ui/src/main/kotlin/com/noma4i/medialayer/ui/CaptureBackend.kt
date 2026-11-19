@@ -37,6 +37,8 @@ internal interface CaptureBackend {
 
   fun setSink(sink: (CaptureEvent) -> Unit)
 
+  fun setAudioIssueSink(sink: (CaptureAudioIssue) -> Unit) = Unit
+
   fun setHost(view: PreviewView?, owner: LifecycleOwner?)
 
   fun bind(lens: CameraLens, profile: CaptureProfile)

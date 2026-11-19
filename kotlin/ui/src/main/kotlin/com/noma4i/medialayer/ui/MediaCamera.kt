@@ -137,6 +137,7 @@ class MediaCamera internal constructor(
         Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, error)
       }
     }
+    backend.setAudioIssueSink { issue -> enqueue { microphoneFailed(issue) } }
     backend.setSink { event -> if (event is CaptureEvent.RecordFinished) enqueue { if (!closed) { recordedEnd = event.end; apply(event) } } else post(event) }
   }
 
@@ -365,6 +366,16 @@ class MediaCamera internal constructor(
 
   private fun post(event: CaptureEvent) {
     if (!queue.isShutdown) enqueue { if (!closed) apply(event) }
+  }
+
+  private fun microphoneFailed(issue: CaptureAudioIssue) {
+    if (closed) return
+    when (issue) {
+      CaptureAudioIssue.SILENCED -> apply(CaptureEvent.AudioFlow(false))
+      CaptureAudioIssue.ACTIVE -> apply(CaptureEvent.AudioFlow(true))
+      CaptureAudioIssue.PERMISSION_DENIED -> if (run.starting || run.started) failMicrophone(microphoneRefusal(RecordingRefusal.PERMISSION_DENIED))
+      CaptureAudioIssue.SOURCE_ERROR, CaptureAudioIssue.ENCODER_ERROR -> if (run.starting || run.started) failMicrophone(refusal(CameraRefusal.RECORD_FAILED))
+    }
   }
 
   private fun failMicrophone(failure: MediaException.Camera) {
