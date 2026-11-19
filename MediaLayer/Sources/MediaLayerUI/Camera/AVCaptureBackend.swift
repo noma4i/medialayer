@@ -33,9 +33,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
   private var previewLinks: [ObjectIdentifier: PreviewLink] = [:]
   private var videoLens = CameraLens.back
   private var mirrorsVideo = false
-  private var turnValue = FrameTurn()
-  /// The capture angle of the take frames of the current bind (see `takeCaptureAngle`).
-  private var frameAngle = previewAngle
   private var videoPort: AVCaptureInput.Port?
 
   override init() {
@@ -131,7 +128,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     previewLinks = [:]
     videoPort = nil
     frameOutput = nil
-    setTurn(FrameTurn())
     videoLens = lens
     mirrorsVideo = lens == .front && profile.mirrorFrontVideo
     audioOutput = nil
@@ -282,10 +278,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     relay.takeCoverage()
   }
 
-  func takeTagged() -> Bool {
-    relay.takeTagged()
-  }
-
   func unbind() {
     unbind(completion: {})
   }
@@ -299,7 +291,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
       self.session.outputs.forEach(self.session.removeOutput)
       self.commitSession(why: "unbind")
       self.previewLinks = [:]
-      self.setTurn(FrameTurn())
       self.videoPort = nil
       self.camera = nil
       self.photoOutput = nil
@@ -363,15 +354,12 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
       guard let settings = audioOutput?.recommendedAudioSettingsForAssetWriter(writingTo: fileType) as? [String: Any] else { return nil }
       audio = settings
     }
-    let turn = frameTurn
-    let transform = takeWriterTransform(turn: turn, mirror: lens == .front && profile.mirrorFrontVideo)
-    MediaTrace.emit("camera", "take angle=\(Int(frameAngle)) preview=\(previewLinks.values.first.map { String(describing: $0.connection.videoRotationAngle) } ?? "none") upright=\(turn.upright)")
     let outputConnection = frameOutput?.connection(with: .video)
-    MediaTrace.emit("camera", "take output angle=\(outputConnection.map { String(describing: $0.videoRotationAngle) } ?? "none") mirrored=\(outputConnection.map { String(describing: $0.isVideoMirrored) } ?? "none") width=\(String(describing: video[AVVideoWidthKey])) height=\(String(describing: video[AVVideoHeightKey])) transformIdentity=\(transform == .identity)")
+    MediaTrace.emit("camera", "take output angle=\(outputConnection.map { String(describing: $0.videoRotationAngle) } ?? "none") mirrored=\(outputConnection.map { String(describing: $0.isVideoMirrored) } ?? "none") width=\(String(describing: video[AVVideoWidthKey])) height=\(String(describing: video[AVVideoHeightKey]))")
     if let camera { traceAspect(camera, lens: lens) }
     let budget = Int(clamping: captureCost(profile: profile))
     return CameraTake.Settings(
-      video: video, audio: audio, transform: transform, maxDurationMs: profile.maxDurationMs, fileType: fileType,
+      video: video, audio: audio, maxDurationMs: profile.maxDurationMs, fileType: fileType,
       fragmentInterval: Self.fragmentInterval, armPTS: CMClockGetTime(clock), maxPendingAudio: budget / CameraTake.entryCost, maxPendingVideo: budget / CameraTake.entryCost,
       maxHeldAudio: budget / CameraTake.entryCost, memoryBudgetBytes: budget
     )
@@ -480,8 +468,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     } else if let output = frameOutput {
       session.removeOutput(output)
       frameOutput = nil
-      setTurn(FrameTurn())
-    }
+      }
     commitSession(why: "frameOutput")
   }
 
@@ -495,31 +482,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, CameraMicrophone, @unche
     frameOutput = output
     guard let connection = output.connection(with: .video) else { return }
     if let stabilization { connection.preferredVideoStabilizationMode = stabilization }
-    // The frames come out upright (and mirrored as the profile wants), so the file needs no rotation tag and no re-encode after stop. A connection that cannot do it keeps the raw frames and the tag.
-    // Decided before anything is touched: a connection that cannot do the whole turn keeps the raw frames, the tag and the old path.
-    var angle = previewAngle
-    if let bound = session.inputs.compactMap({ $0 as? AVCaptureDeviceInput }).first(where: { $0.device.hasMediaType(.video) })?.device,
-       let back = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) {
-      let lensCapture = AVCaptureDevice.RotationCoordinator(device: bound, previewLayer: nil).videoRotationAngleForHorizonLevelCapture
-      let backCapture = AVCaptureDevice.RotationCoordinator(device: back, previewLayer: nil).videoRotationAngleForHorizonLevelCapture
-      angle = takeCaptureAngle(lensCapture: lensCapture, backCapture: backCapture)
-    }
-    frameAngle = angle
-    let angleSupported = connection.isVideoRotationAngleSupported(angle)
-    let upright = turnsFramesUpright(angleSupported: angleSupported, mirroringSupported: connection.isVideoMirroringSupported, mirrorWanted: mirrorsVideo)
-    MediaTrace.emit("camera", "turn decide lens=\(videoLens == .front ? "front" : "back") angleSupported=\(angleSupported) mirroringSupported=\(connection.isVideoMirroringSupported) mirrorWanted=\(mirrorsVideo) upright=\(upright)")
-    if let bound = session.inputs.compactMap({ $0 as? AVCaptureDeviceInput }).first(where: { $0.device.hasMediaType(.video) })?.device {
-      let coordinator = AVCaptureDevice.RotationCoordinator(device: bound, previewLayer: nil)
-      MediaTrace.emit("camera", "rotation lens=\(videoLens == .front ? "front" : "back") device=\(bound.deviceType.rawValue) capture=\(coordinator.videoRotationAngleForHorizonLevelCapture) preview=\(coordinator.videoRotationAngleForHorizonLevelPreview) library=\(previewAngle)")
-    }
-    guard upright else { return setTurn(FrameTurn()) }
-    connection.videoRotationAngle = angle
-    if connection.isVideoMirroringSupported {
-      connection.automaticallyAdjustsVideoMirroring = false
-      connection.isVideoMirrored = mirrorsVideo
-    }
-    MediaTrace.emit("camera", "turn set angle=\(connection.videoRotationAngle) mirrored=\(connection.isVideoMirrored) auto=\(connection.automaticallyAdjustsVideoMirroring)")
-    setTurn(FrameTurn(upright: true, mirrored: mirrorsVideo))
+    // The connection stays at the platform default: the library does not turn or mirror the recorded video (INV-CAPTURE-80).
   }
 
   /// The one place that opens and closes a session transaction, so the trace counts every graph change.

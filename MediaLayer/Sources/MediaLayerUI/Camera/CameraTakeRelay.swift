@@ -12,8 +12,6 @@ final class CameraTakeRelay: @unchecked Sendable {
   private var take: CameraTake?
   private var lastGeneration: UInt64 = 0
   private var finishedCoverage: AudioCoverage?
-  private var takeIsTagged = false
-  private var finishedTagged = false
 
   init(queue: DispatchQueue, emit: @escaping @Sendable (CaptureEvent) -> Void, idle: @escaping @Sendable () -> Void) {
     self.queue = queue
@@ -28,8 +26,6 @@ final class CameraTakeRelay: @unchecked Sendable {
     let generation = lock.withLock { () -> UInt64 in
       lastGeneration &+= 1
       finishedCoverage = nil
-      finishedTagged = false
-      takeIsTagged = settings.transform != .identity
       return lastGeneration
     }
     let take = CameraTake(
@@ -44,11 +40,6 @@ final class CameraTakeRelay: @unchecked Sendable {
   /// The verdict of the take that finished last, once: the camera reads it when the take ends.
   func takeCoverage() -> AudioCoverage? {
     lock.withLock { defer { finishedCoverage = nil }; return finishedCoverage }
-  }
-
-  /// Whether the take that finished last wrote a rotation tag: its frames are raw and the file needs the upright pass. Read once, as the coverage.
-  func takeTagged() -> Bool {
-    lock.withLock { defer { finishedTagged = false }; return finishedTagged }
   }
 
   func appendAudio(_ buffer: CMSampleBuffer) {
@@ -108,7 +99,7 @@ final class CameraTakeRelay: @unchecked Sendable {
     lock.withLock { take = nil }
     switch outcome {
     case let .finished(_, _, end, coverage):
-      lock.withLock { finishedCoverage = coverage; finishedTagged = takeIsTagged }
+      lock.withLock { finishedCoverage = coverage }
       emit(.recordFinished(end: end))
     case let .failed(error):
       Media.recordNativeFailure(error, source: .camera)

@@ -9,7 +9,6 @@ final class CameraTake: @unchecked Sendable {
   struct Settings: @unchecked Sendable {
     var video: [String: Any]
     var audio: [String: Any]?
-    var transform: CGAffineTransform
     var maxDurationMs: UInt64
     var fileType: AVFileType
     var fragmentInterval: CMTime
@@ -200,7 +199,6 @@ final class CameraTake: @unchecked Sendable {
       writer.movieFragmentInterval = settings.fragmentInterval
       let video = AVAssetWriterInput(mediaType: .video, outputSettings: settings.video)
       video.expectsMediaDataInRealTime = true
-      video.transform = settings.transform
       guard writer.canAdd(video) else { throw Failure.writerRejected }
       writer.add(video)
       videoInput = video
