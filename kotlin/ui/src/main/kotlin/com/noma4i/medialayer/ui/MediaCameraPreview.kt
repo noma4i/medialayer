@@ -2,7 +2,6 @@ package com.noma4i.medialayer.ui
 
 import android.content.Context
 import android.graphics.Color
-import android.view.View
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.runtime.Composable
@@ -60,15 +59,15 @@ internal fun cameraPreviewView(context: Context): PreviewView = PreviewView(cont
   implementationMode = PreviewView.ImplementationMode.COMPATIBLE
   scaleType = PreviewView.ScaleType.FILL_CENTER
   setBackgroundColor(Color.TRANSPARENT)
-  visibility = View.INVISIBLE
+  alpha = 0f
 }
 
-/** Shows the preview only while its stream is STREAMING. */
+/** Shows the preview only while its stream is STREAMING; alpha keeps the TextureView drawn, so its surface lives and the stream can start. */
 internal fun applyStreamState(view: PreviewView, state: PreviewView.StreamState) {
   val streaming = state == PreviewView.StreamState.STREAMING
-  val shown = view.visibility == View.VISIBLE
+  val shown = view.alpha == 1f
   if (streaming == shown) return
-  view.visibility = if (streaming) View.VISIBLE else View.INVISIBLE
+  view.alpha = if (streaming) 1f else 0f
   MediaTrace.emit("camera") { if (streaming) "preview shown" else "preview hidden" }
 }
 
