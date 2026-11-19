@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A late encoder failure after a normal camera take end no longer warns on a dead thread.
+
 ## 3.42.0 - 2026-11-19
 
 ### Added

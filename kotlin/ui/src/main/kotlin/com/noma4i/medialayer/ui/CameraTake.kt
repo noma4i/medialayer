@@ -156,7 +156,8 @@ internal class CameraTake(
     drain()
   }
 
-  override fun cancel() { handler.post { end(null, null) } }
+  /** After the end of the take its thread is gone: a cancel is a no-op by the state of the take. */
+  override fun cancel() { if (!ended.get()) handler.post { end(null, null) } }
 
   private fun codec(format: MediaFormat, kind: Int): MediaCodec {
     val made = MediaCodec.createEncoderByType(format.getString(MediaFormat.KEY_MIME)!!)
