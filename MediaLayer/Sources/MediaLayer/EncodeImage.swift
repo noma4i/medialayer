@@ -114,3 +114,61 @@ enum ImageEncoding {
     return result
   }
 }
+
+/// The shared writers of an image in memory: the encoders and the turn used by `encodeImage`.
+enum ImagePreparation {
+  typealias Admit = @Sendable (UInt64) async throws -> @Sendable () -> Void
+
+  static func encoded(_ image: CGImage, format: ImageFormat, quality: Double) throws -> Data {
+    let data = NSMutableData()
+    guard let destination = CGImageDestinationCreateWithData(data, imageType(format).identifier as CFString, 1, nil) else {
+      throw MediaError.Unexpected(detail: "the image destination cannot be created")
+    }
+    try finalize(destination, image, format: format, quality: quality)
+    return data as Data
+  }
+
+  /// The encoder writes into `output` as it goes, the encoded file is never held whole in memory.
+  static func encode(_ image: CGImage, format: ImageFormat, quality: Double, to output: URL) throws {
+    guard let destination = CGImageDestinationCreateWithURL(output as CFURL, imageType(format).identifier as CFString, 1, nil) else {
+      throw MediaError.Unexpected(detail: "the image destination cannot be created")
+    }
+    try finalize(destination, image, format: format, quality: quality)
+  }
+
+  private static func imageType(_ format: ImageFormat) -> UTType { format == .png ? .png : .jpeg }
+
+  private static func finalize(_ destination: CGImageDestination, _ image: CGImage, format: ImageFormat, quality: Double) throws {
+    let options: CFDictionary? = format == .png ? nil : [kCGImageDestinationLossyCompressionQuality: jpegQuality(quality: quality)] as CFDictionary
+    CGImageDestinationAddImage(destination, image, options)
+    guard CGImageDestinationFinalize(destination) else { throw MediaError.Unexpected(detail: "the image cannot be encoded") }
+  }
+
+  static func draw(_ image: CGImage, turn: PhotoTurn) throws -> CGImage {
+    let width = CGFloat(image.width)
+    let height = CGFloat(image.height)
+    let sideways = turn.rotationDegrees % 180 == 90
+    let outWidth = sideways ? image.height : image.width
+    let outHeight = sideways ? image.width : image.height
+    guard let context = CGContext(
+      data: nil, width: outWidth, height: outHeight, bitsPerComponent: 8, bytesPerRow: 0,
+      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+    ) else { throw MediaError.Unexpected(detail: "the photo canvas cannot be created") }
+    var turned: CGAffineTransform
+    switch turn.rotationDegrees {
+    case 90: turned = CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: height, ty: 0)
+    case 180: turned = CGAffineTransform(a: -1, b: 0, c: 0, d: -1, tx: width, ty: height)
+    case 270: turned = CGAffineTransform(a: 0, b: -1, c: 1, d: 0, tx: 0, ty: width)
+    default: turned = .identity
+    }
+    if turn.flipHorizontal { turned = turned.concatenating(CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: CGFloat(outWidth), ty: 0)) }
+    context.translateBy(x: 0, y: CGFloat(outHeight))
+    context.scaleBy(x: 1, y: -1)
+    context.concatenate(turned)
+    context.translateBy(x: 0, y: height)
+    context.scaleBy(x: 1, y: -1)
+    context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+    guard let result = context.makeImage() else { throw MediaError.Unexpected(detail: "the photo cannot be turned") }
+    return result
+  }
+}

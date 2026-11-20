@@ -11,14 +11,6 @@ public struct PreparedMedia: Equatable, Sendable {
   }
 }
 
-func preparableFile(_ url: String) throws -> URL {
-  guard isLocalMediaUrl(url: url),
-        let file = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines)), file.isFileURL
-  else { throw MediaError.Fetch(detail: "\(url) is not a file:// source") }
-  guard FileManager.default.isReadableFile(atPath: file.path) else { throw MediaError.Fetch(detail: "\(url) is not a readable file") }
-  return file
-}
-
 func preparedOutput(extension fileExtension: String, in directory: URL = FileManager.default.temporaryDirectory) -> URL {
   directory.appendingPathComponent("\(UUID().uuidString).\(fileExtension)")
 }
