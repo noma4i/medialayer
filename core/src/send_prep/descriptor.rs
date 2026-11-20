@@ -235,9 +235,14 @@ pub fn media_prepare_decide(descriptor: Vec<u8>, probe: PrepareProbe) -> Prepare
     if let Err(message) = check_settings(&intent) {
         return refuse(MediaPrepareFailure::UnsupportedDescriptor, message);
     }
+    // The reason the platform gave (a decoder maximum, an unreadable file) reaches the refusal as it is.
+    let reason = match &probe {
+        PrepareProbe::Failed { message } => message.clone(),
+        _ => "the device cannot decode the source".to_string(),
+    };
     let cannot_decode = || match &intent {
         MediaPrepareIntent::Video { on_cannot_decode: CannotDecode::UploadSource, .. } => PrepareDecision::Pass,
-        _ => refuse(MediaPrepareFailure::CannotDecode, "the device cannot decode the source"),
+        _ => refuse(MediaPrepareFailure::CannotDecode, reason.clone()),
     };
     match (&intent, &probe) {
         (MediaPrepareIntent::Video { limits, mirror, .. }, PrepareProbe::Video { source, metadata_keys, size_bytes }) => {
