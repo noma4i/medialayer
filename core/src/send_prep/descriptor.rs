@@ -2,7 +2,8 @@
 //! Layout, version 1, big endian: byte 0 = 1, byte 1 = kind (0 video, 1 image), then the fields of the intent in the order of `MediaPrepareIntent`;
 //! an option is a byte 0 or 1 followed by its value, a bool is a byte 0 or 1, a list is a u32 count followed by its items, an enum is its index.
 
-use super::{check, photo_plan, plan_video_sized, video_metadata_to_strip, BitrateStep, CropFractions, ImageFormat, PhotoEdit, PhotoPlan, VideoLimits, VideoPlan, VideoSource};
+use super::plan::check;
+use super::{photo_plan, plan_video_sized, video_metadata_to_strip, BitrateStep, CropFractions, ImageFormat, PhotoEdit, PhotoPlan, VideoLimits, VideoPlan, VideoSource};
 use crate::ffi::PixelSize;
 
 const VERSION: u8 = 1;
@@ -15,11 +16,11 @@ pub enum CannotDecode {
     UploadSource,
 }
 
-/// What the app asks of a file before it is sent. `limits = None` takes `default_video_limits`. `max_bytes` is the largest result that may be sent (D-412), `None` has no limit.
+/// What the app asks of a file before it is sent. `limits = None` takes `default_video_limits`.
 #[derive(Debug, Clone, PartialEq, uniffi::Enum)]
 pub enum MediaPrepareIntent {
-    Video { limits: Option<VideoLimits>, mirror: bool, on_cannot_decode: CannotDecode, max_bytes: Option<u64> },
-    Image { edit: PhotoEdit, quality: Option<f64>, format: ImageFormat, max_bytes: Option<u64> },
+    Video { limits: Option<VideoLimits>, mirror: bool, on_cannot_decode: CannotDecode },
+    Image { edit: PhotoEdit, quality: Option<f64>, format: ImageFormat },
 }
 
 /// What the platform read from a source. `size_bytes` is the file size.
@@ -43,7 +44,6 @@ pub enum MediaPrepareFailure {
     CannotDecode,
     SourceUnreadable,
     WriteFailed,
-    OverMaxBytes,
     UnsupportedDescriptor,
 }
 
@@ -63,6 +63,22 @@ pub struct MediaPrepareFacts {
     pub mime: String,
 }
 
+/// What the platform probe answers: the facts of the file, planned when the probe had a descriptor, or the failure.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum MediaProbeOutcome {
+    Facts { facts: MediaPrepareFacts },
+    Failed { message: String },
+}
+
+/// One run of the platform writer: it reads the descriptor itself through `media_prepare_decide`.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct MediaPrepareJob {
+    pub attempt_id: u64,
+    pub source: String,
+    pub destination: String,
+    pub descriptor: Vec<u8>,
+}
+
 /// What the platform does: copy the source to the destination as it is, run the plan, or end with the refusal.
 #[derive(Debug, Clone, PartialEq, uniffi::Enum)]
 pub enum PrepareDecision {
@@ -75,7 +91,7 @@ pub enum PrepareDecision {
 pub fn media_prepare_descriptor(intent: MediaPrepareIntent) -> Vec<u8> {
     let mut out = vec![VERSION];
     match intent {
-        MediaPrepareIntent::Video { limits, mirror, on_cannot_decode, max_bytes } => {
+        MediaPrepareIntent::Video { limits, mirror, on_cannot_decode } => {
             out.push(0);
             put_option(&mut out, limits, |out, limits| {
                 put_u32(out, limits.max_long_side);
@@ -88,9 +104,8 @@ pub fn media_prepare_descriptor(intent: MediaPrepareIntent) -> Vec<u8> {
             });
             out.push(u8::from(mirror));
             out.push(on_cannot_decode as u8);
-            put_option(&mut out, max_bytes, |out, bytes| out.extend(bytes.to_be_bytes()));
         }
-        MediaPrepareIntent::Image { edit, quality, format, max_bytes } => {
+        MediaPrepareIntent::Image { edit, quality, format } => {
             out.push(1);
             put_option(&mut out, edit.max_size, put_size);
             out.push(u8::from(edit.enlarge));
@@ -100,7 +115,6 @@ pub fn media_prepare_descriptor(intent: MediaPrepareIntent) -> Vec<u8> {
             put_u32(&mut out, edit.rotation_degrees);
             put_option(&mut out, quality, |out, quality| out.extend(quality.to_be_bytes()));
             out.push(format as u8);
-            put_option(&mut out, max_bytes, |out, bytes| out.extend(bytes.to_be_bytes()));
         }
     }
     out
@@ -144,8 +158,7 @@ fn read_intent(reader: &mut Reader) -> Option<MediaPrepareIntent> {
                 1 => CannotDecode::UploadSource,
                 _ => return None,
             };
-            let max_bytes = reader.option(|reader| Some(u64::from_be_bytes(reader.take()?)))?;
-            Some(MediaPrepareIntent::Video { limits, mirror, on_cannot_decode, max_bytes })
+            Some(MediaPrepareIntent::Video { limits, mirror, on_cannot_decode })
         }
         1 => {
             let max_size = reader.option(Reader::size)?;
@@ -160,8 +173,7 @@ fn read_intent(reader: &mut Reader) -> Option<MediaPrepareIntent> {
                 1 => ImageFormat::Png,
                 _ => return None,
             };
-            let max_bytes = reader.option(|reader| Some(u64::from_be_bytes(reader.take()?)))?;
-            Some(MediaPrepareIntent::Image { edit: PhotoEdit { max_size, enlarge, crop, output_size, mirror, rotation_degrees }, quality, format, max_bytes })
+            Some(MediaPrepareIntent::Image { edit: PhotoEdit { max_size, enlarge, crop, output_size, mirror, rotation_degrees }, quality, format })
         }
         _ => None,
     }
@@ -208,30 +220,34 @@ pub fn media_prepare_decide(descriptor: Vec<u8>, probe: PrepareProbe) -> Prepare
     }
 }
 
-/// The width, height and MIME of the file the prepare will make (D-413), or `None` when the descriptor is broken or the probe does not fit it.
+/// The width, height and MIME of the file (D-413). With a descriptor it is the planned result of the prepare, `None` when the descriptor is broken or the probe does not fit it;
+/// without one it is the source as the platform reports it, turned upright.
 #[uniffi::export]
-pub fn media_prepare_facts(descriptor: Vec<u8>, probe: PrepareProbe) -> Option<MediaPrepareFacts> {
-    let intent = decode_descriptor(&descriptor).ok()?;
+pub fn media_prepare_facts(descriptor: Option<Vec<u8>>, probe: PrepareProbe) -> Option<MediaPrepareFacts> {
+    let intent = match descriptor {
+        Some(bytes) => Some(decode_descriptor(&bytes).ok()?),
+        None => None,
+    };
     match (&intent, &probe) {
-        (MediaPrepareIntent::Image { edit, format, .. }, PrepareProbe::Image { width, height, exif_orientation, .. }) => {
+        (None, PrepareProbe::Image { width, height, exif_orientation, format }) => {
+            let edit = PhotoEdit { max_size: None, enlarge: false, crop: None, output_size: None, mirror: false, rotation_degrees: 0 };
+            let size = photo_plan(*width, *height, *exif_orientation, edit)?.upright;
+            Some(MediaPrepareFacts { width: size.width, height: size.height, mime: image_mime(*format).to_string() })
+        }
+        (None, PrepareProbe::Video { source, .. }) => {
+            let size = upright(source.width, source.height, source.rotation_degrees);
+            Some(MediaPrepareFacts { width: size.width, height: size.height, mime: VIDEO_MIME.to_string() })
+        }
+        (Some(MediaPrepareIntent::Image { edit, format, .. }), PrepareProbe::Image { width, height, exif_orientation, .. }) => {
             let size = photo_plan(*width, *height, *exif_orientation, *edit)?.output;
             Some(MediaPrepareFacts { width: size.width, height: size.height, mime: image_mime(*format).to_string() })
         }
-        (MediaPrepareIntent::Video { limits, mirror, .. }, PrepareProbe::Video { source, size_bytes, .. }) => {
+        (Some(MediaPrepareIntent::Video { limits, mirror, .. }), PrepareProbe::Video { source, size_bytes, .. }) => {
             let plan = plan_video_sized(*source, *size_bytes, limits.clone().unwrap_or_else(super::default_video_limits)).ok()?;
             let size = if plan.reencode || *mirror { PixelSize { width: plan.width, height: plan.height } } else { upright(source.width, source.height, source.rotation_degrees) };
             Some(MediaPrepareFacts { width: size.width, height: size.height, mime: VIDEO_MIME.to_string() })
         }
         _ => None,
-    }
-}
-
-/// The check of the written result against `max_bytes` (D-412): `OverMaxBytes` when it is larger, `UnsupportedDescriptor` for a broken descriptor.
-#[uniffi::export]
-pub fn media_prepare_check_result(descriptor: Vec<u8>, size_bytes: u64) -> Option<MediaPrepareFailure> {
-    match decode_descriptor(&descriptor) {
-        Err(reason) => Some(reason),
-        Ok(MediaPrepareIntent::Video { max_bytes, .. } | MediaPrepareIntent::Image { max_bytes, .. }) => max_bytes.filter(|limit| size_bytes > *limit).map(|_| MediaPrepareFailure::OverMaxBytes),
     }
 }
 
