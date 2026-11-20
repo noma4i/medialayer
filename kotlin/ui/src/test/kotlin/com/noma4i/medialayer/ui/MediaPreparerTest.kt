@@ -1,12 +1,7 @@
 package com.noma4i.medialayer.ui
 
 import androidx.test.core.app.ApplicationProvider
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Color
 import com.noma4i.medialayer.CannotDecode
-import com.noma4i.medialayer.ImageFormat
-import com.noma4i.medialayer.PhotoEdit
 import com.noma4i.medialayer.MediaException
 import com.noma4i.medialayer.MediaProbeOutcome
 import com.noma4i.medialayer.defaultVideoLimits
@@ -29,7 +24,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.annotation.GraphicsMode
 
 @RunWith(MediaLayerTestRunner::class)
 class MediaPreparerTest {
@@ -166,40 +160,5 @@ class MediaPreparerTest {
     assertEquals(MediaProbeOutcome.File(1080u, 1920u, "video/mp4"), turned)
     assertTrue(preparerOf(facts4k, decoders = emptyList(), exports = exports).probe(File(folder, "missing.mp4").path, null, null) is MediaProbeOutcome.Failed)
     assertTrue(exports.isEmpty())
-  }
-}
-
-/** Real pixels are needed, so this class runs on the native graphics of Robolectric. */
-@GraphicsMode(GraphicsMode.Mode.NATIVE)
-@RunWith(MediaLayerTestRunner::class)
-class MediaPrepareTransparencyTest {
-  private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-  private val folder = Files.createTempDirectory("transparency").toFile().apply { deleteOnExit() }
-
-  private fun prepared(rotation: UInt, name: String): Bitmap {
-    val source = File(folder, "alpha-$name.png")
-    val bitmap = Bitmap.createBitmap(40, 20, Bitmap.Config.ARGB_8888)
-    for (x in 20 until 40) for (y in 0 until 20) bitmap.setPixel(x, y, Color.RED)
-    source.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-    val destination = File(folder, "out-$name.jpg")
-    val descriptor = mediaPrepareDescriptor(MediaPrepareIntent.Image(PhotoEdit(null, false, null, null, false, rotation), 0.9, ImageFormat.JPEG))
-    val outcome = runBlocking { MediaPreparer(context).run(MediaPrepareJob(1u, source.path, destination.path, descriptor)) {} }
-    assertTrue(outcome.toString(), outcome is MediaPrepareOutcome.Done)
-    return BitmapFactory.decodeFile(destination.path)
-  }
-
-  private fun assertWhite(pixel: Int) = assertTrue("white expected, got ${Integer.toHexString(pixel)}", Color.red(pixel) >= 250 && Color.green(pixel) >= 250 && Color.blue(pixel) >= 250)
-
-  private fun assertRed(pixel: Int) = assertTrue("red expected, got ${Integer.toHexString(pixel)}", Color.red(pixel) >= 230 && Color.green(pixel) <= 40 && Color.blue(pixel) <= 40)
-
-  @Test
-  fun inv_send_65_aPreparedJpegFlattensTransparencyOntoWhite() {
-    val straight = prepared(0u, "straight")
-    assertWhite(straight.getPixel(5, 10))
-    assertRed(straight.getPixel(35, 10))
-    val turned = prepared(90u, "turned")
-    assertEquals(20, turned.width)
-    assertWhite(turned.getPixel(10, 5))
-    assertRed(turned.getPixel(10, 35))
   }
 }

@@ -1,6 +1,8 @@
 package com.noma4i.medialayer.ui
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.media.ExifInterface
 import android.media.MediaExtractor
 import android.media.MediaFormat
@@ -272,5 +274,36 @@ class MediaPreparerDeviceTest {
     assertEquals(MediaPrepareOutcome.Cancelled, outcome)
     assertFalse(destination.exists())
     assertEquals(emptyList<String>(), context.cacheDir.list()!!.filter { it.contains("cancelled.mp4") })
+  }
+
+  /** A JPEG has no alpha: a transparent PNG is flattened onto white, plain and turned by 90 degrees, and the opaque part stays. */
+  @Test
+  fun inv_send_65_aPreparedJpegFlattensTransparencyOntoWhite() = runBlocking<Unit> {
+    val source = File(context.cacheDir, "alpha-half.png")
+    val bitmap = Bitmap.createBitmap(40, 20, Bitmap.Config.ARGB_8888)
+    for (x in 20 until 40) for (y in 0 until 20) bitmap.setPixel(x, y, Color.RED)
+    source.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    fun white(pixel: Int) = Color.red(pixel) >= 250 && Color.green(pixel) >= 250 && Color.blue(pixel) >= 250
+    fun red(pixel: Int) = Color.red(pixel) >= 230 && Color.green(pixel) <= 40 && Color.blue(pixel) <= 40
+    try {
+      for ((attempt, rotation) in listOf(80uL to 0u, 81uL to 90u)) {
+        val destination = File(context.cacheDir, "alpha-half-$rotation.jpg")
+        val edit = PhotoEdit(null, false, null, null, false, rotation)
+        val outcome = preparer.run(MediaPrepareJob(attempt, source.path, destination.path, image(ImageFormat.JPEG, edit)), {})
+        assertTrue(outcome.toString(), outcome is MediaPrepareOutcome.Done)
+        val result = BitmapFactory.decodeFile(destination.path)
+        destination.delete()
+        if (rotation == 0u) {
+          assertTrue("transparent half is white", white(result.getPixel(5, 10)))
+          assertTrue("opaque half stays red", red(result.getPixel(35, 10)))
+        } else {
+          assertEquals(20, result.width)
+          assertTrue("turned transparent half is white", white(result.getPixel(10, 5)))
+          assertTrue("turned opaque half stays red", red(result.getPixel(10, 35)))
+        }
+      }
+    } finally {
+      source.delete()
+    }
   }
 }
