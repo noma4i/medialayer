@@ -34,6 +34,28 @@ private struct RetryCell: View {
   }
 }
 
+private final class DrawnStates: @unchecked Sendable {
+  private let lock = NSLock()
+  private var items: [MediaState] = []
+  var all: [MediaState] { lock.withLock { items } }
+  func add(_ state: MediaState) { lock.withLock { items.append(state) } }
+}
+
+private struct HashedCell: View {
+  let hash: String?
+  let context: MediaContext
+  let drawn: DrawnStates
+
+  var body: some View {
+    MediaImage(MediaSourceValue(url: "file:///cache/hashed.png", kind: .image, blurHash: hash)) { state in
+      let _ = drawn.add(state)
+      Color.clear
+    }
+    .environment(\.mediaContext, context)
+    .frame(width: 50, height: 50)
+  }
+}
+
 @MainActor
 private func until(_ condition: String, timeout: Double = 5, _ holds: () -> Bool) async {
   let end = Date().addingTimeInterval(timeout)
@@ -69,6 +91,29 @@ extension GlobalMedia {
       await until("the second load is ready") { places.recorded.contains("state ready") }
 
       #expect(places.fetchedURLs.count == 2)
+    }
+
+    @Test
+    func inv_placeholder_anImageShownKeepsItWhenItsBlurHashArrivesForTheSameUrl() async {
+      let places = RecordingPlaces()
+      ImageMemory.install(ImageCache(), on: places)
+      places.imageResult = .success(pngData(side: 8))
+      let context = MediaContext(places: places)
+      let drawn = DrawnStates()
+      let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+      let host = UIHostingController(rootView: HashedCell(hash: nil, context: context, drawn: drawn))
+      window.rootViewController = host
+      window.isHidden = false
+      defer { window.isHidden = true; window.rootViewController = nil }
+
+      await until("the image is shown") { drawn.all.last == .ready }
+      let before = drawn.all.count
+      host.rootView = HashedCell(hash: "00TI:j", context: context, drawn: drawn)
+      await until("the new source is drawn") { drawn.all.count > before }
+      for _ in 0..<10 { RunLoop.main.run(until: Date().addingTimeInterval(0.02)); await Task.yield() }
+
+      #expect(drawn.all[before...].allSatisfy { $0 == .ready })
+      #expect(places.fetchedURLs.count == 1)
     }
 
     @Test
