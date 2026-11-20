@@ -4,22 +4,36 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use super::{media_prepare_descriptor, BitrateStep, CannotDecode, CropFractions, ImageFormat, MediaPrepareIntent, PhotoEdit, VideoLimits};
-use crate::api::MediaError;
 use crate::ffi::PixelSize;
 
-fn refuse(detail: String) -> MediaError {
-    MediaError::InvalidSpec { detail: format!("prepare import: {detail}") }
+type Row = HashMap<String, Option<String>>;
+
+/// The `sync_upload_prepare` row of a saved transfer and the rows of its `sync_upload_prepare_step` table, every value as canonical text and `None` as SQL NULL.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct SavedPreparation {
+    pub columns: HashMap<String, Option<String>>,
+    pub children: Vec<HashMap<String, Option<String>>>,
 }
 
-fn text<'a>(columns: &'a HashMap<String, String>, name: &str) -> Result<&'a str, MediaError> {
-    columns.get(name).map(String::as_str).ok_or_else(|| refuse(format!("the column {name} is missing")))
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum PrepareImportOutcome {
+    Done { descriptor: Vec<u8> },
+    Failed { message: String },
 }
 
-fn value<T: FromStr>(columns: &HashMap<String, String>, name: &str) -> Result<T, MediaError> {
+fn refuse(detail: String) -> String {
+    format!("prepare import: {detail}")
+}
+
+fn text<'a>(columns: &'a Row, name: &str) -> Result<&'a str, String> {
+    columns.get(name).and_then(Option::as_deref).ok_or_else(|| refuse(format!("the column {name} is missing or NULL")))
+}
+
+fn value<T: FromStr>(columns: &Row, name: &str) -> Result<T, String> {
     text(columns, name)?.trim().parse().map_err(|_| refuse(format!("the column {name} has a value that cannot be read")))
 }
 
-fn flag(columns: &HashMap<String, String>, name: &str) -> Result<bool, MediaError> {
+fn flag(columns: &Row, name: &str) -> Result<bool, String> {
     match text(columns, name)?.trim() {
         "0" | "false" => Ok(false),
         "1" | "true" => Ok(true),
@@ -27,34 +41,25 @@ fn flag(columns: &HashMap<String, String>, name: &str) -> Result<bool, MediaErro
     }
 }
 
-/// A column the old row leaves empty is absent from the map or holds an empty text.
-fn optional<T: FromStr>(columns: &HashMap<String, String>, name: &str) -> Result<Option<T>, MediaError> {
-    columns.get(name).filter(|text| !text.is_empty()).map(|_| value(columns, name)).transpose()
+/// A column the old row leaves NULL.
+fn optional<T: FromStr>(columns: &Row, name: &str) -> Result<Option<T>, String> {
+    columns.get(name).and_then(Option::as_ref).map(|_| value(columns, name)).transpose()
 }
 
-fn size(columns: &HashMap<String, String>, width: &str, height: &str) -> Result<Option<PixelSize>, MediaError> {
+fn size(columns: &Row, width: &str, height: &str) -> Result<Option<PixelSize>, String> {
     Ok(optional::<u32>(columns, width)?.map(|width_value| value(columns, height).map(|height| PixelSize { width: width_value, height })).transpose()?)
 }
 
-fn corridors(columns: &HashMap<String, String>) -> Result<Vec<BitrateStep>, MediaError> {
-    let Some(text) = columns.get("corridors").filter(|text| !text.is_empty()) else { return Ok(Vec::new()) };
-    text.split(';')
-        .map(|step| {
-            let parts = step.split(',').map(|part| part.trim().parse::<u32>().ok()).collect::<Option<Vec<_>>>();
-            match parts.as_deref() {
-                Some(&[from_long_side, min_bps, max_bps]) => Ok(BitrateStep { from_long_side, min_bps, max_bps }),
-                _ => Err(refuse("the corridors are not `from,min,max` steps divided by `;`".to_string())),
-            }
-        })
-        .collect()
+fn corridors(children: &[Row]) -> Result<Vec<BitrateStep>, String> {
+    children.iter().map(|row| Ok(BitrateStep { from_long_side: value(row, "from_long_side")?, min_bps: value(row, "min_bps")?, max_bps: value(row, "max_bps")? })).collect()
 }
 
-fn video_intent(columns: &HashMap<String, String>) -> Result<MediaPrepareIntent, MediaError> {
+fn video_intent(columns: &Row, children: &[Row]) -> Result<MediaPrepareIntent, String> {
     let limits = match optional::<u32>(columns, "max_long_side")? {
         None => None,
         Some(max_long_side) => Some(VideoLimits {
             max_long_side,
-            corridors: corridors(columns)?,
+            corridors: corridors(children)?,
             min_frame_rate: value(columns, "min_frame_rate")?,
             max_frame_rate: value(columns, "max_frame_rate")?,
             source_bitrate_cap_percent: value(columns, "source_bitrate_cap_percent")?,
@@ -72,7 +77,7 @@ fn video_intent(columns: &HashMap<String, String>) -> Result<MediaPrepareIntent,
     Ok(MediaPrepareIntent::Video { limits, mirror: flag(columns, "mirror")?, on_cannot_decode })
 }
 
-fn image_intent(columns: &HashMap<String, String>) -> Result<MediaPrepareIntent, MediaError> {
+fn image_intent(columns: &Row) -> Result<MediaPrepareIntent, String> {
     let crop = match optional::<f64>(columns, "crop_x")? {
         None => None,
         Some(x) => Some(CropFractions { x, y: value(columns, "crop_y")?, width: value(columns, "crop_width")?, height: value(columns, "crop_height")? }),
@@ -93,35 +98,53 @@ fn image_intent(columns: &HashMap<String, String>) -> Result<MediaPrepareIntent,
     Ok(MediaPrepareIntent::Image { edit, quality: optional(columns, "quality")?, format })
 }
 
-/// The descriptor of a pending transfer saved by DBlayer 6.43, from the values of its `sync_upload_prepare` row read as text
-/// (flags are `0`/`1`, an empty column is absent or empty text) and the `corridors` of its `sync_upload_prepare_step` rows as `from_long_side,min_bps,max_bps` steps divided by `;`.
-/// A missing column or a value that cannot be read is an error. It exists for the D-32 upgrade of saved transfers only.
+/// The descriptor of a pending transfer saved by DBlayer 6.43, from its typed rows: a missing or NULL required column, an unknown value or a broken step is `Failed`.
+/// It exists for the D-32 upgrade of saved transfers only.
 #[uniffi::export]
-pub fn media_prepare_descriptor_import(columns: HashMap<String, String>) -> Result<Vec<u8>, MediaError> {
-    let intent = match text(&columns, "kind")? {
-        "video" => video_intent(&columns)?,
-        "image" => image_intent(&columns)?,
-        other => return Err(refuse(format!("kind `{other}` is unknown"))),
-    };
-    Ok(media_prepare_descriptor(intent))
+pub fn media_prepare_import_descriptor(saved: SavedPreparation) -> PrepareImportOutcome {
+    let columns = &saved.columns;
+    let intent = text(columns, "kind").and_then(|kind| match kind {
+        "video" => video_intent(columns, &saved.children),
+        "image" => image_intent(columns),
+        other => Err(refuse(format!("kind `{other}` is unknown"))),
+    });
+    match intent {
+        Ok(intent) => PrepareImportOutcome::Done { descriptor: media_prepare_descriptor(intent) },
+        Err(message) => PrepareImportOutcome::Failed { message },
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn columns(pairs: &[(&str, &str)]) -> HashMap<String, String> {
-        pairs.iter().map(|(name, value)| (name.to_string(), value.to_string())).collect()
+    fn row(pairs: &[(&str, Option<&str>)]) -> Row {
+        pairs.iter().map(|(name, value)| (name.to_string(), value.map(str::to_string))).collect()
+    }
+
+    fn saved(columns: &[(&str, Option<&str>)], children: &[Row]) -> SavedPreparation {
+        SavedPreparation { columns: row(columns), children: children.to_vec() }
+    }
+
+    fn done(intent: MediaPrepareIntent) -> PrepareImportOutcome {
+        PrepareImportOutcome::Done { descriptor: media_prepare_descriptor(intent) }
+    }
+
+    fn step(from: &str, min: &str, max: &str) -> Row {
+        row(&[("from_long_side", Some(from)), ("min_bps", Some(min)), ("max_bps", Some(max))])
     }
 
     #[test]
     fn inv_send_61_a_saved_video_row_imports_to_the_descriptor_of_the_same_intent_with_and_without_limits() {
-        let none = columns(&[("kind", "video"), ("mirror", "1"), ("on_cannot_decode", "upload_source")]);
-        assert_eq!(media_prepare_descriptor_import(none), Ok(media_prepare_descriptor(MediaPrepareIntent::Video { limits: None, mirror: true, on_cannot_decode: CannotDecode::UploadSource })));
-        let with = columns(&[
-            ("kind", "video"), ("mirror", "0"), ("on_cannot_decode", "fail"), ("max_long_side", "1280"), ("min_frame_rate", "24"), ("max_frame_rate", "30"), ("source_bitrate_cap_percent", "80"),
-            ("audio_bitrate", "96000"), ("audio_channels", "2"), ("audio_sample_rate", "44100"), ("recode_above_bytes", "7000000"), ("corridors", "0,500000,900000;720,900000,2000000"),
-        ]);
+        let none = saved(&[("kind", Some("video")), ("mirror", Some("1")), ("on_cannot_decode", Some("upload_source")), ("max_long_side", None), ("recode_above_bytes", None)], &[]);
+        assert_eq!(media_prepare_import_descriptor(none), done(MediaPrepareIntent::Video { limits: None, mirror: true, on_cannot_decode: CannotDecode::UploadSource }));
+        let with = saved(
+            &[
+                ("kind", Some("video")), ("mirror", Some("0")), ("on_cannot_decode", Some("fail")), ("max_long_side", Some("1280")), ("min_frame_rate", Some("24")), ("max_frame_rate", Some("30")),
+                ("source_bitrate_cap_percent", Some("80")), ("audio_bitrate", Some("96000")), ("audio_channels", Some("2")), ("audio_sample_rate", Some("44100")), ("recode_above_bytes", Some("7000000")),
+            ],
+            &[step("0", "500000", "900000"), step("720", "900000", "2000000")],
+        );
         let limits = VideoLimits {
             max_long_side: 1280,
             corridors: vec![BitrateStep { from_long_side: 0, min_bps: 500_000, max_bps: 900_000 }, BitrateStep { from_long_side: 720, min_bps: 900_000, max_bps: 2_000_000 }],
@@ -133,15 +156,18 @@ mod tests {
             audio_sample_rate: 44_100,
             recode_above_bytes: Some(7_000_000),
         };
-        assert_eq!(media_prepare_descriptor_import(with), Ok(media_prepare_descriptor(MediaPrepareIntent::Video { limits: Some(limits), mirror: false, on_cannot_decode: CannotDecode::Fail })));
+        assert_eq!(media_prepare_import_descriptor(with.clone()), done(MediaPrepareIntent::Video { limits: Some(limits.clone()), mirror: false, on_cannot_decode: CannotDecode::Fail }));
+        let mut null_threshold = with;
+        null_threshold.columns.insert("recode_above_bytes".to_string(), None);
+        assert_eq!(media_prepare_import_descriptor(null_threshold), done(MediaPrepareIntent::Video { limits: Some(VideoLimits { recode_above_bytes: None, ..limits }), mirror: false, on_cannot_decode: CannotDecode::Fail }));
     }
 
     #[test]
     fn inv_send_62_a_saved_image_row_imports_to_the_descriptor_of_the_same_intent() {
-        let row = columns(&[
-            ("kind", "image"), ("mirror", "1"), ("max_width", "800"), ("max_height", "600"), ("enlarge", "1"), ("crop_x", "0.1"), ("crop_y", "0.2"), ("crop_width", "0.5"), ("crop_height", "0.25"),
-            ("output_width", "64"), ("output_height", "64"), ("rotation_degrees", "270"), ("quality", "0.75"), ("format", "png"),
-        ]);
+        let columns = [
+            ("kind", Some("image")), ("mirror", Some("1")), ("max_width", Some("800")), ("max_height", Some("600")), ("enlarge", Some("1")), ("crop_x", Some("0.1")), ("crop_y", Some("0.2")),
+            ("crop_width", Some("0.5")), ("crop_height", Some("0.25")), ("output_width", Some("64")), ("output_height", Some("64")), ("rotation_degrees", Some("270")), ("quality", Some("0.75")), ("format", Some("png")),
+        ];
         let edit = PhotoEdit {
             max_size: Some(PixelSize { width: 800, height: 600 }),
             enlarge: true,
@@ -150,26 +176,33 @@ mod tests {
             mirror: true,
             rotation_degrees: 270,
         };
-        assert_eq!(media_prepare_descriptor_import(row), Ok(media_prepare_descriptor(MediaPrepareIntent::Image { edit, quality: Some(0.75), format: ImageFormat::Png })));
+        assert_eq!(media_prepare_import_descriptor(saved(&columns, &[])), done(MediaPrepareIntent::Image { edit, quality: Some(0.75), format: ImageFormat::Png }));
+        let nulls = saved(&[("kind", Some("image")), ("mirror", Some("0")), ("enlarge", Some("0")), ("rotation_degrees", Some("0")), ("format", Some("jpeg")), ("crop_x", None), ("quality", None), ("max_width", None)], &[]);
+        let plain = PhotoEdit { max_size: None, enlarge: false, crop: None, output_size: None, mirror: false, rotation_degrees: 0 };
+        assert_eq!(media_prepare_import_descriptor(nulls), done(MediaPrepareIntent::Image { edit: plain, quality: None, format: ImageFormat::Jpeg }));
     }
 
     #[test]
-    fn inv_send_63_a_missing_or_unreadable_column_fails_the_import() {
-        let video = columns(&[("kind", "video"), ("mirror", "0"), ("on_cannot_decode", "fail")]);
+    fn inv_send_63_a_missing_null_or_unreadable_column_fails_the_import() {
+        let failed = |saved| matches!(media_prepare_import_descriptor(saved), PrepareImportOutcome::Failed { .. });
+        let video = [("kind", Some("video")), ("mirror", Some("0")), ("on_cannot_decode", Some("fail"))];
+        assert!(!failed(saved(&video, &[])));
         for name in ["kind", "mirror", "on_cannot_decode"] {
-            let mut row = video.clone();
-            row.remove(name);
-            assert!(media_prepare_descriptor_import(row).is_err(), "{name}");
+            let mut missing = saved(&video, &[]);
+            missing.columns.remove(name);
+            assert!(failed(missing), "{name}");
+            let mut null = saved(&video, &[]);
+            null.columns.insert(name.to_string(), None);
+            assert!(failed(null), "{name} NULL");
         }
-        let mut limited = video.clone();
-        limited.insert("max_long_side".to_string(), "1280".to_string());
-        assert!(media_prepare_descriptor_import(limited).is_err());
-        let image = columns(&[("kind", "image"), ("mirror", "0"), ("enlarge", "0"), ("rotation_degrees", "0"), ("format", "jpeg")]);
-        assert!(media_prepare_descriptor_import(image.clone()).is_ok());
-        let mut broken = image.clone();
-        broken.insert("format".to_string(), "gif".to_string());
-        assert!(media_prepare_descriptor_import(broken).is_err());
-        assert!(media_prepare_descriptor_import(columns(&[("kind", "audio")])).is_err());
-        assert!(media_prepare_descriptor_import(HashMap::new()).is_err());
+        assert!(failed(saved(&[("kind", Some("video")), ("mirror", Some("0")), ("on_cannot_decode", Some("fail")), ("max_long_side", Some("1280"))], &[])));
+        let broken_step = saved(&video, &[row(&[("from_long_side", Some("0")), ("min_bps", None), ("max_bps", Some("1"))])]);
+        let mut limited = broken_step;
+        limited.columns.insert("max_long_side".to_string(), Some("1280".to_string()));
+        assert!(failed(limited));
+        let image = [("kind", Some("image")), ("mirror", Some("0")), ("enlarge", Some("0")), ("rotation_degrees", Some("0")), ("format", Some("gif"))];
+        assert!(failed(saved(&image, &[])));
+        assert!(failed(saved(&[("kind", Some("audio"))], &[])));
+        assert!(failed(saved(&[], &[])));
     }
 }
