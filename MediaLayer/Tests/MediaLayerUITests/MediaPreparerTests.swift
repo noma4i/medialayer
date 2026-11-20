@@ -447,7 +447,7 @@ struct MediaPreparerMatrixTests {
 
   // A mirrored front take is re-encoded with the mirror in the pixels and an identity matrix (owner 2026-11-20: only a mirrored take is re-encoded).
   @Test(.timeLimit(.minutes(2)))
-  func aMirroredTakeIsWrittenWithIdentityMatrixAndMirroredPixels() async throws {
+  func inv_capture_91_aMirroredTakeIsWrittenWithIdentityMatrixAndMirroredPixels() async throws {
     let directory = try scratch()
     defer { try? FileManager.default.removeItem(at: directory) }
     let source = directory.appending(path: "source.mp4")
