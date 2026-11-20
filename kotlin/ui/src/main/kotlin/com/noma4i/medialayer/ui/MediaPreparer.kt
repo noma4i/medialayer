@@ -41,20 +41,12 @@ class MediaPreparer internal constructor(
 
   private val running = ConcurrentHashMap<ULong, Attempt>()
 
-  /** The file facts of [path]. With a [descriptor] they are the planned result, without one the file as it is, found by [mime] or by reading it. */
+  /** The file facts of [path]. With a [descriptor] they are the planned result, without one the file as it is. [mime] tells a video from an image, without it the file is read to find out. */
   suspend fun probe(path: String, descriptor: ByteArray?, mime: String?): MediaProbeOutcome = withContext(prepareDispatcher) {
     try {
       val file = File(path)
-      if (!file.isFile || !file.canRead()) return@withContext MediaProbeOutcome.Failed("$path is not a readable file")
-      val kind = if (descriptor != null) kindOf(descriptor) else kindOfMime(mime)
-      val probe = when (kind) {
-        Kind.VIDEO -> readVideo(file)
-        Kind.IMAGE -> probeOfImage(file) ?: PrepareProbe.Failed("$path is not an image")
-        null -> if (descriptor != null) PrepareProbe.Failed("the prepare descriptor has an unknown version or is broken") else probeUnknown(file)
-      }
-      if (probe is PrepareProbe.Failed) return@withContext MediaProbeOutcome.Failed(probe.message)
-      val facts = mediaPrepareFacts(descriptor, probe) ?: return@withContext MediaProbeOutcome.Failed("the file does not fit the prepare descriptor")
-      MediaProbeOutcome.File(facts.width, facts.height, facts.mime)
+      if (!file.isFile || !file.canRead()) MediaProbeOutcome.Failed("$path is not a readable file")
+      else mediaPrepareFacts(descriptor, probeOf(file, mime))
     } catch (error: CancellationException) {
       throw error
     } catch (error: Exception) {
@@ -91,22 +83,13 @@ class MediaPreparer internal constructor(
     }
   }
 
-  private enum class Kind { VIDEO, IMAGE }
-
-  // The descriptor starts with the version 1 and the kind (0 video, 1 image), see core/src/send_prep/descriptor.rs.
-  private fun kindOf(descriptor: ByteArray): Kind? =
-    if (descriptor.size < 2 || descriptor[0] != 1.toByte()) null else when (descriptor[1].toInt()) { 0 -> Kind.VIDEO; 1 -> Kind.IMAGE; else -> null }
-
-  private fun kindOfMime(mime: String?): Kind? = when {
-    mime == null -> null
-    mime.startsWith("video/") -> Kind.VIDEO
-    mime.startsWith("image/") -> Kind.IMAGE
-    else -> null
+  private fun probeOf(file: File, mime: String?): PrepareProbe = when {
+    mime?.startsWith("video/") == true -> readVideo(file)
+    mime?.startsWith("image/") == true -> probeOfImage(file) ?: PrepareProbe.Failed("${file.path} is not an image")
+    else -> probeOfImage(file) ?: readVideo(file)
   }
 
   private fun readVideo(file: File): PrepareProbe = probeOfVideo(videoFacts(file), metadataKeys(context, file), file.length())
-
-  private fun probeUnknown(file: File): PrepareProbe = probeOfImage(file) ?: readVideo(file)
 
   private suspend fun write(job: MediaPrepareJob, progress: (Double) -> Unit): MediaPrepareOutcome {
     val source = File(job.source)
@@ -115,15 +98,16 @@ class MediaPreparer internal constructor(
     var outcome: MediaPrepareOutcome = MediaPrepareOutcome.Failed("the preparation did not finish")
     try {
       if (!source.isFile || !source.canRead()) return MediaPrepareOutcome.Failed("${job.source} is not a readable file").also { outcome = it }
-      val kind = kindOf(job.descriptor)
-      val probe = when (kind) {
-        Kind.VIDEO -> readVideo(source)
-        Kind.IMAGE -> probeOfImage(source) ?: PrepareProbe.Failed("${job.source} is not an image")
-        null -> PrepareProbe.Failed("the prepare descriptor has an unknown version or is broken")
+      val probe = try {
+        probeOf(source, null)
+      } catch (error: CancellationException) {
+        throw error
+      } catch (error: Exception) {
+        PrepareProbe.Failed(error.message ?: error.javaClass.simpleName)
       }
       outcome = when (val decision = mediaPrepareDecide(job.descriptor, probe)) {
         is PrepareDecision.Refuse -> refused(decision.reason, decision.message)
-        is PrepareDecision.Pass -> pass(source, temp, destination, mimeOfPass(job.descriptor, probe), progress)
+        is PrepareDecision.Pass -> unchanged(job.descriptor, probe)
         is PrepareDecision.Run -> when (val plan = decision.plan) {
           is PreparePlan.Video -> writeVideo(job, source, temp, destination, plan, progress)
           is PreparePlan.Image -> writeImage(source, temp, destination, plan, progress)
@@ -142,21 +126,21 @@ class MediaPreparer internal constructor(
   private fun refused(reason: MediaPrepareFailure, message: String): MediaPrepareOutcome =
     if (reason == MediaPrepareFailure.CANNOT_DECODE) MediaPrepareOutcome.CannotDecode(message) else MediaPrepareOutcome.Failed(message)
 
-  private fun mimeOfPass(descriptor: ByteArray, probe: PrepareProbe): String? = mediaPrepareFacts(descriptor, probe)?.mime
-
-  private suspend fun pass(source: File, temp: File, destination: File, mime: String?, progress: (Double) -> Unit): MediaPrepareOutcome {
-    source.copyTo(temp, overwrite = true)
-    currentCoroutineContext().ensureActive()
-    return finish(temp, destination, mime, progress)
-  }
+  /** The source goes as it is: nothing is copied and nothing is written. */
+  private fun unchanged(descriptor: ByteArray, probe: PrepareProbe): MediaPrepareOutcome =
+    MediaPrepareOutcome.Unchanged(null, (mediaPrepareFacts(descriptor, probe) as? MediaProbeOutcome.File)?.mime)
 
   private suspend fun writeVideo(job: MediaPrepareJob, source: File, temp: File, destination: File, plan: PreparePlan.Video, progress: (Double) -> Unit): MediaPrepareOutcome {
     val facts = videoFacts(source)
     val encode = plan.plan.reencode
     if (encode) {
+      // The core owns the policy of a source the device cannot decode: it answers Pass or Refuse(CannotDecode) to a failed probe.
       decoderRefusal(facts, decoderList(facts.mime))?.let {
-        // The app may ask for the source as it is when the device cannot decode it: the last byte of a video descriptor is that policy.
-        return if (job.descriptor.last() == 1.toByte()) pass(source, temp, destination, "video/mp4", progress) else MediaPrepareOutcome.CannotDecode(it)
+        return when (val decision = mediaPrepareDecide(job.descriptor, PrepareProbe.Failed(it))) {
+          is PrepareDecision.Pass -> MediaPrepareOutcome.Unchanged(null, "video/mp4")
+          is PrepareDecision.Refuse -> refused(decision.reason, decision.message)
+          is PrepareDecision.Run -> MediaPrepareOutcome.Failed(it)
+        }
       }
     }
     exporter(VideoExport(context, source, temp, transformSetup(plan, facts, encode)) { progress(it) })

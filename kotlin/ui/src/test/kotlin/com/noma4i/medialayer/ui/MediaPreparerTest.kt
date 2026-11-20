@@ -13,7 +13,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -36,14 +35,14 @@ class MediaPreparerTest {
   private fun preparer(exporter: suspend (VideoExport) -> Unit = { error("no export expected") }) =
     MediaPreparer(context, { fits }, { _, _ -> emptyList() }, { emptyList() }, exporter)
 
-  /** A source that already fits and carries no tag is copied as it is. */
+  /** A source that already fits and carries no tag is left alone: the outcome is Unchanged and nothing is written. */
   @Test
-  fun passCopiesTheFile() = runBlocking {
+  fun passReturnsUnchangedAndWritesNothing() = runBlocking {
     val outcome = preparer().run(job(descriptor(false)), {})
 
-    assertTrue(outcome is MediaPrepareOutcome.Done)
-    assertArrayEquals(bytes, File(folder, "out.mp4").readBytes())
-    assertEquals(setOf("clip.mp4", "out.mp4"), folder.list()!!.toSet())
+    assertTrue(outcome is MediaPrepareOutcome.Unchanged)
+    assertFalse(File(folder, "out.mp4").exists())
+    assertEquals(setOf("clip.mp4"), folder.list()!!.toSet())
   }
 
   /** `cancel` stops the export, the run returns Cancelled and neither the temp file nor the destination stays. */
