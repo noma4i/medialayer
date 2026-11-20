@@ -196,13 +196,14 @@ class PrepareMediaTest {
     val entries = mutableSetOf<androidx.media3.common.Metadata.Entry>(
       Mp4LocationData(37.33f, -122.03f), Mp4TimestampData(1_700_000_000L, 1_700_000_000L), MdtaMetadataEntry("com.apple.quicktime.make", byteArrayOf(1), 0, 1)
     )
-    val keys = entries.map(::metadataKeyOf)
+    val keys = entries.mapNotNull(::metadataKeyOf)
 
     dropSourceMetadata.updateMetadataEntries(entries)
 
     assertEquals(listOf("location", "creation_time", "com.apple.quicktime.make"), keys)
     assertEquals(keys, videoMetadataToStrip(keys))
-    assertTrue(entries.isEmpty())
+    assertEquals(listOf(Mp4TimestampData(0L, 0L)), entries.toList())
+    assertTrue(entries.mapNotNull(::metadataKeyOf).isEmpty())
   }
 
   @Test

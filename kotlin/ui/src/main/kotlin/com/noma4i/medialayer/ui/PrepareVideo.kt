@@ -165,9 +165,9 @@ internal fun transformSetup(plan: VideoPlan, limits: VideoLimits, facts: VideoFa
   return TransformSetup(video, audio, plan.bitrate.toInt(), limits.audioBitrate.toInt(), MimeTypes.VIDEO_H264, MimeTypes.AUDIO_AAC)
 }
 
-internal fun metadataKeyOf(entry: Metadata.Entry): String = when (entry) {
+internal fun metadataKeyOf(entry: Metadata.Entry): String? = when (entry) {
   is Mp4LocationData -> "location"
-  is Mp4TimestampData -> "creation_time"
+  is Mp4TimestampData -> "creation_time".takeIf { entry.creationTimestampSeconds != 0L }
   is MdtaMetadataEntry -> entry.key
   is Id3Frame -> entry.id
   is XmpData -> "xmp"
@@ -182,13 +182,16 @@ internal fun readMetadataKeys(context: Context, file: File): List<String> =
       val group = groups[index]
       (0 until group.length).flatMap { track ->
         val metadata = group.getFormat(track).metadata
-        (0 until (metadata?.length() ?: 0)).map { metadataKeyOf(metadata!![it]) }
+        (0 until (metadata?.length() ?: 0)).mapNotNull { metadataKeyOf(metadata!![it]) }
       }
     }
   }
 
-/** The muxer keeps no metadata entry of the source: no location, no creation time, no tag. */
-internal val dropSourceMetadata = InAppMp4Muxer.MetadataProvider { entries -> entries.clear() }
+/** The muxer keeps no metadata entry of the source: no location, no tag, and a zero (MP4 epoch) creation time instead of a real one. */
+internal val dropSourceMetadata = InAppMp4Muxer.MetadataProvider { entries ->
+  entries.clear()
+  entries.add(Mp4TimestampData(0L, 0L))
+}
 
 internal fun readVideoFacts(file: File): VideoFacts {
   val extractor = MediaExtractor()
