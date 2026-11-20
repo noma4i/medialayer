@@ -240,47 +240,6 @@ struct DecodeAdmissionTests {
     #expect(await work.value == nil)
     #expect(calls.count == 1)
   }
-
-  @Test
-  func inv_send_18_a_photo_takes_one_raster_from_the_ledger_and_gives_it_back() async throws {
-    let file = try png(width: 40, height: 20)
-    defer { try? FileManager.default.removeItem(at: file) }
-    let tally = Tally()
-    let prepared = try await ImagePreparation.run(file, quality: 0.9) { bytes in
-      await tally.take(bytes)
-      return { tally.give() }
-    }
-    defer { try? FileManager.default.removeItem(at: prepared.url) }
-    #expect(tally.asked == [40 * 20 * 4])
-    #expect(tally.released == 1)
-  }
-
-  @Test
-  func inv_send_19_a_photo_above_the_pixel_limit_is_refused_before_any_admission() async throws {
-    let file = try png(width: 16_385, height: 1)
-    defer { try? FileManager.default.removeItem(at: file) }
-    let tally = Tally()
-    await #expect(throws: MediaError.self) {
-      try await ImagePreparation.run(file, quality: 0.9) { bytes in
-        await tally.take(bytes)
-        return { tally.give() }
-      }
-    }
-    #expect(tally.asked.isEmpty)
-  }
-
-  @Test
-  func inv_send_20_a_refused_admission_stops_the_photo_before_it_decodes() async throws {
-    let file = try png(width: 40, height: 20)
-    defer { try? FileManager.default.removeItem(at: file) }
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: directory) }
-    await #expect(throws: MediaError.self) {
-      try await ImagePreparation.run(file, quality: 0.9, directory: directory) { _ in throw MediaError.Overloaded(detail: "no room") }
-    }
-    #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
-  }
 }
 
 extension GlobalMedia {

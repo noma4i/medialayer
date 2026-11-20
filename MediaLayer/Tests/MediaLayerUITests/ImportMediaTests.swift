@@ -131,5 +131,6 @@ extension GlobalMedia {
       #expect(try await attempt.value)
       #expect(Set(try FileManager.default.contentsOfDirectory(atPath: directory.path)) == Set([source.lastPathComponent, finished.url.lastPathComponent]))
       #expect(try Data(contentsOf: finished.url) == Data(contentsOf: source))
+    }
   }
 }
