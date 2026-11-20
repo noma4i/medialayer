@@ -665,9 +665,11 @@ public final class MediaCamera: @unchecked Sendable {
   private func readClip() {
     guard let url = recordingURL else { return }
     reading?.cancel()
+    let mirror = run.takeLens == .front && profile.mirrorFrontVideo
     reading = Task { [services] in
       let info: MediaInfo?
       do {
+        try await services.uprightTake(url, mirror)
         info = try await services.clipInfo(url)
       } catch {
         if !(error is CancellationError) { Media.recordNativeFailure(error, source: .camera) }

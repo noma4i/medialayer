@@ -71,6 +71,7 @@ struct CameraServices {
   var link: @Sendable () -> AudioLink?
   var clipInfo: @Sendable (URL) async throws -> MediaInfo?
   var upright: @Sendable (URL, Double) async throws -> URL
+  var uprightTake: @Sendable (URL, Bool) async throws -> Void = { _, _ in }
   var directory: URL
   var center: NotificationCenter
   var signals: SystemSignalNames
@@ -106,6 +107,7 @@ struct CameraServices {
         }
         return output
       },
+      uprightTake: { url, mirror in try await CaptureUpright.run(url, mirror: mirror) },
       directory: CaptureFiles.directory,
       center: .default,
       signals: .system,

@@ -17697,6 +17697,30 @@ fileprivate struct FfiConverterOptionTypeVideoLimits: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeVideoPlan: FfiConverterRustBuffer {
+    typealias SwiftType = VideoPlan?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeVideoPlan.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeVideoPlan.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeCameraLens: FfiConverterRustBuffer {
     typealias SwiftType = CameraLens?
 
@@ -18995,6 +19019,24 @@ public func captureStep(run: CaptureRun, event: CaptureEvent, profile: CapturePr
 })
 }
 /**
+ * What the platform read from a finished take: the stored pixel size, the turn its matrix asks for (a multiple of 90), and the bitrate and frame rate it was recorded at.
+ * The take is delivered upright with an identity matrix. `None` when the file already is (no turn, no mirror): it goes as it is.
+ * Otherwise a plan that re-encodes at the size the viewer sees (sides swapped on 90 and 270), the bitrate and frame rate of the take, and the turn to apply; `mirror` is applied by the encoder in pixels.
+ */
+public func captureUprightPlan(width: UInt32, height: UInt32, rotationDegrees: Int32, mirror: Bool, bitrate: UInt32, frameRate: Float) -> VideoPlan?  {
+    return try!  FfiConverterOptionTypeVideoPlan.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_func_capture_upright_plan(
+        FfiConverterUInt32.lower(width),
+        FfiConverterUInt32.lower(height),
+        FfiConverterInt32.lower(rotationDegrees),
+        FfiConverterBool.lower(mirror),
+        FfiConverterUInt32.lower(bitrate),
+        FfiConverterFloat.lower(frameRate),uniffiCallStatus
+    )
+})
+}
+/**
  * The rectangle with one handle moved by `dx` and `dy`. The opposite edge or corner stays. A free crop moves each edge alone.
  * A crop with proportions answers only corners and keeps its proportions, a side handle leaves the rectangle as it is.
  */
@@ -19657,6 +19699,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_capture_step() != 52687) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_medialayer_checksum_func_capture_upright_plan() != 61655) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_crop_drag() != 58593) {

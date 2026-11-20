@@ -110,10 +110,10 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     videoPort = inputs.first?.ports(for: .video, sourceDeviceType: device.deviceType, sourceDevicePosition: device.position).first
     previewMirrored = lens == .front && profile.mirrorFrontVideo
     previews.keys.forEach(linkPreview)
-    // The movie connection is set once per bind: a take only starts writing, the running session is not touched at its start.
+    // The movie file never carries a mirror: the stop path mirrors the pixels. The connection is set once per bind: a take only starts writing, the running session is not touched at its start.
     if let connection = movie?.connection(with: .video), connection.isVideoMirroringSupported {
       connection.automaticallyAdjustsVideoMirroring = false
-      connection.isVideoMirrored = lens == .front && profile.mirrorFrontVideo
+      connection.isVideoMirrored = false
     }
     session.commitConfiguration()
     camera = device

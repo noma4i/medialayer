@@ -111,9 +111,10 @@ final class ProbeTests: XCTestCase {
     try? FileManager.default.removeItem(at: kept)
     try FileManager.default.copyItem(at: clip.url, to: kept)
     let facts = try await facts(of: kept)
-    probe(name, [("stopToClipMs", stopToClipMs), ("size", "\(Int(facts.size.width))x\(Int(facts.size.height))"), ("identity", facts.identity), ("audioTracks", facts.audioTracks),
+    probe(name, [("stopToClipMs", stopToClipMs), ("uprightMs", stopToClipMs), ("size", "\(Int(facts.size.width))x\(Int(facts.size.height))"), ("identity", facts.identity), ("audioTracks", facts.audioTracks),
                  ("videoS", String(format: "%.2f", facts.videoSeconds)), ("audioS", String(format: "%.2f", facts.audioSeconds)), ("clipMs", clip.durationMs)])
     try await close(camera)
+    XCTAssertTrue(facts.identity, "the delivered file has an identity matrix")
     XCTAssertLessThanOrEqual(stopToClipMs, 1500)
     XCTAssertGreaterThan(facts.size.height, facts.size.width)
     XCTAssertEqual(facts.audioTracks, 1)
@@ -135,6 +136,11 @@ final class ProbeTests: XCTestCase {
   @MainActor func test4_takeBack5s() async throws { try await take("take_back_5s", profile: .moment, lens: .back, seconds: 5) }
   @MainActor func test5_takeFront5sAfterMoment() async throws { try await take("take_front_5s_after_moment", profile: .circle, lens: .front, seconds: 5) }
   @MainActor func test6_takeMomentFront5s() async throws { try await take("take_moment_front_5s", profile: .moment, lens: .front, seconds: 5) }
+  @MainActor func test7_takeFrontMirrored5s() async throws {
+    var profile = CaptureProfile.circle
+    profile.mirrorFrontVideo = true
+    try await take("take_front_mirrored_5s", profile: profile, lens: .front, seconds: 5)
+  }
   @MainActor func testA_takeFront15s() async throws { try await take("take_front_15s", profile: .circle, lens: .front, seconds: 15) }
 
   @MainActor func testB_takeFront60s() async throws { try await take("take_front_60s", profile: .circle, lens: .front, seconds: 60) }

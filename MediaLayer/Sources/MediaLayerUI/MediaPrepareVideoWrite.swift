@@ -21,6 +21,7 @@ struct PrepareEncoding {
   let plan: VideoPlan
   let audio: PrepareAudio
   let mirror: Bool
+  var hevc = false
 }
 
 final class PrepareRunning: @unchecked Sendable {
@@ -60,7 +61,7 @@ final class PrepareRunning: @unchecked Sendable {
 
 enum PrepareVideoWrite {
   static func run(
-    source: URL, output: URL, plan: VideoPlan, audio: PrepareAudio, mirror: Bool, entry: PrepareRunning, report: @escaping @Sendable (Double) -> Void
+    source: URL, output: URL, plan: VideoPlan, audio: PrepareAudio, mirror: Bool, hevc: Bool = false, entry: PrepareRunning, report: @escaping @Sendable (Double) -> Void
   ) async throws {
     let asset = PrepareContainer.asset(source)
     guard let track = try await asset.loadTracks(withMediaType: .video).first else {
@@ -73,7 +74,7 @@ enum PrepareVideoWrite {
     try Task.checkCancellation()
     let encode = try PrepareEncodeJob(
       asset: asset, track: track, audioTrack: audioTrack, naturalSize: size, transform: transform, duration: duration,
-      encoding: plan.reencode ? PrepareEncoding(plan: plan, audio: audio, mirror: mirror) : nil,
+      encoding: plan.reencode ? PrepareEncoding(plan: plan, audio: audio, mirror: mirror, hevc: hevc) : nil,
       formats: (formats.first, audioFormats.first), output: output, report: report
     )
     entry.attach(encode)
@@ -114,7 +115,7 @@ final class PrepareEncodeJob: @unchecked Sendable {
       let composed = AVAssetReaderVideoCompositionOutput(videoTracks: [track], videoSettings: nil)
       composed.videoComposition = Self.composition(track: track, naturalSize: naturalSize, transform: transform, duration: duration, encoding: encoding)
       videoOutput = composed
-      videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: Self.videoSettings(encoding.plan))
+      videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: Self.videoSettings(encoding.plan, hevc: encoding.hevc))
       audioOutput = audioTrack.map { AVAssetReaderAudioMixOutput(audioTracks: [$0], audioSettings: Self.decodedAudio(encoding.audio)) }
       audioInput = audioTrack == nil ? nil : AVAssetWriterInput(mediaType: .audio, outputSettings: Self.encodedAudio(encoding.audio))
     } else {
@@ -221,19 +222,18 @@ final class PrepareEncodeJob: @unchecked Sendable {
     ]
   }
 
-  private static func videoSettings(_ plan: VideoPlan) -> [String: Any] {
-    [
-      AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: Int(plan.width), AVVideoHeightKey: Int(plan.height),
+  private static func videoSettings(_ plan: VideoPlan, hevc: Bool) -> [String: Any] {
+    var compression: [String: Any] = [AVVideoAverageBitRateKey: Int(plan.bitrate), AVVideoExpectedSourceFrameRateKey: Int(plan.frameRate)]
+    if !hevc { compression[AVVideoProfileLevelKey] = AVVideoProfileLevelH264HighAutoLevel }
+    return [
+      AVVideoCodecKey: hevc ? AVVideoCodecType.hevc : AVVideoCodecType.h264, AVVideoWidthKey: Int(plan.width), AVVideoHeightKey: Int(plan.height),
       AVVideoScalingModeKey: AVVideoScalingModeResizeAspect,
       AVVideoColorPropertiesKey: [
         AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
         AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
         AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2
       ],
-      AVVideoCompressionPropertiesKey: [
-        AVVideoAverageBitRateKey: Int(plan.bitrate), AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
-        AVVideoExpectedSourceFrameRateKey: Int(plan.frameRate)
-      ]
+      AVVideoCompressionPropertiesKey: compression
     ]
   }
 
