@@ -48,6 +48,16 @@ android {
 
   testOptions {
     unitTests.all {
+      it.addTestListener(object : TestListener {
+        override fun beforeSuite(suite: TestDescriptor) = Unit
+        override fun afterSuite(suite: TestDescriptor, result: TestResult) = Unit
+        override fun beforeTest(test: TestDescriptor) {
+          println("ORDER ${System.currentTimeMillis()} START 0 ${test.className}.${test.name}")
+        }
+        override fun afterTest(test: TestDescriptor, result: TestResult) {
+          println("ORDER ${System.currentTimeMillis()} ${result.resultType} ${result.endTime - result.startTime} ${test.className}.${test.name}")
+        }
+      })
       it.doFirst {
         val hostLibrary = file("host-library.path")
         if (!hostLibrary.exists()) throw GradleException("host-library.path is missing: run scripts/build_kotlin.sh --host")

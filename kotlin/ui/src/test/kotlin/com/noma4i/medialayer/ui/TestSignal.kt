@@ -40,7 +40,11 @@ internal object TestSignal {
         }
       }
     }
-    if (reached != true) throw AssertionError("never became true within $timeoutMs ms: $what")
+    if (reached != true) {
+      val error = AssertionError("never became true within $timeoutMs ms: $what")
+      dumpAllThreadsOnce()?.let { error.addSuppressed(IllegalStateException(it)) }
+      throw error
+    }
   }
 }
 

@@ -4,13 +4,17 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 private val recordedComposeTimeout = AtomicBoolean()
 
+/** Every live thread with its state and up to 40 frames, once per JVM; also printed to System.err. Null after the first call. */
+internal fun dumpAllThreadsOnce(): String? {
+  if (!recordedComposeTimeout.compareAndSet(false, true)) return null
+  val dump = Thread.getAllStackTraces().entries
+    .joinToString("\n") { (thread, stack) -> "${thread.name} ${thread.state}\n${stack.take(40).joinToString("\n")}" }
+  System.err.println("THREAD DUMP ON TEST TIMEOUT\n$dump")
+  return dump
+}
+
 internal fun reportComposeTimeout(error: Throwable, state: String): Nothing {
   error.addSuppressed(IllegalStateException(state))
-  if (recordedComposeTimeout.compareAndSet(false, true)) {
-    val threads = Thread.getAllStackTraces().entries
-      .filter { (thread, _) -> thread.name.contains("main", ignoreCase = true) || thread.name.contains("DefaultDispatcher") || thread.name.contains("Ffi") }
-      .joinToString("\n") { (thread, stack) -> "${thread.name} ${thread.state}\n${stack.take(20).joinToString("\n")}" }
-    error.addSuppressed(IllegalStateException(threads))
-  }
+  dumpAllThreadsOnce()?.let { error.addSuppressed(IllegalStateException(it)) }
   throw error
 }
