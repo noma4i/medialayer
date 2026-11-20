@@ -131,7 +131,12 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
   }
   // The shown image belongs to the load identity: a blurHash that only arrives later changes the item, not the picture.
   val state = remember(item.loadIdentity()) { mutableStateOf<MediaState>(MediaState.Idle) }
-  LaunchedEffect(mount) { state.value.takeIf { it != MediaState.Idle }?.let(mount::report) }
+  // The place that last heard the state; a new place for the same load hears the held state once, the first report is never repeated.
+  val heardBy = remember(item.loadIdentity()) { mutableStateOf<Any?>(null) }
+  LaunchedEffect(mount) {
+    val held = state.value
+    if (heardBy.value != null && heardBy.value !== mount && held != MediaState.Idle) { mount.report(held); heardBy.value = mount }
+  }
   val animated = remember { mutableStateOf<Animatable?>(null) }
   LaunchedEffect(failure.value, item) { failure.value.of(item)?.let { state.value = it } }
   LaunchedEffect(animated.value, rate) { (animated.value as? RatedAnimation)?.rateTo(rate) }
@@ -176,6 +181,7 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
       painterState.toMediaState()?.let { reached ->
         state.value = reached
         mount.report(reached)
+        heardBy.value = mount
       }
     },
     modifier = Modifier.fillMaxSize().drawWithContent { if (drawsImage.value) drawContent() }
