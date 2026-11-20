@@ -135,7 +135,7 @@ fn inv_outgoing_09_no_loader_without_a_local() {
 #[test]
 fn inv_outgoing_10_gc_rule() {
     let day = 24 * 60 * 60 * 1000u64;
-    assert!(!outgoing_stale(0, 0, 6 * day, false) || 6 * day > day);
+    assert!(outgoing_stale(0, 0, 6 * day, false));
     assert!(!outgoing_stale(0, 6 * day, 6 * day + 1000, false));
     assert!(outgoing_stale(0, 7 * day, 7 * day + day / 2, false));
     assert!(outgoing_stale(0, 7 * day, 7 * day + 1, false));
