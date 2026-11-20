@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.50.2 - 2026-11-21
+## 3.50.3 - 2026-11-21
 
 ### Added
 
@@ -8,6 +8,7 @@
 - `OutgoingMediaView` takes a cover, a loader and a failure view per phase on both platforms.
 - `Media.outgoing(key:)` returns a sent item and its phase from anywhere in the app.
 - `OutgoingTesting.install` and `reset` let app tests drive an outgoing item with the testing fakes.
+- `OutgoingMedia.prepareCover` returns when the cover is decoded, so a row shows it at once.
 
 ### Changed
 
@@ -18,6 +19,7 @@
 - iOS `MediaImage` draws its preview while a switched source prepares, without an empty frame.
 - An outgoing item takes a local file declared after the item was created.
 - The outgoing cover is drawn from the first frame, the blur hash shows until it decodes.
+- The iOS outgoing loader and failure view fill the view frame, not the filled picture.
 
 ## 3.49.0 - 2026-11-20
 
