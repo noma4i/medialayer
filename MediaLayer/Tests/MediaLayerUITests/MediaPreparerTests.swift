@@ -657,9 +657,16 @@ struct MediaPreparerMatrixTests {
     let preparer = MediaPreparer()
     let first = AsyncStream<Double>.makeStream()
     let job = makeJob(23, source, destination, try videoDescriptor(limits: recodeLimits()))
-    let work = Task { await preparer.run(job: job) { first.continuation.yield($0) } }
+    let work = Task {
+      let outcome = await preparer.run(job: job) { first.continuation.yield($0) }
+      first.continuation.finish()
+      return outcome
+    }
     var values = first.stream.makeAsyncIterator()
-    _ = await values.next()
+    if await values.next() == nil {
+      Issue.record("the run ended before any progress: \(await work.value)")
+      return
+    }
     preparer.cancel(attemptId: 23)
     #expect(await work.value == .cancelled)
     #expect(!FileManager.default.fileExists(atPath: destination.path))
