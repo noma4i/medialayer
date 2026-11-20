@@ -72,15 +72,15 @@ public struct OutgoingMediaView: View {
   @ViewBuilder
   private func picture(_ entry: OutgoingEntry, phase: OutgoingPhase) -> some View {
     if phase == .ready, entry.kind == .image, let remote = entry.remote {
-      MediaImage(
-        MediaSourceValue(url: remote, kind: .image),
-        preview: entry.localURL.map { MediaSourceValue.file($0, kind: .image) },
-        contentMode: contentMode
-      ) { state in
-        if state == .ready || state == .rendered {
-          Color.clear.onAppear { entry.swapDrawn() }
-        } else {
-          Color.clear
+      // A fresh MediaImage draws nothing until it is on screen, so the cover stays under it until the remote is drawn (`swapDrawn`).
+      ZStack {
+        if entry.swapping { cover(entry) }
+        MediaImage(MediaSourceValue(url: remote, kind: .image), contentMode: contentMode) { state in
+          if state == .ready || state == .rendered {
+            Color.clear.onAppear { entry.swapDrawn() }
+          } else {
+            Color.clear
+          }
         }
       }
     } else {

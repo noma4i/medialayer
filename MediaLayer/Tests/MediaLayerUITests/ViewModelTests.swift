@@ -120,6 +120,8 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
     TestSignal.shared.fire()
     if let latch = lock.withLock({ latchedURL == nil || latchedURL == url ? fetchLatch : nil }) { await latch.wait() }
     if let bytes = lock.withLock({ bytesByURL[url] }) { return ImageFetchResult(bytes: bytes, source: imageOrigin) }
+    // Like the real places, a local file nobody registered (a custody copy of an outgoing original) is read from disk.
+    if let local = URL(string: url), local.isFileURL, let bytes = try? Data(contentsOf: local) { return ImageFetchResult(bytes: bytes, source: imageOrigin) }
     return ImageFetchResult(bytes: try imageResult.get(), source: imageOrigin)
   }
   private var readyAsks: [Bool] = []
