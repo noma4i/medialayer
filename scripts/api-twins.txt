@@ -55,6 +55,7 @@ kotlin:com/noma4i/medialayer/ToneUpdate$Value | swift:ToneUpdate.tone | Same cas
 kotlin:com/noma4i/medialayer/testing/TestFetcher.<init> ()V | platform idiom | Kotlin default-argument constructor
 kotlin:com/noma4i/medialayer/testing/TestFetcher.serveAsset | platform idiom | Android assets have no iOS counterpart
 kotlin:com/noma4i/medialayer/ui/AudioPlayhead.<init> | swift:AudioPlayhead.init | Constructor of the same value
+kotlin:com/noma4i/medialayer/ui/MediaPreparer.<init> | swift:MediaPreparer.init | Constructor of the same preparer, Android takes the Context
 kotlin:com/noma4i/medialayer/ui/CapturedClip.<init> | platform idiom | Kotlin public constructor of File and size, Swift memberwise init is internal
 kotlin:com/noma4i/medialayer/ui/CapturedPhoto.<init> | platform idiom | Kotlin public constructor of File and size, Swift memberwise init is internal
 kotlin:com/noma4i/medialayer/ui/VoiceRecording.<init> | platform idiom | Kotlin public constructor of File, Swift memberwise init is internal
