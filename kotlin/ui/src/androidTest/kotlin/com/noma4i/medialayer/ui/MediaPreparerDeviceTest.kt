@@ -97,8 +97,9 @@ class MediaPreparerDeviceTest {
     assertTrue("frames ${result.frames}", result.frames in frames)
     val found = readPrepareMetadataKeys(context, file)
     assertFalse("location kept: $found", "location" in found)
-    val sourceDate = dateOf(source)
-    assertTrue("source creation time kept: $sourceDate", sourceDate == null || sourceDate != dateOf(file))
+    // The result carries no real creation time: none, or the zero MP4 epoch (1904-01-01) the muxer writes in its place.
+    val resultDate = dateOf(file)
+    assertTrue("a real creation time is kept: $resultDate (source ${dateOf(source)})", resultDate == null || resultDate.startsWith("19040101"))
     "${result.mime} ${result.width}x${result.height} frames=${result.frames} audio=${result.hasAudio} no-location"
   }
 
