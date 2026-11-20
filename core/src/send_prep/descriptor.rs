@@ -47,27 +47,40 @@ pub enum MediaPrepareFailure {
     UnsupportedDescriptor,
 }
 
-/// How a prepare ends. `Done.path` is the destination.
+/// How a prepare ends. The result path is always the job destination; the size and the hash are measured by the queue.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum MediaPrepareOutcome {
-    Done { path: String, mime: String, size_bytes: u64, width: u32, height: u32 },
-    Failed { reason: MediaPrepareFailure, message: String },
+    Done { name: Option<String>, mime: Option<String> },
+    CannotDecode { message: String },
+    Failed { message: String },
     Cancelled,
 }
 
-/// The planned result of a prepare, with the turn, the mirror and the crop applied, also when the source goes as it is.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
-pub struct MediaPrepareFacts {
-    pub width: u32,
-    pub height: u32,
-    pub mime: String,
+impl MediaPrepareOutcome {
+    /// The outcome of a refusal: `CannotDecode` stays, every other reason is `Failed`.
+    pub fn refused(reason: MediaPrepareFailure, message: String) -> Self {
+        match reason {
+            MediaPrepareFailure::CannotDecode => Self::CannotDecode { message },
+            _ => Self::Failed { message },
+        }
+    }
 }
 
-/// What the platform probe answers: the facts of the file, planned when the probe had a descriptor, or the failure.
+/// What the platform probe answers: the width, height and MIME of the file, planned when the probe had a descriptor, or the failure. An unsupported file is a `File` with all `None`.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum MediaProbeOutcome {
-    Facts { facts: MediaPrepareFacts },
+    File { width: Option<u32>, height: Option<u32>, mime: Option<String> },
     Failed { message: String },
+}
+
+impl MediaProbeOutcome {
+    fn file(size: PixelSize, mime: &str) -> Self {
+        Self::File { width: Some(size.width), height: Some(size.height), mime: Some(mime.to_string()) }
+    }
+
+    fn unsupported() -> Self {
+        Self::File { width: None, height: None, mime: None }
+    }
 }
 
 /// One run of the platform writer: it reads the descriptor itself through `media_prepare_decide`.
@@ -220,32 +233,34 @@ pub fn media_prepare_decide(descriptor: Vec<u8>, probe: PrepareProbe) -> Prepare
     }
 }
 
-/// The width, height and MIME of the file (D-413). With a descriptor it is the planned result of the prepare, `None` when the descriptor is broken or the probe does not fit it;
-/// without one it is the source as the platform reports it, turned upright.
+/// The width, height and MIME of the file (D-413). With a descriptor it is the planned result of the prepare, an unsupported file (a broken descriptor or a probe that does not fit it) is a `File` with all `None`;
+/// without one it is the source as the platform reports it, turned upright. A failed probe is `Failed`.
 #[uniffi::export]
-pub fn media_prepare_facts(descriptor: Option<Vec<u8>>, probe: PrepareProbe) -> Option<MediaPrepareFacts> {
+pub fn media_prepare_facts(descriptor: Option<Vec<u8>>, probe: PrepareProbe) -> MediaProbeOutcome {
+    if let PrepareProbe::Failed { message } = &probe {
+        return MediaProbeOutcome::Failed { message: message.clone() };
+    }
+    planned_file(descriptor, &probe).unwrap_or_else(MediaProbeOutcome::unsupported)
+}
+
+fn planned_file(descriptor: Option<Vec<u8>>, probe: &PrepareProbe) -> Option<MediaProbeOutcome> {
     let intent = match descriptor {
         Some(bytes) => Some(decode_descriptor(&bytes).ok()?),
         None => None,
     };
-    match (&intent, &probe) {
+    match (&intent, probe) {
         (None, PrepareProbe::Image { width, height, exif_orientation, format }) => {
             let edit = PhotoEdit { max_size: None, enlarge: false, crop: None, output_size: None, mirror: false, rotation_degrees: 0 };
-            let size = photo_plan(*width, *height, *exif_orientation, edit)?.upright;
-            Some(MediaPrepareFacts { width: size.width, height: size.height, mime: image_mime(*format).to_string() })
+            Some(MediaProbeOutcome::file(photo_plan(*width, *height, *exif_orientation, edit)?.upright, image_mime(*format)))
         }
-        (None, PrepareProbe::Video { source, .. }) => {
-            let size = upright(source.width, source.height, source.rotation_degrees);
-            Some(MediaPrepareFacts { width: size.width, height: size.height, mime: VIDEO_MIME.to_string() })
-        }
+        (None, PrepareProbe::Video { source, .. }) => Some(MediaProbeOutcome::file(upright(source.width, source.height, source.rotation_degrees), VIDEO_MIME)),
         (Some(MediaPrepareIntent::Image { edit, format, .. }), PrepareProbe::Image { width, height, exif_orientation, .. }) => {
-            let size = photo_plan(*width, *height, *exif_orientation, *edit)?.output;
-            Some(MediaPrepareFacts { width: size.width, height: size.height, mime: image_mime(*format).to_string() })
+            Some(MediaProbeOutcome::file(photo_plan(*width, *height, *exif_orientation, *edit)?.output, image_mime(*format)))
         }
         (Some(MediaPrepareIntent::Video { limits, mirror, .. }), PrepareProbe::Video { source, size_bytes, .. }) => {
             let plan = plan_video_sized(*source, *size_bytes, limits.clone().unwrap_or_else(super::default_video_limits)).ok()?;
             let size = if plan.reencode || *mirror { PixelSize { width: plan.width, height: plan.height } } else { upright(source.width, source.height, source.rotation_degrees) };
-            Some(MediaPrepareFacts { width: size.width, height: size.height, mime: VIDEO_MIME.to_string() })
+            Some(MediaProbeOutcome::file(size, VIDEO_MIME))
         }
         _ => None,
     }

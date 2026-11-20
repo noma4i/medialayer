@@ -26,6 +26,14 @@ fn photo(width: u32, height: u32) -> PrepareProbe {
     PrepareProbe::Image { width, height, exif_orientation: 1, format: ImageFormat::Jpeg }
 }
 
+fn file(width: u32, height: u32, mime: &str) -> MediaProbeOutcome {
+    MediaProbeOutcome::File { width: Some(width), height: Some(height), mime: Some(mime.to_string()) }
+}
+
+fn unsupported() -> MediaProbeOutcome {
+    MediaProbeOutcome::File { width: None, height: None, mime: None }
+}
+
 #[test]
 fn inv_send_51_a_file_at_or_below_the_recode_threshold_goes_as_it_is_and_a_larger_one_follows_the_plan() {
     let mut misfit = source();
@@ -71,7 +79,7 @@ fn inv_send_53_an_unknown_version_a_short_or_a_longer_descriptor_is_unsupported_
     for bytes in [other_version, longer, unknown_kind, huge_list, Vec::new(), vec![1], good[..good.len() - 1].to_vec()] {
         assert_eq!(decode_descriptor(&bytes), Err(MediaPrepareFailure::UnsupportedDescriptor), "{bytes:?}");
         assert!(matches!(media_prepare_decide(bytes.clone(), photo(10, 10)), PrepareDecision::Refuse { reason: MediaPrepareFailure::UnsupportedDescriptor, .. }));
-        assert_eq!(media_prepare_facts(Some(bytes), photo(10, 10)), None);
+        assert_eq!(media_prepare_facts(Some(bytes), photo(10, 10)), unsupported());
     }
 }
 
@@ -110,25 +118,25 @@ fn inv_send_55_a_source_the_device_cannot_decode_follows_the_policy_of_the_descr
 
 #[test]
 fn inv_send_56_the_planned_size_and_mime_apply_the_turn_the_mirror_and_the_crop_and_hold_for_a_pass() {
-    let facts = |descriptor, probe| media_prepare_facts(Some(descriptor), probe).map(|facts| (facts.width, facts.height, facts.mime));
-    assert_eq!(facts(video(false, CannotDecode::Fail), probe(source(), &[], 1)), Some((1280, 720, "video/mp4".to_string())));
+    let facts = |descriptor, probe| media_prepare_facts(Some(descriptor), probe);
+    assert_eq!(facts(video(false, CannotDecode::Fail), probe(source(), &[], 1)), file(1280, 720, "video/mp4"));
     let mut turned = source();
     turned.rotation_degrees = 90;
-    assert_eq!(facts(video(false, CannotDecode::Fail), probe(turned, &[], 1)), Some((720, 1280, "video/mp4".to_string())));
+    assert_eq!(facts(video(false, CannotDecode::Fail), probe(turned, &[], 1)), file(720, 1280, "video/mp4"));
     let crop = PhotoEdit { crop: Some(CropFractions { x: 0.0, y: 0.0, width: 0.5, height: 1.0 }), ..edit() };
-    assert_eq!(facts(image(crop), photo(200, 100)), Some((100, 100, "image/jpeg".to_string())));
-    assert_eq!(facts(image(edit()), probe(source(), &[], 1)), None);
-    assert_eq!(facts(image(edit()), PrepareProbe::Failed { message: String::new() }), None);
+    assert_eq!(facts(image(crop), photo(200, 100)), file(100, 100, "image/jpeg"));
+    assert_eq!(facts(image(edit()), probe(source(), &[], 1)), unsupported());
+    assert_eq!(facts(image(edit()), PrepareProbe::Failed { message: "no".to_string() }), MediaProbeOutcome::Failed { message: "no".to_string() });
 }
 
 #[test]
 fn inv_send_57_the_facts_without_a_descriptor_are_the_upright_source_as_the_platform_reports_it() {
-    let facts = |probe| media_prepare_facts(None, probe).map(|facts| (facts.width, facts.height, facts.mime));
+    let facts = |probe| media_prepare_facts(None, probe);
     let mut turned = source();
     turned.rotation_degrees = 270;
-    assert_eq!(facts(probe(turned, &[], 1)), Some((720, 1280, "video/mp4".to_string())));
-    assert_eq!(facts(PrepareProbe::Image { width: 200, height: 100, exif_orientation: 6, format: ImageFormat::Png }), Some((100, 200, "image/png".to_string())));
-    assert_eq!(facts(PrepareProbe::Failed { message: String::new() }), None);
+    assert_eq!(facts(probe(turned, &[], 1)), file(720, 1280, "video/mp4"));
+    assert_eq!(facts(PrepareProbe::Image { width: 200, height: 100, exif_orientation: 6, format: ImageFormat::Png }), file(100, 200, "image/png"));
+    assert_eq!(facts(PrepareProbe::Failed { message: "no".to_string() }), MediaProbeOutcome::Failed { message: "no".to_string() });
 }
 
 #[test]
@@ -143,5 +151,14 @@ fn inv_send_58_settings_the_planner_cannot_work_with_are_refused_as_an_unsupport
     ];
     for descriptor in descriptors {
         assert!(matches!(media_prepare_decide(descriptor, photo(10, 10)), PrepareDecision::Refuse { reason: MediaPrepareFailure::UnsupportedDescriptor, .. }));
+    }
+}
+
+#[test]
+fn inv_send_59_a_refusal_maps_to_cannot_decode_or_to_a_failure_with_the_message() {
+    let message = || "m".to_string();
+    assert_eq!(MediaPrepareOutcome::refused(MediaPrepareFailure::CannotDecode, message()), MediaPrepareOutcome::CannotDecode { message: message() });
+    for reason in [MediaPrepareFailure::SourceUnreadable, MediaPrepareFailure::WriteFailed, MediaPrepareFailure::UnsupportedDescriptor] {
+        assert_eq!(MediaPrepareOutcome::refused(reason, message()), MediaPrepareOutcome::Failed { message: message() });
     }
 }
