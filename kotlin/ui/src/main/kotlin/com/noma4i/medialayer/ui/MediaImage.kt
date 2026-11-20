@@ -80,7 +80,7 @@ fun MediaImage(
   val screen = rememberScreenVisibility(source.url, LocalMediaEnvironment.current.stats)
   val item = source.toItem()
   val failure = remember { mutableStateOf<ScopedFailure?>(null) }
-  val attempt = remember(item) { mutableStateOf(0uL) }
+  val attempt = remember(item.loadIdentity()) { mutableStateOf(0uL) }
   val mount = claimImage(source, item, screen, failure, attempt)
   if (source.size != null) {
     Box(modifier.then(screen.modifier)) { ImageBody(source, preview, item, mount, attempt, failure, null, 0L, screen, contentScale, animation, playbackRate, content) }
@@ -129,7 +129,9 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
     val request = imageRequest(context, source, pixels, scale, media, placementPixels, resting, animation.repeats, media.viewDecodeAdmit(), dimensions, rate)
     if (loadTurn == 0uL) request else request.newBuilder().memoryCacheKeyExtra("retry", loadTurn.toString()).build()
   }
-  val state = remember(item) { mutableStateOf<MediaState>(MediaState.Idle) }
+  // The shown image belongs to the load identity: a blurHash that only arrives later changes the item, not the picture.
+  val state = remember(item.loadIdentity()) { mutableStateOf<MediaState>(MediaState.Idle) }
+  LaunchedEffect(mount) { state.value.takeIf { it != MediaState.Idle }?.let(mount::report) }
   val animated = remember { mutableStateOf<Animatable?>(null) }
   LaunchedEffect(failure.value, item) { failure.value.of(item)?.let { state.value = it } }
   LaunchedEffect(animated.value, rate) { (animated.value as? RatedAnimation)?.rateTo(rate) }
@@ -180,6 +182,9 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
   )
   ImageContent(screen, state, drawsImage, content)
 }
+
+/** What the loaded picture depends on; the blurHash only feeds the placeholder. */
+private fun MediaItem.loadIdentity(): List<Any?> = listOf(kind, url, headers, cover, strategy)
 
 internal fun MediaState.drawsImage(): Boolean = this != MediaState.Idle && this != MediaState.Loading
 
