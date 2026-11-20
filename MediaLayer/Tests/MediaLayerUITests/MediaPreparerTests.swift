@@ -53,8 +53,8 @@ private func scratch() throws -> URL {
   return directory
 }
 
-private func videoDescriptor(limits: VideoLimits? = nil, mirror: Bool = false) -> Data {
-  mediaPrepareDescriptor(intent: .video(limits: limits, mirror: mirror, onCannotDecode: .fail))
+private func videoDescriptor(limits: VideoLimits? = nil, mirror: Bool = false) throws -> Data {
+  try mediaPrepareDescriptor(intent: .video(limits: limits, mirror: mirror, onCannotDecode: .fail))
 }
 
 private let plainEdit = PhotoEdit(maxSize: nil, enlarge: false, crop: nil, outputSize: nil, mirror: false, rotationDegrees: 0)
@@ -68,7 +68,7 @@ struct MediaPreparerTests {
     let source = directory.appending(path: "source.mp4")
     try await writeClip(source, width: 64, height: 32, frames: 30)
     let destination = directory.appending(path: "result.mp4")
-    let outcome = await MediaPreparer().run(job: MediaPrepareJob(attemptId: 1, source: source.path, destination: destination.path, descriptor: videoDescriptor())) { _ in }
+    let outcome = await MediaPreparer().run(job: MediaPrepareJob(attemptId: 1, source: source.path, destination: destination.path, descriptor: try videoDescriptor())) { _ in }
     guard case .unchanged = outcome else {
       Issue.record("the source fits, got \(outcome)")
       return
@@ -84,7 +84,7 @@ struct MediaPreparerTests {
     let source = directory.appending(path: "photo.jpg")
     try writePicture(source, width: 40, height: 20, orientation: 6)
     let destination = directory.appending(path: "result.jpg")
-    let descriptor = mediaPrepareDescriptor(intent: .image(edit: plainEdit, quality: nil, format: .jpeg))
+    let descriptor = try mediaPrepareDescriptor(intent: .image(edit: plainEdit, quality: nil, format: .jpeg))
     let progress = PrepareProgressLog()
     let outcome = await MediaPreparer().run(job: MediaPrepareJob(attemptId: 2, source: source.path, destination: destination.path, descriptor: descriptor)) { progress.add($0) }
     guard case let .done(_, mime) = outcome else {
@@ -109,7 +109,7 @@ struct MediaPreparerTests {
     var limits = defaultVideoLimits()
     limits.maxLongSide = 320
     let progress = PrepareProgressLog()
-    let outcome = await MediaPreparer().run(job: MediaPrepareJob(attemptId: 3, source: source.path, destination: destination.path, descriptor: videoDescriptor(limits: limits))) { progress.add($0) }
+    let outcome = await MediaPreparer().run(job: MediaPrepareJob(attemptId: 3, source: source.path, destination: destination.path, descriptor: try videoDescriptor(limits: limits))) { progress.add($0) }
     guard case let .done(_, mime) = outcome else {
       Issue.record("the video is prepared, got \(outcome)")
       return
@@ -131,7 +131,7 @@ struct MediaPreparerTests {
     limits.maxLongSide = 320
     let preparer = MediaPreparer()
     let first = AsyncStream<Double>.makeStream()
-    let job = MediaPrepareJob(attemptId: 7, source: source.path, destination: destination.path, descriptor: videoDescriptor(limits: limits))
+    let job = MediaPrepareJob(attemptId: 7, source: source.path, destination: destination.path, descriptor: try videoDescriptor(limits: limits))
     let work = Task { await preparer.run(job: job) { first.continuation.yield($0) } }
     var values = first.stream.makeAsyncIterator()
     _ = await values.next()
