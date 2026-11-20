@@ -64,6 +64,9 @@ final class OutgoingEntry {
     }
   }
 
+  /// Waits until the cover of the local is decoded (at once without a local).
+  func awaitCover() async { await coverTask?.value }
+
   nonisolated private static func decodeCover(_ url: URL) -> CGImage? {
     guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
     let options: [CFString: Any] = [
@@ -230,6 +233,9 @@ public final class OutgoingMedia {
 
   /// Fetches the remote again after `.failed(.remote)`. Anything else is ignored; an upload is sent again by DBlayer.
   public func retry() { entry.apply(.retry) }
+
+  /// Returns when the cover of the local is decoded, so a row can appear with the picture on its first frame; at once without a local.
+  public func prepareCover() async { await entry.awaitCover() }
 }
 
 extension Media {

@@ -122,6 +122,9 @@ internal class OutgoingEntry(
     }
   }
 
+  /** Waits until the cover of the local is decoded (at once without a local). */
+  internal suspend fun awaitCover() { coverJob?.join() }
+
   /** A composed view of this item is on screen: only then the "not ready yet" answer is asked again. */
   internal fun onScreen(visible: Boolean) {
     synchronized(lock) {
@@ -197,6 +200,9 @@ class OutgoingMedia internal constructor(private val entry: OutgoingEntry) {
   /** The original kept by the library under the key until `ready`, or the declared file when no store is open. */
   val local: File? get() = entry.local
   val hasLocal: Boolean get() = entry.hasLocal
+
+  /** Returns when the cover of the local is decoded, so a row can appear with the picture on its first frame; at once without a local. */
+  suspend fun prepareCover() = entry.awaitCover()
 
   /** The small cover of [local], decoded once at adoption; `null` until then or without a local. */
   internal val cover: StateFlow<ImageBitmap?> get() = entry.cover
