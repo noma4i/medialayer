@@ -6,7 +6,7 @@ use super::plan::check;
 use super::{photo_plan, plan_video_sized, video_metadata_to_strip, BitrateStep, CropFractions, ImageFormat, PhotoEdit, PhotoPlan, VideoLimits, VideoPlan, VideoSource};
 use crate::ffi::PixelSize;
 
-const VERSION: u8 = 1;
+const DESCRIPTOR_VERSION: u8 = 1;
 
 /// What happens to a source the device cannot decode: the prepare fails with `CannotDecode`, or the source goes as it is.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, uniffi::Enum)]
@@ -104,7 +104,7 @@ pub enum PrepareDecision {
 
 #[uniffi::export]
 pub fn media_prepare_descriptor(intent: MediaPrepareIntent) -> Vec<u8> {
-    let mut out = vec![VERSION];
+    let mut out = vec![DESCRIPTOR_VERSION];
     match intent {
         MediaPrepareIntent::Video { limits, mirror, on_cannot_decode } => {
             out.push(0);
@@ -143,7 +143,7 @@ pub(crate) fn decode_descriptor(bytes: &[u8]) -> Result<MediaPrepareIntent, Medi
 }
 
 fn read_intent(reader: &mut Reader) -> Option<MediaPrepareIntent> {
-    if reader.u8()? != VERSION {
+    if reader.u8()? != DESCRIPTOR_VERSION {
         return None;
     }
     match reader.u8()? {
