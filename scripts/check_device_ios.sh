@@ -59,8 +59,10 @@ for attempt in 1 2 3 4 5 6 7 8 9 10; do
   fi
   sleep 3
 done
+# Nothing can bring it back afterwards (an automation runner bound to it re-fronts it): the probe app leaves the phone.
+xcrun devicectl device uninstall app --device "$udid" "$bundle" > "$run/uninstall.log" 2>&1 || echo "check_device_ios: the probe app was not uninstalled, see $run/uninstall.log" >&2
 if [ "$gone" -ge 2 ]; then
-  echo "check_device_ios: probe app terminated (gone on two checks 3 s apart)"
+  echo "check_device_ios: probe app terminated (gone on two checks 3 s apart) and uninstalled"
 else
   echo "check_device_ios: the probe app is STILL RUNNING on $udid, terminate it by hand" >&2
   status=1
