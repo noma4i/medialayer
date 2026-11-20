@@ -15328,6 +15328,11 @@ public enum OutgoingEvent: Equatable, Hashable {
     case remoteResult(result: RemoteResult
     )
     /**
+     * The item has a local original now (it arrived after the item was declared). Only `true` counts: a local is never taken back.
+     */
+    case local(hasLocal: Bool
+    )
+    /**
      * Only from `Failed(Remote)`: fetch the same url again.
      */
     case retry
@@ -15361,7 +15366,10 @@ public struct FfiConverterTypeOutgoingEvent: FfiConverterRustBuffer {
         case 3: return .remoteResult(result: try FfiConverterTypeRemoteResult.read(from: &buf)
         )
         
-        case 4: return .retry
+        case 4: return .local(hasLocal: try FfiConverterBool.read(from: &buf)
+        )
+        
+        case 5: return .retry
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -15386,8 +15394,13 @@ public struct FfiConverterTypeOutgoingEvent: FfiConverterRustBuffer {
             FfiConverterTypeRemoteResult.write(result, into: &buf)
             
         
-        case .retry:
+        case let .local(hasLocal):
             writeInt(&buf, Int32(4))
+            FfiConverterBool.write(hasLocal, into: &buf)
+            
+        
+        case .retry:
+            writeInt(&buf, Int32(5))
         
         }
     }
