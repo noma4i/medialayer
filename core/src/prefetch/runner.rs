@@ -272,7 +272,7 @@ impl Prefetcher {
         let now = Duration::from_millis(self.shared.clock.now_ms());
         let key = self.shared.loader.cache_key(&source.url, &source.headers);
         let mut state = self.shared.state();
-        if !shown && !state.wholes.contains_key(&key) && state.wholes.len() >= self.shared.tuning().max_entries {
+        if !shown && !state.wholes.contains_key(&key) && state.wholes.keys().filter(|held| state.running.contains_key(*held)).count() >= self.shared.tuning().max_entries {
             state.ledger.counters.requested += 1;
             state.ledger.counters.failed += 1;
             drop(state);
