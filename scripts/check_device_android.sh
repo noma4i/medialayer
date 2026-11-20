@@ -6,13 +6,13 @@
 #   APK             a ready test APK; or
 #   BUILD_SSH + BUILD_DIR + GRADLE   build it there (arm64 jniLibs, :ui:assembleDebugAndroidTest) and copy it back
 #   BUILD_ENV       optional shell snippet sourced on the build host before the build
-#   CLASSES         comma list of instrumented classes (default: the phone probe, real camera and microphone only)
+#   CLASSES         comma list of instrumented classes (default: the phone probe with the real camera and microphone, and the MediaPreparer device test)
 #   TEST_PACKAGE    package of the test APK (default: com.noma4i.medialayer.ui.test)
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 adb="${ADB:-adb}"
-classes="${CLASSES:-com.noma4i.medialayer.ui.CameraPhoneProbeTest}"
+classes="${CLASSES:-com.noma4i.medialayer.ui.CameraPhoneProbeTest,com.noma4i.medialayer.ui.MediaPreparerDeviceTest}"
 package="${TEST_PACKAGE:-com.noma4i.medialayer.ui.test}"
 fail() { printf 'check_device_android: %s\n' "$*" >&2; exit 1; }
 
