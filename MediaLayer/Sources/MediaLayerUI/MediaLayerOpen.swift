@@ -70,6 +70,7 @@ extension MediaLayer {
         #if os(iOS)
         CaptureFiles.sweepOrphans()
         #endif
+        Task { @MainActor in OutgoingRuntime.shared.collectStale() }
         if Task.isCancelled {
           media.close()
           throw CancellationError()
