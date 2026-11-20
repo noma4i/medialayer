@@ -107,6 +107,7 @@ private func identifiers(in object: Any?) -> [String] {
   return found
 }
 
+private func isBlank(_ pixel: [UInt8]) -> Bool { pixel[3] == 0 }
 private func isRed(_ pixel: [UInt8]) -> Bool { pixel[0] > 200 && pixel[2] < 60 }
 private func isBlue(_ pixel: [UInt8]) -> Bool { pixel[2] > 200 && pixel[0] < 60 }
 
@@ -138,6 +139,21 @@ extension GlobalMedia {
       await until("the item is ready") { item.phase == .ready }
       await until("the remote is drawn") { isBlue(pixel(of: host.view, x: 16)) }
       #expect(blank == 0)
+    }
+
+    @Test
+    func inv_outgoing_19_a_late_local_is_taken_and_its_cover_is_ready_on_the_first_frame() async {
+      let rig = Rig()
+      defer { rig.finish() }
+      let item = OutgoingMedia(key: "k19", kind: .image, local: nil, blurHash: "LEHV6nWB2yk8pyo0adR*.7kCMdnj")
+      #expect(!item.hasLocal)
+      let late = OutgoingMedia(key: "k19", kind: .image, local: rig.local)
+      #expect(late.hasLocal && item.hasLocal)
+      await until("the cover is decoded") { OutgoingRuntime.shared.entry(for: "k19")?.coverImage != nil }
+      let (host, window) = rig.show(item, cover: .blurredLocal(radius: 4))
+      defer { window.isHidden = true }
+      #expect(identifiers(in: host.view).contains("outgoing.cover.blurred"))
+      #expect(!isBlank(pixel(of: host.view, x: 16)))
     }
 
     @Test

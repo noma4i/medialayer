@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import MediaLayer
 import Observation
 
@@ -10,6 +11,9 @@ final class OutgoingEntry {
   private(set) var state: OutgoingState
   private(set) var view: OutgoingView
   private(set) var localURL: URL?
+  /// The small cover of the local, decoded once when the local is adopted (off the main actor); the view draws it from its first frame.
+  private(set) var coverImage: CGImage?
+  @ObservationIgnored private var coverTask: Task<Void, Never>?
   @ObservationIgnored private let runtime: OutgoingRuntime
   @ObservationIgnored private var screens = 0
   @ObservationIgnored private var fetchTask: Task<Void, Never>?
@@ -29,6 +33,7 @@ final class OutgoingEntry {
     state = declared
     view = outgoingView(state: declared)
     runtime.register(self)
+    if let kept { startCover(kept) }
   }
 
   var kind: OutgoingKind { state.inputs.kind }
@@ -43,10 +48,31 @@ final class OutgoingEntry {
     if let local, localURL == nil, phase != .ready {
       localURL = runtime.store.keep(local, for: key) ?? local
       holdsCustody = true
-      state.inputs.hasLocal = true
+      startCover(localURL!)
+      apply(.local(hasLocal: true))
     }
     if let blurHash, state.inputs.blurHash == nil { state.inputs.blurHash = blurHash }
     view = outgoingView(state: state)
+  }
+
+  private func startCover(_ url: URL) {
+    coverTask?.cancel()
+    coverTask = Task { [weak self] in
+      let image = await Task.detached(priority: .userInitiated) { Self.decodeCover(url) }.value
+      guard !Task.isCancelled else { return }
+      self?.coverImage = image
+    }
+  }
+
+  nonisolated private static func decodeCover(_ url: URL) -> CGImage? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    let options: [CFString: Any] = [
+      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceCreateThumbnailWithTransform: true,
+      kCGImageSourceShouldCacheImmediately: true,
+      kCGImageSourceThumbnailMaxPixelSize: 1024,
+    ]
+    return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
   }
 
   func apply(_ event: OutgoingEvent) {
@@ -97,6 +123,8 @@ final class OutgoingEntry {
     holdsCustody = false
     runtime.store.release(key)
     localURL = nil
+    coverTask?.cancel()
+    coverImage = nil
   }
 
   private func settle() {

@@ -103,10 +103,12 @@ public struct OutgoingMediaView: View {
 
   @ViewBuilder
   private func local(_ entry: OutgoingEntry) -> some View {
-    if let url = entry.localURL {
-      MediaImage(MediaSourceValue.file(url, kind: .image), contentMode: contentMode)
+    if let cover = entry.coverImage {
+      Image(decorative: cover, scale: 1).resizable().aspectRatio(contentMode: contentMode)
     } else if let hash = entry.blurHash, let image = PlaceholderPixels.blurHash(hash)?.cgImage {
       Image(decorative: image, scale: 1).resizable().aspectRatio(contentMode: contentMode)
+    } else if let url = entry.localURL, entry.blurHash == nil {
+      MediaImage(MediaSourceValue.file(url, kind: .image), contentMode: contentMode)
     } else {
       Color.clear
     }
