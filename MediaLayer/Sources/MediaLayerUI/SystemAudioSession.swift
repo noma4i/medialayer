@@ -3,14 +3,18 @@
 import Foundation
 import MediaLayer
 
-func recordSessionFailure(_ error: Error) {
+func isExpectedSessionRefusal(_ error: Error) -> Bool {
   let value = error as NSError
-  if value.domain == NSOSStatusErrorDomain && [
+  return value.domain == NSOSStatusErrorDomain && [
     AVAudioSession.ErrorCode.cannotInterruptOthers.rawValue,
     AVAudioSession.ErrorCode.insufficientPriority.rawValue,
     AVAudioSession.ErrorCode.cannotStartPlaying.rawValue,
     AVAudioSession.ErrorCode.isBusy.rawValue
-  ].contains(value.code) { return }
+  ].contains(value.code)
+}
+
+func recordSessionFailure(_ error: Error) {
+  if isExpectedSessionRefusal(error) { return }
   Media.recordNativeFailure(error, source: .session)
 }
 

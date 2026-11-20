@@ -225,6 +225,23 @@ extension GlobalMedia {
       await app.close()
     }
 
+    // F1b
+    @Test
+    func inv_audio_62b_an_expected_session_refusal_is_not_a_failure() async throws {
+      let app = try await AppLayer.open()
+      let failures = Collected(Media.failures)
+      app.session.failApply(.playAndRecord, refusedApply(560557684))
+      let refused = MediaVoiceRecorder(capture: WritingCapture(), maxDurationMs: 60_000)
+      await #expect(throws: MediaError.self) { try await refused.start(to: temporaryFile("m4a")) }
+      app.session.failApply(.playAndRecord, refusedApply(9, domain: "session"))
+      let recorder = MediaVoiceRecorder(capture: WritingCapture(), maxDurationMs: 60_000)
+      await #expect(throws: MediaError.self) { try await recorder.start(to: temporaryFile("m4a")) }
+
+      await eventually("the unexpected failure") { failures.values.count >= 1 }
+      #expect(failures.values.map { "\($0.source) \($0.domain) \($0.code)" } == ["session session 9"])
+      await app.close()
+    }
+
     // F2
     @Test
     func inv_audio_64_a_down_and_up_burst_of_the_volume_is_one_rise() async throws {

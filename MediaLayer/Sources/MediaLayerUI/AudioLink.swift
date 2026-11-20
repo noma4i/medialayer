@@ -251,7 +251,7 @@ final class AudioLink: @unchecked Sendable {
         stops.forEach { $0.waitForStop() }
         if self.sessionConfigured {
           do { try self.ports.session.deactivate(); self.sessionConfigured = false }
-          catch { Media.recordNativeFailure(error, source: .session) }
+          catch { recordSessionFailure(error) }
         }
         self.inbox.async {
           self.closeFinished = true
@@ -335,7 +335,7 @@ final class AudioLink: @unchecked Sendable {
           stops.forEach { $0.waitForStop() }
           let result: AppliedResult
           do { try self.ports.session.apply(plan, activate: activate); self.sessionConfigured = true; result = .ok }
-          catch { self.report(error, source: .session); result = .failed(code: Int64((error as NSError).code)) }
+          catch { if !isExpectedSessionRefusal(error) { self.report(error, source: .session) }; result = .failed(code: Int64((error as NSError).code)) }
           self.send(.applied(generation: generation, result: result))
           if case .failed = result {
             self.inbox.async { for id in self.calls.keys { self.process(.callSystemDeactivated(id: id)) } }
@@ -349,7 +349,7 @@ final class AudioLink: @unchecked Sendable {
           let result: AppliedResult
           do { try self.ports.session.deactivate(); self.sessionConfigured = false; result = .ok }
           catch is AudioSessionBusy { result = .busy }
-          catch { self.report(error, source: .session); result = .failed(code: Int64((error as NSError).code)) }
+          catch { if !isExpectedSessionRefusal(error) { self.report(error, source: .session) }; result = .failed(code: Int64((error as NSError).code)) }
           self.send(.applied(generation: generation, result: result))
         }
       case let .admit(id):
