@@ -101,4 +101,3 @@ private fun Cover(item: OutgoingMedia, cover: OutgoingCover, contentScale: Conte
     Image(shown, if (blurs) "cover-blurred" else "cover", Modifier.fillMaxSize().then(blur), contentScale = contentScale)
   }
 }
-
