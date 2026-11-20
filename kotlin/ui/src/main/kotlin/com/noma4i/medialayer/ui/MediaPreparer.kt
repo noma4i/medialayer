@@ -6,9 +6,11 @@ import com.noma4i.medialayer.MediaPrepareJob
 import com.noma4i.medialayer.MediaPrepareOutcome
 import com.noma4i.medialayer.MediaProbeOutcome
 import com.noma4i.medialayer.PrepareDecision
+import com.noma4i.medialayer.PrepareKind
 import com.noma4i.medialayer.PreparePlan
 import com.noma4i.medialayer.PrepareProbe
 import com.noma4i.medialayer.mediaPrepareDecide
+import com.noma4i.medialayer.mediaPrepareDescriptorKind
 import com.noma4i.medialayer.mediaPrepareFacts
 import java.io.File
 import java.nio.file.Files
@@ -46,7 +48,7 @@ class MediaPreparer internal constructor(
     try {
       val file = File(path)
       if (!file.isFile || !file.canRead()) MediaProbeOutcome.Failed("$path is not a readable file")
-      else mediaPrepareFacts(descriptor, probeOf(file, mime))
+      else mediaPrepareFacts(descriptor, probeOf(file, mime, descriptor?.let(::mediaPrepareDescriptorKind)))
     } catch (error: CancellationException) {
       throw error
     } catch (error: Exception) {
@@ -83,7 +85,10 @@ class MediaPreparer internal constructor(
     }
   }
 
-  private fun probeOf(file: File, mime: String?): PrepareProbe = when {
+  /** The descriptor kind, when known, picks the reader without touching the bytes of the other kind; otherwise the mime hint or the file decides. */
+  private fun probeOf(file: File, mime: String?, kind: PrepareKind?): PrepareProbe = when {
+    kind == PrepareKind.VIDEO -> readVideo(file)
+    kind == PrepareKind.IMAGE -> probeOfImage(file) ?: PrepareProbe.Failed("${file.path} is not an image")
     mime?.startsWith("video/") == true -> readVideo(file)
     mime?.startsWith("image/") == true -> probeOfImage(file) ?: PrepareProbe.Failed("${file.path} is not an image")
     else -> probeOfImage(file) ?: readVideo(file)
@@ -99,7 +104,8 @@ class MediaPreparer internal constructor(
     try {
       if (!source.isFile || !source.canRead()) return MediaPrepareOutcome.Failed("${job.source} is not a readable file").also { outcome = it }
       val probe = try {
-        probeOf(source, null)
+        // An undecodable descriptor has no kind: the Failed probe lets the core refuse it as unsupported.
+        mediaPrepareDescriptorKind(job.descriptor)?.let { probeOf(source, null, it) } ?: PrepareProbe.Failed("the prepare descriptor is not readable")
       } catch (error: CancellationException) {
         throw error
       } catch (error: Exception) {
