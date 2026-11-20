@@ -445,43 +445,30 @@ struct MediaPreparerMatrixTests {
     #expect(facts.audio && facts.audioCodec == kAudioFormatMPEG4AAC)
   }
 
-  // A capture take is upright with an identity matrix: the front mirror and the sensor turn are in the pixels.
+  // A mirrored front take is re-encoded with the mirror in the pixels and an identity matrix (owner 2026-11-20: only a mirrored take is re-encoded).
   @Test(.timeLimit(.minutes(2)))
   func aMirroredTakeIsWrittenWithIdentityMatrixAndMirroredPixels() async throws {
     let directory = try scratch()
     defer { try? FileManager.default.removeItem(at: directory) }
     let source = directory.appending(path: "source.mp4")
-    try await writeClip(FixtureClip(width: 128, height: 64, audio: true, mirrored: true), to: source)
-    let plan = try #require(captureUprightPlan(width: 128, height: 64, rotationDegrees: 0, mirror: false, bitrate: 500_000, frameRate: 30))
+    try await writeClip(FixtureClip(width: 128, height: 64, audio: true), to: source)
+    let plan = try #require(captureUprightPlan(width: 128, height: 64, rotationDegrees: 0, mirror: true, bitrate: 500_000, frameRate: 30))
     let output = directory.appending(path: "upright.mp4")
     try await PrepareVideoWrite.run(
-      source: source, output: output, plan: plan, audio: PrepareAudio(bitrate: 64_000, channels: 1, sampleRate: 44_100), mirror: false, entry: PrepareRunning(), report: { _ in }
+      source: source, output: output, plan: plan, audio: PrepareAudio(bitrate: 64_000, channels: 1, sampleRate: 44_100), mirror: true, entry: PrepareRunning(), report: { _ in }
     )
     let track = try #require(try await AVURLAsset(url: output).loadTracks(withMediaType: .video).first)
     let (size, transform) = try await track.load(.naturalSize, .preferredTransform)
     #expect(transform == .identity && Int(size.width) == 128 && Int(size.height) == 64)
-    // The reflection showed the black half on the left: the pixels now hold it there.
+    // The fixture is white on the left and black on the right: mirrored pixels hold the black half on the left.
     let (left, right) = (try await luminance(output, left: true), try await luminance(output, left: false))
     #expect(left < 0.3 && right > 0.7)
   }
 
-  @Test(.timeLimit(.minutes(2)))
-  func aTurnedTakeIsWrittenWithIdentityMatrixAndTurnedPixels() async throws {
-    let directory = try scratch()
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let source = directory.appending(path: "source.mp4")
-    try await writeClip(FixtureClip(width: 128, height: 64, turned: true), to: source)
-    let plan = try #require(captureUprightPlan(width: 128, height: 64, rotationDegrees: 90, mirror: false, bitrate: 500_000, frameRate: 30))
-    let output = directory.appending(path: "upright.mp4")
-    try await PrepareVideoWrite.run(
-      source: source, output: output, plan: plan, audio: PrepareAudio(bitrate: 64_000, channels: 1, sampleRate: 44_100), mirror: false, entry: PrepareRunning(), report: { _ in }
-    )
-    let track = try #require(try await AVURLAsset(url: output).loadTracks(withMediaType: .video).first)
-    let (size, transform) = try await track.load(.naturalSize, .preferredTransform)
-    #expect(transform == .identity && Int(size.width) == 64 && Int(size.height) == 128)
-    let image = try AVAssetImageGenerator(asset: AVURLAsset(url: output)).copyCGImage(at: .zero, actualTime: nil)
-    // The white left half turned to the top.
-    #expect(try level(image, x: image.width / 2, y: 2) > 0.7 && level(image, x: image.width / 2, y: image.height - 3) < 0.3)
+  @Test
+  func aTurnedTakeWithoutMirrorKeepsItsRotationTag() {
+    // A plain sensor turn stays as the track matrix: every player and the server read it (owner 2026-11-20).
+    #expect(captureUprightPlan(width: 128, height: 64, rotationDegrees: 90, mirror: false, bitrate: 500_000, frameRate: 30) == nil)
   }
 
 
