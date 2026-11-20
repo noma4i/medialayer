@@ -9495,6 +9495,200 @@ public func FfiConverterTypeOpenConfig_lower(_ value: OpenConfig) -> RustBuffer 
 }
 
 
+public struct OutgoingInputs: Equatable, Hashable {
+    public var key: String
+    public var kind: OutgoingKind
+    public var hasLocal: Bool
+    public var blurHash: String?
+    public var remote: String?
+    public var upload: OutgoingUpload
+    public var remoteResult: RemoteResult?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(key: String, kind: OutgoingKind, hasLocal: Bool, blurHash: String?, remote: String?, upload: OutgoingUpload, remoteResult: RemoteResult?) {
+        self.key = key
+        self.kind = kind
+        self.hasLocal = hasLocal
+        self.blurHash = blurHash
+        self.remote = remote
+        self.upload = upload
+        self.remoteResult = remoteResult
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension OutgoingInputs: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOutgoingInputs: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OutgoingInputs {
+        return
+            try OutgoingInputs(
+                key: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterTypeOutgoingKind.read(from: &buf), 
+                hasLocal: FfiConverterBool.read(from: &buf), 
+                blurHash: FfiConverterOptionString.read(from: &buf), 
+                remote: FfiConverterOptionString.read(from: &buf), 
+                upload: FfiConverterTypeOutgoingUpload.read(from: &buf), 
+                remoteResult: FfiConverterOptionTypeRemoteResult.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: OutgoingInputs, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.key, into: &buf)
+        FfiConverterTypeOutgoingKind.write(value.kind, into: &buf)
+        FfiConverterBool.write(value.hasLocal, into: &buf)
+        FfiConverterOptionString.write(value.blurHash, into: &buf)
+        FfiConverterOptionString.write(value.remote, into: &buf)
+        FfiConverterTypeOutgoingUpload.write(value.upload, into: &buf)
+        FfiConverterOptionTypeRemoteResult.write(value.remoteResult, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutgoingInputs_lift(_ buf: RustBuffer) throws -> OutgoingInputs {
+    return try FfiConverterTypeOutgoingInputs.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutgoingInputs_lower(_ value: OutgoingInputs) -> RustBuffer {
+    return FfiConverterTypeOutgoingInputs.lower(value)
+}
+
+
+public struct OutgoingState: Equatable, Hashable {
+    public var inputs: OutgoingInputs
+    public var phase: OutgoingPhase
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(inputs: OutgoingInputs, phase: OutgoingPhase) {
+        self.inputs = inputs
+        self.phase = phase
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension OutgoingState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOutgoingState: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OutgoingState {
+        return
+            try OutgoingState(
+                inputs: FfiConverterTypeOutgoingInputs.read(from: &buf), 
+                phase: FfiConverterTypeOutgoingPhase.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: OutgoingState, into buf: inout [UInt8]) {
+        FfiConverterTypeOutgoingInputs.write(value.inputs, into: &buf)
+        FfiConverterTypeOutgoingPhase.write(value.phase, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutgoingState_lift(_ buf: RustBuffer) throws -> OutgoingState {
+    return try FfiConverterTypeOutgoingState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutgoingState_lower(_ value: OutgoingState) -> RustBuffer {
+    return FfiConverterTypeOutgoingState.lower(value)
+}
+
+
+public struct OutgoingView: Equatable, Hashable {
+    public var phase: OutgoingPhase
+    public var showsLocal: Bool
+    public var showsLoader: Bool
+    public var canOpen: Bool
+    public var reaskAfterMs: UInt32?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(phase: OutgoingPhase, showsLocal: Bool, showsLoader: Bool, canOpen: Bool, reaskAfterMs: UInt32?) {
+        self.phase = phase
+        self.showsLocal = showsLocal
+        self.showsLoader = showsLoader
+        self.canOpen = canOpen
+        self.reaskAfterMs = reaskAfterMs
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension OutgoingView: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOutgoingView: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OutgoingView {
+        return
+            try OutgoingView(
+                phase: FfiConverterTypeOutgoingPhase.read(from: &buf), 
+                showsLocal: FfiConverterBool.read(from: &buf), 
+                showsLoader: FfiConverterBool.read(from: &buf), 
+                canOpen: FfiConverterBool.read(from: &buf), 
+                reaskAfterMs: FfiConverterOptionUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: OutgoingView, into buf: inout [UInt8]) {
+        FfiConverterTypeOutgoingPhase.write(value.phase, into: &buf)
+        FfiConverterBool.write(value.showsLocal, into: &buf)
+        FfiConverterBool.write(value.showsLoader, into: &buf)
+        FfiConverterBool.write(value.canOpen, into: &buf)
+        FfiConverterOptionUInt32.write(value.reaskAfterMs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutgoingView_lift(_ buf: RustBuffer) throws -> OutgoingView {
+    return try FfiConverterTypeOutgoingView.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutgoingView_lower(_ value: OutgoingView) -> RustBuffer {
+    return FfiConverterTypeOutgoingView.lower(value)
+}
+
+
 /**
  * What the app asks of a photo besides making it upright.
  * `max_size` fits the result into a rectangle and keeps the proportions, it enlarges a smaller result only when `enlarge` is set.
@@ -15121,6 +15315,419 @@ public func FfiConverterTypeMicrophonePermission_lower(_ value: MicrophonePermis
 
 
 
+public enum OutgoingEvent: Equatable, Hashable {
+    
+    case upload(upload: OutgoingUpload
+    )
+    /**
+     * The remote url of the item. `Some` also means the upload is sent, unless it failed (DBlayer drops the upload entry
+     * and fills the server field when the upload completes). `None` never takes a known url back.
+     */
+    case remote(remote: String?
+    )
+    case remoteResult(result: RemoteResult
+    )
+    /**
+     * Only from `Failed(Remote)`: fetch the same url again.
+     */
+    case retry
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension OutgoingEvent: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOutgoingEvent: FfiConverterRustBuffer {
+    typealias SwiftType = OutgoingEvent
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OutgoingEvent {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .upload(upload: try FfiConverterTypeOutgoingUpload.read(from: &buf)
+        )
+        
+        case 2: return .remote(remote: try FfiConverterOptionString.read(from: &buf)
+        )
+        
+        case 3: return .remoteResult(result: try FfiConverterTypeRemoteResult.read(from: &buf)
+        )
+        
+        case 4: return .retry
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: OutgoingEvent, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .upload(upload):
+            writeInt(&buf, Int32(1))
+            FfiConverterTypeOutgoingUpload.write(upload, into: &buf)
+            
+        
+        case let .remote(remote):
+            writeInt(&buf, Int32(2))
+            FfiConverterOptionString.write(remote, into: &buf)
+            
+        
+        case let .remoteResult(result):
+            writeInt(&buf, Int32(3))
+            FfiConverterTypeRemoteResult.write(result, into: &buf)
+            
+        
+        case .retry:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutgoingEvent_lift(_ buf: RustBuffer) throws -> OutgoingEvent {
+    return try FfiConverterTypeOutgoingEvent.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutgoingEvent_lower(_ value: OutgoingEvent) -> RustBuffer {
+    return FfiConverterTypeOutgoingEvent.lower(value)
+}
+
+
+
+
+public enum OutgoingFailure: Equatable, Hashable {
+    
+    case upload(reason: String
+    )
+    case remote(status: UInt16?, detail: String
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension OutgoingFailure: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOutgoingFailure: FfiConverterRustBuffer {
+    typealias SwiftType = OutgoingFailure
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OutgoingFailure {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .upload(reason: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .remote(status: try FfiConverterOptionUInt16.read(from: &buf), detail: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: OutgoingFailure, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .upload(reason):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(reason, into: &buf)
+            
+        
+        case let .remote(status,detail):
+            writeInt(&buf, Int32(2))
+            FfiConverterOptionUInt16.write(status, into: &buf)
+            FfiConverterString.write(detail, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutgoingFailure_lift(_ buf: RustBuffer) throws -> OutgoingFailure {
+    return try FfiConverterTypeOutgoingFailure.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutgoingFailure_lower(_ value: OutgoingFailure) -> RustBuffer {
+    return FfiConverterTypeOutgoingFailure.lower(value)
+}
+
+
+
+
+public enum OutgoingKind: Equatable, Hashable {
+    
+    case image
+    case video
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension OutgoingKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOutgoingKind: FfiConverterRustBuffer {
+    typealias SwiftType = OutgoingKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OutgoingKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .image
+        
+        case 2: return .video
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: OutgoingKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .image:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .video:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutgoingKind_lift(_ buf: RustBuffer) throws -> OutgoingKind {
+    return try FfiConverterTypeOutgoingKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutgoingKind_lower(_ value: OutgoingKind) -> RustBuffer {
+    return FfiConverterTypeOutgoingKind.lower(value)
+}
+
+
+
+
+public enum OutgoingPhase: Equatable, Hashable {
+    
+    case sending(progress: Double
+    )
+    case awaitingRemote
+    case fetchingRemote(progress: Double
+    )
+    case ready
+    case failed(reason: OutgoingFailure
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension OutgoingPhase: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOutgoingPhase: FfiConverterRustBuffer {
+    typealias SwiftType = OutgoingPhase
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OutgoingPhase {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .sending(progress: try FfiConverterDouble.read(from: &buf)
+        )
+        
+        case 2: return .awaitingRemote
+        
+        case 3: return .fetchingRemote(progress: try FfiConverterDouble.read(from: &buf)
+        )
+        
+        case 4: return .ready
+        
+        case 5: return .failed(reason: try FfiConverterTypeOutgoingFailure.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: OutgoingPhase, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .sending(progress):
+            writeInt(&buf, Int32(1))
+            FfiConverterDouble.write(progress, into: &buf)
+            
+        
+        case .awaitingRemote:
+            writeInt(&buf, Int32(2))
+        
+        
+        case let .fetchingRemote(progress):
+            writeInt(&buf, Int32(3))
+            FfiConverterDouble.write(progress, into: &buf)
+            
+        
+        case .ready:
+            writeInt(&buf, Int32(4))
+        
+        
+        case let .failed(reason):
+            writeInt(&buf, Int32(5))
+            FfiConverterTypeOutgoingFailure.write(reason, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutgoingPhase_lift(_ buf: RustBuffer) throws -> OutgoingPhase {
+    return try FfiConverterTypeOutgoingPhase.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutgoingPhase_lower(_ value: OutgoingPhase) -> RustBuffer {
+    return FfiConverterTypeOutgoingPhase.lower(value)
+}
+
+
+
+/**
+ * The upload as DBlayer reports it. Every pre-upload status (waiting, preparing, queued, uploading, sending) is `Sending`.
+ */
+
+public enum OutgoingUpload: Equatable, Hashable {
+    
+    case sending(progress: Double
+    )
+    case sent
+    case failed(reason: String
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension OutgoingUpload: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOutgoingUpload: FfiConverterRustBuffer {
+    typealias SwiftType = OutgoingUpload
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OutgoingUpload {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .sending(progress: try FfiConverterDouble.read(from: &buf)
+        )
+        
+        case 2: return .sent
+        
+        case 3: return .failed(reason: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: OutgoingUpload, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .sending(progress):
+            writeInt(&buf, Int32(1))
+            FfiConverterDouble.write(progress, into: &buf)
+            
+        
+        case .sent:
+            writeInt(&buf, Int32(2))
+        
+        
+        case let .failed(reason):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(reason, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutgoingUpload_lift(_ buf: RustBuffer) throws -> OutgoingUpload {
+    return try FfiConverterTypeOutgoingUpload.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOutgoingUpload_lower(_ value: OutgoingUpload) -> RustBuffer {
+    return FfiConverterTypeOutgoingUpload.lower(value)
+}
+
+
+
+
 public enum PauseReason: Equatable, Hashable {
     
     case capture
@@ -16224,6 +16831,96 @@ public func FfiConverterTypeRecoveryAction_lower(_ value: RecoveryAction) -> Rus
 
 
 
+/**
+ * What the platform reports about fetching the remote copy. `Complete` means the whole body is cached AND decoded.
+ */
+
+public enum RemoteResult: Equatable, Hashable {
+    
+    case notReady
+    case fetching(progress: Double
+    )
+    case complete
+    case failed(status: UInt16?, detail: String
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension RemoteResult: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRemoteResult: FfiConverterRustBuffer {
+    typealias SwiftType = RemoteResult
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RemoteResult {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .notReady
+        
+        case 2: return .fetching(progress: try FfiConverterDouble.read(from: &buf)
+        )
+        
+        case 3: return .complete
+        
+        case 4: return .failed(status: try FfiConverterOptionUInt16.read(from: &buf), detail: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RemoteResult, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .notReady:
+            writeInt(&buf, Int32(1))
+        
+        
+        case let .fetching(progress):
+            writeInt(&buf, Int32(2))
+            FfiConverterDouble.write(progress, into: &buf)
+            
+        
+        case .complete:
+            writeInt(&buf, Int32(3))
+        
+        
+        case let .failed(status,detail):
+            writeInt(&buf, Int32(4))
+            FfiConverterOptionUInt16.write(status, into: &buf)
+            FfiConverterString.write(detail, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRemoteResult_lift(_ buf: RustBuffer) throws -> RemoteResult {
+    return try FfiConverterTypeRemoteResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRemoteResult_lower(_ value: RemoteResult) -> RustBuffer {
+    return FfiConverterTypeRemoteResult.lower(value)
+}
+
+
+
 
 public enum RouteReason: Equatable, Hashable {
     
@@ -17049,6 +17746,30 @@ public func FfiConverterTypeVoiceRefusal_lower(_ value: VoiceRefusal) -> RustBuf
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionUInt16: FfiConverterRustBuffer {
+    typealias SwiftType = UInt16?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt16.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt16.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
     typealias SwiftType = UInt32?
 
@@ -17553,6 +18274,30 @@ fileprivate struct FfiConverterOptionTypeMediaTone: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeOutgoingState: FfiConverterRustBuffer {
+    typealias SwiftType = OutgoingState?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeOutgoingState.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeOutgoingState.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypePhotoPlan: FfiConverterRustBuffer {
     typealias SwiftType = PhotoPlan?
 
@@ -17953,6 +18698,30 @@ fileprivate struct FfiConverterOptionTypeRecordEnd: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeRecordEnd.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRemoteResult: FfiConverterRustBuffer {
+    typealias SwiftType = RemoteResult?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRemoteResult.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRemoteResult.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -19335,6 +20104,65 @@ public func isLocalMediaUrl(url: String) -> Bool  {
     )
 })
 }
+/**
+ * The first state of an item, from what the app declares.
+ */
+public func outgoingDeclare(key: String, kind: OutgoingKind, hasLocal: Bool, blurHash: String?) -> OutgoingState  {
+    return try!  FfiConverterTypeOutgoingState_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_func_outgoing_declare(
+        FfiConverterString.lower(key),
+        FfiConverterTypeOutgoingKind_lower(kind),
+        FfiConverterBool.lower(hasLocal),
+        FfiConverterOptionString.lower(blurHash),uniffiCallStatus
+    )
+})
+}
+public func outgoingFetchSlots() -> UInt32  {
+    return try!  FfiConverterUInt32.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_func_outgoing_fetch_slots(uniffiCallStatus
+    )
+})
+}
+/**
+ * The one fold: the next state from the previous one and an event. Pure; duplicates and out-of-order events are folded.
+ */
+public func outgoingNext(previous: OutgoingState?, event: OutgoingEvent) -> OutgoingState  {
+    return try!  FfiConverterTypeOutgoingState_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_func_outgoing_next(
+        FfiConverterOptionTypeOutgoingState.lower(previous),
+        FfiConverterTypeOutgoingEvent_lower(event),uniffiCallStatus
+    )
+})
+}
+/**
+ * Whether the stored local of an item is garbage: never ready and older than 7 days, or not declared again for 24 hours
+ * after a relaunch. A ready item has released its local already.
+ */
+public func outgoingStale(createdMs: UInt64, lastDeclaredMs: UInt64, nowMs: UInt64, ready: Bool) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_func_outgoing_stale(
+        FfiConverterUInt64.lower(createdMs),
+        FfiConverterUInt64.lower(lastDeclaredMs),
+        FfiConverterUInt64.lower(nowMs),
+        FfiConverterBool.lower(ready),uniffiCallStatus
+    )
+})
+}
+/**
+ * What the UI draws and may do in this state.
+ */
+public func outgoingView(state: OutgoingState) -> OutgoingView  {
+    return try!  FfiConverterTypeOutgoingView_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_func_outgoing_view(
+        FfiConverterTypeOutgoingState_lower(state),uniffiCallStatus
+    )
+})
+}
 public func loadImage(request: ImageLoadRequest, fetcher: Fetcher)throws  -> ImageFetchResult  {
     return try  FfiConverterTypeImageFetchResult_lift(try rustCallWithError(FfiConverterTypeMediaError_lift) {
         uniffiCallStatus in
@@ -19775,6 +20603,21 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_is_local_media_url() != 25313) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_medialayer_checksum_func_outgoing_declare() != 29839) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_medialayer_checksum_func_outgoing_fetch_slots() != 62704) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_medialayer_checksum_func_outgoing_next() != 20751) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_medialayer_checksum_func_outgoing_stale() != 7224) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_medialayer_checksum_func_outgoing_view() != 19949) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_load_image() != 19276) {
