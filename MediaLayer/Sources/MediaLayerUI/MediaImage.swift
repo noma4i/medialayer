@@ -49,7 +49,7 @@ private struct PreviewImage: View {
   let contentMode: ContentMode
 
   var body: some View {
-    ImageRequestView(source: source, context: context, points: points, scale: scale, contentMode: contentMode) { key, request in
+    ImageRequestView(source: source, context: context, points: points, scale: scale, contentMode: contentMode, waiting: { Color.clear }) { key, request in
       PreviewFrame(source: source, context: context, key: key, request: request, contentMode: contentMode)
     }
     .id(ImageInputs(url: source.url, headers: source.headers, width: source.size?.width, height: source.size?.height, contentMode: contentMode, context: ObjectIdentifier(context)))
@@ -94,7 +94,7 @@ private final class PreparedImage: ObservableObject {
   }
 }
 
-private struct ImageRequestView<Content: View>: View {
+private struct ImageRequestView<Content: View, Waiting: View>: View {
   @StateObject private var prepared: PreparedImage
   private let source: any MediaSource
   private let context: MediaContext
@@ -102,8 +102,9 @@ private struct ImageRequestView<Content: View>: View {
   private let scale: CGFloat
   private let contentMode: ContentMode
   private let content: (ImageKey, ImageRequest?) -> Content
+  private let waiting: () -> Waiting
 
-  init(source: any MediaSource, context: MediaContext, points: CGSize, scale: CGFloat, contentMode: ContentMode, @ViewBuilder content: @escaping (ImageKey, ImageRequest?) -> Content) {
+  init(source: any MediaSource, context: MediaContext, points: CGSize, scale: CGFloat, contentMode: ContentMode, @ViewBuilder waiting: @escaping () -> Waiting, @ViewBuilder content: @escaping (ImageKey, ImageRequest?) -> Content) {
     _prepared = StateObject(wrappedValue: PreparedImage(source: source, context: context, points: points, scale: scale, contentMode: contentMode))
     self.source = source
     self.context = context
@@ -111,12 +112,13 @@ private struct ImageRequestView<Content: View>: View {
     self.scale = scale
     self.contentMode = contentMode
     self.content = content
+    self.waiting = waiting
   }
 
   var body: some View {
     Group {
       if let value = prepared.value { content(value.key, value.request) }
-      else { Color.clear }
+      else { waiting() }
     }
     .task(id: PreviewInputs(url: source.url, headers: source.headers, pixelWidth: points.width * scale, pixelHeight: points.height * scale, contentMode: contentMode)) {
       await prepared.load(source: source, context: context, points: points, scale: scale, contentMode: contentMode)
@@ -183,7 +185,7 @@ public struct MediaImage<Content: View>: View {
   @ViewBuilder private var mounted: some View {
     if let context {
       GeometryReader { geometry in
-        ImageRequestView(source: source, context: context, points: geometry.size, scale: displayScale, contentMode: contentMode) { key, request in
+        ImageRequestView(source: source, context: context, points: geometry.size, scale: displayScale, contentMode: contentMode, waiting: { waitingFrame(context: context, size: geometry.size) }) { key, request in
           let shown = shownImage(for: key, request: request)
           ZStack {
             if ImagePass.drawsPlaceholder(playing: isPlaying, shown: shown != nil) {
@@ -216,6 +218,18 @@ public struct MediaImage<Content: View>: View {
       .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.background)) { _ in inBackground = true }
       .onReceive(NotificationCenter.default.publisher(for: SystemSignalNames.system.foreground)) { _ in inBackground = false }
     }
+  }
+
+  /// The pass before the new source has its request: the placeholder and the preview stay drawn, so a source switch never shows an empty frame.
+  @ViewBuilder private func waitingFrame(context: MediaContext, size: CGSize) -> some View {
+    ZStack {
+      if ImagePass.drawsPlaceholder(playing: isPlaying, shown: false) {
+        PlaceholderView(item: source.item, ready: false, context: context)
+        if let preview { PreviewImage(source: preview, context: context, points: size, scale: displayScale, contentMode: contentMode) }
+      }
+    }
+    .frame(width: size.width, height: size.height)
+    .clipped()
   }
 
   @ViewBuilder private func still(_ image: PlatformImage) -> some View {
