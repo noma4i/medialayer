@@ -857,8 +857,9 @@ struct MediaPrepareTransparencyTests {
     let straightImage = try pictureFacts(straight).image
     let clear = try rgb(straightImage, x: 5, y: 10)
     #expect(clear.red >= 0.98 && clear.green >= 0.98 && clear.blue >= 0.98, "transparent region is white, got \(clear)")
+    // Red goes through the colour conversion of the JPEG encoder: about 0.15 green comes back, still clearly red.
     let solid = try rgb(straightImage, x: 35, y: 10)
-    #expect(solid.red >= 0.9 && solid.green <= 0.15 && solid.blue <= 0.15, "the opaque half stays red, got \(solid)")
+    #expect(solid.red >= 0.9 && solid.green <= 0.3 && solid.blue <= 0.3, "the opaque half stays red, got \(solid)")
 
     let turned = directory.appending(path: "turned.jpg")
     let turnedEdit = PhotoEdit(maxSize: nil, enlarge: false, crop: nil, outputSize: nil, mirror: false, rotationDegrees: 90)
@@ -873,6 +874,6 @@ struct MediaPrepareTransparencyTests {
     let top = try rgb(turnedImage, x: 10, y: 5)
     #expect(top.red >= 0.98 && top.green >= 0.98 && top.blue >= 0.98, "turned transparent region is white, got \(top)")
     let bottom = try rgb(turnedImage, x: 10, y: 35)
-    #expect(bottom.red >= 0.9 && bottom.green <= 0.15 && bottom.blue <= 0.15, "the turned opaque half stays red, got \(bottom)")
+    #expect(bottom.red >= 0.9 && bottom.green <= 0.3 && bottom.blue <= 0.3, "the turned opaque half stays red, got \(bottom)")
   }
 }
