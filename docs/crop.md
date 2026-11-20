@@ -34,7 +34,7 @@ Button("Cancel") { crop.cancel() }
 val crop = rememberMediaCrop(aspect = Size(1080, 1920)) { result ->
   if (result == null) dismiss() else scope.launch {
     val frame = result.crop
-    val fractions = CropFractions(frame.left.toDouble(), frame.top.toDouble(), frame.width().toDouble(), frame.height().toDouble())
+    val fractions = CropFractions(1.0 * frame.left, 1.0 * frame.top, 1.0 * frame.width(), 1.0 * frame.height())
     val edit = PhotoEdit(null, false, fractions, PixelSize(1080u, 1920u), false, result.rotation.toUInt())
     preparer.run(MediaPrepareJob(1u, path, output, mediaPrepareDescriptor(MediaPrepareIntent.Image(edit, null, ImageFormat.JPEG)))) {}
   }
