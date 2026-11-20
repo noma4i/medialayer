@@ -824,3 +824,55 @@ struct MediaPreparerMatrixTests {
     #expect(!FileManager.default.fileExists(atPath: destination.path))
   }
 }
+
+// MARK: - A prepared JPEG flattens transparency onto white, like Android and encodeImage
+
+private func writeHalfTransparentPng(_ url: URL, width: Int, height: Int) throws {
+  let context = try #require(CGContext(
+    data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+  ))
+  context.clear(CGRect(x: 0, y: 0, width: width, height: height))
+  context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+  context.fill(CGRect(x: width / 2, y: 0, width: width - width / 2, height: height))
+  let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil))
+  CGImageDestinationAddImage(destination, try #require(context.makeImage()), nil)
+  try #require(CGImageDestinationFinalize(destination))
+}
+
+@Suite(.serialized)
+struct MediaPrepareTransparencyTests {
+  @Test(.timeLimit(.minutes(2)))
+  func inv_send_65_aPreparedJpegFlattensTransparencyOntoWhite() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "alpha.png")
+    try writeHalfTransparentPng(source, width: 40, height: 20)
+    let straight = directory.appending(path: "straight.jpg")
+    let straightOutcome = await MediaPreparer().run(job: makeJob(70, source, straight, try editDescriptor(plainEdit))) { _ in }
+    guard case .done = straightOutcome else {
+      Issue.record("the image is prepared, got \(straightOutcome)")
+      return
+    }
+    let straightImage = try pictureFacts(straight).image
+    let clear = try rgb(straightImage, x: 5, y: 10)
+    #expect(clear.red >= 0.98 && clear.green >= 0.98 && clear.blue >= 0.98, "transparent region is white, got \(clear)")
+    let solid = try rgb(straightImage, x: 35, y: 10)
+    #expect(solid.red >= 0.9 && solid.green <= 0.15 && solid.blue <= 0.15, "the opaque half stays red, got \(solid)")
+
+    let turned = directory.appending(path: "turned.jpg")
+    let turnedEdit = PhotoEdit(maxSize: nil, enlarge: false, crop: nil, outputSize: nil, mirror: false, rotationDegrees: 90)
+    let turnedOutcome = await MediaPreparer().run(job: makeJob(71, source, turned, try editDescriptor(turnedEdit))) { _ in }
+    guard case .done = turnedOutcome else {
+      Issue.record("the turned image is prepared, got \(turnedOutcome)")
+      return
+    }
+    let turnedImage = try pictureFacts(turned).image
+    #expect(turnedImage.width == 20 && turnedImage.height == 40)
+    // turned 90 degrees clockwise the left (transparent) half is on top, the red half at the bottom
+    let top = try rgb(turnedImage, x: 10, y: 5)
+    #expect(top.red >= 0.98 && top.green >= 0.98 && top.blue >= 0.98, "turned transparent region is white, got \(top)")
+    let bottom = try rgb(turnedImage, x: 10, y: 35)
+    #expect(bottom.red >= 0.9 && bottom.green <= 0.15 && bottom.blue <= 0.15, "the turned opaque half stays red, got \(bottom)")
+  }
+}
