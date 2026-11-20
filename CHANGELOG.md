@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.50.1 - 2026-11-21
+
+### Fixed
+
+- `OutgoingTesting.install` and `reset` let app tests drive an outgoing item with the testing fakes.
+
 ## 3.50.0 - 2026-11-21
 
 ### Added
