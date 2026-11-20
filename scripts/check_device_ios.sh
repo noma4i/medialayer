@@ -39,6 +39,19 @@ mkdir -p "$run/files"
 xcrun devicectl device copy from --device "$udid" --domain-type appDataContainer --domain-identifier "$bundle" \
   --source "Documents/probe/$probe_run" --destination "$run/files" > "$run/copy.log" 2>&1 || echo "check_device_ios: the files were not copied, see $run/copy.log" >&2
 
+# The phone is shared: the probe app never stays alive after a run, checked, not assumed.
+xcrun devicectl device info processes --device "$udid" --json-output "$run/processes.json" > /dev/null 2>&1 || true
+for pid in $(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(" ".join(str(p["processIdentifier"]) for p in d.get("result",{}).get("runningProcesses",[]) if "MediaLayerProbe" in p.get("executable","")))' "$run/processes.json" 2>/dev/null); do
+  xcrun devicectl device process terminate --device "$udid" --pid "$pid" > /dev/null 2>&1 || true
+done
+xcrun devicectl device info processes --device "$udid" --json-output "$run/processes-after.json" > /dev/null 2>&1 || true
+if python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(any("MediaLayerProbe" in p.get("executable","") for p in d.get("result",{}).get("runningProcesses",[])))' "$run/processes-after.json" 2>/dev/null; then
+  echo "check_device_ios: probe app terminated"
+else
+  echo "check_device_ios: the probe app is STILL RUNNING on $udid, terminate it by hand" >&2
+  status=1
+fi
+
 grep -h '^PROBE ' "$run/xcodebuild.log" "$run"/files/probe.log "$run"/files/*/probe.log 2>/dev/null | sort -u || true
 grep -E "Test Suite 'All tests'|Executed [0-9]+ tests|TEST (SUCCEEDED|FAILED)|error:" "$run/xcodebuild.log" | tail -n 12 || true
 if [ "$status" -eq 0 ]; then echo "verdict: PASS ($run)"; else echo "verdict: FAIL ($run)"; fi
