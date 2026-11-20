@@ -7,8 +7,6 @@ import SwiftUI
 final class ProbeScreen: ObservableObject {
   static let shared = ProbeScreen()
   @Published var camera: MediaCamera?
-  /// A second camera on screen at the same time: its session interrupts the first one, as another app's capture client does.
-  @Published var other: MediaCamera?
   @Published var report = "MediaLayerProbe: waiting for the tests"
 }
 
@@ -42,9 +40,6 @@ struct ProbeView: View {
       }
       .frame(width: 240, height: 240)
       .clipShape(Circle())
-      if let other = screen.other {
-        MediaCameraPreview(camera: other).frame(width: 120, height: 120).clipShape(Circle())
-      }
       Text(screen.report)
         .font(.system(size: 11, design: .monospaced))
         .frame(maxWidth: .infinity, alignment: .leading)
