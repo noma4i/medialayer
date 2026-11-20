@@ -18,7 +18,9 @@ import com.noma4i.medialayer.MediaProbeOutcome
 import com.noma4i.medialayer.PhotoEdit
 import com.noma4i.medialayer.PixelSize
 import com.noma4i.medialayer.defaultVideoLimits
+import com.noma4i.medialayer.mediaPrepareDecide
 import com.noma4i.medialayer.mediaPrepareDescriptor
+import com.noma4i.medialayer.videoMetadataToStrip
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.runBlocking
@@ -201,7 +203,9 @@ class MediaPreparerDeviceTest {
       assertFalse("location kept", "location" in readPrepareMetadataKeys(context, repacked))
 
       val passed = preparer.run(MediaPrepareJob(2u, repacked.path, untouched.path, descriptor), {})
-      assertTrue(passed.toString(), passed is MediaPrepareOutcome.Unchanged)
+      val keys = readPrepareMetadataKeys(context, repacked)
+      val verdict = mediaPrepareDecide(descriptor, probeOfVideo(readPrepareVideoFacts(repacked), keys, repacked.length()))
+      assertTrue("$passed | repacked keys=$keys verdict=$verdict strip=${videoMetadataToStrip(keys)}", passed is MediaPrepareOutcome.Unchanged)
       assertFalse(untouched.exists())
     } finally {
       source.delete()
