@@ -272,7 +272,7 @@ Android uses the context passed to `open` and accepts content URIs.
 Swift accepts readable file URLs, including security-scoped URLs.
 The result is a new `PreparedMedia` with `isNew` true, stored in the app's temporary directory.
 The caller owns this file and deletes it after use.
-Pass its file URL to `MediaSourceValue.file` for `prepareImage`, `prepareVideo` or `MediaCropper`.
+Pass its path to a `MediaPrepareJob` for `MediaPreparer`, or its file URL to `MediaSourceValue.file` for `MediaCropper`.
 
 Copies read at most 64 KiB per chunk, outside the main thread.
 Open, read and write errors throw `MediaException` on Kotlin or `MediaError` on Swift.

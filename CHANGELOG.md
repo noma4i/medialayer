@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `MediaPreparer` prepares video and photo files by a descriptor, on both platforms.
+- `mediaPrepareDescriptor` builds the descriptor of a video or photo intent.
+- `mediaPrepareImportDescriptor` upgrades a saved 6.43 preparation row once.
+
+### Removed
+
+- `prepareVideo` and `prepareImage` on Swift `MediaLayer` and Kotlin `MediaLayer`, with no deprecated layer.
+- `planVideo` and `planVideoSized` are no longer exported to the platforms.
+
+### Changed
+
+- A camera photo is turned upright by `encodeImage` and keeps its memory admission.
+- `MediaCropResult` is applied through `PhotoEdit` and `MediaPreparer`, not `prepareImage`.
+
 ## 3.48.1 - 2026-11-20
 
 ### Fixed

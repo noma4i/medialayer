@@ -165,42 +165,45 @@ val info = media.mediaInfo(MediaSourceValue.file(clipFile, Kind.VIDEO))   // Med
 
 ## Preparing media for sending
 
-`prepareVideo` and `prepareImage` make a local file ready to upload. Both take a `file://` source and run off the main thread. Cancelling the call stops the work and leaves no output file. `prepareImage` and `encodeImage` write the encoded photo to the file as it is encoded, never as one block in memory.
+`MediaPreparer` makes a local file ready to upload. The app says what it wants with a descriptor (`mediaPrepareDescriptor`), the core decides, `MediaPreparer` reads the source and writes the result. It takes a file path, runs off the main thread, and cancelling a run stops the work and leaves no output file. The API is the same on both platforms: Swift `import MediaLayerUI`, Kotlin `com.noma4i.medialayer.ui.MediaPreparer`.
 
 ```swift
-let video = try await media.prepareVideo(source, limits: defaultVideoLimits(), progress: { fraction in })
-let photo = try await media.prepareImage(source, quality: 0.9)
+let preparer = MediaPreparer()   // one per app, kept for the session
+let video = try mediaPrepareDescriptor(intent: .video(limits: nil, mirror: false, onCannotDecode: .uploadSource))
+let outcome = await preparer.run(job: MediaPrepareJob(attemptId: 7, source: sourcePath, destination: destinationPath, descriptor: video)) { fraction in }
+preparer.cancel(attemptId: 7)
 ```
 
 ```kotlin
-val video = media.prepareVideo(source, limits = defaultVideoLimits(), onProgress = { fraction -> })
-val photo = media.prepareImage(source, quality = 0.9)
+val preparer = MediaPreparer(context)   // one per app, kept for the session
+val video = mediaPrepareDescriptor(MediaPrepareIntent.Video(null, false, CannotDecode.UPLOAD_SOURCE))
+val outcome = preparer.run(MediaPrepareJob(7u, sourcePath, destinationPath, video)) { fraction -> }
+preparer.cancel(7u)
 ```
 
-- The result is `PreparedMedia`: the file and `isNew`. When `isNew` is false the source already fitted, carries no private metadata and is returned untouched, so there is nothing to delete.
-- Video limits are yours: `VideoLimits` holds the long side, the bitrate corridors, the frame rates and the audio settings. `defaultVideoLimits()` gives a long side of 1920, corridors from 0.5 to 3.5 Mbit/s and 30 to 60 frames per second.
-- The video is made upright, with even sides, a long side up to your table (never scaled up), a bitrate inside the corridor of the result and a limited frame rate. The codecs are H.264 and AAC in an mp4 file made for streaming. Android fails at once with `MediaException.Fetch` when no decoder of the device can read the source, for example a 4K video on a phone whose decoders stop at 2560x1440: the message gives the decoder maximum and the video size.
-- The video never carries the metadata of its source: no location or GPS, no creation time, no device or software, no tags. A file that already fits but carries any of them is copied without encoding the video or the audio and without the metadata, and `isNew` is true. The core decides from the keys the platform reads (`videoMetadataToStrip`), only the container keys such as `major_brand` and `handler_name` are allowed.
-- The photo is turned upright by its EXIF orientation and saved as JPEG with your quality (0.0 to 1.0). No metadata is copied, so the editor tag and the EXIF fields are gone.
-- Android reports video progress only while the export runs, with no timer at rest.
+- The outcome is `done` (the result is written at `destination`), `unchanged` (the source already fits and carries no private metadata, nothing is written, use the source), `cannotDecode`, `failed` or `cancelled`. There is no file to delete after `unchanged`.
+- `probe(path:descriptor:mime:)` gives the size and mime of the result the descriptor asks for before any work.
+- Video limits are yours: `VideoLimits` holds the long side, the bitrate corridors, the frame rates and the audio settings. `nil` takes `defaultVideoLimits()`: a long side of 1920, corridors from 0.5 to 3.5 Mbit/s and 30 to 60 frames per second.
+- The video is made upright, with even sides, a long side up to your table (never scaled up), a bitrate inside the corridor of the result and a limited frame rate. The codecs are H.264 and AAC in an mp4 file made for streaming. `mirror` flips the video horizontally, for a front camera. When no decoder of the device can read the source (for example a 4K video on a phone whose decoders stop at 2560x1440) the outcome is `cannotDecode` with the decoder maximum and the video size, or `unchanged` when the descriptor says `uploadSource`.
+- The video never carries the metadata of its source: no location or GPS, no creation time, no device or software, no tags. A file that already fits but carries any of them is copied without encoding the video or the audio and without the metadata (`done`). The core decides from the keys the platform reads (`videoMetadataToStrip`), only the container keys such as `major_brand` and `handler_name` are allowed.
+- A photo is turned upright by its EXIF orientation and saved as JPEG (or PNG) with your quality (0.0 to 1.0). No metadata is copied, so the editor tag and the EXIF fields are gone.
+- Android reports video progress only while the export runs, with no timer at rest. Progress never goes back.
 
-`prepareImage` also edits the photo. `maxSize` fits the result into a rectangle and keeps the proportions, it never enlarges unless `enlarge` is true: then a smaller photo grows to the rectangle (540x960 into 1080x1920 gives 1080x1920), the pixel limit of 16384 per side still applies. `rotation` turns the upright photo clockwise by a multiple of 90 degrees (a negative value turns it the other way, any other value throws `MediaError.Fetch`), it joins the EXIF turn in one turn. `crop` is a rectangle in fractions from 0 to 1 of the turned photo (the one the user sees, see `docs/crop.md`), the origin is the top left corner, a crop past the edge is held inside the photo. `outputSize` gives the exact size and wins over `maxSize`. `mirror` flips the result horizontally, for a front camera. The core plans the sizes in the order turn, crop, mirror, fit. An edit that holds no pixel, such as an empty crop or a size of zero, throws `MediaError.Fetch` (`MediaException.Fetch`).
+The image intent also edits the photo through `PhotoEdit`. `maxSize` fits the result into a rectangle and keeps the proportions, it never enlarges unless `enlarge` is true: then a smaller photo grows to the rectangle (540x960 into 1080x1920 gives 1080x1920), the pixel limit of 16384 per side still applies. `rotationDegrees` turns the upright photo clockwise by a multiple of 90 degrees, it joins the EXIF turn in one turn. `crop` is a rectangle in fractions from 0 to 1 of the turned photo (the one the user sees, see `docs/crop.md`), the origin is the top left corner, a crop past the edge is held inside the photo. `outputSize` gives the exact size and wins over `maxSize`. `mirror` flips the result horizontally, for a front camera. The core plans the sizes in the order turn, crop, mirror, fit. An edit that holds no pixel, such as an empty crop or a size of zero, ends as `cannotDecode`.
 
-The photo is decoded no larger than the edit needs. When the crop is larger than the output, the core plans a smaller decode (Android `inSampleSize` as a power of two, iOS an exact long side) that keeps every side of the crop at or above the output, so an 8160x6120 photo cut to 1080 pixels is decoded at about 2040x1530 and not at 50 megapixels. A crop at or below the output size is decoded at full size. The memory asked of the Ledger is the decoded raster, and the limit of 16384 per side still applies to the file.
+The photo is decoded no larger than the edit needs. When the crop is larger than the output, the core plans a smaller decode (Android `inSampleSize` as a power of two, iOS an exact long side) that keeps every side of the crop at or above the output, so an 8160x6120 photo cut to 1080 pixels is decoded at about 2040x1530 and not at 50 megapixels.
 
 ```swift
-let chat = try await media.prepareImage(source, quality: 0.7, maxSize: CGSize(width: 1080, height: 1920))
-let story = try await media.prepareImage(source, maxSize: CGSize(width: 1080, height: 1920), enlarge: true)
-let avatar = try await media.prepareImage(source, crop: CGRect(x: 0.1, y: 0.2, width: 0.8, height: 0.45), outputSize: CGSize(width: 1080, height: 1080))
-let selfie = try await media.prepareImage(source, mirror: true)
+let chat = try mediaPrepareDescriptor(intent: .image(edit: PhotoEdit(maxSize: PixelSize(width: 1080, height: 1920), enlarge: false, crop: nil, outputSize: nil, mirror: false, rotationDegrees: 0), quality: 0.7, format: .jpeg))
+let avatar = try mediaPrepareDescriptor(intent: .image(edit: PhotoEdit(maxSize: nil, enlarge: false, crop: CropFractions(x: 0.1, y: 0.2, width: 0.8, height: 0.45), outputSize: PixelSize(width: 1080, height: 1080), mirror: false, rotationDegrees: 0), quality: nil, format: .jpeg))
 ```
 
 ```kotlin
-val chat = media.prepareImage(source, quality = 0.7, maxSize = Size(1080, 1920))
-val story = media.prepareImage(source, maxSize = Size(1080, 1920), enlarge = true)
-val avatar = media.prepareImage(source, crop = RectF(0.1f, 0.2f, 0.9f, 0.65f), outputSize = Size(1080, 1080))
-val selfie = media.prepareImage(source, mirror = true)
+val chat = mediaPrepareDescriptor(MediaPrepareIntent.Image(PhotoEdit(PixelSize(1080u, 1920u), false, null, null, false, 0u), 0.7, ImageFormat.JPEG))
+val avatar = mediaPrepareDescriptor(MediaPrepareIntent.Image(PhotoEdit(null, false, CropFractions(0.1, 0.2, 0.8, 0.45), PixelSize(1080u, 1080u), false, 0u), null, ImageFormat.JPEG))
 ```
+
+`mediaPrepareDescriptor` throws `MediaError.InvalidSpec` (`MediaException.InvalidSpec`) for settings the planner refuses, before any bytes exist.
 
 ## Encoding an image in memory
 
@@ -306,7 +309,7 @@ Without declared dimensions, it obtains placement constraints through `BoxWithCo
 Read image work explicitly with Kotlin `media.imageStats().snapshot()` or Swift `media.imageStats().snapshot()`.
 The snapshot counts requests, decodes, memory hits, disk hits, decoded pixels, placement pixels, bitmap bytes, active requests, active observers, and cancellations (one total, not per URL).
 Bitmap bytes accumulate decoded allocations, rather than retained memory.
-`prepareImage` adds the raster it actually decodes to the same counters (one decode, width times height of the sampled raster, not the source), so a 50 MP photo prepared for a 1080 side shows about 1 MP in `decodedPixels`.
+`MediaPreparer` adds the raster it actually decodes to the same counters (one decode, width times height of the sampled raster, not the source), so a 50 MP photo prepared for a 1080 side shows about 1 MP in `decodedPixels`.
 Counters update on image events and perform no work while idle.
 `MediaImage.request` and `MediaImage.decode` identify Android async trace sections and Swift signpost intervals.
 `fetchImage` returns `ImageFetchResult`, containing `bytes` and `source` (`Cache`, `Network`, or `Local`).

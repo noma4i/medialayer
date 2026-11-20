@@ -2,6 +2,26 @@
 
 What an app changes when it moves to a new MediaLayer version. Each section names the removed API, its replacement, and what the app shows.
 
+## 3.49.0
+
+`prepareVideo` and `prepareImage` are removed on both platforms. An app prepares media with `MediaPreparer` and a descriptor from `mediaPrepareDescriptor`, see [Preparing media for sending](declaring-media.md#preparing-media-for-sending).
+
+| Old call | New call |
+| -------- | -------- |
+| `media.prepareVideo(source, limits:, progress:)` | `mediaPrepareDescriptor(intent: .video(limits:, mirror:, onCannotDecode:))` then `MediaPreparer().run(job:progress)` |
+| `media.prepareVideo(source, limits = ..., onProgress = ...)` | `mediaPrepareDescriptor(MediaPrepareIntent.Video(limits, mirror, CannotDecode.FAIL))` then `MediaPreparer(context).run(job) { }` |
+| `media.prepareImage(source, quality:, maxSize:, enlarge:, crop:, outputSize:, mirror:, rotation:)` | `mediaPrepareDescriptor(intent: .image(edit: PhotoEdit(...), quality:, format:))` then `MediaPreparer().run(job:progress)` |
+| `media.prepareImage(source, quality = ..., crop = RectF, rotation = ...)` | `MediaPrepareIntent.Image(PhotoEdit(maxSize, enlarge, CropFractions, outputSize, mirror, rotationDegrees), quality, format)` |
+| `PreparedMedia(url, isNew)` of a prepare | `MediaPrepareOutcome`: `done` (file at `destination`), `unchanged` (use the source), `cannotDecode`, `failed`, `cancelled` |
+| Cancelling the task of the call | `preparer.cancel(attemptId:)`, the run returns `cancelled` and leaves no file |
+| `MediaException.Fetch` of a refused edit or an unreadable source | `cannotDecode` or `failed` with a message |
+
+- The job names a source path and a destination path: the app owns both. A run writes next to the destination and renames, so a partial file never stays.
+- `unchanged` replaces `isNew == false`: nothing is written, upload the source.
+- A video that already fits but carries location or tags is copied without them and ends as `done`.
+- `PreparedMedia` stays for `importMedia` and `encodeImage`.
+- `planVideo` and `planVideoSized` are no longer exported: the core plans inside `MediaPreparer`.
+
 ## Next version
 
 - 3.48.0: a video take is recorded by the system writer again, as in 3.33.1 (iOS `AVCaptureMovieFileOutput`, Android CameraX `Recorder`). The preview mirrors exactly when the file does (`mirrorFrontVideo` on the front lens): pass `true` to mirror preview, file and bubble, `false` to mirror none. The microphone is no longer watched while the take runs, so iOS no longer ends a take with `RecordEnd.microphoneLost` and no longer refuses a clip for a hole in its sound; a take whose microphone fails ends as `recordFailed`. Nothing else changes in the API.
