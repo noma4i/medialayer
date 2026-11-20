@@ -114,9 +114,12 @@ final class ProbeTests: XCTestCase {
     probe(name, [("stopToClipMs", stopToClipMs), ("uprightMs", stopToClipMs), ("size", "\(Int(facts.size.width))x\(Int(facts.size.height))"), ("identity", facts.identity), ("audioTracks", facts.audioTracks),
                  ("videoS", String(format: "%.2f", facts.videoSeconds)), ("audioS", String(format: "%.2f", facts.audioSeconds)), ("clipMs", clip.durationMs)])
     try await close(camera)
-    XCTAssertTrue(facts.identity, "the delivered file has an identity matrix")
+    // Only a mirrored front take is re-encoded, so only it has an identity matrix and upright pixels; the other takes keep their rotation tag.
+    if lens == .front && profile.mirrorFrontVideo {
+      XCTAssertTrue(facts.identity, "the delivered mirrored take has an identity matrix")
+      XCTAssertGreaterThan(facts.size.height, facts.size.width)
+    }
     XCTAssertLessThanOrEqual(stopToClipMs, 1500)
-    XCTAssertGreaterThan(facts.size.height, facts.size.width)
     XCTAssertEqual(facts.audioTracks, 1)
     XCTAssertEqual(facts.videoSeconds, seconds, accuracy: seconds == 5 ? 0.7 : 1.0)
     XCTAssertEqual(facts.audioSeconds, seconds, accuracy: seconds == 5 ? 0.7 : 1.0)

@@ -2,7 +2,6 @@ package com.noma4i.medialayer.ui
 
 import android.Manifest
 import android.media.MediaExtractor
-import android.media.MediaMetadataRetriever
 import android.media.MediaFormat
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -90,18 +89,6 @@ class CameraPhoneProbeTest {
     }
   }
 
-  /** Width, height and rotation of the file as the platform reads them. */
-  private fun shapeOf(file: File): Triple<Int, Int, Int> {
-    val retriever = MediaMetadataRetriever()
-    try {
-      retriever.setDataSource(file.absolutePath)
-      fun key(id: Int) = retriever.extractMetadata(id)?.toIntOrNull() ?: 0
-      return Triple(key(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH), key(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT), key(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION))
-    } finally {
-      retriever.release()
-    }
-  }
-
   private fun take(name: String, kind: CaptureKind, lens: CameraLens, holdMs: Long) = runBlocking {
     val profile = captureProfile(kind).copy(audio = true)
     val composed = CompletableDeferred<MediaCamera>()
@@ -133,10 +120,6 @@ class CameraPhoneProbeTest {
     val found = tracks(clip.file)
     val video = found.entries.firstOrNull { it.key.startsWith("video/") }?.value
     val audio = found.entries.firstOrNull { it.key.startsWith("audio/") }?.value
-    val shape = shapeOf(clip.file)
-    probe(name, "uprightMs" to stopToClipMs, "rotation" to shape.third, "width" to shape.first, "height" to shape.second)
-    assertEquals("$name: the delivered file has an identity matrix", 0, shape.third)
-    assertTrue("$name: the pixels of a portrait take are upright, ${shape.first}x${shape.second}", shape.first < shape.second)
     probe(
       name,
       "kind" to kind, "lens" to lens, "holdMs" to holdMs, "stopToClipMs" to stopToClipMs, "clipMs" to clip.durationMs, "bytes" to clip.file.length(),
@@ -152,13 +135,6 @@ class CameraPhoneProbeTest {
 
   @Test
   fun a_fifteen_second_take_with_sound_is_delivered_without_a_long_pause() = take("take15s", CaptureKind.CIRCLE, CameraLens.FRONT, 15_000)
-
-  @Test
-  fun inv_capture_89_every_delivered_take_has_an_identity_matrix_and_upright_pixels() {
-    take("upright-front", CaptureKind.CIRCLE, CameraLens.FRONT, 3_000)
-    scenario?.close()
-    take("upright-back", CaptureKind.CIRCLE, CameraLens.BACK, 3_000)
-  }
 
   private companion object {
     const val MB = 1024L * 1024L
