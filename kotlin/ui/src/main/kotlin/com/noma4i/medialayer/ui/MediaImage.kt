@@ -258,7 +258,7 @@ internal val LocalPlaceholderObserver = staticCompositionLocalOf<((String, Any) 
 
 internal val LocalBlurDecoder = staticCompositionLocalOf<(String) -> ByteArray> { { hash -> decodeBlurhash(hash, BLUR_SIZE.toUInt(), BLUR_SIZE.toUInt(), 1f) } }
 
-private suspend fun decodeBlur(hash: String, decode: (String) -> ByteArray): ImageBitmap? = withContext(Dispatchers.Default) {
+internal suspend fun decodeBlur(hash: String, decode: (String) -> ByteArray): ImageBitmap? = withContext(Dispatchers.Default) {
   ensureActive()
   try {
     val pixels = decode(hash)

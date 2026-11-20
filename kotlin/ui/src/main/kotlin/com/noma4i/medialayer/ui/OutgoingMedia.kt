@@ -132,12 +132,12 @@ class OutgoingMedia internal constructor(
   }
 
   private fun scheduleReask() {
-    if (onScreen == 0 || reask?.isActive == true || fetch?.isActive == true) return
+    if (onScreen == 0 || reask?.isActive == true) return
     val after = outgoingView(state).reaskAfterMs ?: return
     val url = state.inputs.remote ?: return
     reask = runtime.scope.launch {
       runtime.clock.delay(after.toLong())
-      synchronized(lock) { if (state.inputs.remote == url && onScreen > 0) startFetch(url) }
+      synchronized(lock) { if (state.inputs.remote == url && onScreen > 0 && fetch?.isActive != true) startFetch(url) }
     }
   }
 }
