@@ -23,6 +23,13 @@ pub enum MediaPrepareIntent {
     Image { edit: PhotoEdit, quality: Option<f64>, format: ImageFormat },
 }
 
+/// The kind of file a descriptor asks for, known without reading the source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum PrepareKind {
+    Video,
+    Image,
+}
+
 /// What the platform read from a source. `size_bytes` is the file size.
 #[derive(Debug, Clone, PartialEq, uniffi::Enum)]
 pub enum PrepareProbe {
@@ -133,6 +140,15 @@ pub fn media_prepare_descriptor(intent: MediaPrepareIntent) -> Vec<u8> {
         }
     }
     out
+}
+
+/// The kind of the descriptor, so the platform picks its reader without sniffing the bytes of the source. `None` when the bytes do not decode.
+#[uniffi::export]
+pub fn media_prepare_descriptor_kind(descriptor: Vec<u8>) -> Option<PrepareKind> {
+    match decode_descriptor(&descriptor).ok()? {
+        MediaPrepareIntent::Video { .. } => Some(PrepareKind::Video),
+        MediaPrepareIntent::Image { .. } => Some(PrepareKind::Image),
+    }
 }
 
 /// The intent in `bytes`. An unknown version, a short or a longer input and an unknown tag are `UnsupportedDescriptor`.

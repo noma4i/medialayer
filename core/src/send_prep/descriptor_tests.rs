@@ -169,3 +169,11 @@ fn inv_send_60_a_pass_is_answered_by_unchanged_and_never_by_a_written_destinatio
     assert_ne!(unchanged, MediaPrepareOutcome::Done { name: None, mime: None });
     assert_eq!(media_prepare_decide(video(false, CannotDecode::UploadSource), PrepareProbe::Failed { message: "no".to_string() }), PrepareDecision::Pass);
 }
+
+#[test]
+fn inv_send_64_the_descriptor_kind_is_known_without_the_source_and_garbage_has_none() {
+    assert_eq!(media_prepare_descriptor_kind(video(false, CannotDecode::Fail)), Some(PrepareKind::Video));
+    assert_eq!(media_prepare_descriptor_kind(image(edit())), Some(PrepareKind::Image));
+    assert_eq!(media_prepare_descriptor_kind(vec![9, 9, 9]), None);
+    assert_eq!(media_prepare_descriptor_kind(Vec::new()), None);
+}
