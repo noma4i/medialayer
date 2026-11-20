@@ -410,7 +410,8 @@ struct MediaPreparerMatrixTests {
     let source = directory.appending(path: "source.mp4")
     try await writeClip(FixtureClip(width: 64, height: 32, audio: true, metadata: true), to: source)
     let before = try await videoFacts(source)
-    #expect(before.metadata.contains { $0.lowercased().contains("location") }, "the fixture carries GPS metadata: \(before.metadata)")
+    // As DBlayer's row: the source carries private metadata (an MP4 written by AVAssetWriter keeps the title, not always the location).
+    #expect(!videoMetadataToStrip(keys: before.metadata).isEmpty, "the fixture carries private metadata: \(before.metadata)")
     let destination = directory.appending(path: "result.mp4")
     let outcome = await MediaPreparer().run(job: makeJob(10, source, destination, try videoDescriptor())) { _ in }
     guard case let .done(_, mime) = outcome else {
