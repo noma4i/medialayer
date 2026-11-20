@@ -33,7 +33,7 @@ class MediaPreparerTest {
   private fun job(descriptor: ByteArray, attempt: ULong = 1u) = MediaPrepareJob(attempt, source().path, File(folder, "out.mp4").path, descriptor)
 
   private fun preparer(exporter: suspend (VideoExport) -> Unit = { error("no export expected") }) =
-    MediaPreparer(context, { fits }, { _, _ -> emptyList() }, { emptyList() }, exporter)
+    MediaPreparer(context, { fits }, { _, _ -> emptyList() }, { listOf(DecoderAbility({ _, _ -> true }, emptySet(), 3840, 2160)) }, exporter)
 
   /** A source that already fits and carries no tag is left alone: the outcome is Unchanged and nothing is written. */
   @Test

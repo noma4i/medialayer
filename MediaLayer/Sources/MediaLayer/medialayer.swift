@@ -9090,6 +9090,71 @@ public func FfiConverterTypeMediaItem_lower(_ value: MediaItem) -> RustBuffer {
 }
 
 
+/**
+ * One run of the platform writer: it reads the descriptor itself through `media_prepare_decide`.
+ */
+public struct MediaPrepareJob: Equatable, Hashable {
+    public var attemptId: UInt64
+    public var source: String
+    public var destination: String
+    public var descriptor: Data
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(attemptId: UInt64, source: String, destination: String, descriptor: Data) {
+        self.attemptId = attemptId
+        self.source = source
+        self.destination = destination
+        self.descriptor = descriptor
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension MediaPrepareJob: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMediaPrepareJob: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MediaPrepareJob {
+        return
+            try MediaPrepareJob(
+                attemptId: FfiConverterUInt64.read(from: &buf), 
+                source: FfiConverterString.read(from: &buf), 
+                destination: FfiConverterString.read(from: &buf), 
+                descriptor: FfiConverterData.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: MediaPrepareJob, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.attemptId, into: &buf)
+        FfiConverterString.write(value.source, into: &buf)
+        FfiConverterString.write(value.destination, into: &buf)
+        FfiConverterData.write(value.descriptor, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMediaPrepareJob_lift(_ buf: RustBuffer) throws -> MediaPrepareJob {
+    return try FfiConverterTypeMediaPrepareJob.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMediaPrepareJob_lower(_ value: MediaPrepareJob) -> RustBuffer {
+    return FfiConverterTypeMediaPrepareJob.lower(value)
+}
+
+
 public struct MediaStats: Equatable, Hashable {
     public var totalBytes: UInt64
     public var fileCount: UInt64
@@ -10322,6 +10387,63 @@ public func FfiConverterTypeRgb_lower(_ value: Rgb) -> RustBuffer {
 }
 
 
+/**
+ * The `sync_upload_prepare` row of a saved transfer and the rows of its `sync_upload_prepare_step` table, every value as canonical text and `None` as SQL NULL.
+ */
+public struct SavedPreparation: Equatable, Hashable {
+    public var columns: [String: String?]
+    public var children: [[String: String?]]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(columns: [String: String?], children: [[String: String?]]) {
+        self.columns = columns
+        self.children = children
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SavedPreparation: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSavedPreparation: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SavedPreparation {
+        return
+            try SavedPreparation(
+                columns: FfiConverterDictionaryStringOptionString.read(from: &buf), 
+                children: FfiConverterSequenceDictionaryStringOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SavedPreparation, into buf: inout [UInt8]) {
+        FfiConverterDictionaryStringOptionString.write(value.columns, into: &buf)
+        FfiConverterSequenceDictionaryStringOptionString.write(value.children, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSavedPreparation_lift(_ buf: RustBuffer) throws -> SavedPreparation {
+    return try FfiConverterTypeSavedPreparation.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSavedPreparation_lower(_ value: SavedPreparation) -> RustBuffer {
+    return FfiConverterTypeSavedPreparation.lower(value)
+}
+
+
 public struct SlotCounts: Equatable, Hashable {
     public var hot: UInt32
     public var playing: UInt32
@@ -10706,10 +10828,17 @@ public struct VideoLimits: Equatable, Hashable {
     public var audioBitrate: UInt32
     public var audioChannels: UInt32
     public var audioSampleRate: UInt32
+    /**
+     * A source of at most this many bytes goes as it is, whatever its codec. `None` or 0 turns the threshold off.
+     */
+    public var recodeAboveBytes: UInt64?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(maxLongSide: UInt32, corridors: [BitrateStep], minFrameRate: UInt32, maxFrameRate: UInt32, sourceBitrateCapPercent: UInt32, audioBitrate: UInt32, audioChannels: UInt32, audioSampleRate: UInt32) {
+    public init(maxLongSide: UInt32, corridors: [BitrateStep], minFrameRate: UInt32, maxFrameRate: UInt32, sourceBitrateCapPercent: UInt32, audioBitrate: UInt32, audioChannels: UInt32, audioSampleRate: UInt32, 
+        /**
+         * A source of at most this many bytes goes as it is, whatever its codec. `None` or 0 turns the threshold off.
+         */recodeAboveBytes: UInt64? = nil) {
         self.maxLongSide = maxLongSide
         self.corridors = corridors
         self.minFrameRate = minFrameRate
@@ -10718,6 +10847,7 @@ public struct VideoLimits: Equatable, Hashable {
         self.audioBitrate = audioBitrate
         self.audioChannels = audioChannels
         self.audioSampleRate = audioSampleRate
+        self.recodeAboveBytes = recodeAboveBytes
     }
 
     
@@ -10743,7 +10873,8 @@ public struct FfiConverterTypeVideoLimits: FfiConverterRustBuffer {
                 sourceBitrateCapPercent: FfiConverterUInt32.read(from: &buf), 
                 audioBitrate: FfiConverterUInt32.read(from: &buf), 
                 audioChannels: FfiConverterUInt32.read(from: &buf), 
-                audioSampleRate: FfiConverterUInt32.read(from: &buf)
+                audioSampleRate: FfiConverterUInt32.read(from: &buf), 
+                recodeAboveBytes: FfiConverterOptionUInt64.read(from: &buf)
         )
     }
 
@@ -10756,6 +10887,7 @@ public struct FfiConverterTypeVideoLimits: FfiConverterRustBuffer {
         FfiConverterUInt32.write(value.audioBitrate, into: &buf)
         FfiConverterUInt32.write(value.audioChannels, into: &buf)
         FfiConverterUInt32.write(value.audioSampleRate, into: &buf)
+        FfiConverterOptionUInt64.write(value.recodeAboveBytes, into: &buf)
     }
 }
 
@@ -12424,6 +12556,75 @@ public func FfiConverterTypeCameraRefusal_lift(_ buf: RustBuffer) throws -> Came
 #endif
 public func FfiConverterTypeCameraRefusal_lower(_ value: CameraRefusal) -> RustBuffer {
     return FfiConverterTypeCameraRefusal.lower(value)
+}
+
+
+
+/**
+ * What happens to a source the device cannot decode: the prepare fails with `CannotDecode`, or the source goes as it is.
+ */
+
+public enum CannotDecode: Equatable, Hashable {
+    
+    case fail
+    case uploadSource
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension CannotDecode: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCannotDecode: FfiConverterRustBuffer {
+    typealias SwiftType = CannotDecode
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CannotDecode {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .fail
+        
+        case 2: return .uploadSource
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: CannotDecode, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .fail:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .uploadSource:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCannotDecode_lift(_ buf: RustBuffer) throws -> CannotDecode {
+    return try FfiConverterTypeCannotDecode.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCannotDecode_lower(_ value: CannotDecode) -> RustBuffer {
+    return FfiConverterTypeCannotDecode.lower(value)
 }
 
 
@@ -14304,6 +14505,350 @@ public func FfiConverterTypeMediaError_lower(_ value: MediaError) -> RustBuffer 
 }
 
 
+/**
+ * Why a prepare ends without a file.
+ */
+
+public enum MediaPrepareFailure: Equatable, Hashable {
+    
+    case cannotDecode
+    case sourceUnreadable
+    case writeFailed
+    case unsupportedDescriptor
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension MediaPrepareFailure: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMediaPrepareFailure: FfiConverterRustBuffer {
+    typealias SwiftType = MediaPrepareFailure
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MediaPrepareFailure {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .cannotDecode
+        
+        case 2: return .sourceUnreadable
+        
+        case 3: return .writeFailed
+        
+        case 4: return .unsupportedDescriptor
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: MediaPrepareFailure, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .cannotDecode:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .sourceUnreadable:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .writeFailed:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .unsupportedDescriptor:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMediaPrepareFailure_lift(_ buf: RustBuffer) throws -> MediaPrepareFailure {
+    return try FfiConverterTypeMediaPrepareFailure.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMediaPrepareFailure_lower(_ value: MediaPrepareFailure) -> RustBuffer {
+    return FfiConverterTypeMediaPrepareFailure.lower(value)
+}
+
+
+
+/**
+ * What the app asks of a file before it is sent. `limits = None` takes `default_video_limits`.
+ */
+
+public enum MediaPrepareIntent: Equatable, Hashable {
+    
+    case video(limits: VideoLimits?, mirror: Bool, onCannotDecode: CannotDecode
+    )
+    case image(edit: PhotoEdit, quality: Double?, format: ImageFormat
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension MediaPrepareIntent: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMediaPrepareIntent: FfiConverterRustBuffer {
+    typealias SwiftType = MediaPrepareIntent
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MediaPrepareIntent {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .video(limits: try FfiConverterOptionTypeVideoLimits.read(from: &buf), mirror: try FfiConverterBool.read(from: &buf), onCannotDecode: try FfiConverterTypeCannotDecode.read(from: &buf)
+        )
+        
+        case 2: return .image(edit: try FfiConverterTypePhotoEdit.read(from: &buf), quality: try FfiConverterOptionDouble.read(from: &buf), format: try FfiConverterTypeImageFormat.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: MediaPrepareIntent, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .video(limits,mirror,onCannotDecode):
+            writeInt(&buf, Int32(1))
+            FfiConverterOptionTypeVideoLimits.write(limits, into: &buf)
+            FfiConverterBool.write(mirror, into: &buf)
+            FfiConverterTypeCannotDecode.write(onCannotDecode, into: &buf)
+            
+        
+        case let .image(edit,quality,format):
+            writeInt(&buf, Int32(2))
+            FfiConverterTypePhotoEdit.write(edit, into: &buf)
+            FfiConverterOptionDouble.write(quality, into: &buf)
+            FfiConverterTypeImageFormat.write(format, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMediaPrepareIntent_lift(_ buf: RustBuffer) throws -> MediaPrepareIntent {
+    return try FfiConverterTypeMediaPrepareIntent.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMediaPrepareIntent_lower(_ value: MediaPrepareIntent) -> RustBuffer {
+    return FfiConverterTypeMediaPrepareIntent.lower(value)
+}
+
+
+
+/**
+ * How a prepare ends. `Done` is a written destination, its size and hash are measured by the queue.
+ * `Unchanged` is the answer to `PrepareDecision::Pass` (also the `UploadSource` policy on a source that cannot be decoded): the platform copies nothing and the source goes as it is.
+ */
+
+public enum MediaPrepareOutcome: Equatable, Hashable {
+    
+    case unchanged(name: String?, mime: String?
+    )
+    case done(name: String?, mime: String?
+    )
+    case cannotDecode(message: String
+    )
+    case failed(message: String
+    )
+    case cancelled
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension MediaPrepareOutcome: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMediaPrepareOutcome: FfiConverterRustBuffer {
+    typealias SwiftType = MediaPrepareOutcome
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MediaPrepareOutcome {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .unchanged(name: try FfiConverterOptionString.read(from: &buf), mime: try FfiConverterOptionString.read(from: &buf)
+        )
+        
+        case 2: return .done(name: try FfiConverterOptionString.read(from: &buf), mime: try FfiConverterOptionString.read(from: &buf)
+        )
+        
+        case 3: return .cannotDecode(message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 4: return .failed(message: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 5: return .cancelled
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: MediaPrepareOutcome, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .unchanged(name,mime):
+            writeInt(&buf, Int32(1))
+            FfiConverterOptionString.write(name, into: &buf)
+            FfiConverterOptionString.write(mime, into: &buf)
+            
+        
+        case let .done(name,mime):
+            writeInt(&buf, Int32(2))
+            FfiConverterOptionString.write(name, into: &buf)
+            FfiConverterOptionString.write(mime, into: &buf)
+            
+        
+        case let .cannotDecode(message):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .failed(message):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case .cancelled:
+            writeInt(&buf, Int32(5))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMediaPrepareOutcome_lift(_ buf: RustBuffer) throws -> MediaPrepareOutcome {
+    return try FfiConverterTypeMediaPrepareOutcome.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMediaPrepareOutcome_lower(_ value: MediaPrepareOutcome) -> RustBuffer {
+    return FfiConverterTypeMediaPrepareOutcome.lower(value)
+}
+
+
+
+/**
+ * What the platform probe answers: the width, height and MIME of the file, planned when the probe had a descriptor, or the failure. An unsupported file is a `File` with all `None`.
+ */
+
+public enum MediaProbeOutcome: Equatable, Hashable {
+    
+    case file(width: UInt32?, height: UInt32?, mime: String?
+    )
+    case failed(message: String
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension MediaProbeOutcome: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMediaProbeOutcome: FfiConverterRustBuffer {
+    typealias SwiftType = MediaProbeOutcome
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MediaProbeOutcome {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .file(width: try FfiConverterOptionUInt32.read(from: &buf), height: try FfiConverterOptionUInt32.read(from: &buf), mime: try FfiConverterOptionString.read(from: &buf)
+        )
+        
+        case 2: return .failed(message: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: MediaProbeOutcome, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .file(width,height,mime):
+            writeInt(&buf, Int32(1))
+            FfiConverterOptionUInt32.write(width, into: &buf)
+            FfiConverterOptionUInt32.write(height, into: &buf)
+            FfiConverterOptionString.write(mime, into: &buf)
+            
+        
+        case let .failed(message):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(message, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMediaProbeOutcome_lift(_ buf: RustBuffer) throws -> MediaProbeOutcome {
+    return try FfiConverterTypeMediaProbeOutcome.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMediaProbeOutcome_lower(_ value: MediaProbeOutcome) -> RustBuffer {
+    return FfiConverterTypeMediaProbeOutcome.lower(value)
+}
+
+
+
 
 public enum MediaState: Equatable, Hashable {
     
@@ -14824,6 +15369,402 @@ public func FfiConverterTypePlayRefusal_lift(_ buf: RustBuffer) throws -> PlayRe
 #endif
 public func FfiConverterTypePlayRefusal_lower(_ value: PlayRefusal) -> RustBuffer {
     return FfiConverterTypePlayRefusal.lower(value)
+}
+
+
+
+/**
+ * What the platform does: copy the source to the destination as it is, run the plan, or end with the refusal.
+ */
+
+public enum PrepareDecision: Equatable, Hashable {
+    
+    case pass
+    case run(plan: PreparePlan
+    )
+    case refuse(reason: MediaPrepareFailure, message: String
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension PrepareDecision: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePrepareDecision: FfiConverterRustBuffer {
+    typealias SwiftType = PrepareDecision
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PrepareDecision {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .pass
+        
+        case 2: return .run(plan: try FfiConverterTypePreparePlan.read(from: &buf)
+        )
+        
+        case 3: return .refuse(reason: try FfiConverterTypeMediaPrepareFailure.read(from: &buf), message: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PrepareDecision, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .pass:
+            writeInt(&buf, Int32(1))
+        
+        
+        case let .run(plan):
+            writeInt(&buf, Int32(2))
+            FfiConverterTypePreparePlan.write(plan, into: &buf)
+            
+        
+        case let .refuse(reason,message):
+            writeInt(&buf, Int32(3))
+            FfiConverterTypeMediaPrepareFailure.write(reason, into: &buf)
+            FfiConverterString.write(message, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePrepareDecision_lift(_ buf: RustBuffer) throws -> PrepareDecision {
+    return try FfiConverterTypePrepareDecision.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePrepareDecision_lower(_ value: PrepareDecision) -> RustBuffer {
+    return FfiConverterTypePrepareDecision.lower(value)
+}
+
+
+
+
+public enum PrepareImportOutcome: Equatable, Hashable {
+    
+    case done(descriptor: Data
+    )
+    case failed(message: String
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension PrepareImportOutcome: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePrepareImportOutcome: FfiConverterRustBuffer {
+    typealias SwiftType = PrepareImportOutcome
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PrepareImportOutcome {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .done(descriptor: try FfiConverterData.read(from: &buf)
+        )
+        
+        case 2: return .failed(message: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PrepareImportOutcome, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .done(descriptor):
+            writeInt(&buf, Int32(1))
+            FfiConverterData.write(descriptor, into: &buf)
+            
+        
+        case let .failed(message):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(message, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePrepareImportOutcome_lift(_ buf: RustBuffer) throws -> PrepareImportOutcome {
+    return try FfiConverterTypePrepareImportOutcome.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePrepareImportOutcome_lower(_ value: PrepareImportOutcome) -> RustBuffer {
+    return FfiConverterTypePrepareImportOutcome.lower(value)
+}
+
+
+
+/**
+ * The kind of file a descriptor asks for, known without reading the source.
+ */
+
+public enum PrepareKind: Equatable, Hashable {
+    
+    case video
+    case image
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension PrepareKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePrepareKind: FfiConverterRustBuffer {
+    typealias SwiftType = PrepareKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PrepareKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .video
+        
+        case 2: return .image
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PrepareKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .video:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .image:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePrepareKind_lift(_ buf: RustBuffer) throws -> PrepareKind {
+    return try FfiConverterTypePrepareKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePrepareKind_lower(_ value: PrepareKind) -> RustBuffer {
+    return FfiConverterTypePrepareKind.lower(value)
+}
+
+
+
+/**
+ * The whole job of the platform writer: it decides nothing.
+ */
+
+public enum PreparePlan: Equatable, Hashable {
+    
+    case video(plan: VideoPlan, stripMetadata: [String], audioBitrate: UInt32, audioChannels: UInt32, audioSampleRate: UInt32, mirror: Bool
+    )
+    case image(plan: PhotoPlan, quality: Double, format: ImageFormat
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension PreparePlan: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePreparePlan: FfiConverterRustBuffer {
+    typealias SwiftType = PreparePlan
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PreparePlan {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .video(plan: try FfiConverterTypeVideoPlan.read(from: &buf), stripMetadata: try FfiConverterSequenceString.read(from: &buf), audioBitrate: try FfiConverterUInt32.read(from: &buf), audioChannels: try FfiConverterUInt32.read(from: &buf), audioSampleRate: try FfiConverterUInt32.read(from: &buf), mirror: try FfiConverterBool.read(from: &buf)
+        )
+        
+        case 2: return .image(plan: try FfiConverterTypePhotoPlan.read(from: &buf), quality: try FfiConverterDouble.read(from: &buf), format: try FfiConverterTypeImageFormat.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PreparePlan, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .video(plan,stripMetadata,audioBitrate,audioChannels,audioSampleRate,mirror):
+            writeInt(&buf, Int32(1))
+            FfiConverterTypeVideoPlan.write(plan, into: &buf)
+            FfiConverterSequenceString.write(stripMetadata, into: &buf)
+            FfiConverterUInt32.write(audioBitrate, into: &buf)
+            FfiConverterUInt32.write(audioChannels, into: &buf)
+            FfiConverterUInt32.write(audioSampleRate, into: &buf)
+            FfiConverterBool.write(mirror, into: &buf)
+            
+        
+        case let .image(plan,quality,format):
+            writeInt(&buf, Int32(2))
+            FfiConverterTypePhotoPlan.write(plan, into: &buf)
+            FfiConverterDouble.write(quality, into: &buf)
+            FfiConverterTypeImageFormat.write(format, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePreparePlan_lift(_ buf: RustBuffer) throws -> PreparePlan {
+    return try FfiConverterTypePreparePlan.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePreparePlan_lower(_ value: PreparePlan) -> RustBuffer {
+    return FfiConverterTypePreparePlan.lower(value)
+}
+
+
+
+/**
+ * What the platform read from a source. `size_bytes` is the file size.
+ */
+
+public enum PrepareProbe: Equatable, Hashable {
+    
+    case video(source: VideoSource, metadataKeys: [String], sizeBytes: UInt64
+    )
+    case image(width: UInt32, height: UInt32, exifOrientation: UInt32, format: ImageFormat
+    )
+    case failed(message: String
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension PrepareProbe: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePrepareProbe: FfiConverterRustBuffer {
+    typealias SwiftType = PrepareProbe
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PrepareProbe {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .video(source: try FfiConverterTypeVideoSource.read(from: &buf), metadataKeys: try FfiConverterSequenceString.read(from: &buf), sizeBytes: try FfiConverterUInt64.read(from: &buf)
+        )
+        
+        case 2: return .image(width: try FfiConverterUInt32.read(from: &buf), height: try FfiConverterUInt32.read(from: &buf), exifOrientation: try FfiConverterUInt32.read(from: &buf), format: try FfiConverterTypeImageFormat.read(from: &buf)
+        )
+        
+        case 3: return .failed(message: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PrepareProbe, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .video(source,metadataKeys,sizeBytes):
+            writeInt(&buf, Int32(1))
+            FfiConverterTypeVideoSource.write(source, into: &buf)
+            FfiConverterSequenceString.write(metadataKeys, into: &buf)
+            FfiConverterUInt64.write(sizeBytes, into: &buf)
+            
+        
+        case let .image(width,height,exifOrientation,format):
+            writeInt(&buf, Int32(2))
+            FfiConverterUInt32.write(width, into: &buf)
+            FfiConverterUInt32.write(height, into: &buf)
+            FfiConverterUInt32.write(exifOrientation, into: &buf)
+            FfiConverterTypeImageFormat.write(format, into: &buf)
+            
+        
+        case let .failed(message):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(message, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePrepareProbe_lift(_ buf: RustBuffer) throws -> PrepareProbe {
+    return try FfiConverterTypePrepareProbe.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePrepareProbe_lower(_ value: PrepareProbe) -> RustBuffer {
+    return FfiConverterTypePrepareProbe.lower(value)
 }
 
 
@@ -16204,6 +17145,30 @@ fileprivate struct FfiConverterOptionFloat: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionDouble: FfiConverterRustBuffer {
+    typealias SwiftType = Double?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterDouble.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterDouble.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionBool: FfiConverterRustBuffer {
     typealias SwiftType = Bool?
 
@@ -16708,6 +17673,30 @@ fileprivate struct FfiConverterOptionTypeVideoBounds: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeVideoLimits: FfiConverterRustBuffer {
+    typealias SwiftType = VideoLimits?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeVideoLimits.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeVideoLimits.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeCameraLens: FfiConverterRustBuffer {
     typealias SwiftType = CameraLens?
 
@@ -16892,6 +17881,30 @@ fileprivate struct FfiConverterOptionTypePlayRefusal: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypePlayRefusal.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypePrepareKind: FfiConverterRustBuffer {
+    typealias SwiftType = PrepareKind?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypePrepareKind.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypePrepareKind.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -17445,6 +18458,31 @@ fileprivate struct FfiConverterSequenceSequenceTypeMediaItem: FfiConverterRustBu
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceDictionaryStringOptionString: FfiConverterRustBuffer {
+    typealias SwiftType = [[String: String?]]
+
+    public static func write(_ value: [[String: String?]], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterDictionaryStringOptionString.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [[String: String?]] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [[String: String?]]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterDictionaryStringOptionString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterDictionaryStringString: FfiConverterRustBuffer {
     public static func write(_ value: [String: String], into buf: inout [UInt8]) {
         let len = Int32(value.count)
@@ -17462,6 +18500,32 @@ fileprivate struct FfiConverterDictionaryStringString: FfiConverterRustBuffer {
         for _ in 0..<len {
             let key = try FfiConverterString.read(from: &buf)
             let value = try FfiConverterString.read(from: &buf)
+            dict[key] = value
+        }
+        return dict
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterDictionaryStringOptionString: FfiConverterRustBuffer {
+    public static func write(_ value: [String: String?], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for (key, value) in value {
+            FfiConverterString.write(key, into: &buf)
+            FfiConverterOptionString.write(value, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String: String?] {
+        let len: Int32 = try readInt(&buf)
+        var dict = [String: String?]()
+        dict.reserveCapacity(Int(len))
+        for _ in 0..<len {
+            let key = try FfiConverterString.read(from: &buf)
+            let value = try FfiConverterOptionString.read(from: &buf)
             dict[key] = value
         }
         return dict
@@ -18277,6 +19341,66 @@ public func imageDecodePlan(width: UInt32, height: UInt32, exifOrientation: UInt
 })
 }
 /**
+ * The decision of a prepare: the descriptor and what the platform read from the source give a pass, a plan or a refusal.
+ * A source that cannot be read, a kind that does not match the intent and an image that has no plan are the cannot decode case: `UploadSource` passes the original, `Fail` refuses.
+ */
+public func mediaPrepareDecide(descriptor: Data, probe: PrepareProbe) -> PrepareDecision  {
+    return try!  FfiConverterTypePrepareDecision_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_func_media_prepare_decide(
+        FfiConverterData.lower(descriptor),
+        FfiConverterTypePrepareProbe_lower(probe),uniffiCallStatus
+    )
+})
+}
+/**
+ * The descriptor of an intent. Settings the planner cannot work with are `MediaError::InvalidSpec` here, before any bytes exist (D-364): the same check refuses them in `media_prepare_decide`.
+ */
+public func mediaPrepareDescriptor(intent: MediaPrepareIntent)throws  -> Data  {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeMediaError_lift) {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_func_media_prepare_descriptor(
+        FfiConverterTypeMediaPrepareIntent_lower(intent),uniffiCallStatus
+    )
+})
+}
+/**
+ * The kind of the descriptor, so the platform picks its reader without sniffing the bytes of the source. `None` when the bytes do not decode.
+ */
+public func mediaPrepareDescriptorKind(descriptor: Data) -> PrepareKind?  {
+    return try!  FfiConverterOptionTypePrepareKind.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_func_media_prepare_descriptor_kind(
+        FfiConverterData.lower(descriptor),uniffiCallStatus
+    )
+})
+}
+/**
+ * The width, height and MIME of the file (D-413). With a descriptor it is the planned result of the prepare, an unsupported file (a broken descriptor or a probe that does not fit it) is a `File` with all `None`;
+ * without one it is the source as the platform reports it, turned upright. A failed probe is `Failed`.
+ */
+public func mediaPrepareFacts(descriptor: Data?, probe: PrepareProbe) -> MediaProbeOutcome  {
+    return try!  FfiConverterTypeMediaProbeOutcome_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_func_media_prepare_facts(
+        FfiConverterOptionData.lower(descriptor),
+        FfiConverterTypePrepareProbe_lower(probe),uniffiCallStatus
+    )
+})
+}
+/**
+ * The descriptor of a pending transfer saved by DBlayer 6.43, from its typed rows: a missing or NULL required column, an unknown value or a broken step is `Failed`.
+ * It exists for the D-32 upgrade of saved transfers only.
+ */
+public func mediaPrepareImportDescriptor(saved: SavedPreparation) -> PrepareImportOutcome  {
+    return try!  FfiConverterTypePrepareImportOutcome_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_func_media_prepare_import_descriptor(
+        FfiConverterTypeSavedPreparation_lower(saved),uniffiCallStatus
+    )
+})
+}
+/**
  * The admission of an image encode in a process without an open layer: the plan cost against `limit_bytes`, the input default when it is `None`.
  * A cost above the limit is `Overloaded`, as a refusal of the Ledger is.
  */
@@ -18364,6 +19488,19 @@ public func planVideo(source: VideoSource, limits: VideoLimits)throws  -> VideoP
         uniffiCallStatus in
     uniffi_medialayer_fn_func_plan_video(
         FfiConverterTypeVideoSource_lower(source),
+        FfiConverterTypeVideoLimits_lower(limits),uniffiCallStatus
+    )
+})
+}
+/**
+ * `plan_video` that also knows the file size: a file at or below `recode_above_bytes` goes as it is.
+ */
+public func planVideoSized(source: VideoSource, size: UInt64, limits: VideoLimits)throws  -> VideoPlan  {
+    return try  FfiConverterTypeVideoPlan_lift(try rustCallWithError(FfiConverterTypeMediaError_lift) {
+        uniffiCallStatus in
+    uniffi_medialayer_fn_func_plan_video_sized(
+        FfiConverterTypeVideoSource_lower(source),
+        FfiConverterUInt64.lower(size),
         FfiConverterTypeVideoLimits_lower(limits),uniffiCallStatus
     )
 })
@@ -18631,6 +19768,21 @@ private let initializationResult: InitializationResult = {
     if (uniffi_medialayer_checksum_func_image_decode_plan() != 22732) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_medialayer_checksum_func_media_prepare_decide() != 57153) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_medialayer_checksum_func_media_prepare_descriptor() != 58708) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_medialayer_checksum_func_media_prepare_descriptor_kind() != 60355) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_medialayer_checksum_func_media_prepare_facts() != 56093) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_medialayer_checksum_func_media_prepare_import_descriptor() != 7949) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_medialayer_checksum_func_image_encode_outside_admit() != 37137) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -18653,6 +19805,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_plan_video() != 20788) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_medialayer_checksum_func_plan_video_sized() != 7566) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_video_metadata_to_strip() != 2219) {
