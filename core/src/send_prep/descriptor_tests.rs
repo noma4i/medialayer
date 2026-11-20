@@ -1,4 +1,5 @@
-use super::descriptor::decode_descriptor;
+use super::descriptor::{decode_descriptor, encode_descriptor};
+use crate::api::MediaError;
 use super::*;
 use crate::ffi::PixelSize;
 
@@ -11,11 +12,11 @@ fn edit() -> PhotoEdit {
 }
 
 fn video(mirror: bool, on_cannot_decode: CannotDecode) -> Vec<u8> {
-    media_prepare_descriptor(MediaPrepareIntent::Video { limits: None, mirror, on_cannot_decode })
+    media_prepare_descriptor(MediaPrepareIntent::Video { limits: None, mirror, on_cannot_decode }).unwrap()
 }
 
 fn image(edit: PhotoEdit) -> Vec<u8> {
-    media_prepare_descriptor(MediaPrepareIntent::Image { edit, quality: None, format: ImageFormat::Jpeg })
+    media_prepare_descriptor(MediaPrepareIntent::Image { edit, quality: None, format: ImageFormat::Jpeg }).unwrap()
 }
 
 fn probe(source: VideoSource, keys: &[&str], size_bytes: u64) -> PrepareProbe {
@@ -59,7 +60,7 @@ fn inv_send_52_the_descriptor_round_trips_every_intent_and_starts_with_the_versi
         MediaPrepareIntent::Image { edit: full, quality: Some(0.75), format: ImageFormat::Png },
     ];
     for intent in intents {
-        let bytes = media_prepare_descriptor(intent.clone());
+        let bytes = media_prepare_descriptor(intent.clone()).unwrap();
         assert_eq!(bytes[0], 1);
         assert_eq!(decode_descriptor(&bytes), Ok(intent));
     }
@@ -140,17 +141,20 @@ fn inv_send_57_the_facts_without_a_descriptor_are_the_upright_source_as_the_plat
 }
 
 #[test]
-fn inv_send_58_settings_the_planner_cannot_work_with_are_refused_as_an_unsupported_descriptor() {
+fn inv_send_58_settings_the_planner_cannot_work_with_are_refused_before_bytes_exist() {
     let bad_limits = VideoLimits { corridors: Vec::new(), ..default_video_limits() };
-    let descriptors = [
-        media_prepare_descriptor(MediaPrepareIntent::Video { limits: Some(bad_limits), mirror: false, on_cannot_decode: CannotDecode::Fail }),
-        media_prepare_descriptor(MediaPrepareIntent::Image { edit: edit(), quality: Some(1.5), format: ImageFormat::Jpeg }),
-        image(PhotoEdit { max_size: Some(PixelSize { width: 0, height: 5 }), ..edit() }),
-        image(PhotoEdit { crop: Some(CropFractions { x: 0.0, y: 0.0, width: 0.0, height: 1.0 }), ..edit() }),
-        image(PhotoEdit { rotation_degrees: 45, ..edit() }),
+    let image = |edit, quality| MediaPrepareIntent::Image { edit, quality, format: ImageFormat::Jpeg };
+    let intents = [
+        MediaPrepareIntent::Video { limits: Some(bad_limits), mirror: false, on_cannot_decode: CannotDecode::Fail },
+        image(edit(), Some(1.5)),
+        image(PhotoEdit { max_size: Some(PixelSize { width: 0, height: 5 }), ..edit() }, None),
+        image(PhotoEdit { crop: Some(CropFractions { x: 0.0, y: 0.0, width: 0.0, height: 1.0 }), ..edit() }, None),
+        image(PhotoEdit { rotation_degrees: 45, ..edit() }, None),
     ];
-    for descriptor in descriptors {
-        assert!(matches!(media_prepare_decide(descriptor, photo(10, 10)), PrepareDecision::Refuse { reason: MediaPrepareFailure::UnsupportedDescriptor, .. }));
+    for intent in intents {
+        assert!(matches!(media_prepare_descriptor(intent.clone()), Err(MediaError::InvalidSpec { .. })), "{intent:?}");
+        // Hand-made bytes of the same intent still reach decide and are refused there by the same check.
+        assert!(matches!(media_prepare_decide(encode_descriptor(intent), photo(10, 10)), PrepareDecision::Refuse { reason: MediaPrepareFailure::UnsupportedDescriptor, .. }));
     }
 }
 

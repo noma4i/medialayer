@@ -4,6 +4,7 @@
 
 use super::plan::check;
 use super::{photo_plan, plan_video_sized, video_metadata_to_strip, BitrateStep, CropFractions, ImageFormat, PhotoEdit, PhotoPlan, VideoLimits, VideoPlan, VideoSource};
+use crate::api::MediaError;
 use crate::ffi::PixelSize;
 
 const DESCRIPTOR_VERSION: u8 = 1;
@@ -109,8 +110,15 @@ pub enum PrepareDecision {
     Refuse { reason: MediaPrepareFailure, message: String },
 }
 
+/// The descriptor of an intent. Settings the planner cannot work with are `MediaError::InvalidSpec` here, before any bytes exist (D-364): the same check refuses them in `media_prepare_decide`.
 #[uniffi::export]
-pub fn media_prepare_descriptor(intent: MediaPrepareIntent) -> Vec<u8> {
+pub fn media_prepare_descriptor(intent: MediaPrepareIntent) -> Result<Vec<u8>, MediaError> {
+    check_settings(&intent).map_err(|detail| MediaError::InvalidSpec { detail })?;
+    Ok(encode_descriptor(intent))
+}
+
+/// The bytes of an intent as they are, whatever its settings.
+pub(crate) fn encode_descriptor(intent: MediaPrepareIntent) -> Vec<u8> {
     let mut out = vec![DESCRIPTOR_VERSION];
     match intent {
         MediaPrepareIntent::Video { limits, mirror, on_cannot_decode } => {

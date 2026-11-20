@@ -109,7 +109,7 @@ pub fn media_prepare_import_descriptor(saved: SavedPreparation) -> PrepareImport
         other => Err(refuse(format!("kind `{other}` is unknown"))),
     });
     match intent {
-        Ok(intent) => PrepareImportOutcome::Done { descriptor: media_prepare_descriptor(intent) },
+        Ok(intent) => media_prepare_descriptor(intent).map_or_else(|error| PrepareImportOutcome::Failed { message: refuse(error.to_string()) }, |descriptor| PrepareImportOutcome::Done { descriptor }),
         Err(message) => PrepareImportOutcome::Failed { message },
     }
 }
@@ -127,7 +127,7 @@ mod tests {
     }
 
     fn done(intent: MediaPrepareIntent) -> PrepareImportOutcome {
-        PrepareImportOutcome::Done { descriptor: media_prepare_descriptor(intent) }
+        PrepareImportOutcome::Done { descriptor: media_prepare_descriptor(intent).unwrap() }
     }
 
     fn step(from: &str, min: &str, max: &str) -> Row {
@@ -204,5 +204,7 @@ mod tests {
         assert!(failed(saved(&image, &[])));
         assert!(failed(saved(&[("kind", Some("audio"))], &[])));
         assert!(failed(saved(&[], &[])));
+        // A snapshot that reads fine but holds settings the planner refuses is never `Done`.
+        assert!(failed(saved(&[("kind", Some("image")), ("mirror", Some("0")), ("enlarge", Some("0")), ("rotation_degrees", Some("45")), ("format", Some("jpeg"))], &[])));
     }
 }
