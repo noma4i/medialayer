@@ -181,6 +181,81 @@ final class ProbeTests: XCTestCase {
     XCTAssertTrue(refused.isEmpty, "a take was refused")
   }
 
+  // MARK: another capture client takes the camera
+
+  private var interruptionStarted = Date()
+
+  private func note(_ step: String, _ cameras: [(String, MediaCamera)]) {
+    let ms = Int(Date().timeIntervalSince(interruptionStarted) * 1000)
+    probe("interrupt_\(step)", [("ms", ms)] + cameras.map { ($0.0, "\($0.1.state.phase)/fault=\(String(describing: $0.1.state.fault))") })
+  }
+
+  /// Waits until `done` holds, logging the state of the cameras at every change. Returns the wait in ms, nil on timeout.
+  @MainActor private func wait(_ seconds: Double, step: String, _ cameras: [(String, MediaCamera)], until done: () -> Bool) async throws -> Int? {
+    let started = Date()
+    var last = ""
+    while Date().timeIntervalSince(started) < seconds {
+      let now = cameras.map { "\($0.0)=\($0.1.state.phase)/\(String(describing: $0.1.state.fault))" }.joined(separator: " ")
+      if now != last { last = now; note(step, cameras) }
+      if done() { return Int(Date().timeIntervalSince(started) * 1000) }
+      try await Task.sleep(nanoseconds: 50_000_000)
+    }
+    note(step + "_timeout", cameras)
+    return nil
+  }
+
+  /// A running, then a second running camera: A reports the interruption, B is closed again as the app would close it.
+  @MainActor private func interruptAndRelease() async throws -> MediaCamera {
+    interruptionStarted = Date()
+    let (a, readyA) = try await open(.circle, .front)
+    note("A_open", [("A", a)])
+    probe("interrupt_A_ready", [("readyMs", readyA)])
+    let b = try MediaCamera(profile: .circle, lens: .front)
+    ProbeScreen.shared.other = b
+    let readyB = try await wait(30, step: "B_opening", [("A", a), ("B", b)]) { b.state.isReady }
+    note("B_open", [("A", a), ("B", b)])
+    XCTAssertNotNil(readyB, "B did not become ready")
+    let interrupted = try await wait(10, step: "A_interrupted", [("A", a), ("B", b)]) { !a.state.isReady }
+    XCTAssertNotNil(interrupted, "A did not report the interruption")
+    ProbeScreen.shared.other = nil
+    try await Task.sleep(nanoseconds: 700_000_000)
+    note("B_closed", [("A", a)])
+    return a
+  }
+
+  @MainActor private func finishTake(_ name: String, on camera: MediaCamera, ready: Int?) async throws {
+    XCTAssertNotNil(ready, "\(name): the camera did not stream again")
+    try await camera.startRecording()
+    try await Task.sleep(nanoseconds: 2_000_000_000)
+    let clip = try await camera.stopRecording()
+    let kept = Self.folder.appendingPathComponent("\(name).mp4")
+    try? FileManager.default.removeItem(at: kept)
+    try FileManager.default.copyItem(at: clip.url, to: kept)
+    let facts = try await facts(of: kept)
+    note("\(name)_take", [("cam", camera)])
+    probe(name, [("videoS", String(format: "%.2f", facts.videoSeconds)), ("audioS", String(format: "%.2f", facts.audioSeconds)), ("clipMs", clip.durationMs)])
+    XCTAssertGreaterThan(facts.videoSeconds, 1.5)
+  }
+
+  @MainActor func test8_interruptedCameraResumes() async throws {
+    let a = try await interruptAndRelease()
+    let ready = try await wait(5, step: "A_resume", [("A", a)]) { a.state.isReady }
+    try await finishTake("interrupted_resume", on: a, ready: ready)
+    try await close(a)
+  }
+
+  @MainActor func test9_newCameraAfterInterruptionWorks() async throws {
+    let a = try await interruptAndRelease()
+    ProbeScreen.shared.camera = nil
+    try await Task.sleep(nanoseconds: 700_000_000)
+    note("A_closed", [("A", a)])
+    let (c, readyMs) = try await open(.circle, .front)
+    note("C_open", [("C", c)])
+    probe("interrupt_C_ready", [("readyMs", readyMs)])
+    try await finishTake("interrupted_new_camera", on: c, ready: readyMs)
+    try await close(c)
+  }
+
   @MainActor func test9_voice5s() async throws {
     await permissions()
     _ = try await ProbeApp.opening.value
