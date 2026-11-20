@@ -92,7 +92,7 @@ fn inv_send_54_a_video_that_fits_and_is_clean_passes_and_the_rest_runs_with_the_
         match media_prepare_decide(descriptor, probe(source(), keys, 1)) {
             PrepareDecision::Run { plan: PreparePlan::Video { plan, strip_metadata, audio_bitrate, audio_channels, audio_sample_rate, mirror } } => {
                 assert_eq!((audio_bitrate, audio_channels, audio_sample_rate), (limits.audio_bitrate, limits.audio_channels, limits.audio_sample_rate), "{name}");
-                assert_eq!((plan.reencode, strip_metadata.is_empty(), mirror), (false, name == "mirror", name == "mirror"), "{name}");
+                assert_eq!((plan.reencode, strip_metadata.is_empty(), mirror), (name == "mirror", name == "mirror", name == "mirror"), "{name}");
             }
             other => panic!("{name}: {other:?}"),
         }

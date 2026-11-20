@@ -220,11 +220,12 @@ pub fn media_prepare_decide(descriptor: Vec<u8>, probe: PrepareProbe) -> Prepare
             let limits = limits.clone().unwrap_or_else(super::default_video_limits);
             match plan_video_sized(*source, *size_bytes, limits.clone()) {
                 Err(error) => refuse(MediaPrepareFailure::UnsupportedDescriptor, error.to_string()),
-                Ok(plan) => {
+                Ok(mut plan) => {
                     let strip_metadata = video_metadata_to_strip(metadata_keys.clone());
                     if !plan.reencode && strip_metadata.is_empty() && !mirror {
                         return PrepareDecision::Pass;
                     }
+                    plan.reencode = plan.reencode || *mirror;
                     PrepareDecision::Run { plan: PreparePlan::Video { plan, strip_metadata, audio_bitrate: limits.audio_bitrate, audio_channels: limits.audio_channels, audio_sample_rate: limits.audio_sample_rate, mirror: *mirror } }
                 }
             }
