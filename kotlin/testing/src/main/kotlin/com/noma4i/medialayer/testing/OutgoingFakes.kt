@@ -3,57 +3,74 @@ package com.noma4i.medialayer.testing
 import com.noma4i.medialayer.RemoteResult
 import com.noma4i.medialayer.ui.OutgoingClock
 import com.noma4i.medialayer.ui.OutgoingRemote
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
 
 /**
- * A remote for outgoing media tests. Each url answers `NotReady` until [answer] gives its result; a fetch of an unanswered url waits,
- * so a test decides when the remote lands. Install with `Outgoing.install(remote, clock)`.
+ * A remote for outgoing items: each url answers at once with what [answer] set, or waits until [complete] when it is held.
+ * It counts the fetches in flight so a test can check the two-slot limit.
  */
 class FakeOutgoingRemote : OutgoingRemote {
-  private val answers = ConcurrentHashMap<String, CompletableDeferred<RemoteResult>>()
-  private val fetches = ConcurrentHashMap<String, AtomicInteger>()
-  private val running = AtomicInteger()
-  private val peak = AtomicInteger()
+  private val lock = Any()
+  private val answers = HashMap<String, RemoteResult>()
+  private val held = HashSet<String>()
+  private val waiting = HashMap<String, MutableList<CompletableDeferred<RemoteResult>>>()
+  private val asked = ArrayList<String>()
+  private var running = 0
+  private var peak = 0
 
-  /** The most fetches that ran at the same time. */
-  val maxConcurrent: Int get() = peak.get()
-  val concurrent: Int get() = running.get()
-  fun fetchCount(url: String): Int = fetches[url]?.get() ?: 0
+  val requests: List<String> get() = synchronized(lock) { asked.toList() }
+  fun requestCount(url: String): Int = synchronized(lock) { asked.count { it == url } }
+  val inFlight: Int get() = synchronized(lock) { running }
+  val peakInFlight: Int get() = synchronized(lock) { peak }
 
-  private fun slot(url: String) = answers.getOrPut(url) { CompletableDeferred() }
+  fun answer(url: String, result: RemoteResult) { synchronized(lock) { answers[url] = result } }
 
-  /** The next (and every later) fetch of [url] ends with [result]. */
-  fun answer(url: String, result: RemoteResult) { slot(url).complete(result) }
+  /** The next fetches of [url] wait until [complete]. */
+  fun hold(url: String) { synchronized(lock) { held.add(url) } }
 
-  /** Forget the answer of [url]: the next fetch waits again. */
-  fun clear(url: String) { answers.remove(url) }
+  fun complete(url: String, result: RemoteResult = RemoteResult.Complete) {
+    val gates = synchronized(lock) {
+      held.remove(url)
+      answers[url] = result
+      waiting.remove(url).orEmpty()
+    }
+    gates.forEach { it.complete(result) }
+  }
 
   override suspend fun fetch(url: String, progress: (Double) -> Unit): RemoteResult {
-    fetches.getOrPut(url) { AtomicInteger() }.incrementAndGet()
-    peak.accumulateAndGet(running.incrementAndGet()) { a, b -> maxOf(a, b) }
-    try { return slot(url).await() } finally { running.decrementAndGet() }
+    val (gate, immediate) = synchronized(lock) {
+      asked.add(url)
+      running += 1
+      peak = maxOf(peak, running)
+      if (url in held) CompletableDeferred<RemoteResult>().also { waiting.getOrPut(url) { ArrayList() }.add(it) } to null
+      else null to (answers[url] ?: RemoteResult.Failed(404u, "nothing served at $url"))
+    }
+    try {
+      return gate?.await() ?: immediate!!
+    } finally {
+      synchronized(lock) { running -= 1 }
+    }
   }
 }
 
-/** A clock that moves only when the test says so: [advance] releases the delays that came due. */
+/** The 5 s re-ask timer under a test's hand: a sleep ends only on [advance]. */
 class ManualOutgoingClock : OutgoingClock {
-  private data class Waiter(val due: Long, val gate: CompletableDeferred<Unit>)
   private val lock = Any()
-  private var now = 0L
-  private val waiters = ArrayList<Waiter>()
+  private val sleepers = ArrayList<CompletableDeferred<Unit>>()
+  private val asked = ArrayList<Long>()
 
-  val pending: Int get() = synchronized(lock) { waiters.size }
+  val sleeping: Int get() = synchronized(lock) { sleepers.size }
+  val requestedMilliseconds: List<Long> get() = synchronized(lock) { asked.toList() }
 
-  override suspend fun delay(millis: Long) {
-    val gate = CompletableDeferred<Unit>()
-    synchronized(lock) { waiters.add(Waiter(now + millis, gate)) }
-    try { gate.await() } finally { synchronized(lock) { waiters.removeAll { it.gate === gate } } }
+  /** Ends every sleep that is waiting now. */
+  fun advance() {
+    val ended = synchronized(lock) { sleepers.toList().also { sleepers.clear() } }
+    ended.forEach { it.complete(Unit) }
   }
 
-  fun advance(millis: Long) {
-    val due = synchronized(lock) { now += millis; waiters.filter { it.due <= now }.also { waiters.removeAll(it) } }
-    due.forEach { it.gate.complete(Unit) }
+  override suspend fun sleep(millis: Long) {
+    val gate = CompletableDeferred<Unit>()
+    synchronized(lock) { asked.add(millis); sleepers.add(gate) }
+    try { gate.await() } finally { synchronized(lock) { sleepers.remove(gate) } }
   }
 }

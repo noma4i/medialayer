@@ -49,7 +49,7 @@ class OutgoingMediaTest {
   @Before fun install() = Outgoing.install(remote, clock, store)
   @After fun uninstall() = Outgoing.reset()
 
-  private fun declare(key: String, local: File? = original, blurHash: String? = null) = Outgoing.runtime.item(key) { OutgoingMedia(key, Kind.IMAGE, local, blurHash, Outgoing.runtime) }
+  private fun declare(key: String, local: File? = original, blurHash: String? = null) = OutgoingMedia(key, Kind.IMAGE, local, blurHash)
 
   private fun waitFor(condition: () -> Boolean) = rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); condition() }
 
@@ -58,7 +58,8 @@ class OutgoingMediaTest {
   @Test
   fun inv_outgoing_12_there_is_a_picture_in_every_frame_from_sending_to_ready_with_a_late_remote() {
     val item = declare("m12")
-    rule.setContent { MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { OutgoingMediaImage(item, Modifier.size(50.dp)) } }
+    remote.hold("https://cdn/m12.png")
+    rule.setContent { MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { OutgoingMediaView(item, Modifier.size(50.dp)) } }
     waitFor { rule.onAllNodes(hasContentDescription("cover")).fetchSemanticsNodes().isNotEmpty() }
     assertEquals("sending", described("m12"))
 
@@ -67,7 +68,7 @@ class OutgoingMediaTest {
     waitFor { described("m12") == "fetchingRemote" }
     rule.onNodeWithContentDescription("cover").assertExists()
 
-    remote.answer("https://cdn/m12.png", RemoteResult.Complete)
+    remote.complete("https://cdn/m12.png")
     waitFor { described("m12") == "ready" && rule.onAllNodes(hasContentDescription("cover")).fetchSemanticsNodes().isEmpty() }
     rule.onNodeWithContentDescription("cover").assertDoesNotExist()
   }
@@ -75,10 +76,11 @@ class OutgoingMediaTest {
   @Test
   fun inv_outgoing_13_the_blurred_cover_is_only_before_ready() {
     val item = declare("m13")
-    rule.setContent { MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { OutgoingMediaImage(item, Modifier.size(50.dp), cover = OutgoingCover.BlurredLocal(12.dp)) } }
+    remote.hold("https://cdn/m13.png")
+    rule.setContent { MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { OutgoingMediaView(item, Modifier.size(50.dp), cover = OutgoingCover.BlurredLocal(12.dp)) } }
     waitFor { rule.onAllNodes(hasContentDescription("cover-blurred")).fetchSemanticsNodes().isNotEmpty() }
     item.remote = "https://cdn/m13.png"
-    remote.answer("https://cdn/m13.png", RemoteResult.Complete)
+    remote.complete("https://cdn/m13.png")
     waitFor { described("m13") == "ready" && rule.onAllNodes(hasContentDescription("cover-blurred")).fetchSemanticsNodes().isEmpty() }
     rule.onNodeWithContentDescription("cover-blurred").assertDoesNotExist()
   }
@@ -88,30 +90,31 @@ class OutgoingMediaTest {
     val item = declare("m14")
     val url = "https://cdn/m14.png"
     remote.answer(url, RemoteResult.Failed(500u, "boom"))
-    rule.setContent { MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { OutgoingMediaImage(item, Modifier.size(50.dp), failure = { Text("failed-overlay") }) } }
+    rule.setContent { MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { OutgoingMediaView(item, Modifier.size(50.dp), failure = { Text("failed-overlay") }) } }
     item.remote = url
     waitFor { described("m14") == "failed.remote" }
     rule.onNodeWithContentDescription("cover").assertExists()
     rule.onNodeWithText("failed-overlay").assertExists()
 
-    remote.clear(url)
+    remote.hold(url)
     item.retry()
     waitFor { described("m14") == "fetchingRemote" }
-    remote.answer(url, RemoteResult.Complete)
+    remote.complete(url)
     waitFor { described("m14") == "ready" }
-    assertEquals(2, remote.fetchCount(url))
+    assertEquals(2, remote.requestCount(url))
   }
 
   @Test
   fun inv_outgoing_15_can_open_only_at_ready_and_the_app_rule_overrides() {
     val item = declare("m15")
+    remote.hold("https://cdn/m15.png")
     assertFalse(item.canOpen)
     item.remote = "https://cdn/m15.png"
     assertFalse(item.canOpen)
     item.openable = { it is OutgoingPhase.FetchingRemote }
     assertTrue(item.canOpen)
     item.openable = null
-    remote.answer("https://cdn/m15.png", RemoteResult.Complete)
+    remote.complete("https://cdn/m15.png")
     waitFor { item.phase == OutgoingPhase.Ready }
     assertTrue(item.canOpen)
     item.openable = { false }
@@ -120,13 +123,14 @@ class OutgoingMediaTest {
 
   @Test
   fun inv_outgoing_16_at_most_two_remote_fetches_run_at_once_with_ten_items() {
+    (0 until 10).forEach { remote.hold("https://cdn/album$it.png") }
     val items = (0 until 10).map { declare("album$it", blurHash = null) }
     items.forEachIndexed { index, item -> item.remote = "https://cdn/album$index.png" }
-    waitFor { remote.concurrent == 2 }
-    assertEquals(2, remote.maxConcurrent)
-    (0 until 10).forEach { remote.answer("https://cdn/album$it.png", RemoteResult.Complete) }
+    waitFor { remote.inFlight == 2 }
+    assertEquals(2, remote.peakInFlight)
+    (0 until 10).forEach { remote.complete("https://cdn/album$it.png") }
     waitFor { items.all { it.phase == OutgoingPhase.Ready } }
-    assertEquals(2, remote.maxConcurrent)
+    assertEquals(2, remote.peakInFlight)
   }
 
   @Test
@@ -137,8 +141,8 @@ class OutgoingMediaTest {
     assertTrue(kept.path.startsWith(store.path))
     assertEquals(kept, declare("m17", File(context.cacheDir, "other.png")).local)
     assertTrue(OutgoingStore(store).held("m17"))
-    item.remote = "https://cdn/m17.png"
     remote.answer("https://cdn/m17.png", RemoteResult.Complete)
+    item.remote = "https://cdn/m17.png"
     waitFor { item.phase == OutgoingPhase.Ready }
     waitFor { !OutgoingStore(store).held("m17") }
   }
@@ -149,13 +153,13 @@ class OutgoingMediaTest {
     val url = "https://cdn/m18.mp4"
     remote.answer(url, RemoteResult.NotReady)
     item.remote = url
-    waitFor { remote.fetchCount(url) == 1 && item.phase is OutgoingPhase.FetchingRemote }
-    clock.advance(5_000)
-    assertEquals(1, remote.fetchCount(url))
+    waitFor { remote.requestCount(url) == 1 && item.phase is OutgoingPhase.FetchingRemote }
+    clock.advance()
+    assertEquals(1, remote.requestCount(url))
     item.onScreen(true)
-    waitFor { clock.pending == 1 }
-    clock.advance(5_000)
-    waitFor { remote.fetchCount(url) == 2 }
+    waitFor { clock.sleeping == 1 }
+    clock.advance()
+    waitFor { remote.requestCount(url) == 2 }
     item.onScreen(false)
   }
 }
