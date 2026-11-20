@@ -109,8 +109,9 @@ private fun Cover(item: OutgoingMedia, cover: OutgoingCover, contentScale: Conte
   val radius = (cover as? OutgoingCover.BlurredLocal)?.radius
   val shown = picture ?: blurred
   if (shown != null) {
-    val blur = if (radius != null && picture != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Modifier.blur(radius) else Modifier
-    Image(shown, "cover", Modifier.fillMaxSize().then(blur), contentScale = contentScale)
+    val blurs = radius != null && picture != null
+    val blur = if (blurs && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Modifier.blur(radius!!) else Modifier
+    Image(shown, if (blurs) "cover-blurred" else "cover", Modifier.fillMaxSize().then(blur), contentScale = contentScale)
   }
 }
 
