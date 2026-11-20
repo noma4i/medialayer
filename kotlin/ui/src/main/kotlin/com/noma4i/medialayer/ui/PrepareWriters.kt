@@ -94,7 +94,8 @@ internal fun probeOfVideo(facts: VideoFacts, metadataKeys: List<String>, sizeByt
 internal fun probeOfImage(file: File): PrepareProbe.Image? {
   val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }.also { BitmapFactory.decodeFile(file.path, it) }
   if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-  val tag = ExifInterface(file.path).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL).takeIf { it in 1..8 } ?: ExifInterface.ORIENTATION_NORMAL
+  // Read from a stream: the path constructor goes through the content resolver on some platform versions.
+  val tag = file.inputStream().use { ExifInterface(it) }.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL).takeIf { it in 1..8 } ?: ExifInterface.ORIENTATION_NORMAL
   val format = if (bounds.outMimeType == "image/png") ImageFormat.PNG else ImageFormat.JPEG
   return PrepareProbe.Image(bounds.outWidth.toUInt(), bounds.outHeight.toUInt(), tag.toUInt(), format)
 }
