@@ -5,7 +5,7 @@ import MediaLayer
 import Observation
 
 /// What the user chose: `crop` is a rectangle in fractions 0 to 1 of the photo after `rotation` (origin top left),
-/// `rotation` is the clockwise turn in degrees, 0, 90, 180 or 270. Give both to `MediaLayer.prepareImage(_:crop:rotation:)`.
+/// `rotation` is the clockwise turn in degrees, 0, 90, 180 or 270. Give both to `PhotoEdit(crop:rotationDegrees:)` in a `mediaPrepareDescriptor` image intent.
 /// The rest is the telemetry of the gestures against the first frame: `finalScale` is 1 for the first frame and above 1 when the user magnified (rounded to 0.01),
 /// `finalTranslateX` and `finalTranslateY` are the move of the photo (of the frame when it is free) in whole points, right and down are positive,
 /// `wasPositionChanged` is true once any pan or pinch moved or scaled the crop.

@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import UniformTypeIdentifiers
 
 extension MediaLayer {
   /// An image held in memory saved as a JPEG or PNG file. `exifOrientation` (1 to 8) turns the image upright first, a JPEG has no transparency so it is flattened onto white.

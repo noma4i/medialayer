@@ -95,7 +95,16 @@ struct CameraServices {
       },
       upright: { url, quality in
         guard let layer = Media.current as? MediaLayer else { throw MediaError.Closed }
-        return try await layer.prepareImage(MediaSourceValue.file(url, kind: .image), quality: quality).url
+        let bytes = try Data(contentsOf: url, options: .mappedIfSafe)
+        let jpeg = try await layer.encodeImage(bytes: bytes, format: .jpeg, quality: quality)
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).jpg")
+        do {
+          try jpeg.write(to: output, options: .atomic)
+        } catch {
+          NativeFailures.removeFile(output)
+          throw error
+        }
+        return output
       },
       directory: CaptureFiles.directory,
       center: .default,
