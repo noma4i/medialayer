@@ -38,7 +38,7 @@ import kotlinx.coroutines.CancellationException
 
 /**
  * What the user chose: [crop] is a rectangle in fractions 0 to 1 of the photo after [rotation] (origin top left),
- * [rotation] is the clockwise turn in degrees, 0, 90, 180 or 270. Give both to `MediaLayer.prepareImage(source, crop = crop, rotation = rotation)`.
+ * [rotation] is the clockwise turn in degrees, 0, 90, 180 or 270. Give both to `PhotoEdit(crop = ..., rotationDegrees = ...)` in a `mediaPrepareDescriptor` image intent.
  */
 data class MediaCropResult(
   val crop: RectF,

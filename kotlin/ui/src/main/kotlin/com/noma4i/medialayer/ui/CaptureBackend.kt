@@ -95,7 +95,17 @@ internal class CameraServices(
         admitShot = { bytes -> environment().media.decodeAdmit()(bytes) },
         audio = { Media.link },
         clipInfo = { file -> runCatching { readMediaInfo(context, "file://${file.absolutePath}") }.getOrNull() },
-        upright = { raw, quality -> prepareImageAt(directory, raw, quality, environment().media.decodeAdmit()).file },
+        upright = { raw, quality ->
+          val jpeg = encodeBytes(raw.readBytes(), ImageFormat.JPEG, quality, environment().media.decodeAdmit())
+          File(directory, "prepared-${UUID.randomUUID()}.jpg").also { output ->
+            try {
+              output.writeBytes(jpeg)
+            } catch (error: Throwable) {
+              deleteMediaFile(output)
+              throw error
+            }
+          }
+        },
         directory = directory
       )
     }
