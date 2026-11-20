@@ -69,13 +69,11 @@ pub fn default_video_limits() -> VideoLimits {
 }
 
 /// The one rule that turns a source video and the app tables into what the encoder does: upright even sides, the long side cut to the table without upscale, a bitrate inside the corridor, a frame rate inside the limits, and whether the file needs encoding at all.
-#[uniffi::export]
 pub fn plan_video(source: VideoSource, limits: VideoLimits) -> Result<VideoPlan, MediaError> {
     plan_video_sized(source, u64::MAX, limits)
 }
 
 /// `plan_video` that also knows the file size: a file at or below `recode_above_bytes` goes as it is.
-#[uniffi::export]
 pub fn plan_video_sized(source: VideoSource, size: u64, limits: VideoLimits) -> Result<VideoPlan, MediaError> {
     check(&limits)?;
     if source.width == 0 || source.height == 0 {
