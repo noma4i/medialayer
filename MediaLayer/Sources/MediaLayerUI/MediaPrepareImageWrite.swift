@@ -18,9 +18,18 @@ enum PrepareImageWrite {
     guard var result = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
       throw PrepareFailure(message: "\(sourceURL.path) is not an image")
     }
-    if plan.turn.rotationDegrees != 0 || plan.turn.flipHorizontal { result = try turned(result, plan.turn) }
+    let flatten = format != .png
+    var rewritten = false
+    if plan.turn.rotationDegrees != 0 || plan.turn.flipHorizontal {
+      result = try turned(result, plan.turn, flatten: flatten)
+      rewritten = true
+    }
     try Task.checkCancellation()
-    if plan.needsDraw { result = try drawn(result, plan: plan) }
+    if plan.needsDraw {
+      result = try drawn(result, plan: plan, flatten: flatten)
+      rewritten = true
+    }
+    if flatten && !rewritten && result.hasAlpha { result = try flattened(result) }
     try Task.checkCancellation()
     let type = format == .png ? UTType.png : UTType.jpeg
     guard let destination = CGImageDestinationCreateWithURL(output as CFURL, type.identifier as CFString, 1, nil) else {
@@ -31,7 +40,7 @@ enum PrepareImageWrite {
     guard CGImageDestinationFinalize(destination) else { throw PrepareFailure(message: "the image cannot be encoded") }
   }
 
-  private static func drawn(_ image: CGImage, plan: PhotoPlan) throws -> CGImage {
+  private static func drawn(_ image: CGImage, plan: PhotoPlan, flatten: Bool) throws -> CGImage {
     let across = Double(image.width) / Double(plan.upright.width)
     let down = Double(image.height) / Double(plan.upright.height)
     let left = min(max(Int((Double(plan.crop.x) * across).rounded()), 0), image.width - 1)
@@ -41,10 +50,7 @@ enum PrepareImageWrite {
     guard let cropped = image.cropping(to: CGRect(x: left, y: top, width: right - left, height: bottom - top)) else {
       throw PrepareFailure(message: "the photo cannot be cropped")
     }
-    guard let context = CGContext(
-      data: nil, width: Int(plan.output.width), height: Int(plan.output.height), bitsPerComponent: 8, bytesPerRow: 0,
-      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
-    ) else { throw PrepareFailure(message: "the photo canvas cannot be created") }
+    let context = try canvas(width: Int(plan.output.width), height: Int(plan.output.height), onWhite: flatten)
     context.interpolationQuality = .high
     if plan.mirror {
       context.translateBy(x: CGFloat(plan.output.width), y: 0)
@@ -55,16 +61,13 @@ enum PrepareImageWrite {
     return result
   }
 
-  private static func turned(_ image: CGImage, _ turn: PhotoTurn) throws -> CGImage {
+  private static func turned(_ image: CGImage, _ turn: PhotoTurn, flatten: Bool) throws -> CGImage {
     let width = CGFloat(image.width)
     let height = CGFloat(image.height)
     let sideways = turn.rotationDegrees % 180 == 90
     let outWidth = sideways ? image.height : image.width
     let outHeight = sideways ? image.width : image.height
-    guard let context = CGContext(
-      data: nil, width: outWidth, height: outHeight, bitsPerComponent: 8, bytesPerRow: 0,
-      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
-    ) else { throw PrepareFailure(message: "the photo canvas cannot be created") }
+    let context = try canvas(width: outWidth, height: outHeight, onWhite: flatten)
     var matrix: CGAffineTransform
     switch turn.rotationDegrees {
     case 90: matrix = CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: height, ty: 0)
@@ -81,5 +84,34 @@ enum PrepareImageWrite {
     context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
     guard let result = context.makeImage() else { throw PrepareFailure(message: "the photo cannot be turned") }
     return result
+  }
+
+  /// An opaque canvas; a JPEG has no alpha, so its canvas starts white like `encodeImage` and the Android writer.
+  private static func canvas(width: Int, height: Int, onWhite: Bool) throws -> CGContext {
+    guard let context = CGContext(
+      data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+    ) else { throw PrepareFailure(message: "the photo canvas cannot be created") }
+    if onWhite {
+      context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+      context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+    }
+    return context
+  }
+
+  private static func flattened(_ image: CGImage) throws -> CGImage {
+    let context = try canvas(width: image.width, height: image.height, onWhite: true)
+    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+    guard let result = context.makeImage() else { throw PrepareFailure(message: "the photo cannot be flattened") }
+    return result
+  }
+}
+
+private extension CGImage {
+  var hasAlpha: Bool {
+    switch alphaInfo {
+    case .none, .noneSkipFirst, .noneSkipLast: false
+    default: true
+    }
   }
 }
