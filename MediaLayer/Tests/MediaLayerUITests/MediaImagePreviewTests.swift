@@ -47,6 +47,19 @@ private func until(_ condition: String, _ holds: () -> Bool) async {
   }
 }
 
+@MainActor
+private final class Switch: ObservableObject {
+  @Published var url: String
+  init(url: String) { self.url = url }
+}
+
+private struct Switching: View {
+  @ObservedObject var model: Switch
+  let preview: Photo
+
+  var body: some View { MediaImage(Photo(url: model.url), preview: preview) }
+}
+
 extension GlobalMedia {
   @MainActor
   @Suite(.timeLimit(.minutes(3)))
@@ -83,6 +96,44 @@ extension GlobalMedia {
       #expect(places.visibleCalls(of: local.url).isEmpty)
       #expect(places.visibleCalls(of: main.url) == [true])
       #expect(!places.mainThreadCalls.contains("cacheKey"))
+    }
+
+    @Test
+    func inv_placeholder_13_a_source_switched_from_a_local_file_to_a_remote_url_with_that_file_as_preview_never_draws_an_empty_frame() async {
+      let places = RecordingPlaces()
+      ImageMemory.install(ImageCache(), on: places)
+      let context = MediaContext(places: places)
+      let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).png")
+      try? solid(.red).write(to: file)
+      defer { try? FileManager.default.removeItem(at: file) }
+      let local = Photo(url: file.absoluteString)
+      let remote = Photo(url: "https://o.test/uploaded-\(UUID().uuidString).png")
+      places.answer(local.url, with: solid(.red))
+      places.answer(remote.url, with: solid(.blue))
+      places.fetchLatch = Latch()
+      places.latchedURL = remote.url
+      places.slowKey(for: remote.url)
+      let model = Switch(url: local.url)
+      let host = UIHostingController(rootView: Switching(model: model, preview: local).environment(\.mediaContext, context).frame(width: 32, height: 32))
+      let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 32, height: 32))
+      window.rootViewController = host
+      window.isHidden = false
+      defer { window.isHidden = true }
+      host.view.backgroundColor = .clear
+      host.safeAreaRegions = []
+      host.view.frame = window.bounds
+
+      await until("the local file is drawn as the main image") { let pixel = centerPixel(of: host.view); return pixel[0] > 200 && pixel[2] < 60 }
+
+      model.url = remote.url
+      var blank = 0
+      for _ in 0..<80 {
+        RunLoop.main.run(until: Date().addingTimeInterval(0.005))
+        await Task.yield()
+        let pixel = centerPixel(of: host.view)
+        if !(pixel[0] > 200 && pixel[2] < 60) { blank += 1 }
+      }
+      #expect(blank == 0)
     }
   }
 }

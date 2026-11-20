@@ -47,6 +47,7 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   func cacheKey(url: String, headers: [String: String]) -> String {
     lock.withLock { keyReads += 1 }
     noteMain("cacheKey")
+    if let slow = lock.withLock({ slowKeyURL }), slow == url, !Thread.isMainThread { Thread.sleep(forTimeInterval: 0.3) }
     return url
   }
   private var mainCalls: [String] = []
@@ -60,6 +61,8 @@ final class RecordingPlaces: MediaPlaces, @unchecked Sendable {
   var cacheKeyReads: Int { lock.withLock { keyReads } }
   private let lock = NSLock()
   private var visibility: [VisibleCall] = []
+  private var slowKeyURL: String?
+  func slowKey(for url: String) { lock.withLock { slowKeyURL = url } }
   var fetchLatch: Latch?
   var latchedURL: String?
   private var bytesByURL: [String: Data] = [:]
