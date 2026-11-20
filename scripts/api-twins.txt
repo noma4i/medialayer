@@ -1,6 +1,7 @@
 # symbol | twin or platform idiom | reason
 kotlin:com/noma4i/medialayer/ui/MediaCameraPreviewKt.rememberMediaCamera | platform idiom | Compose owns camera lifetime
 kotlin:com/noma4i/medialayer/ui/MediaCropperKt.rememberMediaCrop | platform idiom | Compose owns crop lifetime
+kotlin:com/noma4i/medialayer/ui/OutgoingMediaKt.rememberOutgoingMedia | platform idiom | Compose owns outgoing item lifetime, Swift declares OutgoingMedia directly
 kotlin:com/noma4i/medialayer/ui/MediaImageLoaderKt.mediaImageLoader | platform idiom | Android Context configures Coil
 kotlin:com/noma4i/medialayer/ui/SharedPreferencesSettings | swift:UserDefaultsSettings | whole: SharedPreferences and UserDefaults stores differ in constructor
 kotlin:com/noma4i/medialayer/ui/ExoPlayerSlot | swift:AVQueuePlayerSlot | whole: Media3 and AVFoundation slots differ in constructor dependencies and members
