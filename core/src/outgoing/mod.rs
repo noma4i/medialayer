@@ -70,6 +70,8 @@ pub enum OutgoingEvent {
     /// and fills the server field when the upload completes). `None` never takes a known url back.
     Remote { remote: Option<String> },
     RemoteResult { result: RemoteResult },
+    /// The item has a local original now (it arrived after the item was declared). Only `true` counts: a local is never taken back.
+    Local { has_local: bool },
     /// Only from `Failed(Remote)`: fetch the same url again.
     Retry,
 }
@@ -208,6 +210,7 @@ pub fn outgoing_next(previous: Option<OutgoingState>, event: OutgoingEvent) -> O
         OutgoingEvent::Upload { upload } => apply_upload(&mut inputs, upload),
         OutgoingEvent::Remote { remote } => apply_remote(&mut inputs, remote),
         OutgoingEvent::RemoteResult { result } => apply_result(&mut inputs, result),
+        OutgoingEvent::Local { has_local } => inputs.has_local |= has_local,
         OutgoingEvent::Retry => {
             if matches!(inputs.remote_result, Some(RemoteResult::Failed { .. })) {
                 inputs.remote_result = None;

@@ -146,10 +146,24 @@ fn inv_outgoing_10_gc_rule() {
     assert_eq!(outgoing_fetch_slots(), 2);
 }
 
+#[test]
+fn inv_outgoing_19_a_late_local_is_taken() {
+    let mut state = outgoing_declare("k".into(), OutgoingKind::Image, false, Some("LEHV6n".into()));
+    assert!(!outgoing_view(state.clone()).shows_loader);
+    state = outgoing_next(Some(state), OutgoingEvent::Local { has_local: true });
+    assert!(state.inputs.has_local);
+    assert!(outgoing_view(state.clone()).shows_loader);
+    state = outgoing_next(Some(state), OutgoingEvent::Local { has_local: false });
+    assert!(state.inputs.has_local, "a local is never taken back");
+    state = outgoing_next(Some(state), OutgoingEvent::Remote { remote: Some("https://a/0".into()) });
+    state = outgoing_next(Some(state), OutgoingEvent::RemoteResult { result: RemoteResult::Complete });
+    assert!(state.inputs.has_local && !outgoing_view(state).shows_loader);
+}
+
 fn random_event(dice: &mut Dice) -> OutgoingEvent {
     let progress = dice.below(101) as f64 / 100.0;
     let url = format!("https://a/{}", dice.below(3));
-    match dice.below(10) {
+    match dice.below(11) {
         0 | 1 => OutgoingEvent::Upload { upload: OutgoingUpload::Sending { progress } },
         2 => OutgoingEvent::Upload { upload: OutgoingUpload::Sent },
         3 => OutgoingEvent::Upload { upload: OutgoingUpload::Failed { reason: "e".into() } },
@@ -160,6 +174,7 @@ fn random_event(dice: &mut Dice) -> OutgoingEvent {
         8 => OutgoingEvent::RemoteResult {
             result: if dice.percent(50) { RemoteResult::Complete } else { failed_remote() },
         },
+        9 => OutgoingEvent::Local { has_local: dice.percent(50) },
         _ => OutgoingEvent::Retry,
     }
 }
@@ -194,6 +209,9 @@ fn inv_outgoing_11_random_sequences_keep_the_rules() {
             assert_eq!(view.can_open, state.phase == OutgoingPhase::Ready);
             if view.reask_after_ms.is_some() {
                 assert_eq!(state.inputs.remote_result, Some(RemoteResult::NotReady));
+            }
+            if before.inputs.has_local {
+                assert!(state.inputs.has_local, "a local was taken back on {event:?}");
             }
             if view.shows_loader {
                 assert!(state.inputs.has_local);
