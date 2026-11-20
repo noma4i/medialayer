@@ -57,12 +57,16 @@ public struct OutgoingMediaView: View {
   public var body: some View {
     let entry = item.entry
     let phase = entry.phase
-    ZStack {
-      picture(entry, phase: phase)
-      if entry.view.showsLoader, let loader = style.loader { loader(phase, entry.state.inputs.hasLocal) }
-      if case .failed(let reason) = phase, let failure = style.failure { failure(reason) }
-    }
-    .clipped()
+    // The view takes the proposed frame; the filled picture, the loader and the failure view are laid out in exactly that frame, never in the picture's filled size.
+    Color.clear
+      .overlay { picture(entry, phase: phase) }
+      .clipped()
+      .overlay {
+        if entry.view.showsLoader, let loader = style.loader { loader(phase, entry.state.inputs.hasLocal) }
+      }
+      .overlay {
+        if case .failed(let reason) = phase, let failure = style.failure { failure(reason) }
+      }
     .accessibilityElement(children: .contain)
     .accessibilityValue(phase.name)
     .accessibilityIdentifier("outgoing.\(entry.key)")
