@@ -23,6 +23,7 @@ import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaItem
 import com.noma4i.medialayer.MediaLayer
 import com.noma4i.medialayer.MediaSource
+import com.noma4i.medialayer.MediaSourceValue
 import com.noma4i.medialayer.MediaState
 import com.noma4i.medialayer.NoHandle
 import com.noma4i.medialayer.Placeholder
@@ -242,6 +243,27 @@ class PlaceholderTest {
 
     assertTrue(events.has { it == Event.Decode(RED, false) })
     assertFalse(events.has { it == Event.Decode(RED, true) })
+  }
+
+  @Test
+  fun inv_placeholder_anImageShownKeepsItWhenItsBlurHashArrivesForTheSameUrl() {
+    val layer = ScriptedLayer("A", events)
+    val url = "https://o.test/blue-cover.png"
+    var source by mutableStateOf<MediaSource>(MediaSourceValue.remote(url, Kind.IMAGE, blurHash = null))
+    val states = CopyOnWriteArrayList<MediaState>()
+    rule.setContent {
+      CompositionLocalProvider(LocalBlurDecoder provides decoder(), LocalPlaceholderObserver provides observer) {
+        MediaLayerProvider(CompletableDeferred(layer), loader) { MediaImage(source, Modifier.size(50.dp)) { states.add(it) } }
+      }
+    }
+    until("image shown") { states.lastOrNull() == MediaState.Ready }
+
+    source = MediaSourceValue.remote(url, Kind.IMAGE, blurHash = RED)
+    repeat(30) { rule.waitForIdle(); looper.idle(); Thread.sleep(50) }
+
+    assertEquals(MediaState.Ready, states.last())
+    assertEquals("the blurhash is drawn over the shown image", 0, nodes("blurhash"))
+    assertFalse(published("blurhash", Tint.RED))
   }
 
   private fun replacing(first: MediaSource, second: MediaSource, control: MediaSource, video: Boolean, oldInput: String, secondLayer: Boolean = false) {
