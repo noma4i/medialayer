@@ -86,6 +86,11 @@ final class RTCAudioSession {
 @MainActor var context: MediaContext { fatalError() }
 @MainActor var audio: AudioPlayback { fatalError() }
 @MainActor var call: MediaCallAudio { fatalError() }
+@MainActor var preparer: MediaPreparer { fatalError() }
+@MainActor var path: String { fatalError() }
+@MainActor var output: String { fatalError() }
+@MainActor var sourcePath: String { fatalError() }
+@MainActor var destinationPath: String { fatalError() }
 @MainActor var photo: PreparedMedia? = nil
 @MainActor var ring: Double = 0
 @MainActor var recordEnabled = false
