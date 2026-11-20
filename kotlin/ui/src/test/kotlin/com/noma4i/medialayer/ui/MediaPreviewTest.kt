@@ -2,6 +2,9 @@ package com.noma4i.medialayer.ui
 
 import android.content.Context
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -65,5 +68,22 @@ class MediaPreviewTest {
     drainFfi()
     assertEquals(2uL, layer.imageStats().snapshot().decodes)
     assertEquals(0, layer.mainThreadFfi.count { it == "cacheKey" })
+  }
+
+  @Test
+  fun inv_placeholder_13_aSourceSwitchedFromALocalFileToARemoteUrlWithThatFileAsPreviewNeverDropsThePreviewNode() {
+    var shown by mutableStateOf<MediaSource>(local)
+    rule.mainClock.autoAdvance = false
+    rule.setContent {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { MediaImage(shown, Modifier.size(50.dp), preview = local) }
+    }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.imageStats().snapshot().decodes >= 1uL }
+
+    shown = main
+    repeat(30) {
+      rule.mainClock.advanceTimeByFrame()
+      looper.idle()
+      previews().assertCountEquals(1)
+    }
   }
 }
