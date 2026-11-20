@@ -270,3 +270,20 @@ async fn inv_strategy_35_one_url_shown_with_another_strategy_than_its_whole_hold
     let seen = lines.0.lock().unwrap().iter().filter(|line| line.contains("mixed-poster")).count();
     assert_eq!(seen, 1, "one trace line per url");
 }
+
+#[tokio::test(start_paused = true)]
+async fn inv_prefetch_25_a_whole_that_failed_does_not_hold_a_place_in_the_whole_queue() {
+    let rig = rig_with(|limits| limits.dedupe_max_entries = 3);
+    let mut events = rig.prefetcher.settled();
+    for index in 0..3 {
+        rig.loader.fail(&item(index).url, true);
+        rig.prefetcher.keep_whole(item(index));
+    }
+    for _ in 0..3 {
+        assert!(matches!(next(&mut events).await.outcome, Outcome::Failed(_)));
+    }
+    rig.prefetcher.keep_whole(item(3));
+    let settled = next(&mut events).await;
+    assert_eq!(settled.url, item(3).url);
+    assert_ne!(settled.outcome, Outcome::Failed("whole queue is full".to_string()), "settled failures still hold the whole queue");
+}
