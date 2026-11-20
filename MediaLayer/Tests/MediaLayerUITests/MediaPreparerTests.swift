@@ -65,7 +65,7 @@ private func writeClip(_ clip: FixtureClip, to url: URL) async throws {
   try #require(writer.startWriting())
   writer.startSession(atSourceTime: .zero)
   nonisolated(unsafe) let adaptorInFeed = adaptor
-  await feed(video, count: clip.frames) { index in
+  async let videoFed: Void = feed(video, count: clip.frames) { index in
     var buffer: CVPixelBuffer?
     CVPixelBufferCreate(nil, clip.width, clip.height, format, nil, &buffer)
     guard let buffer else { return }
@@ -86,6 +86,15 @@ private func writeClip(_ clip: FixtureClip, to url: URL) async throws {
     CVPixelBufferUnlockBaseAddress(buffer, [])
     adaptorInFeed.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(index), timescale: 30))
   }
+  // Both inputs are fed at once: the writer interleaves them, so one input waits for the other when fed in turn.
+  async let audioFed: Void = feedAudio(audio, format: audioFormat)
+  await videoFed
+  await audioFed
+  await writer.finishWriting()
+  try #require(writer.status == .completed, "the fixture clip cannot be written: \(String(describing: writer.error))")
+}
+
+private func feedAudio(_ audio: AVAssetWriterInput?, format audioFormat: CMAudioFormatDescription?) async {
   if let audio, let audioFormat {
     let samples = 44100
     var block: CMBlockBuffer?
@@ -104,8 +113,6 @@ private func writeClip(_ clip: FixtureClip, to url: URL) async throws {
       await feed(audio, count: 1) { _ in if let held { audio.append(held) } }
     }
   }
-  await writer.finishWriting()
-  try #require(writer.status == .completed, "the fixture clip cannot be written: \(String(describing: writer.error))")
 }
 
 private func feed(_ input: AVAssetWriterInput, count: Int, append: @escaping (Int) -> Void) async {
