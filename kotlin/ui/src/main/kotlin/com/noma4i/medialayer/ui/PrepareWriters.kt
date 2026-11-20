@@ -116,32 +116,31 @@ internal suspend fun exportPrepared(request: VideoExport) = withContext(Dispatch
   }.build()
   val handler = Handler(Looper.getMainLooper())
   val holder = ProgressHolder()
-  suspendCancellableCoroutine { continuation ->
-    lateinit var reader: Runnable
-    val transformer = Transformer.Builder(request.context)
-      .apply { setup.videoMime?.let(::setVideoMimeType) }.apply { setup.audioMime?.let(::setAudioMimeType) }
-      .setEncoderFactory(encoders).setPortraitEncodingEnabled(true)
-      .setMuxerFactory(InAppMp4Muxer.Factory(dropSourceMetadata).setAttemptStreamableOutputEnabled(true))
-      .addListener(object : Transformer.Listener {
-        override fun onCompleted(composition: Composition, exportResult: ExportResult) {
-          handler.removeCallbacks(reader)
-          if (continuation.isActive) continuation.resume(Unit)
-        }
-
-        override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
-          handler.removeCallbacks(reader)
-          if (continuation.isActive) {
-            continuation.resumeWithException(IOException("the video cannot be encoded: ${exportException.errorCodeName} ${exportException.cause?.message.orEmpty()}".trim(), exportException))
+  var running: Transformer? = null
+  whileExporting(
+    read = { running?.takeIf { it.getProgress(holder) == Transformer.PROGRESS_STATE_AVAILABLE }?.let { holder.progress / 100.0 } },
+    report = { request.onProgress?.invoke(it) }
+  ) {
+    suspendCancellableCoroutine { continuation ->
+      val transformer = Transformer.Builder(request.context)
+        .apply { setup.videoMime?.let(::setVideoMimeType) }.apply { setup.audioMime?.let(::setAudioMimeType) }
+        .setEncoderFactory(encoders).setPortraitEncodingEnabled(true)
+        .setMuxerFactory(InAppMp4Muxer.Factory(dropSourceMetadata).setAttemptStreamableOutputEnabled(true))
+        .addListener(object : Transformer.Listener {
+          override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+            if (continuation.isActive) continuation.resume(Unit)
           }
-        }
-      }).build()
-    reader = Runnable {
-      if (transformer.getProgress(holder) == Transformer.PROGRESS_STATE_AVAILABLE) request.onProgress?.invoke(holder.progress / 100.0)
-      handler.postDelayed(reader, 100)
+
+          override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
+            if (continuation.isActive) {
+              continuation.resumeWithException(IOException("the video cannot be encoded: ${exportException.errorCodeName} ${exportException.cause?.message.orEmpty()}".trim(), exportException))
+            }
+          }
+        }).build()
+      running = transformer
+      continuation.invokeOnCancellation { handler.post { transformer.cancel() } }
+      transformer.start(item, request.output.absolutePath)
     }
-    continuation.invokeOnCancellation { handler.post { handler.removeCallbacks(reader); transformer.cancel() } }
-    transformer.start(item, request.output.absolutePath)
-    handler.postDelayed(reader, 100)
   }
 }
 
