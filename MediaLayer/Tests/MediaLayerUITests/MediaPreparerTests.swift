@@ -286,3 +286,522 @@ private final class PrepareProgressLog: @unchecked Sendable {
   func add(_ value: Double) { lock.withLock { seen.append(value) } }
   var values: [Double] { lock.withLock { seen } }
 }
+
+// MARK: - Facts read back from the written result
+
+private struct VideoFacts {
+  var width: Int
+  var height: Int
+  var codec: FourCharCode
+  var frames: Int
+  var audio: Bool
+  var audioCodec: FourCharCode?
+  var primaries: String?
+  var metadata: [String]
+}
+
+private func videoFacts(_ url: URL) async throws -> VideoFacts {
+  let asset = AVURLAsset(url: url)
+  let track = try #require(try await asset.loadTracks(withMediaType: .video).first)
+  let (size, transform, formats) = try await track.load(.naturalSize, .preferredTransform, .formatDescriptions)
+  let upright = size.applying(transform)
+  let reader = try AVAssetReader(asset: asset)
+  let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+  reader.add(output)
+  reader.startReading()
+  let frames = sequence(state: output) { $0.copyNextSampleBuffer() }.reduce(0) { $0 + CMSampleBufferGetNumSamples($1) }
+  let extensions = formats.first.flatMap { CMFormatDescriptionGetExtensions($0) as? [String: Any] }
+  let audioTrack = try await asset.loadTracks(withMediaType: .audio).first
+  let audioFormats = try await audioTrack?.load(.formatDescriptions) ?? []
+  var items: [AVMetadataItem] = []
+  for format in try await asset.load(.availableMetadataFormats) { items += try await asset.loadMetadata(for: format) }
+  items += try await track.load(.metadata)
+  return VideoFacts(
+    width: Int(abs(upright.width).rounded()), height: Int(abs(upright.height).rounded()),
+    codec: CMFormatDescriptionGetMediaSubType(try #require(formats.first)), frames: frames,
+    audio: audioTrack != nil, audioCodec: audioFormats.first.map { CMFormatDescriptionGetMediaSubType($0) },
+    primaries: extensions?[kCMFormatDescriptionExtension_ColorPrimaries as String] as? String,
+    metadata: items.compactMap { $0.identifier?.rawValue ?? $0.commonKey?.rawValue }
+  )
+}
+
+/// The brightness 0...1 of the left or right edge of the first frame.
+private func luminance(_ url: URL, left: Bool) async throws -> Double {
+  let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+  let image = try generator.copyCGImage(at: .zero, actualTime: nil)
+  return try level(image, x: left ? 2 : image.width - 3, y: image.height / 2)
+}
+
+private func level(_ image: CGImage, x: Int, y: Int) throws -> Double {
+  let pixel = try rgb(image, x: x, y: y)
+  return (pixel.red + pixel.green + pixel.blue) / 3
+}
+
+private func rgb(_ image: CGImage, x: Int, y: Int) throws -> (red: Double, green: Double, blue: Double) {
+  var data = [UInt8](repeating: 0, count: image.width * image.height * 4)
+  let context = try #require(CGContext(
+    data: &data, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+  ))
+  context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+  let at = (y * image.width + x) * 4
+  return (Double(data[at]) / 255, Double(data[at + 1]) / 255, Double(data[at + 2]) / 255)
+}
+
+private struct PictureFacts {
+  var width: Int
+  var height: Int
+  var type: String?
+  var tagged: Bool
+  var image: CGImage
+}
+
+private func pictureFacts(_ url: URL) throws -> PictureFacts {
+  let source = try #require(CGImageSourceCreateWithURL(url as CFURL, nil))
+  let properties = try #require(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+  let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any]
+  let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any]
+  let tagged = properties[kCGImagePropertyGPSDictionary] != nil || tiff?[kCGImagePropertyTIFFMake] != nil || tiff?[kCGImagePropertyTIFFModel] != nil
+    || exif?[kCGImagePropertyExifLensModel] != nil || exif?[kCGImagePropertyExifBodySerialNumber] != nil
+  return PictureFacts(
+    width: properties[kCGImagePropertyPixelWidth] as? Int ?? 0, height: properties[kCGImagePropertyPixelHeight] as? Int ?? 0,
+    type: CGImageSourceGetType(source) as String?, tagged: tagged, image: try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+  )
+}
+
+private func makeJob(_ attempt: UInt64, _ source: URL, _ destination: URL, _ descriptor: Data) -> MediaPrepareJob {
+  MediaPrepareJob(attemptId: attempt, source: source.path, destination: destination.path, descriptor: descriptor)
+}
+
+private func recodeLimits() -> VideoLimits {
+  var limits = defaultVideoLimits()
+  limits.maxLongSide = 320
+  return limits
+}
+
+private func sizeOnDisk(_ url: URL) throws -> UInt64 {
+  try #require(try FileManager.default.attributesOfItem(atPath: url.path)[.size] as? UInt64)
+}
+
+private func editDescriptor(_ edit: PhotoEdit, format: ImageFormat = .jpeg) throws -> Data {
+  try mediaPrepareDescriptor(intent: .image(edit: edit, quality: 0.8, format: format))
+}
+
+// MARK: - The source matrix of the DBlayer executor, against the public MediaPreparer
+
+@Suite(.serialized)
+struct MediaPreparerMatrixTests {
+  // DBlayer "h264+aac within limits" (private metadata stripped by a repack)
+  @Test(.timeLimit(.minutes(2)))
+  func aClipWithinLimitsAndPrivateMetadataIsRepackedWithoutIt() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "source.mp4")
+    try await writeClip(FixtureClip(width: 64, height: 32, audio: true, metadata: true), to: source)
+    let before = try await videoFacts(source)
+    #expect(before.metadata.contains { $0.lowercased().contains("location") }, "the fixture carries GPS metadata: \(before.metadata)")
+    let destination = directory.appending(path: "result.mp4")
+    let outcome = await MediaPreparer().run(job: makeJob(10, source, destination, try videoDescriptor())) { _ in }
+    guard case let .done(_, mime) = outcome else {
+      Issue.record("the metadata forces a repack, got \(outcome)")
+      return
+    }
+    #expect(mime == "video/mp4")
+    let facts = try await videoFacts(destination)
+    #expect(facts.width == 64 && facts.height == 32 && facts.codec == kCMVideoCodecType_H264 && facts.frames == 30)
+    #expect(facts.audio && facts.audioCodec == kAudioFormatMPEG4AAC, "the AAC track stays")
+    #expect(facts.metadata.allSatisfy { !$0.lowercased().contains("location") && !$0.lowercased().contains("songname") }, "private metadata is gone: \(facts.metadata)")
+  }
+
+  // DBlayer "h264 above limits"
+  @Test(.timeLimit(.minutes(2)))
+  func aClipAboveTheSideLimitIsRecodedSmallerAndKeepsItsAudio() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "source.mp4")
+    try await writeClip(FixtureClip(width: 640, height: 360, audio: true), to: source)
+    let destination = directory.appending(path: "result.mp4")
+    let outcome = await MediaPreparer().run(job: makeJob(11, source, destination, try videoDescriptor(limits: recodeLimits()))) { _ in }
+    guard case .done = outcome else {
+      Issue.record("the clip is above the limit, got \(outcome)")
+      return
+    }
+    let facts = try await videoFacts(destination)
+    #expect(facts.width == 320 && facts.height == 180 && facts.codec == kCMVideoCodecType_H264 && facts.frames == 30)
+    #expect(facts.audio && facts.audioCodec == kAudioFormatMPEG4AAC)
+  }
+
+  // DBlayer "hevc"
+  @Test(.timeLimit(.minutes(2)))
+  func anHevcClipIsRecodedToH264() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "source.mp4")
+    do { try await writeClip(FixtureClip(width: 128, height: 64, codec: .hevc, audio: true), to: source) } catch { return }
+    let destination = directory.appending(path: "result.mp4")
+    let outcome = await MediaPreparer().run(job: makeJob(12, source, destination, try videoDescriptor())) { _ in }
+    guard case .done = outcome else {
+      Issue.record("an HEVC source is recoded, got \(outcome)")
+      return
+    }
+    let facts = try await videoFacts(destination)
+    #expect(facts.width == 128 && facts.height == 64 && facts.codec == kCMVideoCodecType_H264 && facts.frames == 30 && facts.audio)
+  }
+
+  // DBlayer "vertical turned 90" (rotation)
+  @Test(.timeLimit(.minutes(2)))
+  func aClipTurnedBy90DegreesIsWrittenUprightWithoutATurnFlag() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "source.mp4")
+    try await writeClip(FixtureClip(width: 64, height: 32, audio: true, turned: true), to: source)
+    let destination = directory.appending(path: "result.mp4")
+    let outcome = await MediaPreparer().run(job: makeJob(13, source, destination, try videoDescriptor())) { _ in }
+    guard case .done = outcome else {
+      Issue.record("a turned clip is recoded, got \(outcome)")
+      return
+    }
+    let facts = try await videoFacts(destination)
+    #expect(facts.width == 32 && facts.height == 64 && facts.codec == kCMVideoCodecType_H264 && facts.frames == 30)
+    let track = try #require(try await AVURLAsset(url: destination).loadTracks(withMediaType: .video).first)
+    #expect(try await track.load(.preferredTransform).isIdentity, "the result carries no rotation")
+  }
+
+  // DBlayer "no audio track"
+  @Test(.timeLimit(.minutes(2)))
+  func aClipWithoutSoundIsRecodedWithoutAnAudioTrack() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "source.mp4")
+    try await writeClip(FixtureClip(width: 640, height: 360), to: source)
+    let destination = directory.appending(path: "result.mp4")
+    let outcome = await MediaPreparer().run(job: makeJob(14, source, destination, try videoDescriptor(limits: recodeLimits()))) { _ in }
+    guard case .done = outcome else {
+      Issue.record("the silent clip is recoded, got \(outcome)")
+      return
+    }
+    let facts = try await videoFacts(destination)
+    #expect(facts.width == 320 && facts.height == 180 && facts.frames == 30 && !facts.audio)
+  }
+
+  // DBlayer "mirror"
+  @Test(.timeLimit(.minutes(2)))
+  func theMirrorFlagFlipsTheClipLeftToRight() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "source.mp4")
+    try await writeClip(FixtureClip(width: 64, height: 32), to: source)
+    #expect(try await luminance(source, left: true) > 0.7, "the source is bright on the left")
+    let destination = directory.appending(path: "result.mp4")
+    let outcome = await MediaPreparer().run(job: makeJob(15, source, destination, try videoDescriptor(mirror: true))) { _ in }
+    guard case .done = outcome else {
+      Issue.record("the mirror forces a recode, got \(outcome)")
+      return
+    }
+    let left = try await luminance(destination, left: true)
+    let right = try await luminance(destination, left: false)
+    #expect(left < 0.3 && right > 0.7, "the left side is dark and the right side bright after the mirror: \(left) \(right)")
+  }
+
+  // DBlayer "hdr hlg hevc" (the fixture or the recode may be missing on the runtime)
+  @Test(.timeLimit(.minutes(2)))
+  func anHdrClipIsWrittenAsSdrBt709() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "source.mp4")
+    do { try await writeClip(FixtureClip(width: 64, height: 32, codec: .hevc, hdr: true), to: source) } catch { return }
+    let destination = directory.appending(path: "result.mp4")
+    let outcome = await MediaPreparer().run(job: makeJob(16, source, destination, try videoDescriptor())) { _ in }
+    switch outcome {
+    case .done:
+      #expect(try await videoFacts(destination).primaries == "ITU_R_709_2", "the result is SDR BT.709")
+    case let .failed(message), let .cannotDecode(message):
+      #expect(!message.isEmpty, "a runtime without HDR names its reason")
+      #expect(!FileManager.default.fileExists(atPath: destination.path))
+    default:
+      Issue.record("an HDR clip is recoded or refused, got \(outcome)")
+    }
+  }
+
+  // The recode threshold of the limits
+  @Test(.timeLimit(.minutes(2)))
+  func aSourceAtOrBelowTheRecodeThresholdPassesWhateverItsSize() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "source.mp4")
+    try await writeClip(FixtureClip(width: 640, height: 360, audio: true), to: source)
+    var limits = recodeLimits()
+    limits.recodeAboveBytes = try sizeOnDisk(source)
+    let destination = directory.appending(path: "result.mp4")
+    let outcome = await MediaPreparer().run(job: makeJob(17, source, destination, try videoDescriptor(limits: limits))) { _ in }
+    guard case .unchanged = outcome else {
+      Issue.record("the source is at the threshold, got \(outcome)")
+      return
+    }
+    #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted() == ["source.mp4"])
+  }
+
+  @Test(.timeLimit(.minutes(2)))
+  func aSourceAboveTheRecodeThresholdIsRecoded() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "source.mp4")
+    try await writeClip(FixtureClip(width: 640, height: 360, audio: true), to: source)
+    var limits = recodeLimits()
+    limits.recodeAboveBytes = try sizeOnDisk(source) - 1
+    let destination = directory.appending(path: "result.mp4")
+    let outcome = await MediaPreparer().run(job: makeJob(18, source, destination, try videoDescriptor(limits: limits))) { _ in }
+    guard case .done = outcome else {
+      Issue.record("the source is above the threshold, got \(outcome)")
+      return
+    }
+    #expect(try await videoFacts(destination).width == 320)
+  }
+
+  // The three results: pass (Unchanged), repack, recode
+  @Test(.timeLimit(.minutes(2)))
+  func theProbeAnnouncesTheSizeOfEachOfPassRepackAndRecode() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let plain = directory.appending(path: "plain.mp4")
+    let tagged = directory.appending(path: "tagged.mp4")
+    let large = directory.appending(path: "large.mp4")
+    try await writeClip(FixtureClip(width: 64, height: 32), to: plain)
+    try await writeClip(FixtureClip(width: 64, height: 32, audio: true, metadata: true), to: tagged)
+    try await writeClip(FixtureClip(width: 640, height: 360), to: large)
+    let preparer = MediaPreparer()
+    let descriptor = try videoDescriptor(limits: recodeLimits())
+    guard case let .file(plainWidth, plainHeight, plainMime) = await preparer.probe(path: plain.path, descriptor: descriptor, mime: nil),
+          case let .file(taggedWidth, taggedHeight, _) = await preparer.probe(path: tagged.path, descriptor: descriptor, mime: nil),
+          case let .file(largeWidth, largeHeight, _) = await preparer.probe(path: large.path, descriptor: descriptor, mime: nil)
+    else {
+      Issue.record("the probe reads the clips")
+      return
+    }
+    #expect(plainWidth == 64 && plainHeight == 32 && plainMime == "video/mp4")
+    #expect(taggedWidth == 64 && taggedHeight == 32, "a repack keeps the size")
+    #expect(largeWidth == 320 && largeHeight == 180, "a recode gets the planned size")
+  }
+
+  // DBlayer probe turn: a turned source is reported upright
+  @Test(.timeLimit(.minutes(1)))
+  func theProbeReportsATurnedClipUpright() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "turned.mp4")
+    try await writeClip(FixtureClip(width: 64, height: 32, audio: true, turned: true), to: source)
+    guard case let .file(width, height, mime) = await MediaPreparer().probe(path: source.path, descriptor: nil, mime: nil) else {
+      Issue.record("the probe reads the clip")
+      return
+    }
+    #expect(width == 32 && height == 64 && mime == "video/mp4")
+  }
+
+  // Decoder unavailable: the source cannot be read, the policy decides
+  @Test(.timeLimit(.minutes(1)))
+  func anUnreadableVideoIsRefusedAsCannotDecodeByThePolicyFail() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "broken.mp4")
+    try Data(repeating: 7, count: 2048).write(to: source)
+    let destination = directory.appending(path: "result.mp4")
+    let outcome = await MediaPreparer().run(job: makeJob(20, source, destination, try videoDescriptor())) { _ in }
+    guard case let .cannotDecode(message) = outcome else {
+      Issue.record("the source cannot be decoded, got \(outcome)")
+      return
+    }
+    #expect(!message.isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: destination.path))
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func anUnreadableVideoPassesUnchangedByThePolicyUploadSource() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "broken.mp4")
+    try Data(repeating: 7, count: 2048).write(to: source)
+    let destination = directory.appending(path: "result.mp4")
+    let descriptor = try mediaPrepareDescriptor(intent: .video(limits: nil, mirror: false, onCannotDecode: .uploadSource))
+    let outcome = await MediaPreparer().run(job: makeJob(21, source, destination, descriptor)) { _ in }
+    guard case .unchanged = outcome else {
+      Issue.record("the original goes as it is, got \(outcome)")
+      return
+    }
+    #expect(!FileManager.default.fileExists(atPath: destination.path))
+    #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted() == ["broken.mp4"])
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aPhotoDescriptorOnAVideoSourceIsCannotDecode() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "clip.mp4")
+    try await writeClip(source, width: 64, height: 32, frames: 3)
+    let destination = directory.appending(path: "result.jpg")
+    let outcome = await MediaPreparer().run(job: makeJob(22, source, destination, try editDescriptor(plainEdit))) { _ in }
+    guard case .cannotDecode = outcome else {
+      Issue.record("the kind does not match the descriptor, got \(outcome)")
+      return
+    }
+    #expect(!FileManager.default.fileExists(atPath: destination.path))
+  }
+
+  // Cancel mid run with a real recode
+  @Test(.timeLimit(.minutes(2)))
+  func cancelDuringARecodeStopsItAndRemovesThePartialFile() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "long.mp4")
+    try await writeClip(FixtureClip(width: 640, height: 360, audio: true, frames: 240), to: source)
+    let destination = directory.appending(path: "result.mp4")
+    let preparer = MediaPreparer()
+    let first = AsyncStream<Double>.makeStream()
+    let job = makeJob(23, source, destination, try videoDescriptor(limits: recodeLimits()))
+    let work = Task { await preparer.run(job: job) { first.continuation.yield($0) } }
+    var values = first.stream.makeAsyncIterator()
+    _ = await values.next()
+    preparer.cancel(attemptId: 23)
+    #expect(await work.value == .cancelled)
+    #expect(!FileManager.default.fileExists(atPath: destination.path))
+    #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted() == ["long.mp4"], "no temp file is left")
+  }
+
+  // DBlayer picture rows: GPS and device data strip, format, orientation
+  @Test(.timeLimit(.minutes(2)))
+  func aTaggedJpegIsWrittenWithoutGpsAndDeviceData() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "tagged.jpg")
+    try writePicture(source, width: 40, height: 20, orientation: 1, tagged: true)
+    #expect(try pictureFacts(source).tagged, "the fixture carries GPS and device data")
+    let destination = directory.appending(path: "result.jpg")
+    let outcome = await MediaPreparer().run(job: makeJob(30, source, destination, try editDescriptor(plainEdit))) { _ in }
+    guard case let .done(_, mime) = outcome else {
+      Issue.record("the photo is prepared, got \(outcome)")
+      return
+    }
+    let facts = try pictureFacts(destination)
+    #expect(mime == "image/jpeg" && facts.type == UTType.jpeg.identifier)
+    #expect(facts.width == 40 && facts.height == 20)
+    #expect(!facts.tagged, "no GPS or device data is kept")
+  }
+
+  @Test(.timeLimit(.minutes(2)))
+  func aTaggedPngWithAlphaStaysPngWithoutGpsAndDeviceData() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "alpha.png")
+    try writePicture(source, type: .png, width: 40, height: 20, orientation: 1, alpha: true, tagged: true)
+    let destination = directory.appending(path: "result.png")
+    let outcome = await MediaPreparer().run(job: makeJob(31, source, destination, try editDescriptor(plainEdit, format: .png))) { _ in }
+    guard case let .done(_, mime) = outcome else {
+      Issue.record("the png is prepared, got \(outcome)")
+      return
+    }
+    let facts = try pictureFacts(destination)
+    #expect(mime == "image/png" && facts.type == UTType.png.identifier)
+    #expect(facts.width == 40 && facts.height == 20 && !facts.tagged)
+  }
+
+  // DBlayer "heic" (the encoder may be missing on the runtime)
+  @Test(.timeLimit(.minutes(2)))
+  func aTaggedHeicIsWrittenAsJpegWithoutGpsAndDeviceData() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "tagged.heic")
+    do { try writePicture(source, type: UTType("public.heic") ?? .jpeg, width: 40, height: 20, orientation: 1, tagged: true) } catch { return }
+    let destination = directory.appending(path: "result.jpg")
+    let outcome = await MediaPreparer().run(job: makeJob(32, source, destination, try editDescriptor(plainEdit))) { _ in }
+    switch outcome {
+    case .done:
+      let facts = try pictureFacts(destination)
+      #expect(facts.type == UTType.jpeg.identifier && facts.width == 40 && facts.height == 20 && !facts.tagged)
+    case let .failed(message), let .cannotDecode(message):
+      #expect(!message.isEmpty)
+      #expect(!FileManager.default.fileExists(atPath: destination.path))
+    default:
+      Issue.record("a HEIC photo is prepared or refused, got \(outcome)")
+    }
+  }
+
+  // DBlayer "jpeg exif orientation 6" (rotation)
+  @Test(.timeLimit(.minutes(2)))
+  func anExifTurnedJpegIsWrittenUprightWithItsColorsOnTheRightSides() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "turned.jpg")
+    try writePicture(source, width: 40, height: 20, orientation: 6, tagged: true)
+    let destination = directory.appending(path: "result.jpg")
+    let outcome = await MediaPreparer().run(job: makeJob(33, source, destination, try editDescriptor(plainEdit))) { _ in }
+    guard case .done = outcome else {
+      Issue.record("the photo is prepared, got \(outcome)")
+      return
+    }
+    let facts = try pictureFacts(destination)
+    #expect(facts.width == 20 && facts.height == 40 && !facts.tagged)
+    // Orientation 6 turns the picture 90 degrees clockwise: the red left half ends up on top.
+    let top = try rgb(facts.image, x: 10, y: 5)
+    let bottom = try rgb(facts.image, x: 10, y: 35)
+    #expect(top.red > 0.6 && top.blue < 0.4, "the red half is on top: \(top)")
+    #expect(bottom.blue > 0.6 && bottom.red < 0.4, "the blue half is below: \(bottom)")
+  }
+
+  // Crop and the descriptor rotation
+  @Test(.timeLimit(.minutes(2)))
+  func aCropKeepsOnlyTheChosenPartOfThePhoto() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "photo.jpg")
+    try writePicture(source, width: 40, height: 20, orientation: 1, tagged: true)
+    let edit = PhotoEdit(maxSize: nil, enlarge: false, crop: CropFractions(x: 0.5, y: 0, width: 0.5, height: 1), outputSize: nil, mirror: false, rotationDegrees: 0)
+    let descriptor = try editDescriptor(edit)
+    guard case let .file(plannedWidth, plannedHeight, _) = await MediaPreparer().probe(path: source.path, descriptor: descriptor, mime: nil) else {
+      Issue.record("the probe plans the crop")
+      return
+    }
+    let destination = directory.appending(path: "result.jpg")
+    let outcome = await MediaPreparer().run(job: makeJob(34, source, destination, descriptor)) { _ in }
+    guard case .done = outcome else {
+      Issue.record("the cropped photo is prepared, got \(outcome)")
+      return
+    }
+    let facts = try pictureFacts(destination)
+    #expect(facts.width == 20 && facts.height == 20)
+    #expect(UInt32(facts.width) == plannedWidth && UInt32(facts.height) == plannedHeight, "the file has the size the probe announced")
+    let pixel = try rgb(facts.image, x: 10, y: 10)
+    #expect(pixel.blue > 0.6 && pixel.red < 0.4, "only the blue right half is left: \(pixel)")
+    #expect(!facts.tagged)
+  }
+
+  @Test(.timeLimit(.minutes(2)))
+  func aRotationOfTheEditTurnsThePhotoBy90Degrees() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "photo.jpg")
+    try writePicture(source, width: 40, height: 20, orientation: 1)
+    let edit = PhotoEdit(maxSize: nil, enlarge: false, crop: nil, outputSize: nil, mirror: false, rotationDegrees: 90)
+    let destination = directory.appending(path: "result.jpg")
+    let outcome = await MediaPreparer().run(job: makeJob(35, source, destination, try editDescriptor(edit))) { _ in }
+    guard case .done = outcome else {
+      Issue.record("the turned photo is prepared, got \(outcome)")
+      return
+    }
+    let facts = try pictureFacts(destination)
+    #expect(facts.width == 20 && facts.height == 40)
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aPhotoThatCannotBeDecodedIsCannotDecodeAndWritesNothing() async throws {
+    let directory = try scratch()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = directory.appending(path: "broken.jpg")
+    try Data(repeating: 7, count: 2048).write(to: source)
+    let destination = directory.appending(path: "result.jpg")
+    let outcome = await MediaPreparer().run(job: makeJob(36, source, destination, try editDescriptor(plainEdit))) { _ in }
+    guard case .cannotDecode = outcome else {
+      Issue.record("the source is no picture, got \(outcome)")
+      return
+    }
+    #expect(!FileManager.default.fileExists(atPath: destination.path))
+  }
+}
