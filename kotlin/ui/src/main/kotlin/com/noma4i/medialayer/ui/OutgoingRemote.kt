@@ -21,11 +21,11 @@ fun interface OutgoingRemote {
 
 /** The time the 5 s re-ask runs on. The testing module gives a manual one. */
 interface OutgoingClock {
-  suspend fun delay(millis: Long)
+  suspend fun sleep(millis: Long)
 }
 
 internal object SystemOutgoingClock : OutgoingClock {
-  override suspend fun delay(millis: Long) = kotlinx.coroutines.delay(millis)
+  override suspend fun sleep(millis: Long) = kotlinx.coroutines.delay(millis)
 }
 
 /** The remote through the open layer: the core cache fetches the complete body, then a decode proves it is a picture. */
@@ -53,36 +53,36 @@ internal object LayerOutgoingRemote : OutgoingRemote {
 }
 
 /** The process state of outgoing media: the registry, the fetch slots, the remote and clock, the custody store. */
-class OutgoingRuntime internal constructor(
+internal class OutgoingRuntime(
   internal val remote: OutgoingRemote,
   internal val clock: OutgoingClock,
   private val storeDirectory: () -> File?
 ) {
   internal val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
   internal val slots = Semaphore(outgoingFetchSlots().toInt())
-  private val items = LinkedHashMap<String, OutgoingMedia>(16, 0.75f, true)
+  private val items = LinkedHashMap<String, OutgoingEntry>(16, 0.75f, true)
 
   internal fun store(): OutgoingStore? = storeDirectory()?.let { OutgoingStore(it) }
 
-  internal fun item(key: String, create: () -> OutgoingMedia): OutgoingMedia = synchronized(items) {
+  internal fun item(key: String, create: () -> OutgoingEntry): OutgoingEntry = synchronized(items) {
     val found = items[key]
     if (found != null) { found.touch(); return found }
     create().also { items[key] = it; trim() }
   }
 
-  internal fun find(key: String): OutgoingMedia? = synchronized(items) { items[key] }
+  internal fun find(key: String): OutgoingEntry? = synchronized(items) { items[key] }
 
-  /** Ready items are tiny, but not kept for ever: the oldest ready ones go past this many. */
   private fun trim() {
     if (items.size <= KEPT) return
     val iterator = items.entries.iterator()
     while (items.size > KEPT && iterator.hasNext()) if (iterator.next().value.phase == com.noma4i.medialayer.OutgoingPhase.Ready) iterator.remove()
   }
-
-  private companion object { const val KEPT = 512 }
 }
 
-object Outgoing {
+/** Ready items are tiny, but not kept for ever: the oldest ready ones go past this many. */
+private const val KEPT = 512
+
+internal object Outgoing {
   @Volatile internal var runtime: OutgoingRuntime = OutgoingRuntime(LayerOutgoingRemote, SystemOutgoingClock, ::layerStoreDirectory)
 
   /** For the testing module and apps with their own fetch: replaces the remote, the clock and the custody directory, and starts an empty registry. */
@@ -101,4 +101,4 @@ private fun layerStoreDirectory(): File? {
 }
 
 /** The item registry by key: the item (and its phase) is readable outside any composition, until a relaunch. */
-fun Media.outgoing(key: String): OutgoingMedia? = Outgoing.runtime.find(key)
+fun Media.outgoing(key: String): OutgoingMedia? = Outgoing.runtime.find(key)?.let { OutgoingMedia(it) }

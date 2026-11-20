@@ -47,21 +47,12 @@ private data class OutgoingRemoteSource(override val url: String) : MediaSource 
   override val headers: Map<String, String> get() = emptyMap()
 }
 
-/** The phase as text for the semantics (`stateDescription`): sending, awaitingRemote, fetchingRemote, ready, failed.upload, failed.remote. */
-fun OutgoingPhase.describe(): String = when (this) {
-  is OutgoingPhase.Sending -> "sending"
-  is OutgoingPhase.AwaitingRemote -> "awaitingRemote"
-  is OutgoingPhase.FetchingRemote -> "fetchingRemote"
-  is OutgoingPhase.Ready -> "ready"
-  is OutgoingPhase.Failed -> if (reason is OutgoingFailure.Upload) "failed.upload" else "failed.remote"
-}
-
 /**
  * Draws an outgoing item: the cover of the local original (or the blur hash) while it is sent and fetched, then the remote copy swapped in
  * once, in one frame, no crossfade. The phase is in the semantics: `stateDescription` and `testTag("outgoing-<key>")`.
  */
 @Composable
-fun OutgoingMediaImage(
+fun OutgoingMediaView(
   item: OutgoingMedia,
   modifier: Modifier = Modifier,
   contentScale: ContentScale = ContentScale.Crop,
@@ -81,7 +72,7 @@ fun OutgoingMediaImage(
   }
   var remoteShown by remember(item) { mutableStateOf(false) }
   Box(
-    modifier.then(screen.modifier).clipToBounds().testTag("outgoing-${item.key}").semantics { stateDescription = phase.describe() }
+    modifier.then(screen.modifier).clipToBounds().testTag("outgoing-${item.key}").semantics { stateDescription = phase.name }
   ) {
     if (!remoteShown) Cover(item, cover, contentScale)
     val url = item.remote

@@ -5,6 +5,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.SideEffect
 import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.OutgoingEvent
+import com.noma4i.medialayer.OutgoingFailure
 import com.noma4i.medialayer.OutgoingKind
 import com.noma4i.medialayer.OutgoingPhase
 import com.noma4i.medialayer.OutgoingState
@@ -25,6 +26,15 @@ import kotlinx.coroutines.sync.withPermit
 
 val OutgoingPhase.isBusy: Boolean get() = this is OutgoingPhase.Sending || this is OutgoingPhase.AwaitingRemote || this is OutgoingPhase.FetchingRemote
 
+/** The phase as text for the semantics (`stateDescription`): sending, awaitingRemote, fetchingRemote, ready, failed.upload, failed.remote. */
+val OutgoingPhase.name: String get() = when (this) {
+  is OutgoingPhase.Sending -> "sending"
+  is OutgoingPhase.AwaitingRemote -> "awaitingRemote"
+  is OutgoingPhase.FetchingRemote -> "fetchingRemote"
+  is OutgoingPhase.Ready -> "ready"
+  is OutgoingPhase.Failed -> if (reason is OutgoingFailure.Upload) "failed.upload" else "failed.remote"
+}
+
 /** 0..1 for the loader: the upload progress while sending, the fetch progress while fetching, 0 otherwise. */
 val OutgoingPhase.progress: Float get() = when (this) {
   is OutgoingPhase.Sending -> progress.toFloat()
@@ -33,10 +43,10 @@ val OutgoingPhase.progress: Float get() = when (this) {
 }
 
 /**
- * A sent media item. The app declares it and feeds it inputs ([forward], [remote]); the phase is decided by the core state machine,
- * the library fetches the remote copy and swaps it in when it is complete and decoded. The app holds no state of its own for it.
+ * The state of one outgoing item, shared by every [OutgoingMedia] of its key. The phase is decided by the core state machine, the library
+ * fetches the remote copy and swaps it in when it is complete and decoded.
  */
-class OutgoingMedia internal constructor(
+internal class OutgoingEntry(
   val key: String,
   val kind: Kind,
   local: File?,
@@ -61,9 +71,7 @@ class OutgoingMedia internal constructor(
   val phase: OutgoingPhase get() = phaseState.value
   val phases: StateFlow<OutgoingPhase> = phaseState.asStateFlow()
 
-  /** The app's own rule for opening; the default is `ready` only. */
-  @Volatile var openable: ((OutgoingPhase) -> Boolean)? = null
-  val canOpen: Boolean get() = openable?.invoke(phase) ?: outgoingView(synchronized(lock) { state }).canOpen
+  val canOpen: Boolean get() = outgoingView(synchronized(lock) { state }).canOpen
 
   val hasLocal: Boolean get() = state.inputs.hasLocal
 
@@ -136,10 +144,55 @@ class OutgoingMedia internal constructor(
     val after = outgoingView(state).reaskAfterMs ?: return
     val url = state.inputs.remote ?: return
     reask = runtime.scope.launch {
-      runtime.clock.delay(after.toLong())
+      runtime.clock.sleep(after.toLong())
       synchronized(lock) { if (state.inputs.remote == url && onScreen > 0 && fetch?.isActive != true) startFetch(url) }
     }
   }
+}
+
+/**
+ * A sent media item. The app declares it and feeds it inputs ([forward], [remote]); the phase is decided by the core state machine,
+ * the library fetches the remote copy and swaps it in when it is complete and decoded. Handles of one key share one state, which is
+ * readable outside any composition. The app holds no state of its own for it.
+ */
+class OutgoingMedia internal constructor(private val entry: OutgoingEntry) {
+  constructor(key: String, kind: Kind = Kind.IMAGE, local: File? = null, blurHash: String? = null) :
+    this(Outgoing.runtime.item(key) { OutgoingEntry(key, kind, local, blurHash, Outgoing.runtime) })
+
+  /** The app's own rule for opening; the default is `ready` only. */
+  @Volatile var openable: ((OutgoingPhase) -> Boolean)? = null
+
+  val key: String get() = entry.key
+  val kind: Kind get() = entry.kind
+  val blurHash: String? get() = entry.blurHash
+
+  /** The original kept by the library under the key until `ready`, or the declared file when no store is open. */
+  val local: File? get() = entry.local
+  val hasLocal: Boolean get() = entry.hasLocal
+
+  /** The phase, observable outside any view. */
+  val phase: OutgoingPhase get() = entry.phase
+
+  /** The phase now and every change after it. */
+  val phases: StateFlow<OutgoingPhase> get() = entry.phases
+  val canOpen: Boolean get() = openable?.invoke(phase) ?: entry.canOpen
+
+  /** The remote url from the server; `null` never takes a known url back. Setting it also means the upload is done. */
+  var remote: String?
+    get() = entry.remote
+    set(value) { entry.remote = value }
+
+  /** One call: the upload state stream of DBlayer. Duplicates and out-of-order values are folded by the core. Calling again replaces the earlier stream. */
+  fun forward(upload: Flow<OutgoingUpload>): Job = entry.forward(upload)
+
+  /** One upload state of DBlayer. */
+  fun forward(upload: OutgoingUpload) = entry.forward(upload)
+
+  /** Fetches the remote again; only from `failed(.remote)`. A failed upload is re-sent by the app and re-forwarded. */
+  fun retry() = entry.retry()
+
+  /** A composed view of this item is on screen: only then the "not ready yet" answer is asked again. */
+  internal fun onScreen(visible: Boolean) = entry.onScreen(visible)
 }
 
 private fun Kind.toOutgoing(): OutgoingKind = when (this) {
@@ -154,7 +207,7 @@ private fun Kind.toOutgoing(): OutgoingKind = when (this) {
  */
 @Composable
 fun rememberOutgoingMedia(key: String, kind: Kind = Kind.IMAGE, local: File? = null, blurHash: String? = null, remote: String? = null, upload: OutgoingUpload? = null): OutgoingMedia {
-  val item = remember(key) { Outgoing.runtime.item(key) { OutgoingMedia(key, kind, local, blurHash, Outgoing.runtime) } }
+  val item = remember(key) { OutgoingMedia(key, kind, local, blurHash) }
   SideEffect {
     if (upload != null) item.forward(upload)
     if (remote != null) item.remote = remote
