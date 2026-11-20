@@ -42,7 +42,8 @@ extension View {
 }
 
 /// Draws an outgoing item: the cover until the remote copy is ready, then the remote picture in the same frame, with no animation.
-/// A video item draws its cover only. The phase is the accessibility value and the identifier is `outgoing.<key>`.
+/// A video item draws its cover only. The phase is the accessibility value and the identifier is `outgoing.<key>`; the cover under it is
+/// `outgoing.cover.local` or `outgoing.cover.blurred` while it is drawn.
 public struct OutgoingMediaView: View {
   private let item: OutgoingMedia
   private let contentMode: ContentMode
@@ -94,9 +95,9 @@ public struct OutgoingMediaView: View {
     case .custom(let make):
       make()
     case .local:
-      local(entry)
+      local(entry).accessibilityElement(children: .ignore).accessibilityIdentifier("outgoing.cover.local")
     case .blurredLocal(let radius):
-      local(entry).blur(radius: radius).clipped()
+      local(entry).blur(radius: radius).clipped().accessibilityElement(children: .ignore).accessibilityIdentifier("outgoing.cover.blurred")
     }
   }
 

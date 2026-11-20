@@ -90,6 +90,23 @@ private struct Rig {
   }
 }
 
+@MainActor
+private func identifiers(in object: Any?) -> [String] {
+  guard let object else { return [] }
+  var found: [String] = []
+  if let node = object as? NSObject, node.responds(to: Selector(("accessibilityIdentifier"))), let id = node.value(forKey: "accessibilityIdentifier") as? String, !id.isEmpty { found.append(id) }
+  if let view = object as? UIView {
+    for element in view.accessibilityElements ?? [] { found += identifiers(in: element) }
+    for sub in view.subviews { found += identifiers(in: sub) }
+  }
+  if let element = object as? NSObject, !(object is UIView) {
+    let count = element.accessibilityElementCount()
+    if count != NSNotFound { for index in 0..<count { found += identifiers(in: element.accessibilityElement(at: index)) } }
+    for child in (element.value(forKey: "accessibilityElements") as? [Any]) ?? [] { found += identifiers(in: child) }
+  }
+  return found
+}
+
 private func isRed(_ pixel: [UInt8]) -> Bool { pixel[0] > 200 && pixel[2] < 60 }
 private func isBlue(_ pixel: [UInt8]) -> Bool { pixel[2] > 200 && pixel[0] < 60 }
 
@@ -136,12 +153,16 @@ extension GlobalMedia {
       let item = OutgoingMedia(key: "k13", kind: .image, local: split)
       let (host, window) = rig.show(item, cover: .blurredLocal(radius: 8))
       defer { window.isHidden = true }
-      await until("the blurred local is drawn") { let edge = pixel(of: host.view, x: 15); return edge[0] > 40 && edge[2] > 40 }
+      await until("the blurred cover is drawn from the local") {
+        return isRed(pixel(of: host.view, x: 4)) && isBlue(pixel(of: host.view, x: 28)) && identifiers(in: host.view).contains("outgoing.cover.blurred")
+      }
+      #expect(!identifiers(in: host.view).contains("outgoing.cover.local"))
 
       item.setRemote(url)
       rig.remote.complete(url)
       await until("the item is ready") { item.phase == .ready }
-      await until("the sharp remote replaces it") { isBlue(pixel(of: host.view, x: 15)) }
+      await until("the sharp remote replaces it") { isBlue(pixel(of: host.view, x: 4)) && isBlue(pixel(of: host.view, x: 15)) }
+      await until("the cover is gone") { !identifiers(in: host.view).contains { $0.hasPrefix("outgoing.cover.") } }
     }
 
     @Test
