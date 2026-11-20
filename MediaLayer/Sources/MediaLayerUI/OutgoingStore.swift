@@ -4,22 +4,22 @@ import MediaLayer
 
 /// Custody of the local original of an outgoing item, by its key: a hard link (a copy when the link fails) in a directory of the
 /// MediaLayer cache root. It survives a recycled row and a relaunch, is released when the item is ready and swept once when a layer opens.
-public final class OutgoingStore: @unchecked Sendable {
+final class OutgoingStore: @unchecked Sendable {
   private struct Meta: Codable {
     var created: UInt64
     var lastDeclared: UInt64
   }
 
-  public let directory: URL
+  let directory: URL
   private let lock = NSLock()
   private let now: @Sendable () -> UInt64
 
-  public init(directory: URL, now: @escaping @Sendable () -> UInt64 = { UInt64(Date().timeIntervalSince1970 * 1000) }) {
+  init(directory: URL, now: @escaping @Sendable () -> UInt64 = { UInt64(Date().timeIntervalSince1970 * 1000) }) {
     self.directory = directory
     self.now = now
   }
 
-  public static func standard() -> OutgoingStore {
+  static func standard() -> OutgoingStore {
     let caches = (try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
       ?? FileManager.default.temporaryDirectory
     return OutgoingStore(directory: caches.appendingPathComponent("MediaLayer", isDirectory: true).appendingPathComponent("outgoing", isDirectory: true))
@@ -31,7 +31,7 @@ public final class OutgoingStore: @unchecked Sendable {
   }
 
   /// The kept original of `key`, if one is stored.
-  public func stored(for key: String) -> URL? {
+  func stored(for key: String) -> URL? {
     lock.withLock {
       let folder = folder(for: key)
       let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
@@ -41,7 +41,7 @@ public final class OutgoingStore: @unchecked Sendable {
 
   /// Keeps `local` under `key` and answers the kept file. A second call for a key that is already kept only renews its declaration time.
   @discardableResult
-  public func keep(_ local: URL, for key: String) -> URL? {
+  func keep(_ local: URL, for key: String) -> URL? {
     lock.withLock {
       let folder = folder(for: key)
       let manager = FileManager.default
@@ -64,12 +64,12 @@ public final class OutgoingStore: @unchecked Sendable {
     }
   }
 
-  public func release(_ key: String) {
+  func release(_ key: String) {
     lock.withLock { try? FileManager.default.removeItem(at: folder(for: key)) }
   }
 
   /// One pass: removes every kept original that the core calls stale. Run once when a layer opens.
-  public func collectStale() {
+  func collectStale() {
     lock.withLock {
       let manager = FileManager.default
       let folders = (try? manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []

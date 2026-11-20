@@ -102,8 +102,8 @@ private final class WeakEntry {
 
 /// The registry: one entry per key. A busy entry is held here so its fetch continues with no view; a finished one is held weakly.
 @MainActor
-public final class OutgoingRuntime {
-  public static let shared = OutgoingRuntime()
+final class OutgoingRuntime {
+  static let shared = OutgoingRuntime()
 
   var remote: OutgoingRemote = LayerOutgoingRemote(places: { ProcessMediaContext.shared.current?.places })
   var clock: OutgoingClock = SystemOutgoingClock()
@@ -122,22 +122,22 @@ public final class OutgoingRuntime {
     released[entry.key] = WeakEntry(entry)
   }
 
-  /// Test seam and port for the app: the remote fetcher and the clock behind every outgoing item.
-  public func use(remote: OutgoingRemote? = nil, clock: OutgoingClock? = nil, store: OutgoingStore? = nil) {
+  /// Test seam: the remote fetcher, the clock and the custody store behind every outgoing item.
+  func use(remote: OutgoingRemote? = nil, clock: OutgoingClock? = nil, store: OutgoingStore? = nil) {
     if let remote { self.remote = remote }
     if let clock { self.clock = clock }
     if let store { self.store = store }
   }
 
   /// Test seam: a process starts with no entries, as after a relaunch. Kept originals stay on disk.
-  public func forgetAll() {
+  func forgetAll() {
     for entry in held.values { entry.stop() }
     held = [:]
     released = [:]
   }
 
   /// One pass over the kept originals, run when a layer opens.
-  public func collectStale() {
+  func collectStale() {
     let store = store
     Task.detached(priority: .utility) { store.collectStale() }
   }

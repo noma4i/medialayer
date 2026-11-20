@@ -125,8 +125,8 @@ extension GlobalMedia {
       defer { window.isHidden = true }
       await until("the local is drawn") { isRed(pixel(of: host.view, x: 16)) }
 
-      item.setUpload(.sending(progress: 0.5))
-      item.setRemote(url)
+      item.forward(upload: .sending(progress: 0.5))
+      item.remote = url
       var blank = 0
       for turn in 0..<60 {
         if turn == 30 { rig.remote.complete(url) }
@@ -158,7 +158,7 @@ extension GlobalMedia {
       }
       #expect(!identifiers(in: host.view).contains("outgoing.cover.local"))
 
-      item.setRemote(url)
+      item.remote = url
       rig.remote.complete(url)
       await until("the item is ready") { item.phase == .ready }
       await until("the sharp remote replaces it") { isBlue(pixel(of: host.view, x: 4)) && isBlue(pixel(of: host.view, x: 15)) }
@@ -175,7 +175,7 @@ extension GlobalMedia {
       let (host, window) = rig.show(item)
       defer { window.isHidden = true }
 
-      item.setRemote(url)
+      item.remote = url
       await until("the remote failed") { if case .failed(.remote) = item.phase { true } else { false } }
       #expect(isRed(pixel(of: host.view, x: 16)))
       #expect(rig.remote.requestCount(for: url) == 1)
@@ -195,9 +195,9 @@ extension GlobalMedia {
       rig.remote.hold(url)
       let item = OutgoingMedia(key: "k15", kind: .image, local: rig.local)
       #expect(!item.canOpen)
-      item.setUpload(.sending(progress: 0.3))
+      item.forward(upload: .sending(progress: 0.3))
       #expect(!item.canOpen)
-      item.setRemote(url)
+      item.remote = url
       #expect(!item.canOpen)
       item.openable = { _ in true }
       #expect(item.canOpen)
@@ -219,7 +219,7 @@ extension GlobalMedia {
         let url = rig.remoteURL("album-\(index)-\(UUID().uuidString)")
         rig.remote.hold(url)
         let item = OutgoingMedia(key: "k16-\(index)", kind: .image, local: rig.local)
-        item.setRemote(url)
+        item.remote = url
         items.append(item)
         urls.append(url)
       }
@@ -251,7 +251,7 @@ extension GlobalMedia {
       #expect(second.hasLocal)
       #expect(second.local.map { FileManager.default.fileExists(atPath: $0.path) } == true)
 
-      second.setRemote(url)
+      second.remote = url
       rig.remote.complete(url)
       await until("the item is ready") { second.phase == .ready }
       #expect(rig.store.stored(for: "k17") == nil)
@@ -265,7 +265,7 @@ extension GlobalMedia {
       let url = rig.remoteURL()
       rig.remote.answer(url, .notReady)
       let item = OutgoingMedia(key: "k18", kind: .image, local: rig.local)
-      item.setRemote(url)
+      item.remote = url
       await until("the remote answered not ready") { rig.remote.requestCount(for: url) == 1 }
       RunLoop.main.run(until: Date().addingTimeInterval(0.1))
       #expect(rig.clock.sleeping == 0)

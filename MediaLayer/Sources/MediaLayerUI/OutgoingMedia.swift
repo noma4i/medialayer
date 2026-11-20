@@ -16,6 +16,8 @@ final class OutgoingEntry {
   @ObservationIgnored private var fetchingURL: String?
   @ObservationIgnored private var reaskTask: Task<Void, Never>?
   @ObservationIgnored private var holdsCustody = false
+  @ObservationIgnored private var watchers: [UInt64: AsyncStream<OutgoingPhase>.Continuation] = [:]
+  @ObservationIgnored private var nextWatcher: UInt64 = 0
 
   init(runtime: OutgoingRuntime, key: String, kind: OutgoingKind, local: URL?, blurHash: String?) {
     self.runtime = runtime
@@ -48,9 +50,22 @@ final class OutgoingEntry {
   }
 
   func apply(_ event: OutgoingEvent) {
+    let before = state.phase
     state = outgoingNext(previous: state, event: event)
     view = outgoingView(state: state)
+    if state.phase != before { for watcher in watchers.values { watcher.yield(state.phase) } }
     settle()
+  }
+
+  /// The phase now and every change after it; a slow reader keeps the newest value only.
+  func watchPhases() -> AsyncStream<OutgoingPhase> {
+    let (stream, continuation) = AsyncStream<OutgoingPhase>.makeStream(bufferingPolicy: .bufferingNewest(1))
+    nextWatcher += 1
+    let id = nextWatcher
+    watchers[id] = continuation
+    continuation.onTermination = { [weak self] _ in Task { @MainActor in self?.watchers[id] = nil } }
+    continuation.yield(state.phase)
+    return stream
   }
 
   func appeared() {
@@ -162,23 +177,28 @@ public final class OutgoingMedia {
   public var key: String { entry.key }
   public var kind: OutgoingKind { entry.kind }
   public var phase: OutgoingPhase { entry.phase }
+  /// The phase now and every change after it, outside any view.
+  public var phases: AsyncStream<OutgoingPhase> { entry.watchPhases() }
+  public var blurHash: String? { entry.blurHash }
   public var canOpen: Bool { openable?(entry.phase) ?? entry.view.canOpen }
   /// The kept original, nil without a local or after the swap.
   public var local: URL? { entry.localURL }
   public var hasLocal: Bool { entry.state.inputs.hasLocal }
-  public var remote: String? { entry.remote }
+  /// The server url, once DBlayer has it. Setting it also means the upload is done.
+  public var remote: String? {
+    get { entry.remote }
+    set { entry.apply(.remote(remote: newValue)) }
+  }
 
   /// Folds DBlayer's upload states into the item until the stream ends. A repeated or older value changes nothing.
-  public func forward<S: AsyncSequence>(upload: S) async where S.Element == OutgoingUpload {
+  public func forward<S: AsyncSequence>(uploads: S) async where S.Element == OutgoingUpload {
     do {
-      for try await value in upload { entry.apply(.upload(upload: value)) }
+      for try await value in uploads { entry.apply(.upload(upload: value)) }
     } catch {}
   }
 
-  public func setUpload(_ upload: OutgoingUpload) { entry.apply(.upload(upload: upload)) }
-
-  /// The server url, once DBlayer has it. It also means the upload is done.
-  public func setRemote(_ url: String?) { entry.apply(.remote(remote: url)) }
+  /// Folds one upload state of DBlayer into the item.
+  public func forward(upload: OutgoingUpload) { entry.apply(.upload(upload: upload)) }
 
   /// Fetches the remote again after `.failed(.remote)`. Anything else is ignored; an upload is sent again by DBlayer.
   public func retry() { entry.apply(.retry) }
