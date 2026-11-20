@@ -137,6 +137,9 @@ class MediaLayerBridgeTest {
         eventually("active source loaded") { slots.slots.values.any { it.key == pages[page].url } }
         media.attachView(pages[page].url, page.toULong())
         eventually("attachment delivered") { slots.slots.values.sumOf { it.log.count { call -> call == "attach" } } >= page }
+        if (page > 1) {
+          eventually("detach delivered") { slots.slots.values.sumOf { it.log.count { call -> call == "detach" } } >= page - 1 }
+        }
         assertEquals(1u, media.stats().slots.playing)
       }
       val calls = slots.slots.values.flatMap { it.log }
