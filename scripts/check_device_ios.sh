@@ -14,7 +14,7 @@ extra=()
 probe_run="$(basename "$run")"
 [ -z "${DEVELOPMENT_TEAM:-}" ] || extra+=("DEVELOPMENT_TEAM=$DEVELOPMENT_TEAM")
 [ -z "${PROBE_BUNDLE_ID:-}" ] || extra+=("PROBE_BUNDLE_ID=$PROBE_BUNDLE_ID")
-# PROBE_ONLY: space-separated test names (ProbeTests/<class>/<test>) to run only those, for a single question on the shared phone.
+# PROBE_ONLY: space-separated test names (MediaLayerProbeTests/ProbeTests/<test>) to run only those, for a single question on the shared phone.
 for only in ${PROBE_ONLY:-}; do extra+=("-only-testing:$only"); done
 if [ ! -f "$project/Local.xcconfig" ]; then
   [ -n "${DEVELOPMENT_TEAM:-}" ] || { echo "check_device_ios: give DEVELOPMENT_TEAM or create probe/ios/Local.xcconfig" >&2; exit 2; }
