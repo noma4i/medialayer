@@ -129,6 +129,34 @@ MediaImage(
 
 Without a preview, call `MediaImage` as before. Swift takes the preview as an optional source in a second initializer.
 
+## Outgoing media
+
+An item you send is the original on the device first and the server copy later. `OutgoingMedia` owns the states between the two and the swap; the app keeps no state of its own for it. The phase is decided in the core (`sending`, `awaitingRemote`, `fetchingRemote`, `ready`, `failed(.upload / .remote)`), the platform feeds events and draws.
+
+- `OutgoingMedia(key:kind:local:blurHash:)` declares the item. The `key` is DBlayer's client key; every declaration of one key shares one state, and `Media.outgoing(key:)` returns it from anywhere. The `local` file is kept under the key (a hard link, a copy when the link fails) in the MediaLayer cache root, so a recycled row or a relaunch still finds it. It is released when the item is ready, and one sweep at layer open deletes originals that never became ready for 7 days or were not declared again for 24 hours. Without a `local` the cover is the `blurHash`.
+- `item.forward(upload:)` takes DBlayer's upload stream of `OutgoingUpload` (`.sending(progress:)`, `.sent`, `.failed(reason:)`) in one call. Repeated or older values change nothing: a later phase never goes back and progress never falls. `item.setRemote(_:)` passes the server url; it also means the upload is done.
+- With a remote url an image is fetched into the cache of the image pipeline and checked to decode. It goes on with no view on screen, at most two outgoing fetches run at once, the rest wait. A `404`, `202` or `425` answer means the server is still working: the item is asked again every 5 seconds, only while a view of it is on screen.
+- `ready` is reached only with the complete body cached and decoded. The remote replaces the cover in one frame, with no animation. A failed remote keeps the local picture and shows `failed(.remote)`; `item.retry()` fetches it again. Only the remote can be retried, an upload is sent again by DBlayer and forwarded again.
+- `item.canOpen` is true only in `ready`; set `item.openable` to apply your own rule.
+- A `.video` item compiles and draws its cover; it does not fetch yet.
+- The phase name is the accessibility value of the view and its identifier is `outgoing.<key>`. `MediaLayerTesting` has `FakeOutgoingRemote` and `ManualOutgoingClock` (`OutgoingRuntime.shared.use(remote:clock:store:)`) for the re-ask and the late remote.
+
+### Swift
+
+```swift
+let item = OutgoingMedia(key: message.remoteUrl, kind: .image, local: fileURL, blurHash: blurHash)
+
+OutgoingMediaView(item, contentMode: .fill)
+  .outgoingCover(.blurredLocal(radius: 12))
+  .outgoingLoader { phase, hasLocal in if hasLocal { EdgeRing(phase.progress) } }
+  .outgoingFailure { reason in RetryButton() }
+  .frame(width: 120, height: 160)
+
+Task { await item.forward(upload: uploads) }
+item.setRemote(message.remoteUrl)
+if item.canOpen { show(item.phase) }
+```
+
 ## Image size
 
 `imageSize` answers the pixel size of an image before the app draws it, for a chat bubble or a placeholder frame. The core reads the size from the head of the file: PNG, GIF, WebP and JPEG, and a JPEG turned by EXIF orientation 5 to 8 reports the turned size. A `file://` source is read from its file. A remote source needs one `Range` request for its first 1 MiB (the first block of the cache) and never downloads the whole file; a file that is already stored is read from the cache. The answer is kept with the cache entry, survives a restart and leaves with the entry. A source without an entry keeps it in a bounded table of 256 answers. A repeat for the same source makes no network request. It returns `nil` (`null`) when the head holds no known image.

@@ -20,14 +20,12 @@ final class OutgoingEntry {
   init(runtime: OutgoingRuntime, key: String, kind: OutgoingKind, local: URL?, blurHash: String?) {
     self.runtime = runtime
     self.key = key
-    if let local {
-      localURL = runtime.store.keep(local, for: key) ?? local
-    } else {
-      localURL = runtime.store.stored(for: key)
-    }
-    holdsCustody = localURL != nil
-    state = outgoingDeclare(key: key, kind: kind, hasLocal: localURL != nil, blurHash: blurHash)
-    view = outgoingView(state: state)
+    let kept = local.map { runtime.store.keep($0, for: key) ?? $0 } ?? runtime.store.stored(for: key)
+    localURL = kept
+    holdsCustody = kept != nil
+    let declared = outgoingDeclare(key: key, kind: kind, hasLocal: kept != nil, blurHash: blurHash)
+    state = declared
+    view = outgoingView(state: declared)
     runtime.register(self)
   }
 
