@@ -8,6 +8,7 @@ import com.noma4i.medialayer.CameraLens
 import com.noma4i.medialayer.CaptureEvent
 import com.noma4i.medialayer.CaptureFileKind
 import com.noma4i.medialayer.CaptureProfile
+import com.noma4i.medialayer.ImageFormat
 import com.noma4i.medialayer.MediaInfo
 import com.noma4i.medialayer.PixelSize
 import com.noma4i.medialayer.captureFileName
