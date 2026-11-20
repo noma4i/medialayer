@@ -19020,8 +19020,9 @@ public func captureStep(run: CaptureRun, event: CaptureEvent, profile: CapturePr
 }
 /**
  * What the platform read from a finished take: the stored pixel size, the turn its matrix asks for (a multiple of 90), and the bitrate and frame rate it was recorded at.
- * The take is delivered upright with an identity matrix. `None` when the file already is (no turn, no mirror): it goes as it is.
- * Otherwise a plan that re-encodes at the size the viewer sees (sides swapped on 90 and 270), the bitrate and frame rate of the take, and the turn to apply; `mirror` is applied by the encoder in pixels.
+ * Only a mirrored take is re-encoded: the reflection matrix of an iOS front take breaks the server, so it is baked into the pixels. A plain turn (90, 180, 270) stays as the metadata tag, every player and the server read it.
+ * `None` when `mirror` is false, whatever the turn: the take goes as it is.
+ * With `mirror` a plan that re-encodes at the size the viewer sees (sides swapped on 90 and 270), the bitrate and frame rate of the take, and the turn to bake together with the mirror.
  */
 public func captureUprightPlan(width: UInt32, height: UInt32, rotationDegrees: Int32, mirror: Bool, bitrate: UInt32, frameRate: Float) -> VideoPlan?  {
     return try!  FfiConverterOptionTypeVideoPlan.lift(try! rustCall() {
@@ -19701,7 +19702,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_medialayer_checksum_func_capture_step() != 52687) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_medialayer_checksum_func_capture_upright_plan() != 61655) {
+    if (uniffi_medialayer_checksum_func_capture_upright_plan() != 51889) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_crop_drag() != 58593) {
