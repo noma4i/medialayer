@@ -12,15 +12,7 @@ public final class MediaPreparer: @unchecked Sendable {
   public func probe(path: String, descriptor: Data?, mime: String?) async -> MediaProbeOutcome {
     let file = URL(fileURLWithPath: path)
     let probe = await PrepareFacts.read(file, mime: mime)
-    switch probe {
-    case let .failed(message):
-      return .failed(message: message)
-    default:
-      guard let facts = mediaPrepareFacts(descriptor: descriptor, probe: probe) else {
-        return .failed(message: "\(path) does not fit the prepare descriptor")
-      }
-      return .file(width: facts.width, height: facts.height, mime: facts.mime)
-    }
+    return mediaPrepareFacts(descriptor: descriptor, probe: probe)
   }
 
   /// One run: probe, decide, then pass, write or refuse. `progress` gets 0 to 1 and never goes back. A cancelled run removes its temp file and returns `.cancelled`.

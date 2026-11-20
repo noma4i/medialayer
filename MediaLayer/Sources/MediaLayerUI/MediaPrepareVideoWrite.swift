@@ -1,5 +1,6 @@
 @preconcurrency import AVFoundation
 import Foundation
+import MediaLayer
 
 final class PrepareSerial<Value>: @unchecked Sendable {
   private let queue = DispatchQueue(label: "medialayer.prepare.state")
@@ -72,7 +73,7 @@ enum PrepareVideoWrite {
     try Task.checkCancellation()
     let encode = try PrepareEncodeJob(
       asset: asset, track: track, audioTrack: audioTrack, naturalSize: size, transform: transform, duration: duration,
-      encoding: plan.reencode || mirror ? PrepareEncoding(plan: plan, audio: audio, mirror: mirror) : nil,
+      encoding: plan.reencode ? PrepareEncoding(plan: plan, audio: audio, mirror: mirror) : nil,
       formats: (formats.first, audioFormats.first), output: output, report: report
     )
     entry.attach(encode)
@@ -101,7 +102,7 @@ final class PrepareEncodeJob: @unchecked Sendable {
 
   init(
     asset: AVURLAsset, track: AVAssetTrack, audioTrack: AVAssetTrack?, naturalSize: CGSize, transform: CGAffineTransform,
-    duration: CMTime, encoding: PreparePrepareEncoding?, formats: (video: CMFormatDescription?, audio: CMFormatDescription?),
+    duration: CMTime, encoding: PrepareEncoding?, formats: (video: CMFormatDescription?, audio: CMFormatDescription?),
     output: URL, report: @escaping @Sendable (Double) -> Void
   ) throws {
     reader = try AVAssetReader(asset: asset)

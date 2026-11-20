@@ -9,7 +9,8 @@ enum PrepareFacts {
   static func read(_ file: URL, mime: String?) async -> PrepareProbe {
     if let mime, mime.hasPrefix("image/") { return image(file) ?? .failed(message: "\(file.path) is not an image") }
     if let mime, mime.hasPrefix("video/") { return await video(file) }
-    return image(file) ?? (await video(file))
+    if let picture = image(file) { return picture }
+    return await video(file)
   }
 
   private static func image(_ file: URL) -> PrepareProbe? {
