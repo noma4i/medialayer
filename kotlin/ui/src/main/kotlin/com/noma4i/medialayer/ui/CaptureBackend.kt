@@ -82,7 +82,9 @@ internal class CameraServices(
   val audio: () -> AudioLink?,
   val clipInfo: suspend (File) -> MediaInfo?,
   val upright: suspend (File, Double) -> File,
-  val directory: File
+  val directory: File,
+  /** Makes the finished take upright in place; true when the file was replaced. A failure throws. */
+  val uprightTake: suspend (File) -> Boolean = { false }
 ) {
   companion object {
     fun live(context: Context): CameraServices {
@@ -107,7 +109,8 @@ internal class CameraServices(
             }
           }
         },
-        directory = directory
+        directory = directory,
+        uprightTake = { file -> makeTakeUpright(context, file) }
       )
     }
   }

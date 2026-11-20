@@ -678,7 +678,15 @@ class MediaCamera internal constructor(
     val file = recordingFile ?: return
     reading?.cancel()
     reading = scope.launch {
-      val info = services.clipInfo(file)
+      // A take that cannot be made upright is a failed take: no info, the existing failure path, no fallback to the file with the matrix.
+      val info = try {
+        services.uprightTake(file)
+        services.clipInfo(file)
+      } catch (failure: Exception) {
+        if (failure is kotlinx.coroutines.CancellationException) throw failure
+        Media.recordNativeFailure(com.noma4i.medialayer.FailureSource.CAMERA, failure)
+        null
+      }
       enqueue {
         if (recordingFile != file) return@enqueue
         if (reading?.isCancelled == true) return@enqueue
