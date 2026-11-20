@@ -11,7 +11,7 @@ public final class MediaPreparer: @unchecked Sendable {
   /// The facts of the file: the planned result when `descriptor` is given, the source turned upright otherwise.
   public func probe(path: String, descriptor: Data?, mime: String?) async -> MediaProbeOutcome {
     let file = URL(fileURLWithPath: path)
-    let probe = await PrepareFacts.read(file, mime: mime)
+    let probe = await PrepareFacts.read(file, mime: mime, kind: descriptor.flatMap(mediaPrepareDescriptorKind))
     return mediaPrepareFacts(descriptor: descriptor, probe: probe)
   }
 
@@ -24,7 +24,7 @@ public final class MediaPreparer: @unchecked Sendable {
       let destination = URL(fileURLWithPath: job.destination)
       let temp = destination.deletingLastPathComponent().appendingPathComponent(".\(UUID().uuidString).preparing")
       do {
-        let probe = await PrepareFacts.read(URL(fileURLWithPath: job.source), mime: nil)
+        let probe = await PrepareFacts.read(URL(fileURLWithPath: job.source), mime: nil, kind: mediaPrepareDescriptorKind(descriptor: job.descriptor))
         try Task.checkCancellation()
         switch mediaPrepareDecide(descriptor: job.descriptor, probe: probe) {
         case .pass:

@@ -6,7 +6,10 @@ import UniformTypeIdentifiers
 
 /// What the platform reads from a source: the facts the core decides on. A source the device cannot read or decode is `.failed`.
 enum PrepareFacts {
-  static func read(_ file: URL, mime: String?) async -> PrepareProbe {
+  /// A known descriptor `kind` picks the reader without sniffing; without one the mime hint or the file decides.
+  static func read(_ file: URL, mime: String?, kind: PrepareKind? = nil) async -> PrepareProbe {
+    if kind == .video { return await video(file) }
+    if kind == .image { return image(file) ?? .failed(message: "\(file.path) is not an image") }
     if let mime, mime.hasPrefix("image/") { return image(file) ?? .failed(message: "\(file.path) is not an image") }
     if let mime, mime.hasPrefix("video/") { return await video(file) }
     if let picture = image(file) { return picture }
