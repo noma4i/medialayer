@@ -786,7 +786,7 @@ fn inv_capture_57_random_sequences_give_every_started_take_one_outcome_and_its_o
 }
 
 #[test]
-fn inv_capture_85_an_upright_take_without_mirror_is_delivered_as_it_is() {
+fn inv_capture_90_an_upright_take_without_mirror_is_delivered_as_it_is() {
     assert_eq!(capture_upright_plan(720, 1280, 0, false, 4_000_000, 30.0), None);
     assert_eq!(capture_upright_plan(1280, 720, 360, false, 4_000_000, 30.0), None);
 }
