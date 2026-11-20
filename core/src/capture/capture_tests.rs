@@ -784,3 +784,31 @@ fn inv_capture_57_random_sequences_give_every_started_take_one_outcome_and_its_o
         }
     }
 }
+
+#[test]
+fn inv_capture_85_an_upright_take_without_mirror_is_delivered_as_it_is() {
+    assert_eq!(capture_upright_plan(720, 1280, 0, false, 4_000_000, 30.0), None);
+    assert_eq!(capture_upright_plan(1280, 720, 360, false, 4_000_000, 30.0), None);
+}
+
+#[test]
+fn inv_capture_86_a_mirrored_take_is_re_encoded_at_its_own_size_and_bitrate() {
+    let plan = capture_upright_plan(720, 1280, 0, true, 3_500_000, 29.97).unwrap();
+    assert_eq!((plan.reencode, plan.width, plan.height, plan.bitrate, plan.frame_rate, plan.rotation_degrees), (true, 720, 1280, 3_500_000, 30, 0));
+}
+
+#[test]
+fn inv_capture_87_a_quarter_turn_swaps_the_sides() {
+    for turn in [90, 270, -90, -270] {
+        let plan = capture_upright_plan(1280, 720, turn, false, 5_000_000, 30.0).unwrap();
+        assert_eq!((plan.width, plan.height, plan.rotation_degrees), (720, 1280, turn.rem_euclid(360) as u32), "turn {turn}");
+    }
+}
+
+#[test]
+fn inv_capture_88_a_half_turn_keeps_the_sides_and_a_turn_with_mirror_keeps_both() {
+    let half = capture_upright_plan(1280, 720, 180, false, 5_000_000, 60.0).unwrap();
+    assert_eq!((half.width, half.height, half.rotation_degrees, half.frame_rate), (1280, 720, 180, 60));
+    let both = capture_upright_plan(1280, 720, 90, true, 5_000_000, 30.0).unwrap();
+    assert_eq!((both.width, both.height, both.rotation_degrees), (720, 1280, 90));
+}
