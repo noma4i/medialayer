@@ -94,7 +94,7 @@ extension GlobalMedia {
     }
 
     @Test
-    func inv_placeholder_anImageShownKeepsItWhenItsBlurHashArrivesForTheSameUrl() async {
+    func inv_placeholder_12_anImageShownKeepsItWhenItsBlurHashArrivesForTheSameUrl() async {
       let places = RecordingPlaces()
       ImageMemory.install(ImageCache(), on: places)
       places.imageResult = .success(pngData(side: 8))

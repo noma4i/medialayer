@@ -246,7 +246,7 @@ class PlaceholderTest {
   }
 
   @Test
-  fun inv_placeholder_anImageShownKeepsItWhenItsBlurHashArrivesForTheSameUrl() {
+  fun inv_placeholder_12_anImageShownKeepsItWhenItsBlurHashArrivesForTheSameUrl() {
     val layer = ScriptedLayer("A", events)
     val url = "https://o.test/blue-cover.png"
     var source by mutableStateOf<MediaSource>(MediaSourceValue.remote(url, Kind.IMAGE, blurHash = null))
