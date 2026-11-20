@@ -237,14 +237,14 @@ final class ProbeTests: XCTestCase {
     XCTAssertGreaterThan(facts.videoSeconds, 1.5)
   }
 
-  @MainActor func test8_interruptedCameraResumes() async throws {
+  @MainActor func test9a_interruptedCameraResumes() async throws {
     let a = try await interruptAndRelease()
     let ready = try await wait(5, step: "A_resume", [("A", a)]) { a.state.isReady }
     try await finishTake("interrupted_resume", on: a, ready: ready)
     try await close(a)
   }
 
-  @MainActor func test9_newCameraAfterInterruptionWorks() async throws {
+  @MainActor func test9b_newCameraAfterInterruptionWorks() async throws {
     let a = try await interruptAndRelease()
     ProbeScreen.shared.camera = nil
     try await Task.sleep(nanoseconds: 700_000_000)
