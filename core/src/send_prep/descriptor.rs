@@ -47,9 +47,11 @@ pub enum MediaPrepareFailure {
     UnsupportedDescriptor,
 }
 
-/// How a prepare ends. The result path is always the job destination; the size and the hash are measured by the queue.
+/// How a prepare ends. `Done` is a written destination, its size and hash are measured by the queue.
+/// `Unchanged` is the answer to `PrepareDecision::Pass` (also the `UploadSource` policy on a source that cannot be decoded): the platform copies nothing and the source goes as it is.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum MediaPrepareOutcome {
+    Unchanged { name: Option<String>, mime: Option<String> },
     Done { name: Option<String>, mime: Option<String> },
     CannotDecode { message: String },
     Failed { message: String },

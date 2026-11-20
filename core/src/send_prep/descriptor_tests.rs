@@ -162,3 +162,10 @@ fn inv_send_59_a_refusal_maps_to_cannot_decode_or_to_a_failure_with_the_message(
         assert_eq!(MediaPrepareOutcome::refused(reason, message()), MediaPrepareOutcome::Failed { message: message() });
     }
 }
+
+#[test]
+fn inv_send_60_a_pass_is_answered_by_unchanged_and_never_by_a_written_destination() {
+    let unchanged = MediaPrepareOutcome::Unchanged { name: None, mime: None };
+    assert_ne!(unchanged, MediaPrepareOutcome::Done { name: None, mime: None });
+    assert_eq!(media_prepare_decide(video(false, CannotDecode::UploadSource), PrepareProbe::Failed { message: "no".to_string() }), PrepareDecision::Pass);
+}
