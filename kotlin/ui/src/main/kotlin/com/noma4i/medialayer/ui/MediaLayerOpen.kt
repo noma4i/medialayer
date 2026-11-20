@@ -177,6 +177,7 @@ internal fun openMediaLayer(
       synchronized(lock) { factory = slots }
       dir = File(app.cacheDir, "medialayer").apply { mkdirs() }
       CaptureFiles.sweepOrphans(CaptureFiles.directory(app))
+      OutgoingStore.sweep(File(dir, "outgoing"))
       device = deviceMemory(app)
     } finally { Trace.endSection() }
     ensureActive()

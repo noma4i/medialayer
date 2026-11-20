@@ -5,7 +5,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -72,9 +71,6 @@ fun OutgoingMediaImage(
 ) {
   val phase by item.phases.collectAsState()
   val screen = rememberScreenVisibility(item.key)
-  DisposableEffect(item) {
-    onDispose { }
-  }
   LaunchedEffect(item, screen) {
     var seen = false
     try {
