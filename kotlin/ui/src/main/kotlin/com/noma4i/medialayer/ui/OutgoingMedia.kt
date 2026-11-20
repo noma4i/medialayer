@@ -199,7 +199,7 @@ class OutgoingMedia internal constructor(private val entry: OutgoingEntry) {
   val hasLocal: Boolean get() = entry.hasLocal
 
   /** The small cover of [local], decoded once at adoption; `null` until then or without a local. */
-  val cover: StateFlow<ImageBitmap?> get() = entry.cover
+  internal val cover: StateFlow<ImageBitmap?> get() = entry.cover
 
   /** A local that arrived after the item was declared: adopted (custody as at creation), the core is told. Does nothing when the item has one. */
   internal fun declareLocal(file: File?) = entry.touch(file)
