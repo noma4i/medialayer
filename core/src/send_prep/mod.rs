@@ -1,5 +1,6 @@
 mod decode;
 mod descriptor;
+mod descriptor_import;
 mod encode;
 mod import;
 mod photo;
@@ -10,6 +11,7 @@ mod voice;
 
 pub use decode::{image_decode_plan, ImageDecodePlan};
 pub use descriptor::{media_prepare_decide, media_prepare_descriptor, media_prepare_facts, CannotDecode, MediaPrepareFailure, MediaPrepareIntent, MediaPrepareJob, MediaPrepareOutcome, MediaProbeOutcome, PrepareDecision, PrepareProbe, PreparePlan};
+pub use descriptor_import::media_prepare_descriptor_import;
 pub use encode::{image_encode_outside_admit, image_encode_plan, EncodePlan, ImageFormat};
 pub use import::import_extension;
 pub use photo::{jpeg_quality, photo_turn, PhotoTurn};
