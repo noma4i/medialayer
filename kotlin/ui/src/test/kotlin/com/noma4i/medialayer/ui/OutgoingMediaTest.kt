@@ -94,6 +94,21 @@ class OutgoingMediaTest {
   }
 
   @Test
+  fun inv_outgoing_19_a_late_local_is_taken_and_its_cover_is_ready_on_the_first_frame() {
+    val item = declare("m19", local = null, blurHash = "LEHV6nWB2yk8pyo0adR*.7kCMdnj")
+    assertFalse(item.hasLocal)
+    assertEquals(null, item.cover.value)
+    declare("m19", local = original)
+    assertTrue(item.hasLocal)
+    assertTrue(item.local != null)
+    waitFor { item.cover.value != null }
+    var loaderHasLocal = false
+    rule.setContent { MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) { OutgoingMediaView(item, Modifier.size(50.dp), cover = OutgoingCover.BlurredLocal(12.dp), loader = { _, hasLocal -> loaderHasLocal = hasLocal }) } }
+    rule.onNodeWithContentDescription("cover-blurred").assertExists()
+    assertTrue(loaderHasLocal)
+  }
+
+  @Test
   fun inv_outgoing_13_the_blurred_cover_is_only_before_ready() {
     val item = declare("m13")
     remote.hold("https://cdn/m13.png")

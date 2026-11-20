@@ -87,15 +87,11 @@ fun OutgoingMediaView(
 @Composable
 private fun Cover(item: OutgoingMedia, cover: OutgoingCover, contentScale: ContentScale) {
   if (cover is OutgoingCover.Custom) { cover.content(); return }
-  val local = item.local
-  val admit = ProcessMediaEnvironment.current?.media?.let { runCatching { it.decodeAdmit() }.getOrNull() }
-  val picture by produceState<ImageBitmap?>(null, local) {
-    value = local?.let { file -> runCatching { decodeImage(ImageInput { file.inputStream() }, COVER_SIDE, admit).asImageBitmap() }.getOrNull() }
-  }
+  val picture by item.cover.collectAsState()
   val decoder = LocalBlurDecoder.current
   val hash = item.blurHash
-  val blurred by produceState<ImageBitmap?>(null, hash, local == null) {
-    value = if (local == null && hash != null) decodeBlur(hash, decoder) else null
+  val blurred by produceState<ImageBitmap?>(null, hash, picture == null) {
+    value = if (picture == null && hash != null) decodeBlur(hash, decoder) else null
   }
   val radius = (cover as? OutgoingCover.BlurredLocal)?.radius
   val shown = picture ?: blurred
@@ -106,4 +102,3 @@ private fun Cover(item: OutgoingMedia, cover: OutgoingCover, contentScale: Conte
   }
 }
 
-private const val COVER_SIDE = 1024

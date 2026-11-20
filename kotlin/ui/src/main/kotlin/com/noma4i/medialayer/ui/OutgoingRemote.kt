@@ -64,9 +64,9 @@ internal class OutgoingRuntime(
 
   internal fun store(): OutgoingStore? = storeDirectory()?.let { OutgoingStore(it) }
 
-  internal fun item(key: String, create: () -> OutgoingEntry): OutgoingEntry = synchronized(items) {
+  internal fun item(key: String, local: File?, create: () -> OutgoingEntry): OutgoingEntry = synchronized(items) {
     val found = items[key]
-    if (found != null) { found.touch(); return found }
+    if (found != null) { found.touch(local); return found }
     create().also { items[key] = it; trim() }
   }
 

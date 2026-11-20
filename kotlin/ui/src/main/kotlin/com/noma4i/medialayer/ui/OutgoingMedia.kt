@@ -3,6 +3,8 @@ package com.noma4i.medialayer.ui
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.OutgoingEvent
 import com.noma4i.medialayer.OutgoingFailure
@@ -59,6 +61,10 @@ internal class OutgoingEntry(
     private set
 
   private val lock = Any()
+  private val coverState = MutableStateFlow<ImageBitmap?>(null)
+  /** The small cover of [local], decoded once when the local is adopted, off Main. The view draws it from its first frame. */
+  val cover: StateFlow<ImageBitmap?> = coverState.asStateFlow()
+  private var coverJob: Job? = null
   private var state: OutgoingState = outgoingDeclare(key, kind.toOutgoing(), local != null, blurHash)
   private val phaseState = MutableStateFlow(state.phase)
   private var fetch: Job? = null
@@ -66,6 +72,8 @@ internal class OutgoingEntry(
   private var reask: Job? = null
   private var forwarding: Job? = null
   private var onScreen = 0
+
+  init { this.local?.let { startCover(it) } }
 
   /** The phase, observable outside any view. */
   val phase: OutgoingPhase get() = phaseState.value
@@ -92,7 +100,27 @@ internal class OutgoingEntry(
   /** Fetches the remote again; only from `failed(.remote)`. A failed upload is re-sent by the app and re-forwarded. */
   fun retry() = fold(OutgoingEvent.Retry)
 
-  internal fun touch() { local?.let { source -> runCatching { store?.adopt(key, source) } } }
+  /** A declaration of the same key: re-adopts a kept local; a local for an entry that has none is taken now (custody as at creation) and folded into the core. */
+  internal fun touch(declared: File?) {
+    val kept = local
+    if (kept != null) { runCatching { store?.adopt(key, kept) }; return }
+    if (declared == null) return
+    val adopted = runCatching { store?.adopt(key, declared) }.getOrNull() ?: declared
+    synchronized(lock) {
+      if (local != null) return
+      local = adopted
+      startCover(adopted)
+      fold(OutgoingEvent.Local(true))
+    }
+  }
+
+  private fun startCover(file: File) {
+    coverJob?.cancel()
+    coverJob = runtime.scope.launch {
+      val admit = ProcessMediaEnvironment.current?.media?.let { runCatching { it.decodeAdmit() }.getOrNull() }
+      coverState.value = runCatching { decodeImage(ImageInput { file.inputStream() }, COVER_SIDE, admit).asImageBitmap() }.getOrNull()
+    }
+  }
 
   /** A composed view of this item is on screen: only then the "not ready yet" answer is asked again. */
   internal fun onScreen(visible: Boolean) {
@@ -157,7 +185,7 @@ internal class OutgoingEntry(
  */
 class OutgoingMedia internal constructor(private val entry: OutgoingEntry) {
   constructor(key: String, kind: Kind = Kind.IMAGE, local: File? = null, blurHash: String? = null) :
-    this(Outgoing.runtime.item(key) { OutgoingEntry(key, kind, local, blurHash, Outgoing.runtime) })
+    this(Outgoing.runtime.item(key, local) { OutgoingEntry(key, kind, local, blurHash, Outgoing.runtime) })
 
   /** The app's own rule for opening; the default is `ready` only. */
   @Volatile var openable: ((OutgoingPhase) -> Boolean)? = null
@@ -169,6 +197,12 @@ class OutgoingMedia internal constructor(private val entry: OutgoingEntry) {
   /** The original kept by the library under the key until `ready`, or the declared file when no store is open. */
   val local: File? get() = entry.local
   val hasLocal: Boolean get() = entry.hasLocal
+
+  /** The small cover of [local], decoded once at adoption; `null` until then or without a local. */
+  val cover: StateFlow<ImageBitmap?> get() = entry.cover
+
+  /** A local that arrived after the item was declared: adopted (custody as at creation), the core is told. Does nothing when the item has one. */
+  internal fun declareLocal(file: File?) = entry.touch(file)
 
   /** The phase, observable outside any view. */
   val phase: OutgoingPhase get() = entry.phase
@@ -209,8 +243,11 @@ private fun Kind.toOutgoing(): OutgoingKind = when (this) {
 fun rememberOutgoingMedia(key: String, kind: Kind = Kind.IMAGE, local: File? = null, blurHash: String? = null, remote: String? = null, upload: OutgoingUpload? = null): OutgoingMedia {
   val item = remember(key) { OutgoingMedia(key, kind, local, blurHash) }
   SideEffect {
+    if (local != null) item.declareLocal(local)
     if (upload != null) item.forward(upload)
     if (remote != null) item.remote = remote
   }
   return item
 }
+
+private const val COVER_SIDE = 1024
