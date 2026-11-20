@@ -107,6 +107,9 @@ fun showHome() {}
 fun startCallAudio() {}
 fun stopCallAudio() {}
 @Composable fun RetryButton() {}
+@Composable fun EdgeRing(phase: OutgoingPhase) {}
+val uploads: kotlinx.coroutines.flow.Flow<com.noma4i.medialayer.OutgoingUpload> get() = error("example")
+val clientKey: String get() = error("example")
 object Sentry { fun captureMessage(message: String) {} }
 object R {
   object raw { const val welcome = 0 }

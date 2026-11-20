@@ -104,6 +104,7 @@ final class RTCAudioSession {
 struct RootView: View { var body: some View { EmptyView() } }
 struct ChatScreen: View { var body: some View { EmptyView() } }
 struct RetryButton: View { var body: some View { EmptyView() } }
+@MainActor var clientKey: String { fatalError() }
 struct EdgeRing: View { let progress: Double; init(_ progress: Double) { self.progress = progress }; var body: some View { EmptyView() } }
 @MainActor var uploads: AsyncStream<OutgoingUpload> { fatalError() }
 enum Sentry { static func capture(message: String) {} }
