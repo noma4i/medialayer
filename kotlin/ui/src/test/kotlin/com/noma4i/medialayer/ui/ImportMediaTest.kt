@@ -13,9 +13,14 @@ import android.provider.OpenableColumns
 import androidx.test.core.app.ApplicationProvider
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
-import com.noma4i.medialayer.Kind
+import com.noma4i.medialayer.CannotDecode
+import com.noma4i.medialayer.ImageFormat
+import com.noma4i.medialayer.MediaPrepareIntent
+import com.noma4i.medialayer.MediaPrepareJob
+import com.noma4i.medialayer.MediaPrepareOutcome
+import com.noma4i.medialayer.PhotoEdit
+import com.noma4i.medialayer.mediaPrepareDescriptor
 import com.noma4i.medialayer.MediaLayer
-import com.noma4i.medialayer.MediaSourceValue
 import com.noma4i.medialayer.MediaException
 import java.io.File
 import java.io.FileNotFoundException
@@ -62,9 +67,6 @@ class ImportMediaTest {
   private val directory = java.nio.file.Files.createTempDirectory("import-media").toFile()
   private val context = object : ContextWrapper(app) { override fun getCacheDir() = directory }
   private val picked = PickedContent()
-  private val readerBefore = videoReader
-  private val metadataBefore = metadataReader
-  private val orientationBefore = photoOrientation
 
   @Before
   fun register() {
@@ -74,9 +76,6 @@ class ImportMediaTest {
 
   @After
   fun restore() {
-    videoReader = readerBefore
-    metadataReader = metadataBefore
-    photoOrientation = orientationBefore
     directory.deleteRecursively()
     picked.files.values.forEach { it.delete() }
   }
@@ -110,7 +109,6 @@ class ImportMediaTest {
           app.resources.openRawResource(R.raw.medialayer_test_clip).use { input -> outputStream().use { input.copyTo(it) } }
         }
         picked.files.putAll(mapOf("photo" to photo, "video" to clip))
-        photoOrientation = { android.media.ExifInterface.ORIENTATION_ROTATE_90 }
         val image = media.importMedia(uri("photo"))
         val video = media.importMedia(uri("video"))
         try {
@@ -119,15 +117,14 @@ class ImportMediaTest {
           assertEquals("mp4", video.file.extension)
           assertEquals(hash(photo), hash(image.file))
           assertEquals(hash(clip), hash(video.file))
-          val prepared = media.prepareImage(MediaSourceValue.file(image.file, Kind.IMAGE))
-          assertTrue(prepared.file.length() > 0)
-          prepared.file.delete()
+          val photoJob = MediaPrepareJob(1u, image.file.path, File(directory, "photo-out.jpg").path, mediaPrepareDescriptor(MediaPrepareIntent.Image(PhotoEdit(null, false, null, null, false, 0u), null, ImageFormat.JPEG)))
+          val photoOutcome = MediaPreparer(context).run(photoJob) {}
+          assertTrue(photoOutcome.toString(), photoOutcome is MediaPrepareOutcome.Done || photoOutcome is MediaPrepareOutcome.Unchanged)
           val seen = mutableListOf<File>()
-          videoReader = { file -> seen += file; VideoFacts(1280, 720, 0, 30f, 1_500_000, 2, true) }
-          metadataReader = { _, _ -> emptyList() }
-          val preparedClip = media.prepareVideo(MediaSourceValue.file(video.file, Kind.VIDEO))
+          val clipJob = MediaPrepareJob(2u, video.file.path, File(directory, "clip-out.mp4").path, mediaPrepareDescriptor(MediaPrepareIntent.Video(null, false, CannotDecode.FAIL)))
+          val clipPreparer = MediaPreparer(context, { file -> seen += file; VideoFacts(1280, 720, 0, 30f, 1_500_000, 2, true) }, { _, _ -> emptyList() }, { emptyList() }, { error("no export expected") })
+          assertTrue(clipPreparer.run(clipJob) {} is MediaPrepareOutcome.Unchanged)
           assertEquals(listOf(video.file), seen)
-          assertEquals(video.file, preparedClip.file)
           assertTrue(image.file.exists() && video.file.exists())
         } finally {
           image.file.delete()

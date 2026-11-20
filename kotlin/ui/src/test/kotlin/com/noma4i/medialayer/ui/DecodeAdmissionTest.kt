@@ -64,18 +64,14 @@ private class Admissions {
 class DecodeAdmissionTest {
   private val context = ApplicationProvider.getApplicationContext<Context>()
 
-  private val orientationBefore = photoOrientation
-
   @Before
   fun upright() {
     Media.failure = null
-    photoOrientation = { android.media.ExifInterface.ORIENTATION_NORMAL }
   }
 
   @After
   fun restore() {
     Media.failure = null
-    photoOrientation = orientationBefore
   }
 
   @Test
@@ -228,38 +224,6 @@ class DecodeAdmissionTest {
     val result = viewLoad(admissions.admit, 16_385, 1)
 
     assertTrue(result is coil3.request.ErrorResult)
-    assertTrue(admissions.asked.isEmpty())
-  }
-
-  @Test
-  fun inv_send_18_aPhotoTakesOneRasterFromTheLedgerAndGivesItBack() = runBlocking {
-    val file = File.createTempFile("photo", ".png").apply { writeBytes(pngHeader(40, 20)); deleteOnExit() }
-    val cache = File.createTempFile("cache", "").let { it.delete(); it.mkdirs(); it }
-    val admissions = Admissions()
-
-    val outcome = runCatching { prepareImageAt(cache, file, 0.9, admissions.admit) }
-
-    assertEquals(outcome.exceptionOrNull()?.stackTraceToString(), listOf(40L * 20 * 4), admissions.asked.toList())
-    assertEquals(1, admissions.closed.get())
-  }
-
-  @Test
-  fun inv_send_20_aRefusedAdmissionStopsThePhotoBeforeItDecodesAndLeavesNoFile() {
-    val file = File.createTempFile("photo", ".png").apply { writeBytes(pngHeader(40, 20)); deleteOnExit() }
-    val cache = File.createTempFile("cache", "").let { it.delete(); it.mkdirs(); it }
-
-    assertThrows(MediaException.Overloaded::class.java) { runBlocking { prepareImageAt(cache, file, 0.9, { throw MediaException.Overloaded("no room") }) } }
-
-    assertTrue(cache.list()!!.isEmpty())
-  }
-
-  @Test
-  fun inv_send_19_aPhotoAboveThePixelLimitIsRefusedBeforeAnyAdmission() {
-    val file = File.createTempFile("photo", ".png").apply { writeBytes(pngHeader(16_385, 1)); deleteOnExit() }
-    val admissions = Admissions()
-
-    assertThrows(MediaException.Fetch::class.java) { runBlocking { prepareImageAt(file.parentFile!!, file, 0.9, admissions.admit) } }
-
     assertTrue(admissions.asked.isEmpty())
   }
 }
