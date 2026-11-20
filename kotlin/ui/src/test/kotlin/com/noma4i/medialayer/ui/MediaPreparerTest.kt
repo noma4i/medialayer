@@ -114,7 +114,7 @@ class MediaPreparerTest {
     val exports = CopyOnWriteArrayList<VideoExport>()
     val preparer = preparerOf(facts4k, decoders = listOf(decoder(2560, 1440)), exports = exports)
 
-    val outcome = preparer.run(job(video(policy = CannotDecode.UploadSource)), {})
+    val outcome = preparer.run(job(video(policy = CannotDecode.UPLOAD_SOURCE)), {})
 
     assertEquals(MediaPrepareOutcome.Unchanged(null, "video/mp4"), outcome)
     assertTrue(exports.isEmpty())

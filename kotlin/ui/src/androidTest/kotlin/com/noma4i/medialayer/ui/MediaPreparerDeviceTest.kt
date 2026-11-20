@@ -221,7 +221,7 @@ class MediaPreparerDeviceTest {
       assertTrue(refused.toString(), refused is MediaPrepareOutcome.CannotDecode && refused.message.isNotBlank())
       assertFalse(destination.exists())
 
-      val passed = blind.run(MediaPrepareJob(4u, source.path, destination.path, video(640, policy = CannotDecode.UploadSource)), {})
+      val passed = blind.run(MediaPrepareJob(4u, source.path, destination.path, video(640, policy = CannotDecode.UPLOAD_SOURCE)), {})
       assertTrue(passed.toString(), passed is MediaPrepareOutcome.Unchanged)
       assertFalse(destination.exists())
     } finally {
