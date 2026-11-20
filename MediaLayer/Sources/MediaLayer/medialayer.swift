@@ -15368,7 +15368,7 @@ public struct FfiConverterTypeOutgoingEvent: FfiConverterRustBuffer {
         
         case 4: return .local(hasLocal: try FfiConverterBool.read(from: &buf)
         )
-        
+
         case 5: return .retry
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -15397,8 +15397,8 @@ public struct FfiConverterTypeOutgoingEvent: FfiConverterRustBuffer {
         case let .local(hasLocal):
             writeInt(&buf, Int32(4))
             FfiConverterBool.write(hasLocal, into: &buf)
-            
-        
+
+
         case .retry:
             writeInt(&buf, Int32(5))
         
