@@ -79,11 +79,15 @@ class MediaPreviewTest {
     }
     rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.imageStats().snapshot().decodes >= 1uL }
 
+    // The local file is fully shown (its own preview is gone) before the switch: the start does not depend on how fast it decoded.
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); rule.mainClock.advanceTimeByFrame(); previews().fetchSemanticsNodes().isEmpty() }
+
     shown = main
-    repeat(30) {
+    repeat(30) { frame ->
       rule.mainClock.advanceTimeByFrame()
       looper.idle()
-      previews().assertCountEquals(1)
+      // Frame 0 still holds the tree of the old source (the switch is not composed yet): it shows the finished local picture, no preview is due there.
+      if (frame > 0) previews().assertCountEquals(1)
     }
   }
 }
