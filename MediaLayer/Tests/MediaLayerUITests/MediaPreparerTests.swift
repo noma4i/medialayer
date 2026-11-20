@@ -26,13 +26,17 @@ private func writeClip(_ url: URL, width: Int, height: Int, frames: Int) async t
 private func writeClip(_ clip: FixtureClip, to url: URL) async throws {
   let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
   if clip.metadata {
-    writer.metadata = [(AVMetadataIdentifier.quickTimeMetadataLocationISO6709, "+37.3300-122.0300/"), (.iTunesMetadataSongName, "Private title")].map {
-      let item = AVMutableMetadataItem()
-      item.identifier = $0.0
-      item.value = $0.1 as NSString
-      item.dataType = "com.apple.metadata.datatype.UTF-8"
-      return item
-    }
+    let location = AVMutableMetadataItem()
+    location.keySpace = .quickTimeMetadata
+    location.key = AVMetadataKey.quickTimeMetadataKeyLocationISO6709 as NSString
+    location.identifier = .quickTimeMetadataLocationISO6709
+    location.value = "+48.8583+002.2945/" as NSString
+    location.dataType = "com.apple.metadata.datatype.UTF-8"
+    let title = AVMutableMetadataItem()
+    title.identifier = .iTunesMetadataSongName
+    title.value = "Private title" as NSString
+    title.dataType = "com.apple.metadata.datatype.UTF-8"
+    writer.metadata = [location, title]
   }
   var settings: [String: Any] = [AVVideoCodecKey: clip.codec, AVVideoWidthKey: clip.width, AVVideoHeightKey: clip.height]
   if clip.hdr {
