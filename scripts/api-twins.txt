@@ -106,6 +106,8 @@ swift:MediaAudioDriver.endInterruption(shouldResume:) | platform idiom | iOS car
 kotlin:com/noma4i/medialayer/ui/AudioDriveSignal | platform idiom | Opt-in entry of the test driver; Swift keeps it package access
 kotlin:com/noma4i/medialayer/ui/AudioDriveKt.driveAudio | platform idiom | Opt-in entry of the test driver; Swift keeps it package access
 kotlin:com/noma4i/medialayer/testing/MediaAudioDriver.endInterruption | platform idiom | Android focus has no resume hint; Swift takes shouldResume
+kotlin:com/noma4i/medialayer/ui/OutgoingRemoteKt.installOutgoing | platform idiom | Opt-in entry of the outgoing test seam; Swift keeps it package access
+kotlin:com/noma4i/medialayer/ui/OutgoingRemoteKt.resetOutgoing | platform idiom | Opt-in entry of the outgoing test seam; Swift keeps it package access
 swift:MediaVideoProgress | platform idiom | SwiftUI wrapper for the video playhead
 kotlin:com/noma4i/medialayer/ui/PlayheadProgressKt.rememberPlayheadProgress | platform idiom | Compose state of the video playhead, Swift has MediaVideoProgress
 swift:MediaTakeProgress | platform idiom | SwiftUI wrapper for the take progress

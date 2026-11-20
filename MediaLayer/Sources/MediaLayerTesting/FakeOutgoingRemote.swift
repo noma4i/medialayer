@@ -92,3 +92,29 @@ public final class ManualOutgoingClock: OutgoingClock, @unchecked Sendable {
     }
   }
 }
+
+/// The one install seam for an app test: puts the fakes behind every `OutgoingMedia`, over a temporary custody store.
+/// Test targets only. Call `reset()` when the test ends.
+@MainActor
+public enum OutgoingTesting {
+  private static var directory: URL?
+
+  /// Forgets all items, then sends every item's remote fetch to `remote` and its 5 s re-ask timer to `clock`.
+  public static func install(remote: FakeOutgoingRemote, clock: ManualOutgoingClock) {
+    removeDirectory()
+    let created = FileManager.default.temporaryDirectory.appendingPathComponent("outgoing-testing-\(UUID().uuidString)", isDirectory: true)
+    directory = created
+    OutgoingTestingHook.install(remote: remote, clock: clock, directory: created)
+  }
+
+  /// Forgets all items and restores the system remote, clock and custody store.
+  public static func reset() {
+    OutgoingTestingHook.reset()
+    removeDirectory()
+  }
+
+  private static func removeDirectory() {
+    if let directory { try? FileManager.default.removeItem(at: directory) }
+    directory = nil
+  }
+}

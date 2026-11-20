@@ -280,6 +280,25 @@ extension GlobalMedia {
       await until("the item is ready") { item.phase == .ready }
       #expect(rig.remote.requestCount(for: url) == 2)
     }
+
+    @Test
+    func the_public_testing_seam_drives_an_item_to_ready() async {
+      let rig = Rig()
+      defer { rig.finish() }
+      let remote = FakeOutgoingRemote()
+      let clock = ManualOutgoingClock()
+      OutgoingTesting.install(remote: remote, clock: clock)
+      defer { OutgoingTesting.reset() }
+      let url = "https://o.test/seam.png"
+      remote.hold(url)
+      let item = OutgoingMedia(key: "seam", kind: .image, local: rig.local)
+      item.remote = url
+      await until("the fetch is asked") { remote.requestCount(for: url) == 1 }
+      #expect(item.phase != .ready)
+      remote.complete(url)
+      await until("the item is ready") { item.phase == .ready }
+      #expect(item.canOpen)
+    }
   }
 }
 #endif

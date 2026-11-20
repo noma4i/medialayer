@@ -3,6 +3,11 @@ package com.noma4i.medialayer.testing
 import com.noma4i.medialayer.RemoteResult
 import com.noma4i.medialayer.ui.OutgoingClock
 import com.noma4i.medialayer.ui.OutgoingRemote
+import com.noma4i.medialayer.ui.MediaLayerTestingApi
+import com.noma4i.medialayer.ui.installOutgoing
+import com.noma4i.medialayer.ui.resetOutgoing
+import java.io.File
+import java.nio.file.Files
 import kotlinx.coroutines.CompletableDeferred
 
 /**
@@ -72,5 +77,36 @@ class ManualOutgoingClock : OutgoingClock {
     val gate = CompletableDeferred<Unit>()
     synchronized(lock) { asked.add(millis); sleepers.add(gate) }
     try { gate.await() } finally { synchronized(lock) { sleepers.remove(gate) } }
+  }
+}
+
+/**
+ * The one install seam for an app test: puts the fakes behind every `OutgoingMedia`, over a temporary custody store.
+ * Test targets only. Call [reset] when the test ends.
+ */
+object OutgoingTesting {
+  private var directory: File? = null
+
+  /** Forgets all items, then sends every item's remote fetch to [remote] and its 5 s re-ask timer to [clock]. */
+  @OptIn(MediaLayerTestingApi::class)
+  @Synchronized
+  fun install(remote: FakeOutgoingRemote, clock: ManualOutgoingClock) {
+    removeDirectory()
+    val created = Files.createTempDirectory("outgoing-testing").toFile()
+    directory = created
+    installOutgoing(remote, clock, created)
+  }
+
+  /** Forgets all items and restores the system remote, clock and custody store. */
+  @OptIn(MediaLayerTestingApi::class)
+  @Synchronized
+  fun reset() {
+    resetOutgoing()
+    removeDirectory()
+  }
+
+  private fun removeDirectory() {
+    directory?.deleteRecursively()
+    directory = null
   }
 }

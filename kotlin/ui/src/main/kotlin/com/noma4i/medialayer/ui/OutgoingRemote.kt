@@ -95,6 +95,14 @@ internal object Outgoing {
   }
 }
 
+/** Opt-in entry of the testing module: replaces the remote, the clock and the custody directory, and starts an empty registry. */
+@MediaLayerTestingApi
+fun installOutgoing(remote: OutgoingRemote, clock: OutgoingClock, storeDirectory: File) = Outgoing.install(remote, clock, storeDirectory)
+
+/** Opt-in entry of the testing module: forgets every item and restores the system remote, clock and store. */
+@MediaLayerTestingApi
+fun resetOutgoing() = Outgoing.reset()
+
 private fun layerStoreDirectory(): File? {
   val context = ProcessMediaEnvironment.current?.media?.binding?.factory?.appContext ?: return null
   return File(context.cacheDir, "medialayer/outgoing")

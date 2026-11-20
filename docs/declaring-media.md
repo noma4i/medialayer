@@ -139,7 +139,7 @@ An item you send is the original on the device first and the server copy later. 
 - `ready` is reached only with the complete body cached and decoded. The remote replaces the cover in one frame, with no animation. A failed remote keeps the local picture and shows `failed(.remote)`; `item.retry()` fetches it again. Only the remote can be retried, an upload is sent again by DBlayer and forwarded again.
 - `item.canOpen` is true only in `ready`; set `item.openable` to apply your own rule.
 - A `.video` item compiles and draws its cover; it does not fetch yet.
-- The phase name is the accessibility value of the view and its identifier is `outgoing.<key>`. `MediaLayerTesting` has `FakeOutgoingRemote` (`answer`, `hold`, `complete`, `requests`, `requestCount`, `inFlight`, `peakInFlight`) and `ManualOutgoingClock` (`advance`, `sleeping`, `requestedMilliseconds`) for the re-ask and the late remote, the same on both platforms; the library's own tests install them.
+- The phase name is the accessibility value of the view and its identifier is `outgoing.<key>`. `MediaLayerTesting` has `FakeOutgoingRemote` (`answer`, `hold`, `complete`, `requests`, `requestCount`, `inFlight`, `peakInFlight`) and `ManualOutgoingClock` (`advance`, `sleeping`, `requestedMilliseconds`) for the re-ask and the late remote, the same on both platforms; an app test installs them behind every item with `OutgoingTesting.install(remote:clock:)` and ends with `OutgoingTesting.reset()` (temporary custody store, all items forgotten, system remote and clock restored); test targets only.
 
 ### Swift
 

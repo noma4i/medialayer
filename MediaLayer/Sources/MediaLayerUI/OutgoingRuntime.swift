@@ -129,6 +129,20 @@ final class OutgoingRuntime {
     if let store { self.store = store }
   }
 
+  /// Test seam for `MediaLayerTesting`: the fakes behind every item over a custody store in `directory`.
+  package func installForTesting(remote: OutgoingRemote, clock: OutgoingClock, directory: URL) {
+    forgetAll()
+    use(remote: remote, clock: clock, store: OutgoingStore(directory: directory))
+  }
+
+  /// Test seam for `MediaLayerTesting`: forgets every item and puts the system remote, clock and store back.
+  package func resetForTesting() {
+    forgetAll()
+    remote = LayerOutgoingRemote(places: { ProcessMediaContext.shared.current?.places })
+    clock = SystemOutgoingClock()
+    store = OutgoingStore.standard()
+  }
+
   /// Test seam: a process starts with no entries, as after a relaunch. Kept originals stay on disk.
   func forgetAll() {
     for entry in held.values { entry.stop() }
@@ -141,4 +155,13 @@ final class OutgoingRuntime {
     let store = store
     Task.detached(priority: .utility) { store.collectStale() }
   }
+}
+
+/// Reachable only from this package (`MediaLayerTesting`).
+package enum OutgoingTestingHook {
+  @MainActor package static func install(remote: OutgoingRemote, clock: OutgoingClock, directory: URL) {
+    OutgoingRuntime.shared.installForTesting(remote: remote, clock: clock, directory: directory)
+  }
+
+  @MainActor package static func reset() { OutgoingRuntime.shared.resetForTesting() }
 }

@@ -20,6 +20,7 @@ import com.noma4i.medialayer.OutgoingUpload
 import com.noma4i.medialayer.RemoteResult
 import com.noma4i.medialayer.testing.FakeOutgoingRemote
 import com.noma4i.medialayer.testing.ManualOutgoingClock
+import com.noma4i.medialayer.testing.OutgoingTesting
 import java.io.File
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.After
@@ -54,6 +55,25 @@ class OutgoingMediaTest {
   private fun waitFor(condition: () -> Boolean) = rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); condition() }
 
   private fun described(key: String): String? = rule.onNodeWithTag("outgoing-$key").fetchSemanticsNode().config.getOrNull(SemanticsProperties.StateDescription)
+
+  @Test
+  fun the_public_testing_seam_drives_an_item_to_ready() {
+    val seamRemote = FakeOutgoingRemote()
+    OutgoingTesting.install(seamRemote, ManualOutgoingClock())
+    try {
+      val url = "https://cdn/seam.png"
+      seamRemote.hold(url)
+      val item = declare("seam")
+      item.remote = url
+      waitFor { seamRemote.requestCount(url) == 1 }
+      assertFalse(item.phase == OutgoingPhase.Ready)
+      seamRemote.complete(url)
+      waitFor { item.phase == OutgoingPhase.Ready }
+      assertTrue(item.canOpen)
+    } finally {
+      OutgoingTesting.reset()
+    }
+  }
 
   @Test
   fun inv_outgoing_12_there_is_a_picture_in_every_frame_from_sending_to_ready_with_a_late_remote() {
