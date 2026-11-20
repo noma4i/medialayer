@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.49.0 - 2026-11-20
 
 ### Added
 
@@ -18,11 +18,11 @@
 - A camera photo is turned upright by `encodeImage` and keeps its memory admission.
 - `MediaCropResult` is applied through `PhotoEdit` and `MediaPreparer`, not `prepareImage`.
 
-## 3.48.1 - 2026-11-20
-
 ### Fixed
 
-- iOS camera preview no longer blinks when a take starts: the movie connection is set at open.
+- iOS camera preview no longer blinks when a take starts.
+- iOS `MediaPreparer` flattens a JPEG's transparency onto white, like Android and `encodeImage`, instead of black.
+- Android `MediaImage` keeps a shown image when its source gains a blurHash for the same url, instead of drawing the blurHash until restart.
 - Whole downloads that failed no longer fill the whole queue and refuse new ones.
 - iOS reports no failure when the system refuses the audio session in the background.
 
