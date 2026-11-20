@@ -19481,31 +19481,6 @@ public func defaultVideoLimits() -> VideoLimits  {
 })
 }
 /**
- * The one rule that turns a source video and the app tables into what the encoder does: upright even sides, the long side cut to the table without upscale, a bitrate inside the corridor, a frame rate inside the limits, and whether the file needs encoding at all.
- */
-public func planVideo(source: VideoSource, limits: VideoLimits)throws  -> VideoPlan  {
-    return try  FfiConverterTypeVideoPlan_lift(try rustCallWithError(FfiConverterTypeMediaError_lift) {
-        uniffiCallStatus in
-    uniffi_medialayer_fn_func_plan_video(
-        FfiConverterTypeVideoSource_lower(source),
-        FfiConverterTypeVideoLimits_lower(limits),uniffiCallStatus
-    )
-})
-}
-/**
- * `plan_video` that also knows the file size: a file at or below `recode_above_bytes` goes as it is.
- */
-public func planVideoSized(source: VideoSource, size: UInt64, limits: VideoLimits)throws  -> VideoPlan  {
-    return try  FfiConverterTypeVideoPlan_lift(try rustCallWithError(FfiConverterTypeMediaError_lift) {
-        uniffiCallStatus in
-    uniffi_medialayer_fn_func_plan_video_sized(
-        FfiConverterTypeVideoSource_lower(source),
-        FfiConverterUInt64.lower(size),
-        FfiConverterTypeVideoLimits_lower(limits),uniffiCallStatus
-    )
-})
-}
-/**
  * The keys of a video file the result must not carry: location and GPS (`com.apple.quicktime.location.*`, `udta/©xyz`, `loci`), creation time, device and software, and every user tag. The platform reads the keys of the source and the core says which of them force a copy without metadata, an empty answer means the file is clean.
  */
 public func videoMetadataToStrip(keys: [String]) -> [String]  {
@@ -19802,12 +19777,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_default_video_limits() != 7668) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_medialayer_checksum_func_plan_video() != 20788) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_medialayer_checksum_func_plan_video_sized() != 7566) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_video_metadata_to_strip() != 2219) {

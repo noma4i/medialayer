@@ -44,6 +44,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadows.ShadowContentResolver
 
 class PickedContent : ContentProvider() {
@@ -61,6 +62,7 @@ class PickedContent : ContentProvider() {
   override fun update(uri: Uri, values: ContentValues?, selection: String?, args: Array<out String>?) = throw UnsupportedOperationException()
 }
 
+@GraphicsMode(GraphicsMode.Mode.LEGACY)
 @RunWith(MediaLayerTestRunner::class)
 class ImportMediaTest {
   private val app = ApplicationProvider.getApplicationContext<Application>()
