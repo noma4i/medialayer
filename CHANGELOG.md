@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.50.0 - 2026-11-21
+
+### Added
+
+- `OutgoingMedia` keeps the sent original on screen until the server copy is cached and decoded.
+- `OutgoingMediaView` takes a cover, a loader and a failure view per phase on both platforms.
+- `Media.outgoing(key:)` returns a sent item and its phase from anywhere in the app.
+
+### Changed
+
+- A mirrored iOS front take is delivered with the mirror in its pixels and no reflection matrix.
+
+### Fixed
+
+- iOS `MediaImage` draws its preview while a switched source prepares, without an empty frame.
+
 ## 3.49.0 - 2026-11-20
 
 ### Added
