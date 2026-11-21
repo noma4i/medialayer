@@ -23,22 +23,30 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 
-suspend fun MediaLayer.importMedia(uri: Uri): PreparedMedia {
+data class ImportProgress(val bytesCopied: Long, val totalBytes: Long?)
+
+/** Progress runs on the copy thread. Hop to the main thread to update UI. */
+suspend fun MediaLayer.importMedia(uri: Uri, progress: ((ImportProgress) -> Unit)? = null): PreparedMedia {
   val context = checkNotNull(binding) { "the layer was not opened with MediaLayer.open(context)" }.factory.appContext
-  return importMediaAt(context, uri)
+  return importMediaAt(context, uri, progress)
 }
 
-internal suspend fun importMediaAt(context: Context, uri: Uri, openOutput: (File) -> OutputStream = { it.outputStream() }): PreparedMedia {
+internal suspend fun importMediaAt(context: Context, uri: Uri, progress: ((ImportProgress) -> Unit)? = null, openOutput: (File) -> OutputStream = { it.outputStream() }): PreparedMedia {
   var output: File? = null
   try {
     return withContext(prepareDispatcher) {
       val copying = currentCoroutineContext()
       runInterruptible {
         val resolver = context.contentResolver
-        val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-          if (cursor.moveToFirst()) cursor.getString(0) else null
+        val metadata = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+          if (cursor.moveToFirst()) {
+            val nameColumn = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            val sizeColumn = cursor.getColumnIndex(OpenableColumns.SIZE)
+            (if (nameColumn >= 0) cursor.getString(nameColumn) else null) to
+              (if (sizeColumn >= 0 && !cursor.isNull(sizeColumn)) cursor.getLong(sizeColumn) else null)
+          } else null
         }
-        val extension = importExtension(name, resolver.getType(uri))
+        val extension = importExtension(metadata?.first, resolver.getType(uri))
         val suffix = if (extension.isEmpty()) "" else ".$extension"
         val file = File(context.cacheDir, "imported-${UUID.randomUUID()}$suffix")
         output = file
@@ -47,20 +55,27 @@ internal suspend fun importMediaAt(context: Context, uri: Uri, openOutput: (File
         } catch (_: IOException) {
           null
         }
+        val totalBytes = descriptor?.statSize?.takeIf { it >= 0 } ?: metadata?.second
         if (descriptor != null && descriptor.statSize >= 0) {
-          copyByChannel(descriptor, { openOutput(file) }, copying)
+          copyByChannel(descriptor, { openOutput(file) }, copying, totalBytes, progress)
         } else {
           descriptor?.close()
           val input = resolver.openInputStream(uri) ?: throw MediaException.Fetch("the source cannot be opened")
           input.use { source ->
             openOutput(file).use { destination ->
               val buffer = ByteArray(64 * 1024)
+              var copied = 0L
+              copying.ensureActive()
+              progress?.invoke(ImportProgress(copied, totalBytes))
               while (true) {
                 copying.ensureActive()
                 val count = source.read(buffer)
                 copying.ensureActive()
                 if (count < 0) break
                 destination.write(buffer, 0, count)
+                copying.ensureActive()
+                copied += count
+                progress?.invoke(ImportProgress(copied, totalBytes))
               }
             }
           }
@@ -78,18 +93,22 @@ internal suspend fun importMediaAt(context: Context, uri: Uri, openOutput: (File
 
 private const val CHANNEL_CHUNK = 1L shl 20
 
-private fun copyByChannel(descriptor: ParcelFileDescriptor, openOutput: () -> OutputStream, copying: CoroutineContext) {
+private fun copyByChannel(descriptor: ParcelFileDescriptor, openOutput: () -> OutputStream, copying: CoroutineContext, totalBytes: Long?, progress: ((ImportProgress) -> Unit)?) {
   ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { input ->
     val source = input.channel
     openOutput().use { stream ->
       val target: WritableByteChannel = (stream as? FileOutputStream)?.channel ?: Channels.newChannel(stream)
       val buffer = ByteBuffer.allocate(64 * 1024)
       var position = 0L
+      copying.ensureActive()
+      progress?.invoke(ImportProgress(position, totalBytes))
       while (true) {
         copying.ensureActive()
         val moved = source.transferTo(position, CHANNEL_CHUNK, target)
         if (moved > 0) {
+          copying.ensureActive()
           position += moved
+          progress?.invoke(ImportProgress(position, totalBytes))
           continue
         }
         buffer.clear()
@@ -97,7 +116,9 @@ private fun copyByChannel(descriptor: ParcelFileDescriptor, openOutput: () -> Ou
         if (count < 0) break
         buffer.flip()
         while (buffer.hasRemaining()) target.write(buffer)
+        copying.ensureActive()
         position += count
+        progress?.invoke(ImportProgress(position, totalBytes))
       }
     }
   }

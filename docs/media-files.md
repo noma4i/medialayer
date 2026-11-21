@@ -270,6 +270,20 @@ A source with a `file://` URL, such as a clip in the app bundle or a temporary f
 `MediaLayer.importMedia(uri)` on Kotlin and `MediaLayer.importMedia(url)` on Swift copy picked media without re-encoding.
 Android uses the context passed to `open` and accepts content URIs.
 Swift accepts readable file URLs, including security-scoped URLs.
+An optional progress callback reports copied bytes and the total size when known, on the copy thread.
+
+```swift
+let imported = try await media.importMedia(fileURL) { progress in
+  Task { @MainActor in show(progress.bytesCopied) }
+}
+```
+
+```kotlin
+val imported = media.importMedia(android.net.Uri.fromFile(file)) { progress ->
+  scope.launch(Dispatchers.Main) { show(progress.bytesCopied) }
+}
+```
+
 The result is a new `PreparedMedia` with `isNew` true, stored in the app's temporary directory.
 The caller owns this file and deletes it after use.
 Pass its path to a `MediaPrepareJob` for `MediaPreparer`, or its file URL to `MediaSourceValue.file` for `MediaCropper`.

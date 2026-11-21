@@ -52,7 +52,8 @@ extension GlobalMedia {
       for _ in 0..<256 { try writer.write(contentsOf: chunk); hash.update(data: chunk) }
       try writer.close()
       var requests: [Int] = []
-      let imported = try importMediaFile(source, directory: directory, read: { handle, count in
+      var progress: [ImportProgress] = []
+      let imported = try importMediaFile(source, directory: directory, progress: { progress.append($0) }, read: { handle, count in
         requests.append(count)
         return try handle.read(upToCount: count)
       })
@@ -64,6 +65,10 @@ extension GlobalMedia {
       #expect(imported.url.pathExtension == "mov")
       #expect(requests.count > 256)
       #expect(requests.allSatisfy { $0 <= 64 * 1024 })
+      #expect(progress.first?.bytesCopied == 0)
+      #expect(progress.last?.bytesCopied == 16 * 1024 * 1024)
+      #expect(progress.allSatisfy { $0.totalBytes == 16 * 1024 * 1024 })
+      #expect(zip(progress, progress.dropFirst()).allSatisfy { $0.0.bytesCopied <= $0.1.bytesCopied })
       #expect(try FileManager.default.attributesOfItem(atPath: imported.url.path)[.size] as? Int == 16 * 1024 * 1024)
     }
 

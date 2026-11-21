@@ -146,18 +146,28 @@ class ImportMediaTest {
       val chunk = ByteArray(64 * 1024) { (it % 251).toByte() }
       repeat(256) { out.write(chunk) }
     }
-    val imported = importMediaAt(context, uri("large"))
+    val progress = mutableListOf<ImportProgress>()
+    val imported = importMediaAt(context, uri("large"), progress = { progress.add(it) })
     assertEquals(hash(source), hash(imported.file))
     assertEquals(source.length(), imported.file.length())
+    assertEquals(0L, progress.first().bytesCopied)
+    assertEquals(source.length(), progress.last().bytesCopied)
+    assertTrue(progress.all { it.totalBytes == source.length() })
+    assertTrue(progress.zipWithNext().all { (a, b) -> a.bytesCopied <= b.bytesCopied })
   }
 
   @Test
   fun inv_import_02_aProviderWithoutADescriptorIsCopiedByStream() = runBlocking {
     val bytes = ByteArray(300 * 1024) { (it % 253).toByte() }
     shadowOf(app.contentResolver).registerInputStream(uri("stream"), bytes.inputStream())
-    val imported = importMediaAt(context, uri("stream"))
+    val progress = mutableListOf<ImportProgress>()
+    val imported = importMediaAt(context, uri("stream"), progress = { progress.add(it) })
     assertEquals(bytes.size.toLong(), imported.file.length())
     assertTrue(bytes.contentEquals(imported.file.readBytes()))
+    assertEquals(0L, progress.first().bytesCopied)
+    assertEquals(bytes.size.toLong(), progress.last().bytesCopied)
+    assertTrue(progress.all { it.totalBytes == null })
+    assertTrue(progress.zipWithNext().all { (a, b) -> a.bytesCopied <= b.bytesCopied })
   }
 
   @Test
