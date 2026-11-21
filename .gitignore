@@ -16,7 +16,7 @@ kotlin/host-library.path
 !docs/*.md
 **/build/
 MediaLayer/Package.resolved
-/.orca-artifacts
+/.artifacts
 
 /kotlin/src/test/kotlin/app/media/
 __pycache__/

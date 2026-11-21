@@ -18,7 +18,7 @@ case "$destination" in
   *) destination="platform=iOS Simulator,id=$destination" ;;
 esac
 if [ "$#" -gt 0 ]; then shift; fi
-derived=(-derivedDataPath "$root/.orca-artifacts/DD.noindex")
+derived=(-derivedDataPath "$root/.artifacts/DD.noindex")
 for argument in "$@"; do
   if [ "$argument" = -derivedDataPath ]; then derived=(); fi
 done
