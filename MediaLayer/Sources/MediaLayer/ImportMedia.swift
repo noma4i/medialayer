@@ -4,6 +4,11 @@ import UniformTypeIdentifiers
 public struct ImportProgress: Sendable, Equatable {
   public let bytesCopied: Int64
   public let totalBytes: Int64?
+
+  public init(bytesCopied: Int64, totalBytes: Int64?) {
+    self.bytesCopied = bytesCopied
+    self.totalBytes = totalBytes
+  }
 }
 
 extension MediaLayer {

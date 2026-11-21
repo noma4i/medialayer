@@ -19888,7 +19888,7 @@ public func cropTurn(rect: CropFractions, setup: CropSetup, clockwise: Bool) -> 
 })
 }
 /**
- * The rectangle resized by `factor` (above 1 makes it smaller, the content looks larger) around the photo point (`focal_x`, `focal_y`).
+ * The rectangle resized around (`focal_x`, `focal_y`). Above 1, a free frame grows and a frame with proportions shrinks as the photo magnifies.
  * The point keeps its place inside the rectangle. The size follows the limits and the proportions.
  */
 public func cropZoom(rect: CropFractions, setup: CropSetup, factor: Double, focalX: Double, focalY: Double) -> CropFractions  {
@@ -20561,7 +20561,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_medialayer_checksum_func_crop_turn() != 24769) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_medialayer_checksum_func_crop_zoom() != 47788) {
+    if (uniffi_medialayer_checksum_func_crop_zoom() != 64136) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_medialayer_checksum_func_default_crop_limits() != 57494) {
