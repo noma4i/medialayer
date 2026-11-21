@@ -260,8 +260,7 @@ class MediaCrop(
       if (announce) ready(PixelSize(bitmap.width.toUInt(), bitmap.height.toUInt()))
       bitmap
     } catch (cancelled: CancellationException) {
-      if (announce) throw cancelled
-      null
+      throw cancelled
     } catch (error: Exception) {
       if (announce) {
         if (error !is MediaException) throw error
