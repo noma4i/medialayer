@@ -150,7 +150,7 @@ extension GlobalMedia {
       let source = Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!
       let completedDirectory = root.appendingPathComponent("completed/nested")
       let imported = try await media.importMedia(source, directory: completedDirectory)
-      #expect(imported.url.deletingLastPathComponent() == completedDirectory)
+      #expect(imported.url.deletingLastPathComponent().path == completedDirectory.path)
       #expect(try Data(contentsOf: imported.url) == Data(contentsOf: source))
     }
   }
