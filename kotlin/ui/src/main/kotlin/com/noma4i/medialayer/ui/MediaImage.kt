@@ -25,15 +25,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import coil3.DrawableImage
 import coil3.Extras
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
+import coil3.compose.rememberAsyncImagePainter
+import coil3.compose.rememberConstraintsSizeResolver
 import coil3.ImageLoader
 import coil3.decode.BitmapFactoryDecoder
 import coil3.gif.repeatCount
@@ -63,11 +68,16 @@ import kotlinx.coroutines.flow.transformLatest
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.withContext
 
+sealed interface ImageBackdrop {
+  data class Blurred(val radius: Dp) : ImageBackdrop
+}
+
 @Composable
 fun MediaImage(
   source: MediaSource,
   modifier: Modifier = Modifier,
   contentScale: ContentScale = ContentScale.Crop,
+  backdrop: ImageBackdrop? = null,
   preview: MediaSource? = null,
   playbackRate: Double = 1.0,
   animation: ImageAnimation = ImageAnimation(),
@@ -83,13 +93,13 @@ fun MediaImage(
   val attempt = remember(item.loadIdentity()) { mutableStateOf(0uL) }
   val mount = claimImage(source, item, screen, failure, attempt)
   if (source.size != null) {
-    Box(modifier.then(screen.modifier)) { ImageBody(source, preview, item, mount, attempt, failure, null, 0L, screen, contentScale, animation, playbackRate, content) }
+    Box(modifier.then(screen.modifier)) { ImageBody(source, preview, item, mount, attempt, failure, null, 0L, screen, contentScale, backdrop, animation, playbackRate, content) }
     return
   }
   val density = LocalDensity.current.density
   BoxWithConstraints(modifier.then(screen.modifier)) {
     val placementPixels = if (constraints.hasBoundedWidth && constraints.hasBoundedHeight) constraints.maxWidth.toLong() * constraints.maxHeight else 0L
-    ImageBody(source, preview, item, mount, attempt, failure, null, placementPixels, screen, contentScale, animation, playbackRate, content, decodeInput(constraints, density, source, contentScale))
+    ImageBody(source, preview, item, mount, attempt, failure, null, placementPixels, screen, contentScale, backdrop, animation, playbackRate, content, decodeInput(constraints, density, source, contentScale))
   }
 }
 
@@ -112,7 +122,7 @@ private fun claimImage(source: MediaSource, item: MediaItem, screen: ScreenVisib
 
 @Composable
 @OptIn(ExperimentalCoroutinesApi::class)
-private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaItem, mount: PlaceMount, attempt: State<ULong>, failure: State<ScopedFailure?>, pixels: PixelSize?, placementPixels: Long, screen: ScreenVisibility, contentScale: ContentScale, animation: ImageAnimation, playbackRate: Double, content: @Composable (MediaState) -> Unit, dimensions: PixelSizeMemo.Args? = null) {
+private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaItem, mount: PlaceMount, attempt: State<ULong>, failure: State<ScopedFailure?>, pixels: PixelSize?, placementPixels: Long, screen: ScreenVisibility, contentScale: ContentScale, backdrop: ImageBackdrop?, animation: ImageAnimation, playbackRate: Double, content: @Composable (MediaState) -> Unit, dimensions: PixelSizeMemo.Args? = null) {
   val context = LocalContext.current
   val environment = LocalMediaEnvironment.current
   val media = environment.media
@@ -171,21 +181,27 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
     AsyncImage(model = previewRequest, contentDescription = null, imageLoader = loader, contentScale = contentScale, modifier = Modifier.fillMaxSize().testTag(PREVIEW_TAG))
   }
   val drawsImage = remember { mutableStateOf(false) }
-  AsyncImage(
-    model = request,
-    contentDescription = null,
-    imageLoader = loader,
-    contentScale = contentScale,
-    onState = { painterState ->
+  val onState: (AsyncImagePainter.State) -> Unit = { painterState ->
       animated.value = ((painterState as? AsyncImagePainter.State.Success)?.result?.image as? DrawableImage)?.drawable as? Animatable
       painterState.toMediaState()?.let { reached ->
         state.value = reached
         mount.report(reached)
         heardBy.value = mount
       }
-    },
-    modifier = Modifier.fillMaxSize().drawWithContent { if (drawsImage.value) drawContent() }
-  )
+  }
+  if (backdrop is ImageBackdrop.Blurred) {
+    val sizeResolver = rememberConstraintsSizeResolver()
+    val sizedRequest = remember(request, sizeResolver) { request.newBuilder().size(sizeResolver).build() }
+    val painter = rememberAsyncImagePainter(model = sizedRequest, imageLoader = loader, onState = onState, contentScale = contentScale)
+    Box(Modifier.fillMaxSize().clipToBounds()) {
+      if (state.value == MediaState.Ready && animated.value == null) {
+        Image(painter, null, Modifier.matchParentSize().blur(backdrop.radius).clipToBounds().testTag("media-image.backdrop"), contentScale = ContentScale.Crop)
+      }
+      Image(painter, null, Modifier.fillMaxSize().then(sizeResolver).drawWithContent { if (drawsImage.value) drawContent() }, contentScale = contentScale)
+    }
+  } else {
+    AsyncImage(model = request, contentDescription = null, imageLoader = loader, contentScale = contentScale, onState = onState, modifier = Modifier.fillMaxSize().drawWithContent { if (drawsImage.value) drawContent() })
+  }
   ImageContent(screen, state, drawsImage, content)
 }
 

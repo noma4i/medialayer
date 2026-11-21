@@ -60,10 +60,47 @@ private struct Switching: View {
   var body: some View { MediaImage(Photo(url: model.url), preview: preview) }
 }
 
+@MainActor
+private func backdropIdentifiers(_ object: Any?) -> [String] {
+  guard let object else { return [] }
+  var found: [String] = []
+  if let node = object as? NSObject, node.responds(to: Selector(("accessibilityIdentifier"))), let id = node.value(forKey: "accessibilityIdentifier") as? String { found.append(id) }
+  if let view = object as? UIView {
+    for element in view.accessibilityElements ?? [] { found += backdropIdentifiers(element) }
+    for child in view.subviews { found += backdropIdentifiers(child) }
+  } else if let node = object as? NSObject {
+    let count = node.accessibilityElementCount()
+    if count != NSNotFound { for index in 0..<count { found += backdropIdentifiers(node.accessibilityElement(at: index)) } }
+  }
+  return found
+}
+
 extension GlobalMedia {
   @MainActor
   @Suite(.timeLimit(.minutes(3)))
   struct MediaImagePreviewTests {
+    @Test
+    func blurredBackdropSharesTheLoadedImage() async {
+      let places = RecordingPlaces()
+      ImageMemory.install(ImageCache(), on: places)
+      let context = MediaContext(places: places)
+      let photo = Photo(url: "https://o.test/backdrop-\(UUID().uuidString).png")
+      places.answer(photo.url, with: solid(.blue))
+      let host = UIHostingController(rootView: MediaImage(photo, contentMode: .fit, backdrop: .blurred(radius: 8)).environment(\.mediaContext, context).frame(width: 32, height: 32))
+      let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 32, height: 32))
+      window.rootViewController = host
+      window.isHidden = false
+      defer { window.isHidden = true }
+      host.safeAreaRegions = []
+      host.view.frame = window.bounds
+      await until("backdrop and decode are present") { backdropIdentifiers(host.view).contains("media-image.backdrop") && places.imageStats().snapshot().decodes == 1 }
+      #expect(places.fetchedURLs == [photo.url])
+      #expect(places.imageStats().snapshot().requests == 1)
+      #expect(places.imageStats().snapshot().decodes == 1)
+      host.rootView = MediaImage(photo, contentMode: .fit).environment(\.mediaContext, context).frame(width: 32, height: 32)
+      await until("backdrop is removed") { !backdropIdentifiers(host.view).contains("media-image.backdrop") }
+    }
+
     @Test
     func inv_image_48_the_preview_shows_until_the_first_frame_of_the_main_image_and_takes_no_place_of_its_own() async {
       let places = RecordingPlaces()

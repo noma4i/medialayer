@@ -73,6 +73,24 @@ MediaImage(
 )
 ```
 
+### Blurred backdrop
+
+Fill the space around a fitted still image with a blurred copy. Both views use the same decoded image.
+
+```swift
+MediaImage(Poster(url: moment.posterUrl), contentMode: .fit, backdrop: .blurred(radius: 16))
+  .frame(width: 120, height: 160)
+```
+
+```kotlin
+MediaImage(
+  source = Poster(url = moment.posterUrl),
+  modifier = Modifier.size(width = 120.dp, height = 160.dp),
+  contentScale = ContentScale.Fit,
+  backdrop = ImageBackdrop.Blurred(16.dp)
+)
+```
+
 ## Sources without a class
 
 `MediaSourceValue` is a source declared by value, next to the generated types of the `.mdl` file. The app writes no class and no string glue. The constructors and factories keep the text as declared and call nothing native. The core cleans it once when the declaration enters its input queue, off the main thread: the url loses its edge whitespace, a blank cover or blur hash is absent.

@@ -15,6 +15,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import com.noma4i.medialayer.Kind
@@ -40,6 +42,30 @@ class MediaImageCompositionTest {
   private val pending = CompletableDeferred<Unit>()
   private val loader by lazy { mediaImageLoader(context, ImageBytes { _, _ -> pending.await(); com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK) }) }
   private val looper = shadowOf(android.os.Looper.getMainLooper())
+
+  @Test
+  fun blurredBackdropSharesTheLoadedImage() {
+    val backdrop = mutableStateOf<ImageBackdrop?>(ImageBackdrop.Blurred(8.dp))
+    val url = "https://o.test/backdrop.png"
+    val fetches = java.util.concurrent.atomic.AtomicInteger()
+    val counting = mediaImageLoader(context, ImageBytes { _, _ ->
+      fetches.incrementAndGet()
+      com.noma4i.medialayer.ImageFetchResult(pngBytes(), com.noma4i.medialayer.ImageOrigin.NETWORK)
+    }, stats = layer.imageStats())
+    rule.setContent {
+      MediaLayerProvider(CompletableDeferred(layer), counting) {
+        MediaImage(SizedImage(url), Modifier.size(50.dp), contentScale = ContentScale.Fit, backdrop = backdrop.value)
+      }
+    }
+    waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.contains("itemState:$url:Ready") }
+    rule.onNodeWithTag("media-image.backdrop").assertExists()
+    drainFfi()
+    assertEquals(1, fetches.get())
+    assertEquals(1uL, layer.imageStats().snapshot().requests)
+    assertEquals(1uL, layer.imageStats().snapshot().decodes)
+    rule.runOnIdle { backdrop.value = null }
+    rule.onNodeWithTag("media-image.backdrop").assertDoesNotExist()
+  }
 
   private fun waitUntil(timeoutMillis: Long, condition: () -> Boolean) {
     try {

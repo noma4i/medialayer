@@ -2,6 +2,10 @@ import MediaLayer
 import Nuke
 import SwiftUI
 
+public enum ImageBackdrop: Sendable {
+  case blurred(radius: CGFloat)
+}
+
 struct ImageKey: Equatable {
   let identity: String
   let pixels: CGSize?
@@ -157,22 +161,24 @@ public struct MediaImage<Content: View>: View {
   private let source: any MediaSource
   private let preview: (any MediaSource)?
   private let contentMode: ContentMode
+  private let backdrop: ImageBackdrop?
   private let playbackRate: Double
   private let animation: ImageAnimation
   private let content: (MediaState) -> Content
 
-  public init(_ source: some MediaSource, contentMode: ContentMode = .fill, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation(), @ViewBuilder content: @escaping (MediaState) -> Content) {
-    self.init(shown: source, preview: nil, contentMode: contentMode, playbackRate: playbackRate, animation: animation, content: content)
+  public init(_ source: some MediaSource, contentMode: ContentMode = .fill, backdrop: ImageBackdrop? = nil, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation(), @ViewBuilder content: @escaping (MediaState) -> Content) {
+    self.init(shown: source, preview: nil, contentMode: contentMode, backdrop: backdrop, playbackRate: playbackRate, animation: animation, content: content)
   }
 
-  public init(_ source: some MediaSource, preview: (some MediaSource)?, contentMode: ContentMode = .fill, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation(), @ViewBuilder content: @escaping (MediaState) -> Content) {
-    self.init(shown: source, preview: preview, contentMode: contentMode, playbackRate: playbackRate, animation: animation, content: content)
+  public init(_ source: some MediaSource, preview: (some MediaSource)?, contentMode: ContentMode = .fill, backdrop: ImageBackdrop? = nil, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation(), @ViewBuilder content: @escaping (MediaState) -> Content) {
+    self.init(shown: source, preview: preview, contentMode: contentMode, backdrop: backdrop, playbackRate: playbackRate, animation: animation, content: content)
   }
 
-  private init(shown source: any MediaSource, preview: (any MediaSource)?, contentMode: ContentMode, playbackRate: Double, animation: ImageAnimation, content: @escaping (MediaState) -> Content) {
+  private init(shown source: any MediaSource, preview: (any MediaSource)?, contentMode: ContentMode, backdrop: ImageBackdrop?, playbackRate: Double, animation: ImageAnimation, content: @escaping (MediaState) -> Content) {
     self.source = source
     self.preview = preview
     self.contentMode = contentMode
+    self.backdrop = backdrop
     self.playbackRate = playbackRateOf(playbackRate)
     self.animation = animation
     self.content = content
@@ -197,6 +203,11 @@ public struct MediaImage<Content: View>: View {
             if let frames = loaded.flatMap({ $0.key == key ? $0.frames : nil }) {
               AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isPlaying, playbackRate: playbackRate, animation: animation, rests: animation.rests(reduceMotion: reduceMotion), grayscale: grayscale, shape: shape)
             } else if let shown {
+              if case let .blurred(radius) = backdrop, loaded?.animated == nil {
+                Image(platform: shown).resizable().aspectRatio(contentMode: .fill)
+                  .frame(width: geometry.size.width, height: geometry.size.height)
+                  .blur(radius: radius).clipped().accessibilityIdentifier("media-image.backdrop")
+              }
               still(shown)
             }
             if isPlaying { content(ImagePass.contentState(shown: shown != nil, state: state, failure: failure?.of(source.item))) }
@@ -354,12 +365,12 @@ enum ImagePass {
 }
 
 extension MediaImage where Content == EmptyView {
-  public init(_ source: some MediaSource, contentMode: ContentMode = .fill, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation()) {
-    self.init(source, contentMode: contentMode, playbackRate: playbackRate, animation: animation) { _ in EmptyView() }
+  public init(_ source: some MediaSource, contentMode: ContentMode = .fill, backdrop: ImageBackdrop? = nil, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation()) {
+    self.init(source, contentMode: contentMode, backdrop: backdrop, playbackRate: playbackRate, animation: animation) { _ in EmptyView() }
   }
 
-  public init(_ source: some MediaSource, preview: (some MediaSource)?, contentMode: ContentMode = .fill, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation()) {
-    self.init(source, preview: preview, contentMode: contentMode, playbackRate: playbackRate, animation: animation) { _ in EmptyView() }
+  public init(_ source: some MediaSource, preview: (some MediaSource)?, contentMode: ContentMode = .fill, backdrop: ImageBackdrop? = nil, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation()) {
+    self.init(source, preview: preview, contentMode: contentMode, backdrop: backdrop, playbackRate: playbackRate, animation: animation) { _ in EmptyView() }
   }
 }
 
