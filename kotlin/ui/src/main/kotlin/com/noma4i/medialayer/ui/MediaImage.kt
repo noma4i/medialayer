@@ -191,7 +191,7 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
   }
   if (backdrop is ImageBackdrop.Blurred) {
     val sizeResolver = rememberConstraintsSizeResolver()
-    val sizedRequest = remember(request, sizeResolver) { request.newBuilder().size(sizeResolver).build() }
+    val sizedRequest = remember(request, sizeResolver) { if (pixels != null) request else request.newBuilder().size(sizeResolver).build() }
     val painter = rememberAsyncImagePainter(model = sizedRequest, imageLoader = loader, onState = onState, contentScale = contentScale)
     Box(Modifier.fillMaxSize().clipToBounds()) {
       if (state.value == MediaState.Ready && animated.value == null) {
