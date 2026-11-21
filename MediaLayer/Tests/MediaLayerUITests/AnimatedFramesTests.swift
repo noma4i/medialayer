@@ -62,33 +62,6 @@ private func gifOfSharedFrames(frames: Int, side: Int) -> Data {
   return data as Data
 }
 
-private func residentBytes() -> Int {
-  var info = task_vm_info_data_t()
-  var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
-  _ = withUnsafeMutablePointer(to: &info) {
-    $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) }
-  }
-  return Int(info.resident_size)
-}
-
-private final class FootprintPeak: @unchecked Sendable {
-  private let lock = NSLock()
-  private var stopped = false
-  private(set) var peak = 0
-
-  func run(since base: Int) {
-    DispatchQueue.global().async { [self] in
-      while !lock.withLock({ stopped }) {
-        let growth = residentBytes() - base
-        lock.withLock { peak = max(peak, growth) }
-        Thread.sleep(forTimeInterval: 0.001)
-      }
-    }
-  }
-
-  func stop() -> Int { lock.withLock { stopped = true; return peak } }
-}
-
 struct AnimatedFramesTests {
   @Test
   func inv_image_31_gif_uses_each_frame_delay() throws {
@@ -164,14 +137,12 @@ struct AnimatedFramesTests {
   @Test
   func aGifOverTheBudgetPeaksBelowTheBudgetWhileDecoding() throws {
     let data = gifOfSharedFrames(frames: 200, side: 600)
-    let base = residentBytes()
-    let sampler = FootprintPeak()
-    sampler.run(since: base)
-    let frames = AnimatedFrames.decode(data, maxPixel: 600)
-    let peak = sampler.stop()
+    let frames = try #require(AnimatedFrames.decode(data, maxPixel: 600))
 
-    #expect(peak <= 32 << 20)
-    #expect(frames != nil)
+    #expect(frames.retainedBytes <= 32 << 20)
+    #expect(frames.stream.decodes == 0)
+    #expect(frames.stream.cachedCount == 0)
+    #expect(frames.frameCount == 200)
   }
 
   @Test
