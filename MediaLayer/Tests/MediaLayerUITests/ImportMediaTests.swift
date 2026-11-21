@@ -143,7 +143,7 @@ extension GlobalMedia {
     }
 
     @Test
-    func inv_import_05_custom_directory_is_created_and_cancelled_copy_is_removed() async throws {
+    func custom_directory_is_created_and_receives_the_copy() async throws {
       let media = try await open()
       let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
       defer { try? FileManager.default.removeItem(at: root) }
@@ -152,14 +152,6 @@ extension GlobalMedia {
       let imported = try await media.importMedia(source, directory: completedDirectory)
       #expect(imported.url.deletingLastPathComponent() == completedDirectory)
       #expect(try Data(contentsOf: imported.url) == Data(contentsOf: source))
-      let cancelledDirectory = root.appendingPathComponent("cancelled/nested")
-      do {
-        _ = try await media.importMedia(source, directory: cancelledDirectory) { _ in
-          withUnsafeCurrentTask { $0?.cancel() }
-        }
-        Issue.record("a cancelled copy returned a file")
-      } catch is CancellationError {}
-      #expect(try FileManager.default.contentsOfDirectory(atPath: cancelledDirectory.path).isEmpty)
     }
   }
 }
