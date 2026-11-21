@@ -1,6 +1,7 @@
 # Choosing a crop
 
 `MediaCropper` shows a photo and lets the user move and scale a crop frame, on iOS (SwiftUI) and Android (Compose). The result is a rectangle in fractions of the photo and a turn, the same values `PhotoEdit` takes as `crop` (a `CropFractions`) and `rotationDegrees`.
+The cropper shows a screen-size picture at once and replaces it with a sharper one.
 The library draws the photo, the dimmed area and the frame, and owns the gestures. The buttons, the captions and the call of `MediaPreparer` are the app's. A crop at rest holds no task, no timer and no animation.
 
 ## The two frames

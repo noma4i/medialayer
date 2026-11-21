@@ -41,8 +41,12 @@ public struct MediaCropper: View {
       .onChange(of: proxy.size) { _, size in crop.place(in: size, inset: inset) }
       .task(id: source.url) {
         crop.place(in: proxy.size, inset: inset)
-        let side = Int(min(4096, max(proxy.size.width, proxy.size.height) * displayScale * 3))
-        image = await crop.load(source, maxSide: max(side, 256))
+        let pixels = max(proxy.size.width, proxy.size.height) * displayScale
+        let side = Int(min(4096, max(pixels, 256)))
+        let sharpSide = Int(min(4096, max(pixels * 3, 256)))
+        guard let first = await crop.load(source, maxSide: side) else { return }
+        image = first
+        if sharpSide > side, let sharp = await crop.load(source, maxSide: sharpSide, announce: false), !Task.isCancelled { image = sharp }
       }
     }
     .accessibilityIdentifier("media-cropper")

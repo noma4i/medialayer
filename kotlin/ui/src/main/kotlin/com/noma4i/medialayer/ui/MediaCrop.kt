@@ -253,16 +253,20 @@ class MediaCrop(
    * Decodes the photo for the screen and tells the crop its size. The decode takes its raster from the memory budget before it allocates ([MediaImageDecode]).
    * A source that is no local file, no image, or a refused budget is a [MediaException] in [failure]. Null then.
    */
-  internal suspend fun load(source: MediaSource, maxSide: Int, admit: DecodeAdmit? = null): Bitmap? =
+  internal suspend fun load(source: MediaSource, maxSide: Int, admit: DecodeAdmit? = null, announce: Boolean = true): Bitmap? =
     try {
       val file = preparableFile(normalizeItem(source.toItem()).url)
       val bitmap = if (admit == null) MediaImageDecode.decode(file, maxSide) else decodeImage(ImageInput { file.inputStream() }, maxSide, admit)
-      ready(PixelSize(bitmap.width.toUInt(), bitmap.height.toUInt()))
+      if (announce) ready(PixelSize(bitmap.width.toUInt(), bitmap.height.toUInt()))
       bitmap
     } catch (cancelled: CancellationException) {
-      throw cancelled
-    } catch (error: MediaException) {
-      fail(error)
+      if (announce) throw cancelled
+      null
+    } catch (error: Exception) {
+      if (announce) {
+        if (error !is MediaException) throw error
+        fail(error)
+      }
       null
     }
 }

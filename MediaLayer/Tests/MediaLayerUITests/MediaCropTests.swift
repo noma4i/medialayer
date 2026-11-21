@@ -285,6 +285,28 @@ struct MediaCropTests {
   }
 
   @Test
+  func a_quiet_decode_preserves_the_crop_on_success_and_failure() async throws {
+    let file = try jpegFile(200, 300)
+    defer { try? FileManager.default.removeItem(at: file) }
+    let admission = Admission()
+    let source = MediaSourceValue.file(file, kind: .image)
+    let crop = MediaCrop(aspect: chat()) { _ in }
+    crop.place(in: CGSize(width: 400, height: 800), inset: 0)
+    #expect(await crop.load(source, maxSide: 100, admit: admission.admit) != nil)
+    crop.gesture(true)
+    crop.pan(dx: 30, dy: 0)
+    crop.gesture(false)
+    crop.turnRight()
+    let before = crop.snapshot()
+    #expect(before?.rotation == 90 && before?.wasPositionChanged == true)
+    #expect(await crop.load(source, maxSide: 200, admit: admission.admit, announce: false) != nil)
+    #expect(crop.snapshot() == before && crop.isReady && crop.failure == nil)
+    admission.refuses = true
+    #expect(await crop.load(source, maxSide: 200, admit: admission.admit, announce: false) == nil)
+    #expect(crop.snapshot() == before && crop.isReady && crop.failure == nil)
+  }
+
+  @Test
   func inv_crop_15_a_crop_at_rest_holds_no_task_or_timer_and_a_gesture_only_flips_the_flag() {
     let crop = MediaCrop(aspect: chat()) { _ in }
     ready(crop, photo: PixelSize(width: 2000, height: 3000))

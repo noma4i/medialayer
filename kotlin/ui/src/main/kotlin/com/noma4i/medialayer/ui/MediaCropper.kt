@@ -17,6 +17,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -40,6 +41,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.noma4i.medialayer.MediaSource
+import kotlinx.coroutines.flow.first
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -58,10 +60,17 @@ fun MediaCropper(source: MediaSource, crop: MediaCrop, modifier: Modifier = Modi
   val slopPx = with(density) { HANDLE_SLOP_DP.dp.toPx() }
   var bitmap by remember(source.url) { mutableStateOf<Bitmap?>(null) }
   var size by remember { mutableStateOf(IntSize.Zero) }
-  LaunchedEffect(source.url, size) {
-    if (size == IntSize.Zero) return@LaunchedEffect
-    crop.place(size.width, size.height, insetPx)
-    if (bitmap == null) bitmap = crop.load(source, min(4096, maxOf(size.width, size.height) * SCREEN_ZOOM).coerceAtLeast(256))
+  LaunchedEffect(size, insetPx) {
+    if (size != IntSize.Zero) crop.place(size.width, size.height, insetPx)
+  }
+  LaunchedEffect(source.url) {
+    val initial = snapshotFlow { size }.first { it != IntSize.Zero }
+    crop.place(initial.width, initial.height, insetPx)
+    val pixels = maxOf(initial.width, initial.height)
+    val side = min(4096, pixels.coerceAtLeast(256))
+    val sharpSide = min(4096, (pixels * SCREEN_ZOOM).coerceAtLeast(256))
+    bitmap = crop.load(source, side) ?: return@LaunchedEffect
+    if (sharpSide > side) crop.load(source, sharpSide, announce = false)?.let { bitmap = it }
   }
   val shown = bitmap
   DisposableEffect(shown) { onDispose { shown?.recycle() } }

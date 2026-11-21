@@ -282,6 +282,32 @@ class MediaCropTest {
   }
 
   @Test
+  fun aQuietDecodePreservesTheCropOnSuccessAndFailure() = runBlocking {
+    val file = jpegFile(200, 300)
+    val admission = CropAdmission()
+    val source = MediaSourceValue.file(file, Kind.IMAGE)
+    val crop = MediaCrop(chat) { }
+    crop.place(400, 800, 0f)
+    assertNotNull(crop.load(source, 100, admission.admit))
+    crop.gesture(true)
+    crop.pan(30f, 0f)
+    crop.gesture(false)
+    crop.turnRight()
+    val before = crop.snapshot()!!
+    assertEquals(90, before.rotation)
+    assertTrue(before.wasPositionChanged)
+    assertNotNull(crop.load(source, 200, admission.admit, announce = false))
+    assertEquals(before, crop.snapshot())
+    assertTrue(crop.isReady)
+    assertNull(crop.failure)
+    admission.refuses = true
+    assertNull(crop.load(source, 200, admission.admit, announce = false))
+    assertEquals(before, crop.snapshot())
+    assertTrue(crop.isReady)
+    assertNull(crop.failure)
+  }
+
+  @Test
   fun inv_crop_15_aCropAtRestHoldsNoTaskOrTimerAndAGestureOnlyFlipsTheFlag() {
     val crop = MediaCrop(chat) { }
     crop.photoReady(2000, 3000)
