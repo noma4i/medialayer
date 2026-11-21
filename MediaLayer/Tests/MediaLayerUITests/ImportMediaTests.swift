@@ -65,9 +65,12 @@ extension GlobalMedia {
       #expect(imported.url.pathExtension == "mov")
       #expect(requests.count > 256)
       #expect(requests.allSatisfy { $0 <= 64 * 1024 })
-      #expect(progress.first?.bytesCopied == 0)
-      #expect(progress.last?.bytesCopied == 16 * 1024 * 1024)
-      #expect(progress.allSatisfy { $0.totalBytes == 16 * 1024 * 1024 })
+      let size: Int64 = 16 * 1024 * 1024
+      let first = try #require(progress.first)
+      let last = try #require(progress.last)
+      #expect(first.bytesCopied == 0)
+      #expect(last.bytesCopied == size)
+      #expect(progress.allSatisfy { $0.totalBytes == size })
       #expect(zip(progress, progress.dropFirst()).allSatisfy { $0.0.bytesCopied <= $0.1.bytesCopied })
       #expect(try FileManager.default.attributesOfItem(atPath: imported.url.path)[.size] as? Int == 16 * 1024 * 1024)
     }
