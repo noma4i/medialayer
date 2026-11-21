@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.52.0 - 2026-11-22
+
+### Added
+
+- `importMedia` takes a `directory` to copy into; the directory is created when missing.
+
 ## 3.51.0 - 2026-11-21
 
 ### Added
