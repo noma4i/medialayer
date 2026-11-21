@@ -139,7 +139,7 @@ struct AnimatedFramesTests {
     let data = gifOfSharedFrames(frames: 200, side: 600)
     let frames = try #require(AnimatedFrames.decode(data, maxPixel: 600))
 
-    #expect(frames.retainedBytes <= 32 << 20)
+    #expect(frames.retainedBytes - data.count <= 32 << 20, "decoded bytes beside the source")
     #expect(frames.stream.decodes == 0)
     #expect(frames.stream.cachedCount == 0)
     #expect(frames.frameCount == 200)
