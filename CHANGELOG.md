@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.51.0 - 2026-11-21
+
+### Added
+
+- `MediaImage` takes `backdrop: .blurred(radius:)` to fill its frame with a blurred copy of the image.
+- `importMedia` takes a `progress` callback with copied and total bytes.
+
+### Changed
+
+- `MediaCropper` shows a screen-size photo at once, then a sharper decode replaces it.
+
+### Fixed
+
+- A free crop frame grows when two fingers spread and shrinks when they pinch.
+
 ## 3.50.3 - 2026-11-21
 
 ### Added
