@@ -271,6 +271,7 @@ A source with a `file://` URL, such as a clip in the app bundle or a temporary f
 Android uses the context passed to `open` and accepts content URIs.
 Swift accepts readable file URLs, including security-scoped URLs.
 An optional progress callback reports copied bytes and the total size when known, on the copy thread.
+The optional `directory` selects the destination and defaults to the temporary directory on Swift or the cache directory on Kotlin.
 
 ```swift
 let imported = try await media.importMedia(fileURL) { progress in
@@ -284,7 +285,7 @@ val imported = media.importMedia(android.net.Uri.fromFile(file)) { progress ->
 }
 ```
 
-The result is a new `PreparedMedia` with `isNew` true, stored in the app's temporary directory.
+The result is a new `PreparedMedia` with `isNew` true.
 The caller owns this file and deletes it after use.
 Pass its path to a `MediaPrepareJob` for `MediaPreparer`, or its file URL to `MediaSourceValue.file` for `MediaCropper`.
 

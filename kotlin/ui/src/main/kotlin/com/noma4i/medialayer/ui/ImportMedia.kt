@@ -26,12 +26,12 @@ import kotlinx.coroutines.withContext
 data class ImportProgress(val bytesCopied: Long, val totalBytes: Long?)
 
 /** Progress runs on the copy thread. Hop to the main thread to update UI. */
-suspend fun MediaLayer.importMedia(uri: Uri, progress: ((ImportProgress) -> Unit)? = null): PreparedMedia {
+suspend fun MediaLayer.importMedia(uri: Uri, directory: File? = null, progress: ((ImportProgress) -> Unit)? = null): PreparedMedia {
   val context = checkNotNull(binding) { "the layer was not opened with MediaLayer.open(context)" }.factory.appContext
-  return importMediaAt(context, uri, progress)
+  return importMediaAt(context, uri, directory ?: context.cacheDir, progress)
 }
 
-internal suspend fun importMediaAt(context: Context, uri: Uri, progress: ((ImportProgress) -> Unit)? = null, openOutput: (File) -> OutputStream = { it.outputStream() }): PreparedMedia {
+internal suspend fun importMediaAt(context: Context, uri: Uri, directory: File = context.cacheDir, progress: ((ImportProgress) -> Unit)? = null, openOutput: (File) -> OutputStream = { it.outputStream() }): PreparedMedia {
   var output: File? = null
   try {
     return withContext(prepareDispatcher) {
@@ -48,7 +48,8 @@ internal suspend fun importMediaAt(context: Context, uri: Uri, progress: ((Impor
         }
         val extension = importExtension(metadata?.first, resolver.getType(uri))
         val suffix = if (extension.isEmpty()) "" else ".$extension"
-        val file = File(context.cacheDir, "imported-${UUID.randomUUID()}$suffix")
+        if (!directory.isDirectory && !directory.mkdirs() && !directory.isDirectory) throw IOException("the destination directory cannot be created")
+        val file = File(directory, "imported-${UUID.randomUUID()}$suffix")
         output = file
         val descriptor = try {
           resolver.openFileDescriptor(uri, "r")

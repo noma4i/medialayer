@@ -80,8 +80,9 @@ extension GlobalMedia {
       let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
       #expect(throws: MediaError.self) { try importMediaFile(directory) }
       let source = Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!
+      try Data().write(to: directory)
       #expect(throws: MediaError.self) { try importMediaFile(source, directory: directory) }
-      #expect(!FileManager.default.fileExists(atPath: directory.path))
+      try FileManager.default.removeItem(at: directory)
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
       defer { try? FileManager.default.removeItem(at: directory) }
       var input: FileHandle?
@@ -139,6 +140,26 @@ extension GlobalMedia {
       #expect(try await attempt.value)
       #expect(Set(try FileManager.default.contentsOfDirectory(atPath: directory.path)) == Set([source.lastPathComponent, finished.url.lastPathComponent]))
       #expect(try Data(contentsOf: finished.url) == Data(contentsOf: source))
+    }
+
+    @Test
+    func inv_import_05_custom_directory_is_created_and_cancelled_copy_is_removed() async throws {
+      let media = try await open()
+      let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+      defer { try? FileManager.default.removeItem(at: root) }
+      let source = Bundle.module.url(forResource: "silent", withExtension: "mp4", subdirectory: "Fixtures")!
+      let completedDirectory = root.appendingPathComponent("completed/nested")
+      let imported = try await media.importMedia(source, directory: completedDirectory)
+      #expect(imported.url.deletingLastPathComponent() == completedDirectory)
+      #expect(try Data(contentsOf: imported.url) == Data(contentsOf: source))
+      let cancelledDirectory = root.appendingPathComponent("cancelled/nested")
+      do {
+        _ = try await media.importMedia(source, directory: cancelledDirectory) { _ in
+          withUnsafeCurrentTask { $0?.cancel() }
+        }
+        Issue.record("a cancelled copy returned a file")
+      } catch is CancellationError {}
+      #expect(try FileManager.default.contentsOfDirectory(atPath: cancelledDirectory.path).isEmpty)
     }
   }
 }

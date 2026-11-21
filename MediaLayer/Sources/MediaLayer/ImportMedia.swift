@@ -13,8 +13,8 @@ public struct ImportProgress: Sendable, Equatable {
 
 extension MediaLayer {
   /// Progress runs on the copy thread. Hop to the main thread to update UI.
-  public func importMedia(_ source: URL, progress: (@Sendable (ImportProgress) -> Void)? = nil) async throws -> PreparedMedia {
-    let work = Task.detached { try importMediaFile(source, progress: progress) }
+  public func importMedia(_ source: URL, directory: URL? = nil, progress: (@Sendable (ImportProgress) -> Void)? = nil) async throws -> PreparedMedia {
+    let work = Task.detached { try importMediaFile(source, directory: directory ?? FileManager.default.temporaryDirectory, progress: progress) }
     return try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
   }
 }
@@ -39,6 +39,7 @@ func importMediaFile(
     output = destination
     let input = try FileHandle(forReadingFrom: source)
     defer { try? input.close() }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     guard FileManager.default.createFile(atPath: destination.path, contents: nil) else {
       throw MediaError.Fetch(detail: "the destination cannot be created")
     }

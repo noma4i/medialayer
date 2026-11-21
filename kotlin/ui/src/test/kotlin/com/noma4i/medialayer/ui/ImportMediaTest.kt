@@ -243,4 +243,27 @@ class ImportMediaTest {
       assertFalse(finished.file.exists())
     }
   }
+
+  @Test
+  fun inv_import_05_customDirectoryIsCreatedAndCancelledCopyIsRemoved() = runBlocking {
+    val owner = object : LifecycleOwner { override val lifecycle = LifecycleRegistry.createUnsafe(this) }
+    val media = openMediaLayer(app, settings = SharedPreferencesSettings(app), lifecycle = owner.lifecycle) { MediaLayer.open(it) }.blocking()
+    try {
+      val source = File.createTempFile("picked-custom", ".mp4").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+      picked.files["custom"] = source
+      val completed = File(directory, "completed/nested")
+      val imported = media.importMedia(uri("custom"), directory = completed)
+      assertEquals(completed, imported.file.parentFile)
+      assertTrue(source.readBytes().contentEquals(imported.file.readBytes()))
+      val cancelled = File(directory, "cancelled/nested")
+      lateinit var job: Job
+      job = launch(start = CoroutineStart.LAZY) { media.importMedia(uri("custom"), directory = cancelled) { job.cancel() } }
+      job.start()
+      job.join()
+      assertTrue(job.isCancelled)
+      assertTrue(cancelled.listFiles()!!.isEmpty())
+    } finally {
+      media.close()
+    }
+  }
 }
