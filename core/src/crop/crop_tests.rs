@@ -109,9 +109,10 @@ fn inv_crop_04_a_zoom_keeps_the_focal_point_in_place_inside_the_limits_and_the_p
     near(crop_zoom(zoomed, setup(size, chat()), 0.01, 0.5, 0.5), first, "zoom out stops at the largest frame");
     let moved = crop_zoom(rect(0.0, 0.0, first.width, first.height), setup(size, chat()), 2.0, 0.25 * first.width, 0.25 * first.height);
     assert!(inside(moved));
-    let free = crop_zoom(rect(0.0, 0.0, 1.0, 1.0), setup(size, None), 4.0, 0.5, 0.5);
+    near(crop_zoom(rect(0.375, 0.375, 0.25, 0.25), setup(size, None), 4.0, 0.5, 0.5), rect(0.0, 0.0, 1.0, 1.0), "free spread fills the photo");
+    let free = crop_zoom(rect(0.0, 0.0, 1.0, 1.0), setup(size, None), 0.25, 0.5, 0.5);
     near(free, rect(0.375, 0.375, 0.25, 0.25), "free zoom shrinks both sides");
-    let floor = crop_zoom(free, setup(size, None), 100.0, 0.5, 0.5);
+    let floor = crop_zoom(free, setup(size, None), 0.01, 0.5, 0.5);
     assert!((floor.width * 2000.0 - 0.1 * 2000.0).abs() < 1e-6, "the smallest free side is 10 percent of the shorter side: {floor:?}");
     near(crop_zoom(first, setup(size, chat()), f64::NAN, 0.5, 0.5), first, "not a number");
 }
@@ -366,4 +367,22 @@ fn inv_crop_22_a_fixed_frame_turned_right_then_left_returns_to_the_rectangle_it_
         let back = crop_turn(right, setup(landscape, chat()), false);
         near(back, start, name);
     }
+}
+
+#[test]
+fn inv_crop_23_free_spread_enlarges_the_frame_and_pinch_shrinks_it() {
+    let size = photo(2000, 2000);
+    let free = setup(size, None);
+    let start = rect(0.25, 0.25, 0.5, 0.5);
+    let frame = crop_layout(start, free, view()).unwrap().frame;
+    let spread = crop_zoom_view(start, free, view(), 2.0, 200.0, 400.0);
+    let pinch = crop_zoom_view(start, free, view(), 0.5, 200.0, 400.0);
+    let spread_frame = crop_layout(spread, free, view()).unwrap().frame;
+    let pinch_frame = crop_layout(pinch, free, view()).unwrap().frame;
+    assert!(spread_frame.width > frame.width && spread_frame.height > frame.height);
+    assert!(pinch_frame.width < frame.width && pinch_frame.height < frame.height);
+
+    let fixed = setup(size, square());
+    let zoomed = crop_zoom_view(start, fixed, view(), 2.0, 200.0, 400.0);
+    assert!(zoomed.width < start.width && zoomed.height < start.height);
 }

@@ -8,7 +8,7 @@ The library draws the photo, the dimmed area and the frame, and owns the gesture
 | Frame | Made with | What the user does |
 | --- | --- | --- |
 | Fixed proportions | `aspect` (1080:1920 for a chat or a moment, 1:1 for an avatar) | The frame stays still and as large as the window allows. Drag and pinch move and scale the photo under it. |
-| Free | no `aspect` | Drag a side or a corner to resize the frame, drag inside to move it, pinch to resize it. |
+| Free | no `aspect` | Drag a side or a corner to resize the frame, drag inside to move it, spread two fingers to enlarge the frame, pinch them together to shrink it. |
 
 The photo never leaves the frame, the frame never leaves the photo. A fixed frame shrinks to a third of its largest size at most, a free frame is not smaller than 10 percent of the shorter side of the photo (`CropLimits`).
 

@@ -121,7 +121,7 @@ pub fn crop_pan(rect: CropFractions, dx: f64, dy: f64) -> CropFractions {
     CropFractions { x: limit(rect.x + dx, 0.0, 1.0 - rect.width), y: limit(rect.y + dy, 0.0, 1.0 - rect.height), ..rect }
 }
 
-/// The rectangle resized by `factor` (above 1 makes it smaller, the content looks larger) around the photo point (`focal_x`, `focal_y`).
+/// The rectangle resized around (`focal_x`, `focal_y`). Above 1, a free frame grows and a frame with proportions shrinks as the photo magnifies.
 /// The point keeps its place inside the rectangle. The size follows the limits and the proportions.
 #[uniffi::export]
 pub fn crop_zoom(rect: CropFractions, setup: CropSetup, factor: f64, focal_x: f64, focal_y: f64) -> CropFractions {
@@ -135,7 +135,7 @@ pub fn crop_zoom(rect: CropFractions, setup: CropSetup, factor: f64, focal_x: f6
         None => {
             let most = (rect.width / bounds.min_w).min(rect.height / bounds.min_h);
             let least = (rect.width / bounds.max_w).max(rect.height / bounds.max_h);
-            let scale = factor.min(most).max(least);
+            let scale = (1.0 / factor).min(most).max(least);
             (rect.width / scale, rect.height / scale)
         }
         Some(ratio) => {
