@@ -4,7 +4,7 @@ MediaLayer computes color only after a `tone(source, band)` request or a `WithMe
 
 | Question | Answer |
 | -------- | ------ |
-| Who prepares the pixels | Android uses a small software decode in Coil, iOS uses an ImageIO thumbnail. For video the platform extracts a downscaled frame |
+| Who prepares the pixels | Android uses a small software decode in Coil, iOS uses an ImageIO thumbnail. A video with a cover uses the cover; a video without a cover uses a downscaled first frame |
 | When is the tone ready | BlurHash is available at once. After demand appears the core calls the library callback with the source and notifies subscribers |
 | What does a tone hold | An 8 by 12 grid of colors, the average color of the whole frame, the average of a top band, the average of the rest, up to 3 dominant colors |
 | Where is it kept | With the cache entry of the source. It survives a restart and goes away with the entry |
