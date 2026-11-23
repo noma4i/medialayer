@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.53.2 - 2026-11-23
+
+### Fixed
+
+- An image of another size stays available when the largest decode of the same source leaves memory, on both platforms.
+- Android `MediaImage` passes `Ready` to its content while it draws the same picture of another size, like iOS.
+- Android draws that picture in the first frame of a new `MediaImage`, its preview and a `MediaVideo` cover.
+
 ## 3.53.1 - 2026-11-23
 
 ### Fixed
