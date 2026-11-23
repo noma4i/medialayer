@@ -57,16 +57,17 @@ class MediaImageInterimTest {
     val decodes = layer.imageStats().snapshot().decodes
     assertEquals(1uL, decodes)
 
+    rule.mainClock.autoAdvance = false
     rule.runOnIdle { side = 50 }
-    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); requests.get() == 2 }
-    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); rule.onAllNodesWithTag(INTERIM_TAG).fetchSemanticsNodes().isNotEmpty() }
-    rule.onAllNodesWithTag(INTERIM_TAG).assertCountEquals(1)
+    rule.mainClock.advanceTimeByFrame()
+    rule.onAllNodesWithTag(INTERIM_TAG, useUnmergedTree = true).assertCountEquals(1)
     assertEquals(decodes, layer.imageStats().snapshot().decodes)
 
     gate.complete(Unit)
+    rule.mainClock.autoAdvance = true
     rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.count { it == "itemState:${source.url}:Ready" } == 2 }
-    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); rule.onAllNodesWithTag(INTERIM_TAG).fetchSemanticsNodes().isEmpty() }
-    rule.onAllNodesWithTag(INTERIM_TAG).assertCountEquals(0)
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); rule.onAllNodesWithTag(INTERIM_TAG, useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
+    rule.onAllNodesWithTag(INTERIM_TAG, useUnmergedTree = true).assertCountEquals(0)
     assertEquals(decodes + 1uL, layer.imageStats().snapshot().decodes)
   }
 }

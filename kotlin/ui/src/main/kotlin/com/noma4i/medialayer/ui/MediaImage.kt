@@ -38,7 +38,6 @@ import coil3.Extras
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
-import coil3.request.crossfade
 import coil3.compose.rememberConstraintsSizeResolver
 import coil3.ImageLoader
 import coil3.decode.BitmapFactoryDecoder
@@ -139,10 +138,10 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
   val interimKey = remember(environment.imageLoader, source, pixels, dimensions, resting, animation.repeats, rated, preview) {
     if (preview == null && resting == null && animation.repeats == Repeats.Forever && !rated) environment.imageLoader.components.interceptors.filterIsInstance<StillImages>().firstOrNull()?.key(source.url, source.headers, pixels, dimensions, scale) else null
   }
-  val request = remember(media, source, pixels, scale, placementPixels, resting, animation.repeats, dimensions, rated, loadTurn, interimKey) {
+  val interim = remember(interimKey) { interimKey?.let { (environment.imageLoader.memoryCache?.get(it)?.image as? coil3.BitmapImage)?.bitmap?.asImageBitmap() } }
+  val request = remember(media, source, pixels, scale, placementPixels, resting, animation.repeats, dimensions, rated, loadTurn) {
     val request = imageRequest(context, source, pixels, scale, media, placementPixels, resting, animation.repeats, media.viewDecodeAdmit(), dimensions, rate)
     request.newBuilder().apply {
-      interimKey?.let { placeholderMemoryCacheKey(it); crossfade(false) }
       if (loadTurn != 0uL) memoryCacheKeyExtra("retry", loadTurn.toString())
     }.build()
   }
@@ -182,23 +181,24 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
         }.first()
     }
   }
-  val interimVisible = remember { mutableStateOf(false) }
-  if (!interimVisible.value) ImageBlur(item, screen, state, contentScale)
-  if (preview != null && screen.visible && state.value != MediaState.Ready) {
-    val previewDimensions = dimensions?.copy(declared = preview.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) })
-    val previewKey = remember(environment.imageLoader, preview, pixels, previewDimensions, scale) {
-      environment.imageLoader.components.interceptors.filterIsInstance<StillImages>().firstOrNull()?.key(preview.url, preview.headers, pixels, previewDimensions, scale)
-    }
-    val previewRequest = remember(media, preview, pixels, scale, placementPixels, previewDimensions, previewKey) {
-      imageRequest(context, preview, pixels, scale, media, placementPixels, admit = media.viewDecodeAdmit(), dimensions = previewDimensions).newBuilder().apply {
-        previewKey?.let { placeholderMemoryCacheKey(it); crossfade(false) }
-      }.build()
-    }
-    AsyncImage(model = previewRequest, contentDescription = null, imageLoader = loader, contentScale = contentScale, modifier = Modifier.fillMaxSize().testTag(PREVIEW_TAG))
-  }
   val drawsImage = remember { mutableStateOf(false) }
+  val previewDimensions = dimensions?.copy(declared = preview?.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) })
+  val previewKey = remember(environment.imageLoader, preview, pixels, previewDimensions, scale) {
+    preview?.let { environment.imageLoader.components.interceptors.filterIsInstance<StillImages>().firstOrNull()?.key(it.url, it.headers, pixels, previewDimensions, scale) }
+  }
+  val previewInterim = remember(previewKey) { previewKey?.let { (environment.imageLoader.memoryCache?.get(it)?.image as? coil3.BitmapImage)?.bitmap?.asImageBitmap() } }
+  val previewReady = remember(preview, previewDimensions, pixels, scale) { mutableStateOf(false) }
+  val showPreview = preview != null && screen.visible && state.value != MediaState.Ready
+  val shownInterim = if (!drawsImage.value) interim ?: if (showPreview && !previewReady.value) previewInterim else null else null
+  if (shownInterim == null) ImageBlur(item, screen, state, contentScale)
+  shownInterim?.let { Image(it, null, Modifier.fillMaxSize().testTag(INTERIM_TAG), contentScale = contentScale) }
+  if (preview != null && screen.visible && state.value != MediaState.Ready) {
+    val previewRequest = remember(media, preview, pixels, scale, placementPixels, previewDimensions) {
+      imageRequest(context, preview, pixels, scale, media, placementPixels, admit = media.viewDecodeAdmit(), dimensions = previewDimensions)
+    }
+    AsyncImage(model = previewRequest, contentDescription = null, imageLoader = loader, contentScale = contentScale, onState = { previewReady.value = it is AsyncImagePainter.State.Success }, modifier = Modifier.fillMaxSize().testTag(PREVIEW_TAG))
+  }
   val onState: (AsyncImagePainter.State) -> Unit = { painterState ->
-      interimVisible.value = painterState is AsyncImagePainter.State.Loading && painterState.painter != null && interimKey != null
       animated.value = ((painterState as? AsyncImagePainter.State.Success)?.result?.image as? DrawableImage)?.drawable as? Animatable
       painterState.toMediaState()?.let { reached ->
         state.value = reached
@@ -214,10 +214,10 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
       if (state.value == MediaState.Ready && animated.value == null) {
         Image(painter, null, Modifier.matchParentSize().blur(backdrop.radius).clipToBounds().testTag("media-image.backdrop"), contentScale = ContentScale.Crop)
       }
-      Image(painter, null, Modifier.fillMaxSize().then(sizeResolver).then(if (interimVisible.value) Modifier.testTag(INTERIM_TAG) else Modifier).drawWithContent { if (drawsImage.value || interimVisible.value) drawContent() }, contentScale = contentScale)
+      Image(painter, null, Modifier.fillMaxSize().then(sizeResolver).drawWithContent { if (drawsImage.value) drawContent() }, contentScale = contentScale)
     }
   } else {
-    AsyncImage(model = request, contentDescription = null, imageLoader = loader, contentScale = contentScale, onState = onState, modifier = Modifier.fillMaxSize().then(if (interimVisible.value) Modifier.testTag(INTERIM_TAG) else Modifier).drawWithContent { if (drawsImage.value || interimVisible.value) drawContent() })
+    AsyncImage(model = request, contentDescription = null, imageLoader = loader, contentScale = contentScale, onState = onState, modifier = Modifier.fillMaxSize().drawWithContent { if (drawsImage.value) drawContent() })
   }
   ImageContent(screen, state, drawsImage, content)
 }
