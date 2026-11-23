@@ -59,6 +59,9 @@ class MediaImageInterimTest {
 
     rule.mainClock.autoAdvance = false
     rule.runOnIdle { side = 50 }
+    // The state write composes on the next frame: frame 1 is the first frame of the new MediaImage (a probe node next to it appears there too).
+    // The old Coil placeholder path drew nothing in it: [0, 0, 1].
+    rule.mainClock.advanceTimeByFrame()
     rule.mainClock.advanceTimeByFrame()
     rule.onAllNodesWithTag(INTERIM_TAG, useUnmergedTree = true).assertCountEquals(1)
     assertEquals(decodes, layer.imageStats().snapshot().decodes)
