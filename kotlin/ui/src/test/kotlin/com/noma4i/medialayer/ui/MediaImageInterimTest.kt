@@ -58,6 +58,7 @@ class MediaImageInterimTest {
     rule.setContent {
       MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
         key(side) {
+          Box(Modifier.size(1.dp).testTag("probe$side"))
           MediaImage(source, Modifier.size(side.dp)) { state ->
             if (state != MediaState.Ready) Box(Modifier.testTag("skeleton"))
           }
@@ -74,8 +75,7 @@ class MediaImageInterimTest {
     }
     rule.mainClock.autoAdvance = false
     rule.runOnIdle { side = 50 }
-    rule.mainClock.advanceTimeByFrame()
-    rule.mainClock.advanceTimeByFrame()
+    firstFrameOfNewImage()
     rule.onAllNodesWithTag(INTERIM_TAG, useUnmergedTree = true).assertCountEquals(1)
     if (!evictLargest) rule.onAllNodesWithTag("skeleton", useUnmergedTree = true).assertCountEquals(0)
     gate.complete(Unit)
@@ -103,7 +103,7 @@ class MediaImageInterimTest {
 
     rule.setContent {
       MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
-        key(side) { MediaImage(source, Modifier.size(side.dp)) }
+        key(side) { Box(Modifier.size(1.dp).testTag("probe$side")); MediaImage(source, Modifier.size(side.dp)) }
       }
     }
     rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.count { it == "itemState:${source.url}:Ready" } == 1 }
@@ -112,10 +112,7 @@ class MediaImageInterimTest {
 
     rule.mainClock.autoAdvance = false
     rule.runOnIdle { side = 50 }
-    // The state write composes on the next frame: frame 1 is the first frame of the new MediaImage (a probe node next to it appears there too).
-    // The old Coil placeholder path drew nothing in it: [0, 0, 1].
-    rule.mainClock.advanceTimeByFrame()
-    rule.mainClock.advanceTimeByFrame()
+    firstFrameOfNewImage()
     rule.onAllNodesWithTag(INTERIM_TAG, useUnmergedTree = true).assertCountEquals(1)
     assertEquals(decodes, layer.imageStats().snapshot().decodes)
 
@@ -125,5 +122,14 @@ class MediaImageInterimTest {
     rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); rule.onAllNodesWithTag(INTERIM_TAG, useUnmergedTree = true).fetchSemanticsNodes().isEmpty() }
     rule.onAllNodesWithTag(INTERIM_TAG, useUnmergedTree = true).assertCountEquals(0)
     assertEquals(decodes + 1uL, layer.imageStats().snapshot().decodes)
+  }
+
+  /** Steps frames one by one until the frame that first composes the new MediaImage (the probe next to it appears in that frame), so the check reads that exact frame. */
+  private fun firstFrameOfNewImage() {
+    repeat(20) {
+      rule.mainClock.advanceTimeByFrame()
+      if (rule.onAllNodesWithTag("probe50", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()) return
+    }
+    throw AssertionError("the new MediaImage never composed")
   }
 }
