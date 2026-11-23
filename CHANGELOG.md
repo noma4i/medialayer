@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.53.1 - 2026-11-23
+
+### Fixed
+
+- A `MediaImage` preview and a `MediaVideo` cover show the same picture already decoded at another size from the first frame, on both platforms.
+
 ## 3.53.0 - 2026-11-23
 
 ### Changed
