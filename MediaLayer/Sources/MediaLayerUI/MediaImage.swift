@@ -54,8 +54,11 @@ private struct PreviewImage: View {
 
   var body: some View {
     ImageRequestView(source: source, context: context, points: points, scale: scale, contentMode: contentMode, waiting: {
-      if let image = MediaImagePipeline.interimImage(for: source, in: context) {
-        Image(platform: image).resizable().aspectRatio(contentMode: contentMode)
+      // Color.clear keeps the waiting view non-empty: an empty view never runs the task that prepares the request.
+      Color.clear.overlay {
+        if let image = MediaImagePipeline.interimImage(for: source, in: context) {
+          Image(platform: image).resizable().aspectRatio(contentMode: contentMode)
+        }
       }
     }) { key, request in
       PreviewFrame(source: source, context: context, key: key, request: request, contentMode: contentMode)
