@@ -33,8 +33,8 @@ struct PlaceholderView: View {
     GeometryReader { geometry in
       let source = Source(item: item, context: ObjectIdentifier(context))
       ZStack {
-        if let current, current.source == source {
-          switch current.content {
+        if let content = current?.source == source ? current?.content : interimCover {
+          switch content {
           case .blur(let image): Image(decorative: image, scale: 1).resizable().scaledToFill()
           case .cover(let image): Image(platform: image).resizable().scaledToFill()
           case .firstFrame(let image): Image(decorative: image, scale: 1).resizable().scaledToFill()
@@ -52,6 +52,16 @@ struct PlaceholderView: View {
         published(content)
       }
     }
+  }
+
+  private var interimCover: PlaceholderContent? {
+    guard enabled, !ready, item.kind == .video,
+          let url = URL(string: item.url.trimmingCharacters(in: .whitespacesAndNewlines)),
+          let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme), url.host != nil,
+          let cover = item.cover?.trimmingCharacters(in: .whitespacesAndNewlines), !cover.isEmpty,
+          let image = MediaImagePipeline.interimImage(for: CoverSource(url: cover, headers: item.headers), in: context)
+    else { return nil }
+    return .cover(image)
   }
 
   private func resolve(points: CGSize, scale: CGFloat) async -> PlaceholderContent? {
