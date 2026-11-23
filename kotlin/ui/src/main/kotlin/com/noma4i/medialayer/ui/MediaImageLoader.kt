@@ -2,6 +2,7 @@ package com.noma4i.medialayer.ui
 
 import android.app.ActivityManager
 import android.content.Context
+import androidx.compose.ui.graphics.asImageBitmap
 import coil3.ImageLoader
 import coil3.decode.DataSource
 import coil3.decode.ImageSource
@@ -30,8 +31,8 @@ private const val MAX_IMAGE_MEMORY_BYTES: Int = 128 * 1024 * 1024
 internal class StillImages : coil3.intercept.Interceptor {
   private data class Source(val url: String, val headers: Map<String, String>)
   private data class Entry(val key: MemoryCache.Key, val area: Long, val pixels: com.noma4i.medialayer.PixelSize?, val dimensions: PixelSizeMemo.Args?, val scale: coil3.size.Scale)
-  private val entries = object : LinkedHashMap<Source, Entry>(512, 0.75f, true) {
-    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Source, Entry>) = size > 512
+  private val entries = object : LinkedHashMap<Source, List<Entry>>(512, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Source, List<Entry>>) = size > 512
   }
 
   override suspend fun intercept(chain: coil3.intercept.Interceptor.Chain) = chain.proceed()
@@ -42,14 +43,19 @@ internal class StillImages : coil3.intercept.Interceptor {
     val area = result.image.width.toLong() * result.image.height
     val source = Source(data.url, data.headers.toMap())
     synchronized(entries) {
-      if (area >= (entries[source]?.area ?: 0L)) entries[source] = Entry(key, area, data.pixels, data.dimensions, result.request.scale)
+      entries[source] = (listOf(Entry(key, area, data.pixels, data.dimensions, result.request.scale)) + entries[source].orEmpty().filterNot { it.key == key }).take(4)
     }
   }
 
-  fun key(url: String, headers: Map<String, String>, pixels: com.noma4i.medialayer.PixelSize?, dimensions: PixelSizeMemo.Args?, scale: coil3.size.Scale): MemoryCache.Key? = synchronized(entries) {
-    entries[Source(url, headers)]?.takeUnless { it.pixels == pixels && it.dimensions == dimensions && it.scale == scale }?.key
+  fun keys(url: String, headers: Map<String, String>, pixels: com.noma4i.medialayer.PixelSize?, dimensions: PixelSizeMemo.Args?, scale: coil3.size.Scale): List<MemoryCache.Key> = synchronized(entries) {
+    entries[Source(url, headers)].orEmpty().filterNot { it.pixels == pixels && it.dimensions == dimensions && it.scale == scale }.sortedByDescending { it.area }.map { it.key }
   }
 }
+
+internal fun ImageLoader.interim(url: String, headers: Map<String, String>, pixels: com.noma4i.medialayer.PixelSize?, dimensions: PixelSizeMemo.Args?, scale: coil3.size.Scale): androidx.compose.ui.graphics.ImageBitmap? =
+  components.interceptors.filterIsInstance<StillImages>().firstOrNull()?.keys(url, headers, pixels, dimensions, scale)?.firstNotNullOfOrNull {
+    (memoryCache?.get(it)?.image as? coil3.BitmapImage)?.bitmap?.asImageBitmap()
+  }
 
 fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: Int? = null, stats: com.noma4i.medialayer.ImageCounters = com.noma4i.medialayer.ImageCounters()): ImageLoader =
   mediaImageLoader(context, bytes, memoryBytes, stats, PixelSizeMemo())

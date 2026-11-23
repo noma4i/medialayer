@@ -135,10 +135,9 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
   val rate = playbackRateOf(playbackRate)
   val rated = playsAtRate(rate, resting)
   val loadTurn by attempt
-  val interimKey = remember(environment.imageLoader, source, pixels, dimensions, resting, animation.repeats, rated, preview) {
-    if (preview == null && resting == null && animation.repeats == Repeats.Forever && !rated) environment.imageLoader.components.interceptors.filterIsInstance<StillImages>().firstOrNull()?.key(source.url, source.headers, pixels, dimensions, scale) else null
+  val interim = remember(environment.imageLoader, source, pixels, dimensions, scale, resting, animation.repeats, rated, preview) {
+    if (preview == null && resting == null && animation.repeats == Repeats.Forever && !rated) environment.imageLoader.interim(source.url, source.headers, pixels, dimensions, scale) else null
   }
-  val interim = remember(interimKey) { interimKey?.let { (environment.imageLoader.memoryCache?.get(it)?.image as? coil3.BitmapImage)?.bitmap?.asImageBitmap() } }
   val request = remember(media, source, pixels, scale, placementPixels, resting, animation.repeats, dimensions, rated, loadTurn) {
     val request = imageRequest(context, source, pixels, scale, media, placementPixels, resting, animation.repeats, media.viewDecodeAdmit(), dimensions, rate)
     request.newBuilder().apply {
@@ -183,10 +182,9 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
   }
   val drawsImage = remember { mutableStateOf(false) }
   val previewDimensions = dimensions?.copy(declared = preview?.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) })
-  val previewKey = remember(environment.imageLoader, preview, pixels, previewDimensions, scale) {
-    preview?.let { environment.imageLoader.components.interceptors.filterIsInstance<StillImages>().firstOrNull()?.key(it.url, it.headers, pixels, previewDimensions, scale) }
+  val previewInterim = remember(environment.imageLoader, preview, pixels, previewDimensions, scale) {
+    preview?.let { environment.imageLoader.interim(it.url, it.headers, pixels, previewDimensions, scale) }
   }
-  val previewInterim = remember(previewKey) { previewKey?.let { (environment.imageLoader.memoryCache?.get(it)?.image as? coil3.BitmapImage)?.bitmap?.asImageBitmap() } }
   val previewReady = remember(preview, previewDimensions, pixels, scale) { mutableStateOf(false) }
   val showPreview = preview != null && screen.visible && state.value != MediaState.Ready
   val shownInterim = if (!drawsImage.value) interim ?: if (showPreview && !previewReady.value) previewInterim else null else null
@@ -219,7 +217,7 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
   } else {
     AsyncImage(model = request, contentDescription = null, imageLoader = loader, contentScale = contentScale, onState = onState, modifier = Modifier.fillMaxSize().drawWithContent { if (drawsImage.value) drawContent() })
   }
-  ImageContent(screen, state, drawsImage, content)
+  ImageContent(screen, state, drawsImage, shownInterim != null, content)
 }
 
 /** What the loaded picture depends on; the blurHash only feeds the placeholder. */
@@ -228,10 +226,10 @@ private fun MediaItem.loadIdentity(): List<Any?> = listOf(kind, url, headers, co
 internal fun MediaState.drawsImage(): Boolean = this != MediaState.Idle && this != MediaState.Loading
 
 @Composable
-private fun ImageContent(screen: ScreenVisibility, state: State<MediaState>, drawsImage: MutableState<Boolean>, content: @Composable (MediaState) -> Unit) {
+private fun ImageContent(screen: ScreenVisibility, state: State<MediaState>, drawsImage: MutableState<Boolean>, hasInterim: Boolean, content: @Composable (MediaState) -> Unit) {
   val composedState = state.value
   SideEffect { drawsImage.value = composedState.drawsImage() }
-  if (screen.visible) content(composedState)
+  if (screen.visible) content(if (hasInterim && (composedState == MediaState.Idle || composedState == MediaState.Loading)) MediaState.Ready else composedState)
 }
 
 @Composable

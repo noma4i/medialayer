@@ -324,10 +324,9 @@ private fun VideoCover(media: MediaLayer, item: MediaItem, ready: Boolean, enabl
   BoxWithConstraints(Modifier.fillMaxSize()) {
     val dimensions = decodeInput(constraints, density, image, contentScale)
     val placementPixels = if (constraints.hasBoundedWidth && constraints.hasBoundedHeight) constraints.maxWidth.toLong() * constraints.maxHeight else 0L
-    val interimKey = remember(environment.imageLoader, cover.url, item.headers, dimensions, scale) {
-      environment.imageLoader.components.interceptors.filterIsInstance<StillImages>().firstOrNull()?.key(cover.url, item.headers, null, dimensions, scale)
+    val interim = remember(environment.imageLoader, cover.url, item.headers, dimensions, scale) {
+      environment.imageLoader.interim(cover.url, item.headers, null, dimensions, scale)
     }
-    val interim = remember(interimKey) { interimKey?.let { (environment.imageLoader.memoryCache?.get(it)?.image as? coil3.BitmapImage)?.bitmap?.asImageBitmap() } }
     val request = remember(media, image, dimensions, scale, placementPixels) {
       imageRequest(context, image, null, scale, media, placementPixels, admit = media.viewDecodeAdmit(), dimensions = dimensions)
     }
