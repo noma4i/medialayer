@@ -27,16 +27,42 @@ internal fun imageMemoryKey(cacheKey: String, pixels: com.noma4i.medialayer.Pixe
 
 private const val MAX_IMAGE_MEMORY_BYTES: Int = 128 * 1024 * 1024
 
+internal class StillImages : coil3.intercept.Interceptor {
+  private data class Source(val url: String, val headers: Map<String, String>)
+  private data class Entry(val key: MemoryCache.Key, val area: Long, val pixels: com.noma4i.medialayer.PixelSize?, val dimensions: PixelSizeMemo.Args?, val scale: coil3.size.Scale)
+  private val entries = object : LinkedHashMap<Source, Entry>(512, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Source, Entry>) = size > 512
+  }
+
+  override suspend fun intercept(chain: coil3.intercept.Interceptor.Chain) = chain.proceed()
+
+  fun record(data: MediaImageData, result: SuccessResult) {
+    if (data.rest != null || data.repeats != Repeats.Forever || data.rated || result.image !is coil3.BitmapImage) return
+    val key = result.memoryCacheKey ?: return
+    val area = result.image.width.toLong() * result.image.height
+    val source = Source(data.url, data.headers.toMap())
+    synchronized(entries) {
+      if (area >= (entries[source]?.area ?: 0L)) entries[source] = Entry(key, area, data.pixels, data.dimensions, result.request.scale)
+    }
+  }
+
+  fun key(url: String, headers: Map<String, String>, pixels: com.noma4i.medialayer.PixelSize?, dimensions: PixelSizeMemo.Args?, scale: coil3.size.Scale): MemoryCache.Key? = synchronized(entries) {
+    entries[Source(url, headers)]?.takeUnless { it.pixels == pixels && it.dimensions == dimensions && it.scale == scale }?.key
+  }
+}
+
 fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: Int? = null, stats: com.noma4i.medialayer.ImageCounters = com.noma4i.medialayer.ImageCounters()): ImageLoader =
   mediaImageLoader(context, bytes, memoryBytes, stats, PixelSizeMemo())
 
 internal fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: Int?, stats: com.noma4i.medialayer.ImageCounters, pixelSizes: PixelSizeMemo, admit: DecodeAdmit? = null): ImageLoader {
   val budget = memoryBytes ?: minOf(MAX_IMAGE_MEMORY_BYTES.toLong(), context.getSystemService(ActivityManager::class.java).memoryClass * 1024L * 1024L / 4).toInt()
+  val stillImages = StillImages()
   require(budget > 0) { "memoryBytes must be positive" }
   return ImageLoader.Builder(context)
     .eventListenerFactory { ImageEvents(stats) }
     .memoryCache(MemoryCache.Builder().maxSizeBytes(budget.toLong()).build())
     .components {
+      add(stillImages)
       admit?.let { add(AdmittedDecoders(it)) }
       add(coil3.intercept.Interceptor { chain ->
         val data = chain.request.data as? MediaImageData
@@ -52,7 +78,7 @@ internal fun mediaImageLoader(context: Context, bytes: ImageBytes, memoryBytes: 
         request.memoryCacheKey(if (pixels == null) MemoryCache.Key(prepared.identity + if (data.rated) "|rated" else "") else imageMemoryKey(prepared.identity, pixels, chain.request.scale, data.rest, data.repeats, data.rated))
         val keyed = chain.withRequest(request.build())
         val result = if (pixels == null) keyed.proceed() else keyed.withSize(coil3.size.Size(pixels.width.toInt(), pixels.height.toInt())).proceed()
-        (result as? SuccessResult)?.let { pixelSizes.retain(it.image, prepared) }
+        (result as? SuccessResult)?.let { pixelSizes.retain(it.image, prepared); stillImages.record(data, it) }
         result
       })
       add(AnimatedImageDecoder.Factory())

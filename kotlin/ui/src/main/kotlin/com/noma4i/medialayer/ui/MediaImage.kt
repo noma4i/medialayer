@@ -38,6 +38,7 @@ import coil3.Extras
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
+import coil3.request.crossfade
 import coil3.compose.rememberConstraintsSizeResolver
 import coil3.ImageLoader
 import coil3.decode.BitmapFactoryDecoder
@@ -135,9 +136,15 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
   val rate = playbackRateOf(playbackRate)
   val rated = playsAtRate(rate, resting)
   val loadTurn by attempt
-  val request = remember(media, source, pixels, scale, placementPixels, resting, animation.repeats, dimensions, rated, loadTurn) {
+  val interimKey = remember(environment.imageLoader, source, pixels, dimensions, resting, animation.repeats, rated, preview) {
+    if (preview == null && resting == null && animation.repeats == Repeats.Forever && !rated) environment.imageLoader.components.interceptors.filterIsInstance<StillImages>().firstOrNull()?.key(source.url, source.headers, pixels, dimensions, scale) else null
+  }
+  val request = remember(media, source, pixels, scale, placementPixels, resting, animation.repeats, dimensions, rated, loadTurn, interimKey) {
     val request = imageRequest(context, source, pixels, scale, media, placementPixels, resting, animation.repeats, media.viewDecodeAdmit(), dimensions, rate)
-    if (loadTurn == 0uL) request else request.newBuilder().memoryCacheKeyExtra("retry", loadTurn.toString()).build()
+    request.newBuilder().apply {
+      interimKey?.let { placeholderMemoryCacheKey(it); crossfade(false) }
+      if (loadTurn != 0uL) memoryCacheKeyExtra("retry", loadTurn.toString())
+    }.build()
   }
   // The shown image belongs to the load identity: a blurHash that only arrives later changes the item, not the picture.
   val state = remember(item.loadIdentity()) { mutableStateOf<MediaState>(MediaState.Idle) }
@@ -175,13 +182,15 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
         }.first()
     }
   }
-  ImageBlur(item, screen, state, contentScale)
+  val interimVisible = remember { mutableStateOf(false) }
+  if (!interimVisible.value) ImageBlur(item, screen, state, contentScale)
   if (preview != null && screen.visible && state.value != MediaState.Ready) {
     val previewRequest = remember(media, preview, pixels, scale, placementPixels, dimensions) { imageRequest(context, preview, pixels, scale, media, placementPixels, admit = media.viewDecodeAdmit(), dimensions = dimensions?.copy(declared = preview.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) })) }
     AsyncImage(model = previewRequest, contentDescription = null, imageLoader = loader, contentScale = contentScale, modifier = Modifier.fillMaxSize().testTag(PREVIEW_TAG))
   }
   val drawsImage = remember { mutableStateOf(false) }
   val onState: (AsyncImagePainter.State) -> Unit = { painterState ->
+      interimVisible.value = painterState is AsyncImagePainter.State.Loading && painterState.painter != null && interimKey != null
       animated.value = ((painterState as? AsyncImagePainter.State.Success)?.result?.image as? DrawableImage)?.drawable as? Animatable
       painterState.toMediaState()?.let { reached ->
         state.value = reached
@@ -197,10 +206,10 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
       if (state.value == MediaState.Ready && animated.value == null) {
         Image(painter, null, Modifier.matchParentSize().blur(backdrop.radius).clipToBounds().testTag("media-image.backdrop"), contentScale = ContentScale.Crop)
       }
-      Image(painter, null, Modifier.fillMaxSize().then(sizeResolver).drawWithContent { if (drawsImage.value) drawContent() }, contentScale = contentScale)
+      Image(painter, null, Modifier.fillMaxSize().then(sizeResolver).then(if (interimVisible.value) Modifier.testTag(INTERIM_TAG) else Modifier).drawWithContent { if (drawsImage.value || interimVisible.value) drawContent() }, contentScale = contentScale)
     }
   } else {
-    AsyncImage(model = request, contentDescription = null, imageLoader = loader, contentScale = contentScale, onState = onState, modifier = Modifier.fillMaxSize().drawWithContent { if (drawsImage.value) drawContent() })
+    AsyncImage(model = request, contentDescription = null, imageLoader = loader, contentScale = contentScale, onState = onState, modifier = Modifier.fillMaxSize().then(if (interimVisible.value) Modifier.testTag(INTERIM_TAG) else Modifier).drawWithContent { if (drawsImage.value || interimVisible.value) drawContent() })
   }
   ImageContent(screen, state, drawsImage, content)
 }
@@ -262,6 +271,7 @@ internal fun imageRequest(context: Context, source: MediaSource, pixels: PixelSi
     .build()
 
 internal const val PREVIEW_TAG = "medialayer-preview"
+internal const val INTERIM_TAG = "medialayer-interim"
 
 internal val PLACEMENT_PIXELS = Extras.Key(default = 0L)
 
