@@ -43,6 +43,7 @@ import androidx.media3.ui.compose.SURFACE_TYPE_TEXTURE_VIEW
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import coil3.compose.AsyncImage
+import coil3.request.crossfade
 import com.noma4i.medialayer.Kind
 import com.noma4i.medialayer.MediaSource
 import com.noma4i.medialayer.MediaState
@@ -316,17 +317,25 @@ private fun VideoCover(media: MediaLayer, item: MediaItem, ready: Boolean, enabl
   val cover = shown ?: return
   val observer = LocalPlaceholderObserver.current
   val context = LocalContext.current
+  val environment = LocalMediaEnvironment.current
   val density = LocalDensity.current.density
   val scale = contentScale.toScale()
   val image = remember(cover.url, item.headers) { CoverSource(cover.url, item.headers) }
   BoxWithConstraints(Modifier.fillMaxSize()) {
     val dimensions = decodeInput(constraints, density, image, contentScale)
     val placementPixels = if (constraints.hasBoundedWidth && constraints.hasBoundedHeight) constraints.maxWidth.toLong() * constraints.maxHeight else 0L
-    val request = remember(media, cover.url, dimensions, scale, placementPixels) { imageRequest(context, image, null, scale, media, placementPixels, admit = media.viewDecodeAdmit(), dimensions = dimensions) }
+    val interimKey = remember(environment.imageLoader, cover.url, item.headers, dimensions, scale) {
+      environment.imageLoader.components.interceptors.filterIsInstance<StillImages>().firstOrNull()?.key(cover.url, item.headers, null, dimensions, scale)
+    }
+    val request = remember(media, image, dimensions, scale, placementPixels, interimKey) {
+      imageRequest(context, image, null, scale, media, placementPixels, admit = media.viewDecodeAdmit(), dimensions = dimensions).newBuilder().apply {
+        interimKey?.let { placeholderMemoryCacheKey(it); crossfade(false) }
+      }.build()
+    }
     AsyncImage(
       model = request,
       contentDescription = "cover",
-      imageLoader = LocalMediaEnvironment.current.imageLoader,
+      imageLoader = environment.imageLoader,
       onSuccess = { success -> observer?.invoke("cover", (success.result.request.data as? MediaImageData)?.url.orEmpty()) },
       contentScale = contentScale,
       modifier = Modifier.fillMaxSize()
