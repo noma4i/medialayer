@@ -144,6 +144,7 @@ public final class MediaContext: @unchecked Sendable {
   public let places: MediaPlaces
   public let slots: LoadedSlots
   let stats: ImageCounters
+  let stillImages = StillImageIndex()
   var pipeline: Nuke.ImagePipeline { ImageMemory.pipeline(for: places) }
 
   public init(places: MediaPlaces, slots: LoadedSlots? = nil) {

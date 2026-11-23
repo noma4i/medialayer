@@ -109,6 +109,11 @@ public enum MediaImagePipeline {
 }
 
 extension MediaImagePipeline {
+  static func interimImage(for source: some MediaSource, in context: MediaContext) -> PlatformImage? {
+    guard let request = context.stillImages.request(url: source.url, headers: source.headers) else { return nil }
+    return context.pipeline.cache[request]?.image
+  }
+
   static func cachedImage(for request: ImageRequest, in pipeline: ImagePipeline) -> PlatformImage? {
     cachedContainer(for: request, in: pipeline)?.image
   }
@@ -117,16 +122,62 @@ extension MediaImagePipeline {
     pipeline.cache[request]
   }
 
-  static func load(_ source: some MediaSource, request: ImageRequest, pipeline: ImagePipeline, report: (@Sendable (MediaState) -> Void)? = nil) async -> ImageContainer? {
+  static func load(_ source: some MediaSource, request: ImageRequest, pipeline: ImagePipeline, index: StillImageIndex? = nil, report: (@Sendable (MediaState) -> Void)? = nil) async -> ImageContainer? {
     guard !Task.isCancelled else { return nil }
     report?(.loading)
     do {
       let container = try await pipeline.imageTask(with: request).response.container
+      if container.data.map({ AnimatedFrames.sourceFrameCount($0) <= 1 }) ?? true {
+        let pixels = request.userInfo["decodePixels"] as? CGSize ?? container.image.size
+        index?.record(url: source.url, headers: source.headers, request: request, area: pixels.width * pixels.height)
+      }
       report?(.ready)
       return container
     } catch {
       if !Task.isCancelled { report?(.failed(detail: error.localizedDescription)) }
       return nil
+    }
+  }
+}
+
+final class StillImageIndex: @unchecked Sendable {
+  private struct Key: Hashable {
+    let url: String
+    let headers: [String: String]
+  }
+  private struct Entry {
+    let request: ImageRequest
+    let area: CGFloat
+    var used: UInt64
+  }
+  private let lock = NSLock()
+  private var entries: [Key: Entry] = [:]
+  private var sequence: UInt64 = 0
+
+  func request(url: String, headers: [String: String]) -> ImageRequest? {
+    lock.withLock {
+      let key = Key(url: url, headers: headers)
+      guard var entry = entries[key] else { return nil }
+      sequence += 1
+      entry.used = sequence
+      entries[key] = entry
+      return entry.request
+    }
+  }
+
+  func record(url: String, headers: [String: String], request: ImageRequest, area: CGFloat) {
+    lock.withLock {
+      let key = Key(url: url, headers: headers)
+      sequence += 1
+      if var entry = entries[key], entry.area > area {
+        entry.used = sequence
+        entries[key] = entry
+        return
+      }
+      if entries[key] == nil, entries.count == 512, let oldest = entries.min(by: { $0.value.used < $1.value.used })?.key {
+        entries.removeValue(forKey: oldest)
+      }
+      entries[key] = Entry(request: request, area: area, used: sequence)
     }
   }
 }

@@ -35,13 +35,13 @@ private struct PreviewFrame: View {
     }
     .task(id: key) {
       guard loaded == nil, key.pixels != nil, let request else { return }
-      loaded = await MediaImagePipeline.load(source, request: request, pipeline: context.pipeline)?.image
+      loaded = await MediaImagePipeline.load(source, request: request, pipeline: context.pipeline, index: context.stillImages)?.image
     }
   }
 
   private var cached: PlatformImage? {
     guard key.pixels != nil, let request else { return nil }
-    return MediaImagePipeline.cachedImage(for: request, in: context.pipeline)
+    return MediaImagePipeline.cachedImage(for: request, in: context.pipeline) ?? MediaImagePipeline.interimImage(for: source, in: context)
   }
 }
 
@@ -53,7 +53,11 @@ private struct PreviewImage: View {
   let contentMode: ContentMode
 
   var body: some View {
-    ImageRequestView(source: source, context: context, points: points, scale: scale, contentMode: contentMode, waiting: { Color.clear }) { key, request in
+    ImageRequestView(source: source, context: context, points: points, scale: scale, contentMode: contentMode, waiting: {
+      if let image = MediaImagePipeline.interimImage(for: source, in: context) {
+        Image(platform: image).resizable().aspectRatio(contentMode: contentMode)
+      }
+    }) { key, request in
       PreviewFrame(source: source, context: context, key: key, request: request, contentMode: contentMode)
     }
     .id(ImageInputs(url: source.url, headers: source.headers, width: source.size?.width, height: source.size?.height, contentMode: contentMode, context: ObjectIdentifier(context)))
@@ -234,10 +238,12 @@ public struct MediaImage<Content: View>: View {
   /// The pass before the new source has its request: the placeholder and the preview stay drawn, so a source switch never shows an empty frame.
   @ViewBuilder private func waitingFrame(context: MediaContext, size: CGSize) -> some View {
     ZStack {
-      if ImagePass.drawsPlaceholder(playing: isPlaying, shown: false) {
+      let interim = MediaImagePipeline.interimImage(for: source, in: context)
+      if ImagePass.drawsPlaceholder(playing: isPlaying, shown: interim != nil) {
         PlaceholderView(item: source.item, ready: false, context: context)
         if let preview { PreviewImage(source: preview, context: context, points: size, scale: displayScale, contentMode: contentMode) }
       }
+      if let interim { still(interim) }
     }
     .frame(width: size.width, height: size.height)
     .clipped()
@@ -309,7 +315,7 @@ public struct MediaImage<Content: View>: View {
   private func shownImage(for key: ImageKey, request: ImageRequest?) -> PlatformImage? {
     if let loaded, loaded.key == key { return loaded.image }
     guard let context, key.pixels != nil, let request else { return nil }
-    return MediaImagePipeline.cachedImage(for: request, in: context.pipeline)
+    return MediaImagePipeline.cachedImage(for: request, in: context.pipeline) ?? MediaImagePipeline.interimImage(for: source, in: context)
   }
 
   private func load(key: ImageKey, request: ImageRequest?) async {
@@ -317,7 +323,7 @@ public struct MediaImage<Content: View>: View {
     let tail = MediaTrace.tail(source.url)
     MediaTrace.emit("image", "load \(tail) start")
     let report: (@Sendable (MediaState) -> Void)? = mount.map { mount in { @Sendable state in mount.report(state) } }
-    let container = await MediaImagePipeline.load(source, request: request, pipeline: context.pipeline, report: report)
+    let container = await MediaImagePipeline.load(source, request: request, pipeline: context.pipeline, index: context.stillImages, report: report)
     MediaTrace.emit("image", "load \(tail) \(container == nil ? "failed" : "done")")
     let next = container.map { LoadedImage(key: key, image: $0.image, animated: $0.type == .gif || $0.type == .webp ? $0.data : nil) }
     loaded = next

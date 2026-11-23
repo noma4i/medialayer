@@ -13,6 +13,13 @@ private struct Photo: MediaSource {
   var size: MediaSize? { MediaSize(width: 32, height: 32) }
 }
 
+private struct SizedPhoto: MediaSource {
+  let url: String
+  var kind: Kind { .image }
+  var headers: [String: String] { [:] }
+  var size: MediaSize? { nil }
+}
+
 private func solid(_ color: UIColor) -> Data {
   let format = UIGraphicsImageRendererFormat()
   format.scale = 1
@@ -79,6 +86,35 @@ extension GlobalMedia {
   @MainActor
   @Suite(.timeLimit(.minutes(3)))
   struct MediaImagePreviewTests {
+    @Test
+    func inv_image_88_first_frame_uses_the_cached_size_until_the_new_size_loads() async throws {
+      let places = RecordingPlaces()
+      ImageMemory.install(ImageCache(), on: places)
+      let context = MediaContext(places: places)
+      let photo = SizedPhoto(url: "https://o.test/sized-\(UUID().uuidString).png")
+      places.answer(photo.url, with: solid(.red))
+      let request = try #require(await MediaImagePipeline.prepareOffMain(places: places, for: photo, points: CGSize(width: 20, height: 20), scale: 1).request)
+      let initial = await MediaImagePipeline.load(photo, request: request, pipeline: context.pipeline, index: context.stillImages)
+      #expect(initial != nil)
+      places.answer(photo.url, with: solid(.blue))
+      let gate = Latch()
+      places.fetchLatch = gate
+      places.latchedURL = photo.url
+      let host = UIHostingController(rootView: MediaImage(photo).environment(\.mediaContext, context).environment(\.displayScale, 1).frame(width: 50, height: 50))
+      let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 50, height: 50))
+      window.rootViewController = host
+      window.isHidden = false
+      defer { gate.open(); window.isHidden = true }
+      host.view.backgroundColor = .clear
+      host.safeAreaRegions = []
+      host.view.frame = window.bounds
+      host.view.layoutIfNeeded()
+      let first = centerPixel(of: host.view)
+      #expect(first[0] > 200 && first[2] < 60)
+      gate.open()
+      await until("the requested size replaces the interim image") { let pixel = centerPixel(of: host.view); return pixel[2] > 200 && pixel[0] < 60 }
+    }
+
     @Test
     func blurredBackdropSharesTheLoadedImage() async {
       let places = RecordingPlaces()
