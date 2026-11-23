@@ -185,7 +185,15 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
   val interimVisible = remember { mutableStateOf(false) }
   if (!interimVisible.value) ImageBlur(item, screen, state, contentScale)
   if (preview != null && screen.visible && state.value != MediaState.Ready) {
-    val previewRequest = remember(media, preview, pixels, scale, placementPixels, dimensions) { imageRequest(context, preview, pixels, scale, media, placementPixels, admit = media.viewDecodeAdmit(), dimensions = dimensions?.copy(declared = preview.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) })) }
+    val previewDimensions = dimensions?.copy(declared = preview.size?.let { PixelSize(it.first.toUInt(), it.second.toUInt()) })
+    val previewKey = remember(environment.imageLoader, preview, pixels, previewDimensions, scale) {
+      environment.imageLoader.components.interceptors.filterIsInstance<StillImages>().firstOrNull()?.key(preview.url, preview.headers, pixels, previewDimensions, scale)
+    }
+    val previewRequest = remember(media, preview, pixels, scale, placementPixels, previewDimensions, previewKey) {
+      imageRequest(context, preview, pixels, scale, media, placementPixels, admit = media.viewDecodeAdmit(), dimensions = previewDimensions).newBuilder().apply {
+        previewKey?.let { placeholderMemoryCacheKey(it); crossfade(false) }
+      }.build()
+    }
     AsyncImage(model = previewRequest, contentDescription = null, imageLoader = loader, contentScale = contentScale, modifier = Modifier.fillMaxSize().testTag(PREVIEW_TAG))
   }
   val drawsImage = remember { mutableStateOf(false) }
