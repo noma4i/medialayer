@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.53.0 - 2026-11-23
+
+### Changed
+
+- `MediaImage` shows the same picture already decoded at another size in its first frame, then the requested size replaces it.
+- The tone of a video with a cover is documented as the tone of the cover.
+
 ## 3.52.0 - 2026-11-22
 
 ### Added
