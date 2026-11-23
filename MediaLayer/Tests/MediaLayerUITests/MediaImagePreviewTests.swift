@@ -20,12 +20,12 @@ private struct SizedPhoto: MediaSource {
   var size: MediaSize? { nil }
 }
 
-private func solid(_ color: UIColor) -> Data {
+private func solid(_ color: UIColor, side: CGFloat = 32) -> Data {
   let format = UIGraphicsImageRendererFormat()
   format.scale = 1
-  return UIGraphicsImageRenderer(size: CGSize(width: 32, height: 32), format: format).pngData { context in
+  return UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).pngData { context in
     color.setFill()
-    context.fill(CGRect(x: 0, y: 0, width: 32, height: 32))
+    context.fill(CGRect(x: 0, y: 0, width: side, height: side))
   }
 }
 
@@ -86,6 +86,29 @@ extension GlobalMedia {
   @MainActor
   @Suite(.timeLimit(.minutes(3)))
   struct MediaImagePreviewTests {
+    @Test
+    func inv_image_88_uses_smaller_cached_image_after_largest_is_evicted() async throws {
+      let places = RecordingPlaces()
+      ImageMemory.install(ImageCache(), on: places)
+      let context = MediaContext(places: places)
+      let photo = SizedPhoto(url: "https://o.test/evicted-\(UUID().uuidString).png")
+      places.answer(photo.url, with: solid(.red, side: 100))
+      func request(_ side: CGFloat) -> ImageRequest {
+        let size = CGSize(width: side, height: side)
+        var request = ImageRequest(url: URL(string: photo.url)!, processors: [ImageProcessors.Resize(size: size, unit: .pixels, contentMode: .aspectFill)])
+        request.thumbnail = ImageRequest.ThumbnailOptions(size: size, unit: .pixels, contentMode: .aspectFill)
+        request.userInfo["decodePixels"] = size
+        return request
+      }
+      let small = request(20)
+      let large = request(80)
+      #expect(await MediaImagePipeline.load(photo, request: small, pipeline: context.pipeline, index: context.stillImages) != nil)
+      #expect(await MediaImagePipeline.load(photo, request: large, pipeline: context.pipeline, index: context.stillImages) != nil)
+      context.pipeline.cache[large] = nil
+      let image = try #require(MediaImagePipeline.interimImage(for: photo, in: context))
+      #expect(image.cgImage?.width == 20)
+    }
+
     @Test
     func inv_image_88_first_frame_uses_the_cached_size_until_the_new_size_loads() async throws {
       let places = RecordingPlaces()

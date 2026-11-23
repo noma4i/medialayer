@@ -110,8 +110,10 @@ public enum MediaImagePipeline {
 
 extension MediaImagePipeline {
   static func interimImage(for source: some MediaSource, in context: MediaContext) -> PlatformImage? {
-    guard let request = context.stillImages.request(url: source.url, headers: source.headers) else { return nil }
-    return context.pipeline.cache[request]?.image
+    for request in context.stillImages.requests(url: source.url, headers: source.headers) {
+      if let image = context.pipeline.cache[request]?.image { return image }
+    }
+    return nil
   }
 
   static func cachedImage(for request: ImageRequest, in pipeline: ImagePipeline) -> PlatformImage? {
@@ -146,22 +148,30 @@ final class StillImageIndex: @unchecked Sendable {
     let headers: [String: String]
   }
   private struct Entry {
-    let request: ImageRequest
-    let area: CGFloat
+    var requests: [(request: ImageRequest, area: CGFloat)]
     var used: UInt64
+  }
+  private struct RequestKey: Equatable {
+    let thumbnail: ImageRequest.ThumbnailOptions?
+    let processors: [String]
+
+    init(_ request: ImageRequest) {
+      thumbnail = request.thumbnail
+      processors = request.processors.map(\.identifier)
+    }
   }
   private let lock = NSLock()
   private var entries: [Key: Entry] = [:]
   private var sequence: UInt64 = 0
 
-  func request(url: String, headers: [String: String]) -> ImageRequest? {
+  func requests(url: String, headers: [String: String]) -> [ImageRequest] {
     lock.withLock {
       let key = Key(url: url, headers: headers)
-      guard var entry = entries[key] else { return nil }
+      guard var entry = entries[key] else { return [] }
       sequence += 1
       entry.used = sequence
       entries[key] = entry
-      return entry.request
+      return entry.requests.sorted { $0.area > $1.area }.map(\.request)
     }
   }
 
@@ -169,7 +179,10 @@ final class StillImageIndex: @unchecked Sendable {
     lock.withLock {
       let key = Key(url: url, headers: headers)
       sequence += 1
-      if var entry = entries[key], entry.area > area {
+      if var entry = entries[key] {
+        entry.requests.removeAll { RequestKey($0.request) == RequestKey(request) }
+        entry.requests.append((request, area))
+        if entry.requests.count > 4 { entry.requests.removeFirst() }
         entry.used = sequence
         entries[key] = entry
         return
@@ -177,7 +190,7 @@ final class StillImageIndex: @unchecked Sendable {
       if entries[key] == nil, entries.count == 512, let oldest = entries.min(by: { $0.value.used < $1.value.used })?.key {
         entries.removeValue(forKey: oldest)
       }
-      entries[key] = Entry(request: request, area: area, used: sequence)
+      entries[key] = Entry(requests: [(request, area)], used: sequence)
     }
   }
 }
