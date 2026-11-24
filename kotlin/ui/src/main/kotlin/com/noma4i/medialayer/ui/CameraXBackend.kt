@@ -55,6 +55,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
+/** PreviewView flips front-camera frames when CameraX supplies a camera transform. */
+internal fun previewCounterFlip(lens: CameraLens, mirrorFrontVideo: Boolean): Boolean =
+  lens == CameraLens.FRONT && !mirrorFrontVideo
+
 /** The step of the plan the camera stopped at: each one is its own text in the failure, so a device report tells which one it was. */
 internal enum class PlanRefusal(val step: String) {
   NO_STREAM_MAP("the camera has no SCALER_STREAM_CONFIGURATION_MAP"),
@@ -82,6 +86,7 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
   @Volatile private var sink: (CaptureEvent) -> Unit = {}
   @Volatile private var audioIssue: (CaptureAudioIssue) -> Unit = {}
   private var view: PreviewView? = null
+  private var counterFlipPreview = false
   private var owner: LifecycleOwner? = null
   private var cameras: ProcessCameraProvider? = null
   private var camera: Camera? = null
@@ -117,7 +122,12 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
     this.owner = owner
   }
 
-  override fun sensorToView(): Matrix? = view?.sensorToViewTransform
+  override fun sensorToView(): Matrix? {
+    val host = view ?: return null
+    val transform = host.sensorToViewTransform ?: return null
+    if (counterFlipPreview) transform.postConcat(Matrix().apply { setScale(-1f, 1f, host.width / 2f, 0f) })
+    return transform
+  }
 
   override fun bind(lens: CameraLens, profile: CaptureProfile) {
     lastBind = lens to profile
@@ -172,8 +182,10 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
     if (!provider.hasCamera(selector)) return sink(CaptureEvent.Refuse(CameraRefusal.NO_CAMERA))
     val ready = if (profile.mode == CaptureMode.VIDEO) plan.getOrElse { return configureFailed(it, generation) } else plan.getOrNull()
     photoSize = ready?.photoSize
+    counterFlipPreview = previewCounterFlip(lens, profile.mirrorFrontVideo)
+    host.scaleX = if (counterFlipPreview) -1f else 1f
     val made = Preview.Builder().setResolutionSelector(previewSelector(ready, profile))
-      .setMirrorMode(if (profile.mirrorFrontVideo) MirrorMode.MIRROR_MODE_ON_FRONT_ONLY else MirrorMode.MIRROR_MODE_OFF).build().apply { surfaceProvider = host.surfaceProvider }
+      .setMirrorMode(MirrorMode.MIRROR_MODE_OFF).build().apply { surfaceProvider = host.surfaceProvider }
     val cases = mutableListOf<UseCase>(made)
     preview = made
     if (profile.mode == CaptureMode.PHOTO) {

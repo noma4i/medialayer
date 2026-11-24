@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Android front camera viewfinder is no longer mirrored when the profile does not mirror the front video (photo), like iOS.
+
 ## 3.53.3 - 2026-11-24
 
 ### Fixed
