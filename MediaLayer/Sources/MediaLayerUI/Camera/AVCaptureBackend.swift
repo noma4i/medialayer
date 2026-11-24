@@ -15,7 +15,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
   private var photoOutput: AVCapturePhotoOutput?
   private var movieOutput: AVCaptureMovieFileOutput?
   private var frameOutput: AVCaptureVideoDataOutput?
-  private var rotation: AVCaptureDevice.RotationCoordinator?
   private var recording: MovieDelegate?
   private var photoDelegates: [UUID: PhotoDelegate] = [:]
   private var tap: (@Sendable (CVPixelBuffer, UInt64) -> Void)?
@@ -119,7 +118,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     camera = device
     photoOutput = photo
     movieOutput = movie
-    rotation = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
     let choice: FormatChoice?
     do { choice = try applyFormat(device, profile: profile) }
     catch {
@@ -229,7 +227,6 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
       self.photoOutput = nil
       self.movieOutput = nil
       self.frameOutput = nil
-      self.rotation = nil
       self.recording = nil
       completion()
     }
@@ -264,8 +261,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
       guard let self else { return }
       guard let output = self.movieOutput, !output.isRecording, self.session.isRunning else { return self.emit(.recordFinished(end: .failed)) }
       if let connection = output.connection(with: .video) {
-        let angle = self.rotation?.videoRotationAngleForHorizonLevelCapture ?? 90
-        if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
+        // The portrait interface keeps the portrait preview frame regardless of phone pose.
+        if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
       }
       // The movie output writes the sound itself: the core only needs to hear that the microphone of this take is live.
       if profile.audio { self.emit(.audioFlow(flowing: true)) }

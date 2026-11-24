@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- iOS landscape recordings keep the portrait preview frame instead of leveling to the horizon, like Android.
+
 ## 3.53.2 - 2026-11-23
 
 ### Fixed
