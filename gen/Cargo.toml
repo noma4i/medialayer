@@ -1,6 +1,6 @@
 [package]
 name = "medialayer-gen"
-version = "3.53.2"
+version = "3.53.3"
 edition = "2021"
 
 [features]
@@ -15,7 +15,7 @@ name = "medialayer-gen"
 path = "src/main.rs"
 
 [dependencies]
-medialayer = { version = "3.53.2", path = "../core" }
+medialayer = { version = "3.53.3", path = "../core" }
 serde_json = "1.0.151"
 thiserror = "2.0.21"
 
