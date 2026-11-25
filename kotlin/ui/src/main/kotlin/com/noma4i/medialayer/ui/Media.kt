@@ -235,7 +235,7 @@ private fun MediaLayerEnvironment(media: MediaLayer?, imageLoader: ImageLoader?,
 
 @Composable
 internal fun rememberPlace(
-  source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean = true, peeking: Boolean = false, visible: Boolean = true,
+  source: MediaSource, playing: Boolean?, muted: Boolean?, loop: Boolean, peeking: Boolean = false, visible: Boolean = true,
   group: String? = null, rate: Float? = null, viewToken: ULong? = null, mounted: MutableState<PlaceMount?>? = null,
   playGeneration: ULong = 0uL, onPlayback: (PlaybackState) -> Unit = {}
 ): MediaState {

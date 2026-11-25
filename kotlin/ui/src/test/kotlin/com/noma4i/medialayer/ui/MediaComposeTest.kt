@@ -75,6 +75,18 @@ class MediaComposeTest {
   private val slots = ExoPlayerSlotFactory(context, startMuted = true).onMainLooper()
 
   @Test
+  fun inv_audio_119_aMediaAudioNeverLoops() {
+    val note = Note("https://o.test/n.m4a")
+    rule.setContent {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
+        MediaAudio(note) { }
+      }
+    }
+    rule.waitUntil(COMPOSE_WAIT_MS) { layer.items.any { it.url == note.url } }
+    assertEquals(listOf(false), layer.items.filter { it.url == note.url }.map { it.looping }.distinct())
+  }
+
+  @Test
   fun aDeclaredPlaceTellsTheCoreOnlyWhenSomethingChangesAndWithdrawsOnLeave() {
     var playing by mutableStateOf(false)
     var unrelated by mutableIntStateOf(0)
