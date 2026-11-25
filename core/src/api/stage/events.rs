@@ -162,7 +162,7 @@ impl Stage {
                 Some(lease) => state.election.set_intent(&key, lease, Intent::Idle),
                 None => Vec::new(),
             };
-            let commands = state.commands_for(orders);
+            let commands = state.commands_for(orders, self.now());
             self.dispatch_with(state, commands, true, vec![(slot, SlotCall::Seek { position_ms: 0 })]);
         }
         for (id, action) in actions {
@@ -247,7 +247,7 @@ impl Stage {
                 if !state.is_loaded_as(&id.key, id.slot, id.generation) { return; }
                 self.inner.places.failed(&id.key, &reason);
                 let orders = state.leases.get(&id.key).copied().map(|lease| state.election.set_intent(&id.key, lease, Intent::Idle)).unwrap_or_default();
-                let commands = state.commands_for(orders);
+                let commands = state.commands_for(orders, self.now());
                 self.dispatch(state, commands);
             }
             Action::ForegroundPass => {

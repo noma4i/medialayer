@@ -88,14 +88,14 @@ fn inv_pool_01_inv_pool_02_inv_pool_03_inv_pool_06_random_operations_keep_one_pl
     let mut now = 0u64;
     let mut step = Step::Normal;
     let mut is_background = false;
-    let mut counts = [0u64; 16];
+    let mut counts = [0u64; 17];
     for number in 0..OPERATIONS {
         now += dice.below(400);
         let page = dice.index(FEED);
         let key = format!("c{}", dice.below(6));
         let pinned_before = pinned_loaded(&pool);
         let keeps_pins = step != Step::PlaceholdersOnly;
-        let pick = dice.below(16);
+        let pick = dice.below(17);
         counts[pick as usize] += 1;
         let (name, mut released_pins) = match pick {
             0..=3 => {
@@ -178,7 +178,7 @@ fn inv_pool_01_inv_pool_02_inv_pool_03_inv_pool_06_random_operations_keep_one_pl
                     ("release", false)
                 }
             }
-            _ => {
+            15 => {
                 if dice.percent(10) {
                     shadow.apply(&pool.release_all());
                     ("release_all", true)
@@ -186,6 +186,15 @@ fn inv_pool_01_inv_pool_02_inv_pool_03_inv_pool_06_random_operations_keep_one_pl
                     shadow.apply(&pool.set_muted(&key, dice.percent(50)));
                     ("mute_key", false)
                 }
+            }
+            _ => {
+                let commands = pool.claim(now, &key);
+                assert!(commands.iter().all(|command| !matches!(command, Command::Unload { slot } if shadow.playing.contains(slot))));
+                shadow.apply(&commands);
+                if pool.slot_of(&key).is_some() {
+                    assert_eq!(shadow.loaded.values().filter(|loaded| *loaded == &key).count(), 1);
+                }
+                ("claim", false)
             }
         };
         if name == "release" {

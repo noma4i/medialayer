@@ -170,7 +170,7 @@ impl Stage {
         let (state, commands) = {
             let mut state = self.state();
             let commands = if !playing {
-                state.forget_lease(key)
+                state.forget_lease(key, self.now())
             } else {
                 let lease = state.lease_for(key);
                 let default = Context::Ring.policy().groups;
@@ -180,7 +180,7 @@ impl Stage {
                 }
                 let mut orders = state.election.set_groups(key, lease, groups);
                 orders.extend(if renew { state.election.renew_play(key, lease) } else { state.election.set_intent(key, lease, Intent::Play) });
-                let commands = state.commands_for(orders);
+                let commands = state.commands_for(orders, self.now());
                 if !commands.iter().any(|command| matches!(command, Command::Play { .. })) {
                     crate::trace!("stage", "play dropped: {} {}", crate::trace::tail(key), state.election.blocked_reason(lease));
                 }
@@ -197,10 +197,10 @@ impl Stage {
         let (state, commands) = {
             let mut state = self.state();
             let orders = state.election.stop_all();
-            let mut commands = state.commands_for(orders);
+            let mut commands = state.commands_for(orders, self.now());
             let keys: Vec<String> = state.leases.keys().cloned().collect();
             for key in keys {
-                commands.extend(state.forget_lease(&key));
+                commands.extend(state.forget_lease(&key, self.now()));
             }
             (state, commands)
         };
@@ -225,7 +225,7 @@ impl Stage {
         }
         let mut state = self.state();
         let orders = state.election.set_suspension(id, is_active, allow_groups).unwrap_or_default();
-        let commands = state.commands_for(orders);
+        let commands = state.commands_for(orders, self.now());
         self.dispatch(state, commands);
     }
 
@@ -402,7 +402,7 @@ impl Stage {
             let mut state = self.state();
             let keys: Vec<String> = state.leases.keys().cloned().collect();
             for key in keys {
-                state.forget_lease(&key);
+                state.forget_lease(&key, self.now());
             }
             state.catalog.clear();
             state.sliced.clear();

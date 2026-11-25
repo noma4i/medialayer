@@ -30,7 +30,7 @@ impl PoolControl for Stage {
             let directives = state.ring.background();
             let orders = state.election.set_foreground(false);
             let (mut commands, directives) = split(directives);
-            commands.extend(state.commands_for(orders));
+            commands.extend(state.commands_for(orders, self.now()));
             (state, directives, commands)
         };
         self.dispatch(state, commands);
@@ -48,7 +48,7 @@ impl PoolControl for Stage {
             let mut state = self.state();
             state.ring.foreground();
             let orders = state.election.set_foreground(true);
-            let commands = state.commands_for(orders);
+            let commands = state.commands_for(orders, self.now());
             let ids = state.loaded.iter().map(|(key, loaded)| LoadId { key: key.clone(), slot: loaded.slot, generation: loaded.generation }).collect::<Vec<LoadId>>();
             (state, commands, ids)
         };

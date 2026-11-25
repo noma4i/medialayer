@@ -8,6 +8,24 @@ fn sound_calls(rig: &crate::api::test_support::Rig) -> Vec<SlotCall> {
 }
 
 #[tokio::test]
+async fn inv_play_01_a_place_with_the_play_right_gets_a_slot_even_when_the_window_holds_every_slot() {
+    let rig = rig_with(|config| { config.defaults.slots = 3; config.pool.reach = 1; }).await;
+    let stage = &rig.parts.stage;
+    stage.replace_window(1, videos(3));
+    eventually(|| (0..3).all(|page| rig.factory.slot_holding(&url_of(page)).is_some())).await;
+    let key = "file:///sound.m4a";
+    let mut item = video(key);
+    item.kind = Kind::Audio;
+    stage.visible(item, true);
+    stage.set_playing(key, true, &[]);
+    eventually(|| rig.factory.slot_holding(key).is_some_and(|(_, slot)| slot.calls().contains(&SlotCall::Play))).await;
+    let calls = rig.holder(key).1.calls();
+    let load = calls.iter().rposition(|call| matches!(call, SlotCall::Load { .. })).unwrap();
+    let play = calls.iter().rposition(|call| *call == SlotCall::Play).unwrap();
+    assert!(load < play);
+}
+
+#[tokio::test]
 async fn inv_api_14_a_silent_layer_never_unmutes_a_slot_whatever_the_places_ask() {
     let rig = rig_with(|config| config.silent = true).await;
     let stage = &rig.parts.stage;

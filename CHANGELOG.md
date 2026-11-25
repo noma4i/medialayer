@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A place that gets the play right (for example a short local sound) gets a player slot even when the prefetch window holds every slot; before, its play was dropped with no state change.
+
 ## 3.53.4 - 2026-11-24
 
 ### Fixed

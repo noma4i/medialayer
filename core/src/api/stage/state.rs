@@ -134,12 +134,12 @@ impl StageState {
         lease
     }
 
-    pub(super) fn forget_lease(&mut self, key: &str) -> Vec<Command> {
+    pub(super) fn forget_lease(&mut self, key: &str, now: u64) -> Vec<Command> {
         let Some(lease) = self.leases.get(key).copied() else {
             return Vec::new();
         };
         let orders = self.election.unregister(key, lease);
-        let commands = self.commands_for(orders);
+        let commands = self.commands_for(orders, now);
         self.leases.remove(key);
         self.keys_by_lease.remove(&lease);
         self.pending_wanted.remove(key);
@@ -186,7 +186,7 @@ impl StageState {
         let mut commands = Vec::new();
         let mut is_refused = false;
         for key in wanted {
-            let touched = self.ring.touch(now, &key);
+            let touched = if self.is_playing(&key) { self.ring.claim(now, &key) } else { self.ring.touch(now, &key) };
             is_refused |= !touched.iter().any(|command| matches!(command, Command::Load { .. }));
             commands.extend(touched);
             if self.is_playing(&key) {
@@ -227,13 +227,17 @@ impl StageState {
         pages.into_iter().find(|page| keys.key(*page) == Some(playing.as_str()))
     }
 
-    pub(super) fn commands_for(&mut self, orders: Vec<session::LeaseOrder>) -> Vec<Command> {
+    pub(super) fn commands_for(&mut self, orders: Vec<session::LeaseOrder>, now: u64) -> Vec<Command> {
         let mut commands = Vec::new();
         for directive in orders {
             let Some(key) = self.keys_by_lease.get(&directive.lease).cloned() else {
                 continue;
             };
-            commands.extend(self.ring.set_playing(&key, directive.order == session::Order::Play));
+            let playing = directive.order == session::Order::Play;
+            if playing && self.ring.slot_of(&key).is_none() && self.catalog.contains_key(&key) {
+                commands.extend(self.ring.claim(now, &key));
+            }
+            commands.extend(self.ring.set_playing(&key, playing));
         }
         commands
     }
