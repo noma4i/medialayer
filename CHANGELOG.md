@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 3.53.5 - 2026-11-25
 
 ### Fixed
 
+- Android `MediaAudio` no longer loops: a voice ends and reports Ended, like iOS.
 - A place that gets the play right (for example a short local sound) gets a player slot even when the prefetch window holds every slot; before, its play was dropped with no state change.
 
 ## 3.53.4 - 2026-11-24
