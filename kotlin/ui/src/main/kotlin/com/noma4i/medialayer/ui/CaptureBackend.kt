@@ -82,7 +82,8 @@ internal class CameraServices(
   val audio: () -> AudioLink?,
   val clipInfo: suspend (File) -> MediaInfo?,
   val upright: suspend (File, Double) -> File,
-  val directory: File
+  val directory: File,
+  val mirrorPhoto: suspend (File, Int) -> Unit = { _, _ -> }
 ) {
   companion object {
     fun live(context: Context): CameraServices {
@@ -107,7 +108,8 @@ internal class CameraServices(
             }
           }
         },
-        directory = directory
+        directory = directory,
+        mirrorPhoto = { file, quality -> mirrorJpeg(file, quality) }
       )
     }
   }

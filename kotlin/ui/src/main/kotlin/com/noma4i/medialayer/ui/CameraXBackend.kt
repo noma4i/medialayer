@@ -55,13 +55,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
-/** PreviewView flips front-camera frames when CameraX supplies a camera transform. */
-internal fun previewCounterFlip(lens: CameraLens, mirrorFrontVideo: Boolean): Boolean =
-  lens == CameraLens.FRONT && !mirrorFrontVideo
+/** The preview mirror mode is the one of the take: a front lens is mirrored exactly when mirrorFrontVideo (video profile) or mirrorFrontPhoto (photo profile) is set. */
+internal fun previewMirrored(lens: CameraLens, mirror: Boolean): Boolean =
+  lens == CameraLens.FRONT && mirror
 
-/** PreviewView mirrors the front camera by itself, so the shown preview is a mirror image unless the counter flip undoes it. */
-internal fun previewMirrored(lens: CameraLens, counterFlip: Boolean): Boolean =
-  lens == CameraLens.FRONT && !counterFlip
+internal fun CaptureProfile.mirrorsFrontPreview(): Boolean = if (mode == CaptureMode.PHOTO) mirrorFrontPhoto else mirrorFrontVideo
 
 /** The step of the plan the camera stopped at: each one is its own text in the failure, so a device report tells which one it was. */
 internal enum class PlanRefusal(val step: String) {
@@ -90,7 +88,6 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
   @Volatile private var sink: (CaptureEvent) -> Unit = {}
   @Volatile private var audioIssue: (CaptureAudioIssue) -> Unit = {}
   private var view: PreviewView? = null
-  private var counterFlipPreview = false
   private var owner: LifecycleOwner? = null
   private var cameras: ProcessCameraProvider? = null
   private var camera: Camera? = null
@@ -128,9 +125,7 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
 
   override fun sensorToView(): Matrix? {
     val host = view ?: return null
-    val transform = host.sensorToViewTransform ?: return null
-    if (counterFlipPreview) transform.postConcat(Matrix().apply { setScale(-1f, 1f, host.width / 2f, 0f) })
-    return transform
+    return host.sensorToViewTransform
   }
 
   override fun bind(lens: CameraLens, profile: CaptureProfile) {
@@ -186,11 +181,11 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
     if (!provider.hasCamera(selector)) return sink(CaptureEvent.Refuse(CameraRefusal.NO_CAMERA))
     val ready = if (profile.mode == CaptureMode.VIDEO) plan.getOrElse { return configureFailed(it, generation) } else plan.getOrNull()
     photoSize = ready?.photoSize
-    counterFlipPreview = previewCounterFlip(lens, profile.mirrorFrontVideo)
-    host.scaleX = if (counterFlipPreview) -1f else 1f
-    MediaTrace.emit("camera") { "preview lens=$lens mirrorFrontVideo=${profile.mirrorFrontVideo} previewMirrored=${previewMirrored(lens, counterFlipPreview)}" }
+    host.scaleX = 1f
+    MediaTrace.emit("camera") { "preview lens=$lens mirrorFront=${profile.mirrorsFrontPreview()} previewMirrored=${previewMirrored(lens, profile.mirrorsFrontPreview())}" }
+    val mirrorMode = if (profile.mirrorsFrontPreview()) MirrorMode.MIRROR_MODE_ON_FRONT_ONLY else MirrorMode.MIRROR_MODE_OFF
     val made = Preview.Builder().setResolutionSelector(previewSelector(ready, profile))
-      .setMirrorMode(MirrorMode.MIRROR_MODE_OFF).build().apply { surfaceProvider = host.surfaceProvider }
+      .setMirrorMode(mirrorMode).build().apply { surfaceProvider = host.surfaceProvider }
     val cases = mutableListOf<UseCase>(made)
     preview = made
     if (profile.mode == CaptureMode.PHOTO) {
@@ -201,7 +196,7 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
     } else {
       val quality = ready?.quality ?: Quality.HD
       val builder = VideoCapture.Builder(Recorder.Builder().setQualitySelector(QualitySelector.from(quality, FallbackStrategy.lowerQualityOrHigherThan(quality))).build())
-        .setMirrorMode(if (profile.mirrorFrontVideo) MirrorMode.MIRROR_MODE_ON_FRONT_ONLY else MirrorMode.MIRROR_MODE_OFF)
+        .setMirrorMode(mirrorMode)
       ready?.let { builder.setTargetFrameRate(android.util.Range(it.frameRate.low.toInt(), it.frameRate.high.toInt())) }
       val offered = if (Recorder.getVideoCapabilities(provider.getCameraInfo(selector)).isStabilizationSupported) listOf(VideoStabilization.STANDARD, VideoStabilization.CINEMATIC) else emptyList()
       stabilizationMode(profile.stabilization, offered)?.let { builder.setVideoStabilizationEnabled(it != VideoStabilization.OFF) }

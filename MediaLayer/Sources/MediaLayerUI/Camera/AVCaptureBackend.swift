@@ -14,6 +14,10 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
   private var camera: AVCaptureDevice?
   private var photoOutput: AVCapturePhotoOutput?
   private var movieOutput: AVCaptureMovieFileOutput?
+  private var lensRotation: AVCaptureDevice.RotationCoordinator?
+  private var poseRotation: AVCaptureDevice.RotationCoordinator?
+  private var portraitAngle: CGFloat?
+  private var movieDefaultAngle: CGFloat = 0
   private var frameOutput: AVCaptureVideoDataOutput?
   private var recording: MovieDelegate?
   private var photoDelegates: [UUID: PhotoDelegate] = [:]
@@ -23,7 +27,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
   private var previews: [ObjectIdentifier: WeakPreview] = [:]
   private var previewLinks: [ObjectIdentifier: AVCaptureConnection] = [:]
   private var videoPort: AVCaptureInput.Port?
-  /// Same rule as the movie connection (front lens and profile.mirrorFrontVideo), so the preview shows the picture of the file.
+  /// Same rule as the movie connection (front lens and profile.mirrorFrontVideo, or mirrorFrontPhoto for a photo profile), so the preview shows the picture of the file.
   private var previewMirrored = false
   private var previewLens: CameraLens = .back
   private var previewMirrorFrontVideo = false
@@ -109,9 +113,10 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     inputs.forEach(session.addInput)
     outputs.forEach(session.addOutput)
     videoPort = inputs.first?.ports(for: .video, sourceDeviceType: device.deviceType, sourceDevicePosition: device.position).first
-    previewMirrored = lens == .front && profile.mirrorFrontVideo
+    let mirrorFront = profile.mode == .photo ? profile.mirrorFrontPhoto : profile.mirrorFrontVideo
+    previewMirrored = lens == .front && mirrorFront
     previewLens = lens
-    previewMirrorFrontVideo = profile.mirrorFrontVideo
+    previewMirrorFrontVideo = mirrorFront
     previews.keys.forEach(linkPreview)
     // The movie file never carries a mirror: the stop path mirrors the pixels. The connection is set once per bind: a take only starts writing, the running session is not touched at its start.
     if let connection = movie?.connection(with: .video), connection.isVideoMirroringSupported {
@@ -122,6 +127,11 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     camera = device
     photoOutput = photo
     movieOutput = movie
+    let lensCoordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
+    lensRotation = lensCoordinator
+    poseRotation = lens == .back ? lensCoordinator : AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back).map { AVCaptureDevice.RotationCoordinator(device: $0, previewLayer: nil) }
+    portraitAngle = nil
+    movieDefaultAngle = movie?.connection(with: .video)?.videoRotationAngle ?? 0
     let choice: FormatChoice?
     do { choice = try applyFormat(device, profile: profile) }
     catch {
@@ -143,6 +153,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     lock.withLock { chosenPhotoSize = choice?.photoSize }
     installFrameOutput()
     if !session.isRunning { session.startRunning() }
+    _ = takeAngle()
     let hasFlash = profile.mode == .photo ? device.isFlashAvailable : device.hasTorch
     emit(.opened(hasFlash: hasFlash, zoomMin: Float(device.minAvailableVideoZoomFactor), zoomMax: Float(device.maxAvailableVideoZoomFactor)))
     emit(.streaming(on: session.isRunning))
@@ -210,8 +221,18 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
       link.automaticallyAdjustsVideoMirroring = false
       link.isVideoMirrored = previewMirrored
     }
-    MediaTrace.emit("camera", "preview lens=\(previewLens == .front ? "FRONT" : "BACK") mirrorFrontVideo=\(previewMirrorFrontVideo) previewMirrored=\(link.isVideoMirrored)")
+    MediaTrace.emit("camera", "preview lens=\(previewLens == .front ? "FRONT" : "BACK") mirrorFront=\(previewMirrorFrontVideo) previewMirrored=\(link.isVideoMirrored)")
     previewLinks[id] = link
+  }
+
+  /// The take angle of the lens is Apple's capture angle of that lens while the phone is upright, so a take keeps the portrait frame in any pose.
+  private func takeAngle() -> CGFloat {
+    let capture = lensRotation?.videoRotationAngleForHorizonLevelCapture
+    let upright = poseRotation.map { $0.videoRotationAngleForHorizonLevelCapture == 90 } ?? true
+    if upright, let capture { portraitAngle = capture }
+    let angle = portraitAngle ?? capture.flatMap { upright ? $0 : nil } ?? (movieDefaultAngle + 90).truncatingRemainder(dividingBy: 360)
+    MediaTrace.emit("camera", "take angle=\(angle) capture=\(capture.map { "\($0)" } ?? "none") pose=\(poseRotation.map { "\($0.videoRotationAngleForHorizonLevelCapture)" } ?? "none") default=\(movieDefaultAngle) learned=\(portraitAngle != nil)")
+    return angle
   }
 
   func unbind() {
@@ -231,6 +252,9 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
       self.camera = nil
       self.photoOutput = nil
       self.movieOutput = nil
+      self.lensRotation = nil
+      self.poseRotation = nil
+      self.portraitAngle = nil
       self.frameOutput = nil
       self.recording = nil
       completion()
@@ -266,8 +290,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
       guard let self else { return }
       guard let output = self.movieOutput, !output.isRecording, self.session.isRunning else { return self.emit(.recordFinished(end: .failed)) }
       if let connection = output.connection(with: .video) {
-        // The portrait interface keeps the portrait preview frame regardless of phone pose.
-        if connection.isVideoRotationAngleSupported(90) { connection.videoRotationAngle = 90 }
+        let angle = self.takeAngle()
+        if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
       }
       // The movie output writes the sound itself: the core only needs to hear that the microphone of this take is live.
       if profile.audio { self.emit(.audioFlow(flowing: true)) }

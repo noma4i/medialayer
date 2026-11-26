@@ -43,7 +43,11 @@ pub struct CaptureProfile {
     pub max_duration_ms: u64,
     pub min_take_ms: u64,
     pub audio: bool,
+    /// The preview and the video take of the front lens are mirrored.
     pub mirror_front_video: bool,
+    /// The preview of a photo profile and the photo of the front lens are mirrored.
+    #[uniffi(default = false)]
+    pub mirror_front_photo: bool,
     pub stabilization: VideoStabilization,
     pub photo_quality: u32,
     pub reduces_red_eye: bool,
@@ -61,6 +65,7 @@ pub fn capture_profile(kind: CaptureKind) -> CaptureProfile {
         min_take_ms: 0,
         audio: true,
         mirror_front_video: false,
+        mirror_front_photo: false,
         stabilization: VideoStabilization::Off,
         photo_quality: 90,
         reduces_red_eye: false,

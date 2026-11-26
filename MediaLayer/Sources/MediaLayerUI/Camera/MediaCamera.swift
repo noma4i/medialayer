@@ -54,7 +54,7 @@ private final class StartGate: @unchecked Sendable {
   var take: UInt64?
 }
 
-/// A photo from the camera: an upright JPEG file (the EXIF turn is applied, the mirror is not), its size after the turn and the side it was taken from.
+/// A photo from the camera: an upright JPEG file (the EXIF turn is applied, the mirror only when mirrorFrontPhoto is set for the front lens), its size after the turn and the side it was taken from.
 public struct CapturedPhoto: Sendable, Equatable {
   public let url: URL
   public let width: Int
@@ -630,6 +630,9 @@ public final class MediaCamera: @unchecked Sendable {
         hold()
         let made = try await services.upright(raw, Double(profile.photoQuality) / 100)
         NativeFailures.removeFile(raw)
+        if lens == .front && profile.mirrorFrontPhoto {
+          do { try await services.mirrorPhoto(made, Double(profile.photoQuality) / 100) } catch { NativeFailures.removeFile(made); throw error }
+        }
         try FileManager.default.moveItem(at: made, to: file)
         let size = Self.pixelSize(of: file)
         finish(.success(CapturedPhoto(url: file, width: size.width, height: size.height, lens: lens)))

@@ -47,7 +47,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-/** A photo from the camera: an upright JPEG file (the EXIF turn is applied, the mirror is not), its size after the turn and the side it was taken from. */
+/** A photo from the camera: an upright JPEG file (the EXIF turn is applied, the mirror only when mirrorFrontPhoto is set for the front lens), its size after the turn and the side it was taken from. */
 data class CapturedPhoto(val file: File, val width: Int, val height: Int, val lens: CameraLens)
 
 /** A recorded clip: an mp4 file, its length and its frame as the screen shows it. The file belongs to the app from now on. */
@@ -658,6 +658,9 @@ class MediaCamera internal constructor(
         hold.close()
         val made = services.upright(raw, profile.photoQuality.toDouble() / 100)
         deleteMediaFile(raw)
+        if (lens == CameraLens.FRONT && profile.mirrorFrontPhoto) {
+          try { services.mirrorPhoto(made, profile.photoQuality.toInt()) } catch (failure: Exception) { deleteMediaFile(made); throw failure }
+        }
         check(made.renameTo(file)) { "the photo file cannot be moved" }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }.also { BitmapFactory.decodeFile(file.path, it) }
         finish(Result.success(CapturedPhoto(file, bounds.outWidth, bounds.outHeight, lens)))

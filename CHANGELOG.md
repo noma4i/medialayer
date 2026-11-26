@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- CaptureProfile.mirrorFrontPhoto (default false): the front photo and its preview are mirrored by the library, Android and iOS.
+
+### Fixed
+
+- iOS: a take is recorded at Apple's upright capture angle of its lens (3.53.3 hardcoded 90 and turned every front take on iPhone 17 by 90 degrees), a take held in landscape still keeps the portrait frame.
+- Android front camera preview follows mirrorFrontVideo exactly like the recorded take again (3.53.4 made the preview the opposite of the take).
+
 ## 3.56.1 - 2026-11-26
 
 ### Added
