@@ -6,6 +6,10 @@
 
 - The MediaLayer trace logs the camera preview mirror (camera preview lens=... mirrorFrontVideo=... previewMirrored=...), Android and iOS.
 
+### Changed
+
+- A remote video without a cover shows its blurHash until the first frame (Android and iOS); before it showed nothing.
+
 ## 3.55.0 - 2026-11-26
 
 ### Added

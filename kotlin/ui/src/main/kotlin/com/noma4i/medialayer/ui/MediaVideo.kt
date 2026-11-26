@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.geometry.isSpecified
@@ -282,7 +283,13 @@ private fun VideoSurface(player: Player?, contentScale: ContentScale) {
 internal fun provisionalCover(item: MediaItem, ready: Boolean): Placeholder {
   val cover = item.cover?.trim()?.takeIf { it.isNotEmpty() }
   val remote = item.url.trim().let { it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true) }
-  return if (!ready && cover != null && remote) Placeholder.Cover(cover) else Placeholder.None
+  val hash = item.blurHash?.trim()?.takeIf { it.isNotEmpty() }
+  return when {
+    ready || !remote -> Placeholder.None
+    cover != null -> Placeholder.Cover(cover)
+    hash != null -> Placeholder.BlurHash(hash)
+    else -> Placeholder.None
+  }
 }
 
 @Composable
@@ -302,7 +309,8 @@ private fun VideoCover(media: MediaLayer, item: MediaItem, ready: Boolean, enabl
   val answer = placeholder ?: provisionalCover(item, ready)
   val shown = answer as? Placeholder.Cover
   val firstFrame = answer is Placeholder.FirstFrame && item.url.trim().startsWith("file://", ignoreCase = true)
-  val label = if (shown != null) "cover" else if (firstFrame) "firstframe" else "none"
+  val blur = answer as? Placeholder.BlurHash
+  val label = if (shown != null) "cover" else if (blur != null) "blurhash" else if (firstFrame) "firstframe" else "none"
   val last = remember { arrayOf<String?>(null) }
   LaunchedEffect(label, enabled) {
     if (enabled && last[0] != label) {
@@ -312,6 +320,10 @@ private fun VideoCover(media: MediaLayer, item: MediaItem, ready: Boolean, enabl
   }
   if (firstFrame) {
     FirstFrameStill(item.url.trim(), contentScale)
+    return
+  }
+  if (blur != null) {
+    VideoBlur(blur.hash, contentScale)
     return
   }
   val cover = shown ?: return
@@ -341,6 +353,13 @@ private fun VideoCover(media: MediaLayer, item: MediaItem, ready: Boolean, enabl
       modifier = Modifier.fillMaxSize()
     )
   }
+}
+
+@Composable
+private fun VideoBlur(hash: String, contentScale: ContentScale) {
+  val decoder = LocalBlurDecoder.current
+  val bitmap by produceState<ImageBitmap?>(null, hash) { value = decodeBlur(hash, decoder) }
+  bitmap?.let { Image(it, "blurhash", Modifier.fillMaxSize(), contentScale = contentScale) }
 }
 
 @Composable

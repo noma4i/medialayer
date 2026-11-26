@@ -119,7 +119,7 @@ private final class ScriptedPlaces: MediaPlaces, @unchecked Sendable {
     let answer: Placeholder
     switch source.kind {
     case .image: answer = (answerHash ?? source.blurHash).map { .blurHash(hash: $0) } ?? .none
-    case .video: answer = ready ? .none : source.cover.map { .cover(url: $0) } ?? .firstFrame
+    case .video: answer = ready ? .none : source.cover.map { .cover(url: $0) } ?? source.blurHash.map { .blurHash(hash: $0) } ?? .firstFrame
     default: answer = .none
     }
     let gate = lock.withLock { holds.isEmpty ? nil : holds.removeFirst() }
@@ -302,6 +302,21 @@ struct PlaceholderViewTests {
 
     #expect(events.count { if case .still = $0 { return true }; return false } == 0)
     #expect(mount.shown() == .clear)
+  }
+
+  @MainActor
+  @Test
+  func inv_placeholder_02_aRemoteVideoWithABlurHashAndNoCoverResolvesToTheBlur() async {
+    let events = Events()
+    let (_, context) = environment("A", events)
+    let mount = Mount(events: events)
+    defer { mount.close() }
+
+    let item = MediaItem(kind: .video, url: "https://o.test/remote.m3u8", headers: [:], cover: nil, blurHash: red, strategy: .window)
+    mount.show(item, context: context)
+    guard await events.wait({ $0 == .published(.blur(.red)) }) else { Issue.record("blur never published"); return }
+
+    #expect(mount.shown() == .red)
   }
 
   @MainActor

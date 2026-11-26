@@ -23,7 +23,13 @@ pub fn placeholder_for(source: MediaItem, ready: bool) -> Placeholder {
             (None, true) => Placeholder::FirstFrame,
             _ => Placeholder::None,
         },
-        Kind::Video => source.cover.map_or(Placeholder::FirstFrame, |url| Placeholder::Cover { url }),
+        Kind::Video => match source.cover {
+            Some(url) => Placeholder::Cover { url },
+            None => source
+                .blur_hash
+                .filter(|hash| bounded(hash.len() as u64, InputLimits::default().blurhash_chars).is_ok())
+                .map_or(Placeholder::FirstFrame, |hash| Placeholder::BlurHash { hash }),
+        },
         Kind::Audio => Placeholder::None,
     }
 }

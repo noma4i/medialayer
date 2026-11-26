@@ -81,7 +81,7 @@ private class ScriptedLayer(val label: String, private val events: Events, priva
     val answer = when {
       source.kind == Kind.IMAGE -> answerFor(source)?.let { Placeholder.BlurHash(it) } ?: Placeholder.None
       ready -> Placeholder.None
-      else -> source.cover?.let { Placeholder.Cover(it) } ?: Placeholder.FirstFrame
+      else -> source.cover?.let { Placeholder.Cover(it) } ?: source.blurHash?.let { Placeholder.BlurHash(it) } ?: Placeholder.FirstFrame
     }
     val gate = holds.poll()
     events.add(Event.Ask(label, source.url, source.blurHash ?: source.cover, ready, gate != null))
@@ -115,7 +115,7 @@ private class UrlKeyedImage(override val url: String, override var blurHash: Str
   override fun hashCode() = url.hashCode()
 }
 
-private class UrlKeyedClip(override val url: String, override var cover: String?) : MediaSource {
+private class UrlKeyedClip(override val url: String, override var cover: String?, override var blurHash: String? = null) : MediaSource {
   override val kind: Kind get() = Kind.VIDEO
   override val headers: Map<String, String> get() = emptyMap()
   override fun equals(other: Any?) = other is UrlKeyedClip && other.url == url
@@ -232,6 +232,17 @@ class PlaceholderTest {
 
     assertEquals(0, nodes("firstframe"))
     assertTrue(asked.isEmpty())
+  }
+
+  @Test
+  fun inv_placeholder_02_aRemoteVideoWithABlurHashAndNoCoverDrawsTheBlurHashBeforeItsFirstFrame() {
+    val layer = ScriptedLayer("A", events)
+    show(UrlKeyedClip("https://o.test/remote.m3u8", null, RED), layer)
+
+    until("red blur drawn for the video") { nodes("blurhash") == 1 }
+
+    assertEquals(0, nodes("cover"))
+    assertTrue(events.has { it == Event.Decode(RED, false) })
   }
 
   @Test
