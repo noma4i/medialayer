@@ -1,10 +1,10 @@
 # Changelog
 
-## Unreleased
+## 3.54.0 - 2026-11-26
 
 ### Added
 
-- MediaProbeOutcome.File carries durationMs (null for images and containers without a duration), Android and iOS.
+- MediaProbeOutcome.File carries durationMs (null for images and containers without a duration), Android and iOS. A Swift `case .file(...)` pattern or a Kotlin `MediaProbeOutcome.File(...)` call needs the new field.
 
 ## 3.53.6 - 2026-11-26
 
