@@ -25,14 +25,17 @@ private struct PreviewFrame: View {
   let key: ImageKey
   let request: ImageRequest?
   let contentMode: ContentMode
+  let alignment: Alignment
+  let tint: Color?
   @State private var loaded: PlatformImage?
 
   var body: some View {
-    Color.clear.overlay {
+    Color.clear.overlay(alignment: alignment) {
       if let image = loaded ?? cached {
-        Image(platform: image).resizable().aspectRatio(contentMode: contentMode)
+        TemplateImage(image: image, contentMode: contentMode, tint: tint)
       }
     }
+    .clipped()
     .task(id: key) {
       guard loaded == nil, key.pixels != nil, let request else { return }
       loaded = await MediaImagePipeline.load(source, request: request, pipeline: context.pipeline, index: context.stillImages)?.image
@@ -51,17 +54,20 @@ private struct PreviewImage: View {
   let points: CGSize
   let scale: CGFloat
   let contentMode: ContentMode
+  let alignment: Alignment
+  let tint: Color?
 
   var body: some View {
     ImageRequestView(source: source, context: context, points: points, scale: scale, contentMode: contentMode, waiting: {
       // Color.clear keeps the waiting view non-empty: an empty view never runs the task that prepares the request.
-      Color.clear.overlay {
+      Color.clear.overlay(alignment: alignment) {
         if let image = MediaImagePipeline.interimImage(for: source, in: context) {
-          Image(platform: image).resizable().aspectRatio(contentMode: contentMode)
+          TemplateImage(image: image, contentMode: contentMode, tint: tint)
         }
       }
+      .clipped()
     }) { key, request in
-      PreviewFrame(source: source, context: context, key: key, request: request, contentMode: contentMode)
+      PreviewFrame(source: source, context: context, key: key, request: request, contentMode: contentMode, alignment: alignment, tint: tint)
     }
     .id(ImageInputs(url: source.url, headers: source.headers, width: source.size?.width, height: source.size?.height, contentMode: contentMode, context: ObjectIdentifier(context)))
   }
@@ -171,23 +177,27 @@ public struct MediaImage<Content: View>: View {
   private let backdrop: ImageBackdrop?
   private let playbackRate: Double
   private let animation: ImageAnimation
+  private let alignment: Alignment
+  private let tint: Color?
   private let content: (MediaState) -> Content
 
-  public init(_ source: some MediaSource, contentMode: ContentMode = .fill, backdrop: ImageBackdrop? = nil, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation(), @ViewBuilder content: @escaping (MediaState) -> Content) {
-    self.init(shown: source, preview: nil, contentMode: contentMode, backdrop: backdrop, playbackRate: playbackRate, animation: animation, content: content)
+  public init(_ source: some MediaSource, contentMode: ContentMode = .fill, backdrop: ImageBackdrop? = nil, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation(), alignment: Alignment = .center, tint: Color? = nil, @ViewBuilder content: @escaping (MediaState) -> Content) {
+    self.init(shown: source, preview: nil, contentMode: contentMode, backdrop: backdrop, playbackRate: playbackRate, animation: animation, alignment: alignment, tint: tint, content: content)
   }
 
-  public init(_ source: some MediaSource, preview: (some MediaSource)?, contentMode: ContentMode = .fill, backdrop: ImageBackdrop? = nil, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation(), @ViewBuilder content: @escaping (MediaState) -> Content) {
-    self.init(shown: source, preview: preview, contentMode: contentMode, backdrop: backdrop, playbackRate: playbackRate, animation: animation, content: content)
+  public init(_ source: some MediaSource, preview: (some MediaSource)?, contentMode: ContentMode = .fill, backdrop: ImageBackdrop? = nil, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation(), alignment: Alignment = .center, tint: Color? = nil, @ViewBuilder content: @escaping (MediaState) -> Content) {
+    self.init(shown: source, preview: preview, contentMode: contentMode, backdrop: backdrop, playbackRate: playbackRate, animation: animation, alignment: alignment, tint: tint, content: content)
   }
 
-  private init(shown source: any MediaSource, preview: (any MediaSource)?, contentMode: ContentMode, backdrop: ImageBackdrop?, playbackRate: Double, animation: ImageAnimation, content: @escaping (MediaState) -> Content) {
+  private init(shown source: any MediaSource, preview: (any MediaSource)?, contentMode: ContentMode, backdrop: ImageBackdrop?, playbackRate: Double, animation: ImageAnimation, alignment: Alignment, tint: Color?, content: @escaping (MediaState) -> Content) {
     self.source = source
     self.preview = preview
     self.contentMode = contentMode
     self.backdrop = backdrop
     self.playbackRate = playbackRateOf(playbackRate)
     self.animation = animation
+    self.alignment = alignment
+    self.tint = tint
     self.content = content
   }
 
@@ -200,26 +210,26 @@ public struct MediaImage<Content: View>: View {
       GeometryReader { geometry in
         ImageRequestView(source: source, context: context, points: geometry.size, scale: displayScale, contentMode: contentMode, waiting: { waitingFrame(context: context, size: geometry.size) }) { key, request in
           let shown = shownImage(for: key, request: request)
-          ZStack {
+          ZStack(alignment: alignment) {
             if ImagePass.drawsPlaceholder(playing: isPlaying, shown: shown != nil) {
               PlaceholderView(item: source.item, ready: false, context: context)
               if let preview, loaded.flatMap({ $0.key == key ? $0.frames : nil }) == nil {
-                PreviewImage(source: preview, context: context, points: geometry.size, scale: displayScale, contentMode: contentMode)
+                PreviewImage(source: preview, context: context, points: geometry.size, scale: displayScale, contentMode: contentMode, alignment: alignment, tint: tint)
               }
             }
             if let frames = loaded.flatMap({ $0.key == key ? $0.frames : nil }) {
-              AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isPlaying, playbackRate: playbackRate, animation: animation, rests: animation.rests(reduceMotion: reduceMotion), grayscale: grayscale, shape: shape)
+              AnimatedFramesView(frames: frames, contentMode: contentMode, isPlaying: isPlaying, playbackRate: playbackRate, animation: animation, rests: animation.rests(reduceMotion: reduceMotion), grayscale: grayscale, shape: shape, alignment: alignment, tint: tint.map(Self.cgColor))
             } else if let shown {
               if case let .blurred(radius) = backdrop, loaded?.animated == nil {
                 Image(platform: shown).resizable().aspectRatio(contentMode: .fill)
                   .frame(width: geometry.size.width, height: geometry.size.height)
                   .blur(radius: radius).clipped().accessibilityIdentifier("media-image.backdrop")
               }
-              still(shown)
+              still(shown, size: geometry.size)
             }
             if isPlaying { content(ImagePass.contentState(shown: shown != nil, state: state, failure: failure?.of(source.item))) }
           }
-          .frame(width: geometry.size.width, height: geometry.size.height)
+          .frame(width: geometry.size.width, height: geometry.size.height, alignment: alignment)
           .clipped()
           .task(id: ImageLoad(key: key, active: isPlaying, turn: loadTurn)) {
             if isPlaying { await load(key: key, request: request) }
@@ -240,27 +250,35 @@ public struct MediaImage<Content: View>: View {
 
   /// The pass before the new source has its request: the placeholder and the preview stay drawn, so a source switch never shows an empty frame.
   @ViewBuilder private func waitingFrame(context: MediaContext, size: CGSize) -> some View {
-    ZStack {
+    ZStack(alignment: alignment) {
       let interim = MediaImagePipeline.interimImage(for: source, in: context)
       if ImagePass.drawsPlaceholder(playing: isPlaying, shown: interim != nil) {
         PlaceholderView(item: source.item, ready: false, context: context)
-        if let preview { PreviewImage(source: preview, context: context, points: size, scale: displayScale, contentMode: contentMode) }
+        if let preview { PreviewImage(source: preview, context: context, points: size, scale: displayScale, contentMode: contentMode, alignment: alignment, tint: tint) }
       }
-      if let interim { still(interim) }
+      if let interim { still(interim, size: size) }
     }
-    .frame(width: size.width, height: size.height)
+    .frame(width: size.width, height: size.height, alignment: alignment)
     .clipped()
   }
 
-  @ViewBuilder private func still(_ image: PlatformImage) -> some View {
+  @ViewBuilder private func still(_ image: PlatformImage, size: CGSize) -> some View {
     #if canImport(UIKit)
     if grayscale || shape != .rectangle {
-      StillLayerView(image: image, contentMode: contentMode, grayscale: grayscale, shape: shape)
+      StillLayerView(image: image, contentMode: contentMode, grayscale: grayscale, shape: shape, alignment: alignment, tint: tint.map(Self.cgColor))
     } else {
-      Image(platform: image).resizable().aspectRatio(contentMode: contentMode)
+      AlignedImage(image: image, contentMode: contentMode, alignment: alignment, tint: tint, size: size)
     }
     #else
-    Image(platform: image).resizable().aspectRatio(contentMode: contentMode)
+    AlignedImage(image: image, contentMode: contentMode, alignment: alignment, tint: tint, size: size)
+    #endif
+  }
+
+  private static func cgColor(_ color: Color) -> CGColor {
+    #if canImport(UIKit)
+    UIColor(color).cgColor
+    #else
+    NSColor(color).cgColor
     #endif
   }
 
@@ -374,12 +392,12 @@ enum ImagePass {
 }
 
 extension MediaImage where Content == EmptyView {
-  public init(_ source: some MediaSource, contentMode: ContentMode = .fill, backdrop: ImageBackdrop? = nil, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation()) {
-    self.init(source, contentMode: contentMode, backdrop: backdrop, playbackRate: playbackRate, animation: animation) { _ in EmptyView() }
+  public init(_ source: some MediaSource, contentMode: ContentMode = .fill, backdrop: ImageBackdrop? = nil, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation(), alignment: Alignment = .center, tint: Color? = nil) {
+    self.init(source, contentMode: contentMode, backdrop: backdrop, playbackRate: playbackRate, animation: animation, alignment: alignment, tint: tint) { _ in EmptyView() }
   }
 
-  public init(_ source: some MediaSource, preview: (some MediaSource)?, contentMode: ContentMode = .fill, backdrop: ImageBackdrop? = nil, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation()) {
-    self.init(source, preview: preview, contentMode: contentMode, backdrop: backdrop, playbackRate: playbackRate, animation: animation) { _ in EmptyView() }
+  public init(_ source: some MediaSource, preview: (some MediaSource)?, contentMode: ContentMode = .fill, backdrop: ImageBackdrop? = nil, playbackRate: Double = 1, animation: ImageAnimation = ImageAnimation(), alignment: Alignment = .center, tint: Color? = nil) {
+    self.init(source, preview: preview, contentMode: contentMode, backdrop: backdrop, playbackRate: playbackRate, animation: animation, alignment: alignment, tint: tint) { _ in EmptyView() }
   }
 }
 

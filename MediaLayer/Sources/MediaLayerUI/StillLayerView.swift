@@ -6,6 +6,9 @@ final class StillLayerHost: UIView {
   var shape = MediaShape.rectangle {
     didSet { if shape != oldValue { setNeedsLayout() } }
   }
+  var placement = ImagePlacement() {
+    didSet { if placement != oldValue { setNeedsLayout() } }
+  }
 
   override init(frame: CGRect) {
     super.init(frame: frame)
@@ -20,6 +23,7 @@ final class StillLayerHost: UIView {
   override func layoutSubviews() {
     super.layoutSubviews()
     layer.cornerRadius = shape.radius(in: bounds.size)
+    ImageAlign.apply(to: layer, image: placement.image, bounds: bounds.size, contentMode: placement.contentMode, alignment: placement.alignment)
   }
 }
 
@@ -29,10 +33,13 @@ struct StillLayerView: UIViewRepresentable {
   let contentMode: ContentMode
   let grayscale: Bool
   let shape: MediaShape
+  var alignment = Alignment.center
+  var tint: CGColor?
 
   final class Coordinator {
     var source: UIImage?
     var grayscale = false
+    var tint: CGColor?
   }
 
   func makeCoordinator() -> Coordinator { Coordinator() }
@@ -40,19 +47,20 @@ struct StillLayerView: UIViewRepresentable {
   func makeUIView(context: Context) -> StillLayerHost { StillLayerHost() }
 
   func updateUIView(_ view: StillLayerHost, context: Context) {
-    view.layer.contentsGravity = contentMode == .fill ? .resizeAspectFill : .resizeAspect
     view.shape = shape
+    view.placement = ImagePlacement(image: image.size, contentMode: contentMode, alignment: alignment)
     let coordinator = context.coordinator
-    guard coordinator.source !== image || coordinator.grayscale != grayscale else { return }
+    guard coordinator.source !== image || coordinator.grayscale != grayscale || coordinator.tint != tint else { return }
 
     coordinator.source = image
     coordinator.grayscale = grayscale
-    view.layer.contents = image.cgImage.map { grayscale ? GrayscaleImage.convert($0) : $0 }
+    coordinator.tint = tint
+    view.layer.contents = image.cgImage.map { AnimatedFramesView.displayed($0, grayscale: grayscale, tint: tint) }
     TestChange.fire()
   }
 
   func sizeThatFits(_ proposal: ProposedViewSize, uiView: StillLayerHost, context: Context) -> CGSize? {
-    proposal.replacingUnspecifiedDimensions()
+    ImageAlign.size(for: proposal, image: image.size, contentMode: contentMode, alignment: alignment)
   }
 }
 #endif

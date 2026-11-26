@@ -174,6 +174,9 @@ final class FrameLayerView: UIView {
   var shape = MediaShape.rectangle {
     didSet { if shape != oldValue { setNeedsLayout() } }
   }
+  var placement = ImagePlacement() {
+    didSet { if placement != oldValue { setNeedsLayout() } }
+  }
   /// Main-thread writes of `layer.contents`.
   private(set) var framesShown = 0
   var onFrame: ((CGImage) -> Void)?
@@ -205,6 +208,7 @@ final class FrameLayerView: UIView {
   override func layoutSubviews() {
     super.layoutSubviews()
     layer.cornerRadius = shape.radius(in: bounds.size)
+    ImageAlign.apply(to: layer, image: placement.image, bounds: bounds.size, contentMode: placement.contentMode, alignment: placement.alignment)
   }
 
   func show(_ image: CGImage) {
@@ -254,9 +258,10 @@ struct AnimatedFramesView: UIViewRepresentable {
     var repeats: ImageAnimation.Repeats = .forever
     var rest: ImageAnimation.RestFrame = .first
     var grayscale = false
+    var tint: CGColor?
 
     var interval: TimeInterval { frames.loopDuration(rate: rate) / Double(frames.frameCount) }
-    var key: PlanKey { PlanKey(interval: interval, repeats: repeats, rest: rest, grayscale: grayscale) }
+    var key: PlanKey { PlanKey(interval: interval, repeats: repeats, rest: rest, grayscale: grayscale, tint: tint) }
     var restIndex: Int { rest == .last ? frames.frameCount - 1 : 0 }
   }
 
@@ -265,11 +270,13 @@ struct AnimatedFramesView: UIViewRepresentable {
     let repeats: ImageAnimation.Repeats
     let rest: ImageAnimation.RestFrame
     var grayscale = false
+    var tint: CGColor?
   }
 
   struct Appearance: Equatable {
     let token: UUID
     let grayscale: Bool
+    let tint: CGColor?
   }
 
   final class Playback {
@@ -287,6 +294,7 @@ struct AnimatedFramesView: UIViewRepresentable {
       let token: UUID?
       let rest: ImageAnimation.RestFrame
       let grayscale: Bool
+      let tint: CGColor?
     }
 
     deinit {
@@ -323,25 +331,25 @@ struct AnimatedFramesView: UIViewRepresentable {
     }
 
     /// Shows the rest frame once per source and rest choice; the last frame is decoded off the main thread.
-    func rest(_ rest: ImageAnimation.RestFrame, of frames: AnimatedFrames, grayscale: Bool, on view: FrameLayerView) {
+    func rest(_ rest: ImageAnimation.RestFrame, of frames: AnimatedFrames, grayscale: Bool, tint: CGColor?, on view: FrameLayerView) {
       plan = nil
       stop()
       finished = nil
       runningKey = nil
-      let shown = RestShown(token: token, rest: rest, grayscale: grayscale)
+      let shown = RestShown(token: token, rest: rest, grayscale: grayscale, tint: tint)
       guard shownRest != shown else { return }
 
       shownRest = shown
       restTask?.cancel()
       guard rest == .last else {
         restTask = nil
-        view.show(AnimatedFramesView.displayed(frames.firstImage, grayscale: grayscale))
+        view.show(AnimatedFramesView.displayed(frames.firstImage, grayscale: grayscale, tint: tint))
         return
       }
       restTask = Task.detached { [weak view] in
         guard let image = frames.image(at: frames.frameCount - 1), !Task.isCancelled else { return }
 
-        let ready = AnimatedFramesView.displayed(image, grayscale: grayscale)
+        let ready = AnimatedFramesView.displayed(image, grayscale: grayscale, tint: tint)
         await MainActor.run { [weak view] in
           if !Task.isCancelled { view?.show(ready) }
         }
@@ -357,6 +365,8 @@ struct AnimatedFramesView: UIViewRepresentable {
   var rests = false
   var grayscale = false
   var shape = MediaShape.rectangle
+  var alignment = Alignment.center
+  var tint: CGColor?
 
   func makeCoordinator() -> Playback { Playback() }
 
@@ -367,23 +377,23 @@ struct AnimatedFramesView: UIViewRepresentable {
   }
 
   func update(_ view: FrameLayerView, playback: Playback) {
-    view.layer.contentsGravity = contentMode == .fill ? .resizeAspectFill : .resizeAspect
+    view.placement = ImagePlacement(image: CGSize(width: frames.firstImage.width, height: frames.firstImage.height), contentMode: contentMode, alignment: alignment)
     view.shape = shape
     view.windowChanged = { [weak playback, weak view] in
       if let playback, let view { playback.sync(view) }
     }
-    let appearance = Appearance(token: frames.token, grayscale: grayscale)
+    let appearance = Appearance(token: frames.token, grayscale: grayscale, tint: tint)
     if playback.appearance != appearance {
       playback.appearance = appearance
       playback.token = frames.token
       playback.reset()
-      view.show(Self.displayed(frames.firstImage, grayscale: grayscale))
+      view.show(Self.displayed(frames.firstImage, grayscale: grayscale, tint: tint))
     }
     if rests {
-      playback.rest(animation.rest, of: frames, grayscale: grayscale, on: view)
+      playback.rest(animation.rest, of: frames, grayscale: grayscale, tint: tint, on: view)
       return
     }
-    playback.plan = isPlaying ? StreamPlan(stream: frames.stream, frames: frames, rate: playbackRate, repeats: animation.repeats, rest: animation.rest, grayscale: grayscale) : nil
+    playback.plan = isPlaying ? StreamPlan(stream: frames.stream, frames: frames, rate: playbackRate, repeats: animation.repeats, rest: animation.rest, grayscale: grayscale, tint: tint) : nil
     playback.sync(view)
   }
 
@@ -393,8 +403,9 @@ struct AnimatedFramesView: UIViewRepresentable {
     view.stopPresenting()
   }
 
-  nonisolated static func displayed(_ image: CGImage, grayscale: Bool) -> CGImage {
-    grayscale ? GrayscaleImage.convert(image) : image
+  nonisolated static func displayed(_ image: CGImage, grayscale: Bool, tint: CGColor?) -> CGImage {
+    let base = grayscale ? GrayscaleImage.convert(image) : image
+    return tint.map { TintedImage.convert(base, tint: $0) } ?? base
   }
 
   /// Decodes and converts frames off the main thread, the display link of `view` puts them on the layer.
@@ -409,13 +420,13 @@ struct AnimatedFramesView: UIViewRepresentable {
       func prepare(_ index: Int) {
         guard prepared.image(at: index) == nil, let image = plan.frames.image(at: index) else { return }
 
-        prepared.put(displayed(image, grayscale: plan.grayscale), at: index)
+        prepared.put(displayed(image, grayscale: plan.grayscale, tint: plan.tint), at: index)
       }
       while !Task.isCancelled {
         let parts = (clock.now - start).components
         let tick = plan.frames.frameTick(elapsed: Double(parts.seconds) + Double(parts.attoseconds) * 1e-18, rate: plan.rate)
         if let limit, tick >= limit {
-          let resting = plan.frames.image(at: plan.restIndex).map { displayed($0, grayscale: plan.grayscale) }
+          let resting = plan.frames.image(at: plan.restIndex).map { displayed($0, grayscale: plan.grayscale, tint: plan.tint) }
           guard !Task.isCancelled else { return }
 
           await MainActor.run { [weak view] in
@@ -437,7 +448,7 @@ struct AnimatedFramesView: UIViewRepresentable {
   }
 
   func sizeThatFits(_ proposal: ProposedViewSize, uiView: FrameLayerView, context: Context) -> CGSize? {
-    proposal.replacingUnspecifiedDimensions()
+    ImageAlign.size(for: proposal, image: uiView.placement.image, contentMode: contentMode, alignment: alignment)
   }
 }
 #else
@@ -450,6 +461,8 @@ struct AnimatedFramesView: View {
   var rests = false
   var grayscale = false
   var shape = MediaShape.rectangle
+  var alignment = Alignment.center
+  var tint: CGColor?
 
   var body: some View {
     Image(decorative: frames.firstImage, scale: 1).resizable().aspectRatio(contentMode: contentMode)
