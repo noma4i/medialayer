@@ -17,6 +17,7 @@ end
 
 video :moment_video do
   cover :coverUrl
+  blurhash :blurHash
   prefetch from: 1, to: 3, chunks: [2, 1]
   playback chunks_ahead: 2
   pool slots: 3, reach: 1, hold_off: 1.second, trim_delay: 30.seconds, low_ram_slots: 2, low_ram_reach: 0
@@ -75,6 +76,7 @@ The cache key is the URL. The cache lives on disk; image memory caches stay with
 | Option | Default | Meaning |
 | ------ | ------- | ------- |
 | `cover` | none | Name of the field of your own model that holds the cover image URL (the symbol is only a name for your data). The generated type gets an optional `cover` parameter. If given, the cover shows until the video is ready. If not, the first frame is cut from the first chunk and shown instead |
+| `blurhash` | none | Name of the field of your own model that holds the BlurHash string. The generated type gets an optional `blurHash` parameter. A remote video without a cover shows the blurred preview until its first frame |
 | `prefetch from:, to:` | 1, 3 | Pages ahead of the active page that are loaded in advance. Both ends are included: `from: 1, to: 3` loads the pages 1 to 3 ahead |
 | `prefetch chunks:` | `[2, 1]` | How many chunks (HLS segments) of each prefetched stream are loaded, by distance from the active page. The page 1 ahead gets 2 chunks, every page farther 1. The list has 1 to 8 entries, each 1 or 2 (the owner cap: prefetch is never more than 2 chunks), and never grows with the distance. A wrong list is an error, it is never cut. The init segment is loaded with the first chunk and is not counted. Moving the active page loads only the missing chunks of an item that came closer, and cancels the deeper requests of an item that went away. Loaded chunks stay in the cache until its budget removes them |
 | `playback chunks_ahead:` | 2 | How many chunks (HLS segments) ahead of the playing position the library loads from the network, 1 to 8. The local proxy does not fetch a chunk beyond the position plus this number until the player gets closer, so a player that asks for the whole clip cannot pull it. A chunk that is already in the cache is never held, a looping clip replays from the cache. A stall of the playing item adds 1 chunk for that item, 8 at most. The player buffer hint is derived from it. A wrong value is an error that names the key |
@@ -182,7 +184,7 @@ val windowReady = MediaWindow(data = { feed.rows }, source = { it.video }, activ
 
 ## What the generator makes
 
-One type per block, for example `MomentVideo`, `Avatar` and `VoiceNote`. Every type has `url`. A video with `cover` and an image with `blurhash` also get that optional parameter, named `cover` and `blurHash`. The names of the parameters come from the option names, not from the symbols.
+One type per block, for example `MomentVideo`, `Avatar` and `VoiceNote`. Every type has `url`. A video with `cover` or `blurhash` and an image with `blurhash` also get that optional parameter, named `cover` and `blurHash`. The names of the parameters come from the option names, not from the symbols.
 
 The parser rejects repeated option keys and keys attached to a top-level block.
 Numeric conversions reject overflow before building the spec.

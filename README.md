@@ -69,6 +69,7 @@ end
 
 video :moment_video do
   cover :coverUrl
+  blurhash :blurHash
   prefetch from: 1, to: 3, chunks: [2, 1]
 end
 

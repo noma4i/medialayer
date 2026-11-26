@@ -190,6 +190,7 @@ fn cache(body: &[Call]) -> CacheSpec {
 fn video(name: String, body: &[Call]) -> VideoSpec {
     let mut video = VideoSpec::new(&name);
     video.cover_field = argument(body, "cover", symbol);
+    video.blurhash_field = argument(body, "blurhash", symbol);
     video.prefetch.from = keyed(body, "prefetch", "from", int).unwrap_or(video.prefetch.from);
     video.prefetch.to = keyed(body, "prefetch", "to", int).unwrap_or(video.prefetch.to);
     video.prefetch.chunks = keyed(body, "prefetch", "chunks", chunks).unwrap_or(video.prefetch.chunks);

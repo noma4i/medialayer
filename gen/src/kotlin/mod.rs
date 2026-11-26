@@ -14,7 +14,7 @@ pub fn kotlin(spec: &MediaSpec, package: &str) -> String {
 }
 
 fn declaration(source: &Source) -> String {
-    let optional = source.optional.map(|label| format!("    override val {label}: String? = null,\n")).unwrap_or_default();
+    let optional = source.optional.iter().map(|label| format!("    override val {label}: String? = null,\n")).collect::<String>();
     let size = source
         .size
         .map(|(width, height)| format!("    override val size: Pair<Int, Int>? get() = Pair({width}, {height})\n"))

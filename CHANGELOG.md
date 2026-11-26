@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- The media DSL takes `blurhash :<field>` in `video`; generated Swift and Kotlin video sources carry blurHash.
+
 ## 3.56.0 - 2026-11-26
 
 ### Added

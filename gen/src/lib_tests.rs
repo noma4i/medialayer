@@ -25,6 +25,7 @@ fn ruby_blocks(path: &str) -> Vec<String> {
 fn media_files_spec() -> MediaSpec {
     let mut video = VideoSpec::new("moment_video");
     video.cover_field = Some("coverUrl".into());
+    video.blurhash_field = Some("blurHash".into());
     video.prefetch = PrefetchSpec { from: 1, to: 3, chunks: medialayer::limits::LeadingChunks::new(&[2, 1]).unwrap() };
     video.pool = PoolSpec { slots: 3, reach: 1, hold_off: 1, trim_delay: 30, low_ram_slots: Some(2), low_ram_reach: Some(0) };
     video.forward_headers = vec!["Authorization".into(), "Cookie".into(), "User-Agent".into()];
@@ -117,6 +118,18 @@ fn inv_strategy_14_every_kind_declares_its_cache_strategy_and_the_default_is_the
     );
     let errors = parse_spec("video :v do\n  strategy :forever\nend\n").unwrap_err();
     assert_eq!(errors[0].message, "`strategy` must be one of :window, :whole or :on_demand");
+}
+
+#[test]
+fn a_video_declares_cover_and_blurhash_and_both_reach_the_generated_swift_and_kotlin_sources() {
+    let spec = parse_spec("video :v do\n  cover :coverUrl\n  blurhash :blurHash\nend\n").unwrap();
+    assert_eq!(spec.videos[0].blurhash_field.as_deref(), Some("blurHash"));
+    assert_eq!(medialayer::spec::MediaSpec::from_json(&spec.to_json()).unwrap(), spec);
+    let (swift, kotlin) = (swift(&spec), kotlin(&spec, "app.media"));
+    assert!(swift.contains("    public let cover: String?\n    public let blurHash: String?\n"), "{swift}");
+    assert!(swift.contains("init(url: String, cover: String? = nil, blurHash: String? = nil, headers"), "{swift}");
+    assert!(swift.contains("        self.cover = cover\n        self.blurHash = blurHash\n"), "{swift}");
+    assert!(kotlin.contains("    override val cover: String? = null,\n    override val blurHash: String? = null,\n"), "{kotlin}");
 }
 
 #[test]

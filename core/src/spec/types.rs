@@ -112,6 +112,8 @@ pub struct VideoSpec {
     pub name: String,
     #[serde(default)]
     pub cover_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blurhash_field: Option<String>,
     #[serde(default)]
     pub prefetch: PrefetchSpec,
     #[serde(default)]
@@ -135,6 +137,7 @@ impl VideoSpec {
         VideoSpec {
             name: name.to_string(),
             cover_field: None,
+            blurhash_field: None,
             prefetch: PrefetchSpec::default(),
             pool: PoolSpec::default(),
             playback: PlaybackSpec::default(),

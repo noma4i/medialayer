@@ -14,10 +14,9 @@ pub fn swift(spec: &MediaSpec) -> String {
 }
 
 fn declaration(source: &Source) -> String {
-    let optional = source.optional;
-    let field = optional.map(|label| format!("    public let {label}: String?\n")).unwrap_or_default();
-    let parameter = optional.map(|label| format!("{label}: String? = nil, ")).unwrap_or_default();
-    let assignment = optional.map(|label| format!("        self.{label} = {label}\n")).unwrap_or_default();
+    let field: String = source.optional.iter().map(|label| format!("    public let {label}: String?\n")).collect();
+    let parameter: String = source.optional.iter().map(|label| format!("{label}: String? = nil, ")).collect();
+    let assignment: String = source.optional.iter().map(|label| format!("        self.{label} = {label}\n")).collect();
     let size = source
         .size
         .map(|(width, height)| format!("    public var size: MediaSize? {{ MediaSize(width: {width}, height: {height}) }}\n"))

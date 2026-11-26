@@ -83,6 +83,7 @@ const CACHE: &[Rule] = &[
 
 const VIDEO: &[Rule] = &[
     Rule { word: "cover", args: &[Want::Symbol], keys: &[] },
+    Rule { word: "blurhash", args: &[Want::Symbol], keys: &[] },
     Rule { word: "prefetch", args: &[], keys: &[("from", Want::Int), ("to", Want::Int), ("chunks", Want::Chunks)] },
     Rule {
         word: "pool",
