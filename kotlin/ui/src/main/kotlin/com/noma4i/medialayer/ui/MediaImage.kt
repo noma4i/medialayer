@@ -17,12 +17,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.produceState
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.blur
@@ -72,6 +74,11 @@ sealed interface ImageBackdrop {
   data class Blurred(val radius: Dp) : ImageBackdrop
 }
 
+/**
+ * Declares an image place.
+ *
+ * `alignment` and `colorFilter` mean what they mean on Compose `Image`: `alignment` positions the picture (and the interim, preview and blurhash layers) inside the bounds, `colorFilter` tints the picture, the interim and the preview (not the blurred backdrop or the blurhash).
+ */
 @Composable
 fun MediaImage(
   source: MediaSource,
@@ -81,6 +88,8 @@ fun MediaImage(
   preview: MediaSource? = null,
   playbackRate: Double = 1.0,
   animation: ImageAnimation = ImageAnimation(),
+  alignment: Alignment = Alignment.Center,
+  colorFilter: ColorFilter? = null,
   content: @Composable (MediaState) -> Unit = {}
 ) {
   if (currentEnvironmentOrNull() == null) {
@@ -93,13 +102,13 @@ fun MediaImage(
   val attempt = remember(item.loadIdentity()) { mutableStateOf(0uL) }
   val mount = claimImage(source, item, screen, failure, attempt)
   if (source.size != null) {
-    Box(modifier.then(screen.modifier)) { ImageBody(source, preview, item, mount, attempt, failure, null, 0L, screen, contentScale, backdrop, animation, playbackRate, content) }
+    Box(modifier.then(screen.modifier)) { ImageBody(source, preview, item, mount, attempt, failure, null, 0L, screen, contentScale, backdrop, animation, playbackRate, alignment, colorFilter, content) }
     return
   }
   val density = LocalDensity.current.density
   BoxWithConstraints(modifier.then(screen.modifier)) {
     val placementPixels = if (constraints.hasBoundedWidth && constraints.hasBoundedHeight) constraints.maxWidth.toLong() * constraints.maxHeight else 0L
-    ImageBody(source, preview, item, mount, attempt, failure, null, placementPixels, screen, contentScale, backdrop, animation, playbackRate, content, decodeInput(constraints, density, source, contentScale))
+    ImageBody(source, preview, item, mount, attempt, failure, null, placementPixels, screen, contentScale, backdrop, animation, playbackRate, alignment, colorFilter, content, decodeInput(constraints, density, source, contentScale))
   }
 }
 
@@ -122,7 +131,7 @@ private fun claimImage(source: MediaSource, item: MediaItem, screen: ScreenVisib
 
 @Composable
 @OptIn(ExperimentalCoroutinesApi::class)
-private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaItem, mount: PlaceMount, attempt: State<ULong>, failure: State<ScopedFailure?>, pixels: PixelSize?, placementPixels: Long, screen: ScreenVisibility, contentScale: ContentScale, backdrop: ImageBackdrop?, animation: ImageAnimation, playbackRate: Double, content: @Composable (MediaState) -> Unit, dimensions: PixelSizeMemo.Args? = null) {
+private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaItem, mount: PlaceMount, attempt: State<ULong>, failure: State<ScopedFailure?>, pixels: PixelSize?, placementPixels: Long, screen: ScreenVisibility, contentScale: ContentScale, backdrop: ImageBackdrop?, animation: ImageAnimation, playbackRate: Double, alignment: Alignment, colorFilter: ColorFilter?, content: @Composable (MediaState) -> Unit, dimensions: PixelSizeMemo.Args? = null) {
   val context = LocalContext.current
   val environment = LocalMediaEnvironment.current
   val media = environment.media
@@ -188,13 +197,13 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
   val previewReady = remember(preview, previewDimensions, pixels, scale) { mutableStateOf(false) }
   val showPreview = preview != null && state.value != MediaState.Ready
   val shownInterim = if (!drawsImage.value) interim ?: if (showPreview && !previewReady.value) previewInterim else null else null
-  if (shownInterim == null) ImageBlur(item, screen, state, contentScale)
-  shownInterim?.let { Image(it, null, Modifier.fillMaxSize().testTag(INTERIM_TAG), contentScale = contentScale) }
+  if (shownInterim == null) ImageBlur(item, screen, state, contentScale, alignment)
+  shownInterim?.let { Image(it, null, Modifier.fillMaxSize().testTag(INTERIM_TAG), alignment = alignment, contentScale = contentScale, colorFilter = colorFilter) }
   if (preview != null && screen.visible && state.value != MediaState.Ready) {
     val previewRequest = remember(media, preview, pixels, scale, placementPixels, previewDimensions) {
       imageRequest(context, preview, pixels, scale, media, placementPixels, admit = media.viewDecodeAdmit(), dimensions = previewDimensions)
     }
-    AsyncImage(model = previewRequest, contentDescription = null, imageLoader = loader, contentScale = contentScale, onState = { previewReady.value = it is AsyncImagePainter.State.Success }, modifier = Modifier.fillMaxSize().testTag(PREVIEW_TAG))
+    AsyncImage(model = previewRequest, contentDescription = null, imageLoader = loader, alignment = alignment, contentScale = contentScale, colorFilter = colorFilter, onState = { previewReady.value = it is AsyncImagePainter.State.Success }, modifier = Modifier.fillMaxSize().testTag(PREVIEW_TAG))
   }
   val onState: (AsyncImagePainter.State) -> Unit = { painterState ->
       animated.value = ((painterState as? AsyncImagePainter.State.Success)?.result?.image as? DrawableImage)?.drawable as? Animatable
@@ -210,12 +219,12 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
     val painter = rememberAsyncImagePainter(model = sizedRequest, imageLoader = loader, onState = onState, contentScale = contentScale)
     Box(Modifier.fillMaxSize().clipToBounds()) {
       if (state.value == MediaState.Ready && animated.value == null) {
-        Image(painter, null, Modifier.matchParentSize().blur(backdrop.radius).clipToBounds().testTag("media-image.backdrop"), contentScale = ContentScale.Crop)
+        Image(painter, null, Modifier.matchParentSize().blur(backdrop.radius).clipToBounds().testTag("media-image.backdrop"), alignment = alignment, contentScale = ContentScale.Crop)
       }
-      Image(painter, null, Modifier.fillMaxSize().then(sizeResolver).drawWithContent { if (drawsImage.value) drawContent() }, contentScale = contentScale)
+      Image(painter, null, Modifier.fillMaxSize().then(sizeResolver).drawWithContent { if (drawsImage.value) drawContent() }, alignment = alignment, contentScale = contentScale, colorFilter = colorFilter)
     }
   } else {
-    AsyncImage(model = request, contentDescription = null, imageLoader = loader, contentScale = contentScale, onState = onState, modifier = Modifier.fillMaxSize().drawWithContent { if (drawsImage.value) drawContent() })
+    AsyncImage(model = request, contentDescription = null, imageLoader = loader, alignment = alignment, contentScale = contentScale, colorFilter = colorFilter, onState = onState, modifier = Modifier.fillMaxSize().drawWithContent { if (drawsImage.value) drawContent() })
   }
   ImageContent(screen, state, drawsImage, shownInterim != null, content)
 }
@@ -233,7 +242,7 @@ private fun ImageContent(screen: ScreenVisibility, state: State<MediaState>, dra
 }
 
 @Composable
-private fun ImageBlur(item: MediaItem, screen: ScreenVisibility, state: State<MediaState>, contentScale: ContentScale) {
+private fun ImageBlur(item: MediaItem, screen: ScreenVisibility, state: State<MediaState>, contentScale: ContentScale, alignment: Alignment) {
   if (!screen.visible || state.value == MediaState.Ready) return
   val media = LocalMediaEnvironment.current.media
   val decoder = LocalBlurDecoder.current
@@ -244,7 +253,7 @@ private fun ImageBlur(item: MediaItem, screen: ScreenVisibility, state: State<Me
       value = answer?.let { decodeBlur(it.hash, decoder) }
       value?.let { observer?.invoke("blurhash", it.asAndroidBitmap()) }
     }
-    blur?.let { Image(it, "blurhash", Modifier.fillMaxSize(), contentScale = contentScale) }
+    blur?.let { Image(it, "blurhash", Modifier.fillMaxSize(), alignment = alignment, contentScale = contentScale) }
   }
 }
 

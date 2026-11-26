@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Android MediaImage takes alignment and colorFilter (like Compose Image); iOS MediaImage takes alignment and tint.
+
 ## 3.54.0 - 2026-11-26
 
 ### Added
