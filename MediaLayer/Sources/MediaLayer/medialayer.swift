@@ -6580,14 +6580,27 @@ public struct CaptureProfile: Equatable, Hashable {
     public var maxDurationMs: UInt64
     public var minTakeMs: UInt64
     public var audio: Bool
+    /**
+     * The preview and the video take of the front lens are mirrored.
+     */
     public var mirrorFrontVideo: Bool
+    /**
+     * The preview of a photo profile and the photo of the front lens are mirrored.
+     */
+    public var mirrorFrontPhoto: Bool
     public var stabilization: VideoStabilization
     public var photoQuality: UInt32
     public var reducesRedEye: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(mode: CaptureMode, videoSize: PixelSize?, photoSize: PixelSize?, fps: UInt32, maxDurationMs: UInt64, minTakeMs: UInt64, audio: Bool, mirrorFrontVideo: Bool, stabilization: VideoStabilization, photoQuality: UInt32, reducesRedEye: Bool) {
+    public init(mode: CaptureMode, videoSize: PixelSize?, photoSize: PixelSize?, fps: UInt32, maxDurationMs: UInt64, minTakeMs: UInt64, audio: Bool, 
+        /**
+         * The preview and the video take of the front lens are mirrored.
+         */mirrorFrontVideo: Bool, 
+        /**
+         * The preview of a photo profile and the photo of the front lens are mirrored.
+         */mirrorFrontPhoto: Bool = false, stabilization: VideoStabilization, photoQuality: UInt32, reducesRedEye: Bool) {
         self.mode = mode
         self.videoSize = videoSize
         self.photoSize = photoSize
@@ -6596,6 +6609,7 @@ public struct CaptureProfile: Equatable, Hashable {
         self.minTakeMs = minTakeMs
         self.audio = audio
         self.mirrorFrontVideo = mirrorFrontVideo
+        self.mirrorFrontPhoto = mirrorFrontPhoto
         self.stabilization = stabilization
         self.photoQuality = photoQuality
         self.reducesRedEye = reducesRedEye
@@ -6625,6 +6639,7 @@ public struct FfiConverterTypeCaptureProfile: FfiConverterRustBuffer {
                 minTakeMs: FfiConverterUInt64.read(from: &buf), 
                 audio: FfiConverterBool.read(from: &buf), 
                 mirrorFrontVideo: FfiConverterBool.read(from: &buf), 
+                mirrorFrontPhoto: FfiConverterBool.read(from: &buf), 
                 stabilization: FfiConverterTypeVideoStabilization.read(from: &buf), 
                 photoQuality: FfiConverterUInt32.read(from: &buf), 
                 reducesRedEye: FfiConverterBool.read(from: &buf)
@@ -6640,6 +6655,7 @@ public struct FfiConverterTypeCaptureProfile: FfiConverterRustBuffer {
         FfiConverterUInt64.write(value.minTakeMs, into: &buf)
         FfiConverterBool.write(value.audio, into: &buf)
         FfiConverterBool.write(value.mirrorFrontVideo, into: &buf)
+        FfiConverterBool.write(value.mirrorFrontPhoto, into: &buf)
         FfiConverterTypeVideoStabilization.write(value.stabilization, into: &buf)
         FfiConverterUInt32.write(value.photoQuality, into: &buf)
         FfiConverterBool.write(value.reducesRedEye, into: &buf)
