@@ -25,6 +25,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
   private var videoPort: AVCaptureInput.Port?
   /// Same rule as the movie connection (front lens and profile.mirrorFrontVideo), so the preview shows the picture of the file.
   private var previewMirrored = false
+  private var previewLens: CameraLens = .back
+  private var previewMirrorFrontVideo = false
 
   override init() {
     super.init()
@@ -108,6 +110,8 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     outputs.forEach(session.addOutput)
     videoPort = inputs.first?.ports(for: .video, sourceDeviceType: device.deviceType, sourceDevicePosition: device.position).first
     previewMirrored = lens == .front && profile.mirrorFrontVideo
+    previewLens = lens
+    previewMirrorFrontVideo = profile.mirrorFrontVideo
     previews.keys.forEach(linkPreview)
     // The movie file never carries a mirror: the stop path mirrors the pixels. The connection is set once per bind: a take only starts writing, the running session is not touched at its start.
     if let connection = movie?.connection(with: .video), connection.isVideoMirroringSupported {
@@ -206,6 +210,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
       link.automaticallyAdjustsVideoMirroring = false
       link.isVideoMirrored = previewMirrored
     }
+    MediaTrace.emit("camera", "preview lens=\(previewLens == .front ? "FRONT" : "BACK") mirrorFrontVideo=\(previewMirrorFrontVideo) previewMirrored=\(link.isVideoMirrored)")
     previewLinks[id] = link
   }
 

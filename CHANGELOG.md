@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- The MediaLayer trace logs the camera preview mirror (camera preview lens=... mirrorFrontVideo=... previewMirrored=...), Android and iOS.
+
 ## 3.55.0 - 2026-11-26
 
 ### Added

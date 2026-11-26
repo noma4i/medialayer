@@ -59,6 +59,10 @@ import kotlinx.coroutines.withContext
 internal fun previewCounterFlip(lens: CameraLens, mirrorFrontVideo: Boolean): Boolean =
   lens == CameraLens.FRONT && !mirrorFrontVideo
 
+/** PreviewView mirrors the front camera by itself, so the shown preview is a mirror image unless the counter flip undoes it. */
+internal fun previewMirrored(lens: CameraLens, counterFlip: Boolean): Boolean =
+  lens == CameraLens.FRONT && !counterFlip
+
 /** The step of the plan the camera stopped at: each one is its own text in the failure, so a device report tells which one it was. */
 internal enum class PlanRefusal(val step: String) {
   NO_STREAM_MAP("the camera has no SCALER_STREAM_CONFIGURATION_MAP"),
@@ -184,6 +188,7 @@ internal class CameraXBackend(private val context: Context) : CaptureBackend {
     photoSize = ready?.photoSize
     counterFlipPreview = previewCounterFlip(lens, profile.mirrorFrontVideo)
     host.scaleX = if (counterFlipPreview) -1f else 1f
+    MediaTrace.emit("camera") { "preview lens=$lens mirrorFrontVideo=${profile.mirrorFrontVideo} previewMirrored=${previewMirrored(lens, counterFlipPreview)}" }
     val made = Preview.Builder().setResolutionSelector(previewSelector(ready, profile))
       .setMirrorMode(MirrorMode.MIRROR_MODE_OFF).build().apply { surfaceProvider = host.surfaceProvider }
     val cases = mutableListOf<UseCase>(made)
