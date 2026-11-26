@@ -14967,12 +14967,12 @@ public func FfiConverterTypeMediaPrepareOutcome_lower(_ value: MediaPrepareOutco
 
 
 /**
- * What the platform probe answers: the width, height and MIME of the file, planned when the probe had a descriptor, or the failure. An unsupported file is a `File` with all `None`.
+ * What the platform probe answers: the width, height, MIME and container duration in ms of the file (`duration_ms` is None for images and when the container gives none or 0), planned when the probe had a descriptor, or the failure. An unsupported file is a `File` with all `None`.
  */
 
 public enum MediaProbeOutcome: Equatable, Hashable {
     
-    case file(width: UInt32?, height: UInt32?, mime: String?
+    case file(width: UInt32?, height: UInt32?, mime: String?, durationMs: UInt64?
     )
     case failed(message: String
     )
@@ -14997,7 +14997,7 @@ public struct FfiConverterTypeMediaProbeOutcome: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
         
-        case 1: return .file(width: try FfiConverterOptionUInt32.read(from: &buf), height: try FfiConverterOptionUInt32.read(from: &buf), mime: try FfiConverterOptionString.read(from: &buf)
+        case 1: return .file(width: try FfiConverterOptionUInt32.read(from: &buf), height: try FfiConverterOptionUInt32.read(from: &buf), mime: try FfiConverterOptionString.read(from: &buf), durationMs: try FfiConverterOptionUInt64.read(from: &buf)
         )
         
         case 2: return .failed(message: try FfiConverterString.read(from: &buf)
@@ -15011,11 +15011,12 @@ public struct FfiConverterTypeMediaProbeOutcome: FfiConverterRustBuffer {
         switch value {
         
         
-        case let .file(width,height,mime):
+        case let .file(width,height,mime,durationMs):
             writeInt(&buf, Int32(1))
             FfiConverterOptionUInt32.write(width, into: &buf)
             FfiConverterOptionUInt32.write(height, into: &buf)
             FfiConverterOptionString.write(mime, into: &buf)
+            FfiConverterOptionUInt64.write(durationMs, into: &buf)
             
         
         case let .failed(message):
@@ -16305,7 +16306,7 @@ public func FfiConverterTypePreparePlan_lower(_ value: PreparePlan) -> RustBuffe
 
 public enum PrepareProbe: Equatable, Hashable {
     
-    case video(source: VideoSource, metadataKeys: [String], sizeBytes: UInt64
+    case video(source: VideoSource, metadataKeys: [String], sizeBytes: UInt64, durationMs: UInt64?
     )
     case image(width: UInt32, height: UInt32, exifOrientation: UInt32, format: ImageFormat
     )
@@ -16332,7 +16333,7 @@ public struct FfiConverterTypePrepareProbe: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
         
-        case 1: return .video(source: try FfiConverterTypeVideoSource.read(from: &buf), metadataKeys: try FfiConverterSequenceString.read(from: &buf), sizeBytes: try FfiConverterUInt64.read(from: &buf)
+        case 1: return .video(source: try FfiConverterTypeVideoSource.read(from: &buf), metadataKeys: try FfiConverterSequenceString.read(from: &buf), sizeBytes: try FfiConverterUInt64.read(from: &buf), durationMs: try FfiConverterOptionUInt64.read(from: &buf)
         )
         
         case 2: return .image(width: try FfiConverterUInt32.read(from: &buf), height: try FfiConverterUInt32.read(from: &buf), exifOrientation: try FfiConverterUInt32.read(from: &buf), format: try FfiConverterTypeImageFormat.read(from: &buf)
@@ -16349,11 +16350,12 @@ public struct FfiConverterTypePrepareProbe: FfiConverterRustBuffer {
         switch value {
         
         
-        case let .video(source,metadataKeys,sizeBytes):
+        case let .video(source,metadataKeys,sizeBytes,durationMs):
             writeInt(&buf, Int32(1))
             FfiConverterTypeVideoSource.write(source, into: &buf)
             FfiConverterSequenceString.write(metadataKeys, into: &buf)
             FfiConverterUInt64.write(sizeBytes, into: &buf)
+            FfiConverterOptionUInt64.write(durationMs, into: &buf)
             
         
         case let .image(width,height,exifOrientation,format):
