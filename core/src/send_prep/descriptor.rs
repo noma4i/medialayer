@@ -34,7 +34,7 @@ pub enum PrepareKind {
 /// What the platform read from a source. `size_bytes` is the file size.
 #[derive(Debug, Clone, PartialEq, uniffi::Enum)]
 pub enum PrepareProbe {
-    Video { source: VideoSource, metadata_keys: Vec<String>, size_bytes: u64 },
+    Video { source: VideoSource, metadata_keys: Vec<String>, size_bytes: u64, duration_ms: Option<u64> },
     Image { width: u32, height: u32, exif_orientation: u32, format: ImageFormat },
     Failed { message: String },
 }
@@ -76,20 +76,20 @@ impl MediaPrepareOutcome {
     }
 }
 
-/// What the platform probe answers: the width, height and MIME of the file, planned when the probe had a descriptor, or the failure. An unsupported file is a `File` with all `None`.
+/// What the platform probe answers: the width, height, MIME and container duration in ms of the file (`duration_ms` is None for images and when the container gives none or 0), planned when the probe had a descriptor, or the failure. An unsupported file is a `File` with all `None`.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum MediaProbeOutcome {
-    File { width: Option<u32>, height: Option<u32>, mime: Option<String> },
+    File { width: Option<u32>, height: Option<u32>, mime: Option<String>, duration_ms: Option<u64> },
     Failed { message: String },
 }
 
 impl MediaProbeOutcome {
-    fn file(size: PixelSize, mime: &str) -> Self {
-        Self::File { width: Some(size.width), height: Some(size.height), mime: Some(mime.to_string()) }
+    fn file(size: PixelSize, mime: &str, duration_ms: Option<u64>) -> Self {
+        Self::File { width: Some(size.width), height: Some(size.height), mime: Some(mime.to_string()), duration_ms }
     }
 
     fn unsupported() -> Self {
-        Self::File { width: None, height: None, mime: None }
+        Self::File { width: None, height: None, mime: None, duration_ms: None }
     }
 }
 
@@ -245,7 +245,7 @@ pub fn media_prepare_decide(descriptor: Vec<u8>, probe: PrepareProbe) -> Prepare
         _ => refuse(MediaPrepareFailure::CannotDecode, reason.clone()),
     };
     match (&intent, &probe) {
-        (MediaPrepareIntent::Video { limits, mirror, .. }, PrepareProbe::Video { source, metadata_keys, size_bytes }) => {
+        (MediaPrepareIntent::Video { limits, mirror, .. }, PrepareProbe::Video { source, metadata_keys, size_bytes, .. }) => {
             let limits = limits.clone().unwrap_or_else(super::default_video_limits);
             match plan_video_sized(*source, *size_bytes, limits.clone()) {
                 Err(error) => refuse(MediaPrepareFailure::UnsupportedDescriptor, error.to_string()),
@@ -283,16 +283,16 @@ fn planned_file(descriptor: Option<Vec<u8>>, probe: &PrepareProbe) -> Option<Med
     match (&intent, probe) {
         (None, PrepareProbe::Image { width, height, exif_orientation, format }) => {
             let edit = PhotoEdit { max_size: None, enlarge: false, crop: None, output_size: None, mirror: false, rotation_degrees: 0 };
-            Some(MediaProbeOutcome::file(photo_plan(*width, *height, *exif_orientation, edit)?.upright, image_mime(*format)))
+            Some(MediaProbeOutcome::file(photo_plan(*width, *height, *exif_orientation, edit)?.upright, image_mime(*format), None))
         }
-        (None, PrepareProbe::Video { source, .. }) => Some(MediaProbeOutcome::file(upright(source.width, source.height, source.rotation_degrees), VIDEO_MIME)),
+        (None, PrepareProbe::Video { source, duration_ms, .. }) => Some(MediaProbeOutcome::file(upright(source.width, source.height, source.rotation_degrees), VIDEO_MIME, *duration_ms)),
         (Some(MediaPrepareIntent::Image { edit, format, .. }), PrepareProbe::Image { width, height, exif_orientation, .. }) => {
-            Some(MediaProbeOutcome::file(photo_plan(*width, *height, *exif_orientation, *edit)?.output, image_mime(*format)))
+            Some(MediaProbeOutcome::file(photo_plan(*width, *height, *exif_orientation, *edit)?.output, image_mime(*format), None))
         }
-        (Some(MediaPrepareIntent::Video { limits, mirror, .. }), PrepareProbe::Video { source, size_bytes, .. }) => {
+        (Some(MediaPrepareIntent::Video { limits, mirror, .. }), PrepareProbe::Video { source, size_bytes, duration_ms, .. }) => {
             let plan = plan_video_sized(*source, *size_bytes, limits.clone().unwrap_or_else(super::default_video_limits)).ok()?;
             let size = if plan.reencode || *mirror { PixelSize { width: plan.width, height: plan.height } } else { upright(source.width, source.height, source.rotation_degrees) };
-            Some(MediaProbeOutcome::file(size, VIDEO_MIME))
+            Some(MediaProbeOutcome::file(size, VIDEO_MIME, *duration_ms))
         }
         _ => None,
     }

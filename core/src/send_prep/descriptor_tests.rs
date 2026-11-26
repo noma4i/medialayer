@@ -20,7 +20,7 @@ fn image(edit: PhotoEdit) -> Vec<u8> {
 }
 
 fn probe(source: VideoSource, keys: &[&str], size_bytes: u64) -> PrepareProbe {
-    PrepareProbe::Video { source, metadata_keys: keys.iter().map(|key| key.to_string()).collect(), size_bytes }
+    PrepareProbe::Video { source, metadata_keys: keys.iter().map(|key| key.to_string()).collect(), size_bytes, duration_ms: None }
 }
 
 fn photo(width: u32, height: u32) -> PrepareProbe {
@@ -28,11 +28,11 @@ fn photo(width: u32, height: u32) -> PrepareProbe {
 }
 
 fn file(width: u32, height: u32, mime: &str) -> MediaProbeOutcome {
-    MediaProbeOutcome::File { width: Some(width), height: Some(height), mime: Some(mime.to_string()) }
+    MediaProbeOutcome::File { width: Some(width), height: Some(height), mime: Some(mime.to_string()), duration_ms: None }
 }
 
 fn unsupported() -> MediaProbeOutcome {
-    MediaProbeOutcome::File { width: None, height: None, mime: None }
+    MediaProbeOutcome::File { width: None, height: None, mime: None, duration_ms: None }
 }
 
 #[test]
@@ -180,4 +180,13 @@ fn inv_send_64_the_descriptor_kind_is_known_without_the_source_and_garbage_has_n
     assert_eq!(media_prepare_descriptor_kind(image(edit())), Some(PrepareKind::Image));
     assert_eq!(media_prepare_descriptor_kind(vec![9, 9, 9]), None);
     assert_eq!(media_prepare_descriptor_kind(Vec::new()), None);
+}
+
+#[test]
+fn inv_send_57_the_probe_facts_carry_the_video_duration_and_an_image_has_none() {
+    let timed = PrepareProbe::Video { source: source(), metadata_keys: Vec::new(), size_bytes: 1, duration_ms: Some(1234) };
+    let video_file = MediaProbeOutcome::File { width: Some(1280), height: Some(720), mime: Some("video/mp4".to_string()), duration_ms: Some(1234) };
+    assert_eq!(media_prepare_facts(None, timed.clone()), video_file);
+    assert_eq!(media_prepare_facts(Some(video(false, CannotDecode::Fail)), timed), video_file);
+    assert_eq!(media_prepare_facts(None, photo(200, 100)), file(200, 100, "image/jpeg"));
 }

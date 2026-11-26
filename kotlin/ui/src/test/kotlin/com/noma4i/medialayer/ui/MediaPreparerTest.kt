@@ -155,9 +155,11 @@ class MediaPreparerTest {
     val plain = preparerOf(facts4k, decoders = emptyList(), exports = exports).probe(path, null, "video/mp4")
     val turned = preparerOf(VideoFacts(1920, 1080, 90, 30f, 1_000_000, 2, true), decoders = emptyList(), exports = exports).probe(path, null, "video/mp4")
 
-    assertEquals(MediaProbeOutcome.File(1920u, 1080u, "video/mp4"), planned)
-    assertEquals(MediaProbeOutcome.File(3840u, 2160u, "video/mp4"), plain)
-    assertEquals(MediaProbeOutcome.File(1080u, 1920u, "video/mp4"), turned)
+    assertEquals(MediaProbeOutcome.File(1920u, 1080u, "video/mp4", null), planned)
+    assertEquals(MediaProbeOutcome.File(3840u, 2160u, "video/mp4", null), plain)
+    assertEquals(MediaProbeOutcome.File(1080u, 1920u, "video/mp4", null), turned)
+    val timed = preparerOf(VideoFacts(1280, 720, 0, 30f, 1_000_000, 2, true, durationMs = 1234L), decoders = emptyList(), exports = exports).probe(path, null, "video/mp4")
+    assertEquals(MediaProbeOutcome.File(1280u, 720u, "video/mp4", 1234uL), timed)
     assertTrue(preparerOf(facts4k, decoders = emptyList(), exports = exports).probe(File(folder, "missing.mp4").path, null, null) is MediaProbeOutcome.Failed)
     assertTrue(exports.isEmpty())
   }

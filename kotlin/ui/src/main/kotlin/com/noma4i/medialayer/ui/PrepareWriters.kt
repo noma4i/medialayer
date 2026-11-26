@@ -72,7 +72,7 @@ import kotlinx.coroutines.withContext
 /** The facts of a video the way the prepare reads them: the rotation is a turn of 0 to 359 degrees. */
 internal fun readPrepareVideoFacts(file: File): VideoFacts {
   val facts = readVideoFacts(file)
-  return VideoFacts(facts.width, facts.height, facts.rotation.mod(360), facts.frameRate, facts.bitrate, facts.audioChannels, facts.mp4H264Aac, facts.mime, facts.profile)
+  return VideoFacts(facts.width, facts.height, facts.rotation.mod(360), facts.frameRate, facts.bitrate, facts.audioChannels, facts.mp4H264Aac, facts.mime, facts.profile, facts.durationMs)
 }
 
 /** The metadata keys of the source, with the location of the container when the retriever finds one. */
@@ -88,7 +88,7 @@ internal fun readPrepareMetadataKeys(context: Context, file: File): List<String>
 }
 
 internal fun probeOfVideo(facts: VideoFacts, metadataKeys: List<String>, sizeBytes: Long): PrepareProbe =
-  PrepareProbe.Video(facts.toSource(), metadataKeys, sizeBytes.toULong())
+  PrepareProbe.Video(facts.toSource(), metadataKeys, sizeBytes.toULong(), facts.durationMs?.toULong())
 
 /** The bounds, the EXIF orientation and the format of an image, or null when the file is not an image. */
 internal fun probeOfImage(file: File): PrepareProbe.Image? {
@@ -209,7 +209,8 @@ internal class VideoFacts(
   val audioChannels: Int?,
   val mp4H264Aac: Boolean,
   val mime: String = MimeTypes.VIDEO_H264,
-  val profile: Int? = null
+  val profile: Int? = null,
+  val durationMs: Long? = null
 ) {
   fun toSource() = VideoSource(width.toUInt(), height.toUInt(), rotation, frameRate, bitrate?.toUInt(), mp4H264Aac)
 }
@@ -302,7 +303,8 @@ internal fun readVideoFacts(file: File): VideoFacts {
       if (video.containsKey(MediaFormat.KEY_ROTATION)) video.getInteger(MediaFormat.KEY_ROTATION) else 0,
       trackRate ?: countedRate, bitrate.takeIf { it > 0 }, audio?.getInteger(MediaFormat.KEY_CHANNEL_COUNT), fits,
       video.getString(MediaFormat.KEY_MIME).orEmpty(),
-      video.takeIf { it.containsKey(MediaFormat.KEY_PROFILE) }?.getInteger(MediaFormat.KEY_PROFILE)
+      video.takeIf { it.containsKey(MediaFormat.KEY_PROFILE) }?.getInteger(MediaFormat.KEY_PROFILE),
+      durationMs.takeIf { it > 0 }
     )
   } finally {
     extractor.release()

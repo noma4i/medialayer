@@ -49,8 +49,10 @@ enum PrepareFacts {
         rotationDegrees: (Int32((atan2(transform.b, transform.a) * 180 / .pi).rounded()) % 360 + 360) % 360,
         frameRate: rate, bitrate: dataRate > 0 ? UInt32(dataRate) : nil, mp4H264Aac: fits
       )
+      let durationSeconds = try await asset.load(.duration).seconds
+      let durationMs: UInt64? = durationSeconds.isFinite && durationSeconds > 0 ? UInt64((durationSeconds * 1000).rounded()) : nil
       let bytes = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? UInt64) ?? 0
-      return .video(source: source, metadataKeys: try await metadataKeys(asset, tracks: [track] + (audioTrack.map { [$0] } ?? [])), sizeBytes: bytes)
+      return .video(source: source, metadataKeys: try await metadataKeys(asset, tracks: [track] + (audioTrack.map { [$0] } ?? [])), sizeBytes: bytes, durationMs: durationMs)
     } catch {
       return .failed(message: "\(file.path) is not a video: \(error.localizedDescription)")
     }

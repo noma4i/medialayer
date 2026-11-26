@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- MediaProbeOutcome.File carries durationMs (null for images and containers without a duration), Android and iOS.
+
 ## 3.53.6 - 2026-11-26
 
 ### Fixed

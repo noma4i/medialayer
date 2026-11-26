@@ -281,7 +281,7 @@ struct MediaPreparerTests {
     defer { try? FileManager.default.removeItem(at: directory) }
     let source = directory.appending(path: "photo.jpg")
     try writePicture(source, width: 40, height: 20, orientation: 6)
-    guard case let .file(width, height, mime) = await MediaPreparer().probe(path: source.path, descriptor: nil, mime: nil) else {
+    guard case let .file(width, height, mime, _) = await MediaPreparer().probe(path: source.path, descriptor: nil, mime: nil) else {
       Issue.record("the probe reads the photo")
       return
     }
@@ -612,9 +612,9 @@ struct MediaPreparerMatrixTests {
     try await writeClip(FixtureClip(width: 640, height: 360), to: large)
     let preparer = MediaPreparer()
     let descriptor = try videoDescriptor(limits: recodeLimits())
-    guard case let .file(plainWidth, plainHeight, plainMime) = await preparer.probe(path: plain.path, descriptor: descriptor, mime: nil),
-          case let .file(taggedWidth, taggedHeight, _) = await preparer.probe(path: tagged.path, descriptor: descriptor, mime: nil),
-          case let .file(largeWidth, largeHeight, _) = await preparer.probe(path: large.path, descriptor: descriptor, mime: nil)
+    guard case let .file(plainWidth, plainHeight, plainMime, _) = await preparer.probe(path: plain.path, descriptor: descriptor, mime: nil),
+          case let .file(taggedWidth, taggedHeight, _, _) = await preparer.probe(path: tagged.path, descriptor: descriptor, mime: nil),
+          case let .file(largeWidth, largeHeight, _, _) = await preparer.probe(path: large.path, descriptor: descriptor, mime: nil)
     else {
       Issue.record("the probe reads the clips")
       return
@@ -631,11 +631,11 @@ struct MediaPreparerMatrixTests {
     defer { try? FileManager.default.removeItem(at: directory) }
     let source = directory.appending(path: "turned.mp4")
     try await writeClip(FixtureClip(width: 64, height: 32, audio: true, turned: true), to: source)
-    guard case let .file(width, height, mime) = await MediaPreparer().probe(path: source.path, descriptor: nil, mime: nil) else {
+    guard case let .file(width, height, mime, durationMs) = await MediaPreparer().probe(path: source.path, descriptor: nil, mime: nil) else {
       Issue.record("the probe reads the clip")
       return
     }
-    #expect(width == 32 && height == 64 && mime == "video/mp4")
+    #expect(width == 32 && height == 64 && mime == "video/mp4" && (durationMs ?? 0) > 0)
   }
 
   // Decoder unavailable: the source cannot be read, the policy decides
@@ -803,7 +803,7 @@ struct MediaPreparerMatrixTests {
     try writePicture(source, width: 40, height: 20, orientation: 1, tagged: true)
     let edit = PhotoEdit(maxSize: nil, enlarge: false, crop: CropFractions(x: 0.5, y: 0, width: 0.5, height: 1), outputSize: nil, mirror: false, rotationDegrees: 0)
     let descriptor = try editDescriptor(edit)
-    guard case let .file(plannedWidth, plannedHeight, _) = await MediaPreparer().probe(path: source.path, descriptor: descriptor, mime: nil) else {
+    guard case let .file(plannedWidth, plannedHeight, _, _) = await MediaPreparer().probe(path: source.path, descriptor: descriptor, mime: nil) else {
       Issue.record("the probe plans the crop")
       return
     }
