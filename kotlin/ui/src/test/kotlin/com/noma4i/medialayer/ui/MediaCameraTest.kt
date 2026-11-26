@@ -967,7 +967,9 @@ class MediaCameraTest {
 
     app.close()
 
-    eventually("the camera thread ended") { mine.none { it.isAlive } }
+    // The end of a thread fires no TestSignal, so wait on the thread itself.
+    mine.forEach { it.join(5_000) }
+    assertTrue("the camera thread ended", mine.none { it.isAlive })
   }
 
   @Test
