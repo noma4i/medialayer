@@ -299,7 +299,7 @@ private fun VideoCover(media: MediaLayer, item: MediaItem, ready: Boolean, enabl
     ensureActive()
     value = answer
   }
-  val answer = placeholder ?: if (enabled) provisionalCover(item, ready) else null
+  val answer = placeholder ?: provisionalCover(item, ready)
   val shown = answer as? Placeholder.Cover
   val firstFrame = answer is Placeholder.FirstFrame && item.url.trim().startsWith("file://", ignoreCase = true)
   val label = if (shown != null) "cover" else if (firstFrame) "firstframe" else "none"
@@ -332,7 +332,7 @@ private fun VideoCover(media: MediaLayer, item: MediaItem, ready: Boolean, enabl
     }
     val coverReady = remember(request) { mutableStateOf(false) }
     if (!coverReady.value) interim?.let { Image(it, null, Modifier.fillMaxSize().testTag(INTERIM_TAG), contentScale = contentScale) }
-    AsyncImage(
+    if (enabled) AsyncImage(
       model = request,
       contentDescription = "cover",
       imageLoader = environment.imageLoader,

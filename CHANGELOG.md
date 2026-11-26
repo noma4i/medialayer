@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Android draws a picture that is already in memory (the preview of a `MediaImage`, the cover of a `MediaVideo`) in the first frame of a new page, before the place is reported on screen; before, the area stayed empty for 1-2 frames.
+
 ## 3.53.5 - 2026-11-25
 
 ### Fixed

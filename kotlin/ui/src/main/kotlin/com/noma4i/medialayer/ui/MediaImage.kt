@@ -186,7 +186,7 @@ private fun ImageBody(source: MediaSource, preview: MediaSource?, item: MediaIte
     preview?.let { environment.imageLoader.interim(it.url, it.headers, pixels, previewDimensions, scale) }
   }
   val previewReady = remember(preview, previewDimensions, pixels, scale) { mutableStateOf(false) }
-  val showPreview = preview != null && screen.visible && state.value != MediaState.Ready
+  val showPreview = preview != null && state.value != MediaState.Ready
   val shownInterim = if (!drawsImage.value) interim ?: if (showPreview && !previewReady.value) previewInterim else null else null
   if (shownInterim == null) ImageBlur(item, screen, state, contentScale)
   shownInterim?.let { Image(it, null, Modifier.fillMaxSize().testTag(INTERIM_TAG), contentScale = contentScale) }

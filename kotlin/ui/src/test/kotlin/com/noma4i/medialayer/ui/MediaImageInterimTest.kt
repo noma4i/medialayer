@@ -124,6 +124,48 @@ class MediaImageInterimTest {
     assertEquals(decodes + 1uL, layer.imageStats().snapshot().decodes)
   }
 
+  private data class Cached(override val url: String, override val kind: Kind, override val cover: String? = null) : MediaSource {
+    override val headers = emptyMap<String, String>()
+  }
+
+  @Test
+  fun inv_image_88_aCachedPreviewDrawsInTheFirstFrameBeforeThePlaceIsVisible() = firstFrameDraws(video = false)
+
+  @Test
+  fun inv_image_88_aCachedVideoCoverDrawsInTheFirstFrame() = firstFrameDraws(video = true)
+
+  private fun firstFrameDraws(video: Boolean) {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val layer = RecordingLayer()
+    val slots = ExoPlayerSlotFactory(context, startMuted = true).onMainLooper()
+    val cached = Cached("https://example.test/cached.png", Kind.IMAGE)
+    val gate = CompletableDeferred<Unit>()
+    val loader = mediaImageLoader(context, ImageBytes { url, _ ->
+      if (!url.endsWith("cached.png")) gate.await()
+      ImageFetchResult(pngBytes(100, 100), ImageOrigin.NETWORK)
+    }, stats = layer.imageStats()).newBuilder().allowHardware(false).build()
+    val looper = shadowOf(android.os.Looper.getMainLooper())
+    var page by mutableStateOf(0)
+    rule.setContent {
+      MediaLayerProvider(CompletableDeferred(layer), loader, slots.players) {
+        if (page == 0) {
+          MediaImage(cached, Modifier.size(20.dp))
+        } else {
+          Box(Modifier.size(1.dp).testTag("probe50"))
+          if (video) MediaVideo(Cached("https://example.test/v.mp4", Kind.VIDEO, cached.url), modifier = Modifier.size(50.dp))
+          else MediaImage(Cached("https://example.test/full.png", Kind.IMAGE), Modifier.size(50.dp), preview = cached)
+        }
+      }
+    }
+    rule.waitUntil(COMPOSE_WAIT_MS) { looper.idle(); layer.calls.count { it == "itemState:${cached.url}:Ready" } == 1 }
+    rule.mainClock.autoAdvance = false
+    rule.runOnIdle { page = 1 }
+    firstFrameOfNewImage()
+    rule.onAllNodesWithTag(INTERIM_TAG, useUnmergedTree = true).assertCountEquals(1)
+    gate.complete(Unit)
+    rule.mainClock.autoAdvance = true
+  }
+
   /** Steps frames one by one until the frame that first composes the new MediaImage (the probe next to it appears in that frame), so the check reads that exact frame. */
   private fun firstFrameOfNewImage() {
     repeat(20) {
