@@ -22,7 +22,9 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ -z "$prepare" ] || [ -z "$publish" ] || fail '--prepare cannot publish'
-[ -n "$prepare" ] || [ -n "$report" ] || fail 'checks report is required'
+# MEDIALAYER_SKIP_CHECKS=1 publishes without the checks report: only on the owner's explicit word for that release.
+skip_checks="${MEDIALAYER_SKIP_CHECKS:-}"
+[ -n "$prepare" ] || [ -n "$report" ] || [ -n "$skip_checks" ] || fail 'checks report is required'
 [ -n "$android_dir" ] || fail 'Android release result is required: pass --android <result-dir>'
 android_dir="$(cd -- "$android_dir" && pwd -P)" || fail 'Android release result directory not found'
 [ -z "$(git status --porcelain -- . ':(exclude)MediaLayer/Sources/MediaLayer/medialayer.swift')" ] || fail 'working tree is not clean'
@@ -94,7 +96,11 @@ if [ "$(git log -1 --format=%s)" = "Package release $version" ]; then
   done <<< "$package_files"
   source_ref='HEAD^'
 fi
-python3 scripts/release_evidence.py verify "$report" "$android_dir" "$stage" "$source_ref" || fail 'checks report does not match release'
+if [ -n "$skip_checks" ] && [ -z "$report" ]; then
+  printf '%s\n' 'checks report skipped: MEDIALAYER_SKIP_CHECKS is set'
+else
+  python3 scripts/release_evidence.py verify "$report" "$android_dir" "$stage" "$source_ref" || fail 'checks report does not match release'
+fi
 
 mkdir -p "$tmp/archive"
 unzip -q "$stage/MediaLayerFFI.xcframework.zip" -d "$tmp/archive"
