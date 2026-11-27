@@ -487,7 +487,8 @@ impl Proxy {
 }
 
 fn rebind_after_accept_errors(inner: Arc<ProxyShared>, epoch: u64) {
-    tokio::spawn(async move {
+    let owner = inner.clone();
+    owner.tasks.spawn(async move {
         let mut listener = inner.listener.lock().await;
         if inner.stopped.load(Ordering::SeqCst) || inner.listener_epoch.load(Ordering::SeqCst) != epoch { return; }
         let previous = inner.last_port.load(Ordering::SeqCst);

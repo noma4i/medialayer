@@ -189,8 +189,8 @@ impl Book {
 
     pub(super) fn update_place(&mut self, owner: u64, mut input: PlaceInput, reserve: Reserve) {
         let starts = self.places.get(&owner).is_some_and(|place| input.playing && (!place.input.playing || input.play_generation != place.input.play_generation) && place.forgotten != Some(input.play_generation));
-        if starts && !self.in_call && matches!(self.pause_reason, Some(PauseReason::Capture | PauseReason::Interrupted)) {
-            crate::trace!("heal", "audio cleared pause={:?}", self.pause_reason.unwrap());
+        if let Some(reason) = self.pause_reason.filter(|reason| starts && !self.in_call && matches!(reason, PauseReason::Capture | PauseReason::Interrupted)) {
+            crate::trace!("heal", "audio cleared pause={reason:?}");
             self.audio(CoreAudio::Op(AudioOp::ForgetPaused));
         }
         let intent = self.next_seq();

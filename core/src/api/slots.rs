@@ -203,7 +203,7 @@ impl SlotRunner {
     pub fn dispose_current(&self, slot: usize, generation: u64) -> bool {
         let mut lanes = self.lanes();
         if !lanes.live.get(&slot).is_some_and(|lane| lane.shared.pause_id == generation) { return false; }
-        let lane = lanes.live.remove(&slot).unwrap();
+        let Some(lane) = lanes.live.remove(&slot) else { return false };
         lane.shared.queue.dispose();
         lanes.closing.push(lane);
         true

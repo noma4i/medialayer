@@ -61,7 +61,7 @@ impl Session {
             SessionEvent::Applied { generation, result: AppliedResult::Ok } if generation == g => Transition(State::held(w.clone())),
             SessionEvent::Focus { generation, answer: FocusAnswer::Granted } if generation == g => Transition(State::held(w.clone())),
             SessionEvent::Focus { generation, answer: FocusAnswer::Delayed } if generation == g => Transition(State::delayed(w.clone())),
-            SessionEvent::Applied { generation, result: AppliedResult::Failed { .. } } if generation == g && previous.is_some() => Transition(State::held(previous.clone().unwrap())),
+            SessionEvent::Applied { generation, result: AppliedResult::Failed { .. } } if generation == g && previous.is_some() => Transition(State::held(previous.clone().unwrap_or_else(|| w.clone()))),
             SessionEvent::Applied { generation, result: AppliedResult::Failed { .. } } if generation == g => Transition(State::refused(true)),
             SessionEvent::Focus { generation, answer: FocusAnswer::Failed } if generation == g => Transition(State::refused(false)),
             _ => Super,

@@ -32,3 +32,4 @@ periodic kotlin/ui/src/main/kotlin/com/noma4i/medialayer/ui/MediaVoiceRecorder.k
 periodic MediaLayer/Sources/MediaLayerUI/Camera/MediaCamera.swift 1 # length of a running recording read every capture_tick_ms (100 ms), started by RecordStarted and cancelled when the recording leaves Recording or the camera goes, 0 wakeups at rest
 periodic kotlin/ui/src/main/kotlin/com/noma4i/medialayer/ui/MediaCamera.kt 1 # length of a running recording read every capture_tick_ms (100 ms), started by RecordStarted and cancelled when the recording leaves Recording or the camera closes, 0 wakeups at rest
 periodic MediaLayer/Sources/MediaLayerUI/OutgoingRuntime.swift 1 # 5 s re-ask of an outgoing remote that answered not-ready (owner 2026-11-20, INV-OUTGOING-18), only while the item is on screen, ends at ready or failure
+panic:api/stage/dispatch.rs:panic!("tick test panic") # inside #[cfg(test)] only: the test hook that makes the tick loop panic for the restart guard test

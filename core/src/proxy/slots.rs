@@ -111,7 +111,7 @@ struct IdleState {
 
 struct IdleBody {
     state: Arc<Mutex<IdleState>>,
-    task: tokio::task::JoinHandle<()>,
+    _task: crate::api::guard::AbortOnDrop,
 }
 
 impl Stream for IdleBody {
@@ -130,7 +130,6 @@ impl Stream for IdleBody {
 
 impl Drop for IdleBody {
     fn drop(&mut self) {
-        self.task.abort();
         let body = lock(&self.state).body.take();
         drop(body);
     }
@@ -183,7 +182,7 @@ impl Permit {
                 break;
             }
         });
-        Box::pin(IdleBody { state, task })
+        Box::pin(IdleBody { state, _task: crate::api::guard::AbortOnDrop::new(task) })
     }
 }
 

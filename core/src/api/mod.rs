@@ -1,7 +1,7 @@
 mod assemble;
 mod controls;
 mod error;
-mod guard;
+pub(crate) mod guard;
 mod hub;
 mod lane;
 mod placeholder;
