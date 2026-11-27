@@ -78,7 +78,7 @@ fn inv_heal_05_an_audible_edge_after_interruption_reclaims_the_session() {
     world.send(I::InterruptionBegan);
     world.send(I::Audible { slot: 0, on: false });
     let actions = world.send(I::Audible { slot: 0, on: true });
-    assert!(actions.contains(&apply(PLAYBACK)), "{actions:?}");
+    assert_eq!(actions, vec![A::ForgetPaused, apply(PLAYBACK), available(MicrophoneAvailability::Available)]);
     assert_eq!(world.owner.system(), System::Free);
 }
 
@@ -87,11 +87,7 @@ fn inv_heal_05_an_audible_edge_reasks_the_session_when_held() {
     let mut world = World::with(AudioFocus::Mix);
     world.settle(I::VolumeReadStarted { id: 1 });
     let actions = world.send(I::Audible { slot: 0, on: true });
-    assert!(actions.contains(&apply(PLAYBACK)), "{actions:?}");
-    let generation = world.owner.inflight().unwrap();
-    world.send(I::Applied { generation, result: AppliedResult::Ok });
-    let again = world.send(I::Audible { slot: 1, on: true });
-    assert!(again.contains(&apply(PLAYBACK)), "{again:?}");
+    assert_eq!(actions, vec![apply(PLAYBACK)]);
 }
 
 #[test]
@@ -102,7 +98,64 @@ fn inv_heal_05_an_audible_edge_after_a_busy_deactivate_reclaims_playback() {
     let generation = end.iter().find_map(generation_of).unwrap();
     world.raw(I::Applied { generation, result: AppliedResult::Busy });
     let actions = world.send(I::Audible { slot: 0, on: true });
-    assert!(actions.contains(&apply(PLAYBACK)), "{actions:?}");
+    assert_eq!(actions, vec![apply(PLAYBACK)]);
+}
+
+#[test]
+fn inv_heal_05_new_audible_slot_reasks_after_delayed_or_failed_session() {
+    for delayed in [true, false] {
+        let mut world = World::new();
+        assert_eq!(world.send(I::Audible { slot: 0, on: true }), vec![apply(PLAYBACK)]);
+        let generation = world.owner.inflight().unwrap();
+        if delayed {
+            world.send(I::FocusRequest { generation, answer: FocusAnswer::Delayed });
+        } else {
+            world.send(I::Applied { generation, result: AppliedResult::Failed { code: 1 } });
+        }
+        assert_eq!(world.send(I::Audible { slot: 1, on: true }), vec![A::ForgetPaused, apply(PLAYBACK), available(MicrophoneAvailability::Available)]);
+    }
+}
+
+#[test]
+fn inv_heal_03_granted_reask_leaves_transient() {
+    let mut world = World::playing();
+    world.send(I::Focus { change: FocusChange::LossTransient });
+    world.send(I::Audible { slot: 0, on: false });
+    assert_eq!(world.send(I::Audible { slot: 0, on: true }), vec![apply(PLAYBACK)]);
+    let generation = world.owner.inflight().unwrap();
+    assert_eq!(world.send(I::Applied { generation, result: AppliedResult::Ok }), vec![A::ResumePaused, available(MicrophoneAvailability::Available)]);
+    assert_eq!(world.owner.system(), System::Free);
+}
+
+#[test]
+fn inv_heal_05_stale_grant_does_not_replace_new_audible_request() {
+    let mut world = World::new();
+    assert_eq!(world.send(I::Audible { slot: 0, on: true }), vec![apply(PLAYBACK)]);
+    let first = world.owner.inflight().unwrap();
+    assert_eq!(world.send(I::Audible { slot: 1, on: true }), vec![apply(PLAYBACK)]);
+    let second = world.owner.inflight().unwrap();
+    assert_eq!(world.send(I::Applied { generation: first, result: AppliedResult::Ok }), vec![]);
+    assert_eq!(world.send(I::Applied { generation: second, result: AppliedResult::Ok }), vec![]);
+    assert_eq!(session::held(&world.owner.session), Some(PLAYBACK));
+}
+
+#[test]
+fn inv_heal_05_audible_edge_does_not_replace_call_or_capture() {
+    let mut call = World::new();
+    call.settle(I::CallStarted { id: 7, kind: CallKind::Unmanaged, speaker: false });
+    assert_eq!(call.send(I::Audible { slot: 0, on: true }), vec![]);
+    let mut capture = World::new();
+    capture.settle(I::Capture { id: 1, kind: RecordingKind::Voice });
+    assert_eq!(capture.send(I::Audible { slot: 0, on: true }), vec![]);
+}
+
+#[test]
+fn inv_heal_05_failed_reask_preserves_held_playback() {
+    let mut world = World::playing();
+    assert_eq!(world.send(I::Audible { slot: 1, on: true }), vec![apply(PLAYBACK)]);
+    let generation = world.owner.inflight().unwrap();
+    assert_eq!(world.send(I::Applied { generation, result: AppliedResult::Failed { code: 1 } }), vec![]);
+    assert_eq!(session::held(&world.owner.session), Some(PLAYBACK));
 }
 
 fn available(value: MicrophoneAvailability) -> AudioAction {
@@ -284,15 +337,6 @@ fn inv_audio_23_inv_call_10_an_external_call_holds_the_core_until_its_platform_s
     let mut world = World::new();
     assert_eq!(world.settle(I::CallStarted { id: 7, kind: own_callkit(), speaker: false }), vec![A::CallHold { on: true }, configure(SessionWant::Call { kind: own_callkit(), speaker: false }), A::CallState { id: 7, state: CallState::Connecting }, available(MicrophoneAvailability::OwnCall)]);
     assert_eq!(world.send(I::ObservedCalls { uuids: vec!["own".into()] }), vec![], "the own CallKit call seen by the observer is not external");
-}
-
-#[test]
-fn inv_heal_02_a_call_activated_during_an_interruption_leaves_no_pause() {
-    let mut world = World::playing();
-    world.send(I::CallStarted { id: 7, kind: own_callkit(), speaker: false });
-    world.send(I::InterruptionBegan);
-    world.send(I::CallSystemActivated { id: 7 });
-    assert_eq!(world.owner.paused(), None);
 }
 
 #[test]

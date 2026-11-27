@@ -34,7 +34,7 @@ impl SystemMachine {
     fn transient(context: &mut Exit, event: &SystemEvent) -> Outcome<State> {
         match event {
             SystemEvent::Capture | SystemEvent::NewDemand => Transition(State::free()),
-            SystemEvent::Focus(FocusChange::Gain) => { context.resume = Some(true); Transition(State::free()) }
+            SystemEvent::Focus(FocusChange::Gain) | SystemEvent::FocusRequest(FocusAnswer::Granted) => { context.resume = Some(true); Transition(State::free()) }
             _ => Super,
         }
     }

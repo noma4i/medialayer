@@ -379,7 +379,10 @@ impl AudioOwner {
             I::Applied { generation, result } => {
                 let asking = session::applied(&self.session).is_some();
                 self.session_event(session::SessionEvent::Applied { generation, result: result.clone() }, &mut actions);
-                if asking && matches!(result, AppliedResult::Failed { .. }) {
+                if asking && matches!(result, AppliedResult::Ok) {
+                    self.system_event(SystemEvent::FocusRequest(FocusAnswer::Granted), &mut actions);
+                }
+                if asking && matches!(result, AppliedResult::Failed { .. }) && session::held(&self.session).is_none() {
                     self.interrupt_calls(&mut actions);
                     self.system_event(SystemEvent::AppliedFailed, &mut actions);
                     self.revoke(RecordingRefusal::MicrophoneBusy, &mut actions);
@@ -428,6 +431,7 @@ impl AudioOwner {
             },
             I::FocusRequest { generation, answer } => {
                 self.session_event(session::SessionEvent::Focus { generation, answer }, &mut actions);
+                if answer == FocusAnswer::Granted { self.system_event(SystemEvent::FocusRequest(answer), &mut actions); }
                 if matches!(answer, FocusAnswer::Delayed | FocusAnswer::Failed) {
                     self.revoke(RecordingRefusal::MicrophoneBusy, &mut actions);
                     self.system_event(SystemEvent::FocusRequest(answer), &mut actions);

@@ -1,6 +1,6 @@
 use super::*;
 use crate::api::test_support::{eventually, MockFactory, MockSlot};
-use crate::api::{MediaError, MediaItem, PlayRefusal, PlaybackState, PlayerSlotFactory, SlotCall, Subscription};
+use crate::api::{CreatedPlayer, MediaError, MediaItem, PlayRefusal, PlaybackState, PlayerSlot, PlayerSlotFactory, SlotCall, SlotSample, Subscription};
 use crate::audio::{AppliedResult, AudioAction, AudioInput, CallKind, PauseReason, RecordingKind};
 use crate::ffi::{MediaLayer, MediaPlace, PlaybackListener, PlaybackSuspension};
 use std::sync::atomic::Ordering;
@@ -58,6 +58,40 @@ struct Rig {
     inputs: Arc<crate::ffi::AudioInputs>,
 }
 
+struct ReadySlots {
+    factory: Arc<MockFactory>,
+    events: Arc<Mutex<Option<Arc<crate::ffi::PlayerEvents>>>>,
+}
+
+struct ReadySlot {
+    player: Arc<dyn PlayerSlot>,
+    index: u32,
+    events: Arc<Mutex<Option<Arc<crate::ffi::PlayerEvents>>>>,
+}
+
+#[async_trait::async_trait]
+impl PlayerSlotFactory for ReadySlots {
+    async fn create(&self, index: u32) -> CreatedPlayer {
+        let player = self.factory.create(index).await.player;
+        CreatedPlayer { player: Arc::new(ReadySlot { player, index, events: self.events.clone() }) }
+    }
+}
+
+#[async_trait::async_trait]
+impl PlayerSlot for ReadySlot {
+    async fn apply(&self, command: SlotCall) {
+        let generation = match &command { SlotCall::Load { generation, .. } => Some(*generation), _ => None };
+        self.player.apply(command).await;
+        if let Some(generation) = generation {
+            let events = self.events.lock().unwrap().clone().unwrap();
+            events.ready(self.index, generation);
+            events.visual_ready(self.index, generation);
+        }
+    }
+    async fn dispose(&self) { self.player.dispose().await; }
+    fn sample(&self) -> SlotSample { self.player.sample() }
+}
+
 impl Rig {
     fn new() -> Rig {
         Rig::with(Arc::default())
@@ -65,8 +99,10 @@ impl Rig {
 
     fn with(factory: Arc<MockFactory>) -> Rig {
         let dir = tempfile::tempdir().unwrap();
-        let slots: Arc<dyn PlayerSlotFactory> = factory.clone();
+        let events = Arc::new(Mutex::new(None));
+        let slots: Arc<dyn PlayerSlotFactory> = Arc::new(ReadySlots { factory: factory.clone(), events: events.clone() });
         let layer = MediaLayer::build(config(dir.path(), Some(slots), None), Pause::new()).unwrap();
+        *events.lock().unwrap() = Some(layer.player_events());
         let window = layer.open_video_window().unwrap();
         window.replace(0, vec![Some(MediaItem::bare_video(URL))]).unwrap();
         let inputs = layer.audio_inputs();
@@ -82,8 +118,12 @@ impl Rig {
     }
 
     fn slot(&self) -> (u32, Arc<MockSlot>) {
-        self.caller.block_on(eventually(|| self.factory.slot_holding(URL).is_some()));
-        self.factory.slot_holding(URL).unwrap()
+        let mut found = None;
+        self.caller.block_on(eventually(|| {
+            found = self.factory.slot_holding(URL);
+            found.is_some()
+        }));
+        found.unwrap()
     }
 
     fn plays(&self, slot: &MockSlot) -> usize {
@@ -225,6 +265,13 @@ fn inv_heal_01_a_user_play_after_an_interruption_without_end_plays() {
     watched.place.update(PlaceInput { playing: true, play_generation: 1, ..PlaceInput::default() }).unwrap();
     rig.until(&watched.seen, &playing_state());
     rig.caller.block_on(eventually(|| rig.plays(&slot) == 2));
+    let actions = rig.audio(AudioInput::Audible { slot: u64::from(index), on: true });
+    let generation = actions.iter().find_map(|action| match action { AudioAction::Apply { generation, .. } => Some(*generation), _ => None }).unwrap();
+    assert_eq!(actions, vec![AudioAction::Apply { generation, want: crate::audio::SessionWant::Playback { focus: crate::audio::AudioFocus::Exclusive }, activate: true }, AudioAction::Availability { value: crate::audio::MicrophoneAvailability::Available }]);
+    rig.audio(AudioInput::InterruptionEnded { should_resume: false });
+    rig.settled();
+    assert_eq!(watched.seen.last(), Some(playing_state()));
+    assert_eq!(rig.plays(&slot), 2);
 }
 
 #[test]
@@ -233,9 +280,10 @@ fn inv_heal_audio_model() {
     let rig = Rig::new();
     let watched = rig.watched(PlaceInput::default());
     let mut dice = crate::seeded::Dice::new("inv_heal_audio_model");
+    let mut generation = 0;
     for sequence in 0..500_u64 {
         for _ in 0..8 {
-            let event = match dice.below(11) {
+            let event = match dice.below(19) {
                 0 => AudioInput::InterruptionBegan,
                 1 => AudioInput::InterruptionEnded { should_resume: dice.percent(50) },
                 2 => AudioInput::Focus { change: FocusChange::Loss },
@@ -246,9 +294,19 @@ fn inv_heal_audio_model() {
                 7 => AudioInput::Capture { id: 1, kind: RecordingKind::Voice },
                 8 => AudioInput::MediaReset,
                 9 => AudioInput::Foreground { on: true },
-                _ => AudioInput::Audible { slot: 0, on: true },
+                10 => AudioInput::Audible { slot: 0, on: true },
+                11 => AudioInput::Audible { slot: 0, on: false },
+                12 => AudioInput::Focus { change: FocusChange::LossTransientDuck },
+                13 => AudioInput::CallStarted { id: 7, kind: CallKind::CallKit { uuid: "own".into() }, speaker: false },
+                14 => AudioInput::FocusRequest { generation, answer: crate::audio::FocusAnswer::Delayed },
+                15 => AudioInput::FocusRequest { generation, answer: crate::audio::FocusAnswer::Failed },
+                16 => AudioInput::Applied { generation, result: AppliedResult::Ok },
+                17 => AudioInput::Applied { generation, result: AppliedResult::Failed { code: 1 } },
+                _ => AudioInput::Applied { generation, result: AppliedResult::Busy },
             };
-            rig.audio(event);
+            for action in rig.audio(event) {
+                if let AudioAction::Apply { generation: next, .. } | AudioAction::Deactivate { generation: next } = action { generation = next; }
+            }
         }
         rig.audio(AudioInput::CallEnded { id: 7 });
         rig.audio(AudioInput::CaptureEnded { id: 1 });

@@ -24,7 +24,7 @@ fn own(want: &SessionWant) -> bool {
     matches!(want, SessionWant::Call { kind: CallKind::Unmanaged, .. })
 }
 
-fn ask(want: SessionWant, context: &mut SessionContext<'_>, release: bool) -> State {
+fn ask(want: SessionWant, context: &mut SessionContext<'_>, release: bool, previous: Option<SessionWant>) -> State {
     let callkit = matches!(&want, SessionWant::Call { kind: CallKind::CallKit { .. }, .. });
     if callkit && release {
         *context.generation += 1;
@@ -33,7 +33,7 @@ fn ask(want: SessionWant, context: &mut SessionContext<'_>, release: bool) -> St
     *context.generation += 1;
     let generation = *context.generation;
     context.actions.push(AudioAction::Apply { generation, want: want.clone(), activate: !callkit });
-    State::asking(generation, want)
+    State::asking(generation, want, previous)
 }
 
 fn release(context: &mut SessionContext<'_>, own_mode: bool) -> State {
@@ -48,19 +48,20 @@ impl Session {
     #[state(superstate = "any")]
     fn idle(event: &SessionEvent, context: &mut SessionContext<'_>) -> Outcome<State> {
         match event {
-            SessionEvent::Reconcile { want: Some(want), may_ask, fresh, .. } if *may_ask || *fresh => Transition(ask(want.clone(), context, false)),
+            SessionEvent::Reconcile { want: Some(want), may_ask, fresh, .. } if *may_ask || *fresh => Transition(ask(want.clone(), context, false, None)),
             _ => Super,
         }
     }
     #[state(superstate = "any")]
-    fn asking(g: &mut u64, w: &mut SessionWant, event: &SessionEvent, context: &mut SessionContext<'_>) -> Outcome<State> {
+    fn asking(g: &mut u64, w: &mut SessionWant, previous: &mut Option<SessionWant>, event: &SessionEvent, context: &mut SessionContext<'_>) -> Outcome<State> {
         match event {
             SessionEvent::ManagedSpeaker(speaker) if matches!(w, SessionWant::Call { kind: CallKind::CallKit { .. }, .. }) => { if let SessionWant::Call { speaker: current, .. } = w { *current = *speaker; } Handled }
             SessionEvent::Reconcile { want: None, .. } => Transition(release(context, own(w))),
-            SessionEvent::Reconcile { want: Some(want), may_ask, fresh, audible_edge, .. } if (want != w && (*may_ask || *fresh)) || *audible_edge => Transition(ask(want.clone(), context, true)),
+            SessionEvent::Reconcile { want: Some(want), may_ask, fresh, audible_edge, .. } if (want != w && (*may_ask || *fresh)) || *audible_edge => Transition(ask(want.clone(), context, true, previous.clone())),
             SessionEvent::Applied { generation, result: AppliedResult::Ok } if generation == g => Transition(State::held(w.clone())),
             SessionEvent::Focus { generation, answer: FocusAnswer::Granted } if generation == g => Transition(State::held(w.clone())),
             SessionEvent::Focus { generation, answer: FocusAnswer::Delayed } if generation == g => Transition(State::delayed(w.clone())),
+            SessionEvent::Applied { generation, result: AppliedResult::Failed { .. } } if generation == g && previous.is_some() => Transition(State::held(previous.clone().unwrap())),
             SessionEvent::Applied { generation, result: AppliedResult::Failed { .. } } if generation == g => Transition(State::refused(true)),
             SessionEvent::Focus { generation, answer: FocusAnswer::Failed } if generation == g => Transition(State::refused(false)),
             _ => Super,
@@ -71,7 +72,7 @@ impl Session {
         match event {
             SessionEvent::ManagedSpeaker(speaker) if matches!(w, SessionWant::Call { kind: CallKind::CallKit { .. }, .. }) => { if let SessionWant::Call { speaker: current, .. } = w { *current = *speaker; } Handled }
             SessionEvent::Reconcile { want: None, .. } => Transition(release(context, own(w))),
-            SessionEvent::Reconcile { want: Some(want), may_ask, fresh, audible_edge, .. } if (want != w && (*may_ask || *fresh)) || *audible_edge => Transition(ask(want.clone(), context, true)),
+            SessionEvent::Reconcile { want: Some(want), may_ask, fresh, audible_edge, .. } if (want != w && (*may_ask || *fresh)) || *audible_edge => Transition(ask(want.clone(), context, true, (want == w).then(|| w.clone()))),
             _ => Super,
         }
     }
@@ -79,7 +80,7 @@ impl Session {
     fn delayed(w: &mut SessionWant, event: &SessionEvent, context: &mut SessionContext<'_>) -> Outcome<State> {
         match event {
             SessionEvent::Reconcile { want: None, .. } => Transition(release(context, own(w))),
-            SessionEvent::Reconcile { want: Some(want), fresh: true, audible_edge, .. } if want != w || *audible_edge => Transition(ask(want.clone(), context, true)),
+            SessionEvent::Reconcile { want: Some(want), fresh: true, audible_edge, .. } if want != w || *audible_edge => Transition(ask(want.clone(), context, true, None)),
             SessionEvent::Gain => Transition(State::held(w.clone())),
             _ => Super,
         }
@@ -89,14 +90,14 @@ impl Session {
         match event {
             SessionEvent::Reconcile { want: None, .. } if *residue => Transition(release(context, false)),
             SessionEvent::Reconcile { want: None, .. } => Transition(State::idle()),
-            SessionEvent::Reconcile { want: Some(want), fresh: true, .. } => Transition(ask(want.clone(), context, false)),
+            SessionEvent::Reconcile { want: Some(want), fresh: true, .. } => Transition(ask(want.clone(), context, false, None)),
             _ => Super,
         }
     }
     #[state(superstate = "any")]
     fn releasing(g: &mut u64, heard: &mut bool, own_mode: &mut bool, event: &SessionEvent, context: &mut SessionContext<'_>) -> Outcome<State> {
         match event {
-            SessionEvent::Reconcile { want: Some(want), may_ask, fresh, .. } if *may_ask || *fresh => Transition(ask(want.clone(), context, false)),
+            SessionEvent::Reconcile { want: Some(want), may_ask, fresh, .. } if *may_ask || *fresh => Transition(ask(want.clone(), context, false, None)),
             SessionEvent::Applied { generation, result: AppliedResult::Ok | AppliedResult::Failed { .. } } if generation == g => Transition(State::idle()),
             SessionEvent::Applied { generation, result: AppliedResult::Busy } if generation == g && *heard => Transition(release(context, *own_mode)),
             SessionEvent::Applied { generation, result: AppliedResult::Busy } if generation == g => Transition(State::lingering()),
@@ -107,7 +108,7 @@ impl Session {
     #[state(superstate = "any")]
     fn lingering(event: &SessionEvent, context: &mut SessionContext<'_>) -> Outcome<State> {
         match event {
-            SessionEvent::Reconcile { want: Some(want), next: true, .. } => Transition(ask(want.clone(), context, false)),
+            SessionEvent::Reconcile { want: Some(want), next: true, .. } => Transition(ask(want.clone(), context, false, None)),
             SessionEvent::Reconcile { want: None, next: true, .. } => Transition(release(context, false)),
             _ => Super,
         }

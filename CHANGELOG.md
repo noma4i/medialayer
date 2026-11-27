@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixed
+- Preserve playback after a failed audio session retry and clear transient focus after a grant.
 
 - Limit repeated signal updates and delay restarts after task panics.
 - Recover visible playback that never becomes ready and report the recovery.
