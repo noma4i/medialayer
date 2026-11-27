@@ -37,23 +37,79 @@ fn rig() -> Rig {
     Rig { pool, prefetch, directives, release, signals, ledger }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn inv_heal_10_the_memory_step_recovers_after_the_ledger_frees() {
     let rig = rig();
     let held = rig.ledger.reserve(crate::memory::Owner::ImageDecode, 950_000_000).unwrap();
     rig.signals.memory_warning(Pressure::Critical);
     eventually(|| !rig.pool.steps.lock().unwrap().is_empty()).await;
+    let start = tokio::time::Instant::now();
     drop(held);
     eventually(|| rig.pool.steps.lock().unwrap().last() == Some(&Step::Normal)).await;
+    assert_eq!(tokio::time::Instant::now(), start);
 }
 
 #[tokio::test(start_paused = true)]
 async fn inv_heal_10_the_memory_step_recovers_after_warning_decay() {
     let rig = rig();
+    let start = tokio::time::Instant::now();
     rig.signals.memory_warning(Pressure::Critical);
     eventually(|| rig.pool.steps.lock().unwrap().last() == Some(&Step::ShorterBuffer)).await;
-    tokio::time::advance(std::time::Duration::from_secs(10)).await;
+    tokio::time::advance(std::time::Duration::from_secs(6)).await;
+    rig.signals.memory_warning(Pressure::Critical);
+    eventually(|| rig.pool.steps.lock().unwrap().len() == 2).await;
+    tokio::time::advance(std::time::Duration::from_millis(9_999)).await;
+    assert_eq!(*rig.pool.steps.lock().unwrap(), vec![Step::ShorterBuffer, Step::ShorterBuffer]);
+    tokio::time::advance(std::time::Duration::from_millis(1)).await;
     eventually(|| rig.pool.steps.lock().unwrap().last() == Some(&Step::Normal)).await;
+    assert_eq!(tokio::time::Instant::now() - start, std::time::Duration::from_secs(16));
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_10_releases_coalesce_unchanged_steps() {
+    let rig = rig();
+    let bytes = (1_u64 << 30) * 96 / 100;
+    let held = rig.ledger.reserve(crate::memory::Owner::ImageDecode, bytes - 100).unwrap();
+    let mut releases: Vec<_> = (0..100).map(|_| rig.ledger.reserve(crate::memory::Owner::ImageDecode, 1).unwrap()).collect();
+    rig.signals.memory_warning(Pressure::Critical);
+    eventually(|| rig.pool.steps.lock().unwrap().len() == 1).await;
+    assert_eq!(*rig.pool.steps.lock().unwrap(), vec![Step::PlaceholdersOnly]);
+    drop(releases.pop().unwrap());
+    eventually(|| rig.pool.steps.lock().unwrap().len() == 2).await;
+    for release in releases {
+        drop(release);
+        tokio::task::yield_now().await;
+    }
+    rig.signals.foreground();
+    eventually(|| events(&rig).last() == Some(&"foreground".to_string())).await;
+    assert_eq!(*rig.pool.steps.lock().unwrap(), vec![Step::PlaceholdersOnly, Step::PlayingSlotOnly]);
+    drop(held);
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_16_signals_resume_after_pool_panics() {
+    struct PanicPool { inner: FakePool, first: std::sync::atomic::AtomicBool }
+    impl PoolControl for PanicPool {
+        fn stats(&self) -> crate::pool::PoolStats { self.inner.stats() }
+        fn set_step(&self, step: Step) {
+            if self.first.swap(false, Ordering::SeqCst) { panic!("first step"); }
+            self.inner.set_step(step);
+        }
+        fn release_under(&self, now: u64, pressure: crate::pool::Pressure) -> Vec<Directive> { self.inner.release_under(now, pressure) }
+        fn background(&self) -> Vec<Directive> { self.inner.background() }
+        fn foreground(&self) { self.inner.foreground(); }
+        fn set_slots(&self, slots: usize) { self.inner.set_slots(slots); }
+    }
+    let pool = Arc::new(PanicPool { inner: FakePool::default(), first: std::sync::atomic::AtomicBool::new(true) });
+    let signals = Signals::new(&Handle::current(), SignalPorts {
+        pool: pool.clone(), prefetch: shared::<FakePrefetch>(), directives: shared::<FakeDirectives>(),
+        release: shared::<FakeRelease>(), suspendable: Vec::new(), ledger: Ledger::new(1000), clock: Arc::new(SystemClock),
+    });
+    signals.memory_warning(Pressure::Critical);
+    eventually(|| !pool.first.load(Ordering::SeqCst)).await;
+    signals.foreground();
+    eventually(|| pool.inner.events.lock().unwrap().last() == Some(&"foreground".to_string())).await;
+    assert_eq!(*pool.inner.steps.lock().unwrap(), vec![Step::Normal]);
 }
 
 fn events(rig: &Rig) -> Vec<String> {

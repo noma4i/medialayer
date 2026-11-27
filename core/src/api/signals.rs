@@ -73,7 +73,7 @@ struct Reaction {
     suspendable: Vec<Arc<dyn Suspendable>>,
     ledger: Ledger,
     clock: Arc<dyn Clock>,
-    degradation: Mutex<Degradation>,
+    degradation: Mutex<(Degradation, Option<crate::memory::Step>)>,
     blocking: Arc<Mutex<JoinSet<()>>>,
 }
 
@@ -98,7 +98,7 @@ impl Signals {
         let SignalPorts { pool, prefetch, directives, release, suspendable, ledger, clock } = ports;
         let queue = Arc::new(Queue { pending: Mutex::new(VecDeque::new()), wake: Notify::new() });
         let blocking = Arc::new(Mutex::new(JoinSet::new()));
-        let reaction = Arc::new(Reaction { pool, prefetch, directives, release, suspendable, ledger, clock, degradation: Mutex::new(Degradation::default()), blocking: blocking.clone() });
+        let reaction = Arc::new(Reaction { pool, prefetch, directives, release, suspendable, ledger, clock, degradation: Mutex::new((Degradation::default(), None)), blocking: blocking.clone() });
         let inbox = queue.clone();
         let worker = super::guard::restart(handle, "signals", move || {
             let inbox = inbox.clone();
@@ -196,10 +196,14 @@ impl Reaction {
 
     fn lower_step(&self, level: Option<Pressure>) {
         let mut degradation = self.degradation.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let step = degradation.for_pressure(self.ledger.used(), self.ledger.ceiling(), level.map(Into::into));
+        let step = degradation.0.for_pressure(self.ledger.used(), self.ledger.ceiling(), level.map(Into::into));
+        if level.is_none() && degradation.1 == Some(step) {
+            return;
+        }
         if level.is_none() {
             crate::trace!("heal", "capacity step-restored {step:?}");
         }
         self.pool.set_step(step);
+        degradation.1 = Some(step);
     }
 }
