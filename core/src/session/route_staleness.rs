@@ -14,7 +14,7 @@ impl RouteStaleness {
         }
         match resolved_generation {
             None => readiness == Readiness::Ready,
-            Some(resolved) => resolved != current_generation,
+            Some(resolved) => resolved != current_generation || readiness != Readiness::Ready,
         }
     }
 }

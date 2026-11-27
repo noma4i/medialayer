@@ -8,6 +8,7 @@
 - Leaving a blocked audio state clears its interrupted pause.
 - Release stalled proxy capacity and restore memory limits after pressure.
 - Ignore Android background trim levels as memory pressure.
+- Restore the proxy after listener failures and refresh playback routes on reload.
 
 ## 3.59.0 - 2026-11-27
 

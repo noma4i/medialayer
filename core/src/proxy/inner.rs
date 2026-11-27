@@ -73,11 +73,19 @@ pub(super) struct ProxyShared {
     probe_locks: Mutex<HashMap<String, ProbeEntry>>,
     pub listener: tokio::sync::Mutex<Option<Listener>>,
     pub running: AtomicBool,
-    pub alive: Arc<AtomicBool>,
+    pub stopped: AtomicBool,
+    pub alive: Arc<AtomicU64>,
+    pub listener_epoch: Arc<AtomicU64>,
     pub port: AtomicU16,
     pub last_port: AtomicU16,
     pub route_generation: AtomicU64,
     timeout_ms: AtomicU64,
+    #[cfg(test)]
+    pub rebind_hold: watch::Sender<bool>,
+    #[cfg(test)]
+    pub rebind_entered: AtomicBool,
+    #[cfg(test)]
+    pub accept_failures: watch::Sender<bool>,
 }
 
 pub(super) struct Registry(Recent<(HashMap<String, String>, bool)>);
@@ -157,11 +165,19 @@ impl ProxyShared {
             probe_locks: Mutex::new(HashMap::new()),
             listener: tokio::sync::Mutex::new(None),
             running: AtomicBool::new(false),
-            alive: Arc::new(AtomicBool::new(false)),
+            stopped: AtomicBool::new(false),
+            alive: Arc::new(AtomicU64::new(0)),
+            listener_epoch: Arc::new(AtomicU64::new(0)),
             port: AtomicU16::new(0),
             last_port: AtomicU16::new(0),
             route_generation: AtomicU64::new(0),
             timeout_ms,
+            #[cfg(test)]
+            rebind_hold: watch::channel(false).0,
+            #[cfg(test)]
+            rebind_entered: AtomicBool::new(false),
+            #[cfg(test)]
+            accept_failures: watch::channel(false).0,
         }
     }
 

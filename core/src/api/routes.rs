@@ -121,6 +121,7 @@ impl Routes {
 
     pub fn is_stale(&self, route: &PlaybackRoute) -> bool {
         RouteStaleness::is_stale(true, route.generation, self.generation(), self.readiness())
+            || route.generation.is_some() && Url::parse(&route.url).ok().and_then(|url| url.port()) != Some(self.proxy.port())
     }
 
     pub fn refresh(&self, source: &MediaItem, route: &PlaybackRoute) -> PlaybackRoute {

@@ -330,17 +330,15 @@ impl Stage {
         }
     }
 
-    pub(super) fn reload(&self, id: &LoadId, is_refreshing: bool) -> Option<LoadId> {
+    pub(super) fn reload(&self, id: &LoadId, _is_refreshing: bool) -> Option<LoadId> {
         let (state, calls, current) = {
             let mut state = self.state();
             if !state.is_loaded_as(&id.key, id.slot, id.generation) {
                 return None;
             }
             let key = id.key.as_str();
-            if is_refreshing {
-                if let Some(loaded) = state.loaded.get_mut(key) {
-                    loaded.route = self.inner.routes.refresh(&loaded.source, &loaded.route);
-                }
+            if let Some(loaded) = state.loaded.get_mut(key) {
+                loaded.route = self.inner.routes.refresh(&loaded.source, &loaded.route);
             }
             let generation = state.next_generation();
             let is_playing = state.is_playing(key);

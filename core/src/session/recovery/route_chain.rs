@@ -1,6 +1,5 @@
 use super::{Action, Ctx, Event, Input, Signal};
 use crate::hls;
-use crate::session::route_staleness::RouteStaleness;
 use statig::blocking::*;
 
 #[derive(Debug, Clone, Default)]
@@ -70,11 +69,7 @@ impl RouteChain {
                 context.signal = Some(Signal::Failed);
                 Handled
             }
-            Input::Event(Event::RetryDue { resolved_generation, current_generation, readiness }) => {
-                if RouteStaleness::is_stale(context.shared.via_proxy_hls, *resolved_generation, *current_generation, *readiness) {
-                    context.action = Action::RefreshRoute;
-                    return Transition(State::refreshing(false));
-                }
+            Input::Event(Event::RetryDue { .. }) => {
                 context.action = Action::Replay;
                 Handled
             }

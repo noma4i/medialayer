@@ -6,7 +6,7 @@ fn inv_session_10_stale_only_when_recoverable_and_port_changed_or_direct_route_f
     assert!(!RouteStaleness::is_stale(false, Some(1), 2, Ready));
     assert!(!RouteStaleness::is_stale(false, None, 2, Ready));
     assert!(RouteStaleness::is_stale(true, Some(1), 2, Ready));
-    assert!(!RouteStaleness::is_stale(true, Some(2), 2, Unhealthy));
+    assert!(RouteStaleness::is_stale(true, Some(2), 2, Unhealthy));
     assert!(RouteStaleness::is_stale(true, None, 0, Ready));
     assert!(!RouteStaleness::is_stale(true, None, 0, Unhealthy));
     assert!(!RouteStaleness::is_stale(true, None, 0, Stopped));

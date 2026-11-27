@@ -10,6 +10,19 @@ use std::sync::{Arc, Mutex};
 
 const HLS: &str = "https://o.test/hls/master.m3u8";
 
+#[tokio::test]
+async fn inv_heal_08_a_retry_after_a_port_change_loads_the_new_port() {
+    let rig = rig().await;
+    let (slot, player) = playing(&rig, video(&url_of(0))).await;
+    let old = rig.parts.proxy.port();
+    let new = rig.parts.proxy.restart(0).await.unwrap();
+    assert_ne!(old, new);
+    rig.parts.stage.failed(slot as usize, rig.parts.stage.generation_at(slot as usize), 0, "failed".into());
+    eventually(|| player.loads() >= 2).await;
+    let route = player.calls().into_iter().filter_map(|call| match call { SlotCall::Load { route, .. } => Some(route.url), _ => None }).last().unwrap();
+    assert!(route.starts_with(&format!("http://127.0.0.1:{new}/")), "{route}");
+}
+
 fn once(url: &str) -> MediaItem {
     MediaItem { looping: false, ..video(url) }
 }

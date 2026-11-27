@@ -6,6 +6,32 @@ use std::time::Duration;
 use super::proxy_harness::*;
 
 #[tokio::test]
+async fn inv_heal_06_an_aborted_repair_leaves_the_proxy_serving() {
+    let rig = rig().await;
+    let epoch = rig.proxy.inner.listener_epoch.load(Ordering::SeqCst);
+    let _ = rig.proxy.inner.listener.lock().await.as_ref().unwrap().shutdown.send(true);
+    assert!(eventually(|| rig.proxy.readiness() == Readiness::Unhealthy).await);
+    rig.proxy.hold_rebind(true);
+    let repair = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.repair().await } });
+    assert!(eventually(|| rig.proxy.rebind_entered()).await);
+    repair.abort();
+    rig.proxy.hold_rebind(false);
+    assert!(eventually(|| rig.proxy.inner.listener_epoch.load(Ordering::SeqCst) > epoch && !rig.proxy.rebind_entered() && rig.proxy.readiness() == Readiness::Ready).await);
+    rig.fetcher.route("https://o.test/heal.mp4", Script::ok(vec![7]));
+    let url = rig.proxy.url_for("https://o.test/heal.mp4", &HashMap::new()).unwrap();
+    assert_eq!(get(rig.proxy.port(), &path_of(&url)).await.body, vec![7]);
+}
+
+#[tokio::test]
+async fn inv_heal_07_accept_errors_trigger_a_rebind() {
+    let rig = rig().await;
+    let epoch = rig.proxy.inner.listener_epoch.load(Ordering::SeqCst);
+    rig.proxy.fail_accepts();
+    assert!(eventually(|| rig.proxy.inner.listener_epoch.load(Ordering::SeqCst) > epoch && !rig.proxy.rebind_entered() && rig.proxy.readiness() == Readiness::Ready).await);
+    assert!(rig.proxy.ping().await);
+}
+
+#[tokio::test]
 async fn inv_proxy_09_playback_starts_while_prefetch_holds_every_prefetch_slot() {
     let rig = rig_with(config(2)).await;
     rig.fetcher.route("https://o.test/low1.mp4", Script::ok(pattern(10, 0)).hanging());
@@ -77,15 +103,16 @@ async fn inv_proxy_17_restart_on_another_port_raises_the_route_generation() {
     assert_eq!(rig.proxy.route_generation(), 1);
     assert_ne!(spare, first);
 
-    assert_eq!(rig.proxy.restart(spare).await, Ok(spare));
-    assert_eq!(rig.proxy.route_generation(), 1);
+    let replacement = rig.proxy.restart(spare).await.unwrap();
+    assert_ne!(replacement, spare);
+    assert_eq!(rig.proxy.route_generation(), 2);
 
     let occupied = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let busy = occupied.local_addr().unwrap().port();
     let fallback = rig.proxy.restart(busy).await.unwrap();
     assert_ne!(fallback, busy);
     assert_eq!(rig.proxy.port(), fallback);
-    assert_eq!(rig.proxy.route_generation(), 1 + u64::from(fallback != spare));
+    assert_eq!(rig.proxy.route_generation(), 2 + u64::from(fallback != replacement));
     assert!(rig.proxy.ping().await);
 }
 

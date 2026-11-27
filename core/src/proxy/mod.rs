@@ -87,6 +87,15 @@ pub struct Proxy {
 
 impl Proxy {
     #[cfg(test)]
+    fn hold_rebind(&self, hold: bool) {
+        if hold { self.inner.rebind_entered.store(false, Ordering::SeqCst); }
+        self.inner.rebind_hold.send_replace(hold);
+    }
+    #[cfg(test)]
+    fn rebind_entered(&self) -> bool { self.inner.rebind_entered.load(Ordering::SeqCst) }
+    #[cfg(test)]
+    fn fail_accepts(&self) { self.inner.accept_failures.send_replace(true); }
+    #[cfg(test)]
     pub(crate) fn playhead_holds(&self) -> usize {
         self.inner.windows.playhead_holds()
     }
@@ -127,7 +136,7 @@ impl Proxy {
     pub fn readiness(&self) -> Readiness {
         if !self.inner.running.load(Ordering::SeqCst) {
             Readiness::Stopped
-        } else if self.inner.alive.load(Ordering::SeqCst) && self.port() > 0 {
+        } else if self.inner.alive.load(Ordering::SeqCst) != 0 && self.port() > 0 {
             Readiness::Ready
         } else {
             Readiness::Unhealthy
@@ -291,17 +300,21 @@ impl Proxy {
     }
 
     pub async fn repair(&self) -> bool {
+        let proxy = self.clone();
+        tokio::spawn(async move { proxy.repair_inner().await }).await.unwrap_or(false)
+    }
+
+    async fn repair_inner(&self) -> bool {
         let mut listener = self.inner.listener.lock().await;
-        if !self.inner.running.load(Ordering::SeqCst) {
+        if self.inner.stopped.load(Ordering::SeqCst) {
             return false;
         }
         if self.ping().await {
             return true;
         }
         let previous = self.inner.last_port.load(Ordering::SeqCst);
-        match self.rebind(&mut listener, previous).await {
-            Ok(port) if port == previous => crate::trace!("proxy", "repaired the listener on the same port {port}"),
-            Ok(port) => crate::trace!("proxy", "repaired the listener on a new port {previous} -> {port}"),
+        match rebind(&self.inner, &mut listener, previous, "repair").await {
+            Ok(_) => {},
             Err(error) => {
                 crate::trace!("proxy", "repair failed: {error}");
                 return false;
@@ -312,27 +325,18 @@ impl Proxy {
 
     pub async fn stop(&self) {
         let mut listener = self.inner.listener.lock().await;
+        self.inner.stopped.store(true, Ordering::SeqCst);
         self.shut_down(&mut listener).await;
         self.forget_playlists(None);
     }
 
     pub async fn restart(&self, preferred_port: u16) -> Result<u16, ProxyError> {
-        let mut listener = self.inner.listener.lock().await;
-        self.rebind(&mut listener, preferred_port).await
-    }
-
-    async fn rebind(&self, listener: &mut Option<inner::Listener>, preferred_port: u16) -> Result<u16, ProxyError> {
-        self.shut_down(listener).await;
-        self.forget_playlists(None);
-        let (started, port) = server::spawn_listener(&self.inner, preferred_port).await?;
-        *listener = Some(started);
-        let previous = self.inner.last_port.swap(port, Ordering::SeqCst);
-        if previous != 0 && previous != port {
-            self.inner.route_generation.fetch_add(1, Ordering::SeqCst);
-        }
-        self.inner.port.store(port, Ordering::SeqCst);
-        self.inner.running.store(true, Ordering::SeqCst);
-        Ok(port)
+        let proxy = self.clone();
+        tokio::spawn(async move {
+            let mut listener = proxy.inner.listener.lock().await;
+            proxy.inner.stopped.store(false, Ordering::SeqCst);
+            rebind(&proxy.inner, &mut listener, preferred_port, "repair").await
+        }).await.map_err(|error| ProxyError::Bind(error.to_string()))?
     }
 
     pub async fn stored_len(&self, url: &str, headers: &HashMap<String, String>) -> Option<u64> {
@@ -469,6 +473,44 @@ impl Proxy {
         let _ = stopped.finished.await;
         self.inner.cancel_all_flights();
     }
+}
+
+fn rebind_after_accept_errors(inner: Arc<ProxyShared>, epoch: u64) {
+    tokio::spawn(async move {
+        let mut listener = inner.listener.lock().await;
+        if inner.stopped.load(Ordering::SeqCst) || inner.listener_epoch.load(Ordering::SeqCst) != epoch { return; }
+        let previous = inner.last_port.load(Ordering::SeqCst);
+        if let Err(error) = rebind(&inner, &mut listener, previous, "accept-errors").await {
+            crate::trace!("proxy", "repair failed: {error}");
+        }
+    });
+}
+
+async fn rebind(inner: &Arc<ProxyShared>, listener: &mut Option<inner::Listener>, preferred_port: u16, reason: &str) -> Result<u16, ProxyError> {
+    #[cfg(test)]
+    {
+        inner.rebind_entered.store(true, Ordering::SeqCst);
+        crate::test_signal::fire();
+        let _ = inner.rebind_hold.subscribe().wait_for(|held| !*held).await;
+    }
+    let (started, port) = server::spawn_listener(inner, preferred_port).await?;
+    let old = listener.replace(started);
+    let previous = inner.last_port.swap(port, Ordering::SeqCst);
+    if previous != 0 && previous != port { inner.route_generation.fetch_add(1, Ordering::SeqCst); }
+    inner.port.store(port, Ordering::SeqCst);
+    inner.running.store(true, Ordering::SeqCst);
+    inner.playlists.forget(None);
+    crate::trace!("heal", "proxy rebind reason={reason} port={previous}->{port}");
+    #[cfg(test)]
+    {
+        inner.rebind_entered.store(false, Ordering::SeqCst);
+        crate::test_signal::fire();
+    }
+    if let Some(old) = old {
+        let _ = old.shutdown.send(true);
+        let _ = old.finished.await;
+    }
+    Ok(port)
 }
 
 #[cfg(test)]
