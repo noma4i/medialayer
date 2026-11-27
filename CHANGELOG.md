@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A new play clears an interruption pause and starts playback.
+- Leaving a blocked audio state clears its interrupted pause.
+
 ## 3.59.0 - 2026-11-27
 
 ### Added

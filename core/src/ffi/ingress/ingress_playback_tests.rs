@@ -213,6 +213,53 @@ fn inv_playback_02_every_pause_source_shows_paused_with_its_reason_for_audible_m
 }
 
 #[test]
+fn inv_heal_01_a_user_play_after_an_interruption_without_end_plays() {
+    let rig = Rig::new();
+    let watched = rig.watched(PlaceInput { playing: true, ..PlaceInput::default() });
+    let (index, slot) = rig.slot();
+    rig.caller.block_on(eventually(|| rig.plays(&slot) == 1));
+    rig.audio(AudioInput::Audible { slot: u64::from(index), on: true });
+    rig.audio(AudioInput::InterruptionBegan);
+    rig.until(&watched.seen, &state(false, true, Some(PauseReason::Interrupted), None));
+    rig.audio(AudioInput::Audible { slot: u64::from(index), on: false });
+    watched.place.update(PlaceInput { playing: true, play_generation: 1, ..PlaceInput::default() }).unwrap();
+    rig.until(&watched.seen, &playing_state());
+    rig.caller.block_on(eventually(|| rig.plays(&slot) == 2));
+}
+
+#[test]
+fn inv_heal_audio_model() {
+    use crate::audio::FocusChange;
+    let rig = Rig::new();
+    let watched = rig.watched(PlaceInput::default());
+    let mut dice = crate::seeded::Dice::new("inv_heal_audio_model");
+    for sequence in 0..500_u64 {
+        for _ in 0..8 {
+            let event = match dice.below(10) {
+                0 => AudioInput::InterruptionBegan,
+                1 => AudioInput::InterruptionEnded { should_resume: dice.percent(50) },
+                2 => AudioInput::Focus { change: FocusChange::Loss },
+                3 => AudioInput::Focus { change: FocusChange::LossTransient },
+                4 => AudioInput::Focus { change: FocusChange::Gain },
+                5 => AudioInput::CallStarted { id: 7, kind: CallKind::Unmanaged, speaker: false },
+                6 => AudioInput::CallSystemActivated { id: 7 },
+                7 => AudioInput::Capture { id: 1, kind: RecordingKind::Voice },
+                8 => AudioInput::MediaReset,
+                _ => AudioInput::Foreground { on: true },
+            };
+            rig.audio(event);
+        }
+        rig.audio(AudioInput::CallEnded { id: 7 });
+        rig.audio(AudioInput::CaptureEnded { id: 1 });
+        watched.place.update(PlaceInput { playing: false, play_generation: sequence + 1, ..PlaceInput::default() }).unwrap();
+        rig.settled();
+        rig.caller.block_on(eventually(|| watched.seen.last().is_some_and(|state| !state.playing && !state.wish)));
+        watched.place.update(PlaceInput { playing: true, play_generation: sequence + 1, ..PlaceInput::default() }).unwrap();
+        rig.until(&watched.seen, &playing_state());
+    }
+}
+
+#[test]
 fn inv_playback_03_a_resumable_interruption_end_shows_the_place_playing_again() {
     let rig = Rig::new();
     let watched = rig.watched(PlaceInput { playing: true, ..PlaceInput::default() });

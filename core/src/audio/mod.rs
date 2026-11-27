@@ -98,9 +98,12 @@ impl AudioOwner {
         current(&self.system)
     }
     fn system_event(&mut self, event: SystemEvent, actions: &mut Vec<AudioAction>) {
+        let before = self.system();
         let mut exit = Exit::default();
         self.system.handle_with_context(&event, &mut exit);
-        if let Some(resume) = exit.resume {
+        let left_blocked = matches!(before, System::Interrupted | System::Transient | System::WaitForeground)
+            && !matches!(self.system(), System::Interrupted | System::Transient | System::WaitForeground);
+        if let Some(resume) = exit.resume.or(left_blocked.then_some(false)) {
             self.finish_interruption(resume, actions);
         }
         if exit.restore_volume {

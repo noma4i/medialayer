@@ -189,7 +189,10 @@ impl Book {
 
     pub(super) fn update_place(&mut self, owner: u64, mut input: PlaceInput, reserve: Reserve) {
         let starts = self.places.get(&owner).is_some_and(|place| input.playing && (!place.input.playing || input.play_generation != place.input.play_generation) && place.forgotten != Some(input.play_generation));
-        if starts && !self.in_call && self.pause_reason == Some(PauseReason::Capture) { self.audio(CoreAudio::Op(AudioOp::ForgetPaused)); }
+        if starts && !self.in_call && matches!(self.pause_reason, Some(PauseReason::Capture | PauseReason::Interrupted)) {
+            crate::trace!("heal", "audio cleared pause={:?}", self.pause_reason.unwrap());
+            self.audio(CoreAudio::Op(AudioOp::ForgetPaused));
+        }
         let intent = self.next_seq();
         let Some(place) = self.places.get_mut(&owner) else { return };
         let fresh = input.playing && (!place.input.playing || input.play_generation != place.input.play_generation) && place.forgotten != Some(input.play_generation);

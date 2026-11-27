@@ -254,6 +254,15 @@ fn inv_audio_23_inv_call_10_an_external_call_holds_the_core_until_its_platform_s
 }
 
 #[test]
+fn inv_heal_02_a_call_activated_during_an_interruption_leaves_no_pause() {
+    let mut world = World::playing();
+    world.send(I::CallStarted { id: 7, kind: own_callkit(), speaker: false });
+    world.send(I::InterruptionBegan);
+    world.send(I::CallSystemActivated { id: 7 });
+    assert_eq!(world.owner.paused(), None);
+}
+
+#[test]
 fn inv_audio_24_a_callkit_call_releases_the_session_and_lets_the_system_activate_it() {
     let mut world = World::playing();
     let call = SessionWant::Call { kind: own_callkit(), speaker: false };
@@ -262,7 +271,7 @@ fn inv_audio_24_a_callkit_call_releases_the_session_and_lets_the_system_activate
     assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
     assert_eq!(world.send(I::CallSystemActivated { id: 7 }), vec![state(CallState::Live)]);
     assert_eq!(world.send(I::InterruptionBegan), vec![A::PauseAll { reason: PauseReason::Interrupted }, state(CallState::Interrupted)]);
-    assert_eq!(world.send(I::CallSystemActivated { id: 7 }), vec![state(CallState::Live)]);
+    assert_eq!(world.send(I::CallSystemActivated { id: 7 }), vec![A::ForgetPaused, state(CallState::Live)]);
     assert_eq!(world.send(I::CallSystemDeactivated { id: 7 }), vec![state(CallState::Interrupted)]);
     assert_eq!(world.settle(I::CallEnded { id: 7 }), vec![A::CallHold { on: false }, DEACTIVATE, state(CallState::Ended), available(MicrophoneAvailability::Available)]);
 }
