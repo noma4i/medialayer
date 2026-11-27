@@ -1,6 +1,6 @@
 use super::*;
 use crate::api::test_support::{eventually, MockFactory, MockSlot};
-use crate::api::{CreatedPlayer, MediaError, MediaItem, PlayRefusal, PlaybackState, PlayerSlot, PlayerSlotFactory, SlotCall, SlotSample, Subscription};
+use crate::api::{MediaError, MediaItem, PlayRefusal, PlaybackState, PlayerSlotFactory, SlotCall, Subscription};
 use crate::audio::{AppliedResult, AudioAction, AudioInput, CallKind, PauseReason, RecordingKind};
 use crate::ffi::{MediaLayer, MediaPlace, PlaybackListener, PlaybackSuspension};
 use std::sync::atomic::Ordering;
@@ -56,40 +56,6 @@ struct Rig {
     caller: tokio::runtime::Runtime,
     _window: Arc<crate::ffi::MediaWindow>,
     inputs: Arc<crate::ffi::AudioInputs>,
-}
-
-struct ReadySlots {
-    factory: Arc<MockFactory>,
-    events: Arc<Mutex<Option<Arc<crate::ffi::PlayerEvents>>>>,
-}
-
-struct ReadySlot {
-    player: Arc<dyn PlayerSlot>,
-    index: u32,
-    events: Arc<Mutex<Option<Arc<crate::ffi::PlayerEvents>>>>,
-}
-
-#[async_trait::async_trait]
-impl PlayerSlotFactory for ReadySlots {
-    async fn create(&self, index: u32) -> CreatedPlayer {
-        let player = self.factory.create(index).await.player;
-        CreatedPlayer { player: Arc::new(ReadySlot { player, index, events: self.events.clone() }) }
-    }
-}
-
-#[async_trait::async_trait]
-impl PlayerSlot for ReadySlot {
-    async fn apply(&self, command: SlotCall) {
-        let generation = match &command { SlotCall::Load { generation, .. } => Some(*generation), _ => None };
-        self.player.apply(command).await;
-        if let Some(generation) = generation {
-            let events = self.events.lock().unwrap().clone().unwrap();
-            events.ready(self.index, generation);
-            events.visual_ready(self.index, generation);
-        }
-    }
-    async fn dispose(&self) { self.player.dispose().await; }
-    fn sample(&self) -> SlotSample { self.player.sample() }
 }
 
 impl Rig {

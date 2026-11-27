@@ -3,7 +3,7 @@ use crate::api::test_support::{eventually, MockFactory, MockSlot};
 use crate::api::{MediaError, MediaItem, PlayerSlotFactory, SlotCall};
 use crate::audio::{AppliedResult, AudioAction, AudioFocus, AudioInput, CallKind, MicrophoneAvailability, RecordingKind, SessionWant};
 use crate::ffi::MediaLayer;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use super::ingress_harness::*;
 
 const URL: &str = "https://o.test/v1.mp4";
@@ -22,8 +22,10 @@ impl Rig {
     fn new() -> Rig {
         let dir = tempfile::tempdir().unwrap();
         let factory: Arc<MockFactory> = Arc::default();
-        let slots: Arc<dyn PlayerSlotFactory> = factory.clone();
+        let events = Arc::new(Mutex::new(None));
+        let slots: Arc<dyn PlayerSlotFactory> = Arc::new(ReadySlots { factory: factory.clone(), events: events.clone() });
         let layer = MediaLayer::build(config(dir.path(), Some(slots), None), Pause::new()).unwrap();
+        *events.lock().unwrap() = Some(layer.player_events());
         let window = layer.open_video_window().unwrap();
         window.replace(0, vec![Some(MediaItem::bare_video(URL))]).unwrap();
         let inputs = layer.audio_inputs();
@@ -35,8 +37,12 @@ impl Rig {
     }
 
     fn slot(&self) -> Arc<MockSlot> {
-        self.caller.block_on(eventually(|| self.factory.slot_holding(URL).is_some()));
-        self.factory.slot_holding(URL).unwrap().1
+        let mut found = None;
+        self.caller.block_on(eventually(|| {
+            found = self.factory.slot_holding(URL);
+            found.is_some()
+        }));
+        found.unwrap().1
     }
 
     fn plays(&self, slot: &MockSlot) -> usize {

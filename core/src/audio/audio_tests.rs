@@ -203,7 +203,7 @@ fn inv_audio_15_the_end_of_an_interruption_resumes_only_when_the_system_says_so(
         assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
         if resumes {
             assert_eq!(world.settle(end), vec![apply(PLAYBACK), available(MicrophoneAvailability::Available), A::ResumePaused], "{label}: the players resume after their session is applied");
-            assert_eq!(world.send(I::Audible { slot: 0, on: true }), vec![], "{label}");
+            assert_eq!(world.settle(I::Audible { slot: 0, on: true }), vec![apply(PLAYBACK)], "{label}");
         } else {
             assert_eq!(world.send(end), vec![A::ForgetPaused, available(MicrophoneAvailability::Available)], "{label}");
             assert_eq!(world.settle(I::Audible { slot: 0, on: true }), vec![apply(PLAYBACK)], "{label}: a new intent brings the session back");
@@ -229,7 +229,7 @@ fn inv_audio_17_a_transient_loss_pauses_until_the_gain_and_a_duck_lowers_the_vol
     assert_eq!(world.send(I::Focus { change: FocusChange::LossTransient }), vec![A::PauseAll { reason: PauseReason::Interrupted }, available(MicrophoneAvailability::OtherApp)]);
     assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![], "the focus request stays while paused");
     assert_eq!(world.send(I::Focus { change: FocusChange::Gain }), vec![A::ResumePaused, available(MicrophoneAvailability::Available)], "the request was kept, the session stays until the players report");
-    assert_eq!(world.send(I::Audible { slot: 0, on: true }), vec![]);
+    assert_eq!(world.settle(I::Audible { slot: 0, on: true }), vec![apply(PLAYBACK)]);
     assert_eq!(world.send(I::Focus { change: FocusChange::LossTransientDuck }), vec![A::VolumeMultiplier { value: 0.2 }]);
     assert_eq!(world.send(I::Focus { change: FocusChange::Gain }), vec![A::VolumeMultiplier { value: 1.0 }]);
 }
@@ -242,7 +242,7 @@ fn inv_audio_18_a_focus_request_refused_in_the_background_waits_for_the_foregrou
     assert_eq!(world.send(answer(&world, FocusAnswer::Failed)), vec![A::PauseAll { reason: PauseReason::Interrupted }, available(MicrophoneAvailability::OtherApp)]);
     assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
     assert_eq!(world.settle(I::Foreground { on: true }), vec![apply(PLAYBACK), available(MicrophoneAvailability::Available), A::ResumePaused]);
-    assert_eq!(world.send(I::Audible { slot: 0, on: true }), vec![]);
+    assert_eq!(world.settle(I::Audible { slot: 0, on: true }), vec![apply(PLAYBACK)]);
     assert_eq!(World::new().send(I::FocusRequest { generation: 7, answer: FocusAnswer::Delayed }), vec![], "an answer to no request changes nothing");
 }
 

@@ -101,7 +101,7 @@ impl AudioOwner {
         self.system.handle_with_context(&event, &mut exit);
         let left_blocked = matches!(before, System::Interrupted | System::Transient | System::WaitForeground)
             && !matches!(self.system(), System::Interrupted | System::Transient | System::WaitForeground);
-        if let Some(resume) = exit.resume.or(left_blocked.then_some(false)) {
+        if let Some(resume) = exit.resume.or((left_blocked && !matches!(event, SystemEvent::Capture)).then_some(false)) {
             self.finish_interruption(resume, actions);
         }
         if exit.restore_volume {
