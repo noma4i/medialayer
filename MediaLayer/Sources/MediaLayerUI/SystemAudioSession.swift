@@ -84,7 +84,7 @@ struct SystemAudioSession: AudioSessionPort {
     } catch {
       let value = error as NSError
       if value.domain == NSOSStatusErrorDomain && value.code == AVAudioSession.ErrorCode.isBusy.rawValue {
-        throw AudioSessionBusy()
+        throw AudioSessionBusy(category: AVAudioSession.sharedInstance().category.rawValue)
       }
       throw error
     }
@@ -146,6 +146,8 @@ final class SystemCallObserver: NSObject, CallObserverPort, CXCallObserverDelega
   }
 
   func callObserver(_ callObserver: CXCallObserver, callChanged call: CXCall) { publish() }
+
+  func refresh() { publish() }
 
   private func publish() {
     let active = Set(observer.calls.filter { !$0.hasEnded }.map { $0.uuid.uuidString })

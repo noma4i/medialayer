@@ -61,6 +61,7 @@ internal class AudioSystem(private val context: Context) : AudioFocusPort, AutoC
     if (phone != null && allowed && !phoneRegistered) { phone.registerTelephonyCallback(executor, phoneListener); phoneRegistered = true }
     if (phone != null && !allowed && phoneRegistered) { phone.unregisterTelephonyCallback(phoneListener); phoneRegistered = false; sink(FocusSignal.PhoneCall(false)) }
   }
+  fun refresh() { refreshPhone(); mode.onModeChanged(audio.mode) }
   override fun request(plan: FocusPlan): FocusAnswer = focusOperation {
     val previous = active
     previous?.let {

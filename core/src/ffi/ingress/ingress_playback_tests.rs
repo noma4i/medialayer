@@ -235,7 +235,7 @@ fn inv_heal_audio_model() {
     let mut dice = crate::seeded::Dice::new("inv_heal_audio_model");
     for sequence in 0..500_u64 {
         for _ in 0..8 {
-            let event = match dice.below(10) {
+            let event = match dice.below(11) {
                 0 => AudioInput::InterruptionBegan,
                 1 => AudioInput::InterruptionEnded { should_resume: dice.percent(50) },
                 2 => AudioInput::Focus { change: FocusChange::Loss },
@@ -245,7 +245,8 @@ fn inv_heal_audio_model() {
                 6 => AudioInput::CallSystemActivated { id: 7 },
                 7 => AudioInput::Capture { id: 1, kind: RecordingKind::Voice },
                 8 => AudioInput::MediaReset,
-                _ => AudioInput::Foreground { on: true },
+                9 => AudioInput::Foreground { on: true },
+                _ => AudioInput::Audible { slot: 0, on: true },
             };
             rig.audio(event);
         }

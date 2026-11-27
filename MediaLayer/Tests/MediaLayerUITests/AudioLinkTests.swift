@@ -81,6 +81,7 @@ final class FakeSessionPort: AudioSessionPort, @unchecked Sendable {
 final class FakeCallObserver: CallObserverPort, @unchecked Sendable {
   private let lock = NSLock()
   private var sink: (@Sendable (Set<String>) -> Void)?
+  private var current: Set<String> = []
 
   func calls(_ sink: @escaping @Sendable (Set<String>) -> Void) -> @Sendable () -> Void {
     lock.withLock { self.sink = sink }
@@ -88,6 +89,8 @@ final class FakeCallObserver: CallObserverPort, @unchecked Sendable {
   }
 
   func send(_ calls: Set<String>) { lock.withLock { sink }?(calls) }
+  func setCurrent(_ calls: Set<String>) { lock.withLock { current = calls } }
+  func refresh() { let calls = lock.withLock { current }; send(calls) }
 }
 
 struct GrantedMicrophone: MicrophonePermissionPort {
@@ -169,6 +172,16 @@ struct AudioLinkTests {
     microphone.set(.granted)
     await eventually("granted") { rig.availability.last == .available }
     #expect(rig.availability == [.permissionNotAsked, .permissionDenied, .available])
+  }
+
+  @Test
+  func inv_heal_04_foreground_rereads_calls() async throws {
+    let rig = try AudioRig()
+    rig.calls.send(["external"])
+    await eventually("external call") { rig.availability.last == .externalCall }
+    rig.calls.setCurrent([])
+    rig.link.foreground(true)
+    await eventually("call list reread") { rig.availability.last == .available }
   }
 
   @Test

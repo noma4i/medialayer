@@ -1,22 +1,18 @@
 # Audio focus
 
-MediaLayer owns the sound of your app: the audio session on iOS and the audio focus on Android, for playback, voice and video recording, and calls. You choose the playback policy once, when you call `open`. The app writes no audio session or audio focus code.
+MediaLayer owns the audio session and focus for playback, recording, and calls. A heard player takes exclusive focus. The app writes no audio session or audio focus code.
 
 | Question | Answer |
 | -------- | ------ |
 | Who decides | One rule in the core, the same on iOS and Android. The platforms only pass system events in and run what the rule answers |
 | Who talks to the platform | MediaLayer. No `AVAudioSession` or `AudioManager` call runs on the main thread |
-| Default | `mix`: your sound plays beside other apps and never stops or lowers their music |
+| Default | A heard player interrupts other audio |
 | Does `muted` change the policy | No. A muted place never takes the focus. Mute and focus are separate |
 | Does a lost headphone change `Media.muted` | No. `Media.muted` is only the user's flag |
 
-## Policies
+## Policy
 
-| Policy | Other app's music | iOS session | Android focus |
-| ------ | ----------------- | ----------- | ------------- |
-| `exclusive` | Stops while a place plays | `playback`, mode `moviePlayback`, no options | One `AUDIOFOCUS_GAIN` request for the app |
-| `mix` | Keeps playing at full volume | `playback`, mode `moviePlayback`, `mixWithOthers` | No request |
-| `duck` | Gets quieter while a place plays, then returns | as `mix` plus `duckOthers` | One `AUDIOFOCUS_GAIN` request for the app |
+Every heard player requests iOS `playback` without mixing or Android `AUDIOFOCUS_GAIN`. The `audioFocus` option does not change this request. On iOS it still selects the resting category options after deactivation. On Android it has no effect on heard playback.
 
 On Android MediaLayer holds one focus request for the whole app. The players never request focus themselves, so two players can never take the focus from each other.
 
@@ -31,7 +27,7 @@ A place takes the focus only while its player is heard. A player is heard when i
 | Paused, ended or unloaded player | No |
 | Image or GIF | No |
 
-When the last heard player stops, MediaLayer ends the session and tells the other apps, so ducked music comes back. On iOS the session then rests in the playback category of your policy, so a player that starts later always plays through the right output.
+When the last heard player stops, MediaLayer ends the session and tells the other apps. On iOS the session then rests in the playback category of your policy.
 
 ## What the system does to playback
 
@@ -127,7 +123,7 @@ for await _ in await Media.audio?.volumeRaises() ?? AsyncStream { $0.finish() } 
 media.volumeRaises().collect { Media.muted = false }
 ```
 
-## Choose the policy
+## Choose the iOS resting policy
 
 ### Swift
 

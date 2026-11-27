@@ -460,7 +460,7 @@ internal class AudioLink(core: MediaLayer, private val ports: AudioPorts, privat
     return Closeable { synchronized(closeListeners) { closeListeners.remove(listener) } }
   }
   suspend fun awaitClosed() { closeDone.await() }
-  fun foreground(on: Boolean) { if (on) { (ports.focus as? AudioSystem)?.refreshPhone(); send(AudioInput.Permission(ports.permission.state())) }; send(AudioInput.Foreground(on)) }
+  fun foreground(on: Boolean) { if (on) { (ports.focus as? AudioSystem)?.refresh(); send(AudioInput.Permission(ports.permission.state())) }; send(AudioInput.Foreground(on)) }
   suspend fun readVolume(): MediaVolumeReading? {
     val port = volume ?: return null
     val initial = CompletableDeferred<Float?>()

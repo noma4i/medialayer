@@ -4,6 +4,7 @@ import com.noma4i.medialayer.PlayRefusal
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.first
 import android.content.Context
+import android.media.AudioManager
 import androidx.test.core.app.ApplicationProvider
 import com.noma4i.medialayer.AudioFocus
 import com.noma4i.medialayer.CacheStrategy
@@ -35,6 +36,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.shadows.ShadowAudioManager
 
 internal class RecordingFocusPort : AudioFocusPort {
   val calls = SignallingList<String>()
@@ -86,6 +88,24 @@ class AudioLinkTest {
   }
 
   private fun await(what: String, condition: () -> Boolean) = TestSignal.await(what, 5_000, condition)
+
+  @Test
+  fun inv_heal_04_foreground_rereads_communication_mode() {
+    val (layer, own, _) = ownSystemLink()
+    val mode = ShadowAudioManager::class.java.getDeclaredField("mode").apply { isAccessible = true }
+    val signals = CopyOnWriteArrayList<MicrophoneAvailability>()
+    val watch = own.onAvailability { signals.add(it); TestSignal.fire() }
+    try {
+      mode.setInt(null, AudioManager.MODE_IN_COMMUNICATION)
+      own.foreground(true)
+      await("communication mode reread") { signals.lastOrNull() == MicrophoneAvailability.EXTERNAL_CALL }
+      mode.setInt(null, AudioManager.MODE_NORMAL)
+      own.foreground(true)
+      await("normal mode reread") { signals.lastOrNull() == MicrophoneAvailability.AVAILABLE }
+    } finally {
+      mode.setInt(null, AudioManager.MODE_NORMAL); watch.close(); own.close(); layer.close()
+    }
+  }
 
   @Test
   fun inv_audio_74_an_admission_reads_the_permission_of_that_moment_before_the_capture() = runBlocking {

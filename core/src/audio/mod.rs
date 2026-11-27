@@ -35,7 +35,6 @@ enum Paused { Capture, Interrupted { resume: bool } }
 
 #[derive(Clone)]
 pub struct AudioOwner {
-    focus: AudioFocus,
     audible: BTreeSet<u64>,
     volume_readers: BTreeSet<u64>,
     captures: Vec<(u64, RecordingKind)>,
@@ -66,9 +65,8 @@ fn feed_input(input: &mut Input, event: &input::InputEvent, actions: &mut Vec<Au
 }
 
 impl AudioOwner {
-    pub fn new(focus: AudioFocus) -> Self {
+    pub fn new(_focus: AudioFocus) -> Self {
         Self {
-            focus,
             audible: BTreeSet::new(),
             volume_readers: BTreeSet::new(),
             captures: Vec::new(),
@@ -173,7 +171,7 @@ impl AudioOwner {
                 System::Free | System::Ducked | System::Transient
             )
         {
-            return Some(SessionWant::Playback { focus: self.focus });
+            return Some(SessionWant::Playback { focus: AudioFocus::Exclusive });
         }
         if !self.volume_readers.is_empty()
             && matches!(self.system(), System::Free | System::Ducked | System::Transient)
@@ -261,6 +259,7 @@ impl AudioOwner {
         let call_applied = matches!(&input, I::Applied { result: AppliedResult::Ok, .. } | I::FocusRequest { answer: FocusAnswer::Granted, .. });
         let own_before = session::own_mode(&self.session);
         let mut fresh = matches!(&input, I::InterruptionEnded { .. } | I::ResumptionRecommendation { .. } | I::Focus { change: FocusChange::Gain } | I::Foreground { on: true } | I::MediaReset);
+        let mut audible_edge = false;
         let mut actions = Vec::new();
         if !matches!(input, I::Applied { .. }) {
             self.resuming = false;
@@ -275,6 +274,7 @@ impl AudioOwner {
             I::Audible { slot, on } => {
                 if on {
                     fresh = self.audible.insert(slot);
+                    audible_edge = fresh;
                 } else {
                     self.audible.remove(&slot);
                 }
@@ -544,7 +544,8 @@ impl AudioOwner {
             self.system_event(SystemEvent::NewDemand, &mut actions);
         }
         let want = self.want();
-        self.session_event(session::SessionEvent::Reconcile { want, may_ask: self.may_ask(), fresh, next }, &mut actions);
+        audible_edge &= matches!(want, Some(SessionWant::Playback { .. }));
+        self.session_event(session::SessionEvent::Reconcile { want, may_ask: self.may_ask(), fresh, next, audible_edge }, &mut actions);
         if own_before && !session::own_mode(&self.session) { self.comm_mode = false; }
         if self.paused == Some(Paused::Interrupted { resume: true }) && ((session::held(&self.session).is_some() && session::held(&self.session) == self.want()) || (!self.paused_audible && self.want().is_none() && self.system() == System::Free)) {
             actions.push(AudioAction::ResumePaused);

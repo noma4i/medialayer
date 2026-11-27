@@ -9,7 +9,7 @@ enum SystemAudioEvent: Sendable {
   case routeChanged(RouteReason, hadPrivateOutput: Bool)
 }
 
-struct AudioSessionBusy: Error {}
+struct AudioSessionBusy: Error { var category: String = "unknown" }
 
 protocol AudioSessionPort: Sendable {
   func systemEvents(_ sink: @escaping @Sendable (SystemAudioEvent) -> Void) -> @Sendable () -> Void
@@ -22,6 +22,7 @@ protocol AudioSessionPort: Sendable {
 
 protocol CallObserverPort: Sendable {
   func calls(_ sink: @escaping @Sendable (Set<String>) -> Void) -> @Sendable () -> Void
+  func refresh()
 }
 
 protocol MicrophonePermissionPort: Sendable {

@@ -55,6 +55,7 @@ final class AudioLink: @unchecked Sendable {
   private var queuedActions: [PendingAudioAction] = []
   private var processing = false
   private var sessionConfigured = false
+  private var sessionWant: SessionWant?
   private let idLock = NSLock()
   private var next: UInt64 = 0
   private var closed = false
@@ -185,7 +186,7 @@ final class AudioLink: @unchecked Sendable {
     }
   }
   func foreground(_ on: Bool) {
-    if on { refreshPermission() }
+    if on { ports.calls.refresh(); refreshPermission() }
     send(.foreground(on: on))
   }
   /// The system permission prompt resigns the app and returns it active in the same foreground: the one source of a first grant.
@@ -334,7 +335,7 @@ final class AudioLink: @unchecked Sendable {
         sessionQueue.async {
           stops.forEach { $0.waitForStop() }
           let result: AppliedResult
-          do { try self.ports.session.apply(plan, activate: activate); self.sessionConfigured = true; result = .ok }
+          do { try self.ports.session.apply(plan, activate: activate); self.sessionConfigured = true; self.sessionWant = want; result = .ok }
           catch { if !isExpectedSessionRefusal(error) { self.report(error, source: .session) }; result = .failed(code: Int64((error as NSError).code)) }
           self.send(.applied(generation: generation, result: result))
           if case .failed = result {
@@ -348,7 +349,7 @@ final class AudioLink: @unchecked Sendable {
           stops.forEach { $0.waitForStop() }
           let result: AppliedResult
           do { try self.ports.session.deactivate(); self.sessionConfigured = false; result = .ok }
-          catch is AudioSessionBusy { result = .busy }
+          catch let busy as AudioSessionBusy { MediaTrace.emit("audio", "deactivate busy category=\(busy.category) reason=\(String(describing: self.sessionWant))"); result = .busy }
           catch { if !isExpectedSessionRefusal(error) { self.report(error, source: .session) }; result = .failed(code: Int64((error as NSError).code)) }
           self.send(.applied(generation: generation, result: result))
         }

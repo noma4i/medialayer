@@ -5,7 +5,7 @@ use super::{AppliedResult, AudioAction, CallKind, FocusAnswer, SessionWant};
 pub(super) struct Session;
 
 pub(super) enum SessionEvent {
-    Reconcile { want: Option<SessionWant>, may_ask: bool, fresh: bool, next: bool },
+    Reconcile { want: Option<SessionWant>, may_ask: bool, fresh: bool, next: bool, audible_edge: bool },
     Applied { generation: u64, result: AppliedResult },
     Focus { generation: u64, answer: FocusAnswer },
     CallActivated(SessionWant),
@@ -57,7 +57,7 @@ impl Session {
         match event {
             SessionEvent::ManagedSpeaker(speaker) if matches!(w, SessionWant::Call { kind: CallKind::CallKit { .. }, .. }) => { if let SessionWant::Call { speaker: current, .. } = w { *current = *speaker; } Handled }
             SessionEvent::Reconcile { want: None, .. } => Transition(release(context, own(w))),
-            SessionEvent::Reconcile { want: Some(want), may_ask, fresh, .. } if want != w && (*may_ask || *fresh) => Transition(ask(want.clone(), context, true)),
+            SessionEvent::Reconcile { want: Some(want), may_ask, fresh, audible_edge, .. } if (want != w && (*may_ask || *fresh)) || *audible_edge => Transition(ask(want.clone(), context, true)),
             SessionEvent::Applied { generation, result: AppliedResult::Ok } if generation == g => Transition(State::held(w.clone())),
             SessionEvent::Focus { generation, answer: FocusAnswer::Granted } if generation == g => Transition(State::held(w.clone())),
             SessionEvent::Focus { generation, answer: FocusAnswer::Delayed } if generation == g => Transition(State::delayed(w.clone())),
@@ -71,7 +71,7 @@ impl Session {
         match event {
             SessionEvent::ManagedSpeaker(speaker) if matches!(w, SessionWant::Call { kind: CallKind::CallKit { .. }, .. }) => { if let SessionWant::Call { speaker: current, .. } = w { *current = *speaker; } Handled }
             SessionEvent::Reconcile { want: None, .. } => Transition(release(context, own(w))),
-            SessionEvent::Reconcile { want: Some(want), may_ask, fresh, .. } if want != w && (*may_ask || *fresh) => Transition(ask(want.clone(), context, true)),
+            SessionEvent::Reconcile { want: Some(want), may_ask, fresh, audible_edge, .. } if (want != w && (*may_ask || *fresh)) || *audible_edge => Transition(ask(want.clone(), context, true)),
             _ => Super,
         }
     }
@@ -79,7 +79,7 @@ impl Session {
     fn delayed(w: &mut SessionWant, event: &SessionEvent, context: &mut SessionContext<'_>) -> Outcome<State> {
         match event {
             SessionEvent::Reconcile { want: None, .. } => Transition(release(context, own(w))),
-            SessionEvent::Reconcile { want: Some(want), fresh: true, .. } if want != w => Transition(ask(want.clone(), context, true)),
+            SessionEvent::Reconcile { want: Some(want), fresh: true, audible_edge, .. } if want != w || *audible_edge => Transition(ask(want.clone(), context, true)),
             SessionEvent::Gain => Transition(State::held(w.clone())),
             _ => Super,
         }

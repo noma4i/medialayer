@@ -22,7 +22,7 @@ impl SystemMachine {
     #[state(superstate = "any")]
     fn interrupted(context: &mut Exit, event: &SystemEvent) -> Outcome<State> {
         match event {
-            SystemEvent::Foreground(true) => { context.resume = Some(false); Transition(State::free()) }
+            SystemEvent::Foreground(true) | SystemEvent::Audible(true) => { context.resume = Some(false); Transition(State::free()) }
             _ => Super,
         }
     }

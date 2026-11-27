@@ -72,6 +72,39 @@ fn configure(want: SessionWant) -> AudioAction {
 const DEACTIVATE: AudioAction = A::Deactivate { generation: 0 };
 const PLAYBACK: SessionWant = SessionWant::Playback { focus: AudioFocus::Exclusive };
 
+#[test]
+fn inv_heal_05_an_audible_edge_after_interruption_reclaims_the_session() {
+    let mut world = World::playing();
+    world.send(I::InterruptionBegan);
+    world.send(I::Audible { slot: 0, on: false });
+    let actions = world.send(I::Audible { slot: 0, on: true });
+    assert!(actions.contains(&apply(PLAYBACK)), "{actions:?}");
+    assert_eq!(world.owner.system(), System::Free);
+}
+
+#[test]
+fn inv_heal_05_an_audible_edge_reasks_the_session_when_held() {
+    let mut world = World::with(AudioFocus::Mix);
+    world.settle(I::VolumeReadStarted { id: 1 });
+    let actions = world.send(I::Audible { slot: 0, on: true });
+    assert!(actions.contains(&apply(PLAYBACK)), "{actions:?}");
+    let generation = world.owner.inflight().unwrap();
+    world.send(I::Applied { generation, result: AppliedResult::Ok });
+    let again = world.send(I::Audible { slot: 1, on: true });
+    assert!(again.contains(&apply(PLAYBACK)), "{again:?}");
+}
+
+#[test]
+fn inv_heal_05_an_audible_edge_after_a_busy_deactivate_reclaims_playback() {
+    let mut world = World::with(AudioFocus::Mix);
+    world.settle(I::Capture { id: 1, kind: RecordingKind::Video });
+    let end = world.raw(I::CaptureEnded { id: 1 });
+    let generation = end.iter().find_map(generation_of).unwrap();
+    world.raw(I::Applied { generation, result: AppliedResult::Busy });
+    let actions = world.send(I::Audible { slot: 0, on: true });
+    assert!(actions.contains(&apply(PLAYBACK)), "{actions:?}");
+}
+
 fn available(value: MicrophoneAvailability) -> AudioAction {
     A::Availability { value }
 }
@@ -84,8 +117,8 @@ fn own_callkit() -> CallKind {
 fn inv_audio_13_playback_holds_the_session_while_a_slot_sounds_and_releases_it_after_the_last() {
     for focus in [AudioFocus::Exclusive, AudioFocus::Duck, AudioFocus::Mix] {
         let mut world = World::with(focus);
-        assert_eq!(world.settle(I::Audible { slot: 0, on: true }), vec![apply(SessionWant::Playback { focus })], "{focus:?}");
-        assert_eq!(world.send(I::Audible { slot: 1, on: true }), vec![]);
+        assert_eq!(world.settle(I::Audible { slot: 0, on: true }), vec![apply(PLAYBACK)], "{focus:?}");
+        assert_eq!(world.settle(I::Audible { slot: 1, on: true }), vec![apply(PLAYBACK)]);
         assert_eq!(world.send(I::Audible { slot: 0, on: false }), vec![]);
         assert_eq!(world.settle(I::Audible { slot: 1, on: false }), vec![DEACTIVATE], "{focus:?}");
     }
@@ -346,7 +379,7 @@ fn inv_audio_33_a_volume_reader_holds_a_mixing_session_only_while_nothing_sounds
     let mut world = World::with(AudioFocus::Duck);
     let mix = SessionWant::Playback { focus: AudioFocus::Mix };
     assert_eq!(world.settle(I::VolumeReadStarted { id: 1 }), vec![apply(mix.clone())]);
-    assert_eq!(world.settle(I::Audible { slot: 0, on: true }), vec![apply(SessionWant::Playback { focus: AudioFocus::Duck })], "sounding playback takes its own focus");
+    assert_eq!(world.settle(I::Audible { slot: 0, on: true }), vec![apply(PLAYBACK)], "sounding playback takes exclusive focus");
     assert_eq!(world.settle(I::Audible { slot: 0, on: false }), vec![apply(mix)]);
     assert_eq!(world.send(I::VolumeReadStarted { id: 2 }), vec![]);
     assert_eq!(world.send(I::VolumeReadEnded { id: 1 }), vec![]);
