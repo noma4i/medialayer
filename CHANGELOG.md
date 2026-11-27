@@ -1,22 +1,21 @@
 # Changelog
 
-## Unreleased
+## 3.60.0 - 2026-11-27
+
+### Changed
+
+- A player that becomes heard always takes the audio session for exclusive playback and asks for it again on every heard start, whatever audioFocus MediaLayer was opened with; other apps' sound stops (owner rule: a user play always plays).
 
 ### Fixed
-- Preserve playback after a failed audio session retry and clear transient focus after a grant.
 
-- Limit repeated signal updates and delay restarts after task panics.
-- Recover visible playback that never becomes ready and report the recovery.
-- Restart playback and system signal tasks after a panic.
-- Keep Android video views attached when another slot unloads.
-- Heard playback reclaims audio focus and foreground refreshes call state.
-- A new play clears an interruption pause and starts playback.
-- Leaving a blocked audio state clears its interrupted pause.
-- Release stalled proxy capacity and restore memory limits after pressure.
-- Ignore Android background trim levels as memory pressure.
-- Restore the proxy after listener failures and refresh playback routes on reload.
-- Replace stuck players and reload unready media when playback starts.
-- Wait for proxy repair before restoring playback after backgrounding.
+- A new play clears an interruption pause; leaving any blocked audio state clears it too; a granted session ask leaves Android transient focus loss; a failed re-ask keeps the playback that was already held.
+- iOS and Android re-read the call and audio-mode state on every foreground, so a stale call no longer blocks playback after the next return.
+- The local proxy stays reachable: a rebind binds the new listener before closing the old one, survives a cancelled caller, rebinds after repeated accept errors, and reports Unhealthy when a rebind fails; every reload refreshes the playback route.
+- Proxy permit waits end after 10 s with a 503, a direct body the player stopped reading releases its permit, and the memory step returns after the ledger frees room or 10 s after the last warning. Android background trim levels are no longer memory pressure.
+- A native player call that does not return in 8 s, or two loads of one key without Ready, replace that player; Play on a failed or never-ready preload reloads at once; the foreground restore waits for the proxy repair.
+- A visible item that should play and is not Ready after 6 s gets one recovery pass (proxy repair, new player), traced as `core heal reason=..` and reported as a Play failure 'healed ..'.
+- The stage timer loop and the system signal worker restart after a panic, with a backoff from 100 ms to 5 s.
+- Android: unloading a slot no longer clears a view that shows another slot.
 
 ## 3.59.0 - 2026-11-27
 
