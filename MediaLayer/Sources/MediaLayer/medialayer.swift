@@ -13921,6 +13921,10 @@ public enum FailureStage: Equatable, Hashable {
     
     case load
     case store
+    /**
+     * The player gave up on a video or audio after its retries.
+     */
+    case play
 
 
 
@@ -13946,6 +13950,8 @@ public struct FfiConverterTypeFailureStage: FfiConverterRustBuffer {
         
         case 2: return .store
         
+        case 3: return .play
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -13960,6 +13966,10 @@ public struct FfiConverterTypeFailureStage: FfiConverterRustBuffer {
         
         case .store:
             writeInt(&buf, Int32(2))
+        
+        
+        case .play:
+            writeInt(&buf, Int32(3))
         
         }
     }
