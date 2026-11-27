@@ -36,6 +36,7 @@ pub struct StageParts {
     pub silent: bool,
     pub change: Arc<Change>,
     pub ledger: Ledger,
+    pub failures: Arc<crate::failures::Failures>,
 }
 
 struct Inner {
@@ -43,6 +44,7 @@ struct Inner {
     runner: Arc<SlotRunner>,
     routes: Arc<Routes>,
     places: Arc<Places>,
+    failures: Arc<crate::failures::Failures>,
     prefetcher: Prefetcher,
     clock: Arc<dyn Clock>,
     watchdog: WatchdogConfig,
@@ -110,6 +112,7 @@ impl Stage {
             runner: parts.runner,
             routes: parts.routes,
             places: parts.places,
+            failures: parts.failures,
             prefetcher: parts.prefetcher,
             clock: parts.clock,
             watchdog: parts.watchdog,

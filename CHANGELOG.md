@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- FailureStage.play: a video or audio that the player finally gives up on is reported to the failure listeners with the player's error text. Apps with an exhaustive switch over FailureStage add the case.
+
 ### Fixed
 
 - Android: a return within 700 ms of hiding the app keeps video playing; background comes only from the process stop.

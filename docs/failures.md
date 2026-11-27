@@ -1,6 +1,6 @@
 # Failures
 
-The library reports every media load failure and every cache store failure on one stream. The app forwards it to its error tracker.
+The library reports every media load failure, every cache store failure and every playback the player gives up on, on one stream. The app forwards it to its error tracker.
 
 ## What is reported
 
@@ -8,12 +8,12 @@ The library reports every media load failure and every cache store failure on on
 | ----- | ------- |
 | `kind` | `Image`, `Video` or `Audio` |
 | `url` | The source URL |
-| `stage` | `Load`: the origin failed (timeout, network error, status). `Store`: the cache could not keep the response (budget reached with nothing to evict, disk full, write error) |
-| `reason` | Short text of the cause |
+| `stage` | `Load`: the origin failed (timeout, network error, status). `Store`: the cache could not keep the response (budget reached with nothing to evict, disk full, write error). `Play`: the player gave up on a video or audio after its retries |
+| `reason` | Short text of the cause. For `Play` it is the player's error text, for example an OkHttp CLEARTEXT refusal |
 
 A store failure never leaves a view blank. The loaded bytes are still delivered: an image is shown from memory, a video plays from the network. The event only tells you the cache did not keep them.
 
-Each failed load is reported once, however many views wait for it.
+Each failed load is reported once, however many views wait for it. A playback is reported once, when the player gives up: a failure that a retry fixes is not reported.
 
 ## Swift
 

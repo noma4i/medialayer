@@ -1,6 +1,7 @@
 use super::{LoadId, Stage, StageGuard, Work};
 use crate::api::slots::{SlotCall, SlotSample};
 use crate::api::types::MediaState;
+use crate::failures::{FailureStage, MediaFailure};
 use crate::proxy::Readiness;
 use crate::session::{Action, Event, Intent, Sample};
 use std::sync::atomic::Ordering;
@@ -245,6 +246,10 @@ impl Stage {
             Action::Fail(reason) => {
                 let mut state = self.state();
                 if !state.is_loaded_as(&id.key, id.slot, id.generation) { return; }
+                if let Some(loaded) = state.loaded.get(&id.key) {
+                    let failure = MediaFailure { kind: loaded.source.kind, url: loaded.source.url.clone(), stage: FailureStage::Play, reason: reason.clone() };
+                    self.inner.failures.report(failure);
+                }
                 self.inner.places.failed(&id.key, &reason);
                 let orders = state.leases.get(&id.key).copied().map(|lease| state.election.set_intent(&id.key, lease, Intent::Idle)).unwrap_or_default();
                 let commands = state.commands_for(orders, self.now());

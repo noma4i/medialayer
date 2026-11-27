@@ -204,7 +204,7 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
     let dedupe_window = Duration::from_secs(limits.dedupe_window_seconds.into());
     let prefetch_ledger = PrefetchLedger::new(dedupe_window, limits.dedupe_max_entries as usize);
     let prefetcher = Prefetcher::new(Arc::new(ProxyLoader::new(proxy.clone())), &limits, prefetch_ledger, clock.clone());
-    prefetcher.set_failures(failures);
+    prefetcher.set_failures(failures.clone());
     prefetcher.set_image_windows(image_windows.into_iter().collect());
     cache.on_evicted(prefetcher.eviction_listener());
     let routes = Arc::new(Routes::new(proxy.clone(), Arc::new(cache.clone())));
@@ -228,6 +228,7 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
             silent,
             change: change.clone(),
             ledger: ledger.clone(),
+            failures,
         },
     );
     Ok(Parts { cache, proxy, prefetcher, stage, places, routes, tones, settings, ledger, clock, defaults, limits, rejected, device, change, pool })

@@ -7,6 +7,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub enum FailureStage {
     Load,
     Store,
+    /// The player gave up on a video or audio after its retries.
+    Play,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]

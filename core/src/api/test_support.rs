@@ -576,6 +576,7 @@ pub fn replace_stage_clock(rig: &mut Rig, pool: PoolSettings, clock: Arc<dyn cra
     parts.stage = super::stage::Stage::new(tokio::runtime::Handle::current(), super::stage::StageParts {
         ring, runner, routes: parts.routes.clone(), places: parts.places.clone(), prefetcher: parts.prefetcher.clone(), clock,
         watchdog: fast_watchdog(), silent: false, change: parts.change.clone(), ledger: parts.ledger.clone(),
+        failures: Arc::default(),
     });
 }
 

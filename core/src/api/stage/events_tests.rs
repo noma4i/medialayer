@@ -624,3 +624,57 @@ async fn inv_api_49_a_window_entry_never_turns_a_one_shot_place_into_a_loop() {
     assert_eq!(loads, vec![false]);
     assert_eq!(rig.parts.places.state(&url), MediaState::Ended);
 }
+
+#[derive(Default)]
+struct FailureLog(Mutex<Vec<Option<crate::failures::MediaFailure>>>, tokio::sync::Notify);
+
+impl crate::failures::FailureListener for FailureLog {
+    fn failed(&self, failure: crate::failures::MediaFailure) { self.0.lock().unwrap().push(Some(failure)); }
+    fn closed(&self) {
+        self.0.lock().unwrap().push(None);
+        self.1.notify_one();
+    }
+}
+
+async fn failures_until_closed(failures: &crate::failures::Failures, log: &FailureLog) -> Vec<crate::failures::MediaFailure> {
+    failures.close();
+    let closed = log.1.notified();
+    if log.0.lock().unwrap().last() != Some(&None) { closed.await; }
+    log.0.lock().unwrap().iter().flatten().cloned().collect()
+}
+
+#[tokio::test]
+async fn inv_api_72_a_final_playback_failure_reaches_the_failure_listeners() {
+    let failures: Arc<crate::failures::Failures> = Arc::default();
+    let log = Arc::new(FailureLog::default());
+    let _subscription = failures.subscribe(log.clone());
+    let shared = failures.clone();
+    let rig = rig_with(move |config| config.failures = shared).await;
+    let (slot, _) = playing(&rig, video(&url_of(0))).await;
+    let stage = &rig.parts.stage;
+
+    for _ in 0..6 {
+        stage.failed(slot as usize, stage.generation_at(slot as usize), 0, "decoder died".to_string());
+    }
+
+    let reported = failures_until_closed(&failures, &log).await;
+    let expected = crate::failures::MediaFailure { kind: Kind::Video, url: url_of(0), stage: crate::failures::FailureStage::Play, reason: "decoder died".to_string() };
+    assert_eq!(reported, vec![expected]);
+}
+
+#[tokio::test]
+async fn inv_api_72_a_failure_followed_by_a_successful_retry_reports_nothing() {
+    let failures: Arc<crate::failures::Failures> = Arc::default();
+    let log = Arc::new(FailureLog::default());
+    let _subscription = failures.subscribe(log.clone());
+    let shared = failures.clone();
+    let rig = rig_with(move |config| config.failures = shared).await;
+    let (slot, player) = playing(&rig, video(&url_of(0))).await;
+    let stage = &rig.parts.stage;
+
+    stage.failed(slot as usize, stage.generation_at(slot as usize), 0, "decoder died".to_string());
+    eventually(|| player.loads() == 2).await;
+    stage.ready(slot as usize, stage.generation_at(slot as usize));
+
+    assert_eq!(failures_until_closed(&failures, &log).await, Vec::new());
+}
