@@ -178,14 +178,15 @@ class AudioLinkTest {
   fun inv_audio_36_system_signals_reach_the_core_and_its_actions_reach_the_focus() {
     link.audible(0u, true)
     link.audible(1u, true)
-    await("one request for two sounding slots") { focus.calls.toList() == listOf("request GAIN MEDIA") }
+    // Every heard start asks for the focus again (owner rule, 3.60.0): two sounding slots give two requests.
+    await("one request per heard start") { focus.calls.toList() == listOf("request GAIN MEDIA", "request GAIN MEDIA") }
 
     focus.send(FocusSignal.Change(FocusChange.LOSS))
     await("abandoned after the loss") { focus.calls.last() == "abandon" }
     link.audible(0u, false)
     link.audible(1u, false)
     focus.send(FocusSignal.Change(FocusChange.GAIN))
-    assertEquals(listOf("request GAIN MEDIA", "abandon"), focus.calls.toList())
+    assertEquals(listOf("request GAIN MEDIA", "request GAIN MEDIA", "abandon"), focus.calls.toList())
 
     focus.send(FocusSignal.PhoneCall(true))
     await("the core heard the phone call") { seen.lastOrNull() == MicrophoneAvailability.EXTERNAL_CALL }
@@ -206,8 +207,9 @@ class AudioLinkTest {
     link.foreground(true)
     link.audible(0u, true)
 
-    await("requested again") { focus.calls.count { it == "request GAIN MEDIA" } == 2 }
-    assertEquals(listOf("request GAIN MEDIA", "request GAIN MEDIA"), focus.calls.toList())
+    // The foreground asks again for the refused demand and the new heard start asks once more (owner rule, 3.60.0).
+    await("requested again") { focus.calls.count { it == "request GAIN MEDIA" } == 3 }
+    assertEquals(listOf("request GAIN MEDIA", "request GAIN MEDIA", "request GAIN MEDIA"), focus.calls.toList())
   }
 
   @Test
@@ -309,7 +311,8 @@ class AudioLinkTest {
 
       call.close()
 
-      TestSignal.await("released", 5_000) { mixFocus.calls.toList().takeLast(2).toSet() == setOf("communication on=false speaker=false", "abandon") }
+      // The call releases its communication mode; the slot that still sounds takes the media focus again (exclusive under every policy since 3.60.0).
+      TestSignal.await("released", 5_000) { mixFocus.calls.toList().takeLast(2) == listOf("communication on=false speaker=false", "request GAIN MEDIA") }
     } finally {
       mixLink.close()
       mixCore.close()
