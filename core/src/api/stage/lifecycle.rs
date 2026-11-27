@@ -47,8 +47,12 @@ impl PoolControl for Stage {
     fn foreground(&self) {
         let (inner, routes) = (Arc::downgrade(&self.inner), self.inner.routes.clone());
         let token = self.next_token();
+        #[cfg(test)]
+        let finished = self.inner.repair_finished.clone();
         let mut state = self.inner.state.lock().unwrap_or_else(PoisonError::into_inner);
         let task = self.inner.handle.spawn(async move {
+            #[cfg(test)]
+            let _finished = super::RepairFinished(finished);
             routes.repair().await;
             let Some(inner) = inner.upgrade() else { return };
             let stage = Stage { inner };

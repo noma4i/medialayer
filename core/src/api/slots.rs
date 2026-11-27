@@ -336,7 +336,9 @@ async fn perform(players: &Arc<dyn PlayerSlotFactory>, slot: usize, shared: &Sha
     let is_load = matches!(call, SlotCall::Load { .. });
     if matches!(call, SlotCall::Seek { .. }) {
         tokio::select! {
-            () = current.apply(call) => {}
+            result = tokio::time::timeout(shared.timeout, current.apply(call)) => {
+                if result.is_err() { return true; }
+            }
             () = shared.queue.source_replaced_since(revision) => {}
         }
     } else {

@@ -58,16 +58,28 @@ struct Inner {
     wakes: AtomicU64,
     seeks: Mutex<HashMap<String, (u64, std::time::Instant)>>,
     hints: Mutex<HashMap<usize, u64>>,
-    no_ready: Mutex<HashMap<usize, u32>>,
+    no_ready: Mutex<HashMap<usize, (String, u32)>>,
     playback_changes: Mutex<HashSet<String>>,
     playback_wake: Notify,
     playback_observed: AtomicBool,
     #[cfg(test)]
     action_completed: tokio::sync::Notify,
     #[cfg(test)]
+    repair_finished: Arc<Notify>,
+    #[cfg(test)]
+    tick_finished: Notify,
+    #[cfg(test)]
     tick_wait: Mutex<Option<Option<u64>>>,
     #[cfg(test)]
     panic_tick: AtomicBool,
+}
+
+#[cfg(test)]
+struct RepairFinished(Arc<Notify>);
+
+#[cfg(test)]
+impl Drop for RepairFinished {
+    fn drop(&mut self) { self.0.notify_one(); }
 }
 
 #[derive(Clone)]
@@ -135,6 +147,10 @@ impl Stage {
             playback_observed: AtomicBool::new(false),
             #[cfg(test)]
             action_completed: tokio::sync::Notify::new(),
+            #[cfg(test)]
+            repair_finished: Arc::new(Notify::new()),
+            #[cfg(test)]
+            tick_finished: Notify::new(),
             #[cfg(test)]
             tick_wait: Mutex::new(None),
             #[cfg(test)]

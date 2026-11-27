@@ -301,6 +301,8 @@ pub(super) async fn tick_loop(inner: Weak<Inner>, mut due: watch::Receiver<Optio
         };
         stage.dispatch(state, commands);
         for id in heals { stage.heal(id); }
+        #[cfg(test)]
+        stage.inner.tick_finished.notify_one();
     }
 }
 

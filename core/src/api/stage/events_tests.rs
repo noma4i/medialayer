@@ -15,6 +15,14 @@ fn heal_clock(rig: &mut Rig) {
     crate::api::test_support::replace_stage_clock_with_watchdog(rig, Default::default(), Arc::new(crate::api::test_support::TokioClock::new()), watchdog);
 }
 
+async fn settle_tick(stage: &super::Stage) {
+    let due = stage.now() + 1;
+    stage.inner.due.send_replace(Some(due));
+    eventually(|| *stage.inner.tick_wait.lock().unwrap() == Some(Some(due))).await;
+    tokio::time::advance(std::time::Duration::from_millis(1)).await;
+    stage.inner.tick_finished.notified().await;
+}
+
 #[tokio::test(start_paused = true)]
 async fn inv_heal_15_a_visible_wanted_key_without_ready_heals_once() {
     let mut rig = rig().await;
@@ -28,16 +36,99 @@ async fn inv_heal_15_a_visible_wanted_key_without_ready_heals_once() {
     eventually(|| rig.factory.slot_holding(&key).is_some()).await;
     let (_, old) = rig.holder(&key);
     eventually(|| stage.inner.tick_wait.lock().unwrap().is_some_and(|due| due == Some(6000))).await;
-    tokio::time::advance(std::time::Duration::from_secs(6)).await;
+    tokio::time::advance(std::time::Duration::from_millis(5_999)).await;
+    assert_eq!(rig.parts.routes.barrier_entries(), 0);
+    tokio::time::advance(std::time::Duration::from_millis(1)).await;
     eventually(|| rig.factory.created.lock().unwrap().len() == 2).await;
+    stage.inner.repair_finished.notified().await;
+    stage.inner.tick_finished.notified().await;
     assert_eq!(old.disposed.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert_eq!(rig.parts.routes.barrier_entries(), 1);
     eventually(|| !log.0.lock().unwrap().is_empty()).await;
-    let reported = failures_until_closed(&stage.inner.failures, &log).await;
-    assert_eq!(reported, vec![crate::failures::MediaFailure { kind: Kind::Video, url: key, stage: crate::failures::FailureStage::Play, reason: "healed slot".into() }]);
     tokio::time::advance(std::time::Duration::from_secs(6)).await;
+    settle_tick(stage).await;
+    eventually(|| stage.commands_idle()).await;
     assert_eq!(rig.factory.created.lock().unwrap().len(), 2);
     assert_eq!(rig.parts.routes.barrier_entries(), 1);
+    let reported = failures_until_closed(&stage.inner.failures, &log).await;
+    assert_eq!(reported, vec![crate::failures::MediaFailure { kind: Kind::Video, url: key, stage: crate::failures::FailureStage::Play, reason: "healed slot".into() }]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_15_proxy_repair_reports_the_route_used() {
+    for stopped in [false, true] {
+        let mut rig = rig().await;
+        heal_clock(&mut rig);
+        let stage = &rig.parts.stage;
+        let log = Arc::new(FailureLog::default());
+        let _subscription = stage.inner.failures.subscribe(log.clone());
+        let key = url_of(0);
+        stage.visible(video(&key), true);
+        stage.set_playing(&key, true, &[]);
+        eventually(|| rig.factory.slot_holding(&key).is_some() && stage.commands_idle()).await;
+        let old_port = rig.parts.proxy.port();
+        if stopped { rig.parts.proxy.stop().await; }
+        else { crate::proxy::test_client::close_listener_silently(old_port); }
+        eventually(|| stage.inner.tick_wait.lock().unwrap().is_some_and(|due| due == Some(6000))).await;
+        tokio::time::advance(std::time::Duration::from_millis(5_999)).await;
+        assert_eq!(rig.parts.routes.barrier_entries(), 0);
+        tokio::time::advance(std::time::Duration::from_millis(1)).await;
+        eventually(|| rig.factory.created.lock().unwrap().len() == 2 && stage.commands_idle()).await;
+        let route = rig.holder(&key).1.calls().into_iter().find_map(|call| match call { SlotCall::Load { route, .. } => Some(route.url), _ => None }).unwrap();
+        if stopped { assert_eq!(route, key); }
+        else {
+            assert_eq!(route, rig.parts.routes.play_url(&video(&key)).url);
+        }
+        let reason = if stopped { "healed slot" } else { "healed proxy" };
+        assert_eq!(failures_until_closed(&stage.inner.failures, &log).await, vec![crate::failures::MediaFailure { kind: Kind::Video, url: key, stage: crate::failures::FailureStage::Play, reason: reason.into() }]);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_15_a_slot_heal_reaches_the_trace_sink() {
+    struct Lines(Mutex<Vec<String>>);
+    impl crate::trace::TraceSink for Lines {
+        fn line(&self, text: String) { self.0.lock().unwrap().push(text); }
+    }
+    let _owner = crate::trace::sink_test_guard();
+    let lines = Arc::new(Lines(Mutex::default()));
+    crate::trace::set_trace_sink(Some(lines.clone()));
+    let mut rig = rig().await;
+    heal_clock(&mut rig);
+    let key = url_of(0);
+    let stage = &rig.parts.stage;
+    stage.visible(video(&key), true);
+    stage.set_playing(&key, true, &[]);
+    eventually(|| rig.factory.slot_holding(&key).is_some() && stage.commands_idle()).await;
+    eventually(|| stage.inner.tick_wait.lock().unwrap().is_some_and(|due| due == Some(6000))).await;
+    tokio::time::advance(std::time::Duration::from_millis(5_999)).await;
+    assert_eq!(rig.parts.routes.barrier_entries(), 0);
+    tokio::time::advance(std::time::Duration::from_millis(1)).await;
+    eventually(|| rig.parts.routes.barrier_entries() == 1 && rig.factory.created.lock().unwrap().len() == 2 && stage.commands_idle()).await;
+    let matching: Vec<String> = lines.0.lock().unwrap().iter().filter_map(|line| line.split_once(" core heal ").map(|(_, tail)| tail.to_owned())).collect();
+    crate::trace::set_trace_sink(None);
+    assert_eq!(matching, vec![format!("reason=slot key={}", crate::trace::tail(&key))]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_15_a_final_failure_does_not_start_a_heal_loop() {
+    let mut rig = rig().await;
+    heal_clock(&mut rig);
+    let stage = &rig.parts.stage;
+    let log = Arc::new(FailureLog::default());
+    let _subscription = stage.inner.failures.subscribe(log.clone());
+    let key = url_of(0);
+    stage.visible(video(&key), true);
+    stage.set_playing(&key, true, &[]);
+    eventually(|| rig.factory.slot_holding(&key).is_some() && stage.commands_idle()).await;
+    let (slot, _) = rig.holder(&key);
+    for _ in 0..6 { stage.failed(slot as usize, stage.generation_at(slot as usize), 0, "decoder died".into()); }
+    eventually(|| !log.0.lock().unwrap().is_empty() && stage.commands_idle()).await;
+    tokio::time::advance(std::time::Duration::from_secs(12)).await;
+    settle_tick(stage).await;
+    eventually(|| stage.commands_idle()).await;
+    assert_eq!(rig.parts.routes.barrier_entries(), 0);
+    assert_eq!(failures_until_closed(&stage.inner.failures, &log).await, vec![crate::failures::MediaFailure { kind: Kind::Video, url: key, stage: crate::failures::FailureStage::Play, reason: "decoder died".into() }]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -52,13 +143,65 @@ async fn inv_heal_15_a_heal_pass_stops_when_the_key_is_ready() {
     let (slot, _) = rig.holder(&key);
     rig.parts.routes.hold_repair_and_purge(true);
     eventually(|| stage.inner.tick_wait.lock().unwrap().is_some_and(|due| due == Some(6000))).await;
-    tokio::time::advance(std::time::Duration::from_secs(6)).await;
+    tokio::time::advance(std::time::Duration::from_millis(5_999)).await;
+    assert_eq!(rig.parts.routes.barrier_entries(), 0);
+    tokio::time::advance(std::time::Duration::from_millis(1)).await;
     eventually(|| rig.parts.routes.barrier_entries() == 1).await;
     stage.ready(slot as usize, stage.generation_at(slot as usize));
     rig.parts.routes.hold_repair_and_purge(false);
-    eventually(|| !stage.state().tasks.get(&key).is_some_and(|tasks| tasks.iter().any(|task| task.work == super::Work::Heal))).await;
+    stage.inner.repair_finished.notified().await;
     assert_eq!(rig.factory.created.lock().unwrap().len(), 1);
     assert_eq!(rig.parts.routes.barrier_entries(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_15_a_held_repair_cannot_heal_an_obsolete_wish() {
+    for change in 0..4 {
+        let mut rig = rig().await;
+        heal_clock(&mut rig);
+        let stage = &rig.parts.stage;
+        let log = Arc::new(FailureLog::default());
+        let _subscription = stage.inner.failures.subscribe(log.clone());
+        let key = url_of(0);
+        stage.visible(video(&key), true);
+        stage.set_playing(&key, true, &[]);
+        eventually(|| rig.factory.slot_holding(&key).is_some() && stage.commands_idle()).await;
+        rig.parts.routes.hold_repair_and_purge(true);
+        eventually(|| stage.inner.tick_wait.lock().unwrap().is_some_and(|due| due == Some(6000))).await;
+        tokio::time::advance(std::time::Duration::from_millis(5_999)).await;
+        assert_eq!(rig.parts.routes.barrier_entries(), 0);
+        tokio::time::advance(std::time::Duration::from_millis(1)).await;
+        eventually(|| rig.parts.routes.barrier_entries() == 1).await;
+        match change {
+            0 => stage.set_playing(&key, false, &[]),
+            1 => stage.visible(video(&key), false),
+            2 => stage.apply(PoolControl::background(stage)),
+            _ => stage.reload_key(&key),
+        }
+        rig.parts.routes.hold_repair_and_purge(false);
+        stage.inner.repair_finished.notified().await;
+        eventually(|| stage.commands_idle()).await;
+        assert_eq!(rig.factory.created.lock().unwrap().len(), 1, "case {change}");
+        assert_eq!(failures_until_closed(&stage.inner.failures, &log).await, vec![], "case {change}");
+    }
+}
+
+#[tokio::test]
+async fn inv_heal_13_a_second_background_cancels_a_held_foreground_repair() {
+    let rig = rig_with(|config| config.watchdog.first_window_ms = 3_600_000).await;
+    let stage = &rig.parts.stage;
+    let (_, player) = playing(&rig, video(&url_of(0))).await;
+    stage.apply(PoolControl::background(stage));
+    eventually(|| player.calls().last() == Some(&SlotCall::Unload) && stage.commands_idle()).await;
+    rig.parts.routes.hold_repair_and_purge(true);
+    PoolControl::foreground(stage);
+    eventually(|| rig.parts.routes.barrier_entries() == 1).await;
+    stage.apply(PoolControl::background(stage));
+    let calls = player.calls();
+    rig.parts.routes.hold_repair_and_purge(false);
+    stage.inner.repair_finished.notified().await;
+    eventually(|| stage.commands_idle()).await;
+    assert_eq!(player.calls(), calls);
 }
 
 #[tokio::test(start_paused = true)]
@@ -73,7 +216,9 @@ async fn inv_heal_16_a_panicked_tick_loop_restarts() {
     eventually(|| rig.factory.slot_holding(&key).is_some()).await;
     eventually(|| !stage.inner.panic_tick.load(std::sync::atomic::Ordering::SeqCst)).await;
     eventually(|| stage.inner.tick_wait.lock().unwrap().is_some_and(|due| due == Some(6000))).await;
-    tokio::time::advance(std::time::Duration::from_secs(6)).await;
+    tokio::time::advance(std::time::Duration::from_millis(5_999)).await;
+    assert_eq!(rig.parts.routes.barrier_entries(), 0);
+    tokio::time::advance(std::time::Duration::from_millis(1)).await;
     eventually(|| rig.factory.created.lock().unwrap().len() == 2).await;
 }
 
@@ -85,9 +230,9 @@ async fn inv_heal_08_a_retry_after_a_port_change_loads_the_new_port() {
     let new = rig.parts.proxy.restart(0).await.unwrap();
     assert_ne!(old, new);
     rig.parts.stage.failed(slot as usize, rig.parts.stage.generation_at(slot as usize), 0, "failed".into());
-    eventually(|| player.loads() >= 2).await;
+    eventually(|| player.loads() == 2 && rig.parts.stage.commands_idle()).await;
     let route = player.calls().into_iter().filter_map(|call| match call { SlotCall::Load { route, .. } => Some(route.url), _ => None }).last().unwrap();
-    assert!(route.starts_with(&format!("http://127.0.0.1:{new}/")), "{route}");
+    assert_eq!(route, rig.parts.routes.play_url(&video(&url_of(0))).url);
 }
 
 fn once(url: &str) -> MediaItem {
@@ -117,12 +262,17 @@ async fn inv_heal_11_a_slot_call_that_never_returns_recreates_the_slot() {
     eventually(|| rig.factory.gate.entered() > 0).await;
     let index = rig.factory.created.lock().unwrap()[0];
     let old = rig.factory.slot(index);
-    tokio::time::advance(std::time::Duration::from_secs(8)).await;
+    let reserved = rig.parts.ledger.used_by(crate::memory::Owner::Slot(index as usize));
+    assert_eq!(reserved, 24 * 1024 * 1024);
+    tokio::time::advance(std::time::Duration::from_millis(7_999)).await;
+    assert_eq!(old.cancelled_applies(), 0);
+    tokio::time::advance(std::time::Duration::from_millis(1)).await;
     eventually(|| old.cancelled_applies() == 1).await;
     drop(gate);
-    eventually(|| rig.factory.created.lock().unwrap().len() >= 2).await;
+    eventually(|| rig.factory.created.lock().unwrap().len() == 2).await;
     eventually(|| rig.factory.slot_holding(&key).is_some_and(|(_, player)| player.calls().contains(&SlotCall::Play))).await;
     assert_eq!(old.disposed.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(rig.parts.ledger.used_by(crate::memory::Owner::Slot(index as usize)), reserved);
 }
 
 #[tokio::test]
@@ -138,9 +288,115 @@ async fn inv_heal_12_two_loads_without_ready_replace_the_player() {
     stage.reload_key(&key);
     eventually(|| old.loads() == before + 2).await;
     stage.reload_key(&key);
-    eventually(|| rig.factory.created.lock().unwrap().len() >= 2).await;
+    eventually(|| rig.factory.created.lock().unwrap().len() == 2).await;
     eventually(|| rig.factory.slot_holding(&key).is_some_and(|(_, player)| !Arc::ptr_eq(&player, &old))).await;
     assert_eq!(old.disposed.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn inv_heal_12_different_keys_without_ready_keep_the_player() {
+    let rig = rig_with(|config| {
+        config.watchdog.first_window_ms = 3_600_000;
+        config.defaults.slots = 1;
+        config.pool.reach = 0;
+    }).await;
+    let stage = &rig.parts.stage;
+    let (_, player) = playing(&rig, video(&url_of(0))).await;
+    for index in 1..3 {
+        stage.set_playing(&url_of(index - 1), false, &[]);
+        stage.replace_window(0, vec![Some(video(&url_of(index)))]);
+        stage.set_playing(&url_of(index), true, &[]);
+        eventually(|| rig.factory.slot_holding(&url_of(index)).is_some() && stage.commands_idle()).await;
+    }
+    assert_eq!(rig.factory.created.lock().unwrap().len(), 1);
+    assert_eq!(player.disposed.load(std::sync::atomic::Ordering::SeqCst), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_11_a_held_seek_recreates_the_slot_at_the_deadline() {
+    let rig = rig_with(|config| config.watchdog.first_window_ms = 3_600_000).await;
+    let key = url_of(0);
+    let (slot, old) = playing(&rig, video(&key)).await;
+    let gate = rig.factory.seek_gate.hold();
+    rig.parts.stage.inner.runner.send(slot as usize, SlotCall::Seek { position_ms: 5 });
+    eventually(|| rig.factory.seek_gate.entered() == 1).await;
+    tokio::time::advance(std::time::Duration::from_millis(7_999)).await;
+    assert_eq!(old.cancelled_applies(), 0);
+    assert_eq!(rig.factory.created.lock().unwrap().len(), 1);
+    tokio::time::advance(std::time::Duration::from_millis(1)).await;
+    eventually(|| old.cancelled_applies() == 1).await;
+    drop(gate);
+    eventually(|| rig.factory.created.lock().unwrap().len() == 2 && rig.parts.stage.commands_idle()).await;
+    assert_eq!(rig.factory.slot_holding(&key).unwrap().1.calls().last(), Some(&SlotCall::Play));
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_11_a_held_create_retries_each_deadline() {
+    let rig = rig_with(|config| config.watchdog.first_window_ms = 3_600_000).await;
+    let gate = rig.factory.create_gate.hold();
+    let key = url_of(0);
+    rig.parts.stage.visible(video(&key), true);
+    rig.parts.stage.set_playing(&key, true, &[]);
+    eventually(|| rig.factory.create_gate.entered() == 1).await;
+    for expected in 2..=3 {
+        tokio::time::advance(std::time::Duration::from_millis(7_999)).await;
+        assert_eq!(rig.factory.create_gate.entered(), expected - 1);
+        tokio::time::advance(std::time::Duration::from_millis(1)).await;
+        eventually(|| rig.factory.create_gate.entered() == expected).await;
+    }
+    drop(gate);
+    eventually(|| rig.factory.slot_holding(&key).is_some_and(|(_, player)| player.calls().last() == Some(&SlotCall::Play))).await;
+    assert_eq!(rig.factory.created.lock().unwrap().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_11_a_held_dispose_does_not_block_the_next_lane() {
+    let rig = rig_with(|config| config.watchdog.first_window_ms = 3_600_000).await;
+    let key = url_of(0);
+    let (_, old) = playing(&rig, video(&key)).await;
+    let gate = rig.factory.dispose_gate.hold();
+    rig.parts.stage.reset_players();
+    eventually(|| rig.factory.dispose_gate.entered() == 1).await;
+    tokio::time::advance(std::time::Duration::from_millis(7_999)).await;
+    assert_eq!(rig.factory.created.lock().unwrap().len(), 1);
+    tokio::time::advance(std::time::Duration::from_millis(1)).await;
+    eventually(|| rig.factory.created.lock().unwrap().len() == 2 && rig.parts.stage.commands_idle()).await;
+    assert_eq!(old.disposed.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(rig.factory.slot_holding(&key).unwrap().1.calls().last(), Some(&SlotCall::Play));
+    drop(gate);
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_11_a_held_unload_recreates_the_slot() {
+    let rig = rig_with(|config| config.watchdog.first_window_ms = 3_600_000).await;
+    let key = url_of(0);
+    let (slot, old) = playing(&rig, video(&key)).await;
+    let gate = rig.factory.unload_gate.hold();
+    rig.parts.stage.reload_key(&key);
+    eventually(|| rig.factory.unload_gate.entered() == 1).await;
+    tokio::time::advance(std::time::Duration::from_millis(7_999)).await;
+    assert_eq!(old.cancelled_applies(), 0);
+    tokio::time::advance(std::time::Duration::from_millis(1)).await;
+    eventually(|| rig.factory.created.lock().unwrap().len() == 2 && rig.parts.stage.commands_idle()).await;
+    assert_eq!(old.cancelled_applies(), 1);
+    assert_eq!(rig.factory.slot_holding(&key).unwrap().0, slot);
+    drop(gate);
+}
+
+#[tokio::test]
+async fn inv_heal_13_play_reloads_only_a_preload_without_ready() {
+    for ready in [false, true] {
+        let rig = rig_with(|config| config.watchdog.first_window_ms = 3_600_000).await;
+        let key = url_of(0);
+        let stage = &rig.parts.stage;
+        stage.replace_window(0, vec![Some(video(&key))]);
+        eventually(|| rig.factory.slot_holding(&key).is_some() && stage.commands_idle()).await;
+        let (slot, player) = rig.holder(&key);
+        if ready { stage.ready(slot as usize, stage.generation_at(slot as usize)); }
+        stage.set_playing(&key, true, &[]);
+        eventually(|| player.calls().last() == Some(&SlotCall::Play) && stage.commands_idle()).await;
+        assert_eq!(player.loads(), if ready { 1 } else { 2 });
+    }
 }
 
 #[tokio::test]
@@ -172,7 +428,9 @@ async fn inv_heal_11_timeout_from_a_retired_lane_keeps_the_new_lane() {
     let index = rig.factory.created.lock().unwrap()[0];
     let old = rig.factory.slot(index);
     stage.reset_players();
-    tokio::time::advance(std::time::Duration::from_secs(8)).await;
+    tokio::time::advance(std::time::Duration::from_millis(7_999)).await;
+    assert_eq!(old.cancelled_applies(), 0);
+    tokio::time::advance(std::time::Duration::from_millis(1)).await;
     eventually(|| old.cancelled_applies() == 1).await;
     drop(gate);
     eventually(|| rig.factory.slot_holding(&key).is_some_and(|(_, player)| !Arc::ptr_eq(&player, &old))).await;
@@ -189,7 +447,7 @@ async fn inv_heal_13_play_on_a_failed_preload_reloads_at_once() {
     let (slot, player) = rig.holder(&key);
     stage.failed(slot as usize, stage.generation_at(slot as usize), 0, "failed".into());
     stage.set_playing(&key, true, &[]);
-    eventually(|| player.loads() >= 2 && player.calls().contains(&SlotCall::Play)).await;
+    eventually(|| player.loads() == 2 && player.calls().contains(&SlotCall::Play)).await;
 }
 
 #[tokio::test]
@@ -203,10 +461,10 @@ async fn inv_heal_13_the_foreground_restore_waits_for_the_repair() {
     eventually(|| player.calls().contains(&SlotCall::Unload)).await;
     rig.parts.routes.hold_repair_and_purge(true);
     PoolControl::foreground(stage);
-    eventually(|| rig.parts.routes.barrier_entries() > 0).await;
+    eventually(|| rig.parts.routes.barrier_entries() == 1).await;
     assert_eq!(player.loads(), before);
     rig.parts.routes.hold_repair_and_purge(false);
-    eventually(|| player.loads() > before).await;
+    eventually(|| player.loads() == before + 1 && stage.commands_idle()).await;
 }
 
 #[tokio::test]

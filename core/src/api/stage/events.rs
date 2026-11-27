@@ -77,7 +77,11 @@ impl Stage {
         let routes = self.inner.routes.clone();
         let token = self.next_token();
         let target = id.clone();
+        #[cfg(test)]
+        let finished = self.inner.repair_finished.clone();
         self.track(&id, Work::Heal, token, async move {
+            #[cfg(test)]
+            let _finished = super::RepairFinished(finished);
             let repaired = routes.repair_outcome().await;
             let Some(inner) = weak.upgrade() else { return };
             let stage = Stage { inner };
@@ -101,9 +105,14 @@ impl Stage {
     pub(super) fn load_started(&self, slot: usize, lane: u64, key: &str, generation: u64) -> bool {
         let replace = {
             let state = self.state();
-            if !state.is_loaded_as(key, slot, generation) || !state.is_playing(key) { return false; }
+            if !state.is_loaded_as(key, slot, generation) { return false; }
             let mut counts = self.inner.no_ready.lock().unwrap_or_else(PoisonError::into_inner);
-            let count = counts.entry(slot).or_default();
+            let (previous_key, count) = counts.entry(slot).or_insert_with(|| (key.to_owned(), 0));
+            if previous_key != key {
+                *previous_key = key.to_owned();
+                *count = 0;
+            }
+            if !state.is_playing(key) { return false; }
             if *count >= self.inner.watchdog.slot_no_ready_limit { true } else { *count += 1; false }
         };
         replace && self.recreate_slot(slot, lane, "no-ready")
