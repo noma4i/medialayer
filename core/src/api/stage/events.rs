@@ -39,10 +39,40 @@ impl Stage {
     }
     pub fn ready(&self, slot: usize, generation: u64) {
         crate::trace!("event", "ready slot={slot} generation={generation}");
+        {
+            let mut state = self.state();
+            if let Some(key) = Self::current_key(&state, slot, generation) {
+                self.inner.no_ready.lock().unwrap_or_else(PoisonError::into_inner).remove(&slot);
+                if let Some(loaded) = state.loaded.get_mut(&key) { loaded.ready_generation = Some(generation); }
+            }
+        }
         let Some(key) = self.feed_current(slot, generation, Event::Loaded) else { return };
         self.apply_pending_fraction(slot, &key, generation, false);
         self.with_current(slot, generation, |key| self.inner.places.ready(key));
         self.sync_foreground();
+    }
+
+    pub(super) fn recreate_slot(&self, slot: usize, lane: u64, reason: &str) -> bool {
+        let id = {
+            let state = self.state();
+            if !self.inner.runner.dispose_current(slot, lane) { return false; }
+            state.slot_keys.get(&slot).and_then(|key| state.loaded.get(key).map(|loaded| LoadId { key: key.clone(), slot, generation: loaded.generation }))
+        };
+        self.inner.no_ready.lock().unwrap_or_else(PoisonError::into_inner).remove(&slot);
+        crate::trace!("heal", "slot recreate slot={slot} reason={reason}");
+        if let Some(id) = id { self.reload(&id, true); }
+        true
+    }
+
+    pub(super) fn load_started(&self, slot: usize, lane: u64, key: &str, generation: u64) -> bool {
+        let replace = {
+            let state = self.state();
+            if !state.is_loaded_as(key, slot, generation) || !state.is_playing(key) { return false; }
+            let mut counts = self.inner.no_ready.lock().unwrap_or_else(PoisonError::into_inner);
+            let count = counts.entry(slot).or_default();
+            if *count >= self.inner.watchdog.slot_no_ready_limit { true } else { *count += 1; false }
+        };
+        replace && self.recreate_slot(slot, lane, "no-ready")
     }
 
     #[cfg(test)]

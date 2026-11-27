@@ -79,6 +79,9 @@ struct Shared {
     queue: Queue,
     life: Mutex<SlotLife>,
     pause_id: u64,
+    timeout: std::time::Duration,
+    on_timeout: Arc<Mutex<Option<Arc<dyn Fn(usize, u64) + Send + Sync>>>>,
+    on_load: Arc<Mutex<Option<Arc<dyn Fn(usize, u64, &str, u64) -> bool + Send + Sync>>>>,
 }
 
 impl Shared {
@@ -92,6 +95,7 @@ impl Shared {
 }
 
 struct Lane {
+    slot: usize,
     shared: Arc<Shared>,
     _task: AbortOnDrop,
     #[cfg(test)]
@@ -120,6 +124,9 @@ pub struct SlotRunner {
     players: Option<Arc<dyn PlayerSlotFactory>>,
     handle: Handle,
     lanes: Arc<Mutex<Lanes>>,
+    timeout: Mutex<std::time::Duration>,
+    on_timeout: Arc<Mutex<Option<Arc<dyn Fn(usize, u64) + Send + Sync>>>>,
+    on_load: Arc<Mutex<Option<Arc<dyn Fn(usize, u64, &str, u64) -> bool + Send + Sync>>>>,
 }
 
 impl SlotRunner {
@@ -134,8 +141,14 @@ impl SlotRunner {
     }
 
     pub fn new(handle: Handle, players: Option<Arc<dyn PlayerSlotFactory>>) -> SlotRunner {
-        SlotRunner { players, handle, lanes: Arc::new(Mutex::new(Lanes::default())) }
+        SlotRunner { players, handle, lanes: Arc::new(Mutex::new(Lanes::default())), timeout: Mutex::new(std::time::Duration::from_secs(8)), on_timeout: Arc::default(), on_load: Arc::default() }
     }
+
+    pub fn set_timeout(&self, duration: std::time::Duration) { *self.timeout.lock().unwrap_or_else(PoisonError::into_inner) = duration; }
+
+    pub fn on_timeout(&self, callback: Arc<dyn Fn(usize, u64) + Send + Sync>) { *self.on_timeout.lock().unwrap_or_else(PoisonError::into_inner) = Some(callback); }
+
+    pub fn on_load(&self, callback: Arc<dyn Fn(usize, u64, &str, u64) -> bool + Send + Sync>) { *self.on_load.lock().unwrap_or_else(PoisonError::into_inner) = Some(callback); }
 
     pub fn send(&self, slot: usize, call: SlotCall) {
         self.send_held(slot, call, None);
@@ -153,11 +166,17 @@ impl SlotRunner {
             lanes.closing.extend(old);
         }
         let barrier = if call == SlotCall::Pause { lanes.pause_barrier.clone() } else { None };
+        let previous = lanes.closing.iter().rev().find(|lane| lane.slot == slot).map(|lane| lane.shared.clone());
         let lane = lanes.live.entry(slot).or_insert_with(|| {
             static NEXT_PAUSE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-            let shared = Arc::new(Shared { queue: Queue::default(), life: Mutex::new(SlotLife::new()), pause_id: NEXT_PAUSE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) });
-            let task = self.handle.spawn(run_lane(players, slot, shared.clone(), Arc::downgrade(&self.lanes)));
-            Lane { shared, _task: AbortOnDrop::new(task), #[cfg(test)] taken_task: None }
+            let shared = Arc::new(Shared { queue: Queue::default(), life: Mutex::new(SlotLife::new()), pause_id: NEXT_PAUSE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed), timeout: *self.timeout.lock().unwrap_or_else(PoisonError::into_inner), on_timeout: self.on_timeout.clone(), on_load: self.on_load.clone() });
+            let next = shared.clone();
+            let lanes = Arc::downgrade(&self.lanes);
+            let task = self.handle.spawn(async move {
+                if let Some(previous) = previous { previous.queue.settled().await; }
+                run_lane(players, slot, next, lanes).await;
+            });
+            Lane { slot, shared, _task: AbortOnDrop::new(task), #[cfg(test)] taken_task: None }
         });
         lane.shared.queue.push(call, held);
         if let Some((sequence, progress)) = barrier { lane.shared.queue.marker(lane.shared.pause_id, sequence, progress); }
@@ -179,6 +198,15 @@ impl SlotRunner {
             lane.shared.queue.dispose();
             lanes.closing.push(lane);
         }
+    }
+
+    pub fn dispose_current(&self, slot: usize, generation: u64) -> bool {
+        let mut lanes = self.lanes();
+        if !lanes.live.get(&slot).is_some_and(|lane| lane.shared.pause_id == generation) { return false; }
+        let lane = lanes.live.remove(&slot).unwrap();
+        lane.shared.queue.dispose();
+        lanes.closing.push(lane);
+        true
     }
 
     pub fn dispose_all(&self) {
@@ -242,13 +270,27 @@ async fn run_lane(players: Arc<dyn PlayerSlotFactory>, slot: usize, shared: Arc<
         };
         match next {
             Next::Call { call, held, revision } => {
-                perform(&players, slot, &shared, call, held, revision).await;
+                if let SlotCall::Load { key, generation, .. } = &call {
+                    let callback = shared.on_load.lock().unwrap_or_else(PoisonError::into_inner).clone();
+                    if callback.is_some_and(|callback| callback(slot, shared.pause_id, key, *generation)) {
+                        shared.queue.finish();
+                        continue;
+                    }
+                }
+                let timed_out = perform(&players, slot, &shared, call, held, revision).await;
                 shared.queue.finish();
+                if timed_out {
+                    let player = shared.life().player();
+                    if let Some(player) = player { let _ = tokio::time::timeout(shared.timeout, player.dispose()).await; }
+                    shared.life().abandon();
+                    let callback = shared.on_timeout.lock().unwrap_or_else(PoisonError::into_inner).clone();
+                    if let Some(callback) = callback { callback(slot, shared.pause_id); }
+                }
             }
             Next::Dispose => {
                 let player = shared.life().dispose();
                 if let Some(player) = player {
-                    player.dispose().await;
+                    let _ = tokio::time::timeout(shared.timeout, player.dispose()).await;
                 }
                 shared.life().acked();
                 shared.queue.settle();
@@ -265,27 +307,27 @@ async fn run_lane(players: Arc<dyn PlayerSlotFactory>, slot: usize, shared: Arc<
     }
 }
 
-async fn perform(players: &Arc<dyn PlayerSlotFactory>, slot: usize, shared: &Shared, call: SlotCall, held: Option<Held>, revision: u64) {
+async fn perform(players: &Arc<dyn PlayerSlotFactory>, slot: usize, shared: &Shared, call: SlotCall, held: Option<Held>, revision: u64) -> bool {
     if call == SlotCall::Unload {
         let player = shared.life().release();
         if let Some(player) = player {
-            player.apply(SlotCall::Unload).await;
+            if tokio::time::timeout(shared.timeout, player.apply(SlotCall::Unload)).await.is_err() { return true; }
             shared.life().acked();
         }
-        return;
+        return false;
     }
     let started = shared.life().start(held);
     let current = match started {
         Start::Ready(player) => player,
         Start::Create => {
-            let created = players.create(slot as u32).await;
+            let Ok(created) = tokio::time::timeout(shared.timeout, players.create(slot as u32)).await else { return true };
             let player = shared.life().created(created.player);
             if shared.queue.is_replaced_since(revision) {
-                return;
+                return false;
             }
             player
         }
-        Start::Gone => return,
+        Start::Gone => return false,
     };
     let is_load = matches!(call, SlotCall::Load { .. });
     if matches!(call, SlotCall::Seek { .. }) {
@@ -294,9 +336,10 @@ async fn perform(players: &Arc<dyn PlayerSlotFactory>, slot: usize, shared: &Sha
             () = shared.queue.source_replaced_since(revision) => {}
         }
     } else {
-        current.apply(call).await;
+        if tokio::time::timeout(shared.timeout, current.apply(call)).await.is_err() { return true; }
     }
     if is_load {
         shared.life().applied();
     }
+    false
 }

@@ -58,6 +58,7 @@ struct Inner {
     wakes: AtomicU64,
     seeks: Mutex<HashMap<String, (u64, std::time::Instant)>>,
     hints: Mutex<HashMap<usize, u64>>,
+    no_ready: Mutex<HashMap<usize, u32>>,
     playback_changes: Mutex<HashSet<String>>,
     playback_wake: Notify,
     playback_observed: AtomicBool,
@@ -126,6 +127,7 @@ impl Stage {
             wakes: AtomicU64::new(0),
             seeks: Mutex::new(HashMap::new()),
             hints: Mutex::new(HashMap::new()),
+            no_ready: Mutex::new(HashMap::new()),
             playback_changes: Mutex::new(HashSet::new()),
             playback_wake: Notify::new(),
             playback_observed: AtomicBool::new(false),
@@ -137,6 +139,16 @@ impl Stage {
         let tick = handle.spawn(tick_loop(Arc::downgrade(&inner), inner.due.subscribe(), parts.ledger));
         *inner.tick.lock().unwrap_or_else(PoisonError::into_inner) = Some(AbortOnDrop::new(tick));
         let stage = Stage { inner };
+        let weak = Arc::downgrade(&stage.inner);
+        stage.inner.runner.on_timeout(Arc::new(move |slot, lane| {
+            let Some(inner) = weak.upgrade() else { return };
+            Stage { inner }.recreate_slot(slot, lane, "timeout");
+        }));
+        let weak = Arc::downgrade(&stage.inner);
+        stage.inner.runner.on_load(Arc::new(move |slot, lane, key, generation| {
+            let Some(inner) = weak.upgrade() else { return false };
+            Stage { inner }.load_started(slot, lane, key, generation)
+        }));
         stage.inner.routes.set_playhead(stage.playhead());
         stage
     }

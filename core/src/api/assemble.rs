@@ -215,11 +215,13 @@ pub async fn assemble(config: Assembly) -> Result<Parts, MediaError> {
     let tones = Tones::new(handle.clone(), Arc::new(CacheTones::new(cache.clone(), keying)), MEMO_ENTRIES);
     let places = Arc::new(Places::new(handle.clone()));
     let ring_config = pool_config(&limits, device, &pool);
+    let runner = Arc::new(SlotRunner::new(handle.clone(), factory));
+    runner.set_timeout(Duration::from_millis(watchdog.slot_timeout_ms));
     let stage = Stage::new(
         handle.clone(),
         StageParts {
             ring: Ring::with_ledger(ring_config, ledger.clone()),
-            runner: Arc::new(SlotRunner::new(handle, factory)),
+            runner,
             routes: routes.clone(),
             places: places.clone(),
             prefetcher: prefetcher.clone(),

@@ -27,6 +27,7 @@ impl PoolControl for Stage {
     fn background(&self) -> Vec<Directive> {
         let (state, directives, commands) = {
             let mut state = self.state();
+            state.foreground.take();
             let directives = state.ring.background();
             let orders = state.election.set_foreground(false);
             let (mut commands, directives) = split(directives);
@@ -44,15 +45,6 @@ impl PoolControl for Stage {
     }
 
     fn foreground(&self) {
-        let (state, commands, ids) = {
-            let mut state = self.state();
-            state.ring.foreground();
-            let orders = state.election.set_foreground(true);
-            let commands = state.commands_for(orders, self.now());
-            let ids = state.loaded.iter().map(|(key, loaded)| LoadId { key: key.clone(), slot: loaded.slot, generation: loaded.generation }).collect::<Vec<LoadId>>();
-            (state, commands, ids)
-        };
-        self.dispatch(state, commands);
         let (inner, routes) = (Arc::downgrade(&self.inner), self.inner.routes.clone());
         let token = self.next_token();
         let mut state = self.inner.state.lock().unwrap_or_else(PoisonError::into_inner);
@@ -60,6 +52,15 @@ impl PoolControl for Stage {
             routes.repair().await;
             let Some(inner) = inner.upgrade() else { return };
             let stage = Stage { inner };
+            let (state, commands, ids) = {
+                let mut state = stage.state();
+                state.ring.foreground();
+                let orders = state.election.set_foreground(true);
+                let commands = state.commands_for(orders, stage.now());
+                let ids = state.loaded.iter().map(|(key, loaded)| LoadId { key: key.clone(), slot: loaded.slot, generation: loaded.generation }).collect::<Vec<LoadId>>();
+                (state, commands, ids)
+            };
+            stage.dispatch(state, commands);
             for id in ids {
                 stage.feed_id(&id, Event::Foreground);
             }

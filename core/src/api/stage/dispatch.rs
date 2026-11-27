@@ -26,17 +26,27 @@ impl Stage {
             .iter()
             .filter_map(|command| if let Command::Load { slot, key, .. } = command { Some((*slot, key.clone())) } else { None })
             .collect();
-        for (slot, key) in loads {
-            if state.is_playing(&key) && !commands.iter().any(|command| matches!(command, Command::Play { slot: playing } if *playing == slot)) {
-                commands.extend(state.ring.set_playing(&key, true));
+        for (slot, key) in &loads {
+            if state.is_playing(key) && !commands.iter().any(|command| matches!(command, Command::Play { slot: playing } if playing == slot)) {
+                commands.extend(state.ring.set_playing(key, true));
             }
         }
         let mut effects = Effects::default();
         for command in commands {
             crate::trace!("stage", "command {command:?}");
+            if let Command::Play { slot } = &command {
+                if !loads.iter().any(|(loaded_slot, _)| loaded_slot == slot) {
+                    if let Some(key) = state.slot_keys.get(slot) {
+                        if let Some(loaded) = state.loaded.get(key).filter(|loaded| loaded.failed || loaded.ready_generation != Some(loaded.generation)) {
+                            effects.reload_on_play.push(LoadId { key: key.clone(), slot: *slot, generation: loaded.generation });
+                            continue;
+                        }
+                    }
+                }
+            }
             self.translate(&mut state, command, &mut effects);
         }
-        let Effects { calls, actions, unloaded, resumed, parked } = effects;
+        let Effects { calls, actions, unloaded, resumed, parked, reload_on_play } = effects;
         for (slot, call) in calls.into_iter().chain(follow) {
             self.send_call(&state, slot, call);
         }
@@ -56,6 +66,10 @@ impl Stage {
             self.inner.places.resumed(key);
         }
         drop(state);
+        for id in reload_on_play {
+            crate::trace!("heal", "slot reload-on-play key={}", crate::trace::tail(&id.key));
+            self.reload(&id, true);
+        }
         if is_remembering {
             self.remember_parked(parked);
         }
@@ -84,7 +98,7 @@ impl Stage {
         command: Command,
         effects: &mut Effects,
     ) {
-        let Effects { calls, actions, unloaded, resumed, parked } = effects;
+        let Effects { calls, actions, unloaded, resumed, parked, .. } = effects;
         match &command {
             Command::Load { slot, key, held } => {
                 let source = state.catalog.get(key).cloned().unwrap_or_else(|| MediaItem::bare(key, Kind::Video));
@@ -94,7 +108,7 @@ impl Stage {
                 next_action(&mut recovery, Event::Source { key: key.clone(), via_proxy_hls }, self.now());
                 state.slot_keys.insert(*slot, key.clone());
                 let generation = state.next_generation();
-                state.loaded.insert(key.clone(), Loaded { held: held.clone(), slot: *slot, generation, recovery, source, route: route.clone(), seeked: None, failed: false });
+                state.loaded.insert(key.clone(), Loaded { held: held.clone(), slot: *slot, generation, recovery, source, route: route.clone(), seeked: None, failed: false, ready_generation: None });
                 state.pending_wanted.remove(key);
                 let resume = state.positions.take(key);
                 calls.extend(self.load_calls(state, key, resume));

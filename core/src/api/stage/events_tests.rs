@@ -39,6 +39,109 @@ async fn playing(rig: &Rig, source: MediaItem) -> (u32, Arc<crate::api::test_sup
     rig.holder(&url)
 }
 
+#[tokio::test(start_paused = true)]
+async fn inv_heal_11_a_slot_call_that_never_returns_recreates_the_slot() {
+    let rig = rig_with(|config| config.watchdog.first_window_ms = 3_600_000).await;
+    let gate = rig.factory.gate.hold();
+    let stage = &rig.parts.stage;
+    let key = url_of(0);
+    stage.visible(video(&key), true);
+    stage.set_playing(&key, true, &[]);
+    eventually(|| rig.factory.gate.entered() > 0).await;
+    let index = rig.factory.created.lock().unwrap()[0];
+    let old = rig.factory.slot(index);
+    tokio::time::advance(std::time::Duration::from_secs(8)).await;
+    eventually(|| old.cancelled_applies() == 1).await;
+    drop(gate);
+    eventually(|| rig.factory.created.lock().unwrap().len() >= 2).await;
+    eventually(|| rig.factory.slot_holding(&key).is_some_and(|(_, player)| player.calls().contains(&SlotCall::Play))).await;
+    assert_eq!(old.disposed.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn inv_heal_12_two_loads_without_ready_replace_the_player() {
+    let rig = rig_with(|config| config.watchdog.first_window_ms = 3_600_000).await;
+    let key = url_of(0);
+    let (slot, old) = playing(&rig, video(&key)).await;
+    let stage = &rig.parts.stage;
+    stage.ready(slot as usize, stage.generation_at(slot as usize));
+    let before = old.loads();
+    stage.reload_key(&key);
+    eventually(|| old.loads() == before + 1).await;
+    stage.reload_key(&key);
+    eventually(|| old.loads() == before + 2).await;
+    stage.reload_key(&key);
+    eventually(|| rig.factory.created.lock().unwrap().len() >= 2).await;
+    eventually(|| rig.factory.slot_holding(&key).is_some_and(|(_, player)| !Arc::ptr_eq(&player, &old))).await;
+    assert_eq!(old.disposed.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn inv_heal_12_superseded_queued_loads_do_not_replace_the_player() {
+    let rig = rig_with(|config| config.watchdog.first_window_ms = 3_600_000).await;
+    let gate = rig.factory.gate.hold();
+    let stage = &rig.parts.stage;
+    let key = url_of(0);
+    stage.replace_window(0, vec![Some(video(&key))]);
+    stage.set_playing(&key, true, &[]);
+    eventually(|| rig.factory.gate.entered() > 0).await;
+    let index = rig.factory.created.lock().unwrap()[0];
+    let old = rig.factory.slot(index);
+    for _ in 0..3 { stage.reload_key(&key); }
+    drop(gate);
+    eventually(|| old.loads() == 2 && stage.commands_idle()).await;
+    assert_eq!(rig.factory.created.lock().unwrap().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_11_timeout_from_a_retired_lane_keeps_the_new_lane() {
+    let rig = rig_with(|config| config.watchdog.first_window_ms = 3_600_000).await;
+    let gate = rig.factory.gate.hold();
+    let stage = &rig.parts.stage;
+    let key = url_of(0);
+    stage.visible(video(&key), true);
+    stage.set_playing(&key, true, &[]);
+    eventually(|| rig.factory.gate.entered() > 0).await;
+    let index = rig.factory.created.lock().unwrap()[0];
+    let old = rig.factory.slot(index);
+    stage.reset_players();
+    tokio::time::advance(std::time::Duration::from_secs(8)).await;
+    eventually(|| old.cancelled_applies() == 1).await;
+    drop(gate);
+    eventually(|| rig.factory.slot_holding(&key).is_some_and(|(_, player)| !Arc::ptr_eq(&player, &old))).await;
+    assert_eq!(rig.factory.created.lock().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn inv_heal_13_play_on_a_failed_preload_reloads_at_once() {
+    let rig = rig().await;
+    let key = url_of(0);
+    let stage = &rig.parts.stage;
+    stage.replace_window(0, vec![Some(video(&key))]);
+    eventually(|| rig.factory.slot_holding(&key).is_some()).await;
+    let (slot, player) = rig.holder(&key);
+    stage.failed(slot as usize, stage.generation_at(slot as usize), 0, "failed".into());
+    stage.set_playing(&key, true, &[]);
+    eventually(|| player.loads() >= 2 && player.calls().contains(&SlotCall::Play)).await;
+}
+
+#[tokio::test]
+async fn inv_heal_13_the_foreground_restore_waits_for_the_repair() {
+    let rig = rig().await;
+    let stage = &rig.parts.stage;
+    let key = url_of(0);
+    let (_, player) = playing(&rig, video(&key)).await;
+    let before = player.loads();
+    stage.apply(PoolControl::background(stage));
+    eventually(|| player.calls().contains(&SlotCall::Unload)).await;
+    rig.parts.routes.hold_repair_and_purge(true);
+    PoolControl::foreground(stage);
+    eventually(|| rig.parts.routes.barrier_entries() > 0).await;
+    assert_eq!(player.loads(), before);
+    rig.parts.routes.hold_repair_and_purge(false);
+    eventually(|| player.loads() > before).await;
+}
+
 #[tokio::test]
 async fn inv_api_03_the_ready_events_move_a_declared_place_to_ready() {
     let rig = rig().await;

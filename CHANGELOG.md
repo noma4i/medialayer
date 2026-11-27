@@ -9,6 +9,8 @@
 - Release stalled proxy capacity and restore memory limits after pressure.
 - Ignore Android background trim levels as memory pressure.
 - Restore the proxy after listener failures and refresh playback routes on reload.
+- Replace stuck players and reload unready media when playback starts.
+- Wait for proxy repair before restoring playback after backgrounding.
 
 ## 3.59.0 - 2026-11-27
 

@@ -98,6 +98,11 @@ pub(super) struct SlotLife {
 }
 
 impl SlotLife {
+    pub fn abandon(&mut self) -> Option<Player> {
+        let player = self.player();
+        *self = Self::new();
+        player
+    }
     pub fn new() -> SlotLife {
         SlotLife { machine: Life.state_machine() }
     }

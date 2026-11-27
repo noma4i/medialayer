@@ -21,6 +21,7 @@ pub(super) struct Loaded {
     pub(super) route: PlaybackRoute,
     pub(super) seeked: Option<u64>,
     pub(super) failed: bool,
+    pub(super) ready_generation: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -73,6 +74,7 @@ pub(super) struct Effects {
     pub(super) unloaded: Vec<String>,
     pub(super) resumed: Vec<(usize, String, u64)>,
     pub(super) parked: Vec<Parked>,
+    pub(super) reload_on_play: Vec<LoadId>,
 }
 
 pub(super) struct Parked {
