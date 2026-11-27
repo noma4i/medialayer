@@ -33,9 +33,10 @@ extension GlobalMedia {
     }
 
     @Test
-    func theRealSessionReceivesTheCategoryAndOptionsOfEachPolicy() async throws {
+    // A heard player takes the session for exclusive playback whatever focus MediaLayer was opened with (owner rule, 3.60.0).
+    func theRealSessionGetsExclusivePlaybackUnderEveryPolicy() async throws {
       let real = AVAudioSession.sharedInstance()
-      for (focus, mix, duck) in [(AudioFocus.exclusive, false, false), (.mix, true, false), (.duck, true, true)] {
+      for (focus, mix, duck) in [(AudioFocus.exclusive, false, false), (.mix, false, false), (.duck, false, false)] {
         let (core, link, port) = try makeLink(focus)
         link.audible(slot: 1, true)
         await eventually("playback category") { real.category == .playback && real.categoryOptions.contains(.mixWithOthers) == mix && real.categoryOptions.contains(.duckOthers) == duck }

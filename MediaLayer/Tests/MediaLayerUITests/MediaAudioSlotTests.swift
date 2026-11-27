@@ -199,7 +199,7 @@ extension GlobalMedia {
       await slot.pause()
       await eventually("focus released") { port.log.last == "deactivate" }
       #expect(port.log.filter { $0.hasPrefix("apply") } == ["apply AVAudioSessionCategoryPlayback AVAudioSessionModeMoviePlayback activate=true"])
-      #expect(rig.checked.plans == [SessionPlan.of(.playback(focus: .mix))])
+      #expect(rig.checked.plans == [SessionPlan.of(.playback(focus: .exclusive))])
       #expect(port.log.first == "apply AVAudioSessionCategoryPlayback AVAudioSessionModeMoviePlayback activate=true" && port.log.last == "deactivate")
       await slot.unload()
     }
