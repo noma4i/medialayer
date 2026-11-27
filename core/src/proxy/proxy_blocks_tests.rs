@@ -1,5 +1,20 @@
 use super::test_client::{get, request};
 use super::*;
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_09_a_permit_wait_times_out_with_an_error() {
+    let mut config = super::proxy_harness::config(1);
+    config.permit_wait = std::time::Duration::from_secs(10);
+    let rig = super::proxy_harness::rig_with(config).await;
+    let permit = rig.proxy.inner.slots.acquire(Priority::Playback).await.unwrap();
+    let target = super::proxy_harness::path_of(&rig.proxy.url_for("https://o.test/wait.mp4", &std::collections::HashMap::new()).unwrap());
+    let port = rig.proxy.port();
+    let request = tokio::spawn(async move { super::test_client::get(port, &target).await });
+    assert!(super::proxy_harness::eventually(|| rig.proxy.inner.slots.waiting() == 1).await);
+    tokio::time::advance(std::time::Duration::from_secs(10)).await;
+    assert_eq!(request.await.unwrap().status, 503);
+    drop(permit);
+}
 use crate::fetch::mock::Script;
 use std::time::Duration;
 use super::proxy_harness::*;

@@ -16,6 +16,8 @@ const PROBE_LIMIT: Duration = Duration::from_millis(300);
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub permit_wait: Duration,
+    pub direct_idle: Duration,
     pub policy: FetchPolicy,
     pub max_concurrent: usize,
     pub playback_reserved: usize,
@@ -39,6 +41,8 @@ pub struct Config {
 impl Config {
     pub fn from_limits(limits: &Limits) -> Self {
         Config {
+            permit_wait: Duration::from_secs(10),
+            direct_idle: Duration::from_secs(15),
             policy: FetchPolicy::from_limits(limits),
             max_concurrent: limits.max_concurrent as usize,
             playback_reserved: PLAYBACK_RESERVED,

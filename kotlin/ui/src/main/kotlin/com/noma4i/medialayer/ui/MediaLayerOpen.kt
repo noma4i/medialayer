@@ -306,10 +306,9 @@ internal class SystemSignals(
     if (isBackground.compareAndSet(false, true)) { microphoneForeground(false); events.background() }
   }
 
-  private fun pressure(level: Int): Pressure? = when {
-    level == ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> null
-    level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> Pressure.CRITICAL
-    level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> Pressure.MODERATE
+  private fun pressure(level: Int): Pressure? = when (level) {
+    ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> Pressure.CRITICAL
+    ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> Pressure.MODERATE
     else -> null
   }
 

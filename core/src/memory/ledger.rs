@@ -43,6 +43,7 @@ struct Inner {
     ceiling: AtomicU64,
     state: Mutex<State>,
     freed: Notify,
+    released: Notify,
     waiting: AtomicUsize,
 }
 
@@ -86,6 +87,7 @@ impl Ledger {
             ceiling: AtomicU64::new(ceiling),
             state: Mutex::new(State { used: 0, step: Step::Normal, by_owner: HashMap::new() }),
             freed: Notify::new(),
+            released: Notify::new(),
             waiting: AtomicUsize::new(0),
         }))
     }
@@ -109,6 +111,10 @@ impl Ledger {
 
     pub fn freed(&self) -> &Notify {
         &self.0.freed
+    }
+
+    pub(crate) fn released(&self) -> &Notify {
+        &self.0.released
     }
 
     pub fn waiting(&self) -> usize {
@@ -208,6 +214,7 @@ impl Ledger {
         }
         drop(state);
         self.0.freed.notify_waiters();
+        self.0.released.notify_one();
         #[cfg(test)]
         crate::test_signal::fire();
     }

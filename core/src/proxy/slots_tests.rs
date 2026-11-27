@@ -11,6 +11,17 @@ use tokio::time::timeout;
 
 const SHORT: Duration = Duration::from_millis(50);
 
+#[tokio::test(start_paused = true)]
+async fn inv_heal_09_a_permit_held_by_an_unread_direct_body_returns() {
+    let slots = PrioritySlots::new(1, 0, 8);
+    let permit = slots.acquire(Priority::Playback).await.unwrap();
+    let body = permit.hold_idle(Box::pin(futures_util::stream::pending()), Duration::from_secs(15));
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(15)).await;
+    assert!(super::proxy_harness::eventually(|| slots.in_use() == 0).await);
+    drop(body);
+}
+
 async fn wait_for_queue(slots: &PrioritySlots, count: usize) {
     assert!(super::proxy_harness::eventually(|| slots.waiting() == count).await);
 }

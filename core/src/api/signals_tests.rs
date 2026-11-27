@@ -13,6 +13,7 @@ struct Rig {
     directives: Arc<FakeDirectives>,
     release: Arc<FakeRelease>,
     signals: Signals,
+    ledger: Ledger,
 }
 
 fn rig() -> Rig {
@@ -20,6 +21,7 @@ fn rig() -> Rig {
     let prefetch: Arc<FakePrefetch> = shared();
     let directives: Arc<FakeDirectives> = shared();
     let release: Arc<FakeRelease> = shared();
+    let ledger = Ledger::new(1 << 30);
     let signals = Signals::new(
         &Handle::current(),
         SignalPorts {
@@ -28,11 +30,30 @@ fn rig() -> Rig {
             directives: directives.clone(),
             release: release.clone(),
             suspendable: Vec::new(),
-            ledger: Ledger::new(1 << 30),
+            ledger: ledger.clone(),
             clock: Arc::new(SystemClock),
         },
     );
-    Rig { pool, prefetch, directives, release, signals }
+    Rig { pool, prefetch, directives, release, signals, ledger }
+}
+
+#[tokio::test]
+async fn inv_heal_10_the_memory_step_recovers_after_the_ledger_frees() {
+    let rig = rig();
+    let held = rig.ledger.reserve(crate::memory::Owner::ImageDecode, 950_000_000).unwrap();
+    rig.signals.memory_warning(Pressure::Critical);
+    eventually(|| !rig.pool.steps.lock().unwrap().is_empty()).await;
+    drop(held);
+    eventually(|| rig.pool.steps.lock().unwrap().last() == Some(&Step::Normal)).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_10_the_memory_step_recovers_after_warning_decay() {
+    let rig = rig();
+    rig.signals.memory_warning(Pressure::Critical);
+    eventually(|| rig.pool.steps.lock().unwrap().last() == Some(&Step::ShorterBuffer)).await;
+    tokio::time::advance(std::time::Duration::from_secs(10)).await;
+    eventually(|| rig.pool.steps.lock().unwrap().last() == Some(&Step::Normal)).await;
 }
 
 fn events(rig: &Rig) -> Vec<String> {

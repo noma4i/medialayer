@@ -245,10 +245,15 @@ pub(super) async fn download(inner: &ProxyShared, flight: &Arc<Flight>, headers:
     }
     let mut priority = priority;
     let queued = std::time::Instant::now();
+    let deadline = tokio::time::Instant::now() + inner.config.permit_wait;
     let permit = loop {
         tokio::select! {
             biased;
             _ = wait_retired(inner, flight) => return FlightOutcome::Cancelled,
+            _ = tokio::time::sleep_until(deadline) => {
+                crate::trace!("heal", "capacity permit-timeout");
+                return FlightOutcome::Rejected(Arc::new(Rejection { status: 503, content_type: None, body: Bytes::new() }));
+            }
             _ = flight.promote.notified(), if priority.is_prefetch() => priority = priority.promoted(),
             permit = inner.gate(priority).acquire(priority) => match permit {
                 Ok(permit) => break permit,

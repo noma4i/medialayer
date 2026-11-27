@@ -42,7 +42,8 @@ pub(super) async fn origin_fetch(
     headers: Upstream,
     range: Option<(u64, Option<u64>)>,
 ) -> Result<crate::fetch::Response, Failure> {
-    let Ok(permit) = inner.slots.acquire(Priority::Playback).await else {
+    let Ok(Ok(permit)) = tokio::time::timeout(inner.config.permit_wait, inner.slots.acquire(Priority::Playback)).await else {
+        crate::trace!("heal", "capacity permit-timeout");
         return Err(Box::new(text(503, "busy")));
     };
     let request = Request { url: target.to_string(), headers, range };
@@ -51,7 +52,7 @@ pub(super) async fn origin_fetch(
         Err(_) => Err(Box::new(text(502, "origin timed out"))),
         Ok(Err(FetchError::Status(status))) => Err(Box::new(text(status, "origin refused the request"))),
         Ok(Err(error)) => Err(Box::new(text(502, &error.to_string()))),
-        Ok(Ok(response)) => Ok(crate::fetch::Response { body: permit.hold(response.body), ..response }),
+        Ok(Ok(response)) => Ok(crate::fetch::Response { body: permit.hold_idle(response.body, inner.config.direct_idle), ..response }),
     }
 }
 

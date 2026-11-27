@@ -6,6 +6,8 @@
 
 - A new play clears an interruption pause and starts playback.
 - Leaving a blocked audio state clears its interrupted pause.
+- Release stalled proxy capacity and restore memory limits after pressure.
+- Ignore Android background trim levels as memory pressure.
 
 ## 3.59.0 - 2026-11-27
 

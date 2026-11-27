@@ -101,10 +101,28 @@ impl Signals {
         let reaction = Reaction { pool, prefetch, directives, release, suspendable, ledger, clock, degradation: Mutex::new(Degradation::default()), blocking: blocking.clone() };
         let inbox = queue.clone();
         let worker = handle.spawn(async move {
+            let mut decay = None;
             loop {
-                inbox.wake.notified().await;
                 while let Some(signal) = inbox.pop() {
+                    if matches!(signal, Signal::Memory(_)) {
+                        decay = Some(tokio::time::Instant::now() + std::time::Duration::from_secs(10));
+                    }
                     reaction.apply(signal);
+                }
+                tokio::select! {
+                    _ = inbox.wake.notified() => {},
+                    _ = reaction.ledger.released().notified() => {
+                        reaction.lower_step(None);
+                    },
+                    _ = async {
+                        match decay {
+                            Some(deadline) => tokio::time::sleep_until(deadline).await,
+                            None => std::future::pending().await,
+                        }
+                    } => {
+                        decay = None;
+                        reaction.lower_step(None);
+                    },
                 }
             }
         });
@@ -175,6 +193,9 @@ impl Reaction {
     fn lower_step(&self, level: Option<Pressure>) {
         let mut degradation = self.degradation.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let step = degradation.for_pressure(self.ledger.used(), self.ledger.ceiling(), level.map(Into::into));
+        if level.is_none() {
+            crate::trace!("heal", "capacity step-restored {step:?}");
+        }
         self.pool.set_step(step);
     }
 }
