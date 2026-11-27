@@ -37,7 +37,7 @@ impl Stage {
             if let Command::Play { slot } = &command {
                 if !loads.iter().any(|(loaded_slot, _)| loaded_slot == slot) {
                     if let Some(key) = state.slot_keys.get(slot) {
-                        if let Some(loaded) = state.loaded.get(key).filter(|loaded| loaded.failed || loaded.ready_generation != Some(loaded.generation)) {
+                        if let Some(loaded) = state.loaded.get(key).filter(|loaded| loaded.failed) {
                             effects.reload_on_play.push(LoadId { key: key.clone(), slot: *slot, generation: loaded.generation });
                             continue;
                         }

@@ -384,7 +384,7 @@ async fn inv_heal_11_a_held_unload_recreates_the_slot() {
 }
 
 #[tokio::test]
-async fn inv_heal_13_play_reloads_only_a_preload_without_ready() {
+async fn inv_heal_13_play_keeps_a_loading_or_ready_preload() {
     for ready in [false, true] {
         let rig = rig_with(|config| config.watchdog.first_window_ms = 3_600_000).await;
         let key = url_of(0);
@@ -395,7 +395,7 @@ async fn inv_heal_13_play_reloads_only_a_preload_without_ready() {
         if ready { stage.ready(slot as usize, stage.generation_at(slot as usize)); }
         stage.set_playing(&key, true, &[]);
         eventually(|| player.calls().last() == Some(&SlotCall::Play) && stage.commands_idle()).await;
-        assert_eq!(player.loads(), if ready { 1 } else { 2 });
+        assert_eq!(player.loads(), 1);
     }
 }
 

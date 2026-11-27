@@ -19,6 +19,7 @@ async fn inv_pool_01_old_pressure_commands_preserve_new_assignments() {
         };
         if background {
             PoolControl::foreground(stage);
+            stage.inner.repair_finished.notified().await;
         }
         stage.replace_window(10, videos(20));
         let assigned = stage.state().slot_keys.clone();
