@@ -95,7 +95,8 @@ async fn inv_heal_15_a_slot_heal_reaches_the_trace_sink() {
     crate::trace::set_trace_sink(Some(lines.clone()));
     let mut rig = rig().await;
     heal_clock(&mut rig);
-    let key = url_of(0);
+    // The sink is process-wide and other heal tests run in parallel: a key no other test uses keeps their lines out.
+    let key = "https://o.test/heal-trace-sink.mp4".to_string();
     let stage = &rig.parts.stage;
     stage.visible(video(&key), true);
     stage.set_playing(&key, true, &[]);
@@ -105,7 +106,7 @@ async fn inv_heal_15_a_slot_heal_reaches_the_trace_sink() {
     assert_eq!(rig.parts.routes.barrier_entries(), 0);
     tokio::time::advance(std::time::Duration::from_millis(1)).await;
     eventually(|| rig.parts.routes.barrier_entries() == 1 && rig.factory.created.lock().unwrap().len() == 2 && stage.commands_idle()).await;
-    let matching: Vec<String> = lines.0.lock().unwrap().iter().filter_map(|line| line.split_once(" core heal ").map(|(_, tail)| tail.to_owned())).collect();
+    let matching: Vec<String> = lines.0.lock().unwrap().iter().filter_map(|line| line.split_once(" core heal ").map(|(_, tail)| tail.to_owned())).filter(|tail| tail.ends_with(crate::trace::tail(&key))).collect();
     crate::trace::set_trace_sink(None);
     assert_eq!(matching, vec![format!("reason=slot key={}", crate::trace::tail(&key))]);
 }
