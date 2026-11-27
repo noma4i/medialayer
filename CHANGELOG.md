@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- iOS front photo is no longer mirrored by the platform default of the photo connection; like Android, only CaptureProfile.mirrorFrontPhoto mirrors it. Apps that flipped the iOS front photo themselves drop that flip.
+
 ## 3.57.0 - 2026-11-26
 
 ### Added

@@ -118,8 +118,9 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
     previewLens = lens
     previewMirrorFrontVideo = mirrorFront
     previews.keys.forEach(linkPreview)
-    // The movie file never carries a mirror: the stop path mirrors the pixels. The connection is set once per bind: a take only starts writing, the running session is not touched at its start.
-    if let connection = movie?.connection(with: .video), connection.isVideoMirroringSupported {
+    // The movie file and the photo never carry a platform mirror: mirroring is the library's own step (stop path for video, MirrorPhoto for photo). The connections are set once per bind: a take only starts writing, the running session is not touched at its start.
+    for output in [movie as AVCaptureOutput?, photo] {
+      guard let connection = output?.connection(with: .video), connection.isVideoMirroringSupported else { continue }
       connection.automaticallyAdjustsVideoMirroring = false
       connection.isVideoMirrored = false
     }
@@ -280,6 +281,7 @@ final class AVCaptureBackend: NSObject, CaptureBackend, @unchecked Sendable {
           continuation.resume(with: result)
         }
         self.photoDelegates[id] = delegate
+        MediaTrace.emit("camera", "photo lens=\(self.previewLens == .front ? "FRONT" : "BACK") connectionMirrored=\(output.connection(with: .video)?.isVideoMirrored ?? false) mirrorFrontPhoto=\(profile.mirrorFrontPhoto)")
         output.capturePhoto(with: settings, delegate: delegate)
       }
     }
