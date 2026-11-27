@@ -43,7 +43,7 @@ impl Stage {
             let mut state = self.state();
             if let Some(key) = Self::current_key(&state, slot, generation) {
                 self.inner.no_ready.lock().unwrap_or_else(PoisonError::into_inner).remove(&slot);
-                if let Some(loaded) = state.loaded.get_mut(&key) { loaded.ready_generation = Some(generation); }
+                if let Some(loaded) = state.loaded.get_mut(&key) { loaded.ready_generation = Some(generation); loaded.healed = false; }
             }
         }
         let Some(key) = self.feed_current(slot, generation, Event::Loaded) else { return };
@@ -53,15 +53,49 @@ impl Stage {
     }
 
     pub(super) fn recreate_slot(&self, slot: usize, lane: u64, reason: &str) -> bool {
+        self.recreate_slot_for(slot, lane, reason, None)
+    }
+
+    fn recreate_slot_for(&self, slot: usize, lane: u64, reason: &str, expected: Option<&LoadId>) -> bool {
         let id = {
             let state = self.state();
+            if let Some(id) = expected {
+                if !state.is_loaded_as(&id.key, id.slot, id.generation) || !state.is_playing(&id.key) || !state.shown.contains_key(&id.key)
+                    || state.loaded.get(&id.key).is_some_and(|loaded| loaded.ready_generation == Some(id.generation)) { return false; }
+            }
             if !self.inner.runner.dispose_current(slot, lane) { return false; }
             state.slot_keys.get(&slot).and_then(|key| state.loaded.get(key).map(|loaded| LoadId { key: key.clone(), slot, generation: loaded.generation }))
         };
         self.inner.no_ready.lock().unwrap_or_else(PoisonError::into_inner).remove(&slot);
         crate::trace!("heal", "slot recreate slot={slot} reason={reason}");
-        if let Some(id) = id { self.reload(&id, true); }
+        if let Some(id) = id { self.reload_inner(&id, expected.is_some()); }
         true
+    }
+
+    pub(super) fn heal(&self, id: LoadId) {
+        let weak = Arc::downgrade(&self.inner);
+        let routes = self.inner.routes.clone();
+        let token = self.next_token();
+        let target = id.clone();
+        self.track(&id, Work::Heal, token, async move {
+            let repaired = routes.repair_outcome().await;
+            let Some(inner) = weak.upgrade() else { return };
+            let stage = Stage { inner };
+            let source = stage.with_id(&target, |state| {
+                (state.is_playing(&target.key) && state.shown.contains_key(&target.key))
+                    .then(|| state.loaded.get(&target.key).filter(|loaded| loaded.ready_generation != Some(target.generation)).map(|loaded| loaded.source.clone())).flatten()
+            }).flatten();
+            if let Some((source, lane)) = source.zip(stage.inner.runner.lane_generation(target.slot)) {
+                if stage.recreate_slot_for(target.slot, lane, "heal", Some(&target)) {
+                    let reason = if repaired == crate::proxy::RepairOutcome::Rebound { "proxy" } else { "slot" };
+                    crate::trace!("core", "heal reason={reason} key={}", crate::trace::tail(&target.key));
+                    stage.inner.failures.report(MediaFailure { kind: source.kind, url: source.url, stage: FailureStage::Play, reason: format!("healed {reason}") });
+                }
+            }
+            stage.finish_work(&target.key, token);
+            #[cfg(test)]
+            crate::test_signal::fire();
+        });
     }
 
     pub(super) fn load_started(&self, slot: usize, lane: u64, key: &str, generation: u64) -> bool {
@@ -137,6 +171,12 @@ impl Stage {
 
     pub fn visual_ready(&self, slot: usize, generation: u64) {
         crate::trace!("event", "visual_ready slot={slot} generation={generation}");
+        {
+            let mut state = self.state();
+            if let Some(key) = Self::current_key(&state, slot, generation) {
+                if let Some(loaded) = state.loaded.get_mut(&key) { loaded.ready_generation = Some(generation); loaded.healed = false; }
+            }
+        }
         let key = self.with_current(slot, generation, str::to_string);
         if let Some(key) = key {
             self.apply_pending_fraction(slot, &key, generation, false);
@@ -361,6 +401,10 @@ impl Stage {
     }
 
     pub(super) fn reload(&self, id: &LoadId, _is_refreshing: bool) -> Option<LoadId> {
+        self.reload_inner(id, false)
+    }
+
+    fn reload_inner(&self, id: &LoadId, is_heal: bool) -> Option<LoadId> {
         let (state, calls, current) = {
             let mut state = self.state();
             if !state.is_loaded_as(&id.key, id.slot, id.generation) {
@@ -374,6 +418,8 @@ impl Stage {
             let is_playing = state.is_playing(key);
             if let Some(loaded) = state.loaded.get_mut(key) {
                 loaded.generation = generation;
+                loaded.heal_due = None;
+                loaded.healed = is_heal;
                 if is_playing { loaded.failed = false; }
             }
             if let Some(entries) = state.tasks.get_mut(key) {

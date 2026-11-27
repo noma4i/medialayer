@@ -209,6 +209,10 @@ impl SlotRunner {
         true
     }
 
+    pub fn lane_generation(&self, slot: usize) -> Option<u64> {
+        self.lanes().live.get(&slot).map(|lane| lane.shared.pause_id)
+    }
+
     pub fn dispose_all(&self) {
         let mut lanes = self.lanes();
         lanes.is_closed = true;

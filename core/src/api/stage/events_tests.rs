@@ -10,6 +10,73 @@ use std::sync::{Arc, Mutex};
 
 const HLS: &str = "https://o.test/hls/master.m3u8";
 
+fn heal_clock(rig: &mut Rig) {
+    let watchdog = WatchdogConfig { first_window_ms: 60_000, startup_delay_ms: 60_000, ..WatchdogConfig::default() };
+    crate::api::test_support::replace_stage_clock_with_watchdog(rig, Default::default(), Arc::new(crate::api::test_support::TokioClock::new()), watchdog);
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_15_a_visible_wanted_key_without_ready_heals_once() {
+    let mut rig = rig().await;
+    heal_clock(&mut rig);
+    let stage = &rig.parts.stage;
+    let log = Arc::new(FailureLog::default());
+    let _subscription = stage.inner.failures.subscribe(log.clone());
+    let key = url_of(0);
+    stage.visible(video(&key), true);
+    stage.set_playing(&key, true, &[]);
+    eventually(|| rig.factory.slot_holding(&key).is_some()).await;
+    let (_, old) = rig.holder(&key);
+    eventually(|| stage.inner.tick_wait.lock().unwrap().is_some_and(|due| due == Some(6000))).await;
+    tokio::time::advance(std::time::Duration::from_secs(6)).await;
+    eventually(|| rig.factory.created.lock().unwrap().len() == 2).await;
+    assert_eq!(old.disposed.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(rig.parts.routes.barrier_entries(), 1);
+    eventually(|| !log.0.lock().unwrap().is_empty()).await;
+    let reported = failures_until_closed(&stage.inner.failures, &log).await;
+    assert_eq!(reported, vec![crate::failures::MediaFailure { kind: Kind::Video, url: key, stage: crate::failures::FailureStage::Play, reason: "healed slot".into() }]);
+    tokio::time::advance(std::time::Duration::from_secs(6)).await;
+    assert_eq!(rig.factory.created.lock().unwrap().len(), 2);
+    assert_eq!(rig.parts.routes.barrier_entries(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_15_a_heal_pass_stops_when_the_key_is_ready() {
+    let mut rig = rig().await;
+    heal_clock(&mut rig);
+    let stage = &rig.parts.stage;
+    let key = url_of(0);
+    stage.visible(video(&key), true);
+    stage.set_playing(&key, true, &[]);
+    eventually(|| rig.factory.slot_holding(&key).is_some()).await;
+    let (slot, _) = rig.holder(&key);
+    rig.parts.routes.hold_repair_and_purge(true);
+    eventually(|| stage.inner.tick_wait.lock().unwrap().is_some_and(|due| due == Some(6000))).await;
+    tokio::time::advance(std::time::Duration::from_secs(6)).await;
+    eventually(|| rig.parts.routes.barrier_entries() == 1).await;
+    stage.ready(slot as usize, stage.generation_at(slot as usize));
+    rig.parts.routes.hold_repair_and_purge(false);
+    eventually(|| !stage.state().tasks.get(&key).is_some_and(|tasks| tasks.iter().any(|task| task.work == super::Work::Heal))).await;
+    assert_eq!(rig.factory.created.lock().unwrap().len(), 1);
+    assert_eq!(rig.parts.routes.barrier_entries(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_16_a_panicked_tick_loop_restarts() {
+    let mut rig = rig().await;
+    heal_clock(&mut rig);
+    let stage = &rig.parts.stage;
+    stage.inner.panic_tick.store(true, std::sync::atomic::Ordering::SeqCst);
+    let key = url_of(0);
+    stage.visible(video(&key), true);
+    stage.set_playing(&key, true, &[]);
+    eventually(|| rig.factory.slot_holding(&key).is_some()).await;
+    eventually(|| !stage.inner.panic_tick.load(std::sync::atomic::Ordering::SeqCst)).await;
+    eventually(|| stage.inner.tick_wait.lock().unwrap().is_some_and(|due| due == Some(6000))).await;
+    tokio::time::advance(std::time::Duration::from_secs(6)).await;
+    eventually(|| rig.factory.created.lock().unwrap().len() == 2).await;
+}
+
 #[tokio::test]
 async fn inv_heal_08_a_retry_after_a_port_change_loads_the_new_port() {
     let rig = rig().await;
@@ -745,7 +812,7 @@ async fn inv_api_49_a_window_entry_never_turns_a_one_shot_place_into_a_loop() {
 struct FailureLog(Mutex<Vec<Option<crate::failures::MediaFailure>>>, tokio::sync::Notify);
 
 impl crate::failures::FailureListener for FailureLog {
-    fn failed(&self, failure: crate::failures::MediaFailure) { self.0.lock().unwrap().push(Some(failure)); }
+    fn failed(&self, failure: crate::failures::MediaFailure) { self.0.lock().unwrap().push(Some(failure)); crate::test_signal::fire(); }
     fn closed(&self) {
         self.0.lock().unwrap().push(None);
         self.1.notify_one();

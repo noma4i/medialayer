@@ -1,5 +1,6 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WatchdogConfig {
+    pub heal_after_ms: u64,
     pub slot_timeout_ms: u64,
     pub slot_no_ready_limit: u32,
     pub first_window_ms: u64,
@@ -17,6 +18,7 @@ pub struct WatchdogConfig {
 impl Default for WatchdogConfig {
     fn default() -> Self {
         Self {
+            heal_after_ms: 6_000,
             slot_timeout_ms: 8_000,
             slot_no_ready_limit: 2,
             first_window_ms: 12_000,

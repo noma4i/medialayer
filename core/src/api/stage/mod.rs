@@ -66,6 +66,8 @@ struct Inner {
     action_completed: tokio::sync::Notify,
     #[cfg(test)]
     tick_wait: Mutex<Option<Option<u64>>>,
+    #[cfg(test)]
+    panic_tick: AtomicBool,
 }
 
 #[derive(Clone)]
@@ -135,8 +137,12 @@ impl Stage {
             action_completed: tokio::sync::Notify::new(),
             #[cfg(test)]
             tick_wait: Mutex::new(None),
+            #[cfg(test)]
+            panic_tick: AtomicBool::new(false),
         });
-        let tick = handle.spawn(tick_loop(Arc::downgrade(&inner), inner.due.subscribe(), parts.ledger));
+        let weak = Arc::downgrade(&inner);
+        let due = inner.due.subscribe();
+        let tick = super::guard::restart(&handle, "stage-tick", move || tick_loop(weak.clone(), due.clone(), parts.ledger.clone()));
         *inner.tick.lock().unwrap_or_else(PoisonError::into_inner) = Some(AbortOnDrop::new(tick));
         let stage = Stage { inner };
         let weak = Arc::downgrade(&stage.inner);

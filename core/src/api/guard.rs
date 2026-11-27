@@ -1,4 +1,22 @@
 use tokio::task::{JoinError, JoinHandle};
+use std::future::Future;
+
+pub fn restart<F, Fut>(handle: &tokio::runtime::Handle, name: &'static str, task: F) -> JoinHandle<()>
+where
+    F: Fn() -> Fut + Send + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    let runtime = handle.clone();
+    handle.spawn(async move {
+        loop {
+            let mut child = AbortOnDrop::new(runtime.spawn(task()));
+            match child.join().await {
+                Err(error) if error.is_panic() => crate::trace!("core", "heal task-restart name={name}"),
+                _ => return,
+            }
+        }
+    })
+}
 
 pub struct AbortOnDrop<T = ()>(JoinHandle<T>);
 

@@ -65,6 +65,13 @@ pub enum Readiness {
     Unhealthy,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepairOutcome {
+    Healthy,
+    Rebound,
+    Failed,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProxyError {
     #[error("bind failed: {0}")]
@@ -300,27 +307,31 @@ impl Proxy {
     }
 
     pub async fn repair(&self) -> bool {
-        let proxy = self.clone();
-        tokio::spawn(async move { proxy.repair_inner().await }).await.unwrap_or(false)
+        self.repair_outcome().await != RepairOutcome::Failed
     }
 
-    async fn repair_inner(&self) -> bool {
+    pub async fn repair_outcome(&self) -> RepairOutcome {
+        let proxy = self.clone();
+        tokio::spawn(async move { proxy.repair_inner().await }).await.unwrap_or(RepairOutcome::Failed)
+    }
+
+    async fn repair_inner(&self) -> RepairOutcome {
         let mut listener = self.inner.listener.lock().await;
         if self.inner.stopped.load(Ordering::SeqCst) {
-            return false;
+            return RepairOutcome::Failed;
         }
         if self.ping().await {
-            return true;
+            return RepairOutcome::Healthy;
         }
         let previous = self.inner.last_port.load(Ordering::SeqCst);
         match rebind(&self.inner, &mut listener, previous, "repair").await {
             Ok(_) => {},
             Err(error) => {
                 crate::trace!("proxy", "repair failed: {error}");
-                return false;
+                return RepairOutcome::Failed;
             }
         }
-        true
+        RepairOutcome::Rebound
     }
 
     pub async fn stop(&self) {

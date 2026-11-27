@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Recover visible playback that never becomes ready and report the recovery.
+- Restart playback and system signal tasks after a panic.
+- Keep Android video views attached when another slot unloads.
 - A new play clears an interruption pause and starts playback.
 - Leaving a blocked audio state clears its interrupted pause.
 - Release stalled proxy capacity and restore memory limits after pressure.

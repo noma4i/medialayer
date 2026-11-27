@@ -34,6 +34,10 @@ class ViewHandle internal constructor(val token: ULong) {
     current.value = player
     onTestChange?.invoke()
   }
+
+  internal fun hide(player: Player) {
+    if (current.compareAndSet(player, null)) onTestChange?.invoke()
+  }
 }
 
 class SlotPlayers internal constructor(val videoOutputCounters: VideoOutputCounters? = null) {

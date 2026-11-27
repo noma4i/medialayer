@@ -570,12 +570,16 @@ impl crate::cache::Clock for TokioClock {
 }
 
 pub fn replace_stage_clock(rig: &mut Rig, pool: PoolSettings, clock: Arc<dyn crate::cache::Clock>) {
+    replace_stage_clock_with_watchdog(rig, pool, clock, fast_watchdog());
+}
+
+pub fn replace_stage_clock_with_watchdog(rig: &mut Rig, pool: PoolSettings, clock: Arc<dyn crate::cache::Clock>, watchdog: WatchdogConfig) {
     let parts = &mut rig.parts;
     let ring = crate::pool::Ring::with_ledger(super::assemble::pool_config(&parts.limits, parts.device, &pool), parts.ledger.clone());
     let runner = Arc::new(super::slots::SlotRunner::new(tokio::runtime::Handle::current(), Some(rig.factory.clone())));
     parts.stage = super::stage::Stage::new(tokio::runtime::Handle::current(), super::stage::StageParts {
         ring, runner, routes: parts.routes.clone(), places: parts.places.clone(), prefetcher: parts.prefetcher.clone(), clock,
-        watchdog: fast_watchdog(), silent: false, change: parts.change.clone(), ledger: parts.ledger.clone(),
+        watchdog, silent: false, change: parts.change.clone(), ledger: parts.ledger.clone(),
         failures: Arc::default(),
     });
 }

@@ -22,6 +22,8 @@ pub(super) struct Loaded {
     pub(super) seeked: Option<u64>,
     pub(super) failed: bool,
     pub(super) ready_generation: Option<u64>,
+    pub(super) heal_due: Option<u64>,
+    pub(super) healed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -37,6 +39,7 @@ pub(super) enum Work {
     Retry,
     Foreground,
     Repair,
+    Heal,
     Purge,
 }
 
@@ -180,7 +183,7 @@ impl StageState {
 
     pub(super) fn next_due(&self) -> Option<u64> {
         let attempt = (self.is_restore_requested && self.has_pending_restore()).then_some(0);
-        self.ring.next_due().into_iter().chain(attempt).min()
+        self.ring.next_due().into_iter().chain(attempt).chain(self.loaded.values().filter_map(|loaded| loaded.heal_due)).min()
     }
 
     pub(super) fn restore_wanted(&mut self, now: u64) -> (Vec<Command>, bool) {
@@ -272,6 +275,15 @@ impl Drop for StageGuard<'_> {
     fn drop(&mut self) {
         if !self.is_changed {
             return;
+        }
+        let now = self.inner.clock.now_ms();
+        let eligible: HashSet<String> = self.guard.loaded.keys().filter(|key| self.guard.shown.contains_key(*key) && self.guard.is_playing(key)).cloned().collect();
+        for (key, loaded) in &mut self.guard.loaded {
+            if eligible.contains(key) && loaded.ready_generation != Some(loaded.generation) && !loaded.healed {
+                loaded.heal_due.get_or_insert(now.saturating_add(self.inner.watchdog.heal_after_ms));
+            } else {
+                loaded.heal_due = None;
+            }
         }
         let observing = self.inner.playback_observed.load(std::sync::atomic::Ordering::Acquire);
         let playing = observing.then(|| self.guard.reported_playing_key()).flatten();

@@ -98,9 +98,12 @@ impl Signals {
         let SignalPorts { pool, prefetch, directives, release, suspendable, ledger, clock } = ports;
         let queue = Arc::new(Queue { pending: Mutex::new(VecDeque::new()), wake: Notify::new() });
         let blocking = Arc::new(Mutex::new(JoinSet::new()));
-        let reaction = Reaction { pool, prefetch, directives, release, suspendable, ledger, clock, degradation: Mutex::new(Degradation::default()), blocking: blocking.clone() };
+        let reaction = Arc::new(Reaction { pool, prefetch, directives, release, suspendable, ledger, clock, degradation: Mutex::new(Degradation::default()), blocking: blocking.clone() });
         let inbox = queue.clone();
-        let worker = handle.spawn(async move {
+        let worker = super::guard::restart(handle, "signals", move || {
+            let inbox = inbox.clone();
+            let reaction = reaction.clone();
+            async move {
             let mut decay = None;
             loop {
                 while let Some(signal) = inbox.pop() {
@@ -124,6 +127,7 @@ impl Signals {
                         reaction.lower_step(None);
                     },
                 }
+            }
             }
         });
         Signals { queue, worker: Mutex::new(Some(AbortOnDrop::new(worker))), blocking }

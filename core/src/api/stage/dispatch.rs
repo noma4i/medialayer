@@ -108,7 +108,7 @@ impl Stage {
                 next_action(&mut recovery, Event::Source { key: key.clone(), via_proxy_hls }, self.now());
                 state.slot_keys.insert(*slot, key.clone());
                 let generation = state.next_generation();
-                state.loaded.insert(key.clone(), Loaded { held: held.clone(), slot: *slot, generation, recovery, source, route: route.clone(), seeked: None, failed: false, ready_generation: None });
+                state.loaded.insert(key.clone(), Loaded { held: held.clone(), slot: *slot, generation, recovery, source, route: route.clone(), seeked: None, failed: false, ready_generation: None, heal_due: None, healed: false });
                 state.pending_wanted.remove(key);
                 let resume = state.positions.take(key);
                 calls.extend(self.load_calls(state, key, resume));
@@ -219,6 +219,14 @@ pub(super) async fn tick_loop(inner: Weak<Inner>, mut due: watch::Receiver<Optio
     tokio::pin!(freed);
     freed.as_mut().enable();
     loop {
+        #[cfg(test)]
+        if let Some(inner) = inner.upgrade() {
+            if inner.panic_tick.swap(false, Ordering::SeqCst) {
+                *inner.tick_wait.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+                crate::test_signal::fire();
+                panic!("tick test panic");
+            }
+        }
         let wait = match *due.borrow_and_update() {
             Some(at) => {
                 let Some(inner) = inner.upgrade() else { return };
@@ -260,7 +268,7 @@ pub(super) async fn tick_loop(inner: Weak<Inner>, mut due: watch::Receiver<Optio
             }
             Wake::Due => {}
         }
-        let (state, commands) = {
+        let (state, commands, heals) = {
             let now = stage.now();
             let mut state = stage.state_quiet();
             let room = ledger.ceiling().saturating_sub(ledger.used());
@@ -282,9 +290,17 @@ pub(super) async fn tick_loop(inner: Weak<Inner>, mut due: watch::Receiver<Optio
                 state.is_room_wanted = is_refused;
                 state.refusal_room = room;
             }
-            (state, commands)
+            let heals: Vec<LoadId> = state.loaded.iter_mut().filter_map(|(key, loaded)| {
+                if loaded.heal_due.is_some_and(|due| due <= now) {
+                    loaded.heal_due = None;
+                    loaded.healed = true;
+                    Some(LoadId { key: key.clone(), slot: loaded.slot, generation: loaded.generation })
+                } else { None }
+            }).collect();
+            (state, commands, heals)
         };
         stage.dispatch(state, commands);
+        for id in heals { stage.heal(id); }
     }
 }
 

@@ -136,7 +136,11 @@ impl Routes {
     }
 
     pub async fn repair(&self) -> bool {
-        let repaired = self.proxy.repair().await;
+        self.repair_outcome().await != crate::proxy::RepairOutcome::Failed
+    }
+
+    pub async fn repair_outcome(&self) -> crate::proxy::RepairOutcome {
+        let repaired = self.proxy.repair_outcome().await;
         #[cfg(test)]
         self.barrier.pass().await;
         repaired

@@ -298,7 +298,7 @@ class ExoPlayerSlot internal constructor(private val id: UInt, private val host:
   }
 
   private fun hideFromView() {
-    viewToken?.let { host.players.view(it) }?.show(null)
+    output?.let { player -> viewToken?.let { host.players.view(it) }?.hide(player) }
     viewAttached = false
   }
 

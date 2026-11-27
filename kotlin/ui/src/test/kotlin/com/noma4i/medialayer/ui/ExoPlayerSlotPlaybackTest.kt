@@ -190,6 +190,19 @@ internal class ExoPlayerSlotPlaybackTest : ExoPlayerSlotRig() {
   }
 
   @Test
+  fun inv_heal_14_unload_keeps_a_view_that_shows_another_slot() {
+    val factory = factory()
+    val first = factory.createSlot(0u)
+    val second = factory.createSlot(1u)
+    val view = factory.players.newView()
+    first.load("first", route); second.load("second", route); idle()
+    first.attach(view.token); second.attach(view.token); idle()
+    assertSame(second.output, view.player.value)
+    first.unload(); idle()
+    assertSame(second.output, view.player.value)
+  }
+
+  @Test
   fun attachGivesTheViewHandleThePlayerDetachTakesItAndSeekMovesThePosition() {
     val factory = factory()
     val slot = factory.createSlot(0u)
