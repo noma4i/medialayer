@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.59.0 - 2026-11-27
 
 ### Added
 
