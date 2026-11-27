@@ -6,14 +6,20 @@ async fn inv_heal_09_a_permit_wait_times_out_with_an_error() {
     let mut config = super::proxy_harness::config(1);
     config.permit_wait = std::time::Duration::from_secs(10);
     let rig = super::proxy_harness::rig_with(config).await;
+    rig.fetcher.route("https://o.test/wait.mp4", Script::ok(vec![7]));
     let permit = rig.proxy.inner.slots.acquire(Priority::Playback).await.unwrap();
     let target = super::proxy_harness::path_of(&rig.proxy.url_for("https://o.test/wait.mp4", &std::collections::HashMap::new()).unwrap());
     let port = rig.proxy.port();
-    let request = tokio::spawn(async move { super::test_client::get(port, &target).await });
+    let path = target.clone();
+    let mut request = tokio::spawn(async move { super::test_client::request(port, "HEAD", &path, &[]).await });
     assert!(super::proxy_harness::eventually(|| rig.proxy.inner.slots.waiting() == 1).await);
-    tokio::time::advance(std::time::Duration::from_secs(10)).await;
+    tokio::time::advance(std::time::Duration::from_millis(9999)).await;
+    assert!(futures_util::poll!(&mut request).is_pending());
+    tokio::time::advance(std::time::Duration::from_millis(1)).await;
     assert_eq!(request.await.unwrap().status, 503);
     drop(permit);
+    let reply = get(port, &target).await;
+    assert_eq!((reply.status, reply.body), (200, vec![7]));
 }
 use crate::fetch::mock::Script;
 use std::time::Duration;

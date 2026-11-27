@@ -5,6 +5,47 @@ use crate::fetch::mock::Script;
 use std::time::Duration;
 use super::proxy_harness::*;
 
+struct GatedFetch {
+    calls: std::sync::atomic::AtomicUsize,
+    gate: Arc<tokio::sync::Semaphore>,
+}
+
+#[async_trait::async_trait]
+impl crate::fetch::Fetcher for GatedFetch {
+    async fn fetch(&self, _: crate::fetch::Request) -> Result<crate::fetch::Response, crate::fetch::FetchError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        crate::test_signal::fire();
+        let gate = self.gate.clone();
+        let body = futures_util::stream::once(async move {
+            gate.acquire().await.unwrap().forget();
+            Ok(bytes::Bytes::from_static(&[7, 8]))
+        });
+        Ok(crate::fetch::Response { status: 200, headers: HashMap::from([("content-length".into(), "2".into())]), body: Box::pin(body) })
+    }
+}
+
+#[tokio::test]
+async fn inv_heal_rebind_keeps_old_stream_until_new_listener_is_ready() {
+    let fetcher = Arc::new(GatedFetch { calls: std::sync::atomic::AtomicUsize::new(0), gate: Arc::new(tokio::sync::Semaphore::new(0)) });
+    let proxy = Proxy::start(config(8), fetcher.clone(), Arc::new(super::memory_store::MemoryStore::new())).await.unwrap();
+    let source = "https://o.test/stream.mp4";
+    let target = path_of(&proxy.url_for(source, &HashMap::new()).unwrap());
+    let old_port = proxy.port();
+    let stream = tokio::spawn(async move { get(old_port, &target).await });
+    assert!(eventually(|| fetcher.calls.load(Ordering::SeqCst) == 1).await);
+    proxy.hold_rebind(true);
+    let rebind = tokio::spawn({ let proxy = proxy.clone(); async move { proxy.restart(0).await } });
+    assert!(eventually(|| proxy.rebind_entered()).await);
+    assert_eq!(proxy.readiness(), Readiness::Ready);
+    assert_ne!(proxy.port(), old_port);
+    assert_eq!(proxy.ping().await, true);
+    fetcher.gate.add_permits(1);
+    assert_eq!(stream.await.unwrap().body, vec![7, 8]);
+    assert_eq!(proxy.readiness(), Readiness::Ready);
+    proxy.hold_rebind(false);
+    rebind.await.unwrap().unwrap();
+}
+
 #[tokio::test]
 async fn inv_heal_06_an_aborted_repair_leaves_the_proxy_serving() {
     let rig = rig().await;
@@ -22,13 +63,81 @@ async fn inv_heal_06_an_aborted_repair_leaves_the_proxy_serving() {
     assert_eq!(get(rig.proxy.port(), &path_of(&url)).await.body, vec![7]);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn inv_heal_07_accept_errors_trigger_a_rebind() {
     let rig = rig().await;
     let epoch = rig.proxy.inner.listener_epoch.load(Ordering::SeqCst);
+    rig.proxy.inner.accept_error_limit.store(1, Ordering::SeqCst);
     rig.proxy.fail_accepts();
-    assert!(eventually(|| rig.proxy.inner.listener_epoch.load(Ordering::SeqCst) > epoch && !rig.proxy.rebind_entered() && rig.proxy.readiness() == Readiness::Ready).await);
+    assert!(eventually(|| rig.proxy.inner.listener_epoch.load(Ordering::SeqCst) == epoch + 1 && !rig.proxy.rebind_entered() && rig.proxy.readiness() == Readiness::Ready).await);
+    tokio::time::resume();
     assert!(rig.proxy.ping().await);
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_stale_accept_recovery_does_not_rebind_twice() {
+    let rig = rig().await;
+    let epoch = rig.proxy.inner.listener_epoch.load(Ordering::SeqCst);
+    let guard = rig.proxy.inner.listener.lock().await;
+    let repair = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.repair().await } });
+    tokio::task::yield_now().await;
+    rig.proxy.fail_accepts();
+    assert!(eventually(|| rig.proxy.inner.accept_errors.load(Ordering::SeqCst) == 8).await);
+    drop(guard);
+    assert_eq!(repair.await.unwrap(), true);
+    let _barrier = rig.proxy.inner.listener.lock().await;
+    assert_eq!(rig.proxy.inner.listener_epoch.load(Ordering::SeqCst), epoch + 1);
+    assert_eq!(rig.proxy.readiness(), Readiness::Ready);
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_accept_success_resets_the_error_count() {
+    let rig = rig().await;
+    let epoch = rig.proxy.inner.listener_epoch.load(Ordering::SeqCst);
+    rig.proxy.inner.accept_budget.store(7, Ordering::SeqCst);
+    rig.proxy.inner.accept_failures.send_replace(false);
+    assert!(eventually(|| rig.proxy.inner.accept_errors.load(Ordering::SeqCst) == 7).await);
+    tokio::time::advance(Duration::from_millis(640)).await;
+    tokio::time::resume();
+    assert_eq!(rig.proxy.ping().await, true);
+    tokio::time::pause();
+    rig.proxy.inner.accept_budget.store(7, Ordering::SeqCst);
+    rig.proxy.inner.accept_failures.send_replace(false);
+    assert!(eventually(|| rig.proxy.inner.accept_errors.load(Ordering::SeqCst) == 14).await);
+    assert_eq!(rig.proxy.inner.listener_epoch.load(Ordering::SeqCst), epoch);
+    rig.proxy.inner.accept_budget.store(1, Ordering::SeqCst);
+    rig.proxy.inner.accept_failures.send_replace(false);
+    assert!(eventually(|| rig.proxy.inner.listener_epoch.load(Ordering::SeqCst) == epoch + 1).await);
+    assert_eq!(rig.proxy.inner.accept_errors.load(Ordering::SeqCst), 15);
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_failed_accept_rebind_is_unhealthy_until_repair() {
+    let rig = rig().await;
+    let epoch = rig.proxy.inner.listener_epoch.load(Ordering::SeqCst);
+    rig.proxy.inner.fail_bind.store(true, Ordering::SeqCst);
+    rig.proxy.fail_accepts();
+    assert!(eventually(|| rig.proxy.readiness() == Readiness::Unhealthy).await);
+    assert_eq!(rig.proxy.inner.listener_epoch.load(Ordering::SeqCst), epoch);
+    rig.proxy.inner.fail_bind.store(false, Ordering::SeqCst);
+    assert_eq!(rig.proxy.repair().await, true);
+    assert_eq!(rig.proxy.inner.listener_epoch.load(Ordering::SeqCst), epoch + 1);
+    assert_eq!(rig.proxy.readiness(), Readiness::Ready);
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_stopped_proxy_ignores_accept_recovery() {
+    let rig = rig().await;
+    let epoch = rig.proxy.inner.listener_epoch.load(Ordering::SeqCst);
+    let guard = rig.proxy.inner.listener.lock().await;
+    let stop = tokio::spawn({ let proxy = rig.proxy.clone(); async move { proxy.stop().await } });
+    tokio::task::yield_now().await;
+    rig.proxy.fail_accepts();
+    assert!(eventually(|| !*rig.proxy.inner.accept_failures.borrow()).await);
+    drop(guard);
+    stop.await.unwrap();
+    assert_eq!(rig.proxy.readiness(), Readiness::Stopped);
+    assert_eq!(rig.proxy.inner.listener_epoch.load(Ordering::SeqCst), epoch);
 }
 
 #[tokio::test]
@@ -153,21 +262,6 @@ async fn inv_proxy_23_a_listener_closed_under_the_accept_loop_is_rebound_by_repa
     let url = rig.proxy.url_for("https://o.test/a.mp4", &HashMap::new()).unwrap();
     let reply = get(rig.proxy.port(), &path_of(&url)).await;
     assert_eq!(reply.body, pattern(10, 3));
-}
-
-#[tokio::test]
-async fn inv_proxy_23_an_accept_task_that_ended_is_rebound_by_repair() {
-    let rig = rig().await;
-    let port = rig.proxy.port();
-    let _ = rig.proxy.inner.listener.lock().await.as_ref().unwrap().shutdown.send(true);
-    assert!(eventually(|| rig.proxy.readiness() != Readiness::Ready).await);
-    assert_eq!(rig.proxy.readiness(), Readiness::Unhealthy);
-    assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err());
-
-    assert!(rig.proxy.repair().await);
-
-    assert_eq!(rig.proxy.readiness(), Readiness::Ready);
-    assert!(rig.proxy.ping().await);
 }
 
 #[tokio::test]

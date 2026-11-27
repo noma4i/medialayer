@@ -4,6 +4,7 @@ use crate::api::Kind;
 use crate::api::MediaError;
 use std::collections::HashMap;
 use std::sync::Arc;
+use url::Url;
 
 fn video(url: &str, token: &str) -> MediaItem {
     MediaItem {
@@ -52,6 +53,28 @@ async fn inv_api_08_a_route_is_stale_after_the_proxy_changes_port_and_after_it_b
     let direct = routes.play_url(&source);
     rig.proxy.restart(0).await.unwrap();
     assert!(routes.is_stale(&direct));
+}
+
+#[tokio::test]
+async fn inv_heal_route_refresh_after_stop_preserves_origin_headers() {
+    let rig = proxy_rig().await;
+    let routes = Routes::new(rig.proxy.clone(), Arc::new(rig.cache.clone()));
+    let source = video("https://cdn.test/clip.mp4", "token");
+    let proxied = routes.play_url(&source);
+    rig.proxy.stop().await;
+    let direct = routes.refresh(&source, &proxied);
+    assert_eq!((direct.url, direct.headers, direct.generation), (source.url, source.headers, None));
+}
+
+#[tokio::test]
+async fn inv_heal_route_with_a_different_port_is_stale() {
+    let rig = proxy_rig().await;
+    let routes = Routes::new(rig.proxy.clone(), Arc::new(rig.cache.clone()));
+    let mut route = routes.play_url(&video("https://cdn.test/clip.mp4", "token"));
+    let mut url = Url::parse(&route.url).unwrap();
+    url.set_port(Some(if rig.proxy.port() == 1 { 2 } else { 1 })).unwrap();
+    route.url = url.to_string();
+    assert_eq!(routes.is_stale(&route), true);
 }
 
 #[tokio::test]

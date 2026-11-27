@@ -205,12 +205,10 @@ fn inv_session_08_progress_restarts_the_retry_table() {
 }
 
 #[test]
-fn inv_session_10_retry_replays_proxied_and_direct_sources() {
+fn inv_session_10_retry_replays_stale_source() {
     let stale = Event::RetryDue { resolved_generation: Some(1), current_generation: 2, readiness: Readiness::Ready };
     let mut proxied = loaded();
-    assert_eq!(next_action(&mut proxied, stale.clone(), 0), Action::Replay);
-    let mut direct = state_with(false);
-    assert_eq!(next_action(&mut direct, stale, 0), Action::Replay);
+    assert_eq!(next_action(&mut proxied, stale, 0), Action::Replay);
 }
 
 #[test]

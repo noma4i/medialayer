@@ -86,6 +86,14 @@ pub(super) struct ProxyShared {
     pub rebind_entered: AtomicBool,
     #[cfg(test)]
     pub accept_failures: watch::Sender<bool>,
+    #[cfg(test)]
+    pub fail_bind: AtomicBool,
+    #[cfg(test)]
+    pub accept_budget: AtomicUsize,
+    #[cfg(test)]
+    pub accept_errors: AtomicUsize,
+    #[cfg(test)]
+    pub accept_error_limit: AtomicUsize,
 }
 
 pub(super) struct Registry(Recent<(HashMap<String, String>, bool)>);
@@ -178,6 +186,14 @@ impl ProxyShared {
             rebind_entered: AtomicBool::new(false),
             #[cfg(test)]
             accept_failures: watch::channel(false).0,
+            #[cfg(test)]
+            fail_bind: AtomicBool::new(false),
+            #[cfg(test)]
+            accept_budget: AtomicUsize::new(0),
+            #[cfg(test)]
+            accept_errors: AtomicUsize::new(0),
+            #[cfg(test)]
+            accept_error_limit: AtomicUsize::new(8),
         }
     }
 

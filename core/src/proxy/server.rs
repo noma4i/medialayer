@@ -14,6 +14,7 @@ use tokio::task::JoinSet;
 
 const ACCEPT_RETRY: Duration = Duration::from_millis(10);
 const ACCEPT_RETRY_MAX: Duration = Duration::from_secs(1);
+#[cfg(not(test))]
 const ACCEPT_ERROR_LIMIT: usize = 8;
 
 struct AliveGuard(Arc<AtomicU64>, u64);
@@ -27,6 +28,10 @@ impl Drop for AliveGuard {
 }
 
 pub(super) async fn spawn_listener(inner: &Arc<ProxyShared>, preferred_port: u16) -> Result<(Listener, u16), ProxyError> {
+    #[cfg(test)]
+    if inner.fail_bind.load(Ordering::SeqCst) {
+        return Err(ProxyError::Bind("injected bind error".into()));
+    }
     let socket = match TcpListener::bind(("127.0.0.1", preferred_port)).await {
         Ok(socket) => socket,
         Err(_) if preferred_port != 0 => bind_any().await?,
@@ -68,6 +73,11 @@ async fn accept_loop(inner: Arc<ProxyShared>, socket: TcpListener, mut shutdown:
                     connections.spawn(serve_connection(inner.clone(), stream, guard));
                 }
                 Err(error) => {
+                    #[cfg(test)]
+                    {
+                        inner.accept_errors.fetch_add(1, Ordering::SeqCst);
+                        crate::test_signal::fire();
+                    }
                     errors += 1;
                     if !failing {
                         inner.config.failures.report(crate::failures::MediaFailure {
@@ -78,9 +88,16 @@ async fn accept_loop(inner: Arc<ProxyShared>, socket: TcpListener, mut shutdown:
                         });
                         failing = true;
                     }
-                    if errors >= ACCEPT_ERROR_LIMIT {
+                    #[cfg(test)]
+                    let limit = inner.accept_error_limit.load(Ordering::SeqCst);
+                    #[cfg(not(test))]
+                    let limit = ACCEPT_ERROR_LIMIT;
+                    if errors >= limit {
                         #[cfg(test)]
-                        inner.accept_failures.send_replace(false);
+                        {
+                            inner.accept_failures.send_replace(false);
+                            crate::test_signal::fire();
+                        }
                         super::rebind_after_accept_errors(inner.clone(), epoch);
                         let _ = shutdown.changed().await;
                         break;
@@ -103,13 +120,15 @@ async fn accept(socket: &TcpListener, inner: &ProxyShared) -> std::io::Result<(T
     #[cfg(test)]
     {
         let mut signal = inner.accept_failures.subscribe();
-        if *signal.borrow() {
-            return Err(std::io::Error::other("injected accept error"));
+        loop {
+            if *signal.borrow() || inner.accept_budget.try_update(Ordering::SeqCst, Ordering::SeqCst, |count| count.checked_sub(1)).is_ok() {
+                return Err(std::io::Error::other("injected accept error"));
+            }
+            tokio::select! {
+                result = socket.accept() => return result,
+                _ = signal.changed() => {}
+            }
         }
-        return tokio::select! {
-            result = socket.accept() => result,
-            _ = signal.changed() => Err(std::io::Error::other("injected accept error")),
-        };
     }
     #[cfg(not(test))]
     {

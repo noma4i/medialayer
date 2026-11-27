@@ -15,11 +15,29 @@ const SHORT: Duration = Duration::from_millis(50);
 async fn inv_heal_09_a_permit_held_by_an_unread_direct_body_returns() {
     let slots = PrioritySlots::new(1, 0, 8);
     let permit = slots.acquire(Priority::Playback).await.unwrap();
-    let body = permit.hold_idle(Box::pin(futures_util::stream::pending()), Duration::from_secs(15));
+    let mut body = permit.hold_idle(Box::pin(futures_util::stream::pending()), Duration::from_secs(15));
     tokio::task::yield_now().await;
-    tokio::time::advance(Duration::from_secs(15)).await;
+    tokio::time::advance(Duration::from_secs(10)).await;
+    use futures_util::StreamExt;
+    let next = body.next();
+    tokio::pin!(next);
+    assert!(futures_util::poll!(next.as_mut()).is_pending());
+    tokio::time::advance(Duration::from_millis(14999)).await;
+    assert_eq!(slots.in_use(), 1);
+    tokio::time::advance(Duration::from_millis(1)).await;
+    assert_eq!(next.await, None);
     assert!(super::proxy_harness::eventually(|| slots.in_use() == 0).await);
+}
+
+#[tokio::test(start_paused = true)]
+async fn inv_heal_09_dropping_a_body_releases_its_permit() {
+    let slots = PrioritySlots::new(1, 0, 8);
+    let permit = slots.acquire(Priority::Playback).await.unwrap();
+    let body = permit.hold_idle(Box::pin(futures_util::stream::pending()), Duration::from_secs(15));
+    tokio::time::advance(Duration::from_secs(1)).await;
     drop(body);
+    assert!(super::proxy_harness::eventually(|| slots.in_use() == 0).await);
+    assert_eq!(slots.in_use(), 0);
 }
 
 async fn wait_for_queue(slots: &PrioritySlots, count: usize) {

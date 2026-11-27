@@ -492,24 +492,27 @@ fn rebind_after_accept_errors(inner: Arc<ProxyShared>, epoch: u64) {
         if inner.stopped.load(Ordering::SeqCst) || inner.listener_epoch.load(Ordering::SeqCst) != epoch { return; }
         let previous = inner.last_port.load(Ordering::SeqCst);
         if let Err(error) = rebind(&inner, &mut listener, previous, "accept-errors").await {
+            let _ = inner.alive.compare_exchange(epoch, 0, Ordering::SeqCst, Ordering::SeqCst);
+            #[cfg(test)]
+            crate::test_signal::fire();
             crate::trace!("proxy", "repair failed: {error}");
         }
     });
 }
 
 async fn rebind(inner: &Arc<ProxyShared>, listener: &mut Option<inner::Listener>, preferred_port: u16, reason: &str) -> Result<u16, ProxyError> {
-    #[cfg(test)]
-    {
-        inner.rebind_entered.store(true, Ordering::SeqCst);
-        crate::test_signal::fire();
-        let _ = inner.rebind_hold.subscribe().wait_for(|held| !*held).await;
-    }
     let (started, port) = server::spawn_listener(inner, preferred_port).await?;
     let old = listener.replace(started);
     let previous = inner.last_port.swap(port, Ordering::SeqCst);
     if previous != 0 && previous != port { inner.route_generation.fetch_add(1, Ordering::SeqCst); }
     inner.port.store(port, Ordering::SeqCst);
     inner.running.store(true, Ordering::SeqCst);
+    #[cfg(test)]
+    {
+        inner.rebind_entered.store(true, Ordering::SeqCst);
+        crate::test_signal::fire();
+        let _ = inner.rebind_hold.subscribe().wait_for(|held| !*held).await;
+    }
     inner.playlists.forget(None);
     crate::trace!("heal", "proxy rebind reason={reason} port={previous}->{port}");
     #[cfg(test)]
