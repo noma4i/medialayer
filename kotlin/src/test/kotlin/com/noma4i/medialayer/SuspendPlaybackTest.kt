@@ -12,9 +12,13 @@ import org.junit.Test
 
 private class TransportSlot : PlayerSlot, PlayerSlotFactory {
   val log = Channel<String>(Channel.UNLIMITED)
-  override suspend fun create(slot: UInt): CreatedPlayer = CreatedPlayer(this)
+  // A real player reports Ready for every Load; without it the core treats a resumed play as a never-ready preload and reloads it.
+  @Volatile var events: PlayerEvents? = null
+  private var id = 0u
+  override suspend fun create(slot: UInt): CreatedPlayer { id = slot; return CreatedPlayer(this) }
   override suspend fun apply(command: SlotCall) {
     when (command) {
+      is SlotCall.Load -> events?.ready(id, command.generation)
       SlotCall.Play -> log.trySend("play")
       SlotCall.Pause -> log.trySend("pause")
       is SlotCall.Rate -> log.trySend("rate")
@@ -42,6 +46,7 @@ private fun open(slot: TransportSlot?) = MediaLayer.open(OpenConfig(
 
 private suspend fun openPlaying(slot: TransportSlot, groups: List<String?> = listOf(null)): MediaLayer {
   val media = open(slot)
+  slot.events = media.playerEvents()
   media.replaceWindow(0u, listOf(MediaItem(Kind.VIDEO, CLIP, emptyMap(), null, null, strategy = CacheStrategy.WINDOW)))
   media.setPlaying(CLIP, true, groups)
   assertEquals("play", withTimeout(10_000) { slot.log.receive() })
