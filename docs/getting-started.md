@@ -96,6 +96,8 @@ Open returns without waiting for the core assembly. Swift `open` is `async`, Kot
 
 Android creates one shared `OkHttpClient` for the default fetcher and the players. An explicit `fetcher` and `callFactory` replace the matching dependency.
 
+MediaLayer plays remote video through its local proxy at `http://127.0.0.1:<port>`. The network security config of the app must allow cleartext traffic to `127.0.0.1` in every build type, for example `<domain-config cleartextTrafficPermitted="true"><domain includeSubdomains="false">127.0.0.1</domain></domain-config>`. Without it, OkHttp refuses the cleartext request and every remote video fails.
+
 ## Open with full control
 
 The calls above fill `OpenConfig` for you. Pass it yourself to change the pool, the device class or the cache key.

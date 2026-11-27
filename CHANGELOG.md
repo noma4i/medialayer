@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Android: a return within 700 ms of hiding the app keeps video playing; background comes only from the process stop.
+
 ## 3.58.0 - 2026-11-27
 
 ### Fixed

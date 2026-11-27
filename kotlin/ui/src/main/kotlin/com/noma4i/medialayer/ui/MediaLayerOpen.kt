@@ -287,7 +287,6 @@ internal class SystemSignals(
   private val isBackground = AtomicBoolean(false)
 
   override fun onTrimMemory(level: Int) {
-    if (level == ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) return goBackground()
     pressure(level)?.let { events.memoryWarning(it) }
   }
 
@@ -308,6 +307,7 @@ internal class SystemSignals(
   }
 
   private fun pressure(level: Int): Pressure? = when {
+    level == ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> null
     level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL -> Pressure.CRITICAL
     level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> Pressure.MODERATE
     else -> null
